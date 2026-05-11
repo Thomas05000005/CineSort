@@ -48,7 +48,7 @@ jobs:
           python scripts/visual_check_ui_preview.py --dev
 
       - name: Upload verification artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-preview-proof
           path: |
@@ -95,7 +95,7 @@ jobs:
           python scripts/package_zip.py --qa --release
 
       - name: Upload Windows build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-build-artifacts
           path: |
