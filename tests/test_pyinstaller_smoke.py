@@ -10,6 +10,7 @@ En CI, on lance `pyinstaller CineSort.spec` avant ces tests.
 Pre-Phase 13.3 : aucun test ne demarrait reellement l'exe. CLAUDE.md
 revendiquait "49.84 MB testes" sans validation fonctionnelle.
 """
+
 from __future__ import annotations
 
 import os
@@ -65,6 +66,7 @@ class PyInstallerSmokeTests(unittest.TestCase):
         env = os.environ.copy()
         # Forcer state_dir temporaire pour ne pas polluer le ~/.local/share du dev
         import tempfile
+
         with tempfile.TemporaryDirectory(prefix="cinesort_smoke_") as tmp:
             env["CINESORT_STATE_DIR"] = tmp
             # NB : l'exe doit accepter --api + --port. Si la signature change,
@@ -84,7 +86,7 @@ class PyInstallerSmokeTests(unittest.TestCase):
                     f"L'exe n'a pas repondu sur /api/health en 15s. "
                     f"Verifier hiddenimports + runtime hooks.\n"
                     f"stdout: {proc.stdout.read(2000) if proc.stdout else b''}\n"
-                    f"stderr: {proc.stderr.read(2000) if proc.stderr else b''}"
+                    f"stderr: {proc.stderr.read(2000) if proc.stderr else b''}",
                 )
                 self.assertIn("ok", health or {})
             finally:

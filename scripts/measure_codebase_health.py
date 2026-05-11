@@ -9,6 +9,7 @@ Usage :
 
 Si --output n'est pas fourni, le rapport est imprimé sur stdout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,6 +22,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+import contextlib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_DIRS = {
@@ -76,11 +78,13 @@ def analyze_python_file(path: Path) -> Dict[str, object]:
             end_line = getattr(node, "end_lineno", node.lineno)
             length = end_line - node.lineno + 1
             if length > 100:
-                out["long_functions"].append({
-                    "name": node.name,
-                    "line": node.lineno,
-                    "length": length,
-                })
+                out["long_functions"].append(
+                    {
+                        "name": node.name,
+                        "line": node.lineno,
+                        "length": length,
+                    }
+                )
             args = node.args
             total_params = (
                 len(args.args)
@@ -93,22 +97,28 @@ def analyze_python_file(path: Path) -> Dict[str, object]:
             if node.args.args and node.args.args[0].arg in ("self", "cls"):
                 total_params -= 1
             if total_params >= 10:
-                out["param_heavy_functions"].append({
-                    "name": node.name,
-                    "line": node.lineno,
-                    "params": total_params,
-                })
+                out["param_heavy_functions"].append(
+                    {
+                        "name": node.name,
+                        "line": node.lineno,
+                        "params": total_params,
+                    }
+                )
         elif isinstance(node, ast.ExceptHandler):
             if node.type is None:
-                out["except_exception_sites"].append({
-                    "line": node.lineno,
-                    "form": "bare except",
-                })
+                out["except_exception_sites"].append(
+                    {
+                        "line": node.lineno,
+                        "form": "bare except",
+                    }
+                )
             elif isinstance(node.type, ast.Name) and node.type.id == "Exception":
-                out["except_exception_sites"].append({
-                    "line": node.lineno,
-                    "form": "except Exception",
-                })
+                out["except_exception_sites"].append(
+                    {
+                        "line": node.lineno,
+                        "form": "except Exception",
+                    }
+                )
     return out
 
 
@@ -120,15 +130,23 @@ def analyze_python_file(path: Path) -> Dict[str, object]:
 def run_ruff_select(select: str, paths: Iterable[Path]) -> int:
     """Compte les violations Ruff pour une règle donnée. Retourne -1 si erreur."""
     args = [
-        sys.executable, "-m", "ruff", "check",
-        "--select", select,
+        sys.executable,
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        select,
         "--no-cache",
-        "--output-format", "json",
+        "--output-format",
+        "json",
     ]
     args.extend(str(p) for p in paths)
     try:
         proc = subprocess.run(
-            args, capture_output=True, text=True, check=False,
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
             cwd=str(REPO_ROOT),
         )
     except FileNotFoundError:
@@ -268,10 +286,8 @@ def gather_js_metrics(web_dir: Path) -> Dict[str, object]:
     files = list(iter_files(web_dir, ["js"]))
     total_loc = 0
     for path in files:
-        try:
+        with contextlib.suppress(OSError):
             total_loc += path.read_text(encoding="utf-8", errors="replace").count("\n") + 1
-        except OSError:
-            pass
     return {"file_count": len(files), "total_loc": total_loc}
 
 
@@ -354,11 +370,17 @@ def format_report(data: Dict[str, object]) -> str:
     out.append("")
     out.append("| Règle Ruff | Description | Violations |")
     out.append("|------------|-------------|------------|")
-    out.append(f"| `BLE001` | blind except (`except Exception`) | {ruff['BLE001'] if ruff['BLE001'] >= 0 else 'erreur ruff'} |")
+    out.append(
+        f"| `BLE001` | blind except (`except Exception`) | {ruff['BLE001'] if ruff['BLE001'] >= 0 else 'erreur ruff'} |"
+    )
     out.append(f"| `PLR2004` | magic value comparison | {ruff['PLR2004'] if ruff['PLR2004'] >= 0 else 'erreur ruff'} |")
-    out.append(f"| `PLR0913` | too many arguments (>5) | {ruff['PLR0913'] if ruff['PLR0913'] >= 0 else 'erreur ruff'} |")
+    out.append(
+        f"| `PLR0913` | too many arguments (>5) | {ruff['PLR0913'] if ruff['PLR0913'] >= 0 else 'erreur ruff'} |"
+    )
     out.append(f"| `C901` | complexity > 10 | {ruff['C901'] if ruff['C901'] >= 0 else 'erreur ruff'} |")
-    out.append(f"| `SIM105` | try/except/pass → suppress | {ruff['SIM105'] if ruff['SIM105'] >= 0 else 'erreur ruff'} |")
+    out.append(
+        f"| `SIM105` | try/except/pass → suppress | {ruff['SIM105'] if ruff['SIM105'] >= 0 else 'erreur ruff'} |"
+    )
     out.append(f"| `ARG001` | argument inutilisé | {ruff['ARG001'] if ruff['ARG001'] >= 0 else 'erreur ruff'} |")
     out.append(f"| `B007` | variable de boucle inutilisée | {ruff['B007'] if ruff['B007'] >= 0 else 'erreur ruff'} |")
     out.append(f"| `RUF100` | `# noqa` inutile | {ruff['RUF100'] if ruff['RUF100'] >= 0 else 'erreur ruff'} |")
@@ -448,11 +470,17 @@ def git_info() -> Tuple[str, str]:
     try:
         branch = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=True, cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=str(REPO_ROOT),
         ).stdout.strip()
         commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, check=True, cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=str(REPO_ROOT),
         ).stdout.strip()
         return branch, commit
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -466,8 +494,7 @@ def git_info() -> Tuple[str, str]:
 
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Chemin du fichier markdown de sortie (sinon stdout)")
+    parser.add_argument("--output", type=Path, default=None, help="Chemin du fichier markdown de sortie (sinon stdout)")
     args = parser.parse_args(argv)
 
     cinesort_dir = REPO_ROOT / "cinesort"

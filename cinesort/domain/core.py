@@ -72,9 +72,19 @@ VIDEO_EXTS_DEFAULT = {".mkv", ".mp4", ".avi", ".m2ts"}
 # avaient 5 sets hardcodes divergents — un fichier .wmv pouvait etre considere
 # video par 1 module et pas par les autres. A utiliser partout ou on detecte
 # "un fichier video quelconque" (collisions, cleanup, integrity check).
-VIDEO_EXTS_ALL = frozenset({
-    ".mkv", ".mp4", ".m2ts", ".avi", ".iso", ".ts", ".wmv", ".mov", ".webm",
-})
+VIDEO_EXTS_ALL = frozenset(
+    {
+        ".mkv",
+        ".mp4",
+        ".m2ts",
+        ".avi",
+        ".iso",
+        ".ts",
+        ".wmv",
+        ".mov",
+        ".webm",
+    }
+)
 SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
 
 MIN_VIDEO_BYTES = 50 * 1024 * 1024  # 50MB

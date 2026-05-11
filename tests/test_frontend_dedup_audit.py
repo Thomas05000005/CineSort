@@ -25,6 +25,7 @@ Si le test echoue parce que la liste a evolue : c'est OK, mettre a jour
 les ensembles ci-dessous. Si le test echoue parce qu'un composant DEJA
 divergent est devenu identique : c'est mieux, le supprimer de la liste.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -37,30 +38,32 @@ _DASHBOARD_COMPONENTS = _REPO / "web" / "dashboard" / "components"
 
 # Snapshot 2026-05-11 : 22 noms partages, tous divergents en contenu.
 # Cette liste est figee. Toute deviation -> regression a investiguer.
-_KNOWN_DIVERGENT_PAIRS = frozenset({
-    "auto-tooltip.js",
-    "badge.js",
-    "breadcrumb.js",
-    "command-palette.js",
-    "confetti.js",
-    "copy-to-clipboard.js",
-    "empty-state.js",
-    "home-charts.js",
-    "home-widgets.js",
-    "kpi-card.js",
-    "library-components.js",
-    "modal.js",
-    "notification-center.js",
-    "score-v2.js",
-    "scraping-status.js",
-    "sidebar-v5.js",
-    "skeleton.js",
-    "sparkline.js",
-    "table.js",
-    "toast.js",
-    "top-bar-v5.js",
-    "virtual-table.js",
-})
+_KNOWN_DIVERGENT_PAIRS = frozenset(
+    {
+        "auto-tooltip.js",
+        "badge.js",
+        "breadcrumb.js",
+        "command-palette.js",
+        "confetti.js",
+        "copy-to-clipboard.js",
+        "empty-state.js",
+        "home-charts.js",
+        "home-widgets.js",
+        "kpi-card.js",
+        "library-components.js",
+        "modal.js",
+        "notification-center.js",
+        "score-v2.js",
+        "scraping-status.js",
+        "sidebar-v5.js",
+        "skeleton.js",
+        "sparkline.js",
+        "table.js",
+        "toast.js",
+        "top-bar-v5.js",
+        "virtual-table.js",
+    }
+)
 
 
 def _shared_names() -> set[str]:

@@ -35,6 +35,7 @@ from create_test_data import (
     populate_database,
     write_plan_file,
 )
+import contextlib
 
 VIEWPORTS = {
     "desktop": {"width": 1920, "height": 1080},
@@ -62,10 +63,8 @@ def _wait_server(port: int, timeout_s: float = 5.0) -> None:
         except (ConnectionRefusedError, OSError):
             pass
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 c.close()
-            except Exception:
-                pass
         time.sleep(0.1)
     raise TimeoutError(f"Serveur non pret sur le port {port}")
 

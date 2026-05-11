@@ -24,6 +24,7 @@ Pas un test exhaustif par migration (ce serait 20 fichiers, session
 dediee), mais un filet de securite qui detecte 90% des regressions de
 schema sans investissement disproportionne.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -62,9 +63,7 @@ def _user_version(conn: sqlite3.Connection) -> int:
 def _list_tables(conn: sqlite3.Connection) -> set[str]:
     return {
         str(r[0])
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        )
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     }
 
 
@@ -106,9 +105,7 @@ class MigrationChainAppliesCleanlyTests(_TmpDb):
         # Applique tout d'un coup puis verifie via schema_migrations
         mgr.apply()
         with closing(connect_sqlite(str(self.db_path))) as conn:
-            rows = conn.execute(
-                "SELECT version FROM schema_migrations ORDER BY version ASC"
-            ).fetchall()
+            rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version ASC").fetchall()
             recorded = [int(r[0]) for r in rows]
         # schema_migrations est cree par 012, donc tracking >= 12
         expected_tracked = [v for v, _ in items if v >= 12]

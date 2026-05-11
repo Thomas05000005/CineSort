@@ -3,3 +3,6 @@
 ruff>=0.15,<0.16
 coverage>=7.6,<8
 pre-commit>=4.0,<5
+# v1.0.0-beta : pytest est invoque par check_project.bat (quality gate windows-ci)
+# meme si le projet utilise majoritairement unittest. Pin majeur safe.
+pytest>=8.0,<9

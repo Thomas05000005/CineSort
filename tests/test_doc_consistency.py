@@ -9,6 +9,7 @@ puis mettre a jour CLAUDE.md ou corriger la divergence.
 
 Phase 0 du plan de remediation v7.8.0.
 """
+
 from __future__ import annotations
 
 import unittest
@@ -89,6 +90,7 @@ class ClaudeMdMetricsConsistencyTests(unittest.TestCase):
         self.assertTrue(script.exists(), f"Script absent : {script}")
         # Verifier qu'il compile (sans l'executer pour ne pas allonger la suite)
         import py_compile
+
         try:
             py_compile.compile(str(script), doraise=True)
         except py_compile.PyCompileError as exc:
@@ -105,10 +107,11 @@ class HistoricalSnapshotPresenceTests(unittest.TestCase):
             self.fail(f"{results_dir} n'existe pas — lancer measure_codebase_health.py")
         snapshots = list(results_dir.glob("v7_*_real_metrics_*.md"))
         self.assertGreaterEqual(
-            len(snapshots), 1,
+            len(snapshots),
+            1,
             "Aucun snapshot de mesure objective trouve dans audit/results/ "
             "(format attendu : v7_X_Y_real_metrics_YYYYMMDD.md). "
-            "Relancer python scripts/measure_codebase_health.py --output ..."
+            "Relancer python scripts/measure_codebase_health.py --output ...",
         )
 
 

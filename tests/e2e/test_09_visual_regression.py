@@ -60,8 +60,8 @@ def _compare_screenshots(current_path: _Path, baseline_path: _Path) -> tuple[boo
         size_delta = abs(len(a) - len(b))
         rel = size_delta / max(1, len(b))
         if rel < _MAX_DIFF_RATIO * 5:  # tolerance bytes plus large car compression PNG
-            return True, f"bytes differ slightly ({rel*100:.2f}%)"
-        return False, f"bytes differ significantly ({rel*100:.2f}% size delta)"
+            return True, f"bytes differ slightly ({rel * 100:.2f}%)"
+        return False, f"bytes differ significantly ({rel * 100:.2f}% size delta)"
 
     try:
         img_cur = Image.open(current_path).convert("RGB")
@@ -78,8 +78,11 @@ def _compare_screenshots(current_path: _Path, baseline_path: _Path) -> tuple[boo
     total = len(cur_data)
     ratio = diff_pixels / max(1, total)
     if ratio <= _MAX_DIFF_RATIO:
-        return True, f"diff {ratio*100:.2f}% within tolerance"
-    return False, f"diff {ratio*100:.2f}% exceeds {_MAX_DIFF_RATIO*100:.0f}% tolerance ({diff_pixels}/{total} pixels)"
+        return True, f"diff {ratio * 100:.2f}% within tolerance"
+    return (
+        False,
+        f"diff {ratio * 100:.2f}% exceeds {_MAX_DIFF_RATIO * 100:.0f}% tolerance ({diff_pixels}/{total} pixels)",
+    )
 
 
 def _auth_and_navigate(page, e2e_server, view: str):

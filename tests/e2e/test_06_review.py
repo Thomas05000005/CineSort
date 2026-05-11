@@ -22,10 +22,12 @@ if _e2e_dir not in sys.path:
 
 from pages.review_page import ReviewPage  # noqa: E402
 
-pytestmark = pytest.mark.skip(reason=(
-    "V1-05 : vue /review supprimee par FIX-4 CRIT-5 (triage integre dans "
-    "Library workflow). Tests a re-porter vers la nouvelle UI."
-))
+pytestmark = pytest.mark.skip(
+    reason=(
+        "V1-05 : vue /review supprimee par FIX-4 CRIT-5 (triage integre dans "
+        "Library workflow). Tests a re-porter vers la nouvelle UI."
+    )
+)
 
 
 class TestReview:

@@ -678,8 +678,8 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
         if not videos:
             core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
             for ext, count in core_mod._collect_non_video_extensions(ctx.cfg, folder).items():
-                ctx.stats.analyse_ignores_extensions[ext] = (
-                    int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(count)
+                ctx.stats.analyse_ignores_extensions[ext] = int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(
+                    count
                 )
             ctx.persist_folder_cache(
                 folder=folder,
@@ -1034,9 +1034,7 @@ def _augment_candidates_from_nfo_imdb(
                 year_ok = False
         # Seuil strict : on accepte si la similarite est >= 0.50 OU
         # si annee matche parfaitement et similarite >= 0.35
-        accept = (sim_best >= 0.50) or (
-            year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35
-        )
+        accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
         if accept:
             nfo_imdb_cand = core_mod.Candidate(
                 title=imdb_result.title,
@@ -1120,9 +1118,7 @@ def _augment_candidates_from_nfo_tmdb_id(
             year_delta = abs(int(tmdb_result.year) - int(name_year))
             if year_delta > 2:
                 year_ok = False
-        accept = (sim_best >= 0.50) or (
-            year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35
-        )
+        accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
         if accept:
             # Ne pas doublonner si un candidat NFO/IMDb avec ce tmdb_id existe déjà
             already_have = any(getattr(c, "tmdb_id", None) == tmdb_result.id for c in nfo_cands)
@@ -1361,8 +1357,7 @@ def _resolve_tmdb_collection(
         )
         log(
             "WARN",
-            f"Collection '{coll_name}' ignoree pour '{folder_name}' "
-            f"(aucun mot commun avec le nom source).",
+            f"Collection '{coll_name}' ignoree pour '{folder_name}' (aucun mot commun avec le nom source).",
         )
         return None, None
     return coll_id, coll_name
@@ -1616,9 +1611,7 @@ def _plan_item(
     if cached_row is not None:
         return [cached_row]
 
-    folder_name, log_ctx, detected_edition = _resolve_folder_context(
-        cfg, folder, video, is_collection=is_collection
-    )
+    folder_name, log_ctx, detected_edition = _resolve_folder_context(cfg, folder, video, is_collection=is_collection)
 
     name_year, name_year_reason, remaster_hint = core_mod.infer_name_year(folder_name, video.name)
     name_cands = core_mod.build_candidates_from_name(folder_name, video.name, preferred_year=name_year)

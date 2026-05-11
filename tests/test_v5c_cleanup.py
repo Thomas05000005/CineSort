@@ -51,7 +51,7 @@ RESTORED_V4_VIEWS = [
 # que app.js ne les importe plus.
 TRULY_REMOVED_VIEWS = [
     "web/dashboard/views/review.js",  # FIX-4 CRIT-5 : section /review supprimee
-    "web/dashboard/views/runs.js",    # FIX-4 CRIT-5 : section /runs supprimee
+    "web/dashboard/views/runs.js",  # FIX-4 CRIT-5 : section /runs supprimee
 ]
 
 
@@ -84,16 +84,14 @@ class V5CCleanupTests(unittest.TestCase):
             with self.subTest(file=rel):
                 self.assertTrue(
                     (_ROOT / rel).exists(),
-                    f"V1-05 : la vue v4 RESTAUREE {rel} doit exister "
-                    f"(decision post-incident V5)",
+                    f"V1-05 : la vue v4 RESTAUREE {rel} doit exister (decision post-incident V5)",
                 )
 
     def test_v4_library_folder_restored(self) -> None:
         """Le dossier library/ (orchestrateur v4) doit etre restaure."""
         self.assertTrue(
             (_ROOT / "web" / "dashboard" / "views" / "library").exists(),
-            "V1-05 : web/dashboard/views/library/ doit exister "
-            "(restaure post-incident V5)",
+            "V1-05 : web/dashboard/views/library/ doit exister (restaure post-incident V5)",
         )
 
     def test_kept_files_still_exist(self) -> None:

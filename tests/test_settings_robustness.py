@@ -200,8 +200,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         mask = "\u2022" * 8
 
         # SEC-H2 : tmdb_api_key et jellyfin_api_key sont MAINTENANT masques aussi
-        for field in ("tmdb_api_key", "jellyfin_api_key", "plex_token",
-                      "radarr_api_key", "email_smtp_password"):
+        for field in ("tmdb_api_key", "jellyfin_api_key", "plex_token", "radarr_api_key", "email_smtp_password"):
             self.assertEqual(loaded[field], mask, f"{field} doit etre masque : {loaded.get(field)}")
             self.assertTrue(loaded.get(f"_has_{field}"), f"_has_{field} doit etre True")
 
@@ -210,6 +209,7 @@ class SettingsRobustnessTests(unittest.TestCase):
 
         # SEC-H2 : aucun des secrets ne doit fuiter dans le JSON serialise
         import json
+
         serialized = json.dumps(loaded)
         for secret in (
             "my-tmdb-secret-key",
@@ -218,10 +218,7 @@ class SettingsRobustnessTests(unittest.TestCase):
             "my-radarr-secret",
             "my-email-password",
         ):
-            self.assertNotIn(
-                secret, serialized,
-                f"Secret '{secret}' fuit dans get_settings JSON : {serialized[:200]}"
-            )
+            self.assertNotIn(secret, serialized, f"Secret '{secret}' fuit dans get_settings JSON : {serialized[:200]}")
 
     def test_save_settings_with_mask_preserves_existing_keys_sec_h2(self) -> None:
         """SEC-H2 : si le frontend renvoie le masque (user n'a pas modifie), la
@@ -253,6 +250,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         )
         # Les cles originales doivent etre preservees (pas remplacees par le masque)
         from cinesort.ui.api.settings_support import read_settings
+
         raw = read_settings(self.state_dir)
         self.assertEqual(raw.get("tmdb_api_key"), "original-tmdb")
         self.assertEqual(raw.get("jellyfin_api_key"), "original-jellyfin")

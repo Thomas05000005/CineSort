@@ -749,7 +749,9 @@ def undo_selected_rows(
             "failed": undo_counts["failed"],
         },
         "row_ids": list(target_row_ids),
-        "message": t("errors.undo_selective_done") if undo_counts["failed"] == 0 else t("errors.undo_selective_done_with_anomalies"),
+        "message": t("errors.undo_selective_done")
+        if undo_counts["failed"] == 0
+        else t("errors.undo_selective_done_with_anomalies"),
     }
 
 

@@ -4,6 +4,7 @@ Tests structurels (lecture de fichiers, pas d'exécution JS) qui
 constituent un garde-fou anti-régression sur l'activation v5 du
 dashboard distant.
 """
+
 from __future__ import annotations
 import unittest
 from pathlib import Path
@@ -50,8 +51,13 @@ class V5BActivationTests(unittest.TestCase):
     def test_html_v5_view_mount_points(self):
         # Mount points pour les 7 vues v5 portees.
         for view_id in (
-            "view-home", "view-library", "view-processing",
-            "view-quality", "view-settings", "view-help", "view-film-detail",
+            "view-home",
+            "view-library",
+            "view-processing",
+            "view-quality",
+            "view-settings",
+            "view-help",
+            "view-film-detail",
         ):
             self.assertIn(f'id="{view_id}"', self.html, f"Mount point manquant : {view_id}")
 
@@ -101,8 +107,7 @@ class V5BActivationTests(unittest.TestCase):
             self.assertIn(v4, self.app, f"Vue v4 manquante : {v4}")
 
     def test_routes_v5_registered(self):
-        for route in ('"/home"', '"/library"', '"/processing"', '"/quality"',
-                      '"/settings"', '"/help"', '"/film/:id"'):
+        for route in ('"/home"', '"/library"', '"/processing"', '"/quality"', '"/settings"', '"/help"', '"/film/:id"'):
             self.assertIn(route, self.app, f"Route v5 manquante : {route}")
 
     def test_routes_v4_kept(self):

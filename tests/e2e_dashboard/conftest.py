@@ -36,6 +36,7 @@ import socket
 import tempfile
 import time
 from http.client import HTTPConnection
+import contextlib
 
 
 def _find_free_port() -> int:
@@ -56,10 +57,8 @@ def _wait_server_ready(port: int, timeout_s: float = 5.0) -> None:
         except (ConnectionRefusedError, OSError):
             pass
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
         time.sleep(0.1)
     raise TimeoutError(f"Serveur non demarre en {timeout_s}s sur le port {port}")
 

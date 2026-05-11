@@ -56,7 +56,9 @@ class DashboardSimulatorTests(unittest.TestCase):
         self.assertIn('data-qsim-weight="extras"', js)
         self.assertIn('data-qsim-tier="premium"', js)
 
-    @unittest.skip("V5C-01: dashboard/views/quality.js supprime — bouton simulateur desormais dans qij-v5 (couvert par tests v5)")
+    @unittest.skip(
+        "V5C-01: dashboard/views/quality.js supprime — bouton simulateur desormais dans qij-v5 (couvert par tests v5)"
+    )
     def test_quality_view_has_simulate_button(self):
         js = self.quality_path.read_text(encoding="utf-8")
         self.assertIn("btnQualitySimulate", js)

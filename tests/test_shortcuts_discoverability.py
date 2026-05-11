@@ -19,7 +19,9 @@ APP_JS = REPO / "web" / "dashboard" / "app.js"
 CSS = REPO / "web" / "dashboard" / "styles.css"
 
 
-@unittest.skip("V5C-01: dashboard/views/help.js supprime — vue Aide portee en v5 (couvert par test_help_v5_features et test_help_v5_ported)")
+@unittest.skip(
+    "V5C-01: dashboard/views/help.js supprime — vue Aide portee en v5 (couvert par test_help_v5_features et test_help_v5_ported)"
+)
 class ShortcutsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tooltip = TOOLTIP.read_text(encoding="utf-8")

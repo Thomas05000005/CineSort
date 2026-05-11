@@ -87,7 +87,9 @@ class HelpLogsRestSecurityTests(unittest.TestCase):
         self.assertIn("open_path", _EXCLUDED_METHODS)
 
 
-@unittest.skip("V5C-01: dashboard/views/help.js supprime — la vue Aide est desormais portee en v5 (web/views/help.js, couvert par test_help_v5_ported)")
+@unittest.skip(
+    "V5C-01: dashboard/views/help.js supprime — la vue Aide est desormais portee en v5 (web/views/help.js, couvert par test_help_v5_ported)"
+)
 class HelpViewSupportSectionTests(unittest.TestCase):
     """Frontend : section Support enrichie (parite desktop + dashboard)."""
 

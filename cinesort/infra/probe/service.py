@@ -264,9 +264,7 @@ class ProbeService:
             },
         }
 
-    def _try_cache_lookup(
-        self, media_path: Path, backend: str
-    ) -> Optional[Dict[str, Any]]:
+    def _try_cache_lookup(self, media_path: Path, backend: str) -> Optional[Dict[str, Any]]:
         """V5-04 : cache lookup utilise AVANT submit au pool — evite subprocess inutile.
 
         Retourne le resultat formatte si hit, None sinon (ou si cache desactive).
@@ -279,13 +277,9 @@ class ProbeService:
         cached = self.store.get_probe_cache(**cache_key)
         if not cached:
             return None
-        normalized_cached = (
-            cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}
-        )
+        normalized_cached = cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}
         raw_cached = (
-            cached.get("raw_json")
-            if isinstance(cached.get("raw_json"), dict)
-            else {"mediainfo": None, "ffprobe": None}
+            cached.get("raw_json") if isinstance(cached.get("raw_json"), dict) else {"mediainfo": None, "ffprobe": None}
         )
         return {
             "ok": True,
@@ -361,18 +355,13 @@ class ProbeService:
             backend,
         )
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="probe") as ex:
-            future_to_path = {
-                ex.submit(self.probe_file, media_path=mp, settings=settings): mp
-                for mp in to_probe
-            }
+            future_to_path = {ex.submit(self.probe_file, media_path=mp, settings=settings): mp for mp in to_probe}
             for future in as_completed(future_to_path):
                 mp = future_to_path[future]
                 try:
                     results[str(mp)] = future.result()
                 except (OSError, RuntimeError, TypeError, ValueError) as exc:
-                    logger.warning(
-                        "Probe parallel failed path=%s err=%s", mp, exc
-                    )
+                    logger.warning("Probe parallel failed path=%s err=%s", mp, exc)
                     results[str(mp)] = {
                         "ok": False,
                         "cache_hit": False,

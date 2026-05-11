@@ -22,10 +22,12 @@ if _e2e_dir not in sys.path:
 
 from pages.runs_page import RunsPage  # noqa: E402
 
-pytestmark = pytest.mark.skip(reason=(
-    "V1-05 : vue /runs supprimee par FIX-4 CRIT-5 (consolidee dans QIJ tab "
-    "Journal). Tests a re-porter vers la nouvelle UI."
-))
+pytestmark = pytest.mark.skip(
+    reason=(
+        "V1-05 : vue /runs supprimee par FIX-4 CRIT-5 (consolidee dans QIJ tab "
+        "Journal). Tests a re-porter vers la nouvelle UI."
+    )
+)
 
 
 class TestRuns:

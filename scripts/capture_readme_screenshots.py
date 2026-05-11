@@ -46,6 +46,7 @@ from create_test_data import (  # noqa: E402
     populate_database,
     write_plan_file,
 )
+import contextlib
 
 OUTPUT_DIR = _PROJECT_ROOT / "docs" / "screenshots"
 VIEWPORT = {"width": 1280, "height": 800}
@@ -82,10 +83,8 @@ def _wait_server(port: int, timeout_s: float = 5.0) -> None:
             pass
         finally:
             if c is not None:
-                try:
+                with contextlib.suppress(Exception):
                     c.close()
-                except Exception:
-                    pass
         time.sleep(0.1)
     raise TimeoutError(f"Serveur non pret sur le port {port}")
 

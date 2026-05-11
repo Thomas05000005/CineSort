@@ -61,9 +61,7 @@ def _is_ort_available() -> bool:
         except ImportError:
             _ort_available = False
             if not _missing_ort_warned:
-                logger.warning(
-                    "onnxruntime non installe -> LPIPS desactive (reinstaller CineSort pour le restaurer)"
-                )
+                logger.warning("onnxruntime non installe -> LPIPS desactive (reinstaller CineSort pour le restaurer)")
                 _missing_ort_warned = True
     return _ort_available
 

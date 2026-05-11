@@ -24,6 +24,7 @@ Mesure snapshot (2026-05-11) :
 
 Toute deviation a la hausse = regression a investiguer.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -91,6 +92,7 @@ class ImportCycleGuardTests(unittest.TestCase):
     def test_domain_core_loads_within_reasonable_time(self) -> None:
         """Sanity : l'import ne doit pas crasher et reste raisonnable."""
         import time
+
         saved = dict(sys.modules)
         try:
             for m in [m for m in list(sys.modules) if m.startswith("cinesort.")]:

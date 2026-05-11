@@ -60,7 +60,9 @@ class ExpertModeBackendTests(unittest.TestCase):
             api.save_settings(s2)
 
 
-@unittest.skip("V5C-01: dashboard/views/settings.js supprime — settings v5 portee dans web/views/settings-v5.js (couvert par test_settings_v5_ported)")
+@unittest.skip(
+    "V5C-01: dashboard/views/settings.js supprime — settings v5 portee dans web/views/settings-v5.js (couvert par test_settings_v5_ported)"
+)
 class ExpertModeFrontendTests(unittest.TestCase):
     def setUp(self):
         root = Path(__file__).resolve().parents[1]

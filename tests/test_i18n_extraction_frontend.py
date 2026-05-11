@@ -66,10 +66,20 @@ class FrJsonV6_02KeysTests(unittest.TestCase):
 
     def test_sidebar_keys_present(self) -> None:
         fr = _load("fr")
-        for key in ("brand_name", "brand_desc", "aria_label",
-                    "about", "about_aria", "collapse", "expand",
-                    "collapse_expand", "counter_aria", "title_with_shortcut",
-                    "integration_disabled_title", "update_badge_title"):
+        for key in (
+            "brand_name",
+            "brand_desc",
+            "aria_label",
+            "about",
+            "about_aria",
+            "collapse",
+            "expand",
+            "collapse_expand",
+            "counter_aria",
+            "title_with_shortcut",
+            "integration_disabled_title",
+            "update_badge_title",
+        ):
             self.assertIn(key, fr.get("sidebar", {}), f"sidebar.{key} manquante")
         nav = fr.get("sidebar", {}).get("nav", {})
         for key in ("home", "processing", "library", "qij", "settings", "help"):
@@ -77,8 +87,14 @@ class FrJsonV6_02KeysTests(unittest.TestCase):
 
     def test_topbar_keys_present(self) -> None:
         fr = _load("fr")
-        for key in ("search_label", "search_aria", "notifications_aria",
-                    "theme_change_aria", "help_fab_aria", "help_fab_title"):
+        for key in (
+            "search_label",
+            "search_aria",
+            "notifications_aria",
+            "theme_change_aria",
+            "help_fab_aria",
+            "help_fab_title",
+        ):
             self.assertIn(key, fr.get("topbar", {}), f"topbar.{key} manquante")
         themes = fr.get("topbar", {}).get("themes", {})
         for key in ("studio", "cinema", "luxe", "neon"):
@@ -87,55 +103,123 @@ class FrJsonV6_02KeysTests(unittest.TestCase):
     def test_settings_groups_keys_present(self) -> None:
         fr = _load("fr")
         groups = fr.get("settings", {}).get("groups", {})
-        expected = {"sources", "analyse", "nommage", "bibliotheque",
-                    "integrations", "notifications", "serveur", "apparence", "avance"}
-        self.assertEqual(set(groups.keys()), expected,
-                         "settings.groups ne contient pas exactement les 9 groupes")
+        expected = {
+            "sources",
+            "analyse",
+            "nommage",
+            "bibliotheque",
+            "integrations",
+            "notifications",
+            "serveur",
+            "apparence",
+            "avance",
+        }
+        self.assertEqual(set(groups.keys()), expected, "settings.groups ne contient pas exactement les 9 groupes")
 
     def test_settings_sections_keys_present(self) -> None:
         fr = _load("fr")
         sections = fr.get("settings", {}).get("sections", {})
         # Au moins les sections importantes doivent exister.
-        for s in ("roots", "watch", "probe", "perceptual", "scoring",
-                  "templates", "organization", "cleanup", "subtitles",
-                  "tmdb", "jellyfin", "plex", "radarr", "desktop",
-                  "email", "plugins", "rest", "https",
-                  "theme", "effects", "parallelism", "onboarding", "updates"):
+        for s in (
+            "roots",
+            "watch",
+            "probe",
+            "perceptual",
+            "scoring",
+            "templates",
+            "organization",
+            "cleanup",
+            "subtitles",
+            "tmdb",
+            "jellyfin",
+            "plex",
+            "radarr",
+            "desktop",
+            "email",
+            "plugins",
+            "rest",
+            "https",
+            "theme",
+            "effects",
+            "parallelism",
+            "onboarding",
+            "updates",
+        ):
             self.assertIn(s, sections, f"settings.sections.{s} manquante")
 
     def test_qij_quality_keys_present(self) -> None:
         fr = _load("fr")
         quality = fr.get("qij", {}).get("quality", {})
-        for key in ("tab_title", "subtitle", "no_data_title", "btn_simulate",
-                    "btn_custom_rules", "kpi_films", "kpi_avg_score",
-                    "kpi_platinum", "kpi_trend", "section_anomalies",
-                    "section_outliers", "outliers_hint",
-                    "batch_in_progress", "batch_no_run", "batch_success"):
+        for key in (
+            "tab_title",
+            "subtitle",
+            "no_data_title",
+            "btn_simulate",
+            "btn_custom_rules",
+            "kpi_films",
+            "kpi_avg_score",
+            "kpi_platinum",
+            "kpi_trend",
+            "section_anomalies",
+            "section_outliers",
+            "outliers_hint",
+            "batch_in_progress",
+            "batch_no_run",
+            "batch_success",
+        ):
             self.assertIn(key, quality, f"qij.quality.{key} manquante")
 
     def test_qij_integrations_keys_present(self) -> None:
         fr = _load("fr")
         integ = fr.get("qij", {}).get("integrations", {})
-        for key in ("tab_title", "subtitle", "status_connected", "status_error",
-                    "status_ready", "status_not_configured", "status_disabled",
-                    "btn_test", "btn_check_sync", "btn_libraries", "btn_settings"):
+        for key in (
+            "tab_title",
+            "subtitle",
+            "status_connected",
+            "status_error",
+            "status_ready",
+            "status_not_configured",
+            "status_disabled",
+            "btn_test",
+            "btn_check_sync",
+            "btn_libraries",
+            "btn_settings",
+        ):
             self.assertIn(key, integ, f"qij.integrations.{key} manquante")
 
     def test_qij_journal_keys_present(self) -> None:
         fr = _load("fr")
         journal = fr.get("qij", {}).get("journal", {})
-        for key in ("tab_title", "btn_live", "btn_history",
-                    "no_active_run", "btn_cancel", "init", "no_runs",
-                    "selected_run_label", "selected_none",
-                    "btn_export_nfo", "sort_label"):
+        for key in (
+            "tab_title",
+            "btn_live",
+            "btn_history",
+            "no_active_run",
+            "btn_cancel",
+            "init",
+            "no_runs",
+            "selected_run_label",
+            "selected_none",
+            "btn_export_nfo",
+            "sort_label",
+        ):
             self.assertIn(key, journal, f"qij.journal.{key} manquante")
 
     def test_danger_zone_keys_present(self) -> None:
         fr = _load("fr")
         dz = fr.get("danger_zone", {})
-        for key in ("title", "reset_title", "reset_desc", "reset_button",
-                    "prompt_confirm", "wrong_confirm", "last_chance",
-                    "reset_done", "reset_error", "current_data"):
+        for key in (
+            "title",
+            "reset_title",
+            "reset_desc",
+            "reset_button",
+            "prompt_confirm",
+            "wrong_confirm",
+            "last_chance",
+            "reset_done",
+            "reset_error",
+            "current_data",
+        ):
             self.assertIn(key, dz, f"danger_zone.{key} manquante")
 
 
@@ -147,13 +231,14 @@ class JsImportT_Tests(unittest.TestCase):
             self.assertTrue(path.exists(), f"Fichier introuvable : {path}")
             content = path.read_text(encoding="utf-8")
             self.assertIn(
-                "from \"../core/i18n.js\"",
+                'from "../core/i18n.js"',
                 content,
                 f"{path.name} ne semble pas importer i18n.js",
             )
             # Doit utiliser t() au moins une fois (sinon a quoi bon ?).
             self.assertGreater(
-                len(_extract_t_keys(content)), 0,
+                len(_extract_t_keys(content)),
+                0,
                 f"{path.name} importe i18n.js mais n'utilise pas t()",
             )
 
@@ -227,9 +312,13 @@ class FrEnMirrorV6_02Tests(unittest.TestCase):
         fr_flat = _flatten(_load("fr"))
         en_flat = _flatten(_load("en"))
         prefixes = (
-            "settings.groups.", "settings.sections.", "settings.fields.",
-            "settings.preview_effects.", "settings.qr.",
-            "settings.updates.", "settings.expert_mode.",
+            "settings.groups.",
+            "settings.sections.",
+            "settings.fields.",
+            "settings.preview_effects.",
+            "settings.qr.",
+            "settings.updates.",
+            "settings.expert_mode.",
         )
         fr_keys = self._filter(fr_flat, prefixes)
         en_keys = self._filter(en_flat, prefixes)

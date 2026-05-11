@@ -7,6 +7,7 @@ retourne est utilise et le champ est retire du payload avant serialisation.
 Permet aux handlers d'opter pour des codes 404/403/409/... sans casser les
 clients existants qui lisent uniquement data.ok.
 """
+
 from __future__ import annotations
 
 import json

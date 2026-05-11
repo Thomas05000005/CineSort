@@ -41,15 +41,13 @@ class V5CIntegrationsTests(unittest.TestCase):
         """Toutes les vues doivent exporter une fonction init via ESM."""
         for view in _VIEWS:
             content = (_DASHBOARD_VIEWS_DIR / view).read_text(encoding="utf-8")
-            self.assertIn("export function init", content,
-                          f"{view} doit exposer un export ESM init*()")
+            self.assertIn("export function init", content, f"{view} doit exposer un export ESM init*()")
             self.assertIn("import", content, f"{view} doit utiliser des imports ESM")
 
     def test_btn_compact_defined_in_dashboard_styles(self) -> None:
         """Alignement minimal V5C-02 : .btn--compact ajoute au CSS du dashboard."""
         styles = Path("web/dashboard/styles.css").read_text(encoding="utf-8")
-        self.assertIn(".btn--compact", styles,
-                      "La classe .btn--compact doit etre definie pour Plex/Radarr/Logs")
+        self.assertIn(".btn--compact", styles, "La classe .btn--compact doit etre definie pour Plex/Radarr/Logs")
 
 
 if __name__ == "__main__":

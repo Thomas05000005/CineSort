@@ -722,9 +722,7 @@ def _build_settings_dict(settings: Dict[str, Any]) -> Dict[str, Any]:
         # propage dans les enrichissements quality_report. V2 reste calcule
         # cote BDD (cache `composite_score_v2` en migration 018) pour preserver
         # la possibilite de switch sans re-scan complet.
-        "composite_score_version": _normalize_composite_score_version(
-            settings.get("composite_score_version")
-        ),
+        "composite_score_version": _normalize_composite_score_version(settings.get("composite_score_version")),
     }
 
 

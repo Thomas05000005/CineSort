@@ -159,11 +159,7 @@ def _classify_audio_bucket(detected: Dict[str, Any]) -> Optional[str]:
         return None
     if ("truehd" in audio_codec) or ("atmos" in audio_codec):
         return "TrueHD/Atmos"
-    if (
-        ("dts-hd" in audio_codec)
-        or ("dtshd" in audio_codec)
-        or (("dts" in audio_codec) and ("ma" in audio_codec))
-    ):
+    if ("dts-hd" in audio_codec) or ("dtshd" in audio_codec) or (("dts" in audio_codec) and ("ma" in audio_codec)):
         return "DTS-HD MA"
     if "dts" in audio_codec:
         return "DTS"
@@ -263,7 +259,12 @@ def _build_dashboard_section(
 
         bitrate_kbps = int(detected.get("bitrate_kbps") or 0)
         threshold_2160 = int(thresholds.get("bitrate_min_kbps_2160p") or 0)
-        if (resolution_bucket == "2160p") and (bitrate_kbps > 0) and (threshold_2160 > 0) and (bitrate_kbps < threshold_2160):
+        if (
+            (resolution_bucket == "2160p")
+            and (bitrate_kbps > 0)
+            and (threshold_2160 > 0)
+            and (bitrate_kbps < threshold_2160)
+        ):
             low_bitrate.append(
                 {
                     "title": title,

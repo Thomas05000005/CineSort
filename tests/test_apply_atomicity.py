@@ -67,14 +67,16 @@ class JournaledMoveTests(unittest.TestCase):
 
     def test_journaled_move_with_exception_leaves_entry(self) -> None:
         """Exception dans le with → entree reste pour reconciliation."""
-        with self.assertRaises(RuntimeError):
-            with journaled_move(
+        with (
+            self.assertRaises(RuntimeError),
+            journaled_move(
                 self.store,
                 src="C:/src.mkv",
                 dst="C:/dst.mkv",
                 op_type="MOVE_FILE",
-            ):
-                raise RuntimeError("simulated crash mid-move")
+            ),
+        ):
+            raise RuntimeError("simulated crash mid-move")
 
         # L'entree pending est restee (sera traitee par reconciliation au boot)
         pending = self.store.list_pending_moves()

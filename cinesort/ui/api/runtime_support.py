@@ -195,8 +195,7 @@ def get_or_create_infra(
                 orphan_run_ids = [row[0] for row in cursor.fetchall()]
                 if orphan_run_ids:
                     conn.execute(
-                        "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) "
-                        "WHERE status = ?",
+                        "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) WHERE status = ?",
                         ("FAILED", "Crash detecte au boot (run orphelin)", "RUNNING"),
                     )
                     _logger.warning(

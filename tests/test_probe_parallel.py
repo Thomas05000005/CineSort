@@ -43,9 +43,7 @@ class _SlowRunnerSpy:
 
     def __call__(self, cmd, timeout_s):
         # Les checks de version sont [tool, --Version|-version] — pas de fichier media.
-        is_version_check = (
-            len(cmd) == 2 and str(cmd[1]).lower() in ("--version", "-version")
-        )
+        is_version_check = len(cmd) == 2 and str(cmd[1]).lower() in ("--version", "-version")
         with self._lock:
             if is_version_check:
                 self.version_calls += 1
@@ -126,9 +124,7 @@ class ProbeFilesBatchTests(unittest.TestCase):
     def test_single_file_uses_mono_thread_path(self) -> None:
         runner = _SlowRunnerSpy()
         service = self._make_service(runner)
-        out = service.probe_files(
-            media_paths=[self.media_paths[0]], settings=self._settings()
-        )
+        out = service.probe_files(media_paths=[self.media_paths[0]], settings=self._settings())
         self.assertEqual(len(out), 1)
         self.assertIn(str(self.media_paths[0]), out)
         # Mono-thread = 1 seul thread utilise.
@@ -182,13 +178,9 @@ class ProbeFilesBatchTests(unittest.TestCase):
         runner = _SlowRunnerSpy()
         service = self._make_service(runner)
         # Cache only first 2.
-        service.probe_files(
-            media_paths=self.media_paths[:2], settings=self._settings()
-        )
+        service.probe_files(media_paths=self.media_paths[:2], settings=self._settings())
         runner.calls = 0
-        out = service.probe_files(
-            media_paths=self.media_paths, settings=self._settings()
-        )
+        out = service.probe_files(media_paths=self.media_paths, settings=self._settings())
         self.assertEqual(len(out), len(self.media_paths))
         # Seuls les 3 manquants ont declenche subprocess.
         self.assertEqual(runner.calls, 3)
@@ -292,7 +284,8 @@ class ProbeFilesBatchTests(unittest.TestCase):
         # un gain de 30%+ (par < 70% seq) prouve le parallelism, le gain reel
         # observe est typiquement 50-80% mais varie selon la machine.
         self.assertLess(
-            par_dur, seq_dur * 0.7,
+            par_dur,
+            seq_dur * 0.7,
             f"100 films par={par_dur:.3f}s seq={seq_dur:.3f}s (gain insuffisant)",
         )
 

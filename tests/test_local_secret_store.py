@@ -15,6 +15,7 @@ Couvre :
 - Valeur vide → tolere
 - Plusieurs purposes distincts : isolation cryptographique
 """
+
 from __future__ import annotations
 
 import os

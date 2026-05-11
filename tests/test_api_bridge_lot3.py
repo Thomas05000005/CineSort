@@ -950,6 +950,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         # En usage reel, l'utilisateur re-saisirait la cle pour la tester ; ici on
         # simule le test automatique au demarrage via le store DPAPI direct.
         from cinesort.ui.api.settings_support import read_settings as _read_settings
+
         raw_tmdb_key = str(_read_settings(self.state_dir).get("tmdb_api_key") or "")
         if protection_ok:
             self.assertEqual(raw_tmdb_key, "abc123tmdb")  # cle bien dechiffree en interne

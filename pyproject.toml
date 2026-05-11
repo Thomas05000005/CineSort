@@ -58,6 +58,18 @@ ignore = [
 "tests/e2e_dashboard/**/*.py" = ["F841"]
 "tests/e2e_desktop/**/*.py" = ["F841"]
 
+# v1.0.0-beta : les tests utilisent souvent des nested `with mock.patch.object`
+# pour la lisibilite (1 patch par ligne >> long tuple `with A, B, C:`). SIM117
+# n'apporte pas de gain de qualite ici, juste du churn.
+# Les tests utilisent aussi parfois try/except Exception/pass legitimement
+# (cleanup defensif sur conn.close, etc.) — SIM105 ignore.
+"tests/**/*.py" = ["SIM105", "SIM117"]
+
+# app.py contient des try/except Exception/pass defensifs autour de pywebview
+# (splash.destroy() peut crasher si la fenetre est deja detruite — c'est OK).
+# Pas une candidate pour contextlib.suppress.
+"app.py" = ["SIM105"]
+
 [tool.coverage.run]
 branch = false
 omit = [

@@ -48,16 +48,10 @@ LOG_FIELD_REQUEST_ID = "request_id"
 
 # Format texte par defaut enrichi avec run_id + request_id. Compact pour rester
 # lisible meme quand les deux champs sont a "-".
-DEFAULT_LOG_FORMAT_WITH_CONTEXT = (
-    "%(asctime)s [%(levelname)s] %(name)s [run=%(run_id)s req=%(request_id)s] %(message)s"
-)
+DEFAULT_LOG_FORMAT_WITH_CONTEXT = "%(asctime)s [%(levelname)s] %(name)s [run=%(run_id)s req=%(request_id)s] %(message)s"
 
-_run_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "cinesort_run_id", default=None
-)
-_request_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "cinesort_request_id", default=None
-)
+_run_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("cinesort_run_id", default=None)
+_request_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("cinesort_request_id", default=None)
 
 
 # --- API publique : run_id ----------------------------------------------------

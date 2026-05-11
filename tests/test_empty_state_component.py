@@ -38,7 +38,9 @@ class EmptyStateComponentTests(unittest.TestCase):
                 f"{view} : ne semble pas utiliser le composant EmptyState",
             )
 
-    @unittest.skip("V5C-01: dashboard/views/quality.js supprime — la vue Qualite est desormais qij-v5 (couvert par test_v5b_activation et test_qij_v5_ported)")
+    @unittest.skip(
+        "V5C-01: dashboard/views/quality.js supprime — la vue Qualite est desormais qij-v5 (couvert par test_v5b_activation et test_qij_v5_ported)"
+    )
     def test_dashboard_quality_uses_component(self) -> None:
         src = (_ROOT / "web/dashboard/views/quality.js").read_text(encoding="utf-8")
         self.assertIn("buildEmptyState", src)

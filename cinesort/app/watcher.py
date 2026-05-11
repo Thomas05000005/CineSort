@@ -163,6 +163,7 @@ class FolderWatcher(threading.Thread):
         # R5-CRIT-6 : pre-validation accessibility roots
         try:
             from cinesort.infra.fs_safety import is_dir_accessible
+
             inaccessible: List[str] = []
             for root in self._roots:
                 try:

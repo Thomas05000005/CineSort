@@ -17,6 +17,7 @@ from cinesort.infra.log_scrubber import (
     reset_for_tests,
     scrub_secrets,
 )
+import contextlib
 
 
 class ScrubSecretsFunctionTests(unittest.TestCase):
@@ -105,6 +106,7 @@ class ScrubSecretsFunctionTests(unittest.TestCase):
     def test_full_settings_dump_no_leak_sec_h1(self) -> None:
         """SEC-H1 : dump complet d'un settings.json realiste ne fuit aucune cle."""
         import json
+
         settings = {
             "root": "C:/Films",
             "auto_approve_threshold": 85,
@@ -216,10 +218,8 @@ class InstallRotatingLogTests(unittest.TestCase):
         for h in list(root.handlers):
             if h not in self._initial_handlers:
                 root.removeHandler(h)
-                try:
+                with contextlib.suppress(Exception):
                     h.close()
-                except Exception:
-                    pass
         import shutil
 
         shutil.rmtree(self._tmp, ignore_errors=True)

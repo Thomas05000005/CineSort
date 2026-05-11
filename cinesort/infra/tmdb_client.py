@@ -339,7 +339,9 @@ class TmdbClient:
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
             stale = self._cache_get_stale(cache_key)
             if isinstance(stale, list):
-                logger.info("TMDb: search '%s' (%s) — fallback cache expire (%d items)", q_norm, year or "?", len(stale))
+                logger.info(
+                    "TMDb: search '%s' (%s) — fallback cache expire (%d items)", q_norm, year or "?", len(stale)
+                )
                 return [TmdbResult(**x) for x in stale]
             return []
         if not isinstance(data, dict):

@@ -742,18 +742,18 @@ def apply_settings_defaults(
     # BUG 1 : generer un token REST aleatoire au premier lancement plutot que vide
     if not str(payload.get("rest_api_token") or "").strip():
         import secrets as _secrets
+
         payload["rest_api_token"] = _secrets.token_urlsafe(24)
 
     # V6-01 (R4-I18N-4) : locale clamp via _normalize_locale a {"fr", "en"}, defaut "fr"
     payload["locale"] = _normalize_locale(payload.get("locale"))
 
     # V4-05 (R4-PERC-7 / H16) : composite_score_version normalise (V1 par defaut)
-    payload["composite_score_version"] = _normalize_composite_score_version(
-        payload.get("composite_score_version")
-    )
+    payload["composite_score_version"] = _normalize_composite_score_version(payload.get("composite_score_version"))
 
     # V3-04 (R4-LOG-3) : log_level normalise (DEBUG/INFO/WARNING/ERROR/CRITICAL)
     from cinesort.infra.log_context import normalize_log_level_setting
+
     payload["log_level"] = normalize_log_level_setting(payload.get("log_level"))
 
     payload.setdefault("debug_enabled", debug_enabled)
@@ -1228,9 +1228,7 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : toggle V1/V2 normalise
         # a la sauvegarde (clamp {1,2}, fallback 1). Le defaut applique en lecture
         # via `apply_settings_defaults` couvre les configs existantes.
-        "composite_score_version": _normalize_composite_score_version(
-            payload.get("composite_score_version")
-        ),
+        "composite_score_version": _normalize_composite_score_version(payload.get("composite_score_version")),
     }
 
 

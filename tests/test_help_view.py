@@ -81,7 +81,9 @@ class HelpViewDesktopContentTests(unittest.TestCase):
         self.assertIn('"./views/help.js"', self.html)
 
 
-@unittest.skip("V5C-01: dashboard/views/help.js supprime — la vue Aide dashboard charge desormais ../views/help.js (couvert par HelpViewDesktopContentTests + test_help_v5_ported)")
+@unittest.skip(
+    "V5C-01: dashboard/views/help.js supprime — la vue Aide dashboard charge desormais ../views/help.js (couvert par HelpViewDesktopContentTests + test_help_v5_ported)"
+)
 class HelpViewDashboardContentTests(unittest.TestCase):
     """Vue Aide dashboard distant : ES module, route /help."""
 
@@ -132,12 +134,16 @@ class HelpViewDashboardContentTests(unittest.TestCase):
         # V5B-01 : helpContent supprime, vue v5 monte directement dans #view-help
         self.assertIn('id="view-help"', self.html)
 
-    @unittest.skip("V5B-01: sidebar v5 rendue dynamiquement par sidebar-v5.js, plus de data-route/data-testid statiques dans index.html")
+    @unittest.skip(
+        "V5B-01: sidebar v5 rendue dynamiquement par sidebar-v5.js, plus de data-route/data-testid statiques dans index.html"
+    )
     def test_html_sidebar_link(self):
         pass
 
 
-@unittest.skip("V5C-01: dashboard/views/help.js supprime — desktop et dashboard partagent desormais le meme web/views/help.js (parite triviale)")
+@unittest.skip(
+    "V5C-01: dashboard/views/help.js supprime — desktop et dashboard partagent desormais le meme web/views/help.js (parite triviale)"
+)
 class HelpViewParityTests(unittest.TestCase):
     """Le contenu (FAQ + glossaire) doit etre aligne entre desktop et dashboard.
 

@@ -161,9 +161,7 @@ class PurgeExpiredCacheTests(unittest.TestCase):
     def test_ttl_clamp_applied(self) -> None:
         """Un ttl_days hors bornes doit etre clamp."""
         old = time.time() - (2 * 24 * 3600)  # 2 jours
-        self._write_cache(
-            {"movie|1": {"_cached_at": old, "value": {}}}
-        )
+        self._write_cache({"movie|1": {"_cached_at": old, "value": {}}})
         # ttl_days = 0 -> clamp a 1 jour. 2 jours d'age > 1 jour -> purge.
         result = purge_expired_tmdb_cache(self.cache_path, ttl_days=0)
         self.assertEqual(result["purged"], 1)

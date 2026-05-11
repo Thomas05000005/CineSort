@@ -237,8 +237,7 @@ class _StoreBase:
             # une corruption silencieuse cote operateur. L'auto-restore est
             # tente juste apres dans initialize().
             logger.error(
-                "DB integrity check FAILED: %s. Path: %s. "
-                "Auto-restore from backup will be attempted.",
+                "DB integrity check FAILED: %s. Path: %s. Auto-restore from backup will be attempted.",
                 status,
                 self.db_path,
             )

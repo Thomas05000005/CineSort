@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from cinesort.ui.api.cinesort_api import CineSortApi
+import contextlib
 
 DEV_MODE_ENV_VAR = "DEV_MODE"
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
@@ -589,7 +590,10 @@ def main() -> None:
             if _desktop_dashboard_token:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={quote(_desktop_dashboard_token)}&native=1"
                 # DEBUG : afficher l'URL injectee (token tronque pour lisibilite)
-                print(f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1", file=sys.stderr)
+                print(
+                    f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
+                    file=sys.stderr,
+                )
             else:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
                 print("[REST] AVERTISSEMENT : main_url SANS ntoken (token vide dans settings_early)", file=sys.stderr)
@@ -641,6 +645,7 @@ def main() -> None:
                 # R5-CRASH-3 : atexit cleanup pour eviter tray icon Win32 orphelin
                 # si crash brutal (kill -9 reste insurmonté mais SIGTERM ok).
                 import atexit as _atexit
+
                 _atexit.register(lambda: api._notify.shutdown())
 
                 # Version dans le splash
@@ -692,10 +697,8 @@ def main() -> None:
                 # Afficher la fenetre principale et detruire le splash
                 main_window.show()
                 _log.info("splash: fenetre principale affichee, splash detruit")
-                try:
+                with contextlib.suppress(Exception):
                     splash.destroy()
-                except Exception:
-                    pass
 
             except Exception as exc:
                 _log.error("splash: erreur startup — %s", exc)
@@ -707,10 +710,8 @@ def main() -> None:
                     main_window.show()
                 except Exception:
                     pass
-                try:
+                with contextlib.suppress(Exception):
                     splash.destroy()
-                except Exception:
-                    pass
 
         # private_mode=False : autorise localStorage/sessionStorage persistants
         # (sinon le token bypass login est purge au reload, login obligatoire).

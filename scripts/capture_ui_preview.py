@@ -146,37 +146,36 @@ def run_capture(args: argparse.Namespace) -> list[Path]:
     captures: list[Path] = []
     manifest: list[dict[str, str]] = []
 
-    with PreviewServer(root, args.host, args.port) as server:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={"width": args.width, "height": args.height},
-                color_scheme="dark",
-                device_scale_factor=1,
-                locale="fr-FR",
-                timezone_id="Europe/Paris",
-                reduced_motion="reduce",
+    with PreviewServer(root, args.host, args.port) as server, sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": args.width, "height": args.height},
+            color_scheme="dark",
+            device_scale_factor=1,
+            locale="fr-FR",
+            timezone_id="Europe/Paris",
+            reduced_motion="reduce",
+        )
+        for index, view in enumerate(views, start=1):
+            scenario = scenario_for_view(args, view)
+            page = context.new_page()
+            url = build_url(args.host, server.port, scenario, view)
+            filename = f"{index:02d}-{view}.png"
+            target = output_dir / filename
+            capture_one(page, url, view, target)
+            page.close()
+            captures.append(target)
+            manifest.append(
+                {
+                    "view": view,
+                    "label": VIEW_LABELS[view],
+                    "scenario": scenario,
+                    "file": filename,
+                    "request_path": f"/web/index_preview.html?preview=1&scenario={scenario}&view={view}",
+                }
             )
-            for index, view in enumerate(views, start=1):
-                scenario = scenario_for_view(args, view)
-                page = context.new_page()
-                url = build_url(args.host, server.port, scenario, view)
-                filename = f"{index:02d}-{view}.png"
-                target = output_dir / filename
-                capture_one(page, url, view, target)
-                page.close()
-                captures.append(target)
-                manifest.append(
-                    {
-                        "view": view,
-                        "label": VIEW_LABELS[view],
-                        "scenario": scenario,
-                        "file": filename,
-                        "request_path": f"/web/index_preview.html?preview=1&scenario={scenario}&view={view}",
-                    }
-                )
-            context.close()
-            browser.close()
+        context.close()
+        browser.close()
 
     write_manifest(output_dir, manifest)
     return captures

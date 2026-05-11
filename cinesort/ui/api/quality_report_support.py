@@ -293,9 +293,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         score_version = _normalize_composite_score_version(
             settings.get("composite_score_version") if isinstance(settings, dict) else None
         )
-        enrich_quality_report_with_perceptual(
-            store, run_id, row_id, result, composite_score_version=score_version
-        )
+        enrich_quality_report_with_perceptual(store, run_id, row_id, result, composite_score_version=score_version)
         return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         return {"ok": False, "message": str(exc)}

@@ -268,7 +268,9 @@ class ProbeEnrichmentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-@unittest.skip("V5C-01: dashboard/views/review.js supprime (remplace par processing v5) — adaptation vers v5 deferee a V5C-03")
+@unittest.skip(
+    "V5C-01: dashboard/views/review.js supprime (remplace par processing v5) — adaptation vers v5 deferee a V5C-03"
+)
 class UiBadgeTests(unittest.TestCase):
     """Badges audio dans les fichiers UI."""
 
@@ -380,7 +382,9 @@ class AudioLanguageCoherenceTests(unittest.TestCase):
         # Les champs ne sont pas dans le resultat vide
 
 
-@unittest.skip("V5C-01: dashboard/views/review.js supprime (remplace par processing v5) — adaptation vers v5 deferee a V5C-03")
+@unittest.skip(
+    "V5C-01: dashboard/views/review.js supprime (remplace par processing v5) — adaptation vers v5 deferee a V5C-03"
+)
 class AudioLanguageUiTests(unittest.TestCase):
     """Tests presence UI badge langue audio."""
 

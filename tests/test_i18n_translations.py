@@ -45,15 +45,48 @@ def _flatten(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
 
 # Termes techniques qui restent identiques en FR et EN (noms propres / acronymes)
 _TECHNICAL_TERMS: Set[str] = {
-    "TMDb", "TMDb (The Movie Database)", "Jellyfin", "Plex", "Radarr",
-    "NFO", "HDR10", "LPIPS", "EBU R128", "Dolby Vision", "Dolby Vision (DV)",
-    "Tier", "Run", "Plan", "Apply", "Undo", "Quarantine", "Dry-run",
-    "Multi-root", "Banding", "Upscale", "Re-encode", "SSIM", "DRC",
-    "Chromaprint", "Score V2", "Composite Score V2", "Score V1",
-    "Confidence", "Probe", "Edition", "Quality profile",
-    "Grain era", "Grain analysis v2", "Naming preset", "Watch folder",
-    "Watch folder (auto-monitor)", "Plugin hook", "Smart playlist",
-    "Saga / Collection", "Saga / Collection (TMDb)", "Perceptual",
+    "TMDb",
+    "TMDb (The Movie Database)",
+    "Jellyfin",
+    "Plex",
+    "Radarr",
+    "NFO",
+    "HDR10",
+    "LPIPS",
+    "EBU R128",
+    "Dolby Vision",
+    "Dolby Vision (DV)",
+    "Tier",
+    "Run",
+    "Plan",
+    "Apply",
+    "Undo",
+    "Quarantine",
+    "Dry-run",
+    "Multi-root",
+    "Banding",
+    "Upscale",
+    "Re-encode",
+    "SSIM",
+    "DRC",
+    "Chromaprint",
+    "Score V2",
+    "Composite Score V2",
+    "Score V1",
+    "Confidence",
+    "Probe",
+    "Edition",
+    "Quality profile",
+    "Grain era",
+    "Grain analysis v2",
+    "Naming preset",
+    "Watch folder",
+    "Watch folder (auto-monitor)",
+    "Plugin hook",
+    "Smart playlist",
+    "Saga / Collection",
+    "Saga / Collection (TMDb)",
+    "Perceptual",
 }
 
 
@@ -66,8 +99,17 @@ class EnJsonValidStructureTests(unittest.TestCase):
 
     def test_en_json_contains_required_top_level(self) -> None:
         data = _load("en")
-        for cat in ("common", "errors", "glossary", "help",
-                    "settings", "qij", "library", "processing", "notifications"):
+        for cat in (
+            "common",
+            "errors",
+            "glossary",
+            "help",
+            "settings",
+            "qij",
+            "library",
+            "processing",
+            "notifications",
+        ):
             self.assertIn(cat, data, f"Categorie '{cat}' manquante dans en.json")
 
     def test_en_json_meta_is_english(self) -> None:
@@ -84,27 +126,52 @@ class GlossaryTranslationTests(unittest.TestCase):
         data = _load("en")
         glossary = data.get("glossary", {})
         self.assertGreaterEqual(
-            len(glossary), 30,
-            f"glossary EN doit contenir au moins 30 termes (actuel: {len(glossary)})"
+            len(glossary), 30, f"glossary EN doit contenir au moins 30 termes (actuel: {len(glossary)})"
         )
 
     def test_glossary_required_terms_present(self) -> None:
         """Les termes incontournables du metier doivent etre traduits."""
         required = {
-            "tier", "score_v2", "confidence", "probe", "run", "plan", "apply",
-            "undo", "quarantine", "dry_run", "nfo", "tmdb", "jellyfin", "plex",
-            "radarr", "perceptual", "lpips", "ssim", "chromaprint", "drc",
-            "edition", "saga_collection", "banding", "upscale", "reencode",
-            "hdr10", "dolby_vision", "grain_v2", "ebu_r128",
-            "quality_profile", "naming_preset", "multi_root", "watch_folder",
-            "plugin_hook", "smart_playlist", "composite_score_v2",
+            "tier",
+            "score_v2",
+            "confidence",
+            "probe",
+            "run",
+            "plan",
+            "apply",
+            "undo",
+            "quarantine",
+            "dry_run",
+            "nfo",
+            "tmdb",
+            "jellyfin",
+            "plex",
+            "radarr",
+            "perceptual",
+            "lpips",
+            "ssim",
+            "chromaprint",
+            "drc",
+            "edition",
+            "saga_collection",
+            "banding",
+            "upscale",
+            "reencode",
+            "hdr10",
+            "dolby_vision",
+            "grain_v2",
+            "ebu_r128",
+            "quality_profile",
+            "naming_preset",
+            "multi_root",
+            "watch_folder",
+            "plugin_hook",
+            "smart_playlist",
+            "composite_score_v2",
         }
         glossary = _load("en").get("glossary", {})
         missing = required - set(glossary.keys())
-        self.assertFalse(
-            missing,
-            f"Termes glossaire manquants en EN : {sorted(missing)}"
-        )
+        self.assertFalse(missing, f"Termes glossaire manquants en EN : {sorted(missing)}")
 
     def test_glossary_values_are_non_empty_strings(self) -> None:
         glossary = _load("en").get("glossary", {})
@@ -112,10 +179,7 @@ class GlossaryTranslationTests(unittest.TestCase):
             self.assertIsInstance(value, str, f"glossary.{key} doit etre une string")
             self.assertTrue(value.strip(), f"glossary.{key} est vide")
             # Un definition utile fait au moins quelques mots
-            self.assertGreaterEqual(
-                len(value.split()), 3,
-                f"glossary.{key} trop courte: '{value}'"
-            )
+            self.assertGreaterEqual(len(value.split()), 3, f"glossary.{key} trop courte: '{value}'")
 
 
 class FaqTranslationTests(unittest.TestCase):
@@ -124,38 +188,23 @@ class FaqTranslationTests(unittest.TestCase):
     def test_faq_has_at_least_15_questions(self) -> None:
         data = _load("en")
         faq = data.get("help", {}).get("faq", {})
-        self.assertGreaterEqual(
-            len(faq), 15,
-            f"help.faq EN doit contenir au moins 15 questions (actuel: {len(faq)})"
-        )
+        self.assertGreaterEqual(len(faq), 15, f"help.faq EN doit contenir au moins 15 questions (actuel: {len(faq)})")
 
     def test_faq_each_entry_has_question_and_answer(self) -> None:
         faq = _load("en").get("help", {}).get("faq", {})
         for key, entry in faq.items():
-            self.assertIsInstance(
-                entry, dict,
-                f"help.faq.{key} doit etre un dict {{question, answer}}"
-            )
+            self.assertIsInstance(entry, dict, f"help.faq.{key} doit etre un dict {{question, answer}}")
             self.assertIn("question", entry, f"help.faq.{key}.question manquante")
             self.assertIn("answer", entry, f"help.faq.{key}.answer manquante")
-            self.assertTrue(
-                entry["question"].strip(),
-                f"help.faq.{key}.question vide"
-            )
-            self.assertTrue(
-                entry["answer"].strip(),
-                f"help.faq.{key}.answer vide"
-            )
+            self.assertTrue(entry["question"].strip(), f"help.faq.{key}.question vide")
+            self.assertTrue(entry["answer"].strip(), f"help.faq.{key}.answer vide")
 
     def test_faq_answers_are_substantive(self) -> None:
         """Une reponse utile fait au moins une phrase complete."""
         faq = _load("en").get("help", {}).get("faq", {})
         for key, entry in faq.items():
             answer = entry.get("answer", "")
-            self.assertGreaterEqual(
-                len(answer.split()), 10,
-                f"help.faq.{key}.answer trop courte: '{answer}'"
-            )
+            self.assertGreaterEqual(len(answer.split()), 10, f"help.faq.{key}.answer trop courte: '{answer}'")
 
 
 class FrEnParityTests(unittest.TestCase):
@@ -164,10 +213,7 @@ class FrEnParityTests(unittest.TestCase):
     def test_top_level_categories_match(self) -> None:
         fr = _load("fr")
         en = _load("en")
-        self.assertEqual(
-            set(fr.keys()), set(en.keys()),
-            "Categories top-level fr/en doivent etre identiques"
-        )
+        self.assertEqual(set(fr.keys()), set(en.keys()), "Categories top-level fr/en doivent etre identiques")
 
     def test_every_fr_leaf_key_has_en_equivalent(self) -> None:
         """Toute cle de FR doit exister en EN (l'inverse n'est pas requis :
@@ -185,9 +231,10 @@ class FrEnParityTests(unittest.TestCase):
         # par V6-06 lors du round-trip global).
         coverage = (len(fr_flat) - len(missing_in_en)) / max(len(fr_flat), 1)
         self.assertGreaterEqual(
-            coverage, 0.15,
+            coverage,
+            0.15,
             f"Couverture EN trop basse ({coverage * 100:.1f}% vs 15% min). "
-            f"Manquantes ({len(missing_in_en)}): {missing_in_en[:10]}..."
+            f"Manquantes ({len(missing_in_en)}): {missing_in_en[:10]}...",
         )
 
     def test_categories_v6_05_have_full_parity(self) -> None:
@@ -201,18 +248,19 @@ class FrEnParityTests(unittest.TestCase):
         en_flat = _flatten(_load("en"))
         en_keys = set(en_flat.keys())
         v6_05_prefixes = (
-            "common.", "glossary.",
-            "danger_zone.", "sidebar.", "topbar.",
-            "library.", "processing.",
+            "common.",
+            "glossary.",
+            "danger_zone.",
+            "sidebar.",
+            "topbar.",
+            "library.",
+            "processing.",
         )
         missing: List[str] = []
         for k in fr_flat:
             if any(k.startswith(p) for p in v6_05_prefixes) and k not in en_keys:
                 missing.append(k)
-        self.assertFalse(
-            missing,
-            f"Categories V6-05 ont des cles FR sans equivalent EN : {missing}"
-        )
+        self.assertFalse(missing, f"Categories V6-05 ont des cles FR sans equivalent EN : {missing}")
 
     def test_no_empty_string_in_en(self) -> None:
         """Aucune valeur EN ne doit etre une string vide."""

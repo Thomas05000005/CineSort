@@ -317,11 +317,7 @@ def _render_method(name: str, method: Callable[..., Any]) -> str:
         first_line = doc.splitlines()[0].strip()
     else:
         first_line = "_(pas de docstring)_"
-    return (
-        f"#### `POST /api/{name}`\n\n"
-        f"**Signature** : `{name}{sig}`\n\n"
-        f"**Description** : {first_line}\n"
-    )
+    return f"#### `POST /api/{name}`\n\n**Signature** : `{name}{sig}`\n\n**Description** : {first_line}\n"
 
 
 def _render_examples() -> str:
@@ -331,8 +327,8 @@ def _render_examples() -> str:
             f"### {ex['title']}\n\n"
             "```bash\n"
             f"curl -X POST http://localhost:8642/api/{ex['method']} \\\n"
-            "  -H \"Authorization: Bearer YOUR_TOKEN\" \\\n"
-            "  -H \"Content-Type: application/json\" \\\n"
+            '  -H "Authorization: Bearer YOUR_TOKEN" \\\n'
+            '  -H "Content-Type: application/json" \\\n'
             f"  -d '{ex['body']}'\n"
             "```\n\n"
             f"**Reponse** : `{ex['response']}`\n"
@@ -364,7 +360,7 @@ def generate_markdown(api: Any) -> str:
     out.append(f"- **Total endpoints publics** : {len(methods)}")
     out.append("- **Methode HTTP** : `POST /api/{method_name}` avec body JSON")
     out.append("- **Auth** : `Authorization: Bearer <token>` (token configure dans les Reglages)")
-    out.append("- **Format reponse** : `{\"ok\": true, ...}` ou `{\"ok\": false, \"message\": \"...\"}`")
+    out.append('- **Format reponse** : `{"ok": true, ...}` ou `{"ok": false, "message": "..."}`')
     out.append("- **Endpoints publics** : `GET /api/health` (sans auth) et `GET /api/spec` (OpenAPI)")
     out.append("- **Body max** : 16 MB ; **Rate limit auth** : 5 echecs / 60s par IP\n")
 
@@ -403,10 +399,7 @@ def main() -> int:
     output.write_text(content, encoding="utf-8", newline="\n")
     line_count = content.count("\n") + 1
     methods_count = len(_collect_methods(api))
-    print(
-        f"OK : {output.relative_to(_PROJECT_ROOT)} ecrit "
-        f"({methods_count} endpoints, {line_count} lignes)"
-    )
+    print(f"OK : {output.relative_to(_PROJECT_ROOT)} ecrit ({methods_count} endpoints, {line_count} lignes)")
     return 0
 
 

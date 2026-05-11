@@ -968,9 +968,7 @@ def _apply_commentary_penalty_helper(
         return audio_sub
     if int(audio_analysis.get("tracks_count") or 0) == 1 and audio_analysis.get("has_commentary"):
         audio_sub += _PENALTY_COMMENTARY_ONLY
-        factors.append(
-            {"category": "audio", "delta": _PENALTY_COMMENTARY_ONLY, "label": "Piste unique = commentaire"}
-        )
+        factors.append({"category": "audio", "delta": _PENALTY_COMMENTARY_ONLY, "label": "Piste unique = commentaire"})
         reasons.append(f"{_PENALTY_COMMENTARY_ONLY} Piste unique = commentaire")
     return audio_sub
 

@@ -142,17 +142,13 @@ class TestApplySettingsDefaults(unittest.TestCase):
     def test_existing_v2_preserved(self) -> None:
         """Si l'utilisateur a deja activate V2, on preserve."""
         with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults(
-                {"composite_score_version": 2}, **_defaults_kwargs(Path("."))
-            )
+            payload = apply_settings_defaults({"composite_score_version": 2}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 2)
 
     def test_invalid_value_falls_back(self) -> None:
         """Settings.json corrompu/manuel -> V1 silencieux (pas de crash)."""
         with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults(
-                {"composite_score_version": "garbage"}, **_defaults_kwargs(Path("."))
-            )
+            payload = apply_settings_defaults({"composite_score_version": "garbage"}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 1)
 
 
@@ -198,21 +194,15 @@ class TestBuildSettingsDictDispatch(unittest.TestCase):
         self.assertEqual(d["composite_score_version"], 1)
 
     def test_explicit_v2(self) -> None:
-        d = _build_settings_dict(
-            {"perceptual_enabled": True, "composite_score_version": 2}
-        )
+        d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": 2})
         self.assertEqual(d["composite_score_version"], 2)
 
     def test_string_v2_normalized(self) -> None:
-        d = _build_settings_dict(
-            {"perceptual_enabled": True, "composite_score_version": "2"}
-        )
+        d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": "2"})
         self.assertEqual(d["composite_score_version"], 2)
 
     def test_invalid_falls_back_v1(self) -> None:
-        d = _build_settings_dict(
-            {"perceptual_enabled": True, "composite_score_version": 99}
-        )
+        d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": 99})
         self.assertEqual(d["composite_score_version"], 1)
 
 
@@ -250,9 +240,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
     def test_explicit_v1(self) -> None:
         store = self._store_with_v1_and_v2()
         result: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result, composite_score_version=1
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result, composite_score_version=1)
         self.assertEqual(result["perceptual"]["global_score"], 72)
         self.assertEqual(result["perceptual"]["composite_score_version"], 1)
 
@@ -260,9 +248,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
         """Toggle V2 -> on promeut V2 comme score principal."""
         store = self._store_with_v1_and_v2()
         result: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result, composite_score_version=2
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result, composite_score_version=2)
         self.assertEqual(result["perceptual"]["global_score"], 88)
         self.assertEqual(result["perceptual"]["global_tier"], "gold")
         self.assertEqual(result["perceptual"]["composite_score_version"], 2)
@@ -278,9 +264,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
             # global_score_v2 absent (legacy row pre v7.5.0 ou calcul V2 echoue)
         }
         result: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result, composite_score_version=2
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result, composite_score_version=2)
         self.assertEqual(result["perceptual"]["global_score"], 72)
         self.assertEqual(result["perceptual"]["global_tier"], "bon")
         self.assertEqual(result["perceptual"]["composite_score_version"], 1)
@@ -290,9 +274,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
         store = mock.MagicMock()
         store.get_perceptual_report.return_value = None
         result: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result, composite_score_version=2
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result, composite_score_version=2)
         self.assertNotIn("perceptual", result)
 
 
@@ -318,14 +300,10 @@ class TestCoexistence(unittest.TestCase):
         }
         # Premier appel V1
         result_v1: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result_v1, composite_score_version=1
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result_v1, composite_score_version=1)
         # Deuxieme appel V2
         result_v2: Dict[str, Any] = {}
-        enrich_quality_report_with_perceptual(
-            store, "run1", "row1", result_v2, composite_score_version=2
-        )
+        enrich_quality_report_with_perceptual(store, "run1", "row1", result_v2, composite_score_version=2)
         # Les deux ont reussi sans erreur, scores differents
         self.assertEqual(result_v1["perceptual"]["global_score"], 72)
         self.assertEqual(result_v2["perceptual"]["global_score"], 88)

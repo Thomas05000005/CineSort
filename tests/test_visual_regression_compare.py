@@ -6,6 +6,7 @@ ici des tests unitaires PURS sur la fonction de comparaison pixel pour
 verifier qu'elle detecte bien les regressions (et ne flag pas les images
 identiques).
 """
+
 from __future__ import annotations
 
 import sys
@@ -22,11 +23,13 @@ if str(_e2e_dir) not in sys.path:
 def _compare_screenshots(*args, **kwargs):
     # Lazy import to skip cleanly if PIL absent
     from tests.e2e.test_09_visual_regression import _compare_screenshots as _fn
+
     return _fn(*args, **kwargs)
 
 
 try:
     from PIL import Image  # type: ignore[import-untyped]
+
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
@@ -39,6 +42,7 @@ class CompareScreenshotsTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         import shutil
+
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_identical_images_pass(self) -> None:

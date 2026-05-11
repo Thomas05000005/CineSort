@@ -17,6 +17,7 @@ from typing import Any, Dict
 
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer, _RateLimiter
+import contextlib
 
 
 def _find_free_port() -> int:
@@ -123,10 +124,8 @@ class RestSecurityHttpTests(unittest.TestCase):
                 time.sleep(0.05 * (attempt + 1))
                 continue
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     conn.close()
-                except OSError:
-                    pass
             try:
                 data = json.loads(data_raw.decode("utf-8")) if data_raw else {}
             except json.JSONDecodeError:

@@ -151,7 +151,8 @@ class CategoryParityTests(unittest.TestCase):
         ratio = en_count / fr_count if fr_count else 0
         # Garde-fou : EN doit etre >= 50% de FR (sinon regression evidente)
         self.assertGreaterEqual(
-            ratio, 0.5,
+            ratio,
+            0.5,
             f"EN trop pauvre vs FR : {en_count}/{fr_count} = {ratio:.0%}",
         )
 
@@ -171,9 +172,9 @@ class CategoryParityTests(unittest.TestCase):
         # Seuil indicatif : 200 cles. Dans la pratique on est autour de 113
         # (V6-05 enrichi). Au-dela = anomalie a investiguer.
         self.assertLessEqual(
-            len(only_en), 200,
-            f"Trop de cles EN orphelines (sans equivalent FR) : {len(only_en)} "
-            f"(echantillon: {only_en[:10]})",
+            len(only_en),
+            200,
+            f"Trop de cles EN orphelines (sans equivalent FR) : {len(only_en)} (echantillon: {only_en[:10]})",
         )
 
 
@@ -184,21 +185,22 @@ class CategoryParityTests(unittest.TestCase):
 
 # Patterns FR evidents : presence d'au moins un caractere accentue francais
 # typique dans une chaine entouree de quotes (single ou double).
-_FRENCH_STRING_RE = re.compile(
-    r'''(['"])(?P<text>(?=[^'"\n]{3,200}['"])[^'"\n]*?[éèàâêîôûçÉÈÀÂÊÎÔÛÇ][^'"\n]*?)\1'''
-)
+_FRENCH_STRING_RE = re.compile(r"""(['"])(?P<text>(?=[^'"\n]{3,200}['"])[^'"\n]*?[éèàâêîôûçÉÈÀÂÊÎÔÛÇ][^'"\n]*?)\1""")
 
 # Mots-cles FR usuels en supplement des accents (pour capter "Annuler", "Charger"
 # qui n'ont pas d'accent mais sont clairement FR). Liste minimale pour eviter
 # les faux positifs sur du code anglais qui contient "load", "save" etc.
 _FRENCH_WORDS_PATTERN = re.compile(
-    r'\b(?:Annuler|Charger|Sauvegarder|Supprimer|Modifier|Lancer|Veuillez|Erreur|Avertissement|Confirmer|Param[èe]tres|Aper[çc]u|R[ée]sultat|Statistiques|Doublon|Doublons)\b'
+    r"\b(?:Annuler|Charger|Sauvegarder|Supprimer|Modifier|Lancer|Veuillez|Erreur|Avertissement|Confirmer|Param[èe]tres|Aper[çc]u|R[ée]sultat|Statistiques|Doublon|Doublons)\b"
 )
 
 # Noms de fichiers a ignorer (logs, scripts dev, tests qui contiennent
 # legitimement des chaines FR pour assertion).
 _IGNORE_FILE_PATTERNS = {
-    "test_", "_test.py", "demo_", "_demo.py",
+    "test_",
+    "_test.py",
+    "demo_",
+    "_demo.py",
 }
 
 
@@ -253,7 +255,8 @@ class FrenchStringLeakDetectionTests(unittest.TestCase):
         # Seuil de tolerance : < 3000 occurrences (les vues legacy comme runs.js,
         # quality-simulator.js ne sont pas encore i18n). Tout au-dela = regression.
         self.assertLessEqual(
-            count, 3000,
+            count,
+            3000,
             f"Trop de chaines FR suspectes dans web/dashboard/views ({count}). "
             f"Liste tronquee : {self._js_candidates[:5]}",
         )
@@ -262,9 +265,9 @@ class FrenchStringLeakDetectionTests(unittest.TestCase):
         """Rapport informatif : liste les chaines FR suspectes dans cinesort/ui/api."""
         count = len(self._py_candidates)
         self.assertLessEqual(
-            count, 1500,
-            f"Trop de chaines FR suspectes dans cinesort/ui/api ({count}). "
-            f"Liste tronquee : {self._py_candidates[:5]}",
+            count,
+            1500,
+            f"Trop de chaines FR suspectes dans cinesort/ui/api ({count}). Liste tronquee : {self._py_candidates[:5]}",
         )
 
     def test_french_leak_summary_callable(self) -> None:
@@ -478,33 +481,39 @@ class LocalePersistenceTests(unittest.TestCase):
 
     def test_locale_en_persists_across_reads(self) -> None:
         """Sauvegarder locale=en puis re-lire doit retourner locale=en."""
-        self._save_payload({
-            "root": str(self.state_dir),
-            "state_dir": str(self.state_dir),
-            "locale": "en",
-            "tmdb_enabled": False,
-        })
+        self._save_payload(
+            {
+                "root": str(self.state_dir),
+                "state_dir": str(self.state_dir),
+                "locale": "en",
+                "tmdb_enabled": False,
+            }
+        )
         result = self._read_payload()
         self.assertEqual(result.get("locale"), "en")
 
     def test_locale_fr_persists_across_reads(self) -> None:
-        self._save_payload({
-            "root": str(self.state_dir),
-            "state_dir": str(self.state_dir),
-            "locale": "fr",
-            "tmdb_enabled": False,
-        })
+        self._save_payload(
+            {
+                "root": str(self.state_dir),
+                "state_dir": str(self.state_dir),
+                "locale": "fr",
+                "tmdb_enabled": False,
+            }
+        )
         result = self._read_payload()
         self.assertEqual(result.get("locale"), "fr")
 
     def test_locale_invalid_at_save_falls_back_to_fr(self) -> None:
         """Save d'une locale invalide -> fr (clamp), survit au re-read."""
-        self._save_payload({
-            "root": str(self.state_dir),
-            "state_dir": str(self.state_dir),
-            "locale": "zz",
-            "tmdb_enabled": False,
-        })
+        self._save_payload(
+            {
+                "root": str(self.state_dir),
+                "state_dir": str(self.state_dir),
+                "locale": "zz",
+                "tmdb_enabled": False,
+            }
+        )
         result = self._read_payload()
         self.assertEqual(result.get("locale"), "fr")
 
@@ -548,7 +557,8 @@ class JsonStructureHardeningTests(unittest.TestCase):
             flat = _flatten(_load(locale))
             for key, value in flat.items():
                 self.assertIsInstance(
-                    value, str,
+                    value,
+                    str,
                     f"{locale}.json:{key} n'est pas une string (got {type(value).__name__})",
                 )
 

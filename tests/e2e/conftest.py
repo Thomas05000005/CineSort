@@ -30,6 +30,7 @@ from create_test_data import (  # noqa: E402
     populate_database,
     write_plan_file,
 )
+import contextlib
 
 
 def _find_free_port() -> int:
@@ -52,10 +53,8 @@ def _wait_server_ready(port: int, timeout_s: float = 5.0) -> None:
         except (ConnectionRefusedError, OSError):
             pass
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
         time.sleep(0.1)
     raise TimeoutError(f"Le serveur E2E n'a pas demarre en {timeout_s}s sur le port {port}")
 

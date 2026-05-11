@@ -21,7 +21,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -146,9 +146,7 @@ class IntegrityCheckAutoRestoreTests(unittest.TestCase):
         # 1. Cree la DB et un backup valide
         self._create_valid_db()
         backup_dir = self.db_path.parent / "backups"
-        backup_path = backup_db_with_rotation(
-            self.db_path, backup_dir, trigger="manual", max_count=5
-        )
+        backup_path = backup_db_with_rotation(self.db_path, backup_dir, trigger="manual", max_count=5)
         self.assertIsNotNone(backup_path, "Le backup pre-corruption doit exister")
 
         # 2. Corrompt la DB
@@ -180,10 +178,8 @@ class IntegrityCheckAutoRestoreTests(unittest.TestCase):
         self._corrupt_db_pages()
 
         store2 = SQLiteStore(self.db_path, busy_timeout_ms=5000)
-        try:
+        with suppress(sqlite3.DatabaseError, RuntimeError):
             store2.initialize()
-        except (sqlite3.DatabaseError, RuntimeError):
-            pass
 
         event = store2.integrity_event
         self.assertIsNotNone(event)

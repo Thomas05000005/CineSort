@@ -241,7 +241,8 @@ class DashboardAriaLiveAtomicTests(unittest.TestCase):
         atomic_count = self.html.count('aria-atomic="true"')
         self.assertGreater(live_count, 0, "Il doit y avoir au moins un conteneur aria-live")
         self.assertGreaterEqual(
-            atomic_count, live_count,
+            atomic_count,
+            live_count,
             f"aria-atomic='true' ({atomic_count}) doit etre present sur chaque "
             f"aria-live ({live_count}) pour annonces completes",
         )
@@ -329,7 +330,7 @@ class DashboardTableSortableKeyboardTests(unittest.TestCase):
     def test_handles_enter_and_space(self) -> None:
         # Active sur Enter ou Space (avec preventDefault pour eviter scroll).
         self.assertIn('"Enter"', self.js)
-        self.assertIn('preventDefault', self.js)
+        self.assertIn("preventDefault", self.js)
 
     def test_th_sortable_is_focusable(self) -> None:
         # tabindex="0" + role columnheader pour l'accessibilite clavier.

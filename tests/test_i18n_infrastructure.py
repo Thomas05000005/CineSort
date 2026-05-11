@@ -199,8 +199,15 @@ class LocalesJsonStructureTests(unittest.TestCase):
 
     def test_required_categories_present_in_both(self) -> None:
         required = {
-            "settings", "qij", "library", "processing",
-            "notifications", "errors", "common", "glossary", "help",
+            "settings",
+            "qij",
+            "library",
+            "processing",
+            "notifications",
+            "errors",
+            "common",
+            "glossary",
+            "help",
         }
         for locale_name in ("fr", "en"):
             data = json.loads((LOCALES_DIR / f"{locale_name}.json").read_text(encoding="utf-8"))

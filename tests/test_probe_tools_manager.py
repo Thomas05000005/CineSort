@@ -21,15 +21,14 @@ def _isolate_tools_lookup(td: str):
 
 class ProbeToolsManagerTests(unittest.TestCase):
     def test_detect_probe_tools_missing(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="probe_tools_missing_") as td:
-            with _isolate_tools_lookup(td):
-                payload = detect_probe_tools(
-                    settings={"probe_backend": "auto", "ffprobe_path": "", "mediainfo_path": ""},
-                    state_dir=Path(td),
-                    which_fn=lambda _name: None,
-                    check_versions=True,
-                    scan_winget_packages=False,
-                )
+        with tempfile.TemporaryDirectory(prefix="probe_tools_missing_") as td, _isolate_tools_lookup(td):
+            payload = detect_probe_tools(
+                settings={"probe_backend": "auto", "ffprobe_path": "", "mediainfo_path": ""},
+                state_dir=Path(td),
+                which_fn=lambda _name: None,
+                check_versions=True,
+                scan_winget_packages=False,
+            )
         self.assertFalse(payload.get("hybrid_ready"), payload)
         self.assertEqual(str(payload.get("degraded_mode")), "none", payload)
         tools = payload.get("tools", {})

@@ -145,8 +145,7 @@ class CascadeBehaviorTests(unittest.TestCase):
                 (run_id, ts),
             )
             self.conn.execute(
-                "INSERT INTO anomalies(run_id, severity, code, message, ts) "
-                "VALUES (?, 'WARN', 'A1', 'm', ?)",
+                "INSERT INTO anomalies(run_id, severity, code, message, ts) VALUES (?, 'WARN', 'A1', 'm', ?)",
                 (run_id, ts),
             )
         # 1 batch attache a R1 + 2 ops
@@ -251,8 +250,7 @@ class ExistingDbMigrationTests(unittest.TestCase):
                 (ts,),
             )
             conn.execute(
-                "INSERT INTO anomalies(run_id, severity, code, message, ts) "
-                "VALUES ('RX', 'WARN', 'A1', 'm', ?)",
+                "INSERT INTO anomalies(run_id, severity, code, message, ts) VALUES ('RX', 'WARN', 'A1', 'm', ?)",
                 (ts,),
             )
             conn.execute(
@@ -279,9 +277,7 @@ class ExistingDbMigrationTests(unittest.TestCase):
             self.assertEqual(
                 int(conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='RX'").fetchone()[0]), 1
             )
-            self.assertEqual(
-                int(conn.execute("SELECT COUNT(*) FROM anomalies WHERE run_id='RX'").fetchone()[0]), 1
-            )
+            self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM anomalies WHERE run_id='RX'").fetchone()[0]), 1)
             self.assertEqual(
                 int(conn.execute("SELECT COUNT(*) FROM apply_batches WHERE batch_id='BX'").fetchone()[0]), 1
             )
@@ -315,8 +311,7 @@ class ExistingDbMigrationTests(unittest.TestCase):
             )
             # 1 anomaly orpheline
             conn.execute(
-                "INSERT INTO anomalies(run_id, severity, code, message, ts) "
-                "VALUES ('GHOST', 'WARN', 'A1', 'm', ?)",
+                "INSERT INTO anomalies(run_id, severity, code, message, ts) VALUES ('GHOST', 'WARN', 'A1', 'm', ?)",
                 (ts,),
             )
             conn.commit()
@@ -327,9 +322,13 @@ class ExistingDbMigrationTests(unittest.TestCase):
 
         with closing(connect_sqlite(str(self.db_path))) as conn:
             # Le legitime est preserve
-            self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='R-OK'").fetchone()[0]), 1)
+            self.assertEqual(
+                int(conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='R-OK'").fetchone()[0]), 1
+            )
             # L'orphelin est filtre
-            self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='GHOST'").fetchone()[0]), 0)
+            self.assertEqual(
+                int(conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='GHOST'").fetchone()[0]), 0
+            )
             self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM anomalies WHERE run_id='GHOST'").fetchone()[0]), 0)
 
 
@@ -358,8 +357,7 @@ class IdempotenceTests(unittest.TestCase):
                 (ts,),
             )
             conn.execute(
-                "INSERT INTO errors(run_id, ts, step, code, message) "
-                "VALUES ('RZ', ?, 'scan', 'E1', 'm')",
+                "INSERT INTO errors(run_id, ts, step, code, message) VALUES ('RZ', ?, 'scan', 'E1', 'm')",
                 (ts,),
             )
             conn.commit()
