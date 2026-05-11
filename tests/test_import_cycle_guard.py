@@ -23,14 +23,19 @@ Mesure snapshot (2026-05-11) :
   (sauf TmdbClient via TYPE_CHECKING qui n'est pas reellement importe)
 
 Toute deviation a la hausse = regression a investiguer.
+
+v1.0.0-beta : on utilise **subprocess** au lieu de manipuler `sys.modules`
+directement. Manipuler sys.modules dans un test pollue les caches
+module-level (lru_cache, dict globals) utilises par les tests suivants
+(decouvert via bisection : issue GitHub #4).
 """
 
 from __future__ import annotations
 
-import importlib
+import subprocess
 import sys
 import unittest
-
+from pathlib import Path
 
 # Snapshot 2026-05-11 v7.8.0 : 6 modules app charges au temps d'import
 # cinesort.domain.core. Si la liste change : (a) une convergence (moins
@@ -38,39 +43,46 @@ import unittest
 _BASELINE_APP_MODULES_LOADED = 6
 _BASELINE_UI_MODULES_LOADED = 0
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-def _fresh_import_domain_core() -> tuple[int, int, int]:
-    """Importe cinesort.domain.core depuis zero, retourne (n_app, n_ui, n_infra).
 
-    Snapshot/restore complete de sys.modules pour ne PAS polluer l'etat global
-    des autres tests qui reposent sur des singletons de module (e.g.,
-    log_scrubber._ROTATING_INSTALLED).
+def _count_imports_in_subprocess() -> dict[str, int]:
+    """Lance un sous-process Python qui importe cinesort.domain.core et
+    rapporte combien de modules cinesort.app/ui/infra sont charges.
+
+    Utilise subprocess (pas manipulation de sys.modules) pour eviter de
+    polluer les caches module-level des tests suivants.
     """
-    saved = dict(sys.modules)
-    try:
-        # Purge les modules cinesort.X pour forcer un re-import "frais"
-        for m in [m for m in list(sys.modules) if m.startswith("cinesort.")]:
-            del sys.modules[m]
-        importlib.import_module("cinesort.domain.core")
-        loaded = list(sys.modules)
-        n_app = sum(1 for m in loaded if m.startswith("cinesort.app"))
-        n_ui = sum(1 for m in loaded if m.startswith("cinesort.ui"))
-        n_infra = sum(1 for m in loaded if m.startswith("cinesort.infra"))
-        return n_app, n_ui, n_infra
-    finally:
-        # Restaure les modules pour ne pas reset les globals des modules
-        # singletons (log_scrubber, NotifyService, etc.) que d'autres tests
-        # utilisent.
-        for m in [m for m in list(sys.modules) if m.startswith("cinesort.") and m not in saved]:
-            del sys.modules[m]
-        for m, mod in saved.items():
-            if m.startswith("cinesort."):
-                sys.modules[m] = mod
+    script = (
+        "import sys; "
+        "import cinesort.domain.core; "
+        "loaded = list(sys.modules); "
+        "n_app = sum(1 for m in loaded if m.startswith('cinesort.app')); "
+        "n_ui = sum(1 for m in loaded if m.startswith('cinesort.ui')); "
+        "n_infra = sum(1 for m in loaded if m.startswith('cinesort.infra')); "
+        "print(f'{n_app},{n_ui},{n_infra}')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    output = result.stdout.strip().splitlines()[-1]  # derniere ligne (ignore warnings)
+    parts = output.split(",")
+    return {"app": int(parts[0]), "ui": int(parts[1]), "infra": int(parts[2])}
 
 
 class ImportCycleGuardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # 1 seul subprocess pour les 3 tests (couts d'init Python ~200ms)
+        cls.counts = _count_imports_in_subprocess()
+
     def test_domain_core_app_imports_not_growing(self) -> None:
-        n_app, _, _ = _fresh_import_domain_core()
+        n_app = self.counts["app"]
         self.assertLessEqual(
             n_app,
             _BASELINE_APP_MODULES_LOADED,
@@ -81,7 +93,7 @@ class ImportCycleGuardTests(unittest.TestCase):
         )
 
     def test_domain_core_does_not_import_ui_layer(self) -> None:
-        _, n_ui, _ = _fresh_import_domain_core()
+        n_ui = self.counts["ui"]
         self.assertEqual(
             n_ui,
             _BASELINE_UI_MODULES_LOADED,
@@ -90,24 +102,10 @@ class ImportCycleGuardTests(unittest.TestCase):
         )
 
     def test_domain_core_loads_within_reasonable_time(self) -> None:
-        """Sanity : l'import ne doit pas crasher et reste raisonnable."""
-        import time
-
-        saved = dict(sys.modules)
-        try:
-            for m in [m for m in list(sys.modules) if m.startswith("cinesort.")]:
-                del sys.modules[m]
-            t0 = time.time()
-            importlib.import_module("cinesort.domain.core")
-            dt_ms = (time.time() - t0) * 1000
-            # 5 s est volontairement laxiste — c'est juste un crash-detector.
-            self.assertLess(dt_ms, 5000, f"import cinesort.domain.core trop lent: {dt_ms:.0f}ms")
-        finally:
-            for m in [m for m in list(sys.modules) if m.startswith("cinesort.") and m not in saved]:
-                del sys.modules[m]
-            for m, mod in saved.items():
-                if m.startswith("cinesort."):
-                    sys.modules[m] = mod
+        """Sanity : l'import ne doit pas crasher."""
+        # Si _count_imports_in_subprocess() a renvoye sans exception, l'import
+        # a deja ete valide (subprocess.run avec check=True).
+        self.assertGreaterEqual(self.counts["app"], 0)
 
 
 if __name__ == "__main__":

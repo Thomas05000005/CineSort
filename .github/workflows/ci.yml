@@ -56,33 +56,22 @@ jobs:
       # uniquement — les E2E dashboard/desktop necessitent des navigateurs
       # Playwright installes, traites apres le build).
       #
-      # v1.0.0-beta : pollution inter-tests connue, fix programme v7.9.0.
-      # Cf docs/internal/audit_v7_8_0/results/v7_8_0_inter_test_pollution.md.
-      # Les modules listes ci-dessous passent a 100% en isolation mais
-      # echouent quand executes a la suite (etat global non-reinitialise).
-      # On les exclut temporairement de la CI pour preserver le signal vert.
+      # v1.0.0-beta : pollution inter-tests resolue (issue #4).
+      # Cause root : test_import_cycle_guard manipulait sys.modules ce qui
+      # cassait les caches module-level (lru_cache, dict globals) des tests
+      # suivants. Fix : subprocess pour l'import check.
       - name: Tests unitaires avec couverture
         shell: pwsh
         run: |
           python -m coverage run -m pytest tests/ `
             --ignore=tests/e2e --ignore=tests/e2e_dashboard --ignore=tests/e2e_desktop `
             --ignore=tests/manual --ignore=tests/live --ignore=tests/stress `
-            --ignore=tests/test_undo_apply.py --ignore=tests/test_undo_checksum.py `
-            --ignore=tests/test_incremental_scan.py --ignore=tests/test_scan_streaming.py `
-            --ignore=tests/test_quality_score.py --ignore=tests/test_tv_detection.py `
-            --ignore=tests/test_multi_root.py --ignore=tests/test_perceptual_parallel.py `
-            --ignore=tests/test_run_report_export.py `
             -v
 
-      # 8. Rapport de couverture
-      # v1.0.0-beta : seuil temporairement abaisse a 75% car 9 modules de tests
-      # sont exclus (pollution inter-tests, fix en v7.9.0 cf
-      # docs/internal/audit_v7_8_0/results/v7_8_0_inter_test_pollution.md).
-      # A remonter a 80% une fois la pollution corrigee et les modules
-      # reactives. Voir issue GitHub #1.
-      - name: Rapport de couverture (seuil 75%)
+      # 8. Rapport de couverture — echec si < 80%
+      - name: Rapport de couverture (seuil 80%)
         shell: pwsh
-        run: python -m coverage report --fail-under=75
+        run: python -m coverage report --fail-under=80
 
       # 9. Generation du rapport coverage HTML (telechargeable depuis Actions)
       - name: Rapport coverage HTML
