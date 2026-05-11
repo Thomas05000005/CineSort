@@ -1,0 +1,198 @@
+name: Module Audit (Claude)
+
+# Audit complet par couche/module avec Claude Code Action.
+#
+# Modes :
+# 1. workflow_dispatch : choix manuel d'une couche dans dropdown
+# 2. schedule cron : rotation automatique 1 couche/jour de semaine (lun-ven)
+# 3. workflow_dispatch + target=all : audit complet d'un coup
+#
+# Chaque audit :
+# - Liste les modules de la couche
+# - Claude lit chaque module et fait l'analyse
+# - Genere un rapport markdown daté dans docs/internal/audits/daily/
+# - Ouvre une PR avec le rapport
+# - Si fixes critiques trouves, ouvre des PRs separees
+#
+# Consomme du quota Claude Max via OAuth token.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Couche a auditer"
+        required: true
+        type: choice
+        options:
+          - all
+          - transverse
+          - domain
+          - domain-perceptual
+          - app
+          - infra
+          - infra-db
+          - infra-probe
+          - ui-api
+          - frontend
+        default: domain
+      level:
+        description: "Niveau d'agressivite"
+        required: false
+        type: choice
+        options:
+          - defensif
+          - modere
+          - agressif
+        default: modere
+      open_prs:
+        description: "Ouvrir des PRs avec les fixes (true/false)"
+        required: false
+        type: choice
+        options:
+          - "true"
+          - "false"
+        default: "true"
+
+  schedule:
+    # Rotation auto lun-ven a 04h00 UTC (~05h00 Paris hiver / 06h00 ete).
+    # 1 couche par jour pour eviter de saturer le quota Max.
+    # Le job determine la couche selon le jour de la semaine.
+    # Pas de weekend = pause pour vous laisser reviewer.
+    - cron: "0 4 * * 1-5"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  audit:
+    name: Audit ${{ github.event.inputs.target || 'auto-rotation' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine target (manual or auto-rotation)
+        id: target
+        shell: bash
+        run: |
+          # Si declenche manuellement, prendre l'input. Sinon rotation par jour.
+          target="${{ github.event.inputs.target }}"
+          if [ -z "$target" ]; then
+            day=$(date +%u)  # 1=lundi, 7=dimanche
+            case "$day" in
+              1) target="domain" ;;
+              2) target="domain-perceptual" ;;
+              3) target="app" ;;
+              4) target="infra" ;;
+              5) target="ui-api" ;;
+              *) target="transverse" ;;
+            esac
+            echo "Rotation auto jour=$day -> $target"
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Build module list
+        id: modules
+        shell: bash
+        run: |
+          target="${{ steps.target.outputs.target }}"
+          case "$target" in
+            all)
+              modules=$(find cinesort -type f -name '*.py' ! -path '*__pycache__*' ! -path '*__init__.py' | sort)
+              ;;
+            transverse)
+              modules="TRANSVERSE_ANALYSIS"
+              ;;
+            domain)
+              modules=$(find cinesort/domain -maxdepth 1 -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            domain-perceptual)
+              modules=$(find cinesort/domain/perceptual -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            app)
+              modules=$(find cinesort/app -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            infra)
+              modules=$(find cinesort/infra -maxdepth 1 -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            infra-db)
+              modules=$(find cinesort/infra/db -maxdepth 1 -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            infra-probe)
+              modules=$(find cinesort/infra/probe -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            ui-api)
+              modules=$(find cinesort/ui/api -type f -name '*.py' ! -name '__init__.py' | sort)
+              ;;
+            frontend)
+              modules=$(find web -type f \( -name '*.js' -o -name '*.html' \) ! -path '*backup*' ! -path '*preview*' | sort | head -50)
+              ;;
+            *)
+              echo "Unknown target: $target"
+              exit 1
+              ;;
+          esac
+          {
+            echo 'list<<EOF'
+            echo "$modules"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          count=$(echo "$modules" | grep -c '.' || true)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Modules a auditer ($count) :"
+          echo "$modules" | head -20
+
+      - name: Run Claude audit
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: >-
+            Audit automatique de CineSort, couche "${{ steps.target.outputs.target }}",
+            niveau "${{ github.event.inputs.level || 'modere' }}".
+
+            Ouverture de PRs avec fixes : ${{ github.event.inputs.open_prs || 'true' }}.
+
+
+            ${{ steps.target.outputs.target == 'transverse' && 'Analyse transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Reponds en francais.' || format('Modules a auditer ({0} fichiers) :', steps.modules.outputs.count) }}
+
+
+            ${{ steps.target.outputs.target != 'transverse' && steps.modules.outputs.list || '' }}
+
+
+            Mission :
+
+            1. Pour CHAQUE module liste, lis le contenu integralement.
+
+            2. Cherche : bugs latents (None.method, comparaison douteuse,
+               try/except trop large, race condition), simplifications mineures,
+               patterns dangereux, fonctions trop longues (>100L), magic numbers,
+               duplications.
+
+            3. Produis un rapport markdown structure dans le fichier
+               docs/internal/audits/claude/$(date +%Y-%m-%d)-${{ steps.target.outputs.target }}.md
+               avec format :
+               - Pour chaque module : section avec liste des findings (severite low/med/high
+                 + ligne + description + suggestion)
+               - Resume executif en debut : top 5 findings critiques.
+
+            4. Si "open_prs" = true ET tu trouves des fixes a haut ROI/bas risque :
+               ouvre une PR par fix (titre conventional commit, branch fix/audit-...).
+               Limite-toi a 3 PRs max par run pour ne pas submerger le reviewer.
+
+            5. Ouvre une PR finale qui ajoute le fichier rapport.
+
+            6. Reponds en francais dans tous les commentaires.
+
+
+            Niveau "modere" : seulement les fixes evidents/safe. Niveau "agressif" :
+            n'hesite pas a proposer refactor structurels (mais une PR distincte).
+            Niveau "defensif" : commente seulement, n'ouvre AUCUNE PR meme avec
+            open_prs=true.
