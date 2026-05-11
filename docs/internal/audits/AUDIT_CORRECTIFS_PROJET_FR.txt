@@ -1,0 +1,243 @@
+CineSort - Memo audit et ordre de correction
+===========================================
+
+Date
+----
+2026-03-06
+
+But de ce fichier
+-----------------
+Garder une trace simple des constats importants sur le projet, pour avancer lot par lot sans oublier les points a faible risque mais a forte valeur.
+
+Comprehension rapide du projet
+-----------------------------
+CineSort est une application desktop Windows (Python + pywebview) pour:
+- analyser une bibliotheque films,
+- proposer un plan de normalisation,
+- laisser valider avant action,
+- appliquer de facon prudente (dry-run, quarantaine, undo, verification doublons),
+- enrichir la lecture avec un hub Qualite (probe, score, batch, presets),
+- fournir un packaging Windows et des artefacts de run reutilisables.
+
+Constat global
+--------------
+La base est solide:
+- tests backend nombreux et historiquement verts,
+- politique medias prudente,
+- outils qualite/probe et exports deja bien integres,
+- packaging EXE et ZIP en place.
+
+Les risques restants sont surtout:
+- des ambiguites UI,
+- quelques comportements de fallback trop permissifs,
+- quelques angles morts sur scan/export,
+- et une dette de maintenabilite due aux gros fichiers monolithiques.
+
+Ordre de correction retenu
+--------------------------
+1. Batch qualite: aligner le sens de "selection" avec le comportement reel.
+2. Reset propre de `state.decisions` quand on recharge un autre run pour la qualite.
+3. Eviter les fallbacks implicites sur `D:\\Films` quand `save_settings` ou `start_plan` recoivent un payload partiel.
+4. Revoir le cut de recursion scan quand un dossier parent contient deja une video.
+5. Durcir l'export CSV pour Excel Windows (`utf-8-sig`).
+6. Rendre l'etat "preset qualite actif" plus exact apres edition manuelle.
+7. Continuer le decoupage progressif des fichiers monolithiques (`core.py`, `cinesort_api.py`, `web/app.js`).
+
+Suivi des corrections
+---------------------
+
+1) Batch qualite - ambiguite "selection"
+Statut: FAIT
+Date: 2026-03-06
+Decision:
+- ne pas introduire de multi-selection risquee dans ce lot,
+- corriger l'ambiguite utilisateur en alignant le libelle et les messages avec le comportement reel.
+Comportement retenu:
+- le bouton batch qualite traite les films valides (`ok=true`) dans la table Validation,
+- le libelle devient "Analyser tous les films valides".
+Pourquoi:
+- correction faible risque,
+- aucun changement de logique metier validation/apply,
+- supprime la confusion sans ouvrir un chantier de selection multiple.
+Verification effectuee:
+- UI: bouton et messages parlent maintenant de "films valides",
+- test contractuel UI mis a jour et vert (`tests.test_ui_logic_contracts`).
+Note validation locale:
+- `check_project.bat` echoue actuellement sur ce poste a cause de `PermissionError [WinError 5]` dans de nombreux tests utilisant `tempfile.TemporaryDirectory`,
+- ce blocage semble environnemental et non lie au correctif du point 1,
+- un echec distinct reste a confirmer plus tard sur `tests.test_tmdb_client` / `TmdbClient.flush()`, hors scope de ce point 1.
+
+2) Reset des decisions sur changement de run qualite
+Statut: FAIT
+Date: 2026-03-06
+Probleme:
+- si `load_validation` echoue apres un `setRows(...)`, des decisions du run precedent peuvent rester en memoire.
+Correction appliquee:
+- `ensureQualityRowsForRun(...)` vide maintenant `state.decisions` juste apres `setRows(...)`,
+- puis recharge les decisions uniquement si `load_validation` reussit.
+Pourquoi:
+- evite qu'un ancien run pollue les filtres ou le batch qualite,
+- correction ciblee sans changer la logique validation/apply.
+Verification effectuee:
+- test contractuel UI ajoute pour verrouiller l'ordre `reset -> load_validation`.
+
+3) Fallback implicite ROOT sur payload partiel
+Statut: FAIT
+Date: 2026-03-06
+Probleme:
+- `save_settings` et `start_plan` peuvent encore viser `D:\\Films` si la cle `root` est absente.
+Correction appliquee:
+- si `root` est present mais vide: erreur explicite conservee,
+- si `root` est absent: l'API reutilise le ROOT reellement enregistre dans le `state_dir` cible,
+- si aucun ROOT enregistre n'existe: erreur explicite au lieu d'un fallback implicite vers `D:\\Films`.
+Details de surete:
+- si le payload fournit explicitement un `state_dir`, seule la configuration de ce `state_dir` est prise en compte,
+- l'API n'ira plus lire par accident un ancien `settings.json` d'un autre contexte local du poste.
+Verification effectuee:
+- tests ajoutes pour `save_settings` et `start_plan`:
+  - reutilisation du ROOT sauvegarde,
+  - rejet propre si aucun ROOT sauvegarde n'existe,
+  - rejet du ROOT vide explicite conserve.
+- `tests.test_api_bridge_lot3` -> OK,
+- `tests.test_backend_flow` -> OK.
+
+4) Recursion scan coupee trop tot
+Statut: FAIT
+Date: 2026-03-06
+Probleme:
+- un dossier parent avec une video peut bloquer l'exploration de sous-dossiers films legitimes.
+Correction appliquee:
+- `_iter_scan_targets(...)` continue maintenant la descente si un dossier parent a des sous-dossiers et ne contient que des videos d'extras generiques (`bonus`, `extras`, `featurettes`, etc.),
+- le parent n'est alors plus considere comme unite film terminale.
+Perimetre volontairement prudent:
+- la logique generale "folder with videos => stop descending" est conservee pour les vrais dossiers films,
+- la correction vise uniquement le cas faible risque des videos bonus/extras au parent.
+Verification effectuee:
+- test ajoute sur structure mixte `parent + Bonus.mkv + sous-dossiers films`,
+- test existant sur collections imbriquees conserve,
+- `tests.test_core_heuristics` -> OK.
+
+5) Export CSV Windows/Excel
+Statut: FAIT
+Date: 2026-03-06
+Probleme:
+- export actuel en UTF-8 sans BOM, risque de accents mal lus sous Excel Windows.
+Correction appliquee:
+- l'export CSV du rapport run est maintenant ecrit en `utf-8-sig`,
+- l'export JSON reste inchange.
+Verification effectuee:
+- test d'export mis a jour pour verifier explicitement le BOM CSV,
+- `tests.test_run_report_export` -> OK.
+
+6) Preset qualite actif
+Statut: FAIT
+Date: 2026-03-06
+Probleme:
+- le preset actif est deduit par `profile_id` seulement.
+Correction appliquee:
+- le front compare maintenant le profil qualite courant au preset complet via une empreinte stable des valeurs utiles,
+- un preset est marque `actif` uniquement en cas de correspondance exacte,
+- si le `profile_id` correspond mais que les valeurs ont ete modifiees, l'UI affiche un etat `derive`.
+Support API:
+- `get_quality_presets()` expose aussi `profile_json` pour permettre la comparaison exacte sans endpoint supplementaire.
+Verification effectuee:
+- test contractuel UI ajoute pour la logique `fingerprint + derived`,
+- test backend cible sur `get_quality_presets()` mis a jour,
+- `tests.test_ui_logic_contracts` -> OK,
+- `tests.test_quality_score.QualityScoreTests.test_api_get_quality_presets_returns_expected_ids` -> OK.
+
+7) Dette de structure
+Statut: EN COURS
+Probleme:
+- `core.py`, `cinesort_api.py` et `web/app.js` concentrent trop de responsabilites.
+Avancement:
+- 7A FAIT:
+  - garde-fous de refactor ajoutes sur le bridge API pour verrouiller la resolution `ROOT/state_dir`,
+  - tests negatifs ajoutes pour eviter les fuites de contexte entre `state_dir`.
+- 7B1 FAIT:
+  - extraction des helpers prives `_resolve_payload_state_dir(...)` et `_resolve_root_from_payload(...)`,
+  - `save_settings(...)` et `start_plan(...)` utilisent maintenant la meme logique centralisee.
+- 7B2 FAIT:
+  - extraction des helpers prives `_quality_store(...)`, `_active_quality_profile_payload(...)`, `_save_active_quality_profile(...)`,
+  - extraction du helper `_write_run_report_file(...)`,
+  - les endpoints publics du profil qualite et de l'export run deleguent maintenant a ces helpers internes.
+Benefice:
+- le comportement public est preserve,
+- la logique `ROOT/state_dir` n'est plus dupliquee,
+- la logique du profil qualite et de l'export run est moins repetee,
+- le risque de divergence future entre `save_settings` et `start_plan` baisse.
+Reste a faire:
+- 7C1 FAIT:
+  - extraction des services UI transverses dans `web/ui_shell.js`,
+  - `app.js` garde l'etat et le workflow, `ui_shell.js` porte les helpers DOM/status/modal/apiCall.
+- 7C2 FAIT:
+  - extraction du domaine Validation dans `web/ui_validation.js`,
+  - extraction du domaine Qualite dans `web/ui_quality.js`,
+  - `web/index.html` charge maintenant `ui_shell.js`, `ui_validation.js`, `ui_quality.js`, puis `app.js`,
+  - `app.js` reste l'orchestrateur global (etat, bootstrap, hooks, navigation, flows).
+- 7D1 FAIT:
+  - extraction des helpers purs de scan dans `core_scan_helpers.py`,
+  - `core.py` delegue maintenant la decouverte de cibles scan, la collecte des extensions non video,
+    la detection `single with extras` et l'iteration des videos a ce module dedie.
+- 7D2 FAIT:
+  - extraction des heuristiques pures titre/annee/TMDb dans `core_title_helpers.py`,
+  - `core.py` importe maintenant:
+    - `extract_year(...)`,
+    - `infer_name_year(...)`,
+    - `clean_title_guess(...)`,
+    - `title_match_score(...)`,
+    - `tokens(...)`,
+    - `_expand_tmdb_queries(...)`,
+    - `_extract_trailing_sequel_num(...)`,
+    - `_title_similarity(...)`,
+    - `_tmdb_prefix_equivalent(...)`,
+    - `_norm_for_tokens(...)`.
+  - reconstruction du socle incremental interne supprime par erreur pendant l'extraction:
+    - signature config,
+    - snapshot/delta stats,
+    - serialisation `PlanRow`,
+    - signature de dossier.
+- 7E FAIT (cadrage):
+  - document de conception ajoute: `APPLY_ROWS_7E_DESIGN_FR.md`,
+  - invariants de securite explicitement poses pour `apply_rows(...)`,
+  - responsabilites actuelles de la fonction cartographiees,
+  - ordre d'extraction faible risque defini:
+    - contexte apply,
+    - pre-pass collection,
+    - cleanup final,
+    - puis seulement dispatch ligne et comptage,
+  - matrice de non-regression fixee avant tout refactor code.
+
+Prochaine suite logique apres 7E
+--------------------------------
+Sous-lots recommandes:
+1. 7E1 - extraction `_build_apply_context(...)` - FAIT
+2. 7E2 - extraction `_prepare_collection_folder_map(...)`
+3. 7E3 - extraction `_finalize_apply_cleanup(...)`
+4. 7E4 - extraction prudente du dispatch ligne
+5. 7E5 - extraction prudente du comptage applique/ignore
+
+7E1 detail
+----------
+Statut: FAIT
+Date: 2026-03-07
+Correction appliquee:
+- ajout de `ApplyExecutionContext`,
+- ajout du helper `_build_apply_context(...)`,
+- `apply_rows(...)` utilise maintenant ce contexte au lieu d'initialiser localement:
+  - config normalisee,
+  - `ApplyResult`,
+  - `decision_keys`,
+  - `hash_cache`,
+  - racines `_review/_conflicts/_leftovers`,
+  - sets/maps d'execution utilises par la suite du flux.
+Pourquoi:
+- reduire le bruit de debut de `apply_rows(...)`,
+- poser un point d'entree stable pour les prochains sous-lots,
+- ne toucher ni au dispatch metier, ni a l'undo, ni a la politique medias.
+Verification effectuee:
+- test ajoute sur `_build_apply_context(...)`,
+- `tests.test_v7_1_features` -> OK,
+- `tests.test_merge_duplicates` -> OK,
+- `tests.test_undo_apply` -> OK,
+- `tests.test_backend_flow` -> OK.

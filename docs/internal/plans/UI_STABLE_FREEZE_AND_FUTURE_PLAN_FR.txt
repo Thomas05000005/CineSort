@@ -1,0 +1,32 @@
+﻿Stable UI freeze and future redesign plan - 2026-03-08
+
+1. Stable UI frozen
+- The current stable UI remains the production reference.
+- No experimental Next variant is routed by default.
+- Launch stable by default with:
+  python app.py
+  or dist\\CineSort.exe without CINESORT_UI=next.
+
+2. Experimental UI archived
+- Experimental Next material was archived in:
+  archive_ui_next_20260308\\
+- Archived content includes:
+  - web_next_zero\\
+  - copies of the previous web/index_next.html and associated next CSS/JS files
+  - UI_NEXT_MVP_GATE_FR.md
+  - UI_NEXT_REFONTE_WORKLOG.txt
+  - UI_NEXT_ZERO_WORKLOG.txt
+- Goal: preserve work without mixing it into the stable UI.
+
+3. Future redesign rule
+- Any future redesign should restart from a clear product/UI brief before coding.
+- Recommended approach:
+  - define target navigation first
+  - define page hierarchy second
+  - define visual design system third
+  - build one convincing page reference before propagating
+- Do not resume from half-finished experiments by default.
+
+Current recommendation
+- Keep stable frozen.
+- Use the archived folders only as references, not as an active baseline.

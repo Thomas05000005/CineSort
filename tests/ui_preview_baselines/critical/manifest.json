@@ -1,0 +1,44 @@
+[
+  {
+    "view": "home",
+    "label": "Accueil",
+    "scenario": "run_recent_safe",
+    "file": "accueil.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=run_recent_safe&view=home"
+  },
+  {
+    "view": "validation",
+    "label": "Validation",
+    "scenario": "validation_loaded",
+    "file": "validation.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=validation_loaded&view=validation"
+  },
+  {
+    "view": "execution",
+    "label": "Application",
+    "scenario": "apply_result",
+    "file": "application.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=apply_result&view=execution"
+  },
+  {
+    "view": "quality",
+    "label": "Qualite",
+    "scenario": "quality_anomalies",
+    "file": "qualite.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=quality_anomalies&view=quality"
+  },
+  {
+    "view": "history",
+    "label": "Journaux",
+    "scenario": "logs_artifacts",
+    "file": "journaux.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=logs_artifacts&view=history"
+  },
+  {
+    "view": "settings",
+    "label": "Parametres",
+    "scenario": "settings_complete",
+    "file": "parametres.png",
+    "request_path": "/web/index_preview.html?preview=1&scenario=settings_complete&view=settings"
+  }
+]

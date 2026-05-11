@@ -1,0 +1,189 @@
+﻿from __future__ import annotations
+
+import importlib.util
+import re
+import unittest
+from pathlib import Path
+
+
+class UiNextContractsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root = Path(__file__).resolve().parents[1]
+        cls.index_next = (cls.root / 'web' / 'index_next.html').read_text(encoding='utf-8')
+        cls.styles_next = (cls.root / 'web' / 'styles_next.css').read_text(encoding='utf-8')
+        cls.app_next = (cls.root / 'web' / 'app_next.js').read_text(encoding='utf-8')
+        cls.ui_next_shell = (cls.root / 'web' / 'ui_next_shell.js').read_text(encoding='utf-8')
+        cls.ui_next_validation = (cls.root / 'web' / 'ui_next_validation.js').read_text(encoding='utf-8')
+        cls.ui_next_quality = (cls.root / 'web' / 'ui_next_quality.js').read_text(encoding='utf-8')
+        cls.ui_next_apply = (cls.root / 'web' / 'ui_next_apply.js').read_text(encoding='utf-8')
+
+        stable_parts = [
+            (cls.root / 'web' / 'app.js').read_text(encoding='utf-8'),
+            (cls.root / 'web' / 'ui_shell.js').read_text(encoding='utf-8'),
+            (cls.root / 'web' / 'ui_validation.js').read_text(encoding='utf-8'),
+            (cls.root / 'web' / 'ui_quality.js').read_text(encoding='utf-8'),
+        ]
+        next_parts = [
+            cls.app_next,
+            cls.ui_next_shell,
+            cls.ui_next_validation,
+            cls.ui_next_quality,
+            cls.ui_next_apply,
+        ]
+        cls.stable_api_calls = set(re.findall(r'window\.pywebview\.api\.(\w+)', '\n'.join(stable_parts)))
+        cls.next_api_calls = set(re.findall(r'window\.pywebview\.api\.(\w+)', '\n'.join(next_parts)))
+
+        spec = importlib.util.spec_from_file_location('cinesort_app_module', cls.root / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        spec.loader.exec_module(module)
+        cls.app_module = module
+
+    def test_entrypoint_resolution_supports_stable_and_next(self) -> None:
+        self.assertFalse(self.app_module.is_dev_mode([], {}))
+        self.assertTrue(self.app_module.is_dev_mode(['--dev'], {}))
+        self.assertTrue(self.app_module.is_dev_mode([], {'DEV_MODE': '1'}))
+        self.assertEqual(self.app_module.requested_ui_variant(['--ui', 'next'], {}), 'next')
+        self.assertEqual(self.app_module.requested_ui_variant(['--ui=next'], {}), 'next')
+        self.assertEqual(self.app_module.requested_ui_variant([], {'CINESORT_UI': 'next'}), 'next')
+        self.assertEqual(self.app_module.resolve_ui_variant(['--ui', 'next'], {}), 'stable')
+        self.assertEqual(self.app_module.resolve_ui_variant(['--ui=next'], {}), 'stable')
+        self.assertEqual(self.app_module.resolve_ui_variant([], {'CINESORT_UI': 'next'}), 'stable')
+        self.assertEqual(self.app_module.resolve_ui_variant(['--ui', 'next', '--dev'], {}), 'next')
+        self.assertEqual(self.app_module.resolve_ui_variant([], {'CINESORT_UI': 'next', 'DEV_MODE': '1'}), 'next')
+        self.assertEqual(self.app_module.resolve_ui_variant(['--ui', 'preview', '--dev'], {}), 'preview')
+        self.assertIn("Repli automatique vers l'UI stable", self.app_module.resolve_ui_policy_notice(['--ui', 'next'], {}) or '')
+        self.assertIsNone(self.app_module.resolve_ui_policy_notice(['--ui', 'next', '--dev'], {}))
+        self.assertEqual(self.app_module.resolve_ui_variant([], {}), 'stable')
+        self.assertEqual(
+            self.app_module.resolve_ui_entrypoint('next'),
+            ('web/index_next.html', 'CineSort [UI Next] - Tri & normalisation de bibliotheque films'),
+        )
+        self.assertEqual(
+            self.app_module.resolve_ui_entrypoint('preview'),
+            ('web/index_preview.html', 'CineSort [UI Preview] - Tri & normalisation de bibliotheque films'),
+        )
+        self.assertEqual(
+            self.app_module.resolve_ui_entrypoint('stable'),
+            ('web/index.html', 'CineSort - Tri & normalisation de bibliotheque films'),
+        )
+
+    def test_index_next_loads_only_next_front_assets(self) -> None:
+        self.assertIn('<body class="ui-next control-room horizon-core">', self.index_next)
+        self.assertIn('<link rel="stylesheet" href="./styles_next.css" />', self.index_next)
+        self.assertIn('<script src="./ui_next_shell.js"></script>', self.index_next)
+        self.assertIn('<script src="./ui_next_validation.js"></script>', self.index_next)
+        self.assertIn('<script src="./ui_next_quality.js"></script>', self.index_next)
+        self.assertIn('<script src="./ui_next_apply.js"></script>', self.index_next)
+        self.assertIn('<script src="./app_next.js"></script>', self.index_next)
+        self.assertNotIn('<script src="./app.js"></script>', self.index_next)
+        self.assertNotIn('<link rel="stylesheet" href="./styles.css" />', self.index_next)
+        self.assertIn('class="brandEyebrow"', self.index_next)
+        self.assertIn('class="topbarEyebrow"', self.index_next)
+        self.assertIn('class="workflowRibbon steps"', self.index_next)
+        self.assertIn('class="commandDeck"', self.index_next)
+        self.assertNotIn('<aside class="sidebar">', self.index_next)
+
+    def test_index_next_declares_workflow_views(self) -> None:
+        expected = {'settings', 'plan', 'quality', 'validate', 'duplicates', 'apply', 'logs', 'dashboard'}
+        found = set(re.findall(r'id="view-([a-z]+)"', self.index_next))
+        self.assertTrue(expected.issubset(found), found)
+        self.assertIn('qualityNextLayout', self.index_next)
+        self.assertIn('applyNextLayout', self.index_next)
+
+    def test_next_ctas_exist_for_mvp_views(self) -> None:
+        self.assertIn('id="btnAssistValidation"', self.index_next)
+        self.assertIn('id="btnCheckDuplicates"', self.index_next)
+        self.assertIn('id="btnQualityTestSelected"', self.index_next)
+        self.assertIn('id="btnQualityBatchSelection"', self.index_next)
+        self.assertIn('id="btnQualityBatchFiltered"', self.index_next)
+        self.assertIn('id="btnApply"', self.index_next)
+        self.assertIn('id="btnUndoPreview"', self.index_next)
+        self.assertIn('id="btnUndoRun"', self.index_next)
+        self.assertIn('id="operatorDiagOverallBadge"', self.index_next)
+        self.assertIn('id="operatorDiagTmdbBadge"', self.index_next)
+        self.assertIn('id="operatorDiagProbeBadge"', self.index_next)
+        self.assertIn('id="inResidualCleanupFolderName"', self.index_next)
+        self.assertIn('id="ckResidualCleanupEnabled"', self.index_next)
+        self.assertIn('id="selResidualCleanupScope"', self.index_next)
+        self.assertIn('id="applyCleanupDiagPanel"', self.index_next)
+        self.assertIn('id="applyCleanupStatusBadge"', self.index_next)
+        self.assertIn('id="applyCleanupPreviewValue"', self.index_next)
+        self.assertIn('id="applyCleanupDetailText"', self.index_next)
+
+    def test_next_bootstrap_calls_mvp_enhancers(self) -> None:
+        self.assertIn('if(typeof enhanceNextValidationLayout === "function")', self.app_next)
+        self.assertIn('if(typeof enhanceNextQualityLayout === "function")', self.app_next)
+        self.assertIn('if(typeof enhanceNextApplyLayout === "function")', self.app_next)
+        self.assertIn('if(typeof bindNextApplyUi === "function")', self.app_next)
+        self.assertIn('if(typeof syncNextApplyViewState === "function")', self.app_next)
+
+    def test_next_modules_define_mvp_enhancers(self) -> None:
+        self.assertIn('function enhanceNextValidationLayout()', self.ui_next_validation)
+        self.assertIn('function enhanceNextQualityLayout()', self.ui_next_quality)
+        self.assertIn('function enhanceNextApplyLayout()', self.ui_next_apply)
+        self.assertIn('function bindNextApplyUi()', self.ui_next_apply)
+        self.assertIn('function syncNextApplyViewState()', self.ui_next_apply)
+
+    def test_next_uses_no_new_backend_endpoints(self) -> None:
+        self.assertTrue(self.next_api_calls, 'next api calls should not be empty')
+        self.assertTrue(self.next_api_calls.issubset(self.stable_api_calls), sorted(self.next_api_calls - self.stable_api_calls))
+
+    def test_next_operator_diagnostic_reuses_same_contract(self) -> None:
+        self.assertIn('function renderOperatorDiagnostic()', self.app_next)
+        self.assertIn('renderOperatorDiagnostic();', self.app_next)
+        self.assertIn('$("ckRememberKey")?.addEventListener("change", updateOnboardingStatus);', self.app_next)
+        self.assertIn('$("ckDryRun")?.addEventListener("change", updateOnboardingStatus);', self.app_next)
+        self.assertIn('$("ckQuarantine")?.addEventListener("change", updateOnboardingStatus);', self.app_next)
+        self.assertIn('$("ckMoveEmptyFoldersEnabled")?.addEventListener("change", updateOnboardingStatus);', self.app_next)
+        self.assertIn('$("selEmptyFoldersScope")?.addEventListener("change", updateOnboardingStatus);', self.app_next)
+
+    def test_next_undo_contract_mentions_cleanup_buckets(self) -> None:
+        self.assertIn('Dossiers inclus dans l\'Undo :', self.app_next)
+        self.assertIn('Dossiers vides (_Vide):', self.app_next)
+        self.assertIn('Dossiers résiduels (_Dossier Nettoyage):', self.app_next)
+        self.assertIn('Dossiers restaurés :', self.app_next)
+
+    def test_next_apply_cleanup_preview_contract_is_present(self) -> None:
+        self.assertIn("cleanupResidualPreview: null,", self.app_next)
+        self.assertIn("cleanupResidualLastResult: null,", self.app_next)
+        self.assertIn("function renderApplyCleanupDiagnostic()", self.app_next)
+        self.assertIn("async function refreshCleanupResidualPreview(triggerEl = null, opts = {})", self.app_next)
+        self.assertIn("function cleanupResidualScopeDescriptor(scope)", self.app_next)
+        self.assertIn("function cleanupResidualReasonLabel(code)", self.app_next)
+        self.assertIn("function cleanupResidualBlockedHint(diag)", self.app_next)
+        self.assertIn('window.pywebview.api.get_cleanup_residual_preview(rid)', self.app_next)
+        self.assertIn('await refreshCleanupResidualPreview(null, { silent: true });', self.app_next)
+        self.assertIn('Nettoyage résiduel', self.app_next)
+        self.assertIn("Probablement éligibles avant l'application", self.app_next)
+        self.assertIn('Dossiers déplacés', self.app_next)
+        self.assertIn('Dossiers laissés en place', self.app_next)
+        self.assertIn("Aucun dossier probablement éligible", self.app_next)
+        self.assertIn("Toute la racine ROOT", self.app_next)
+        self.assertIn("Dossiers touchés par ce run", self.app_next)
+
+    def test_next_styles_define_isolated_shell_and_no_global_horizontal_scroll(self) -> None:
+        self.assertIn('body.ui-next{', self.styles_next)
+        self.assertIn('body.ui-next.control-room{', self.styles_next)
+        self.assertIn('body.ui-next.horizon-core{', self.styles_next)
+        self.assertIn('body.ui-next .appNext{', self.styles_next)
+        self.assertRegex(self.styles_next, r'overflow-x\s*:\s*hidden')
+        self.assertIn('body.ui-next.horizon-core .workflowRibbon{', self.styles_next)
+        self.assertIn('.qualityNextGrid', self.styles_next)
+        self.assertIn('.applyNextGrid', self.styles_next)
+        self.assertIn('.nextDataZone', self.styles_next)
+        self.assertIn('.operatorDiagPanel{', self.styles_next)
+
+    def test_next_readme_documentation_exists(self) -> None:
+        readme = (self.root / 'README_FR.txt').read_text(encoding='utf-8')
+        self.assertIn('UI Next = dev only', readme)
+        self.assertIn('python app.py --ui next', readme)
+        self.assertIn('CINESORT_UI=next', readme)
+        self.assertIn('DEV_MODE=1', readme)
+        self.assertIn("retombe proprement sur l'UI stable", readme)
+
+
+if __name__ == '__main__':
+    unittest.main()
+

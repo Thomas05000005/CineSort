@@ -1,0 +1,81 @@
+[project]
+name = "cinesort"
+license = {text = "MIT"}
+authors = [
+    {name = "<PROJECT_AUTHOR>"},
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = [
+  ".git",
+  ".venv",
+  ".venv313",
+  "venv",
+  "build",
+  "dist",
+  "packages",
+  "__pycache__",
+  ".tmp_test",
+  ".tmp_audit",
+  ".ui_backups",
+  "archive_ui_next_20260308",
+  "web_next_zero",
+  # Scripts d'audit visuel manuel (Playwright capture, pas de la prod)
+  "tests/manual",
+]
+
+[tool.ruff.lint]
+# Audit B3 : elargissement progressif. Les regles E/W (pycodestyle), F
+# (pyflakes), et UP024/UP032/UP034 (pyupgrade bas risque) attrapent les
+# bugs latents sans demander de refactoring massif. E501 (line-too-long)
+# et la majorite des UP restent ignores pour ne pas noyer le CI.
+# v7.8.0 Phase 14 : activation progressive de regles sans violation (29 fixes
+# automatiques deja appliques) — empeche toute regression future sur ces idiomes.
+select = [
+  "E", "F", "W",
+  "UP015", "UP024", "UP032", "UP034",
+  "SIM105",  # try/except/pass -> contextlib.suppress
+  "SIM110",  # reimplemented-builtin (any/all) -> use builtin
+  "SIM117",  # multiple-with -> combined with statement
+]
+ignore = [
+  "E501",  # line-too-long : line-length 120 parfois depasse, non-bloquant
+  "E402",  # module-level import not at top — quelques cas legitimes (lazy)
+  "E701",  # multi-statement on one line colon — peu de cas
+  "E702",  # multi-statement semicolon — peu de cas
+  "E741",  # ambiguous variable name (l, I, O) — legacy accepte
+  "E721",  # type comparison avec == au lieu de isinstance — 3 cas legitimes
+  "E731",  # lambda assignment — 2 cas
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Les tests E2E Playwright instancient des page objects en variables locales
+# que Python garde en vie par ref au frame ; l'analyse statique F841 ne voit
+# pas l'usage. On whitelist F841 pour ces fichiers.
+"tests/e2e/**/*.py" = ["F841"]
+"tests/e2e_dashboard/**/*.py" = ["F841"]
+"tests/e2e_desktop/**/*.py" = ["F841"]
+
+[tool.coverage.run]
+branch = false
+omit = [
+  "tests/*",
+  ".venv/*",
+  ".venv313/*",
+  "build/*",
+  "dist/*",
+  "packages/*",
+  ".tmp_test/*",
+  ".tmp_audit/*",
+]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+precision = 1
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+]

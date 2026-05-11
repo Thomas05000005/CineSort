@@ -1,0 +1,76 @@
+﻿CineSort state inspection - 2026-03-08
+Path inspected: %USERPROFILE%\\Desktop\\CineSort
+
+Observed files
+- settings.json
+- tmdb_cache.json
+- db\\cinesort.sqlite
+- runs\\tri_films_20260308_113501_172\\
+
+Run health summary
+- One run found: 20260308_113501_172
+- Analysis summary:
+  - planned rows: 865
+  - ignored during analysis: 90
+  - folders scanned: 954
+  - collections detected: 1
+  - collection rows generated: 2
+  - singles detected: 863
+  - confidence: high=860 med=5 low=0
+  - sources: nfo=825 tmdb=37 name=3
+- Apply summary from logs and DB:
+  - dry-run executed first
+  - real apply executed after
+  - final apply batch in DB: DONE, dry_run=False
+  - no apply errors found
+  - no anomalies found
+  - no conflicts, leftovers or duplicate-identical files in _review
+- Undo capability appears present:
+  - apply_operations: 845
+  - reversible operations: 844
+  - undo_status pending: 845
+
+Concrete observations
+1. The run itself looks healthy.
+- No DB errors table entries
+- No anomalies table entries
+- No review leftovers/conflicts content
+- Final apply batch completed successfully
+
+2. Several NFO warnings were logged.
+- Examples: NFO title mismatch and NFO year reject
+- This is not a crash issue.
+- It signals data quality cases worth improving later in matching heuristics.
+
+3. Current settings.json does not match the run configuration on TMDb and apply-related options.
+- Current settings.json:
+  - tmdb_api_key = empty
+  - dry_run_apply = true
+  - quarantine_unapproved = false
+- Run config stored in DB:
+  - tmdb_api_key was present
+  - dry_run_apply / quarantine_unapproved not present in run config snapshot
+- Meaning:
+  - the inspected run used TMDb with a real key
+  - the current settings file no longer contains that key
+- Risk:
+  - future runs may degrade to cache-only behavior unless the key is restored or stored elsewhere intentionally
+- This should be verified in the product behavior.
+
+4. Safety-related settings worth reviewing
+- empty_folders_scope = root_all
+  - broad scope, operationally aggressive on large libraries
+- incremental_scan_enabled = false
+  - safe, but slower on big libraries
+- current settings.json says quarantine_unapproved = false
+  - less conservative than the observed run logs, which showed quarantine=True during apply
+
+Recommended follow-up
+- Verify why TMDb API key is absent from current settings.json while the run used a key.
+- Decide whether this is:
+  - intentional non-persistence for security
+  - or an actual settings persistence issue
+- If the goal is maximum operational safety, review:
+  - quarantine_unapproved
+  - empty_folders_scope
+- Use this run as a healthy reference dataset for future QA.

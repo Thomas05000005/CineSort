@@ -1,0 +1,309 @@
+Phase 1 - Gel produit, architecture cible, role des vues
+=========================================================
+
+Date
+----
+2026-03-09
+
+But de cette phase
+------------------
+Ne rien refondre tout de suite.
+Fixer ce qui doit etre preserve, puis definir une architecture cible lisible de l'application avant toute reorganisation UI ou produit.
+
+Principe directeur
+------------------
+Faire evoluer CineSort:
+- d'un outil de correction et normalisation,
+- vers une application de gestion / audit / nettoyage / qualite pour bibliotheques films et series,
+- sans casser le noyau fiable deja en place.
+
+
+1. Ce qu'on gele
+----------------
+
+1.1 Noyau fiable a preserver
+- Moteur de planification / analyse actuel.
+- Mecanique Apply / dry-run / undo.
+- Garde-fous doublons avant apply.
+- Quarantaine / review / conflits.
+- Scan incremental.
+- Moteur de qualite, probe et score.
+- Journaux et artefacts de run.
+- Packaging EXE et ZIP.
+
+1.2 Invariants produit a ne pas casser
+- Aucune suppression destructive par defaut.
+- Toute action sensible doit rester explicable et tracable.
+- Le run reste l'unite de travail principale.
+- Le Dashboard ne doit jamais changer implicitement le workflow.
+- La Validation reste le point de decision humaine.
+- Qualite reste non destructive.
+- `_Vide` et `_Dossier Nettoyage` restent distincts.
+
+1.3 Comportements UX a preserver
+- Contexte run/film nettoye proprement lors des changements de run.
+- Blocage Apply si validation non enregistree.
+- Blocage Apply si verification doublons impossible.
+- Lisibilite des diagnostics operateur.
+- UI stable reste reference de production.
+
+1.4 Zones a ne pas toucher sans necessite
+- `core.py` autour de `apply_rows(...)`
+- `cinesort/infra/db/sqlite_store.py`
+- `cinesort/domain/quality_score.py`
+- `cinesort/infra/probe/*`
+
+
+2. Architecture cible de l'application
+--------------------------------------
+
+Vision generale
+---------------
+L'application doit etre lue comme un produit a 3 couches:
+
+1. Preparation de l'environnement
+   - Parametres
+   - diagnostic operateur
+   - sante outils / TMDb / prudence
+
+2. Travail sur un run
+   - Analyse
+   - Qualite
+   - A verifier
+   - Validation
+   - Doublons
+   - Application
+   - Journaux
+
+3. Pilotage global
+   - Accueil
+   - resume des derniers runs
+   - acces rapide
+   - etat global de la bibliotheque
+
+
+Architecture cible des vues
+---------------------------
+
+A. Accueil
+- Nouvelle porte d'entree.
+- Ne remplace pas le run.
+- Sert a:
+  - voir l'etat global,
+  - reprendre le dernier run,
+  - comprendre quoi faire ensuite,
+  - lancer rapidement Analyse ou ouvrir Qualite.
+
+B. Parametres
+- Devient une vraie page "configuration operateur".
+- Ne doit plus etre juste un formulaire.
+- Doit montrer:
+  - configuration source,
+  - etat TMDb,
+  - etat probe,
+  - prudence apply,
+  - options de nettoyage.
+
+C. Analyse
+- Devient la page "construction du run".
+- Son role:
+  - lancer le scan,
+  - montrer progression,
+  - produire un plan,
+  - resumer ce qui a ete detecte.
+
+D. Qualite
+- Devient un module autonome base sur un run.
+- N'est pas une sous-fonction secondaire.
+- Son role:
+  - auditer la qualite media,
+  - filtrer les cas faibles ou suspects,
+  - centraliser les outils probe,
+  - exposer le score et ses raisons,
+  - preparer le retour vers Validation.
+
+E. A verifier
+- Nouvelle vue produit a terme.
+- Sert a regrouper:
+  - cas faibles,
+  - cas ambigus,
+  - warnings heuristiques,
+  - lignes necessitant revue humaine.
+- Elle ne remplace pas Validation; elle prepare la relecture.
+
+F. Validation
+- Reste la vue de decision humaine.
+- Son role:
+  - valider ou non les lignes,
+  - utiliser filtres et presets,
+  - traiter les cas safe rapidement,
+  - laisser les cas litigieux hors apply.
+
+G. Doublons
+- Reste un sas de securite avant application.
+- Son role:
+  - montrer les conflits de destination,
+  - separer les mergeables des vrais risques,
+  - preparer un apply sans surprise.
+
+H. Application
+- Devient le poste de mise en production du run.
+- Son role:
+  - montrer le mode dry-run / reel,
+  - montrer les garde-fous actifs,
+  - montrer clairement ce qui va etre fait,
+  - centraliser resultat apply, undo, `_Vide`, `_Dossier Nettoyage`.
+
+I. Journaux
+- Devient la vue de trace et d'export d'un run.
+- Son role:
+  - logs,
+  - artefacts,
+  - exports,
+  - diagnostic post-run.
+
+J. Dashboard
+- N'a plus vocation a etre un module principal du workflow.
+- A terme:
+  - une partie de son contenu est absorbee par Qualite,
+  - le reste devient soit Accueil, soit vue Pilotage.
+- Il ne doit plus etre ambigu entre:
+  - vue du dernier run,
+  - vue globale,
+  - vue qualite.
+
+
+3. Navigation cible
+-------------------
+
+Navigation principale cible
+---------------------------
+Ordre recommande a terme:
+- Accueil
+- Parametres
+- Analyse
+- Qualite
+- A verifier
+- Validation
+- Doublons
+- Application
+- Journaux
+
+Modules transverses
+-------------------
+- Dashboard actuel est a deconstruire progressivement:
+  - KPI qualite -> Qualite / Accueil
+  - historique des runs -> Accueil / Journaux
+  - anomalies -> Qualite / A verifier
+
+Principe de navigation
+----------------------
+- Toujours savoir:
+  - ou on est,
+  - sur quel run on travaille,
+  - quelle est la prochaine action logique.
+- Distinguer clairement:
+  - consultation,
+  - filtrage,
+  - decision,
+  - execution,
+  - trace.
+
+
+4. Role exact de chaque vue cible
+---------------------------------
+
+Accueil
+- Role: point d'entree.
+- Questions auxquelles la page doit repondre:
+  - L'app est-elle correctement configuree ?
+  - Quel est le dernier run utile ?
+  - Que dois-je faire maintenant ?
+  - Y a-t-il des alertes qualite ou des runs en attente ?
+
+Parametres
+- Role: configurer et verifier l'environnement.
+- Questions:
+  - ROOT et STATE_DIR sont-ils corrects ?
+  - TMDb est-il pret ?
+  - Probe est-il operationnel ?
+  - Mes reglages apply sont-ils prudents ?
+
+Analyse
+- Role: construire un run exploitable.
+- Questions:
+  - L'analyse tourne-t-elle ?
+  - Que detecte-t-elle ?
+  - Le plan est-il pret ?
+
+Qualite
+- Role: audit technique et tri des cas faibles.
+- Questions:
+  - Quelle est la qualite du run ?
+  - Quels medias sont faibles ou suspects ?
+  - Pourquoi un score est-il bas ?
+  - Le probe est-il fiable ?
+
+A verifier
+- Role: file de revue humaine priorisee.
+- Questions:
+  - Qu'est-ce qui merite vraiment mon temps ?
+  - Quels cas sont ambigus ou risqués ?
+
+Validation
+- Role: prise de decision sur les lignes du plan.
+- Questions:
+  - Quelles lignes puis-je valider vite ?
+  - Quelles lignes dois-je laisser en attente ?
+  - Quel sous-ensemble vais-je appliquer ?
+
+Doublons
+- Role: controle de securite avant execution.
+- Questions:
+  - Vais-je entrer en conflit avec l'existant ?
+  - Quels cas bloquent un apply propre ?
+
+Application
+- Role: execution et retour arriere.
+- Questions:
+  - Vais-je faire un dry-run ou un apply reel ?
+  - Quels garde-fous sont actifs ?
+  - Quel a ete le resultat exact ?
+  - Que puis-je annuler ?
+
+Journaux
+- Role: preuve et trace du run.
+- Questions:
+  - Que s'est-il passe ?
+  - Quels artefacts ont ete produits ?
+  - Que puis-je exporter ou partager ?
+
+Dashboard / Pilotage
+- Role cible: non plus une vue de workflow.
+- Questions:
+  - Quelle est la tendance globale ?
+  - Quelle est la sante recente de la bibliotheque ?
+- Evolution recommandee:
+  - absorption progressive dans Accueil + Qualite + Journaux
+
+
+5. Ce qu'on fera ensuite en Phase 2
+-----------------------------------
+- Creer Accueil
+- Repositionner Qualite comme module autonome base sur un run
+- Absorber l'actuel Dashboard dans Qualite / Accueil / Journaux
+- Refaire la navigation globale
+- Rendre Parametres plus "vraie app"
+
+
+6. Decision de phase
+--------------------
+
+Valide pour la suite si les points suivants sont acceptes:
+- le run reste l'unite de travail centrale,
+- Qualite devient un module autonome et non une sous-page secondaire,
+- Dashboard n'est plus un module principal a terme,
+- une future vue "A verifier" est necessaire,
+- Application devient explicitement le poste d'execution du run,
+- Accueil devient la porte d'entree produit.
+

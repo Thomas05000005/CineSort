@@ -1,0 +1,52 @@
+REFONTE UI NEXT - JOURNAL DE CHANTIER
+Date: 2026-03-07
+Contexte: reprise complete de la UI Next, l'etat precedent etant juge trop proche de la stable et visuellement raté.
+Objectif: reconstruire une UI Next totalement distincte, premium, fonctionnelle, moderne, sans toucher a l'UI stable ni au backend.
+Contraintes: stable intacte, endpoints inchanges, flux metier inchanges, isolation totale Next, documentation continue de chaque choix pour limiter la perte de contexte.
+
+Etapes prevues:
+1. Audit et references visuelles externes.
+2. Definition d'un design system Next neuf.
+3. Reconstruction shell/navigation.
+4. Reconstruction des vues principales.
+5. Validation + build.
+
+Journal:
+- Creation du fichier de suivi.
+
+Passe SVG-inspired / control-room renforcee
+- Reference visuelle retenue: tableau de fonctions luxe sombre avec structure tres lisible, lignes de separation or, familles visuelles distinctes, alternance de lignes et hierarchie forte.
+- Sources de travail consultees:
+  * Atlassian Design - spacing / forms / dynamic table (rythme, densite, lisibilite des tableaux, aide secondaire)
+  * Vercel Geist Colors (contraste et role des backgrounds / surfaces)
+  * Recherches de dashboards dark premium / black and gold pour la separation des familles visuelles
+- Decision: garder la navigation haute et pousser la Next vers un tableau de controle plus structure, plus contraste, plus role-based.
+
+Changements effectues sur la UI Next:
+- Shell horizontal conserve mais renforce.
+- Clusters de navigation differencies: Preparer / Decider / Executer.
+- Cellules de contexte differenciees: run / film / mode operateur.
+- Families visuelles differenciees par couleur et liseres:
+  * filtres = bleu ardoise
+  * actions = bleu plus franc
+  * support/aide = bronze sombre
+  * resultats/tables/logs = noir technique
+- Tables renforcees: header plus net, soulignement or, alternance de lignes, premiere colonne plus marquee.
+- Boutons hierarchises: primaire plus franc, secondaires plus sobres.
+- Stable inchangee. Backend inchange. Endpoints inchanges.
+
+Validation technique:
+- tests.test_ui_next_contracts OK
+- tests.test_ui_logic_contracts OK
+- unittest discover complet OK (167 tests)
+- build_windows.bat OK
+- smoke EXE packe en mode UI Next OK
+
+Commande de test EXE Next:
+$env:CINESORT_UI = "next"
+.\dist\CineSort.exe
+
+Points a verifier manuellement:
+- Comparaison stable vs next cote a cote.
+- Validation / Qualite / Application: separation des roles, lisibilite des tables, dominance des resultats.
+- 1080p / 1440p sans scroll horizontal global.

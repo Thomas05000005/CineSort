@@ -1,0 +1,238 @@
+%% CineSort — Diagrammes d'architecture (Mermaid)
+%%
+%% Ce fichier regroupe 6 diagrammes Mermaid documentant l'architecture
+%% de CineSort v7.7.0. Chaque diagramme est délimité par un titre `%% --- N ...`.
+%%
+%% Rendu : copier le bloc voulu dans un viewer Mermaid (https://mermaid.live)
+%%         ou utiliser le plugin Mermaid VS Code / les blocs ```mermaid``` Markdown.
+%%
+%% Conventions couleurs :
+%%   - UI       (bleu clair  #3B82F6) : web/, trifilms/ui/
+%%   - APP      (vert        #10B981) : trifilms/app/
+%%   - DOMAIN   (orange      #F59E0B) : trifilms/domain/
+%%   - INFRA    (gris        #6B7280) : trifilms/infra/
+%%
+%% Auteur : Vague 3 — mission V3-09 (résout R4-DOC-5)
+
+%% ---------------------------------------------------------------------------
+%% 1. Architecture en couches (modules)
+%% ---------------------------------------------------------------------------
+graph TB
+    subgraph UI_LAYER["UI Layer"]
+        UI_DESKTOP[web/ pywebview frontend]
+        UI_DASHBOARD[web/dashboard/ SPA distante]
+        UI_API[trifilms/ui/api/ JS bridge]
+    end
+
+    subgraph APP_LAYER["Application Layer"]
+        APP_PLAN[plan_support / apply_core]
+        APP_JOB[job_runner / cleanup]
+        APP_INTEG[jellyfin_sync / plex / radarr]
+        APP_HOOKS[plugin_hooks / email / watcher]
+    end
+
+    subgraph DOMAIN_LAYER["Domain Layer"]
+        DOM_CORE[core / scoring / naming]
+        DOM_QUALITY[quality_score / encode_analysis]
+        DOM_PERCEPTUAL[perceptual/ 20+ modules]
+        DOM_HELPERS[scan / subtitle / tv / edition]
+    end
+
+    subgraph INFRA_LAYER["Infrastructure Layer"]
+        INFRA_DB[(SQLite WAL<br/>21 migrations)]
+        INFRA_PROBE[probe/ ffprobe + mediainfo]
+        INFRA_HTTP[tmdb / jellyfin / plex / radarr clients]
+        INFRA_REST[rest_server.py]
+        INFRA_NOTIF[notifications Win32]
+    end
+
+    UI_DESKTOP --> UI_API
+    UI_DASHBOARD -.HTTP REST.-> INFRA_REST
+    UI_API --> APP_PLAN
+    UI_API --> APP_INTEG
+    INFRA_REST --> UI_API
+
+    APP_PLAN --> DOM_CORE
+    APP_PLAN --> DOM_HELPERS
+    APP_PLAN --> INFRA_PROBE
+    APP_JOB --> APP_PLAN
+    APP_INTEG --> INFRA_HTTP
+    APP_HOOKS --> INFRA_DB
+
+    DOM_QUALITY --> DOM_PERCEPTUAL
+    DOM_CORE --> INFRA_HTTP
+    DOM_PERCEPTUAL --> INFRA_PROBE
+
+    APP_PLAN --> INFRA_DB
+    INFRA_NOTIF -.toast.-> UI_DESKTOP
+
+    classDef ui fill:#3B82F6,stroke:#1E40AF,color:#fff
+    classDef app fill:#10B981,stroke:#047857,color:#fff
+    classDef domain fill:#F59E0B,stroke:#B45309,color:#fff
+    classDef infra fill:#6B7280,stroke:#374151,color:#fff
+
+    class UI_DESKTOP,UI_DASHBOARD,UI_API ui
+    class APP_PLAN,APP_JOB,APP_INTEG,APP_HOOKS app
+    class DOM_CORE,DOM_QUALITY,DOM_PERCEPTUAL,DOM_HELPERS domain
+    class INFRA_DB,INFRA_PROBE,INFRA_HTTP,INFRA_REST,INFRA_NOTIF infra
+
+%% ---------------------------------------------------------------------------
+%% 2. Workflow scan -> plan -> review -> apply -> undo
+%% ---------------------------------------------------------------------------
+flowchart LR
+    START([Utilisateur lance scan]) --> SCAN{scan_helpers<br/>incremental v2}
+    SCAN -- cache hit total --> PLAN_DONE
+    SCAN -- miss / partiel --> NORM[probe_service<br/>ffprobe + mediainfo]
+    NORM --> EXTRACT[title_helpers<br/>NFO / dossier / TMDb]
+    EXTRACT --> PLAN[plan_support._plan_item<br/>quality + dedup + warnings]
+    PLAN --> PLAN_DONE[(plan.jsonl + DB)]
+
+    PLAN_DONE --> REVIEW[/Review UI<br/>approve / reject / bulk/]
+    REVIEW -- auto_approve >= seuil --> AUTO[Auto-approuve]
+    REVIEW -- saisie manuelle --> SAVE[save_validation]
+    AUTO --> SAVE
+
+    SAVE --> DRYRUN{Dry-run apply}
+    DRYRUN -- conflits --> REVIEW
+    DRYRUN -- OK --> APPLY[apply_core.apply_rows<br/>journal WAL atomique]
+    APPLY --> NOTIF[NotifyService toast OS]
+    APPLY --> JF[Hook Jellyfin/Plex<br/>refresh + watched]
+
+    APPLY --> END_OK([Termine])
+    END_OK -.undo demande.-> UNDO[undo_last_apply<br/>par batch ou par film]
+    UNDO --> REVERSE[Reverse moves<br/>conflits -> _undo_conflicts]
+    REVERSE --> END_OK
+
+%% ---------------------------------------------------------------------------
+%% 3. Pipeline analyse perceptuelle (DAG)
+%% ---------------------------------------------------------------------------
+flowchart TB
+    INPUT[Video file] --> FFPROBE[ffprobe<br/>duration + streams]
+    FFPROBE --> TIMESTAMPS[compute_timestamps<br/>echantillonnage deterministe]
+    TIMESTAMPS --> EXTRACT[extract_representative_frames<br/>downscale 4K]
+
+    EXTRACT --> VIDEO_FILTERS[run_filter_graph<br/>signalstats + blockdetect + blurdetect]
+    VIDEO_FILTERS --> HISTO[luminance_histogram + banding]
+    VIDEO_FILTERS --> GRAIN_V2[grain_analysis v2<br/>era TMDb + AV1 AFGS1]
+    VIDEO_FILTERS --> SSIM[ssim_self_ref<br/>1080p vs 4K]
+    VIDEO_FILTERS --> LPIPS[LPIPS AlexNet ONNX]
+
+    INPUT --> AUDIO_EBU[loudnorm EBU R128]
+    AUDIO_EBU --> ASTATS[astats + clipping]
+    ASTATS --> CHROMA[Chromaprint fingerprint]
+    ASTATS --> SPECTRAL[spectral cutoff FFT]
+    ASTATS --> MEL[Mel spectrogram<br/>4 detecteurs]
+
+    HISTO --> COMPV[compute_visual_score]
+    GRAIN_V2 --> COMPV
+    SSIM --> COMPV
+    LPIPS --> COMPV
+    AUDIO_EBU --> COMPA[compute_audio_score]
+    SPECTRAL --> COMPA
+    MEL --> COMPA
+
+    COMPV --> COMPOSITE[composite_score_v2<br/>Video 60 / Audio 35 / Coherence 5]
+    COMPA --> COMPOSITE
+    COMPOSITE --> VERDICTS[detect_cross_verdicts<br/>10 verdicts contextualises]
+    VERDICTS --> CACHE[(perceptual_reports DB)]
+
+%% ---------------------------------------------------------------------------
+%% 4. Notification flow (queue thread-safe -> Win32 toast)
+%% ---------------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    participant USER as Utilisateur
+    participant API as TriFilmsApi (UI thread)
+    participant JOB as JobRunner (background)
+    participant NOTIFY as NotifyService
+    participant Q as Queue thread-safe
+    participant DRAIN as drain_timer (UI thread)
+    participant WIN32 as Shell_NotifyIconW
+    participant CENTER as NotificationStore
+
+    USER->>API: start_plan(settings)
+    API->>JOB: spawn thread
+    JOB->>JOB: scan + plan
+    JOB->>NOTIFY: notify(scan_done, payload)
+    NOTIFY->>Q: queue.put(event)
+    NOTIFY->>CENTER: mirror(event)
+
+    loop chaque 250ms
+        DRAIN->>Q: drain_queue()
+        Q-->>DRAIN: events[]
+        alt window non focus
+            DRAIN->>WIN32: Shell_NotifyIconW(BALLOON)
+            WIN32-->>USER: toast OS
+        else window focus
+            DRAIN->>DRAIN: skip OS toast
+        end
+    end
+
+    USER->>API: open notification center
+    API->>CENTER: get_notifications()
+    CENTER-->>USER: liste persistante
+
+%% ---------------------------------------------------------------------------
+%% 5. Apply atomicity (WAL pattern apply_pending_moves)
+%% ---------------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    participant APP as apply_core
+    participant DB as SQLite (WAL mode)
+    participant FS as Filesystem
+    participant BOOT as reconcile_at_boot
+
+    Note over APP,FS: Move atomique (move_journal.journaled_move)
+    APP->>DB: INSERT apply_pending_moves<br/>(src, dst, batch_id)
+    APP->>FS: shutil.move(src, dst)
+    alt move OK
+        APP->>DB: DELETE pending_move WHERE id=?
+        APP->>DB: INSERT apply_operations<br/>(record_op + checksum)
+    else move erreur
+        APP->>DB: DELETE pending_move WHERE id=?
+        APP-->>APP: raise -> rollback batch
+    end
+
+    Note over BOOT,FS: Boot suivant : crash recovery
+    BOOT->>DB: SELECT * FROM apply_pending_moves
+    loop chaque pending orphelin
+        BOOT->>FS: stat(src) + stat(dst)
+        alt dst existe (move OK avant crash)
+            BOOT->>DB: DELETE pending (verdict completed)
+        else src existe seul (crash avant move)
+            BOOT->>DB: DELETE pending (verdict rolled_back)
+        else les deux existent
+            BOOT->>DB: DELETE + alerte UI (duplicated)
+        else ni l'un ni l'autre
+            BOOT->>DB: DELETE + alerte UI (lost)
+        end
+    end
+
+%% ---------------------------------------------------------------------------
+%% 6. Polish Total v7.7.0 — flow des 8 vagues (meta-doc operation)
+%% ---------------------------------------------------------------------------
+flowchart TB
+    V0[Vague 0<br/>Preparation<br/>baseline + tag] --> V1
+    V1[Vague 1<br/>Bloquants release<br/>CVE / DB / ffmpeg] --> V2
+    V2[Vague 2<br/>UX / A11y polish<br/>WCAG 2.2 AA + CSP] --> V3
+    V3[Vague 3<br/>Polish micro + Doc<br/>CLAUDE / MANUAL / API / mmd] --> V4
+    V4[Vague 4 SEQUENTIEL<br/>Refactor coeur metier<br/>_plan_item / V2 toggle] --> V5
+    V5[Vague 5<br/>Stress / scale<br/>UI virtu / multiproc] --> V6
+    V6[Vague 6<br/>i18n EN<br/>250 strings + tests] --> V7
+    V7[Vague 7<br/>Validation finale<br/>build + tag v7.7.0]
+
+    V1 -.tag backup.-> T1[(backup-before-vague-1)]
+    V2 -.tag backup.-> T2[(backup-before-vague-2)]
+    V3 -.tag backup.-> T3[(backup-before-vague-3)]
+    V4 -.tag backup.-> T4[(backup-before-vague-4)]
+    V5 -.tag backup.-> T5[(backup-before-vague-5)]
+    V6 -.tag backup.-> T6[(backup-before-vague-6)]
+    V7 ==> RELEASE([v7.7.0 GitHub Release])
+
+    classDef parallel fill:#10B981,stroke:#047857,color:#fff
+    classDef sequential fill:#F59E0B,stroke:#B45309,color:#fff
+    classDef milestone fill:#3B82F6,stroke:#1E40AF,color:#fff
+
+    class V1,V2,V3,V5,V6 parallel
+    class V4 sequential
+    class V0,V7,RELEASE milestone

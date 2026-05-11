@@ -1,0 +1,17 @@
+name: ❓ Question
+description: Une question sur l'utilisation, la configuration, ou le fonctionnement.
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pour les questions générales, préfère **GitHub Discussions** : c'est plus adapté
+        et la communauté peut t'aider plus vite. Les issues sont réservées aux bugs/features.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Ta question
+    validations:
+      required: true

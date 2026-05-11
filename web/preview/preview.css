@@ -1,0 +1,68 @@
+body.previewMode {
+  padding-top: 64px;
+}
+
+.previewToolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(12, 18, 28, 0.92);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+body.light .previewToolbar {
+  background: rgba(247, 248, 251, 0.94);
+  border-bottom-color: rgba(15, 23, 42, 0.12);
+}
+
+.previewToolbarBadge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #1f8a70;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.previewToolbarMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+}
+
+.previewToolbarMeta span {
+  font-size: 12px;
+  opacity: 0.78;
+}
+
+.previewToolbarField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  body.previewMode {
+    padding-top: 118px;
+  }
+
+  .previewToolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .previewToolbarMeta {
+    min-width: 100%;
+  }
+}

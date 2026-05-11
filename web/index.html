@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- F2 Audit : Content-Security-Policy couche defense en profondeur contre XSS via
+       innerHTML. pywebview:// est autorise pour le bridge js_api ; inline styles
+       tolerees (styles calcules par le JS dashboard) ; aucun script inline. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' pywebview:; frame-ancestors 'none'; base-uri 'self'">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>CineSort</title>
+  <!-- V3-02 (v7.7.0) : police partagee shared/fonts/ (deduplication 162 KB) -->
+  <link rel="preload" href="./shared/fonts/Manrope-Variable.ttf" as="font" type="font/ttf" crossorigin>
+  <!-- v7.6.0 Design System v5 (shared) — charge AVANT les styles legacy -->
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/themes.css" />
+  <link rel="stylesheet" href="./shared/animations.css" />
+  <link rel="stylesheet" href="./shared/components.css" />
+  <link rel="stylesheet" href="./shared/utilities.css" />
+  <!-- Legacy CSS (conserve pendant la transition, suppression progressive en Vague 10) -->
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./themes.css" />
+</head>
+<body>
+  <!-- V8 A11y : skip-link pour navigation clavier (voir .skip-link dans themes.css) -->
+  <a href="#main-content" class="skip-link">Aller au contenu principal</a>
+  <div class="app">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-logo" aria-hidden="true">CS</div>
+        <div>
+          <div class="sidebar-name">CineSort</div>
+          <div class="sidebar-desc">Organisation de films</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" role="tablist" aria-label="Navigation CineSort">
+        <div class="sidebar-group">Workflow</div>
+        <!-- Parite dashboard : Bibliotheque = hub workflow 5 etapes -->
+        <button class="nav-btn" data-view="library" id="tab-library" data-testid="nav-library" role="tab" aria-selected="false" aria-controls="view-library" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span><span>Bibliothèque</span>
+        </button>
+        <button class="nav-btn active" data-view="home" id="tab-home" data-testid="nav-home" role="tab" aria-selected="true" aria-controls="view-home" tabindex="0">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span><span>Accueil</span>
+        </button>
+        <button class="nav-btn" data-view="validation" id="tab-validation" data-testid="nav-validation" role="tab" aria-selected="false" aria-controls="view-validation" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span>Validation</span>
+        </button>
+        <button class="nav-btn" data-view="execution" id="tab-execution" data-testid="nav-execution" role="tab" aria-selected="false" aria-controls="view-execution" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></span><span>Application</span>
+        </button>
+        <button class="nav-btn" data-view="quality" id="tab-quality" data-testid="nav-quality" role="tab" aria-selected="false" aria-controls="view-quality" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span>Qualité</span>
+        </button>
+        <div class="sidebar-group">Intégrations</div>
+        <button class="nav-btn nav-btn-jellyfin" data-view="jellyfin" id="tab-jellyfin" data-testid="nav-jellyfin" role="tab" aria-selected="false" aria-controls="view-jellyfin" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span>Jellyfin</span>
+        </button>
+        <button class="nav-btn nav-btn-plex" data-view="plex" id="tab-plex" data-testid="nav-plex" role="tab" aria-selected="false" aria-controls="view-plex" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></span><span>Plex</span>
+        </button>
+        <button class="nav-btn nav-btn-radarr" data-view="radarr" id="tab-radarr" data-testid="nav-radarr" role="tab" aria-selected="false" aria-controls="view-radarr" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span>Radarr</span>
+        </button>
+        <div class="sidebar-group">Général</div>
+        <button class="nav-btn" data-view="history" id="tab-history" data-testid="nav-history" role="tab" aria-selected="false" aria-controls="view-history" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span><span>Journaux</span>
+        </button>
+        <button class="nav-btn" data-view="settings" id="tab-settings" data-testid="nav-settings" role="tab" aria-selected="false" aria-controls="view-settings" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span>Paramètres</span>
+        </button>
+        <button class="nav-btn" data-view="help" id="tab-help" data-testid="nav-help" role="tab" aria-selected="false" aria-controls="view-help" tabindex="-1">
+          <span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span>Aide</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="flex gap-2">
+          <button class="btn btn--ghost btn--compact" id="btnNotifCenter" data-testid="nav-notifications" aria-label="Notifications" title="Centre de notifications">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+            <span id="btnNotifCenterLabel">Notifs</span>
+          </button>
+          <button class="btn btn--ghost btn--compact" id="btnTheme">Thème clair</button>
+          <button class="btn btn--ghost btn--compact" id="btnHelp">Aide</button>
+          <button class="btn btn--ghost btn--compact" id="btnAbout" data-testid="btn-about" title="A propos, version, licence, support">À propos</button>
+        </div>
+        <div class="sidebar-pills">
+          <span class="pill" id="pillRun">Run: —</span>
+          <span class="pill" id="pillStatus">En attente</span>
+          <span id="appConnDot" class="conn-dot conn-dot--unknown" data-tip="Bridge backend" role="status" aria-label="Statut bridge backend"></span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <main class="main" id="main-content" tabindex="-1">
+      <header class="topbar">
+        <div>
+          <div class="topbar-title" id="topbar-title">Accueil</div>
+          <div class="topbar-sub" id="topbar-sub">Point d'entree et lancement d'analyse.</div>
+        </div>
+        <div class="topbar-right"></div>
+      </header>
+
+      <div class="content">
+
+        <!-- ========== VIEW: LIBRARY (hub workflow 5 etapes, parite dashboard) ========== -->
+        <section class="view" id="view-library" role="tabpanel" aria-labelledby="tab-library" aria-hidden="true">
+          <div class="layout-stack">
+            <div class="workflow-header">
+              <span>Run : <strong id="libRunLabel" data-testid="lib-run-label">—</strong></span>
+              <label class="checkbox-row"><input type="checkbox" id="ckLibAdvanced" data-testid="lib-advanced-toggle"> Mode avancé</label>
+            </div>
+            <div class="workflow-steps" id="libWorkflowSteps">
+              <button class="step active" data-lib-step="1" data-testid="lib-step-analyse">1. Analyse</button>
+              <button class="step" data-lib-step="2" data-testid="lib-step-verification">2. Vérification</button>
+              <button class="step" data-lib-step="3" data-testid="lib-step-validation">3. Validation</button>
+              <button class="step" data-lib-step="4" data-testid="lib-step-doublons">4. Doublons</button>
+              <button class="step" data-lib-step="5" data-testid="lib-step-application">5. Application</button>
+            </div>
+
+            <section class="lib-section card" data-lib-section="analyse">
+              <div class="card__eyebrow">1. Analyse</div>
+              <p class="text-muted">Lance un scan du dossier racine pour detecter et analyser les films.</p>
+              <div id="libAnalyseKpis" class="kpi-grid" style="margin-bottom:var(--sp-3)"></div>
+              <div class="flex gap-2">
+                <button class="btn btn--primary" data-lib-goto="home">📂 Lancer / voir l'analyse</button>
+                <button class="btn btn--compact btn--ghost" data-lib-goto="settings">⚙ Parametres</button>
+              </div>
+            </section>
+
+            <section class="lib-section card" data-lib-section="verification">
+              <div class="card__eyebrow">2. Vérification</div>
+              <p class="text-muted">Verifie les films analyses : score, tier, confiance.</p>
+              <div id="libVerificationKpis" class="kpi-grid" style="margin-bottom:var(--sp-3)"></div>
+              <div class="flex gap-2">
+                <button class="btn btn--primary" data-lib-goto="quality">📊 Ouvrir Qualite</button>
+                <button class="btn btn--compact btn--ghost" data-lib-goto="validation">👁 Voir table validation</button>
+              </div>
+            </section>
+
+            <section class="lib-section card" data-lib-section="validation">
+              <div class="card__eyebrow">3. Validation</div>
+              <p class="text-muted">Approuve ou rejette chaque film, ajuste les decisions.</p>
+              <div id="libValidationKpis" class="kpi-grid" style="margin-bottom:var(--sp-3)"></div>
+              <div class="flex gap-2">
+                <button class="btn btn--primary" data-lib-goto="validation">✓ Ouvrir Validation</button>
+              </div>
+            </section>
+
+            <section class="lib-section card" data-lib-section="doublons">
+              <div class="card__eyebrow">4. Doublons</div>
+              <p class="text-muted">Detecte les films en doublon et compare leur qualite.</p>
+              <div id="libDuplicatesKpis" class="kpi-grid" style="margin-bottom:var(--sp-3)"></div>
+              <div class="flex gap-2">
+                <button class="btn btn--primary" data-lib-goto="execution">🔍 Verifier les doublons</button>
+              </div>
+            </section>
+
+            <section class="lib-section card" data-lib-section="application">
+              <div class="card__eyebrow">5. Application</div>
+              <p class="text-muted">Applique les renommages / deplacements, avec dry-run et undo.</p>
+              <div id="libApplyKpis" class="kpi-grid" style="margin-bottom:var(--sp-3)"></div>
+              <div class="flex gap-2">
+                <button class="btn btn--primary" data-lib-goto="execution">▶ Ouvrir Application</button>
+                <button class="btn btn--compact btn--ghost" data-lib-goto="history">📋 Historique</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: HOME ========== -->
+        <section class="view active" id="view-home" role="tabpanel" aria-labelledby="tab-home" aria-hidden="false">
+          <div class="layout-stack">
+            <!-- Hero bandeau (E10) -->
+            <div class="home-hero card">
+              <div class="home-hero__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+                  <line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>
+                  <line x1="2" y1="12" x2="22" y2="12"/>
+                  <line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/>
+                  <line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>
+                </svg>
+              </div>
+              <div class="home-hero__text">
+                <h1 class="home-hero__title">Votre bibliothèque, rangée.</h1>
+                <p class="home-hero__sub">CineSort analyse, propose et applique — toujours en dry-run d'abord.</p>
+              </div>
+              <div class="home-hero__stats" id="homeHeroStats">
+                <div class="home-hero__stat"><strong id="homeStatTotal">—</strong><span>films</span></div>
+                <div class="home-hero__stat"><strong id="homeStatScore">—</strong><span>score moyen</span></div>
+                <div class="home-hero__stat" id="homeStatDeltaWrap" hidden><strong id="homeStatDelta">—</strong><span>7 derniers jours</span></div>
+              </div>
+            </div>
+
+            <!-- Environment bar -->
+            <div class="env-bar" id="homeEnvBar">
+              <span class="env-item" id="homeEnvTmdb">TMDb: —</span>
+              <span class="env-item" id="homeEnvProbe">Probe: —</span>
+              <span class="env-item" id="homeEnvRoot">Dossier: —</span>
+            </div>
+
+            <!-- Bandeau auto-install outils probe (V1-07 audit : alert--warning pour hierarchie) -->
+            <div class="alert alert--warning hidden" id="homeProbeInstallBanner" data-testid="home-probe-banner">
+              <span id="probeInstallMsg">Outils d'analyse video manquants (FFprobe / MediaInfo).</span>
+              <button class="btn btn--primary btn--compact" id="btnAutoInstallProbe" data-testid="home-btn-install-probe">Installer automatiquement</button>
+            </div>
+
+            <div class="layout-2col">
+              <!-- Last run -->
+              <div class="card" id="homeRunCard">
+                <div class="card__eyebrow">Dernier run</div>
+                <div class="card__title" id="homeRunTitle">Aucun run</div>
+                <div class="kpi-grid mt-3" id="homeRunKpis">
+                  <div class="kpi"><div class="kpi__label">Films</div><div class="kpi__value" id="homeKpiFilms" data-testid="home-kpi-films">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Score</div><div class="kpi__value" id="homeKpiScore" data-testid="home-kpi-score">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Anomalies</div><div class="kpi__value" id="homeKpiAnomalies">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Statut</div><div class="kpi__value" id="homeKpiStatus">—</div></div>
+                </div>
+                <div class="card__actions">
+                  <button class="btn btn--compact" id="btnHomeGoValidation">Ouvrir Validation</button>
+                  <button class="btn btn--compact" id="btnHomeGoQuality">Ouvrir Qualité</button>
+                  <button class="btn btn--compact" id="btnHomeGoExecution">Ouvrir Exécution</button>
+                </div>
+              </div>
+
+              <!-- Scan launcher -->
+              <div class="card" id="homeScanCard">
+                <div class="card__eyebrow">Nouvelle analyse</div>
+                <div class="card__title">Lancer un scan</div>
+                <div class="card__desc" id="homeScanRoot">Dossier : non configure</div>
+                <div id="homeRootsStatus" class="roots-status"></div>
+                <button class="btn btn--primary w-full" id="btnStartPlan" data-testid="home-btn-scan">Démarrer l'analyse</button>
+                <div class="mt-3 hidden" id="homeScanProgress">
+                  <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill" data-testid="home-progress-fill"></div></div>
+                  <div class="flex justify-between mt-2 font-sm text-secondary">
+                    <span id="progCount">0/0</span>
+                    <span><span id="progSpeed">0</span> doss./s</span>
+                    <span>ETA <span id="progEta">—</span></span>
+                  </div>
+                  <div class="font-xs text-muted mt-1 truncate" id="progCurrent" title="">—</div>
+                  <!-- BUG 3 : mini-log visible en permanence pendant le scan -->
+                  <div class="scan-mini-log" id="scanMiniLog" aria-live="polite"></div>
+                </div>
+                <div class="status-msg mt-2" id="planMsg" aria-live="polite"></div>
+                <div class="mt-3">
+                  <button class="btn btn--compact" id="btnLoadTable" data-testid="home-btn-load-table" disabled>Charger la table</button>
+                  <button class="btn btn--compact btn--ghost" id="btnOpenRunDir" data-testid="home-btn-open-dir" disabled>Ouvrir le dossier</button>
+                  <button class="btn btn--compact btn--ghost" id="btnForceFullRescan" data-testid="home-btn-force-rescan" title="Purge le cache incrémental et relance un scan complet">Forcer le rescan complet</button>
+                </div>
+                <details class="collapsible mt-3">
+                  <summary>Journal d'exécution</summary>
+                  <pre class="logbox" id="logboxPlan" data-testid="home-logbox"></pre>
+                </details>
+              </div>
+            </div>
+
+            <!-- Signals -->
+            <div class="card" id="homeSignalsCard">
+              <div class="card__eyebrow">Signaux d'attention</div>
+              <ul class="signals-list" id="homeSignalsList">
+                <li class="signal-item text-muted">Aucun signal pour le moment.</li>
+              </ul>
+            </div>
+
+            <!-- U2 audit : widgets globaux (Librarian + Espace disque) alimentes par get_global_stats -->
+            <div class="layout-2col">
+              <!-- Suggestions bibliothecaire (librarian) -->
+              <div class="card hidden" id="homeLibrarianCard">
+                <div class="card__eyebrow">Suggestions bibliothécaire</div>
+                <div class="card__title">Santé : <span id="homeLibHealthScore">—</span></div>
+                <div class="suggestions-list mt-3" id="homeLibSuggestions"></div>
+              </div>
+
+              <!-- Espace disque -->
+              <div class="card hidden" id="homeSpaceCard">
+                <div class="card__eyebrow">Espace disque</div>
+                <div class="kpi-grid mt-2" id="homeSpaceKpis">
+                  <div class="kpi"><div class="kpi__label">Total</div><div class="kpi__value" id="homeSpaceTotal">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Moyenne</div><div class="kpi__value" id="homeSpaceAvg">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Récupérable</div><div class="kpi__value" id="homeSpaceArchivable">—</div></div>
+                </div>
+                <div class="space-bars mt-3" id="homeSpaceBars" aria-label="Distribution de l'espace par tier qualité"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: VALIDATION ========== -->
+        <section class="view" id="view-validation" role="tabpanel" aria-labelledby="tab-validation" aria-hidden="true">
+          <div class="layout-stack">
+            <!-- Counters -->
+            <div class="flex gap-3 items-center flex-wrap">
+              <span class="pill" id="valPillTotal" data-testid="val-pill-total">0 films</span>
+              <span class="pill" id="valPillChecked" data-testid="val-pill-checked">0 valides</span>
+              <span class="pill" id="valPillReview" data-testid="val-pill-review">0 a revoir</span>
+              <span class="status-msg" id="valMsg" aria-live="polite"></span>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters-bar">
+              <input class="input filter-search" type="text" id="searchBox" data-testid="val-search" placeholder="Rechercher..." aria-label="Rechercher un film" />
+              <select class="input filter-select" id="filterConf" data-testid="val-filter-conf" aria-label="Filtrer par confiance">
+                <option value="all">Toutes confiances</option>
+                <option value="high">High</option>
+                <option value="med">Med</option>
+                <option value="low">Low</option>
+              </select>
+              <select class="input filter-select" id="filterSource" data-testid="val-filter-source" aria-label="Filtrer par source">
+                <option value="all">Toutes sources</option>
+                <option value="nfo">NFO</option>
+                <option value="tmdb">TMDb</option>
+                <option value="name">Nom</option>
+              </select>
+            </div>
+
+            <!-- Presets -->
+            <div class="preset-group" id="valPresets" data-testid="val-presets">
+              <button class="preset-btn active" data-preset="none">Tous</button>
+              <button class="preset-btn" data-preset="review_risk" data-testid="val-preset-review">A revoir</button>
+              <button class="preset-btn" data-preset="add_year" data-testid="val-preset-year">Ajout annee</button>
+              <button class="preset-btn" data-preset="sensitive" data-testid="val-preset-sensitive">Sensibles</button>
+              <button class="preset-btn" data-preset="collections" data-testid="val-preset-collections">Collections</button>
+            </div>
+
+            <!-- Table + Inspector -->
+            <div class="layout-split">
+              <div>
+                <div class="table-wrap">
+                  <table class="tbl" aria-label="Table de validation">
+                    <thead>
+                      <tr>
+                        <th class="cell-narrow"></th>
+                        <th>Titre</th>
+                        <th>Annee</th>
+                        <th>Dossier</th>
+                        <th>Nouveau chemin</th>
+                        <th>Source</th>
+                        <th>Confiance</th>
+                        <th>ST</th>
+                        <th>Type</th>
+                      </tr>
+                    </thead>
+                    <tbody id="planTbody" data-testid="val-table-body"></tbody>
+                  </table>
+                </div>
+                <div class="flex gap-2 mt-3 items-center">
+                  <button class="btn btn--compact" id="btnCheckVisible" data-testid="val-btn-check-all">Tout cocher</button>
+                  <button class="btn btn--compact" id="btnUncheckVisible" data-testid="val-btn-uncheck-all">Tout decocher</button>
+                  <button class="btn btn--compact" id="btnFocusMode" title="Mode immersif (F)" aria-pressed="false">🎯 Focus</button>
+                  <div class="flex-1"></div>
+                  <button class="btn btn--primary" id="btnSaveValidation" data-testid="val-btn-save">Enregistrer les decisions</button>
+                </div>
+              </div>
+
+              <!-- Inspector -->
+              <div class="card card--flat" id="valInspector" data-testid="val-inspector">
+                <div class="card__eyebrow">Inspecteur</div>
+                <div class="card__title" id="inspectorTitle" data-testid="val-inspector-title">Selectionnez un film</div>
+                <div id="inspectorBody" class="font-sm text-secondary" data-testid="val-inspector-body">
+                  Les details du film selectionne apparaitront ici.
+                </div>
+                <div class="card__actions" id="inspectorActions"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: EXECUTION ========== -->
+        <section class="view" id="view-execution" role="tabpanel" aria-labelledby="tab-execution" aria-hidden="true">
+          <div class="layout-stack">
+            <!-- Conflicts gate -->
+            <div class="card" id="execConflictsCard">
+              <div class="card__eyebrow">Pre-verification</div>
+              <div class="flex gap-3 items-center" id="execConflictsSummary">
+                <span class="badge badge--ok" id="execConflictsBadge">0 conflit</span>
+                <span class="text-secondary font-sm" id="execConflictsDetail">Aucun conflit détecté.</span>
+              </div>
+              <details class="collapsible" id="execConflictsDetails">
+                <summary>Details des conflits</summary>
+                <div class="table-wrap mt-2">
+                  <table class="tbl">
+                    <thead><tr><th>Film cible</th><th>Point a verifier</th><th>Lignes</th><th>Existant</th></tr></thead>
+                    <tbody id="dupTbody"></tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+
+            <div class="layout-2col">
+              <!-- Apply -->
+              <div class="card" id="execApplyCard">
+                <div class="card__eyebrow">Appliquer</div>
+                <div class="flex gap-4 mb-3">
+                  <label class="switch-label">
+                    <input type="checkbox" class="switch-input" id="ckDryRun" data-testid="exec-ck-dryrun" checked />
+                    <span class="switch-track"></span>
+                    Dry-run
+                  </label>
+                  <label class="switch-label">
+                    <input type="checkbox" class="switch-input" id="ckQuarantine" data-testid="exec-ck-quarantine" />
+                    <span class="switch-track"></span>
+                    Quarantaine
+                  </label>
+                </div>
+                <div class="flex gap-2 mb-2">
+                  <button class="btn btn--compact" id="btnPreviewApply" data-testid="exec-btn-preview" title="Afficher le plan détaillé des déplacements avant d'appliquer">Aperçu détaillé</button>
+                  <button class="btn btn--primary flex-grow" id="btnApply" data-testid="exec-btn-apply">Lancer l'exécution</button>
+                </div>
+                <div class="flex gap-2 mb-2">
+                  <button class="btn btn--compact" id="btnDownloadAudit" data-testid="exec-btn-audit" title="Télécharger le journal d'audit JSONL du dernier apply">Journal d'audit (.jsonl)</button>
+                  <button class="btn btn--compact" id="btnDownloadAuditCsv" data-testid="exec-btn-audit-csv" title="Télécharger le journal d'audit au format CSV">Journal (.csv)</button>
+                </div>
+                <div class="status-msg mt-2" id="applyMsg" aria-live="polite"></div>
+                <pre class="logbox mt-3" id="applyResult" data-testid="exec-apply-result">—</pre>
+
+                <details class="collapsible mt-3" id="execCleanupSection">
+                  <summary>Nettoyage résiduel</summary>
+                  <div id="execCleanupBody" class="mt-2 font-sm text-secondary">Aucun nettoyage en attente.</div>
+                </details>
+              </div>
+
+              <!-- Undo -->
+              <div class="card" id="execUndoCard">
+                <div class="card__eyebrow">Annuler</div>
+                <div class="font-sm text-secondary mb-3" id="undoSummary">Aucune operation annulable.</div>
+                <div class="flex gap-2 mb-3">
+                  <button class="btn btn--compact" id="btnUndoPreview" data-testid="exec-btn-undo-preview">Prévisualiser</button>
+                  <button class="btn btn--compact btn--danger" id="btnUndoRun" data-testid="exec-btn-undo-run" disabled>Annuler tout</button>
+                </div>
+                <label class="switch-label mb-3">
+                  <input type="checkbox" class="switch-input" id="ckUndoDryRun" checked />
+                  <span class="switch-track"></span>
+                  Dry-run undo
+                </label>
+                <pre class="logbox" id="undoResult">—</pre>
+
+                <details class="collapsible mt-3">
+                  <summary>Annulation par film</summary>
+                  <div class="flex gap-2 mb-2 mt-2">
+                    <button class="btn btn--compact" id="btnUndoV5Load">Charger le detail</button>
+                    <button class="btn btn--compact" id="btnUndoV5SelectAll">Tout cocher</button>
+                    <button class="btn btn--compact" id="btnUndoV5DeselectAll">Tout decocher</button>
+                  </div>
+                  <div class="table-wrap">
+                    <table class="tbl" aria-label="Films du batch">
+                      <thead><tr><th class="cell-narrow"></th><th>Film</th><th>Operation</th><th>Statut</th></tr></thead>
+                      <tbody id="undoV5Tbody"></tbody>
+                    </table>
+                  </div>
+                  <div class="flex gap-2 mt-2">
+                    <button class="btn btn--compact" id="btnUndoV5Preview">Aperçu de la sélection</button>
+                    <button class="btn btn--compact btn--danger" id="btnUndoV5Execute" disabled>Annuler la sélection</button>
+                  </div>
+                  <div class="status-msg mt-2" id="undoV5Msg" aria-live="polite"></div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: QUALITY ========== -->
+        <section class="view" id="view-quality" role="tabpanel" aria-labelledby="tab-quality" aria-hidden="true">
+          <div class="layout-stack">
+            <!-- Mode toggle -->
+            <div class="flex gap-2 items-center">
+              <div class="preset-group" id="qualityModeToggle" data-testid="quality-mode-toggle">
+                <button class="preset-btn active" data-qmode="run">Run courant</button>
+                <button class="preset-btn" data-qmode="global">Bibliotheque</button>
+              </div>
+              <div class="flex-1"></div>
+              <button class="btn btn--compact btn--primary" id="btnQualityAnalyze" data-testid="quality-btn-analyze">Analyser la qualité</button>
+              <button class="btn btn--compact" id="btnQualitySimulate" title="Simuler un preset (G5)">🎛 Simuler un preset</button>
+              <button class="btn btn--compact" id="btnQualityRefresh" data-testid="quality-btn-refresh">Rafraîchir</button>
+              <button class="btn btn--compact btn--ghost" id="btnQualityOpenDir">Ouvrir le dossier</button>
+              <span class="status-msg" id="qualityMsg" aria-live="polite"></span>
+            </div>
+
+            <p class="status-msg hidden" id="qualityEmptyMsg" data-testid="quality-empty-msg" style="text-align:center;padding:var(--sp-6)"></p>
+
+            <!-- ===== PANEL: Run courant ===== -->
+            <div id="qualityPanelRun">
+              <div class="card">
+                <div class="card__eyebrow">Résumé du run</div>
+                <div class="kpi-grid" id="qualityKpis">
+                  <div class="kpi"><div class="kpi__label">Score moyen</div><div class="kpi__value" id="qKpiScore">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Premium</div><div class="kpi__value" id="qKpiPremium">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Films scores</div><div class="kpi__value" id="qKpiFilms">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Analyse partielle</div><div class="kpi__value" id="qKpiPartial">—</div></div>
+                </div>
+              </div>
+
+              <div class="layout-2col mt-4">
+                <div class="card">
+                  <div class="card__eyebrow">Distribution</div>
+                  <div class="dist-bars" id="qualityDistBars" data-testid="quality-dist-bars">
+                    <div class="dist-row"><span class="dist-label">85-100</span><div class="dist-bar-track"><div class="dist-bar-fill dist-bar-fill--premium" style="width:0" id="distPremium"></div></div><span class="dist-count" id="distPremiumN">0</span></div>
+                    <div class="dist-row"><span class="dist-label">68-84</span><div class="dist-bar-track"><div class="dist-bar-fill dist-bar-fill--good" style="width:0" id="distGood"></div></div><span class="dist-count" id="distGoodN">0</span></div>
+                    <div class="dist-row"><span class="dist-label">54-67</span><div class="dist-bar-track"><div class="dist-bar-fill dist-bar-fill--medium" style="width:0" id="distMedium"></div></div><span class="dist-count" id="distMediumN">0</span></div>
+                    <div class="dist-row"><span class="dist-label">&lt;54</span><div class="dist-bar-track"><div class="dist-bar-fill dist-bar-fill--bad" style="width:0" id="distBad"></div></div><span class="dist-count" id="distBadN">0</span></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card__eyebrow">Profil technique</div>
+                  <div class="card__title font-sm mb-2">Résolutions</div>
+                  <div class="stat-grid" id="qualityResolutions"></div>
+                  <div class="card__title font-sm mt-3 mb-2">HDR</div>
+                  <div class="stat-grid" id="qualityHdr"></div>
+                  <div class="card__title font-sm mt-3 mb-2">Audio</div>
+                  <div class="stat-grid" id="qualityAudio"></div>
+                </div>
+              </div>
+
+              <div class="card mt-4">
+                <div class="card__eyebrow">Anomalies</div>
+                <div class="table-wrap">
+                  <table class="tbl">
+                    <thead><tr><th>Niveau</th><th>Code</th><th>Message</th><th>Chemin</th></tr></thead>
+                    <tbody id="qualityAnomaliesTbody" data-testid="quality-anomalies-table"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="card mt-4">
+                <div class="card__eyebrow">Presets qualité</div>
+                <div class="preset-group" id="qualityPresetGroup">
+                  <button class="preset-btn" data-quality-preset="remux_strict">Remux strict</button>
+                  <button class="preset-btn active" data-quality-preset="equilibre">Équilibré</button>
+                  <button class="preset-btn" data-quality-preset="light">Léger</button>
+                </div>
+                <div class="flex gap-2 items-center mt-3" style="flex-wrap:wrap">
+                  <span class="text-muted">Profil actif :</span>
+                  <button class="btn btn--compact" id="btnQualityExportProfile" title="Télécharger le profil qualité au format JSON">📤 Exporter</button>
+                  <button class="btn btn--compact" id="btnQualityImportProfile" title="Importer un profil JSON">📥 Importer</button>
+                  <input type="file" id="qualityImportInput" accept=".json,application/json" hidden />
+                  <button class="btn btn--compact btn--ghost" id="btnQualityResetProfile" title="Réinitialiser au profil par défaut">↺ Réinitialiser</button>
+                  <span id="qualityProfileMsg" class="text-muted" aria-live="polite"></span>
+                </div>
+              </div>
+
+              <!-- ===== G6 : Règles personnalisées de scoring ===== -->
+              <div class="card mt-4" id="customRulesCard">
+                <div class="card__eyebrow">Règles personnalisées (G6)</div>
+                <p class="text-muted" style="margin-top:0">Règles conditionnelles qui complètent les pondérations et seuils. Appliquées dans l'ordre de priorité.</p>
+
+                <div class="rules-templates flex gap-2 items-center" style="flex-wrap:wrap;margin-bottom:var(--sp-3)">
+                  <span class="text-muted">Templates :</span>
+                  <button class="btn btn--compact" data-rule-template="trash_like">📋 TRaSH-like</button>
+                  <button class="btn btn--compact" data-rule-template="purist">🎯 Puriste</button>
+                  <button class="btn btn--compact" data-rule-template="casual">🪶 Casual</button>
+                  <span class="text-muted">|</span>
+                  <button class="btn btn--compact" id="btnRulesImport">📥 Importer JSON</button>
+                  <input type="file" id="rulesImportInput" accept=".json,application/json" hidden />
+                  <button class="btn btn--compact" id="btnRulesExport">📤 Exporter JSON</button>
+                </div>
+
+                <div id="customRulesList" class="rules-list" aria-live="polite"></div>
+
+                <div class="rules-actions flex gap-2 items-center mt-3" style="flex-wrap:wrap">
+                  <button class="btn btn--compact btn--primary" id="btnRuleAdd">+ Ajouter une règle</button>
+                  <div class="flex-1"></div>
+                  <span class="text-muted" id="rulesCount">0 règle(s)</span>
+                  <button class="btn btn--compact" id="btnRulesSave">💾 Enregistrer</button>
+                  <button class="btn btn--compact" id="btnRulesPreviewImpact" disabled>🎛 Simuler l'impact</button>
+                </div>
+                <p class="status-msg" id="rulesMsg" aria-live="polite" style="margin-top:var(--sp-2)"></p>
+              </div>
+            </div>
+
+            <!-- ===== PANEL: Bibliotheque (global stats) ===== -->
+            <div id="qualityPanelGlobal" class="hidden">
+              <!-- Global KPIs -->
+              <div class="card">
+                <div class="card__eyebrow">Résumé global</div>
+                <div class="kpi-grid" id="globalKpis">
+                  <div class="kpi"><div class="kpi__label">Runs</div><div class="kpi__value" id="gKpiRuns">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Films traites</div><div class="kpi__value" id="gKpiFilms">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Score moyen</div><div class="kpi__value" id="gKpiScore">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Premium</div><div class="kpi__value" id="gKpiPremium">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Tendance</div><div class="kpi__value" id="gKpiTrend">—</div></div>
+                  <div class="kpi"><div class="kpi__label">Sans analyse</div><div class="kpi__value" id="gKpiUnscored">—</div></div>
+                </div>
+              </div>
+
+              <!-- Timeline chart + distribution -->
+              <div class="layout-2col mt-4">
+                <div class="card">
+                  <div class="card__eyebrow">Evolution du score moyen</div>
+                  <div id="globalTimelineChart" class="mt-2" style="min-height:160px"></div>
+                </div>
+                <div class="card">
+                  <div class="card__eyebrow">Distribution des tiers</div>
+                  <div class="dist-bars" id="globalDistBars"></div>
+                </div>
+              </div>
+
+              <!-- Top anomalies -->
+              <div class="card mt-4">
+                <div class="card__eyebrow">Anomalies les plus frequentes</div>
+                <div class="table-wrap">
+                  <table class="tbl">
+                    <thead><tr><th>Code</th><th>Occurrences</th><th>Dernière vue</th></tr></thead>
+                    <tbody id="globalAnomaliesTbody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Activity -->
+              <div class="card mt-4">
+                <div class="card__eyebrow">Activité récente</div>
+                <div class="table-wrap">
+                  <table class="tbl">
+                    <thead><tr><th>Run</th><th>Date</th><th>Films</th><th>Score</th><th>Statut</th><th>Alertes</th></tr></thead>
+                    <tbody id="globalActivityTbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <!-- Espace disque -->
+              <div id="globalSpaceSection" class="card hidden mt-3">
+                <div class="card__eyebrow">Espace disque</div>
+              </div>
+              <!-- Suggestions bibliothecaire -->
+              <div id="globalLibrarianSection" class="card hidden mt-3">
+                <div class="card__eyebrow">Suggestions</div>
+              </div>
+              <!-- Tendance sante -->
+              <div id="globalHealthTrend" class="card hidden mt-3">
+                <div class="card__eyebrow">Tendance sante</div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ========== VIEW: HISTORY ========== -->
+        <section class="view" id="view-history" role="tabpanel" aria-labelledby="tab-history" aria-hidden="true">
+          <div class="layout-stack">
+            <!-- Exports -->
+            <div class="card" id="historyExportCard">
+              <div class="card__eyebrow">Exports du run actif</div>
+              <div class="flex gap-2 items-center flex-wrap">
+                <span class="font-sm text-secondary" id="historyRunLabel">Aucun run selectionne</span>
+                <div class="flex-1"></div>
+                <button class="btn btn--compact" id="btnExportJson" data-testid="logs-btn-export-json">JSON</button>
+                <button class="btn btn--compact" id="btnExportCsv" data-testid="logs-btn-export-csv">CSV</button>
+                <button class="btn btn--compact" id="btnExportHtml" data-testid="logs-btn-export-html">HTML</button>
+                <button class="btn btn--compact" id="btnExportNfo" data-testid="logs-btn-export-nfo">.nfo</button>
+              </div>
+              <div class="status-msg mt-2" id="exportMsg" aria-live="polite"></div>
+            </div>
+
+            <!-- Runs table -->
+            <div class="card">
+              <div class="card__eyebrow">Runs précédents</div>
+              <div class="table-wrap">
+                <table class="tbl">
+                  <thead><tr><th>Run</th><th>Début</th><th>Durée</th><th>Films</th><th>Apply</th><th>Alertes</th><th></th></tr></thead>
+                  <tbody id="historyTbody" data-testid="logs-history-table"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Journal -->
+            <div class="card">
+              <div class="card__eyebrow">Journal</div>
+              <pre class="logbox" id="logboxAll" data-testid="logs-logbox">Aucun journal disponible.</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: LIBRARY (Bibliothèque — page workflow) ========== -->
+        <!-- ========== VIEW: JELLYFIN ========== -->
+        <section class="view" id="view-jellyfin" role="tabpanel" aria-labelledby="tab-jellyfin" aria-hidden="true">
+          <div class="layout-stack" id="jellyfinViewContent">
+            <p class="text-muted">Jellyfin — chargement...</p>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: PLEX ========== -->
+        <section class="view" id="view-plex" role="tabpanel" aria-labelledby="tab-plex" aria-hidden="true">
+          <div class="layout-stack" id="plexViewContent">
+            <p class="text-muted">Plex — chargement...</p>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: RADARR ========== -->
+        <section class="view" id="view-radarr" role="tabpanel" aria-labelledby="tab-radarr" aria-hidden="true">
+          <div class="layout-stack" id="radarrViewContent">
+            <p class="text-muted">Radarr — chargement...</p>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: SETTINGS ========== -->
+        <section class="view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" aria-hidden="true">
+          <div class="layout-stack">
+            <div class="status-msg" id="saveMsg" aria-live="polite"></div>
+
+            <!-- Essential -->
+            <div class="card">
+              <div class="card__eyebrow">Essentiel</div>
+              <div class="field">
+                <label class="field-label">Dossiers racine</label>
+                <div id="rootsList" class="roots-list" data-testid="settings-roots-list"></div>
+                <div class="field-row" style="margin-top:var(--sp-2)">
+                  <input class="input flex-1" type="text" id="inNewRoot" data-testid="settings-new-root" aria-label="Ajouter un dossier racine" placeholder="C:\Films — ajouter un dossier" />
+                  <button class="btn btn-sm" id="btnAddRoot" data-testid="settings-btn-add-root">+ Ajouter</button>
+                </div>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inState">Dossier d'état (optionnel)</label>
+                <input class="input" type="text" id="inState" placeholder="Auto" />
+              </div>
+            </div>
+
+            <!-- TMDb -->
+            <div class="card">
+              <div class="card__eyebrow">TMDb</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckTmdbEnabled" data-testid="settings-tmdb-enabled" checked /> Activer TMDb</label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inApiKey">Clé API</label>
+                <div class="field-row">
+                  <input class="input flex-1" type="password" id="inApiKey" data-testid="settings-tmdb-key" placeholder="Clé API TMDb" />
+                  <button class="btn btn--compact" id="btnRevealKey" aria-label="Afficher la clé">&#128065;</button>
+                  <button class="btn btn--compact" id="btnTestKey" data-testid="settings-tmdb-btn-test">Tester</button>
+                </div>
+                <span class="status-msg" id="tmdbTestMsg" aria-live="polite"></span>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckRememberKey" /> Mémoriser la clé</label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inTimeout">Timeout (secondes)</label>
+                <input class="input" type="number" id="inTimeout" value="10" min="1" step="1" style="max-width:100px" />
+              </div>
+            </div>
+
+            <!-- Video Analysis -->
+            <div class="card">
+              <div class="card__eyebrow">Analyse video</div>
+              <div class="field">
+                <label class="field-label" for="selProbeBackend">Backend probe</label>
+                <select class="input" id="selProbeBackend" data-testid="settings-probe-backend" style="max-width:200px">
+                  <option value="auto">Auto</option>
+                  <option value="ffprobe">ffprobe</option>
+                  <option value="mediainfo">mediainfo</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inProbeFfprobePath">Chemin ffprobe (optionnel)</label>
+                <input class="input" type="text" id="inProbeFfprobePath" placeholder="Auto" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inProbeMediainfoPath">Chemin mediainfo (optionnel)</label>
+                <input class="input" type="text" id="inProbeMediainfoPath" placeholder="Auto" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inProbeTimeoutS">Timeout probe (s)</label>
+                <input class="input" type="number" id="inProbeTimeoutS" min="5" max="300" step="5" placeholder="30" style="max-width:120px" title="Timeout ffprobe/mediainfo. Augmente sur NAS lent ou gros fichiers 4K." />
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckEnableTvDetection" /> Detection series TV</label>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckSubtitleDetection" checked /> Detection sous-titres</label>
+                <div class="field-row" style="margin-top:var(--sp-1)">
+                  <label class="field-label" for="inSubtitleLangs" style="white-space:nowrap">Langues attendues</label>
+                  <input class="input" type="text" id="inSubtitleLangs" value="fr" placeholder="fr, en" style="max-width:200px" />
+                </div>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckIncrementalScanEnabled" checked /> Scan incremental</label>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckAutoApproveEnabled" /> Auto-approbation</label>
+                <div class="field-row mt-1">
+                  <label class="field-label" for="inAutoApproveThreshold">Seuil</label>
+                  <input class="input" type="number" id="inAutoApproveThreshold" value="85" min="70" max="100" style="max-width:80px" />
+                  <span class="font-sm text-muted" id="autoApproveThresholdLabel">85%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- P4.3 : Partage de profil qualité -->
+            <div class="card">
+              <div class="card__eyebrow">Profil qualité — partage communautaire</div>
+              <p class="font-xs text-muted mb-2">Exportez votre profil qualité calibré pour le partager, ou importez un profil tiers. Format JSON structuré, 128 Ko max.</p>
+              <div class="field">
+                <label class="field-label" for="inProfileExchangeName">Nom du profil (à l'export)</label>
+                <input class="input" type="text" id="inProfileExchangeName" placeholder="Ex : Ma config cinéma 4K HDR" style="max-width:360px" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inProfileExchangeDesc">Description (optionnel)</label>
+                <input class="input" type="text" id="inProfileExchangeDesc" placeholder="Ex : Privilégie l'audio Atmos et les films récents" />
+              </div>
+              <div class="flex gap-2 mb-2">
+                <button class="btn btn--compact" id="btnExportQualityProfile">Exporter le profil actif</button>
+                <input type="file" id="fileImportQualityProfile" accept=".json,.cinesort.json" style="display:none" />
+                <button class="btn btn--compact" id="btnImportQualityProfile">Importer un profil…</button>
+                <button class="btn btn--compact" id="btnShowCalibration" title="Voir les écarts entre votre scoring et vos feedbacks utilisateurs (P4.1)">Rapport de calibration</button>
+              </div>
+              <div class="status-msg" id="profileExchangeMsg" aria-live="polite"></div>
+              <div id="calibrationReportContent" style="margin-top:10px"></div>
+            </div>
+
+            <!-- Profils de renommage -->
+            <div class="card">
+              <div class="card__eyebrow">Profil de renommage</div>
+              <div class="field">
+                <label class="field-label" for="selNamingPreset">Preset</label>
+                <select class="input" id="selNamingPreset" style="max-width:240px">
+                  <option value="default">Standard</option>
+                  <option value="plex">Plex</option>
+                  <option value="jellyfin">Jellyfin</option>
+                  <option value="quality">Qualité</option>
+                  <option value="custom">Personnalisé</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inNamingMovie">Template film</label>
+                <input class="input" type="text" id="inNamingMovie" value="{title} ({year})" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inNamingTv">Template serie</label>
+                <input class="input" type="text" id="inNamingTv" value="{series} ({year})" />
+              </div>
+              <div id="namingPreview" class="naming-preview"></div>
+              <p class="font-xs text-muted mt-1">Variables : {title} {year} {resolution} {video_codec} {hdr} {audio_codec} {channels} {quality} {score} {tmdb_id} {tmdb_tag} {original_title} {source} {bitrate} {container} {series} {season} {episode} {ep_title}</p>
+            </div>
+
+            <!-- Jellyfin -->
+            <div class="card">
+              <div class="card__eyebrow">Jellyfin</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckJellyfinEnabled" /> Activer l'integration</label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inJellyfinUrl">URL serveur</label>
+                <input class="input" type="text" id="inJellyfinUrl" placeholder="http://localhost:8096" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inJellyfinApiKey">Clé API</label>
+                <div class="field-row">
+                  <input class="input flex-1" type="password" id="inJellyfinApiKey" placeholder="Clé API Jellyfin" />
+                  <button class="btn btn--compact" id="btnTestJellyfin">Tester</button>
+                </div>
+                <span class="status-msg" id="jellyfinTestMsg" aria-live="polite"></span>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckJellyfinRefreshOnApply" checked /> Rafraichir apres apply</label>
+              </div>
+            </div>
+
+            <!-- Cleanup & folders -->
+            <details class="collapsible">
+              <summary>Nettoyage et dossiers techniques</summary>
+              <div class="card mt-2">
+                <div class="field">
+                  <label class="switch-label"><input type="checkbox" id="ckCollectionMove" /> Dossiers de collection</label>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="inCollectionFolderName">Nom du dossier collection</label>
+                  <input class="input" type="text" id="inCollectionFolderName" value="_Collection" />
+                </div>
+                <div class="field">
+                  <label class="switch-label"><input type="checkbox" id="ckMoveEmptyFoldersEnabled" /> Deplacer les dossiers vides</label>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="inEmptyFoldersFolderName">Nom dossier vides</label>
+                  <input class="input" type="text" id="inEmptyFoldersFolderName" value="_Vide" />
+                </div>
+                <div class="field">
+                  <label class="field-label" for="selEmptyFoldersScope">Scope dossiers vides</label>
+                  <select class="input" id="selEmptyFoldersScope" style="max-width:200px">
+                    <option value="root_all">Root complet</option>
+                    <option value="touched_only">Touches uniquement</option>
+                  </select>
+                </div>
+                <hr class="card__sep" />
+                <div class="field">
+                  <label class="switch-label"><input type="checkbox" id="ckResidualCleanupEnabled" /> Nettoyage résiduel</label>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="inResidualCleanupFolderName">Nom dossier nettoyage</label>
+                  <input class="input" type="text" id="inResidualCleanupFolderName" value="_Dossier Nettoyage" />
+                </div>
+                <div class="field">
+                  <label class="field-label" for="selResidualCleanupScope">Scope nettoyage</label>
+                  <select class="input" id="selResidualCleanupScope" style="max-width:200px">
+                    <option value="touched_only">Touches uniquement</option>
+                    <option value="root_all">Root complet</option>
+                  </select>
+                </div>
+                <div class="flex gap-3 flex-wrap mt-2">
+                  <label class="switch-label"><input type="checkbox" id="ckResidualIncludeNfo" /> NFO</label>
+                  <label class="switch-label"><input type="checkbox" id="ckResidualIncludeImages" /> Images</label>
+                  <label class="switch-label"><input type="checkbox" id="ckResidualIncludeSubtitles" /> Sous-titres</label>
+                  <label class="switch-label"><input type="checkbox" id="ckResidualIncludeTexts" /> Textes</label>
+                </div>
+              </div>
+            </details>
+
+            <!-- Notifications -->
+            <div class="card">
+              <div class="card__eyebrow">Notifications</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckNotificationsEnabled" /> Activer les notifications desktop</label>
+                <span class="field-hint">Notifie uniquement si la fenetre n'est pas active.</span>
+              </div>
+              <div class="flex gap-3 flex-wrap mt-2" id="notifGranularity">
+                <label class="switch-label"><input type="checkbox" id="ckNotifScanDone" checked /> Fin d'analyse</label>
+                <label class="switch-label"><input type="checkbox" id="ckNotifApplyDone" checked /> Fin d'application</label>
+                <label class="switch-label"><input type="checkbox" id="ckNotifUndoDone" checked /> Fin d'annulation</label>
+                <label class="switch-label"><input type="checkbox" id="ckNotifErrors" checked /> Erreurs critiques</label>
+              </div>
+            </div>
+
+            <!-- Plex -->
+            <div class="card">
+              <div class="card__eyebrow">Plex</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPlexEnabled" /> Activer Plex</label>
+              </div>
+              <div class="field mt-2"><label for="inPlexUrl">URL du serveur</label><input class="input" id="inPlexUrl" placeholder="http://192.168.1.100:32400" /></div>
+              <div class="field mt-2"><label for="inPlexToken">Token</label><input type="password" class="input" id="inPlexToken" /></div>
+              <div class="flex gap-2 mt-2">
+                <button class="btn btn--compact" id="btnTestPlex">Tester la connexion</button>
+              </div>
+              <div class="field mt-2">
+                <label for="selPlexLibrary">Bibliotheque films</label>
+                <select class="input" id="selPlexLibrary"><option value="">— tester d'abord —</option></select>
+              </div>
+              <div class="field mt-2">
+                <label class="switch-label"><input type="checkbox" id="ckPlexRefreshOnApply" checked /> Rafraichir apres apply</label>
+              </div>
+            </div>
+
+            <!-- Radarr -->
+            <div class="card">
+              <div class="card__eyebrow">Radarr</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckRadarrEnabled" /> Activer Radarr</label>
+              </div>
+              <div class="field mt-2"><label for="inRadarrUrl">URL du serveur</label><input class="input" id="inRadarrUrl" placeholder="http://localhost:7878" /></div>
+              <div class="field mt-2"><label for="inRadarrApiKey">Clé API</label><input type="password" class="input" id="inRadarrApiKey" /></div>
+              <div class="flex gap-2 mt-2">
+                <button class="btn btn--compact" id="btnTestRadarr">Tester la connexion</button>
+              </div>
+            </div>
+
+            <!-- Mode veille -->
+            <div class="card">
+              <div class="card__eyebrow">Mode veille</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckWatchEnabled" /> Activer la surveillance automatique</label>
+                <span class="field-hint">Detecte les nouveaux films et lance un scan automatique.</span>
+              </div>
+              <div class="field mt-2">
+                <label for="watchInterval">Intervalle (minutes)</label>
+                <input type="number" class="input" id="watchInterval" min="1" max="60" value="5" style="width:80px" />
+              </div>
+            </div>
+
+            <!-- Watchlist -->
+            <div class="card">
+              <div class="card__eyebrow">Watchlist</div>
+              <div class="field">
+                <span class="field-hint">Comparez votre watchlist Letterboxd ou IMDb avec votre bibliotheque locale.</span>
+              </div>
+              <div class="flex gap-2 mt-2">
+                <label class="btn btn--compact btn--accent-outline">Importer Letterboxd CSV<input type="file" accept=".csv" id="fileLetterboxd" hidden /></label>
+                <label class="btn btn--compact btn--accent-outline">Importer IMDb CSV<input type="file" accept=".csv" id="fileImdb" hidden /></label>
+              </div>
+              <div id="watchlistResults" class="mt-4"></div>
+            </div>
+
+            <!-- Rapport email -->
+            <div class="card">
+              <div class="card__eyebrow">Rapport par email</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckEmailEnabled" /> Activer les rapports par email</label>
+              </div>
+              <div class="field mt-2"><label for="inEmailSmtpHost">Serveur SMTP</label><input class="input" id="inEmailSmtpHost" placeholder="smtp.gmail.com" /></div>
+              <div class="flex gap-3 mt-2">
+                <div class="field"><label for="inEmailSmtpPort">Port</label><input type="number" class="input" id="inEmailSmtpPort" value="587" style="width:80px" /></div>
+                <div class="field"><label class="switch-label"><input type="checkbox" id="ckEmailSmtpTls" checked /> TLS</label></div>
+              </div>
+              <div class="field mt-2"><label for="inEmailSmtpUser">Utilisateur SMTP</label><input class="input" id="inEmailSmtpUser" /></div>
+              <div class="field mt-2"><label for="inEmailSmtpPassword">Mot de passe SMTP</label><input type="password" class="input" id="inEmailSmtpPassword" /></div>
+              <div class="field mt-2"><label for="inEmailTo">Destinataire</label><input type="email" class="input" id="inEmailTo" placeholder="vous@example.com" /></div>
+              <div class="flex gap-3 mt-2">
+                <label class="switch-label"><input type="checkbox" id="ckEmailOnScan" checked /> Apres scan</label>
+                <label class="switch-label"><input type="checkbox" id="ckEmailOnApply" checked /> Apres apply</label>
+              </div>
+              <div class="field mt-2">
+                <button class="btn btn--compact" id="btnTestEmail">Tester l'envoi email</button>
+                <span id="msgTestEmail" class="field-hint"></span>
+              </div>
+            </div>
+
+            <!-- Plugins -->
+            <div class="card">
+              <div class="card__eyebrow">Plugins</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPluginsEnabled" /> Activer les hooks plugins</label>
+                <span class="field-hint">Execute les scripts du dossier plugins/ apres scan, apply, undo.</span>
+              </div>
+              <div class="field mt-2">
+                <label for="pluginsTimeout">Timeout par plugin (secondes)</label>
+                <input type="number" class="input" id="pluginsTimeout" min="5" max="120" value="30" style="width:80px" />
+              </div>
+            </div>
+
+            <!-- API REST -->
+            <div class="card">
+              <div class="card__eyebrow">API REST</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckRestApiEnabled" /> Activer l'API REST</label>
+                <span class="field-hint">Expose les endpoints CineSort en HTTP pour pilotage distant. Cliquez "Redemarrer le service API" apres un changement de port ou token.</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inRestApiPort">Port</label>
+                <input class="input" type="number" id="inRestApiPort" value="8642" min="1024" max="65535" style="max-width:100px" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inRestApiToken">Clé d'accès</label>
+                <div class="field-row">
+                  <input class="input flex-1" type="password" id="inRestApiToken" placeholder="Collez ou regénérez une clé…" />
+                  <button class="btn btn--compact" id="btnRevealRestToken" title="Afficher/masquer" aria-label="Afficher la clé">&#128065;</button>
+                  <button class="btn btn--compact" id="btnCopyRestToken" title="Copier dans le presse-papier" aria-label="Copier la clé">&#128203;</button>
+                  <button class="btn btn--compact" id="btnRegenRestToken" title="Generer une nouvelle clé" aria-label="Regenerer">&#128257;</button>
+                </div>
+                <span class="field-hint">Cette clé protège l'accès distant. À saisir sur les autres appareils (téléphone / PC) pour se connecter.</span>
+                <span class="status-msg" id="restTokenMsg" aria-live="polite"></span>
+              </div>
+              <div class="field" id="restDashboardUrlRow" style="display:none">
+                <label class="field-label">Dashboard accessible a :</label>
+                <div id="restQrContainer" style="margin:8px 0;text-align:center"></div>
+                <div class="field-row" style="gap:0.5rem;align-items:center">
+                  <a id="restDashboardUrl" href="#" target="_blank" class="link-accent" style="word-break:break-all"></a>
+                  <button class="btn btn--compact" id="btnCopyDashUrl" title="Copier le lien">&#128203;</button>
+                </div>
+                <span class="field-hint">Scannez le QR code ou ouvrez ce lien sur votre telephone (meme reseau Wi-Fi).</span>
+              </div>
+              <div class="field" style="padding-top:0.5rem">
+                <button class="btn btn--compact" id="btnRestartApi">Redemarrer le service API</button>
+                <span id="restartApiMsg" class="field-hint"></span>
+              </div>
+              <!-- HTTPS (G7) -->
+              <div class="field" style="padding-top:0.75rem;border-top:1px dashed var(--border);margin-top:0.75rem">
+                <label class="switch-label"><input type="checkbox" id="ckRestHttpsEnabled" /> Activer HTTPS (TLS)</label>
+                <span class="field-hint">Chiffre la connexion au dashboard distant. Requiert un certificat et une cle valides.</span>
+              </div>
+              <div class="field">
+                <label class="field-label" for="inRestCertPath">Chemin du certificat (cert.pem)</label>
+                <input type="text" class="input" id="inRestCertPath" placeholder="C:\CineSort\cert.pem" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="inRestKeyPath">Chemin de la cle privee (key.pem)</label>
+                <input type="text" class="input" id="inRestKeyPath" placeholder="C:\CineSort\key.pem" />
+                <span class="field-hint">Generer : <code>openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=CineSort"</code></span>
+              </div>
+            </div>
+
+            <!-- Apparence -->
+            <div class="card">
+              <div class="card__eyebrow">Apparence</div>
+              <div class="field">
+                <label class="field-label" for="selTheme">Theme</label>
+                <select class="input" id="selTheme" data-testid="settings-theme" style="max-width:200px">
+                  <option value="studio">Studio</option>
+                  <option value="cinema">Cinema</option>
+                  <option value="luxe">Luxe</option>
+                  <option value="neon">Neon</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="selAnimationLevel">Niveau d'animations</label>
+                <select class="input" id="selAnimationLevel" data-testid="settings-animation" style="max-width:200px">
+                  <option value="subtle">Subtil</option>
+                  <option value="moderate">Modéré</option>
+                  <option value="intense">Intense</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="rangeEffectSpeed">Vitesse des effets <span id="lblEffectSpeed" class="text-muted">50</span></label>
+                <input type="range" id="rangeEffectSpeed" data-testid="settings-effect-speed" min="1" max="100" value="50" style="width:100%;max-width:300px" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="rangeGlowIntensity">Intensité des lueurs <span id="lblGlowIntensity" class="text-muted">30</span></label>
+                <input type="range" id="rangeGlowIntensity" data-testid="settings-glow-intensity" min="0" max="100" value="30" style="width:100%;max-width:300px" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="rangeLightIntensity">Luminosité des effets <span id="lblLightIntensity" class="text-muted">20</span></label>
+                <input type="range" id="rangeLightIntensity" min="0" max="100" value="20" style="width:100%;max-width:300px" />
+              </div>
+            </div>
+
+            <!-- Analyse perceptuelle -->
+            <div class="card">
+              <div class="card__eyebrow">Analyse perceptuelle</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPerceptualEnabled" /> Activer l'analyse perceptuelle</label>
+                <span class="field-hint">Analyse le signal reel (pixels + audio) pour un scoring qualitatif approfondi.</span>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPerceptualAutoOnScan" /> Lancer auto apres chaque scan</label>
+              </div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPerceptualAutoOnQuality" /> Lancer avec le rapport qualité</label>
+              </div>
+              <div class="field mt-2">
+                <label for="inPerceptualTimeout">Timeout par film (secondes)</label>
+                <input type="number" class="input" id="inPerceptualTimeout" min="30" max="600" value="120" style="width:80px" />
+              </div>
+              <div class="card__eyebrow mt-2" style="font-size:var(--fs-xs)">Video</div>
+              <div class="field">
+                <label for="inPerceptualFrames">Frames a analyser</label>
+                <input type="number" class="input" id="inPerceptualFrames" min="5" max="50" value="10" style="width:80px" />
+              </div>
+              <div class="field">
+                <label for="inPerceptualSkip">Ignorer debut/fin (%)</label>
+                <input type="number" class="input" id="inPerceptualSkip" min="0" max="20" value="5" style="width:80px" />
+              </div>
+              <div class="field">
+                <label for="inPerceptualDarkWeight">Poids scenes sombres</label>
+                <input type="number" class="input" id="inPerceptualDarkWeight" min="1.0" max="3.0" step="0.1" value="1.5" style="width:80px" />
+              </div>
+              <div class="card__eyebrow mt-2" style="font-size:var(--fs-xs)">Audio</div>
+              <div class="field">
+                <label class="switch-label"><input type="checkbox" id="ckPerceptualAudioDeep" checked /> Analyse audio complete (astats + clipping)</label>
+              </div>
+              <div class="field">
+                <label for="inPerceptualAudioSegment">Segment clipping (secondes)</label>
+                <input type="number" class="input" id="inPerceptualAudioSegment" min="10" max="120" value="30" style="width:80px" />
+              </div>
+              <div class="card__eyebrow mt-2" style="font-size:var(--fs-xs)">Comparaison</div>
+              <div class="field">
+                <label for="inPerceptualCompFrames">Frames de comparaison</label>
+                <input type="number" class="input" id="inPerceptualCompFrames" min="10" max="100" value="20" style="width:80px" />
+              </div>
+              <div class="field">
+                <label for="inPerceptualCompTimeout">Timeout comparaison (secondes)</label>
+                <input type="number" class="input" id="inPerceptualCompTimeout" min="120" max="1800" value="600" style="width:80px" />
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="btn btn--primary" id="btnSaveSettings" data-testid="settings-btn-save">Enregistrer</button>
+              <span class="settings-dirty" id="settingsDirtyIndicator" aria-live="polite">
+                <span class="settings-dirty__dot"></span>
+                <span class="settings-dirty__text">Modifications non enregistrees</span>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== VIEW: HELP (V1-14 — FAQ + glossaire metier) ========== -->
+        <section class="view" id="view-help" role="tabpanel" aria-labelledby="tab-help" aria-hidden="true">
+          <div id="helpContent"></div>
+        </section>
+
+      </div><!-- .content -->
+    </main>
+  </div><!-- .app -->
+
+  <!-- ============ MODALS ============ -->
+
+  <!-- Help modal -->
+  <div class="modal hidden" id="modalHelp" role="dialog" aria-modal="true" aria-labelledby="modalHelpTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title" id="modalHelpTitle">Aide rapide</span>
+        <button class="modal-close" data-close="modalHelp" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p><strong>1. Réglages</strong> — Configurez le dossier racine et la clé TMDb.</p>
+        <p class="mt-2"><strong>2. Analyse</strong> — Lancez un scan depuis l'Accueil.</p>
+        <p class="mt-2"><strong>3. Validation</strong> — Approuvez ou rejetez chaque film.</p>
+        <p class="mt-2"><strong>4. Exécution</strong> — Appliquez en dry-run puis en reel.</p>
+        <p class="mt-3 font-sm text-muted">Appuyez sur <kbd>?</kbd> ou <kbd>F1</kbd> pour voir tous les raccourcis clavier.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn--primary" data-close="modalHelp">Compris</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quality Simulator modal (G5) -->
+  <div class="modal hidden" id="modalQualitySimulator" role="dialog" aria-modal="true" aria-labelledby="qsimTitle">
+    <div class="modal-card qsim-card" style="max-width:860px">
+      <div class="modal-header">
+        <span class="modal-title" id="qsimTitle">Simuler un preset qualité</span>
+        <div class="qsim-scope-wrap">
+          <label for="qsimScope" class="qsim-scope-label">Portée :</label>
+          <select id="qsimScope" class="input" style="width:auto">
+            <option value="run">Run courant</option>
+            <option value="library">Toute la bibliothèque</option>
+          </select>
+        </div>
+        <button class="modal-close-btn" data-close="modalQualitySimulator" aria-label="Fermer">&times;</button>
+      </div>
+
+      <nav class="qsim-tabs" role="tablist">
+        <button role="tab" type="button" class="qsim-tab is-active" data-qsim-tab="simple" aria-selected="true">Simple</button>
+        <button role="tab" type="button" class="qsim-tab" data-qsim-tab="advanced" aria-selected="false">Avancé</button>
+      </nav>
+
+      <div class="modal-body qsim-body">
+
+        <!-- Onglet Simple -->
+        <section class="qsim-panel" data-qsim-panel="simple">
+          <div class="qsim-preset-grid" role="radiogroup" aria-label="Choisir un preset">
+            <button type="button" class="qsim-preset-card" data-preset-id="equilibre" role="radio" aria-checked="false">
+              <div class="qsim-preset-card__icon">⚖</div>
+              <div class="qsim-preset-card__name">Équilibré</div>
+              <div class="qsim-preset-card__hint">Recommandé pour bibliothèques mixtes</div>
+            </button>
+            <button type="button" class="qsim-preset-card" data-preset-id="remux_strict" role="radio" aria-checked="false">
+              <div class="qsim-preset-card__icon">🎯</div>
+              <div class="qsim-preset-card__name">Remux strict</div>
+              <div class="qsim-preset-card__hint">Exigence élevée, bitrate priorisé</div>
+            </button>
+            <button type="button" class="qsim-preset-card" data-preset-id="light" role="radio" aria-checked="false">
+              <div class="qsim-preset-card__icon">🪶</div>
+              <div class="qsim-preset-card__name">Light</div>
+              <div class="qsim-preset-card__hint">Tolérant, streaming-friendly</div>
+            </button>
+          </div>
+
+          <div class="qsim-results hidden" id="qsimResults" aria-live="polite">
+            <div class="qsim-before-after">
+              <div class="qsim-score qsim-score--before">
+                <div class="qsim-score__label">Avant</div>
+                <div class="qsim-score__value" id="qsimBeforeValue">—</div>
+                <div class="qsim-score__profile" id="qsimBeforeProfile">Actuel</div>
+              </div>
+              <div class="qsim-score__arrow" aria-hidden="true">→</div>
+              <div class="qsim-score qsim-score--after">
+                <div class="qsim-score__label">Après</div>
+                <div class="qsim-score__value" id="qsimAfterValue">—</div>
+                <div class="qsim-score__profile" id="qsimAfterProfile">—</div>
+                <div class="qsim-score__delta" id="qsimDeltaBadge"></div>
+              </div>
+            </div>
+
+            <div class="qsim-chart-wrap">
+              <h3 class="qsim-section-title">Distribution par tier</h3>
+              <div id="qsimTiersChart"></div>
+            </div>
+
+            <div class="qsim-stats" id="qsimStatsPills"></div>
+
+            <details class="qsim-impacted">
+              <summary>Films les plus impactés</summary>
+              <div class="qsim-impacted-grid">
+                <div class="qsim-impacted__col">
+                  <h4>🚀 Plus gros gains</h4>
+                  <ul id="qsimWinnersList"></ul>
+                </div>
+                <div class="qsim-impacted__col">
+                  <h4>📉 Plus grosses pertes</h4>
+                  <ul id="qsimLosersList"></ul>
+                </div>
+              </div>
+            </details>
+
+            <details class="qsim-breakdown">
+              <summary>Impact par codec &amp; résolution</summary>
+              <div class="qsim-breakdown-grid">
+                <div>
+                  <h4>Codec</h4>
+                  <table class="qsim-breakdown-table" id="qsimByCodec"></table>
+                </div>
+                <div>
+                  <h4>Résolution</h4>
+                  <table class="qsim-breakdown-table" id="qsimByResolution"></table>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="qsim-empty" id="qsimEmpty">
+            <p class="text-muted">Choisis un preset ci-dessus pour voir l'impact sur ton run courant.</p>
+          </div>
+        </section>
+
+        <!-- Onglet Avancé (sliders) -->
+        <section class="qsim-panel hidden" data-qsim-panel="advanced">
+          <div class="qsim-advanced-intro">
+            <p class="text-muted">Ajuste les pondérations et les seuils — la simulation se met à jour automatiquement.</p>
+          </div>
+
+          <fieldset class="qsim-fieldset">
+            <legend>Pondérations</legend>
+            <div class="qsim-slider-row">
+              <label>Vidéo <output id="qsimWVideoOut">60 %</output></label>
+              <input type="range" min="0" max="100" value="60" data-qsim-weight="video" aria-label="Pondération vidéo" />
+            </div>
+            <div class="qsim-slider-row">
+              <label>Audio <output id="qsimWAudioOut">30 %</output></label>
+              <input type="range" min="0" max="100" value="30" data-qsim-weight="audio" aria-label="Pondération audio" />
+            </div>
+            <div class="qsim-slider-row">
+              <label>Extras <output id="qsimWExtrasOut">10 %</output></label>
+              <input type="range" min="0" max="100" value="10" data-qsim-weight="extras" aria-label="Pondération extras" />
+            </div>
+          </fieldset>
+
+          <fieldset class="qsim-fieldset">
+            <legend>Seuils de tiers</legend>
+            <div class="qsim-slider-row">
+              <label>Premium &ge; <output id="qsimTPremiumOut">85</output></label>
+              <input type="range" min="70" max="95" value="85" data-qsim-tier="premium" aria-label="Seuil Premium" />
+            </div>
+            <div class="qsim-slider-row">
+              <label>Bon &ge; <output id="qsimTBonOut">68</output></label>
+              <input type="range" min="55" max="80" value="68" data-qsim-tier="bon" aria-label="Seuil Bon" />
+            </div>
+            <div class="qsim-slider-row">
+              <label>Moyen &ge; <output id="qsimTMoyenOut">54</output></label>
+              <input type="range" min="40" max="65" value="54" data-qsim-tier="moyen" aria-label="Seuil Moyen" />
+            </div>
+          </fieldset>
+
+          <div class="qsim-advanced-mini-stats" id="qsimAdvStats"></div>
+        </section>
+
+      </div>
+
+      <div class="modal-actions qsim-actions">
+        <button class="btn" data-close="modalQualitySimulator">Annuler</button>
+        <button class="btn" id="qsimBtnSaveCustom" disabled>💾 Sauver comme custom</button>
+        <button class="btn btn--primary" id="qsimBtnApply" disabled>✓ Appliquer ce preset</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Comparison modal (doublons qualité) -->
+  <div class="modal hidden" id="modalCompare" role="dialog" aria-modal="true" aria-labelledby="modalCompareTitle">
+    <div class="modal-card" style="max-width:640px">
+      <div class="modal-header">
+        <span class="modal-title" id="modalCompareTitle">Comparaison qualité</span>
+        <button class="modal-close" data-close="modalCompare" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn" data-close="modalCompare">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Film History Modal (P3.3) -->
+  <div class="modal hidden" id="modalFilmHistory" role="dialog" aria-modal="true" aria-labelledby="modalFilmHistoryTitle">
+    <div class="modal-card" style="max-width:860px; max-height:86vh">
+      <div class="modal-header">
+        <span class="modal-title" id="modalFilmHistoryTitle">Historique du film</span>
+        <button class="modal-close" data-close="modalFilmHistory" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="filmHistoryBody" style="overflow-y:auto; max-height:72vh">
+        <div class="text-secondary">Chargement...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-close="modalFilmHistory">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Score Explanation Modal (P2.1) -->
+  <div class="modal hidden" id="modalScoreExplain" role="dialog" aria-modal="true" aria-labelledby="modalScoreExplainTitle">
+    <div class="modal-card" style="max-width:760px; max-height:86vh">
+      <div class="modal-header">
+        <span class="modal-title" id="modalScoreExplainTitle">Détail du score</span>
+        <button class="modal-close" data-close="modalScoreExplain" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="scoreExplainBody" style="overflow-y:auto; max-height:70vh">
+        <div class="text-secondary">Chargement...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-close="modalScoreExplain">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apply Preview Modal (P1.3) -->
+  <div class="modal hidden" id="modalApplyPreview" role="dialog" aria-modal="true" aria-labelledby="modalApplyPreviewTitle">
+    <div class="modal-card" style="max-width:960px; max-height:86vh">
+      <div class="modal-header">
+        <span class="modal-title" id="modalApplyPreviewTitle">Aperçu détaillé avant application</span>
+        <button class="modal-close" data-close="modalApplyPreview" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="applyPreviewBody" style="overflow-y:auto; max-height:70vh">
+        <div class="text-secondary">Chargement...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-close="modalApplyPreview">Fermer</button>
+        <button class="btn btn--primary" id="btnApplyFromPreview" data-close="modalApplyPreview">Appliquer réellement</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shortcuts modal -->
+  <div class="modal hidden" id="modalShortcuts" role="dialog" aria-modal="true" aria-labelledby="modalShortcutsTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title" id="modalShortcutsTitle">Raccourcis clavier</span>
+        <button class="modal-close" data-close="modalShortcuts" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body">
+        <h4>Navigation</h4>
+        <table class="shortcuts-table">
+          <tr><td><kbd>Alt+1</kbd> a <kbd>Alt+6</kbd></td><td>Changer de vue</td></tr>
+          <tr><td><kbd>Ctrl+S</kbd></td><td>Sauvegarder les decisions</td></tr>
+          <tr><td><kbd>F5</kbd></td><td>Rafraîchir la vue</td></tr>
+          <tr><td><kbd>?</kbd> / <kbd>F1</kbd></td><td>Cette aide</td></tr>
+        </table>
+        <h4 class="mt-3">Validation</h4>
+        <table class="shortcuts-table">
+          <tr><td><kbd>&uarr;</kbd> <kbd>&darr;</kbd> / <kbd>j</kbd> <kbd>k</kbd></td><td>Film precedent / suivant</td></tr>
+          <tr><td><kbd>Espace</kbd> / <kbd>a</kbd></td><td>Approuver / desapprouver</td></tr>
+          <tr><td><kbd>r</kbd></td><td>Rejeter</td></tr>
+          <tr><td><kbd>i</kbd></td><td>Voir l'inspecteur</td></tr>
+          <tr><td><kbd>Ctrl+A</kbd></td><td>Tout approuver (filtre courant)</td></tr>
+          <tr><td><kbd>Echap</kbd></td><td>Deselectionner</td></tr>
+        </table>
+        <h4 class="mt-3">Drag &amp; drop</h4>
+        <p class="font-sm text-muted">Glissez un dossier depuis l'explorateur pour l'ajouter aux racines.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn--primary" data-close="modalShortcuts">Compris</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Candidates modal -->
+  <div class="modal hidden" id="modalCandidates" role="dialog" aria-modal="true" aria-labelledby="modalCandidatesTitle">
+    <div class="modal-card wide">
+      <div class="modal-header">
+        <span class="modal-title" id="modalCandidatesTitle">Suggestions</span>
+        <button class="modal-close" data-close="modalCandidates" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="candList"></div>
+    </div>
+  </div>
+
+  <!-- Action dialog (confirm/info) -->
+  <div class="modal hidden" id="modalActionDialog" role="dialog" aria-modal="true" aria-labelledby="modalActionDialogTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title" id="modalActionDialogTitle">Confirmation</span>
+      </div>
+      <div class="modal-body">
+        <p id="modalActionDialogMessage">Voulez-vous continuer ?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="modalActionCancel">Annuler</button>
+        <button class="btn btn--primary" id="modalActionConfirm">Continuer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wizard modal -->
+  <div class="modal hidden" id="wizardModal" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <div class="modal-card wide">
+      <div class="modal-header">
+        <span class="modal-title" id="wizardTitle">Configuration initiale</span>
+        <button class="modal-close" data-close="wizardModal" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="wizard-dots" role="group" aria-label="Etapes">
+          <div class="wizard-dot active" data-step="1"></div>
+          <div class="wizard-dot" data-step="2"></div>
+          <div class="wizard-dot" data-step="3"></div>
+          <div class="wizard-dot" data-step="4"></div>
+          <div class="wizard-dot" data-step="5"></div>
+        </div>
+
+        <!-- Step 1: Welcome -->
+        <div class="wizard-step active" id="wizStep1">
+          <h3>Bienvenue dans CineSort</h3>
+          <p class="mt-2 text-secondary">Configurons votre bibliotheque en quelques etapes.</p>
+          <div class="mt-4"><button class="btn btn--primary" id="wizBtnStart">Commencer</button></div>
+        </div>
+
+        <!-- Step 2: Root folder -->
+        <div class="wizard-step" id="wizStep2">
+          <h3>Dossier racine</h3>
+          <p class="mt-2 text-secondary">Où se trouve votre bibliothèque de films ?</p>
+          <div class="field mt-3">
+            <label class="sr-only" for="wizRoot">Chemin du dossier racine</label>
+            <input class="input" type="text" id="wizRoot" placeholder="C:\Films" />
+            <span class="field-hint" id="wizRootFeedback"></span>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <button class="btn" id="wizBtn2Prev">Précédent</button>
+            <button class="btn btn--primary" id="wizBtn2Next" disabled>Suivant</button>
+          </div>
+        </div>
+
+        <!-- Step 3: TMDb -->
+        <div class="wizard-step" id="wizStep3">
+          <h3>Clé TMDb (optionnel)</h3>
+          <p class="mt-2 text-secondary">Une clé API TMDb améliore la détection des titres.</p>
+          <div class="field mt-3">
+            <label class="sr-only" for="wizTmdbKey">Clé API TMDb</label>
+            <input class="input" type="text" id="wizTmdbKey" placeholder="Clé API v3" />
+            <span class="status-msg" id="wizTmdbStatus"></span>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <button class="btn btn--compact" id="wizBtnTestTmdb">Tester la clé</button>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <button class="btn" id="wizBtn3Prev">Precedent</button>
+            <button class="btn btn--primary" id="wizBtn3Next">Suivant</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Quick test -->
+        <div class="wizard-step" id="wizStep4">
+          <h3>Test rapide</h3>
+          <p class="mt-2 text-secondary">Lancez un scan rapide pour verifier que tout fonctionne.</p>
+          <div class="flex gap-2 mt-3">
+            <button class="btn btn--primary" id="wizBtnRunTest">Lancer le test</button>
+            <button class="btn" id="wizBtnSkipTest">Passer</button>
+          </div>
+          <span class="status-msg mt-2" id="wizTestStatus"></span>
+          <pre class="logbox mt-3" id="wizTestResults" style="max-height:200px;overflow:auto"></pre>
+          <div class="flex gap-2 mt-4">
+            <button class="btn" id="wizBtn4Prev">Precedent</button>
+            <button class="btn btn--primary" id="wizBtn4Next">Terminer</button>
+          </div>
+        </div>
+
+        <!-- Step 5: Summary -->
+        <div class="wizard-step" id="wizStep5">
+          <h3>Configuration terminee</h3>
+          <p class="mt-2 text-secondary" id="wizSummary">Votre configuration est prete.</p>
+          <div class="flex gap-2 mt-4">
+            <button class="btn btn--primary" id="wizBtnFinish">Lancer une analyse</button>
+            <button class="btn" id="wizBtnClose">Fermer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCRIPTS ============ -->
+  <script defer src="./core/dom.js"></script>
+  <script defer src="./core/format.js"></script>
+  <script defer src="./core/time-groups.js"></script>
+  <script defer src="./core/rename-preview.js"></script>
+  <script defer src="./core/error-boundary.js"></script>
+  <script defer src="./core/state.js"></script>
+  <script defer src="./components/status.js"></script>
+  <script defer src="./components/modal.js"></script>
+  <script defer src="./components/badge.js"></script>
+  <script defer src="./components/table.js"></script>
+  <script defer src="./components/virtual-table.js"></script>
+  <script defer src="./components/empty-state.js"></script>
+  <script defer src="./components/skeleton.js"></script>
+  <script defer src="./components/sparkline.js"></script>
+  <script defer src="./components/kpi-card.js"></script>
+  <script defer src="./components/score-v2.js"></script>
+  <!-- v7.6.0 Vague 1 : nouveaux composants navigation v5 (non montes auto, actives en Vagues 2+) -->
+  <script defer src="./components/sidebar-v5.js"></script>
+  <script defer src="./components/top-bar-v5.js"></script>
+  <script defer src="./components/breadcrumb.js"></script>
+  <!-- v7.6.0 Vague 2 : composants Home overview-first -->
+  <script defer src="./components/home-widgets.js"></script>
+  <script defer src="./components/home-charts.js"></script>
+  <!-- v7.6.0 Vague 3 : composants Library + orchestrateur -->
+  <script defer src="./components/library-components.js"></script>
+  <script defer src="./views/library-v5.js"></script>
+  <!-- v7.6.0 Vague 4 : page film standalone -->
+  <script defer src="./views/film-detail.js"></script>
+  <!-- v7.6.0 Vague 5 : Traitement fusion F1 (scan / review / apply) -->
+  <script defer src="./views/processing.js"></script>
+  <!-- v7.6.0 Vague 6 : Parametres refondus 9 groupes -->
+  <script defer src="./views/settings-v5.js"></script>
+  <!-- v7.6.0 Vague 7 : Quality / Integrations / Journal refondues -->
+  <script defer src="./views/qij-v5.js"></script>
+  <!-- v7.6.0 Vague 9 : Notification Center drawer -->
+  <script defer src="./components/notification-center.js"></script>
+  <script defer src="./components/scraping-status.js"></script>
+  <script defer src="./components/confetti.js"></script>
+  <script defer src="./components/toast.js"></script>
+  <script defer src="./components/auto-tooltip.js"></script>
+  <script defer src="./components/copy-to-clipboard.js"></script>
+  <script defer src="./components/command-palette.js"></script>
+  <script defer src="./components/help-overlay.js"></script>
+  <script defer src="./components/activity-log.js"></script>
+  <script defer src="./core/api.js"></script>
+  <script defer src="./core/router.js"></script>
+  <script defer src="./core/keyboard.js"></script>
+  <script defer src="./core/drop.js"></script>
+  <!-- Preview mode (no-op in production, activates with ?preview=1) -->
+  <script defer src="./preview/preview_scenarios.js"></script>
+  <script defer src="./preview/preview_api.js"></script>
+  <script defer src="./preview/preview_toolbar.js"></script>
+  <script defer src="./preview/preview_boot.js"></script>
+  <script defer src="./views/library.js"></script>
+  <script defer src="./views/home.js"></script>
+  <script defer src="./views/validation.js"></script>
+  <script defer src="./views/execution.js"></script>
+  <script defer src="./views/quality.js"></script>
+  <script defer src="./views/history.js"></script>
+  <script defer src="./views/settings.js"></script>
+  <script defer src="./views/quality-simulator.js"></script>
+  <script defer src="./views/custom-rules-editor.js"></script>
+  <script defer src="./views/jellyfin-view.js"></script>
+  <script defer src="./views/plex-view.js"></script>
+  <script defer src="./views/radarr-view.js"></script>
+  <script defer src="./views/about.js"></script>
+  <script defer src="./views/help.js"></script>
+  <script defer src="./app.js"></script>
+</body>
+</html>

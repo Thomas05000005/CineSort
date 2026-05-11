@@ -1,0 +1,80 @@
+CineSort - Re-audit local final de pre-release sur etat fige r7
+Date: 2026-03-19
+Branche audit source: audit_v7_2_0_dev_round6
+Branche stabilisee cible: stabilized_v7_2_0_dev_r7
+Tag cible: pre_v7_2_0_dev_audit_r7
+Commit applicatif verifie: 43f39c6
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: phase locale post-r6 proprement integree et revalidee.
+- Fiabilite estimee sur poste local: 8.6/10.
+- Conclusion courte: la borne r7 devient la nouvelle reference locale de pre-release. Le produit est solide localement sur ses flux critiques, avec preuves live completes et UX utile stabilisee, mais il n'est pas encore industrialise globalement.
+
+Preuves rejouees sur la baseline r7
+- observation UI reelle:
+  - npx playwright disponible et utilise pour une capture preview reelle
+  - screenshot systeme utilise pour une verification secondaire
+- pre-commit run --all-files: OK
+- check_project.bat: OK
+- build_windows.bat: OK
+- visual_check_ui_preview.py --dev: OK
+- live opt-in:
+  - TMDb reel: OK
+  - probe reel: OK
+  - pywebview natif reel: OK
+- stress opt-in:
+  - tests.stress.large_volume_flow: OK
+
+Fiable / bien prouve localement
+- gate standard reproductible
+- build QA/release local reproductible
+- preview visuel stable avec baseline critique versionnee
+- UI stable unique comme runtime
+- flux critiques prouves:
+  - plan -> validation -> duplicates -> apply -> undo
+- preuves live locales completes:
+  - TMDb
+  - ffprobe / MediaInfo
+  - pywebview natif
+- scenarios gros volumes opt-in couverts sur les cas synthetiques rejoues
+- backend mieux structure qu'au point de depart:
+  - CineSortApi davantage decompose en modules support par responsabilite
+  - core.py davantage decompose autour de plan/apply/duplicates
+  - flux DB secondaires plus lisibles autour de SQLiteStore
+- UX utile amelioree:
+  - Reglages avances plus legers
+  - Conflits plus lisible et plus actionnable
+  - tables larges plus maniables
+  - etats vides/erreurs plus coherents
+- decision validation gros volumes:
+  - statu quo retenu a ce stade
+  - ni pagination legere ni virtualisation ne sont justifiees maintenant par les mesures reelles
+
+Probable / partiellement prouve
+- tenue sur bibliotheques reelles tres heterogenes au-dela des scenarios locaux rejoues
+- maintenabilite backend meilleure, mais refactor encore incomplet sur cinesort_api.py et core.py
+- lisibilite UX meilleure sur desktop, mais encore perfectible sur certains cas secondaires
+- packaging Windows local solide, mais encore dependant du poste courant
+
+Non prouve / hors scope local
+- vrai run GitHub Actions Windows sur remote reel
+- signature code reelle avec secrets et pipeline distant
+- reproductibilite complete hors machine locale
+- comportement sur machines Windows differentes ou environnements partiellement verrouilles
+
+Dettes restantes
+- finir le decoupage residuel le plus sensible de cinesort_api.py
+- finir le decoupage residuel le plus heuristique de core.py
+- harmoniser encore quelques messages UX secondaires
+- ouvrir ensuite le scope GitHub/CI/signature si l'industrialisation distante devient prioritaire
+
+Lecture finale honnete
+- Localement, le produit est maintenant dans un etat de pre-release credible.
+- Les preuves locales ne reposent plus seulement sur des tests verts, mais sur un ensemble coherent:
+  - gate standard
+  - build
+  - visual check
+  - live reel
+  - stress opt-in
+- Ce qui manque surtout n'est plus du produit local pur, mais l'industrialisation distante et les dernieres finitions structurelles.

@@ -1,0 +1,86 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.log
+.coverage
+.coverage.*
+.pre-commit-cache/
+.ruff_cache/
+
+# Virtual env
+.venv/
+.venv*/
+venv/
+venv*/
+
+# Build artifacts
+build/
+dist/
+packages/
+web/_backup_*/
+.tmp_test/
+.tmp_audit/
+.ui_backups/
+archive_ui_next_*/
+docs/internal/archive/
+web_next_zero/
+audit_screenshots/
+tests/ui_preview_baselines/*
+!tests/ui_preview_baselines/critical/
+!tests/ui_preview_baselines/critical/**
+
+# MCP et outils locaux (logs verbeux, binaires lourds teleсharges par auto_install)
+.playwright-mcp/
+tools/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime app state
+STATE_DIR/
+runs/
+db/
+CineSort/
+!cinesort/infra/db/
+!cinesort/infra/db/migrations/
+!cinesort/infra/db/migrations/*.sql
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data.db
+ui_log.txt
+# Local backup patches
+_BACKUP_patch_*.txt
+_LOCAL_uncommitted_changes_backup.patch
+# Secrets and certificates
+*.env
+.env.*
+.env.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+# Exceptions : templates de configuration versionnes (pas de secrets reels)
+!.env.example
+!settings.json.example
+# Local settings (contiennent cles DPAPI, tokens)
+settings.json
+
+# Audits visuels manuels : screenshots et videos (gros artefacts, regenerables)
+tests/manual/screenshots/
+tests/manual/videos/
+
+# Lighthouse raw JSON (regenerable, redundant with HTML report)
+docs/internal/audit_v7_8_0/results/lighthouse/lighthouse_report.report.json
+
+# Personal/dev artefacts pas pour public
+.herald-error.log
+preview-*.html
+preview_*.html
+test_output.txt
+*.test_output

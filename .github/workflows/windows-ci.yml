@@ -1,0 +1,99 @@
+name: windows-ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dev and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -r requirements-build.txt
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: |
+          python -m playwright install chromium
+
+      - name: Standard quality gate
+        shell: cmd
+        run: check_project.bat
+
+      - name: Preview capture
+        shell: pwsh
+        run: |
+          python scripts/capture_ui_preview.py --dev --recommended --output-dir build\ui_preview_captures\ci
+
+      - name: Preview visual check
+        shell: pwsh
+        run: |
+          python scripts/visual_check_ui_preview.py --dev
+
+      - name: Upload verification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview-proof
+          path: |
+            build/ui_preview_captures/ci
+            build/ui_preview_visual_check/latest
+          if-no-files-found: error
+
+  build:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dev and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -r requirements-build.txt
+
+      - name: Build Windows QA and release artifacts
+        shell: cmd
+        run: build_windows.bat
+
+      - name: Optional code signing
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: |
+          ./scripts/sign_windows_release.ps1 -Paths @(
+            "dist/CineSort.exe",
+            "dist/CineSort_QA/CineSort.exe"
+          )
+          python scripts/package_zip.py --qa --release
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-artifacts
+          path: |
+            dist/CineSort.exe
+            dist/CineSort_QA/**
+            packages/*.zip
+            packages/*.sha256
+            packages/*.manifest.txt
+          if-no-files-found: error

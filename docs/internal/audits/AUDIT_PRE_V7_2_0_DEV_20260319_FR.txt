@@ -1,0 +1,82 @@
+CineSort - Re-audit complet sur etat fige
+Date: 2026-03-19
+Branche audit: audit_v7_2_0_dev_round2
+Branche stabilisee: stabilized_v7_2_0_dev
+Tag: pre_v7_2_0_dev_audit
+Commit: 3c5f5ce
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: nettement plus fiable et plus coheremment outille qu'au premier audit.
+- Fiabilite estimee: 6.5/10.
+- Etat Git de depart pour l'audit: propre et borne par branche + tag.
+- Conclusion courte: le produit n'est plus dans un etat "suite verte mais preuve faible". En revanche, il reste trop de dette structurelle et trop d'angles morts externes pour parler d'un durcissement complet.
+
+Preuves rejouees
+- check_project.bat: OK
+  - compile recursive: 66 fichiers Python
+  - tests: 260 OK
+  - coverage totale: 76.2%
+- build_windows.bat: OK
+  - QA onedir: dist/CineSort_QA/CineSort.exe
+  - release onefile: dist/CineSort.exe
+  - ZIP QA/release generes
+- preview UI:
+  - capture_ui_preview.py --dev --recommended: OK
+  - visual_check_ui_preview.py --dev: OK, 6 vues, 0 echec
+- flux critiques:
+  - plan -> validation -> duplicates -> apply -> undo prouves sur FS temporaire
+  - smoke pywebview/API minimal prouve au bootstrap Python
+
+Ce qui est maintenant prouve
+- gate local utilisable de bout en bout
+- workflow visual_check reproductible avec baseline critique versionnee
+- packaging QA/release aligne avec docs/spec/scripts
+- UI stable unique comme runtime officiel
+- secret TMDb protege localement via Windows DPAPI quand disponible
+- schema SQLite pilote par les migrations comme source de verite
+
+Ce qui reste seulement probable
+- robustesse des integrations externes sur machines reelles variees
+- comportement en charge sur tres grosses bibliotheques
+- tenue des cas d'erreur plus hostiles autour d'apply/undo
+
+Ce qui reste non prouve
+- echanges JS reels dans une vraie fenetre pywebview native
+- execution E2E avec TMDb reel, ffprobe reel et MediaInfo reel dans un environnement non maitrise
+- chaine de release industrialisee (CI, signature code, publication)
+
+Problemes prioritaires restants
+P0
+- Aucun P0 bloqueur confirme sur le chemin critique nominal du produit audite.
+
+P1
+- cinesort_api.py reste un gros monolithe multi-responsabilites.
+- core.py reste trop massif sur la planification et l'engine d'application.
+- les integrations externes restent peu prouvees en E2E reel.
+- il n'y a toujours pas de pipeline CI/release ni de signature code.
+
+P2
+- le gate statique reste limite au scope tooling/preview et non au repo complet.
+- l'initialisation SQLite garde un fallback table-par-table encore verbeux.
+- l'UI reste desktop-first avec tables larges et ecran Reglages dense.
+- l'accessibilite reste seulement "minimale correcte", pas franchement solide.
+- le build PyInstaller reste dependant d'un environnement Windows local et emet encore des warnings non bloquants.
+
+Plan de suite recommande
+P0
+- relancer un lot de durcissement cible sur les integrations externes et la preuve E2E non native.
+- garder ce tag comme borne d'audit de reference.
+
+P1
+- poursuivre le decoupage de cinesort_api.py par use case.
+- poursuivre le decoupage de core.py autour de la planification et de l'apply.
+- etendre progressivement le gate statique au code produit.
+
+P2
+- alleger Reglages et la lecture des grandes tables.
+- industrialiser la release Windows: CI, artefacts, signature, checklists.
+
+Note de lecture
+- Ce memo ne remplace pas le rapport d'audit complet A-E rendu dans la conversation.
+- Il sert de borne interne concise pour l'etat fige pre_v7_2_0_dev_audit.

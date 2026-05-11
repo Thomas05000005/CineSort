@@ -1,0 +1,38 @@
+﻿Cas reels retenus pour le lot heuristiques NFO (mini dataset prudent)
+Date: 2026-03-08
+
+Source: warnings reels observes dans le run de reference.
+Objectif: corriger uniquement un cas sur debruitage du titre video avant l'annee parenthesee,
+sans detendre les rejets legitimes de NFO faux.
+
+Cas positifs traites
+- La force de l'ordre (2012)
+  NFO: End of Watch (2012)
+  Video: End of Watch (2012) ... (La Force de l ordre).mkv
+  Probleme: le titre exact avant l'annee parenthesee n'etait pas exploite.
+  Decision: ajouter une variante de comparaison "prefixe avant annee parenthesee".
+
+Cas negatifs conserves volontairement
+- BAC Nord (2020)
+  NFO pointe vers Norm of the North: King Sized Adventure (2019)
+  Decision: doit rester rejete.
+
+- BURN.E / BURN·E (2008)
+  NFO pointe vers un autre court metrage suedois
+  Decision: doit rester rejete.
+
+Cas analyses mais non modifies car trop risques ou legitimes
+- Beetlejuice Beetlejuice (2024): NFO Beetlejuice (1988), rejet legitime par l'annee.
+- Le Comte de Monte-Cristo (2024): NFO 1975, rejet legitime par l'annee.
+- Robin des Bois (2010): warning observe avant rename, situation finale saine.
+- Démineurs (2008): NFO Les demineurs / Sweepers (1998), rejet legitime.
+- Noe (2014): NFO d'un autre film, rejet legitime.
+- La Mission (2020): NFO d'un autre film, rejet legitime.
+- L'Agence (2011): NFO L'Agence tous risques, rejet legitime.
+- Ca (2017): NFO Pirates des Caraibes, rejet legitime.
+
+Regle de prudence retenue
+- Ne pas assouplir globalement les year rejects.
+- Ne pas ajouter de "grande heuristique magique".
+- Corriger seulement le cas ou le titre exact existe deja dans le nom de la video
+  mais n'etait pas correctement pris en compte a cause du format du release name.

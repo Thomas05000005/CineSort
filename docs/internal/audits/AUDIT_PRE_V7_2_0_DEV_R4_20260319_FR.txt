@@ -1,0 +1,56 @@
+CineSort - Re-audit complet sur etat fige r4
+Date: 2026-03-19
+Branche audit: audit_v7_2_0_dev_round5
+Branche stabilisee: stabilized_v7_2_0_dev_r4
+Tag: pre_v7_2_0_dev_audit_r4
+Commit de reference: 7a15a6a
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: baseline locale rejouee proprement avec gate, build, preview, probe live, pywebview live et stress opt-in.
+- Fiabilite estimee: 7.6/10 sur poste local.
+- Conclusion courte: la borne r4 est stable et rejouable en local, mais TMDb live et la validation GitHub distante restent des preuves externes encore ouvertes sur cette machine.
+
+Preuves rejouees sur la baseline r4
+- pre-commit run --all-files: OK
+- check_project.bat: OK
+- build_windows.bat: OK
+- capture_ui_preview.py --dev --recommended: OK
+- visual_check_ui_preview.py --dev: OK
+- live opt-in:
+  - probe reel: OK
+  - pywebview natif reel: OK
+  - TMDb live: non rejoue ici faute de CINESORT_LIVE_TMDB / CINESORT_TMDB_API_KEY
+- stress opt-in:
+  - tests.stress.large_volume_flow: OK
+
+Ce qui est prouve localement
+- gate standard reproductible
+- build QA/release local reproductible
+- preview visuel stable avec baseline critique versionnee
+- UI stable unique comme runtime
+- preuves live locales pour probe et pywebview
+- scenarios gros volumes opt-in sans crash sur les cas couverts
+
+Ce qui reste ouvert
+- TMDb live reel tant qu'une vraie cle d'environnement n'est pas fournie
+- validation d'un vrai run GitHub Actions Windows tant qu'aucun remote Git n'est configure et pousse
+
+Blocages externes connus au moment de ce memo
+- aucun remote Git n'est configure sur cette machine
+- gh n'est pas disponible
+- CINESORT_TMDB_API_KEY est absente
+
+Plan de suite recommande
+P1
+- fournir CINESORT_LIVE_TMDB=1 et CINESORT_TMDB_API_KEY, puis rejouer python scripts/run_live_verification.py
+- pousser la borne r4 sur GitHub et valider .github/workflows/windows-ci.yml sur un vrai run Windows
+
+P1 backend
+- poursuivre le decoupage restant de cinesort_api.py
+- poursuivre le decoupage restant de core.py et reduire encore les helpers inline d'apply/scan
+- simplifier encore SQLiteStore.initialize() sans changer le schema
+
+P2
+- finir Reglages, grandes tables et etats vides/erreurs/gros volumes
+- verifier la signature conditionnelle sur un vrai run CI

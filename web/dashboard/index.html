@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="luxe">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- F2 Audit : Content-Security-Policy couche defense en profondeur contre XSS
+       via innerHTML (redondant avec le header CSP emis par rest_server.py pour
+       les clients qui ne l'enverraient pas).
+       V4-09 : retire frame-ancestors du meta (ignore par les browsers, doit etre
+       en HTTP header — voir rest_server.py X-Frame-Options). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>CineSort — Dashboard</title>
+  <!-- V4-09 : favicon SVG inline (pas de fichier separe, evite 404 Lighthouse BP) -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎬%3C/text%3E%3C/svg%3E">
+  <!-- V3-02 (v7.7.0) : police partagee shared/fonts/ (servi par /shared/* REST) -->
+  <link rel="preload" href="/shared/fonts/Manrope-Variable.ttf" as="font" type="font/ttf" crossorigin>
+  <!-- v7.6.0 Design System v5 (shared) — charge AVANT les styles legacy -->
+  <!-- Dashboard distant : servi par REST via /shared/* (pas ../shared/ car path traversal) -->
+  <link rel="stylesheet" href="/shared/tokens.css">
+  <link rel="stylesheet" href="/shared/themes.css">
+  <link rel="stylesheet" href="/shared/animations.css">
+  <link rel="stylesheet" href="/shared/components.css">
+  <link rel="stylesheet" href="/shared/utilities.css">
+  <!-- Legacy CSS (conserve pendant la transition, suppression en Vague 5C) -->
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="../themes.css">
+  <link rel="stylesheet" href="./depth-effects.css">
+  <!-- V5B-01 : layout shell v5 minimal (sidebar mount + main flex) -->
+  <style>
+    .v5-shell { display: flex; min-height: 100vh; align-items: stretch; }
+    .v5-sidebar-mount { flex-shrink: 0; }
+    .v5-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .v5-topbar-mount { flex-shrink: 0; }
+    .v5-breadcrumb-mount { flex-shrink: 0; padding: var(--sp-2) var(--sp-4) 0; }
+    .v5-content { flex: 1; min-width: 0; padding: var(--sp-4); overflow-y: auto; }
+    .v5-content > .view { display: none; }
+    .v5-content > .view.active { display: block; }
+  </style>
+</head>
+<body data-theme="luxe">
+
+  <!-- V8 A11y : skip-link pour navigation clavier -->
+  <a href="#main-content" class="skip-link">Aller au contenu principal</a>
+
+  <!-- ============ LOGIN (plein ecran, pas de shell) ============ -->
+  <div id="view-login" class="view login-wrap">
+    <div class="card login-card">
+      <h1>CineSort <span class="text-accent">Dashboard</span></h1>
+      <p class="subtitle">Entrez la clé d'accès fournie par CineSort (Paramètres → API REST → Clé d'accès, ou carte « Accès distant » de l'accueil).</p>
+      <form id="loginForm" autocomplete="off">
+        <div class="field">
+          <label for="loginToken">Clé d'accès</label>
+          <input id="loginToken" data-testid="login-token" type="password" class="input" placeholder="Collez la clé d'accès…" autocomplete="off" spellcheck="false">
+        </div>
+        <label class="checkbox-row mb-4">
+          <input id="loginPersist" data-testid="login-persist" type="checkbox">
+          Rester connecté
+        </label>
+        <div id="loginMsg" class="status-msg"></div>
+        <button id="loginBtn" data-testid="login-btn" type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+          <span id="loginSpinner" class="spinner hidden"></span>
+          Connexion
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ V5B-01 : SHELL V5 (sidebar v5 + topbar v5 + breadcrumb + main) ============ -->
+  <!-- L'id "app-shell" est preserve pour compat router.js (toggle hidden vs view-login). -->
+  <div id="app-shell" class="v5-shell hidden">
+
+    <!-- Sidebar v5 (mount dynamique via sidebar-v5.render()) -->
+    <aside id="v5SidebarMount" class="v5-sidebar-mount" role="navigation" aria-label="Navigation principale"></aside>
+
+    <div class="v5-main">
+      <!-- Top-bar v5 (mount dynamique via top-bar-v5.render()) -->
+      <header id="v5TopBarMount" class="v5-topbar-mount" role="banner"></header>
+
+      <!-- Breadcrumb (mount dynamique via breadcrumb.render()) -->
+      <nav id="v5BreadcrumbMount" class="v5-breadcrumb-mount" aria-label="Fil d'Ariane"></nav>
+
+      <!-- Mount points pour les vues. La classe .main est preservee pour compat
+           router.js (querySelector('.main .view') pour toggle .active). -->
+      <main id="main-content" class="main v5-content">
+        <!-- Vues v5 ESM (V5bis-portees) -->
+        <section id="view-home" class="view"></section>
+        <section id="view-library" class="view">
+          <div id="libraryContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-processing" class="view">
+          <!-- Note : /processing route vers initLibraryWorkflow (vue v4 unifiee). -->
+        </section>
+        <section id="view-quality" class="view">
+          <div id="qualityContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <!-- V7-fusion Phase 3 : vue QIJ consolidee (Quality + Integrations + Journal) -->
+        <section id="view-qij" class="view" aria-live="polite" aria-atomic="true" aria-busy="false"></section>
+        <section id="view-settings" class="view">
+          <div id="dashSettingsContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-help" class="view">
+          <div id="helpContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-film-detail" class="view"></section>
+
+        <!-- Vues v4 conservees temporairement (V5C les portera ou supprimera) -->
+        <section id="view-jellyfin" class="view">
+          <div id="jellyfinContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-plex" class="view">
+          <div id="plexContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-radarr" class="view">
+          <div id="radarrContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+        <section id="view-logs" class="view">
+          <div id="logsContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+
+        <!-- V7-fix CRIT-5 : sections runs/review supprimees (orphelines, sans
+             registerRoute correspondant). Les fonctionnalites runs sont dans
+             QIJ tab Journal, et review est dans Library workflow Validation. -->
+
+
+        <!-- Status legacy redirige vers /home (alias) — conteneur present pour compat -->
+        <section id="view-status" class="view">
+          <div id="statusContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- V6 : shim global supprime, remplace par module ESM
+       (cf web/views/_legacy_compat.js importe par home.js). -->
+  <!-- Bootstrap JS (ES modules) -->
+  <script type="module" src="./app.js"></script>
+  <!-- Modale "A propos" (V1-12) — auto-init via DOMContentLoaded -->
+  <script type="module" src="./views/about.js"></script>
+</body>
+</html>

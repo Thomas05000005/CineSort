@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="fr" data-theme="onyx">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CineSort v6 — Design Preview</title>
+<style>
+/* ============================================================
+   CineSort v6 — Design System Preview
+   4 palettes refondues · Glassmorphism · Ambient gradients · Bento
+   ============================================================ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Espacements (8pt scale) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 48px; --sp-9: 64px;
+
+  /* Typo */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Radii */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-pill: 999px;
+
+  /* Transitions */
+  --t-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --t-mid: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --t-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   THÈME 1 — ONYX & AURUM v2 (premium noir & or — contraste AAA)
+   Inspiration : Rolex boutique, Nolan credits, Apple Liquid Glass
+   Tokens OKLCh (perception uniforme) — fallback hex commenté
+   ============================================================ */
+[data-theme="onyx"] {
+  /* Fonds profondeur warm (léger shift ambre vers le noir) */
+  --bg-base: #07070A;           /* oklch(0.10 0.005 70) */
+  --bg-elevated: #0F0E12;       /* oklch(0.14 0.005 70) */
+  --bg-sunken: #030305;         /* oklch(0.06 0.003 70) */
+
+  /* Glass plus transparent + bleuté-warm pour capter l'orbe en arrière */
+  --glass-bg: rgba(22, 19, 14, 0.28);           /* -50% opacité vs v1 */
+  --glass-bg-strong: rgba(28, 24, 18, 0.48);
+  --glass-border: rgba(255, 240, 200, 0.08);
+  --glass-border-hover: rgba(255, 210, 140, 0.55);
+  --glass-inset: rgba(255, 245, 220, 0.05);
+  --glass-sheen: linear-gradient(135deg, rgba(255, 245, 220, 0.08) 0%, transparent 45%, rgba(255, 200, 120, 0.04) 100%);
+
+  /* Texte contraste AAA (ratio > 12:1 sur bg-base) */
+  --text-primary: #FAF6EC;      /* oklch(0.97 0.015 90) — warm off-white */
+  --text-secondary: #B9B0A0;    /* oklch(0.75 0.015 80) — ratio 8.5:1 */
+  --text-tertiary: #75685A;     /* oklch(0.50 0.015 75) — ratio 4.5:1 */
+  --text-inverse: #07070A;
+
+  /* Accent : Champagne Gold brillant (plus noble que v1) */
+  --accent: #FFD085;            /* oklch(0.87 0.12 80) */
+  --accent-hover: #FFE4B0;      /* oklch(0.92 0.08 85) */
+  --accent-deep: #C88A3A;       /* oklch(0.65 0.13 60) — pour gradients */
+  --accent-soft: rgba(255, 208, 133, 0.18);
+  --accent-glow: rgba(255, 208, 133, 0.45);
+
+  --success: #5EEAA8;
+  --warning: #FFCB48;
+  --danger: #FF7878;
+  --info: #7AB8FF;
+
+  /* Ambient orbs renforcés (opacité +70%) + 4e orbe chaud diagonal */
+  --ambient-1: radial-gradient(720px circle at 12% 8%, rgba(255, 208, 133, 0.22), transparent 60%);
+  --ambient-2: radial-gradient(900px circle at 88% 92%, rgba(200, 138, 58, 0.14), transparent 70%);
+  --ambient-3: radial-gradient(500px circle at 80% 20%, rgba(180, 80, 20, 0.10), transparent 65%);
+  --ambient-4: radial-gradient(420px circle at 20% 90%, rgba(255, 180, 100, 0.08), transparent 60%);
+}
+
+/* ============================================================
+   THÈME 2 — MIDNIGHT CELLULOID (cinéma : nuit profonde + rouge velours)
+   Inspiration : salle de projection, rideau de théâtre
+   ============================================================ */
+[data-theme="celluloid"] {
+  --bg-base: #050B15;
+  --bg-elevated: #0B1423;
+  --bg-sunken: #02060C;
+
+  --glass-bg: rgba(14, 22, 38, 0.28);
+  --glass-bg-strong: rgba(20, 30, 50, 0.48);
+  --glass-border: rgba(255, 180, 180, 0.10);
+  --glass-border-hover: rgba(255, 80, 95, 0.55);
+  --glass-inset: rgba(255, 230, 230, 0.05);
+  --glass-sheen: linear-gradient(135deg, rgba(255, 220, 220, 0.08) 0%, transparent 45%, rgba(230, 57, 70, 0.04) 100%);
+
+  --text-primary: #F6EDE5;
+  --text-secondary: #B0A8AC;
+  --text-tertiary: #6E6872;
+  --text-inverse: #050B15;
+
+  --accent: #FF4D5E;
+  --accent-hover: #FF7080;
+  --accent-deep: #B02030;
+  --accent-soft: rgba(255, 77, 94, 0.18);
+  --accent-glow: rgba(255, 77, 94, 0.45);
+
+  --success: #4FE1A8;
+  --warning: #FFBF44;
+  --danger: #FF6B7A;
+  --info: #6AB0FF;
+
+  --ambient-1: radial-gradient(720px circle at 12% 10%, rgba(255, 77, 94, 0.18), transparent 62%);
+  --ambient-2: radial-gradient(900px circle at 90% 92%, rgba(100, 40, 140, 0.14), transparent 70%);
+  --ambient-3: radial-gradient(500px circle at 75% 25%, rgba(180, 30, 50, 0.12), transparent 65%);
+  --ambient-4: radial-gradient(420px circle at 25% 85%, rgba(60, 20, 80, 0.10), transparent 60%);
+}
+
+/* ============================================================
+   THÈME 3 — POLAR STUDIO (studio : tech neutre + cyan électrique)
+   Inspiration : cockpit Linear, Vercel dashboard
+   ============================================================ */
+[data-theme="polar"] {
+  --bg-base: #08090D;
+  --bg-elevated: #11141A;
+  --bg-sunken: #04050A;
+
+  --glass-bg: rgba(20, 24, 32, 0.28);
+  --glass-bg-strong: rgba(28, 34, 44, 0.48);
+  --glass-border: rgba(200, 230, 255, 0.10);
+  --glass-border-hover: rgba(100, 230, 255, 0.55);
+  --glass-inset: rgba(220, 240, 255, 0.05);
+  --glass-sheen: linear-gradient(135deg, rgba(220, 240, 255, 0.08) 0%, transparent 45%, rgba(34, 211, 238, 0.05) 100%);
+
+  --text-primary: #F1F5FC;
+  --text-secondary: #A4B0C2;
+  --text-tertiary: #626E80;
+  --text-inverse: #08090D;
+
+  --accent: #4BE4F5;
+  --accent-hover: #7FF0FD;
+  --accent-deep: #0E8FA8;
+  --accent-soft: rgba(75, 228, 245, 0.18);
+  --accent-glow: rgba(75, 228, 245, 0.45);
+
+  --success: #4FE5A6;
+  --warning: #FFCB48;
+  --danger: #FF8585;
+  --info: #9AA8FF;
+
+  --ambient-1: radial-gradient(720px circle at 12% 10%, rgba(75, 228, 245, 0.16), transparent 62%);
+  --ambient-2: radial-gradient(900px circle at 90% 92%, rgba(140, 130, 255, 0.12), transparent 70%);
+  --ambient-3: radial-gradient(500px circle at 75% 25%, rgba(30, 120, 200, 0.10), transparent 65%);
+  --ambient-4: radial-gradient(420px circle at 25% 85%, rgba(20, 200, 220, 0.08), transparent 60%);
+}
+
+/* ============================================================
+   THÈME 4 — ULTRAVIOLET (néon : cyberpunk élégant)
+   Inspiration : Blade Runner 2049, Synthwave
+   ============================================================ */
+[data-theme="ultraviolet"] {
+  --bg-base: #0A0718;
+  --bg-elevated: #130F28;
+  --bg-sunken: #04020E;
+
+  --glass-bg: rgba(22, 16, 42, 0.28);
+  --glass-bg-strong: rgba(30, 22, 56, 0.48);
+  --glass-border: rgba(210, 190, 255, 0.12);
+  --glass-border-hover: rgba(200, 160, 255, 0.55);
+  --glass-inset: rgba(235, 220, 255, 0.05);
+  --glass-sheen: linear-gradient(135deg, rgba(235, 220, 255, 0.08) 0%, transparent 45%, rgba(167, 139, 250, 0.05) 100%);
+
+  --text-primary: #F3EDFF;
+  --text-secondary: #B5ABD2;
+  --text-tertiary: #756B95;
+  --text-inverse: #0A0718;
+
+  --accent: #C4A5FF;
+  --accent-hover: #D8C3FF;
+  --accent-deep: #7B4FD8;
+  --accent-soft: rgba(196, 165, 255, 0.18);
+  --accent-glow: rgba(196, 165, 255, 0.5);
+
+  --success: #7DECC5;
+  --warning: #FFDC90;
+  --danger: #FFABB0;
+  --info: #A8BDFF;
+
+  --ambient-1: radial-gradient(720px circle at 12% 10%, rgba(196, 165, 255, 0.20), transparent 62%);
+  --ambient-2: radial-gradient(900px circle at 90% 92%, rgba(255, 120, 200, 0.14), transparent 70%);
+  --ambient-3: radial-gradient(500px circle at 75% 25%, rgba(120, 60, 200, 0.12), transparent 65%);
+  --ambient-4: radial-gradient(420px circle at 25% 85%, rgba(80, 30, 150, 0.10), transparent 60%);
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+html, body {
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed; inset: -10%;
+  background:
+    var(--ambient-1),
+    var(--ambient-2),
+    var(--ambient-3),
+    var(--ambient-4, transparent),
+    linear-gradient(180deg, var(--bg-sunken) 0%, var(--bg-base) 100%);
+  z-index: -2;
+  animation: ambientDrift 28s ease-in-out infinite alternate;
+  filter: blur(0.5px);
+}
+
+@keyframes ambientDrift {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  33%  { transform: translate3d(-30px, 15px, 0) scale(1.04); }
+  66%  { transform: translate3d(20px, -20px, 0) scale(0.98); }
+  100% { transform: translate3d(15px, 10px, 0) scale(1.02); }
+}
+
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 245, 220, 0.025) 1px, transparent 0);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.7;
+}
+
+/* Light leak diagonal — effet cinématique premium */
+.app::before {
+  content: "";
+  position: fixed; inset: 0;
+  background: linear-gradient(110deg,
+    transparent 0%,
+    transparent 45%,
+    rgba(255, 208, 133, 0.035) 48%,
+    rgba(255, 208, 133, 0.06) 50%,
+    rgba(255, 208, 133, 0.035) 52%,
+    transparent 55%,
+    transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: plus-lighter;
+}
+
+/* ============================================================
+   APP SHELL : sidebar + topbar + main
+   ============================================================ */
+.app {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 64px 1fr;
+  grid-template-areas:
+    "sidebar topbar"
+    "sidebar main";
+  height: 100vh;
+  gap: 0;
+}
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  grid-area: sidebar;
+  padding: var(--sp-5) var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-right: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  overflow-y: auto;
+  position: relative;
+  box-shadow:
+    inset -1px 0 0 var(--glass-inset),
+    4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg, var(--accent-soft) 0%, transparent 20%),
+    linear-gradient(180deg, transparent 80%, rgba(0, 0, 0, 0.2) 100%);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-2);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.logo-mark {
+  width: 32px; height: 32px;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  display: grid; place-items: center;
+  color: var(--text-inverse);
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow:
+    0 4px 16px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-group-label {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--t-fast);
+  position: relative;
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.nav-item:hover {
+  background: var(--glass-inset);
+  color: var(--text-primary);
+}
+
+.nav-item.active {
+  background: linear-gradient(90deg, var(--accent-soft) 0%, transparent 100%);
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.nav-item .icon {
+  width: 18px;
+  height: 18px;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.nav-item.active .icon { opacity: 1; }
+
+.nav-badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------- Topbar ---------- */
+.topbar {
+  grid-area: topbar;
+  padding: 0 var(--sp-7);
+  background: var(--glass-bg);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-bottom: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  position: relative;
+  z-index: 10;
+  box-shadow:
+    inset 0 -1px 0 var(--glass-inset),
+    0 4px 24px rgba(0, 0, 0, 0.2);
+}
+
+.topbar-title h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.topbar-title p {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.search {
+  flex: 1;
+  max-width: 480px;
+  margin-left: auto;
+  position: relative;
+}
+
+.search input {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-8);
+  background: var(--glass-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  transition: all var(--t-fast);
+}
+
+.search input::placeholder { color: var(--text-tertiary); }
+
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--bg-elevated);
+}
+
+.search .search-icon {
+  position: absolute;
+  left: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.search kbd {
+  position: absolute;
+  right: var(--sp-3);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 6px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: var(--glass-inset);
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all var(--t-fast);
+  position: relative;
+}
+
+.icon-btn:hover {
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+}
+
+.icon-btn .dot {
+  position: absolute;
+  top: 9px; right: 9px;
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  display: grid;
+  place-items: center;
+  color: var(--text-inverse);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  border: 2px solid var(--glass-border);
+  box-shadow: 0 2px 12px var(--accent-glow);
+}
+
+/* ---------- Main ---------- */
+.main {
+  grid-area: main;
+  padding: var(--sp-6) var(--sp-7);
+  overflow-y: auto;
+}
+
+/* ============================================================
+   BENTO GRID LAYOUT
+   ============================================================ */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--sp-5);
+  max-width: 1400px;
+}
+
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--t-mid), border-color var(--t-mid), box-shadow var(--t-mid);
+  box-shadow:
+    inset 0 1px 0 var(--glass-inset),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.015),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 32px rgba(0, 0, 0, 0.28),
+    0 24px 64px rgba(0, 0, 0, 0.18);
+  z-index: 1;
+}
+
+/* Sheen premium — reflet diagonal subtil */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--glass-sheen, linear-gradient(135deg, var(--glass-inset) 0%, transparent 50%));
+  pointer-events: none;
+  opacity: 1;
+  z-index: -1;
+}
+
+/* Reflet supérieur style Apple glass */
+.card::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.card:hover {
+  border-color: var(--glass-border-hover);
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 var(--glass-inset),
+    inset 0 0 0 1px rgba(255, 208, 133, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    0 24px 56px rgba(0, 0, 0, 0.35),
+    0 0 48px var(--accent-glow);
+}
+
+/* Hero card (status) */
+.card.hero { grid-column: span 8; }
+.card.side { grid-column: span 4; }
+.card.half { grid-column: span 6; }
+.card.third { grid-column: span 4; }
+.card.quarter { grid-column: span 3; }
+.card.wide { grid-column: span 12; }
+
+@media (max-width: 1200px) {
+  .card.hero, .card.side { grid-column: span 12; }
+  .card.half, .card.third { grid-column: span 6; }
+}
+@media (max-width: 768px) {
+  .card.half, .card.third, .card.quarter { grid-column: span 12; }
+  .app { grid-template-columns: 0 1fr; }
+  .sidebar { display: none; }
+}
+
+.card h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.card h3 .dot {
+  width: 6px; height: 6px;
+  background: var(--success);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.3); }
+}
+
+/* ============================================================
+   KPI Hero
+   ============================================================ */
+.hero-content {
+  display: flex;
+  gap: var(--sp-7);
+  align-items: flex-start;
+}
+
+.hero-primary {
+  flex: 1;
+}
+
+.hero-label {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-2);
+}
+
+.hero-value {
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
+  line-height: 1;
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-meta {
+  display: flex;
+  gap: var(--sp-5);
+  margin-top: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-item .v {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.meta-item .v.pos { color: var(--success); }
+.meta-item .v.neg { color: var(--danger); }
+
+.meta-item .l {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+}
+
+/* Progress ring (SVG) */
+.ring {
+  width: 140px; height: 140px;
+  position: relative;
+}
+
+.ring svg { transform: rotate(-90deg); }
+
+.ring-track {
+  fill: none;
+  stroke: var(--glass-inset);
+  stroke-width: 10;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: url(#ring-grad);
+  stroke-width: 10;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s ease;
+  filter: drop-shadow(0 0 8px var(--accent-glow));
+}
+
+.ring-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  flex-direction: column;
+}
+
+.ring-label strong {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.ring-label small {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   Sparkline
+   ============================================================ */
+.sparkline {
+  width: 100%;
+  height: 60px;
+  margin-top: var(--sp-3);
+}
+
+.sparkline path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: none;
+  filter: drop-shadow(0 2px 4px var(--accent-glow));
+}
+
+.sparkline .fill {
+  fill: url(#spark-grad);
+  opacity: 0.3;
+}
+
+/* ============================================================
+   Quality distribution
+   ============================================================ */
+.quality-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.quality-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 50px;
+  gap: var(--sp-3);
+  align-items: center;
+  font-size: 13px;
+}
+
+.tier-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+
+.tier-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+.tier-platinum { color: #E4E4E7; }
+.tier-platinum .tier-dot { background: linear-gradient(135deg, #E4E4E7, #A1A1AA); box-shadow: 0 0 6px rgba(228, 228, 231, 0.5); }
+
+.tier-gold { color: var(--accent); }
+.tier-gold .tier-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+.tier-silver { color: #C0C0CC; }
+.tier-silver .tier-dot { background: #C0C0CC; }
+
+.tier-bronze { color: #CD7F32; }
+.tier-bronze .tier-dot { background: #CD7F32; }
+
+.tier-reject { color: var(--danger); }
+.tier-reject .tier-dot { background: var(--danger); }
+
+.quality-track {
+  height: 8px;
+  background: var(--glass-inset);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  position: relative;
+}
+
+.quality-fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  position: relative;
+  animation: slideIn 800ms ease forwards;
+  transform-origin: left;
+}
+
+@keyframes slideIn {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+.quality-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* ============================================================
+   Activity feed
+   ============================================================ */
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.activity-item {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  transition: background var(--t-fast);
+  align-items: flex-start;
+}
+
+.activity-item:hover {
+  background: var(--glass-inset);
+}
+
+.activity-icon {
+  width: 32px; height: 32px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.activity-icon.ok { background: rgba(74, 222, 128, 0.15); color: var(--success); }
+.activity-icon.warn { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+.activity-icon.err { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+
+.activity-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-text .title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-text .time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Services grid
+   ============================================================ */
+.services {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.service {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--glass-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  transition: all var(--t-fast);
+}
+
+.service:hover {
+  border-color: var(--glass-border-hover);
+}
+
+.service-avatar {
+  width: 36px; height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.service-info .n {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.service-info .s {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.service .status-dot {
+  margin-left: auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.on { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.status-dot.off { background: var(--text-tertiary); }
+.status-dot.warn { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+
+/* ============================================================
+   Buttons & theme switcher
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 10px 16px;
+  background: var(--glass-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--t-fast);
+  text-decoration: none;
+}
+
+.btn:hover {
+  border-color: var(--glass-border-hover);
+  background: var(--glass-bg-strong);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: var(--text-inverse);
+  border-color: transparent;
+  box-shadow: 0 4px 16px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+}
+
+.theme-switch {
+  position: fixed;
+  bottom: var(--sp-6);
+  right: var(--sp-6);
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-pill);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.theme-chip {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all var(--t-fast);
+  position: relative;
+}
+
+.theme-chip:hover { transform: scale(1.1); }
+
+.theme-chip.active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+}
+
+.theme-chip[data-swatch="onyx"] { background: linear-gradient(135deg, #0A0A0C 0%, #F5C97E 100%); }
+.theme-chip[data-swatch="celluloid"] { background: linear-gradient(135deg, #07101F 0%, #E63946 100%); }
+.theme-chip[data-swatch="polar"] { background: linear-gradient(135deg, #0B0D11 0%, #22D3EE 100%); }
+.theme-chip[data-swatch="ultraviolet"] { background: linear-gradient(135deg, #0A081C 0%, #A78BFA 100%); }
+
+/* ============================================================
+   Scroll
+   ============================================================ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: var(--r-pill);
+  border: 2px solid var(--bg-base);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--glass-border-hover); }
+
+/* ============================================================
+   Responsive workflow steps
+   ============================================================ */
+.workflow-strip {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--glass-inset);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+}
+
+.step {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.step.done { color: var(--success); border-color: rgba(74, 222, 128, 0.3); }
+.step.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+/* ============================================================
+   Badge
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--glass-border);
+}
+.badge.success { background: rgba(74, 222, 128, 0.12); color: var(--success); border-color: rgba(74, 222, 128, 0.25); }
+.badge.warn    { background: rgba(251, 191, 36, 0.12); color: var(--warning); border-color: rgba(251, 191, 36, 0.25); }
+.badge.danger  { background: rgba(248, 113, 113, 0.12); color: var(--danger); border-color: rgba(248, 113, 113, 0.25); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark">C</div>
+      <span>CineSort</span>
+    </div>
+
+    <nav class="nav-group">
+      <a href="#" class="nav-item active">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Accueil
+      </a>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        Bibliothèque
+        <span class="nav-badge">42</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Qualité
+      </a>
+    </nav>
+
+    <nav class="nav-group">
+      <div class="nav-group-label">Intégrations</div>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+        Jellyfin
+      </a>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 9l-8 7-8-7"/><path d="M20 15l-8 7-8-7"/></svg>
+        Plex
+      </a>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Radarr
+      </a>
+    </nav>
+
+    <nav class="nav-group" style="margin-top: auto;">
+      <div class="nav-group-label">Système</div>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Journaux
+      </a>
+      <a href="#" class="nav-item">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Paramètres
+      </a>
+    </nav>
+  </aside>
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Accueil</h1>
+      <p>Vue d'ensemble — santé et activité</p>
+    </div>
+
+    <div class="search">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" placeholder="Chercher un film, paramètre, journal…">
+      <kbd>⌘K</kbd>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="icon-btn" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="dot"></span>
+      </button>
+      <button class="icon-btn" title="Aide">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+      <button class="icon-btn" title="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </button>
+      <div class="avatar">TB</div>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="bento">
+
+      <!-- HERO : run en cours -->
+      <section class="card hero">
+        <h3><span class="dot"></span> Run actif — Scan bibliothèque</h3>
+        <div class="hero-content">
+          <div class="hero-primary">
+            <div class="hero-label">Films traités</div>
+            <div class="hero-value">1 247</div>
+            <div class="hero-meta">
+              <div class="meta-item"><span class="v pos">+82</span><span class="l">7 derniers jours</span></div>
+              <div class="meta-item"><span class="v">98.3%</span><span class="l">succès</span></div>
+              <div class="meta-item"><span class="v">24m</span><span class="l">restant</span></div>
+            </div>
+          </div>
+          <div class="ring">
+            <svg width="140" height="140" viewBox="0 0 140 140">
+              <defs>
+                <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="var(--accent)"/>
+                  <stop offset="100%" stop-color="var(--accent-hover)"/>
+                </linearGradient>
+              </defs>
+              <circle cx="70" cy="70" r="60" class="ring-track"/>
+              <circle cx="70" cy="70" r="60" class="ring-fill"
+                      stroke-dasharray="377"
+                      stroke-dashoffset="113"/>
+            </svg>
+            <div class="ring-label">
+              <strong>70%</strong>
+              <small>scan</small>
+            </div>
+          </div>
+        </div>
+        <div class="workflow-strip">
+          <div class="step done">1. Analyse</div>
+          <div class="step done">2. Vérification</div>
+          <div class="step active">3. Validation</div>
+          <div class="step">4. Doublons</div>
+          <div class="step">5. Application</div>
+        </div>
+      </section>
+
+      <!-- Services -->
+      <section class="card side">
+        <h3>Services connectés</h3>
+        <div class="services">
+          <div class="service">
+            <div class="service-avatar" style="background: #00A4DC; color: #fff;">J</div>
+            <div class="service-info">
+              <div class="n">Jellyfin</div>
+              <div class="s">En ligne · 24ms</div>
+            </div>
+            <span class="status-dot on"></span>
+          </div>
+          <div class="service">
+            <div class="service-avatar" style="background: #282A2D; color: #EBAF00;">P</div>
+            <div class="service-info">
+              <div class="n">Plex</div>
+              <div class="s">En ligne · 38ms</div>
+            </div>
+            <span class="status-dot on"></span>
+          </div>
+          <div class="service">
+            <div class="service-avatar" style="background: #FFC230; color: #000;">R</div>
+            <div class="service-info">
+              <div class="n">Radarr</div>
+              <div class="s">Dernière sync 2h</div>
+            </div>
+            <span class="status-dot warn"></span>
+          </div>
+          <div class="service">
+            <div class="service-avatar" style="background: #1976d2; color: #fff;">T</div>
+            <div class="service-info">
+              <div class="n">TMDb</div>
+              <div class="s">845 req / h</div>
+            </div>
+            <span class="status-dot on"></span>
+          </div>
+        </div>
+        <button class="btn" style="width: 100%; justify-content: center; margin-top: var(--sp-4);">Tester les connexions</button>
+      </section>
+
+      <!-- Distribution qualité -->
+      <section class="card half">
+        <h3>Distribution qualité <span class="badge" style="margin-left: auto;">1247 films</span></h3>
+        <div class="quality-bars">
+          <div class="quality-row">
+            <span class="tier-label tier-platinum"><span class="tier-dot"></span>Platinum</span>
+            <div class="quality-track"><div class="quality-fill" style="width: 18%; background: linear-gradient(90deg, #E4E4E7, #A1A1AA);"></div></div>
+            <span class="quality-value">224</span>
+          </div>
+          <div class="quality-row">
+            <span class="tier-label tier-gold"><span class="tier-dot"></span>Gold</span>
+            <div class="quality-track"><div class="quality-fill" style="width: 42%; background: linear-gradient(90deg, var(--accent), var(--accent-hover));"></div></div>
+            <span class="quality-value">524</span>
+          </div>
+          <div class="quality-row">
+            <span class="tier-label tier-silver"><span class="tier-dot"></span>Silver</span>
+            <div class="quality-track"><div class="quality-fill" style="width: 28%; background: linear-gradient(90deg, #C0C0CC, #8B8B96);"></div></div>
+            <span class="quality-value">349</span>
+          </div>
+          <div class="quality-row">
+            <span class="tier-label tier-bronze"><span class="tier-dot"></span>Bronze</span>
+            <div class="quality-track"><div class="quality-fill" style="width: 10%; background: linear-gradient(90deg, #CD7F32, #8B4513);"></div></div>
+            <span class="quality-value">124</span>
+          </div>
+          <div class="quality-row">
+            <span class="tier-label tier-reject"><span class="tier-dot"></span>Reject</span>
+            <div class="quality-track"><div class="quality-fill" style="width: 2%; background: var(--danger);"></div></div>
+            <span class="quality-value">26</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tendance disque -->
+      <section class="card half">
+        <h3>Espace disque · 7j</h3>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: var(--sp-3);">
+          <div>
+            <div class="hero-value" style="font-size: 36px;">2.4 TB</div>
+            <div style="font-size: 12px; color: var(--text-tertiary);">sur 4 TB · 60% utilisé</div>
+          </div>
+          <div class="badge warn">+180 GB cette semaine</div>
+        </div>
+        <svg class="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="fill" d="M 0 50 L 30 45 L 60 38 L 90 40 L 120 30 L 150 25 L 180 28 L 210 18 L 240 20 L 270 10 L 300 8 L 300 60 L 0 60 Z"/>
+          <path d="M 0 50 L 30 45 L 60 38 L 90 40 L 120 30 L 150 25 L 180 28 L 210 18 L 240 20 L 270 10 L 300 8"/>
+        </svg>
+      </section>
+
+      <!-- Activity feed -->
+      <section class="card third">
+        <h3>Activité récente</h3>
+        <div class="activity">
+          <div class="activity-item">
+            <div class="activity-icon ok">✓</div>
+            <div class="activity-text">
+              <div class="title">Inception (2010) · 1080p BluRay</div>
+              <div class="time">il y a 2 min · Gold · 94/100</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon warn">!</div>
+            <div class="activity-text">
+              <div class="title">Doublon détecté · Interstellar</div>
+              <div class="time">il y a 14 min · à valider</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon ok">✓</div>
+            <div class="activity-text">
+              <div class="title">The Dark Knight · 4K HDR</div>
+              <div class="time">il y a 23 min · Platinum · 98/100</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon err">✕</div>
+            <div class="activity-text">
+              <div class="title">Échec TMDb · "movie_xyz_2023"</div>
+              <div class="time">il y a 1h · ignoré</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Librarian suggestions -->
+      <section class="card third">
+        <h3>Suggestions Librarian</h3>
+        <div style="margin-top: var(--sp-3);">
+          <div style="display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-4);">
+            <div class="hero-value" style="font-size: 40px;">8.7</div>
+            <div style="color: var(--text-tertiary); font-size: 12px;">/ 10 · santé globale</div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: var(--sp-3);">
+            <div style="padding: var(--sp-3); background: var(--glass-inset); border-radius: var(--r-md); border-left: 3px solid var(--warning);">
+              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">3 doublons à trancher</div>
+              <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">dont 2 de haute qualité</div>
+            </div>
+            <div style="padding: var(--sp-3); background: var(--glass-inset); border-radius: var(--r-md); border-left: 3px solid var(--info);">
+              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">12 upgrades possibles</div>
+              <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">via Radarr · estimation +8 Go</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick actions -->
+      <section class="card third">
+        <h3>Actions rapides</h3>
+        <div style="display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3);">
+          <button class="btn btn-primary" style="justify-content: flex-start;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Lancer un nouveau scan
+          </button>
+          <button class="btn" style="justify-content: flex-start;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            Vérifier 3 doublons
+          </button>
+          <button class="btn" style="justify-content: flex-start;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Export CSV complet
+          </button>
+          <button class="btn" style="justify-content: flex-start;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 12v-2"/><path d="M5 12H3"/><path d="M21 12h-2"/></svg>
+            Optimiser la base
+          </button>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+</div>
+
+<!-- Theme switcher -->
+<div class="theme-switch">
+  <div class="theme-chip active" data-swatch="onyx" title="Onyx & Aurum"></div>
+  <div class="theme-chip" data-swatch="celluloid" title="Midnight Celluloid"></div>
+  <div class="theme-chip" data-swatch="polar" title="Polar Studio"></div>
+  <div class="theme-chip" data-swatch="ultraviolet" title="Ultraviolet"></div>
+</div>
+
+<script>
+function applyTheme(name) {
+  document.querySelectorAll('.theme-chip').forEach(c => c.classList.toggle('active', c.dataset.swatch === name));
+  document.documentElement.setAttribute('data-theme', name);
+}
+document.querySelectorAll('.theme-chip').forEach(chip => {
+  chip.addEventListener('click', () => applyTheme(chip.dataset.swatch));
+});
+const hashTheme = location.hash.replace('#', '');
+if (['onyx', 'celluloid', 'polar', 'ultraviolet'].includes(hashTheme)) applyTheme(hashTheme);
+window.addEventListener('hashchange', () => {
+  const t = location.hash.replace('#', '');
+  if (['onyx', 'celluloid', 'polar', 'ultraviolet'].includes(t)) applyTheme(t);
+});
+</script>
+</body>
+</html>

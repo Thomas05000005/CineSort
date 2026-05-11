@@ -1,0 +1,53 @@
+CineSort - Re-audit complet sur etat fige r3
+Date: 2026-03-19
+Branche audit: audit_v7_2_0_dev_round4
+Branche stabilisee: stabilized_v7_2_0_dev_r3
+Tag: pre_v7_2_0_dev_audit_r3
+Commit de reference: a74e48e
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: base locale stabilisee, backend mieux decoupe, UI stable et baseline critique coherentes.
+- Fiabilite estimee: 7.4/10 sur poste local.
+- Conclusion courte: la baseline r3 est rejouable proprement, mais TMDb live et la validation GitHub distante restent des preuves externes encore ouvertes sur cette machine.
+
+Preuves rejouees sur la baseline r3
+- check_project.bat: OK
+- build_windows.bat: OK
+- capture_ui_preview.py --dev --recommended: OK
+- visual_check_ui_preview.py --dev: OK
+- live opt-in:
+  - probe reel: OK
+  - pywebview natif reel: OK
+  - TMDb live: non rejoue ici faute de CINESORT_LIVE_TMDB / CINESORT_TMDB_API_KEY
+
+Ce qui est prouve
+- gate local standard reproductible
+- build QA/release local reproductible
+- preview visuel stable avec baseline critique versionnee
+- UI stable unique comme runtime
+- decoupage backend en cours sur settings, probe, apply, dashboard, run-flow, quality, apply_rows, planification
+
+Ce qui reste seulement probable
+- robustesse TMDb sur reseau reel et quotas
+- tenue de la CI Windows sur un vrai run GitHub
+- comportement en charge sur de tres gros volumes hors stress opt-in local
+
+Blocages externes connus au moment de ce memo
+- aucun remote Git n'est configure sur cette machine
+- gh n'est pas disponible
+- CINESORT_TMDB_API_KEY est absente
+
+Plan de suite recommande
+P0
+- fermer TMDb live avec une vraie cle d'environnement
+- pousser la borne r3 et valider le workflow Windows sur GitHub
+
+P1
+- poursuivre le decoupage restant de cinesort_api.py
+- poursuivre le decoupage restant de core.py
+- continuer les preuves hostiles et gros volumes
+
+P2
+- finir Reglages, grandes tables et etats vides/erreurs/gros volumes
+- verifier la signature conditionnelle sur un vrai run CI

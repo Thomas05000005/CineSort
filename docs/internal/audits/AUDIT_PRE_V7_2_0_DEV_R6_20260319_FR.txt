@@ -1,0 +1,69 @@
+CineSort - Re-audit local final sur etat fige r6
+Date: 2026-03-19
+Branche audit source: audit_v7_2_0_dev_round6
+Branche stabilisee cible: stabilized_v7_2_0_dev_r6
+Tag cible: pre_v7_2_0_dev_audit_r6
+Commit applicatif verifie: 5fe6927
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: phase locale proprement consolidee apres les lots A a F.
+- Fiabilite estimee sur poste local: 8.2/10.
+- Conclusion courte: la borne r6 devient la nouvelle reference locale stable. Le produit est solide localement sur ses flux critiques, mais n'est pas encore industrialise globalement.
+
+Preuves rejouees sur la baseline r6
+- pre-commit run --all-files: OK
+- check_project.bat: OK
+- build_windows.bat: OK
+- visual_check_ui_preview.py --dev: OK
+- live opt-in:
+  - TMDb reel: OK
+  - probe reel: OK
+  - pywebview natif reel: OK
+- stress opt-in:
+  - tests.stress.large_volume_flow: OK
+
+Fiable / bien prouve localement
+- gate standard reproductible
+- build QA/release local reproductible
+- preview visuel stable avec baseline critique versionnee
+- UI stable unique comme runtime
+- flux critiques nominalement prouves:
+  - plan -> validation -> duplicates -> apply -> undo
+- preuves live locales completes:
+  - TMDb
+  - ffprobe / MediaInfo
+  - pywebview natif
+- scenarios gros volumes opt-in couverts sur les cas synthetiques rejoues
+- backend mieux structure qu'au point de depart:
+  - CineSortApi partiellement decompose en modules support par responsabilite
+  - core.py partiellement decompose autour de plan/apply/duplicates
+  - initialisation SQLite clarifiee avec migrations comme source de verite
+- UX utile amelioree:
+  - Reglages plus lisibles
+  - tables larges plus maniables
+  - etats vides/erreurs plus coherents
+
+Probable / partiellement prouve
+- tenue sur bibliotheques reelles tres heterogenes au-dela des scenarios locaux rejoues
+- maintenabilite backend meilleure, mais refactor encore incomplet sur cinesort_api.py et core.py
+- lisibilite UX meilleure sur desktop, mais encore perfectible sur certains cas secondaires et grandes tables
+- packaging Windows local solide, mais encore dependant du poste courant
+
+Non prouve / hors scope local
+- vrai run GitHub Actions Windows sur remote reel
+- signature code reelle avec secrets et pipeline distant
+- reproductibilite complete hors machine locale
+- comportement sur machines Windows tres differentes ou environnements partiellement verrouilles
+
+Dettes restantes
+- finir le decoupage residuel de cinesort_api.py
+- finir le decoupage residuel de core.py
+- simplifier encore certains chemins DB defenifs hors initialize()
+- homogeneiisation finale de quelques messages UX secondaires
+- validation GitHub/CI/signature quand le scope distant sera ouvert
+
+Lecture finale honnete
+- Localement, le produit n'est plus dans un etat "tests verts mais preuves faibles".
+- La preuve locale est maintenant large et coherente.
+- Ce qui manque surtout n'est plus du produit local pur, mais l'industrialisation distante et les dernieres finitions de structure.

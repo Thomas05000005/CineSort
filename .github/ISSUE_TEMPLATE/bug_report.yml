@@ -1,0 +1,67 @@
+name: 🐛 Signaler un bug
+description: Un comportement inattendu, un crash, ou un truc qui marche mal.
+title: "[Bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de signaler ce bug ! Avant tout, regarde si quelqu'un a déjà ouvert
+        une issue similaire dans la liste.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version de CineSort
+      description: Visible dans Paramètres > À propos (ex. v7.6.0)
+      placeholder: v7.6.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Version Windows
+      description: Win10 / Win11 / build (ex. Win11 26200)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Description du bug
+      description: Que s'est-il passé ? Qu'est-ce que tu attendais à la place ?
+      placeholder: |
+        J'ai cliqué sur X, puis Y est arrivé.
+        Je m'attendais à ce que Z arrive.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: |
+        1. Ouvrir CineSort
+        2. Aller dans Bibliothèque
+        3. Cliquer sur ...
+        4. Bug visible
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optionnel mais aide énormément)
+      description: Aide > Ouvrir les logs > copie-colle le contenu de cinesort.log
+      render: text
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Vérifications
+      options:
+        - label: J'ai vérifié qu'aucune issue similaire n'existait déjà
+          required: true
+        - label: J'utilise la dernière version stable de CineSort
+          required: true

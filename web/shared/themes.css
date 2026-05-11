@@ -1,0 +1,203 @@
+/* ============================================================================
+ * CineSort Design System v5 — Themes
+ * ============================================================================
+ * 4 ambiances : Studio (technique, default) / Cinema (velours) / Luxe (or mat)
+ * / Neon (cyber). Chaque theme redefinit UNIQUEMENT :
+ *   - surfaces (--bg, --surface-1, --surface-2)
+ *   - borders (--border-1, --border-2)
+ *   - accent (--accent, --accent-hover, --accent-soft, --accent-glow, --accent-border)
+ *   - atmosphere overlay (subtle)
+ *
+ * Les tier colors (--tier-*) et severities (--sev-*) restent invariantes,
+ * definies dans tokens.css.
+ *
+ * Activation : <html data-theme="studio|cinema|luxe|neon"> ou <body>.
+ * Fallback par defaut : Studio.
+ * ============================================================================
+ */
+
+/* ===========================================================
+ * Theme STUDIO (defaut, technique, bleu accent)
+ * =========================================================== */
+
+:root,
+[data-theme="studio"] {
+  --bg:        #06090F;
+  --bg-raised: #0B111A;
+
+  --surface-1: rgba(255, 255, 255, 0.035);
+  --surface-2: rgba(255, 255, 255, 0.055);
+  --surface-3: rgba(255, 255, 255, 0.075);
+
+  --border-1: rgba(255, 255, 255, 0.08);
+  --border-2: rgba(96, 165, 250, 0.25);
+
+  --accent:        #60A5FA;
+  --accent-hover:  #3B82F6;
+  --accent-soft:   rgba(96, 165, 250, 0.12);
+  --accent-glow:   rgba(96, 165, 250, 0.20);
+  --accent-border: rgba(96, 165, 250, 0.28);
+
+  /* V3-07 — Focus ring jaune ambre (contraste AAA sur bleu Studio) */
+  --focus-ring: #FBBF24;
+  --focus-ring-rgb: 251, 191, 36;
+
+  --atmosphere-overlay: none;
+}
+
+/* Studio atmosphere subtile : scan lines horizontales */
+[data-theme="studio"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 3px,
+    rgba(255, 255, 255, 0.008) 3px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+  opacity: 0.5;
+}
+
+/* ===========================================================
+ * Theme CINEMA (velours rouge/or)
+ * =========================================================== */
+
+[data-theme="cinema"] {
+  --bg:        #0C0708;
+  --bg-raised: #130A0B;
+
+  --surface-1: rgba(255, 214, 170, 0.025);
+  --surface-2: rgba(255, 214, 170, 0.05);
+  --surface-3: rgba(255, 214, 170, 0.07);
+
+  --border-1: rgba(220, 38, 38, 0.10);
+  --border-2: rgba(251, 191, 36, 0.20);
+
+  --accent:        #DC2626;
+  --accent-hover:  #EF4444;
+  --accent-soft:   rgba(220, 38, 38, 0.12);
+  --accent-glow:   rgba(220, 38, 38, 0.20);
+  --accent-border: rgba(220, 38, 38, 0.28);
+
+  /* V3-07 — Focus ring blanc (contraste maximal sur velours rouge) */
+  --focus-ring: #FFFFFF;
+  --focus-ring-rgb: 255, 255, 255;
+
+  --atmosphere-overlay: grain;
+}
+
+/* Cinema atmosphere : grain pellicule tres subtil */
+[data-theme="cinema"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(220, 38, 38, 0.02) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(251, 191, 36, 0.02) 0%, transparent 50%);
+  opacity: 0.6;
+}
+
+/* ===========================================================
+ * Theme LUXE (or mat noir profond)
+ * =========================================================== */
+
+[data-theme="luxe"] {
+  --bg:        #0A0806;
+  --bg-raised: #120F0A;
+
+  --surface-1: rgba(251, 191, 36, 0.03);
+  --surface-2: rgba(251, 191, 36, 0.055);
+  --surface-3: rgba(251, 191, 36, 0.08);
+
+  --border-1: rgba(251, 191, 36, 0.12);
+  --border-2: rgba(251, 191, 36, 0.28);
+
+  --accent:        #FBBF24;
+  --accent-hover:  #F59E0B;
+  --accent-soft:   rgba(251, 191, 36, 0.12);
+  --accent-glow:   rgba(251, 191, 36, 0.25);
+  --accent-border: rgba(251, 191, 36, 0.30);
+
+  /* V3-07 — Focus ring or vif (contraste AAA sur noir mat) */
+  --focus-ring: #FFD700;
+  --focus-ring-rgb: 255, 215, 0;
+
+  --atmosphere-overlay: shimmer;
+}
+
+/* Luxe atmosphere : shimmer dore lent */
+@keyframes luxeShimmer {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.55; }
+}
+
+[data-theme="luxe"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(251, 191, 36, 0.03) 0%,
+    transparent 60%
+  );
+  animation: luxeShimmer 8s ease-in-out infinite;
+}
+
+/* ===========================================================
+ * Theme NEON (cyber violet/cyan)
+ * =========================================================== */
+
+[data-theme="neon"] {
+  --bg:        #050714;
+  --bg-raised: #0A0D22;
+
+  --surface-1: rgba(168, 85, 247, 0.03);
+  --surface-2: rgba(6, 182, 212, 0.05);
+  --surface-3: rgba(168, 85, 247, 0.08);
+
+  --border-1: rgba(168, 85, 247, 0.15);
+  --border-2: rgba(6, 182, 212, 0.30);
+
+  --accent:        #A855F7;
+  --accent-hover:  #9333EA;
+  --accent-soft:   rgba(168, 85, 247, 0.15);
+  --accent-glow:   rgba(168, 85, 247, 0.30);
+  --accent-border: rgba(6, 182, 212, 0.30);
+
+  /* V3-07 — Focus ring cyan vif (contraste AAA sur violet/cyber) */
+  --focus-ring: #00FFFF;
+  --focus-ring-rgb: 0, 255, 255;
+
+  --atmosphere-overlay: neon;
+}
+
+/* Neon atmosphere : gradient rotating */
+@keyframes neonRotate {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+[data-theme="neon"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    135deg,
+    rgba(168, 85, 247, 0.025) 0%,
+    rgba(6, 182, 212, 0.025) 50%,
+    rgba(168, 85, 247, 0.025) 100%
+  );
+  background-size: 300% 300%;
+  animation: neonRotate 12s linear infinite;
+}

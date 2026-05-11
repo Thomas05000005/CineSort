@@ -1,0 +1,679 @@
+/* ============================================================
+   CineSort Dashboard — Depth Effects V6
+   Bento grid + glass cards + ring progress + quality bars
+   Additif : se superpose a styles.css sans le remplacer.
+   ============================================================ */
+
+/* ============================================================
+   BENTO GRID LAYOUT
+   ============================================================ */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--sp-5, 20px);
+  width: 100%;
+}
+
+.bento-card {
+  /* Styles de base (glass, blur, shadow, hover, padding) : dans themes.css .card/.kpi-card */
+  min-width: 0;
+  /* Audit UI desktop 20260429 : defense en profondeur — empeche les
+     contenus longs sans separateurs (paths Windows, URLs, tokens) de
+     forcer la card a deborder de sa colonne dans la grid bento. Le
+     min-width:0 ci-dessus permet a flex/grid de la retrecir, mais sans
+     overflow-wrap, le contenu lui-meme imposait un scrollWidth > clientWidth. */
+  overflow-wrap: anywhere;
+}
+
+/* Utilitaire : si bento-card est applique directement sur un KPI-hero sans card wrapper */
+.kpi-card.bento-card--hero {
+  grid-column: span 8;
+}
+
+.bento-card--hero    { grid-column: span 8; }
+.bento-card--side    { grid-column: span 4; }
+.bento-card--half    { grid-column: span 6; }
+.bento-card--third   { grid-column: span 4; }
+.bento-card--quarter { grid-column: span 3; }
+.bento-card--wide    { grid-column: span 12; }
+
+@media (max-width: 1200px) {
+  .bento-card--hero,
+  .bento-card--side    { grid-column: span 12; }
+  .bento-card--half,
+  .bento-card--third   { grid-column: span 6; }
+}
+
+@media (max-width: 768px) {
+  .bento-card--half,
+  .bento-card--third,
+  .bento-card--quarter { grid-column: span 12; }
+}
+
+/* Titre section dans une card */
+.bento-card h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3, 12px);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+}
+
+.bento-card h3 .live-dot {
+  width: 8px; height: 8px;
+  background: var(--success);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--success), 0 0 24px var(--success);
+  animation: livePulse 2s ease-in-out infinite;
+  position: relative;
+}
+
+.bento-card h3 .live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--success);
+  opacity: 0.6;
+  animation: liveRing 2s ease-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 12px var(--success), 0 0 24px var(--success); }
+  50%      { opacity: 0.7; transform: scale(1.3); box-shadow: 0 0 18px var(--success), 0 0 36px var(--success); }
+}
+
+@keyframes liveRing {
+  0%   { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* ============================================================
+   HERO CONTENT (KPIs + ring progress)
+   ============================================================ */
+.hero-content {
+  display: flex;
+  gap: var(--sp-7, 32px);
+  align-items: flex-start;
+}
+
+.hero-primary { flex: 1; min-width: 0; }
+
+.hero-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2, 8px);
+}
+
+.hero-value {
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text-primary);
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Variante sans gradient (si gradientText: false) */
+.hero-value--solid {
+  background: none;
+  -webkit-text-fill-color: initial;
+  color: var(--text-primary);
+}
+
+/* Valeur KPI classique avec gradient (non-hero) */
+.kpi-value--gradient {
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-meta {
+  display: flex;
+  gap: var(--sp-5, 20px);
+  margin-top: var(--sp-4, 16px);
+  flex-wrap: wrap;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-item .v {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta-item .v.pos { color: var(--success); }
+.meta-item .v.neg { color: var(--danger); }
+
+.meta-item .l {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   RING PROGRESS (SVG)
+   ============================================================ */
+.ring {
+  width: 140px; height: 140px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ring svg { transform: rotate(-90deg); display: block; }
+
+.ring-track {
+  fill: none;
+  stroke: var(--glass-inset);
+  stroke-width: 10;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 10;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s ease;
+  filter: drop-shadow(0 0 12px var(--accent-glow)) drop-shadow(0 0 24px var(--accent-glow));
+  animation: ringGlowPulse 3s ease-in-out infinite;
+}
+
+@keyframes ringGlowPulse {
+  0%, 100% { filter: drop-shadow(0 0 12px var(--accent-glow)) drop-shadow(0 0 24px var(--accent-glow)); }
+  50%      { filter: drop-shadow(0 0 18px var(--accent-glow)) drop-shadow(0 0 36px var(--accent-glow)); }
+}
+
+.ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.ring-label strong {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.ring-label small {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   WORKFLOW STRIP (5 etapes bibliotheque)
+   ============================================================ */
+.workflow-strip {
+  display: flex;
+  gap: var(--sp-2, 8px);
+  margin-top: var(--sp-4, 16px);
+  padding: var(--sp-3, 12px);
+  background: var(--glass-inset);
+  border-radius: var(--r-md, 12px);
+  overflow-x: auto;
+}
+
+.workflow-step {
+  flex: 1;
+  padding: var(--sp-3, 12px) var(--sp-4, 16px);
+  border-radius: var(--r-sm, 8px);
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--dur-fast, 140ms) var(--ease);
+  text-decoration: none;
+}
+
+.workflow-step:hover {
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+}
+
+.workflow-step.done {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.workflow-step.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+/* ============================================================
+   SERVICES GRID (integrations tiles)
+   ============================================================ */
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3, 12px);
+}
+
+.service-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-3, 12px);
+  background: var(--glass-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md, 12px);
+  transition: all var(--dur-fast, 140ms) var(--ease);
+  text-decoration: none;
+  color: inherit;
+}
+
+.service-tile:hover {
+  border-color: var(--glass-border-hover);
+  background: color-mix(in srgb, var(--accent) 4%, var(--glass-bg-strong));
+}
+
+.service-avatar {
+  width: 36px; height: 36px;
+  border-radius: var(--r-sm, 8px);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.service-info { min-width: 0; flex: 1; }
+
+.service-info .n {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-info .s {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.service-status-dot {
+  margin-left: auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.service-status-dot.on {
+  background: var(--success);
+  box-shadow: 0 0 10px var(--success), 0 0 20px color-mix(in srgb, var(--success) 40%, transparent);
+  animation: statusPulse 2.5s ease-in-out infinite;
+}
+.service-status-dot.off  { background: var(--text-muted); opacity: 0.6; }
+.service-status-dot.warn {
+  background: var(--warning);
+  box-shadow: 0 0 10px var(--warning), 0 0 20px color-mix(in srgb, var(--warning) 40%, transparent);
+  animation: statusPulse 2s ease-in-out infinite;
+}
+.service-status-dot.err {
+  background: var(--danger);
+  box-shadow: 0 0 10px var(--danger), 0 0 20px color-mix(in srgb, var(--danger) 40%, transparent);
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.75; transform: scale(1.15); }
+}
+
+/* ============================================================
+   QUALITY DISTRIBUTION BARS
+   ============================================================ */
+.quality-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+.quality-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  gap: var(--sp-3, 12px);
+  align-items: center;
+  font-size: 13px;
+}
+
+.tier-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  font-weight: 600;
+}
+
+.tier-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tier-label.tier-platinum { color: #E4E4E7; }
+.tier-label.tier-platinum .tier-dot {
+  background: linear-gradient(135deg, #E4E4E7, #A1A1AA);
+  box-shadow: 0 0 6px rgba(228, 228, 231, 0.5);
+}
+
+.tier-label.tier-gold { color: var(--accent); }
+.tier-label.tier-gold .tier-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+.tier-label.tier-silver { color: #C0C0CC; }
+.tier-label.tier-silver .tier-dot { background: #C0C0CC; }
+
+.tier-label.tier-bronze { color: #CD7F32; }
+.tier-label.tier-bronze .tier-dot { background: #CD7F32; }
+
+.tier-label.tier-reject { color: var(--danger); }
+.tier-label.tier-reject .tier-dot { background: var(--danger); }
+
+.quality-track {
+  height: 8px;
+  background: var(--glass-inset);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  position: relative;
+}
+
+.quality-fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  animation: qualitySlideIn 800ms var(--ease) forwards;
+  transform-origin: left;
+}
+
+@keyframes qualitySlideIn {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+.quality-fill.tier-platinum { background: linear-gradient(90deg, #E4E4E7, #A1A1AA); }
+.quality-fill.tier-gold     { background: linear-gradient(90deg, var(--accent), var(--accent-hover)); }
+.quality-fill.tier-silver   { background: linear-gradient(90deg, #C0C0CC, #8B8B96); }
+.quality-fill.tier-bronze   { background: linear-gradient(90deg, #CD7F32, #8B4513); }
+.quality-fill.tier-reject   { background: var(--danger); }
+
+.quality-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* ============================================================
+   ACTIVITY FEED
+   ============================================================ */
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2, 8px);
+}
+
+.activity-item {
+  display: flex;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-3, 12px);
+  border-radius: var(--r-md, 12px);
+  transition: background var(--dur-fast, 140ms) var(--ease);
+  align-items: flex-start;
+}
+
+.activity-item:hover {
+  background: var(--glass-inset);
+}
+
+.activity-icon {
+  width: 32px; height: 32px;
+  border-radius: var(--r-md, 12px);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.activity-icon.ok   { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.activity-icon.warn { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.activity-icon.err  { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.activity-icon.info { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
+
+.activity-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-text .title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-text .time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   LIBRARIAN (health score + suggestions)
+   ============================================================ */
+.health-score {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2, 8px);
+  margin-bottom: var(--sp-4, 16px);
+}
+
+.health-score .v {
+  font-size: 48px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.health-score .u {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+.suggestion-card {
+  padding: var(--sp-3, 12px);
+  background: var(--glass-inset);
+  border-radius: var(--r-md, 12px);
+  border-left: 3px solid var(--text-muted);
+}
+
+.suggestion-card.priority-high   { border-left-color: var(--warning); }
+.suggestion-card.priority-medium { border-left-color: var(--info); }
+.suggestion-card.priority-low    { border-left-color: var(--text-muted); }
+
+.suggestion-card .title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.suggestion-card .details {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ============================================================
+   SPARKLINE (tendance espace disque / score)
+   ============================================================ */
+.sparkline {
+  width: 100%;
+  height: 80px;
+  margin-top: var(--sp-3, 12px);
+  display: block;
+}
+
+.sparkline path.line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: none;
+  filter: drop-shadow(0 2px 4px var(--accent-glow));
+}
+
+.sparkline path.fill {
+  fill: url(#spark-fill-grad);
+  opacity: 0.35;
+}
+
+/* ============================================================
+   TOPBAR ENRICHIE : search + actions
+   ============================================================ */
+.topbar-search {
+  flex: 1;
+  max-width: 460px;
+  position: relative;
+  margin-left: auto;
+}
+
+.topbar-search input {
+  width: 100%;
+  padding: 10px 14px 10px 40px;
+  background: var(--glass-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md, 12px);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  transition: all var(--dur-fast, 140ms) var(--ease);
+}
+
+.topbar-search input::placeholder { color: var(--text-muted); }
+
+.topbar-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--glass-bg-strong);
+}
+
+.topbar-search .search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+  width: 16px;
+  height: 16px;
+}
+
+.topbar-search kbd {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 6px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xs, 6px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Audit visuel V-5 (20260429) : sur viewport <1280px le badge Ctrl+K
+   chevauchait le placeholder text de la search bar. On masque le kbd
+   en dessous de cette largeur pour que le placeholder reste lisible. */
+@media (max-width: 1279px) {
+  .topbar-search kbd {
+    display: none;
+  }
+}
+
+/* ============================================================
+   Topbar avatar (initiales utilisateur)
+   ============================================================ */
+.topbar-avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  display: grid;
+  place-items: center;
+  color: var(--text-inverse);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  border: 2px solid var(--glass-border);
+  box-shadow: 0 2px 12px var(--accent-glow);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Logo mark premium (sidebar)
+   ============================================================ */
+.logo-mark {
+  width: 32px; height: 32px;
+  border-radius: var(--r-md, 12px);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  display: grid;
+  place-items: center;
+  color: var(--text-inverse);
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow:
+    0 4px 16px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Responsive : mobile adaptations
+   ============================================================ */
+@media (max-width: 768px) {
+  .hero-value { font-size: 40px; }
+  .hero-content { flex-direction: column; }
+  .ring { width: 100px; height: 100px; }
+  .ring-label strong { font-size: 22px; }
+  .topbar-search { max-width: 100%; }
+}

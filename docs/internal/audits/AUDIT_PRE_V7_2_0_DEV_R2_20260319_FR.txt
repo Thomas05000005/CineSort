@@ -1,0 +1,80 @@
+CineSort - Re-audit complet sur etat fige r2
+Date: 2026-03-19
+Branche audit: audit_v7_2_0_dev_round3
+Branche stabilisee: stabilized_v7_2_0_dev_r2
+Tag: pre_v7_2_0_dev_audit_r2
+Commit: 34fd3fe
+Version: 7.2.0-dev
+
+Verdict global
+- Etat global: plus fiable et plus lisible que la borne precedente, avec debut de decoupage backend concret.
+- Fiabilite estimee: 7.1/10.
+- Etat Git de depart pour l'audit: propre et borne par branche + tag.
+- Conclusion courte: la baseline locale est solide, mais la preuve externe TMDb live, les cas hostiles et la validation CI GitHub reelle restent a fermer.
+
+Preuves rejouees
+- check_project.bat: OK
+  - compile recursive: 76 fichiers Python
+  - tests: 262 OK
+  - coverage totale: 76.6%
+- build_windows.bat: OK
+  - QA onedir: dist/CineSort_QA/CineSort.exe
+  - release onefile: dist/CineSort.exe
+  - ZIP QA/release generes
+- preview UI:
+  - capture_ui_preview.py --dev --recommended: OK
+  - visual_check_ui_preview.py --dev: OK, 6 vues, 0 echec
+- preuves live disponibles:
+  - probe reel: OK en mode opt-in
+  - pywebview natif reel: OK en mode opt-in
+  - TMDb live: non rejoue sur ce poste faute de cle d'environnement
+
+Ce qui est maintenant prouve
+- gate local utilisable de bout en bout
+- build QA/release reproductible localement
+- workflow visual_check reproductible avec baseline critique versionnee
+- UI stable unique comme runtime officiel
+- schema SQLite pilote par les migrations comme source de verite
+- debut de separation backend: settings, apply/undo, probe, dashboard/reporting, apply_rows
+- preuves live opt-in pour probe et pywebview natif
+
+Ce qui reste seulement probable
+- robustesse TMDb sur reseau reel et reponses hostiles
+- comportement en charge sur tres grosses bibliotheques
+- tenue CI/release sur un vrai run GitHub Actions
+
+Ce qui reste non prouve
+- TMDb live reel avec une vraie cle sur cette machine
+- cas hostiles systematiques autour de ffprobe / MediaInfo / TMDb
+- pipeline GitHub Actions execute reellement avec artefacts et signature conditionnelle
+
+Problemes prioritaires restants
+P0
+- Rejouer TMDb live avec une vraie cle et figer la preuve.
+- Valider la CI Windows sur GitHub, pas seulement localement.
+
+P1
+- cinesort_api.py reste trop gros sur le run-flow et la qualite.
+- core.py reste trop massif sur la planification.
+- les cas hostiles externes et les gros volumes restent peu prouves.
+
+P2
+- l'UX Reglages et les grandes tables restent perfectibles.
+- l'accessibilite reste correcte mais encore minimale.
+
+Plan de suite recommande
+P0
+- fermer TMDb live puis refaire un audit bref si le client ou le test live bougent.
+
+P1
+- extraire run_flow_support et quality_support depuis cinesort_api.py.
+- extraire core_plan_support depuis core.py.
+- ajouter des preuves deterministes de cas hostiles et une suite stress opt-in.
+
+P2
+- valider le workflow Windows sur GitHub.
+- finaliser Reglages, grandes tables et etats vides/erreurs/gros volumes.
+
+Note de lecture
+- Ce memo ne remplace pas le rapport complet rendu dans la conversation.
+- Il sert de borne interne concise pour l'etat fige pre_v7_2_0_dev_audit_r2.

@@ -1,0 +1,173 @@
+﻿PLAN DE CORRECTION ET D'AMELIORATION - CINESORT
+Date: 2026-03-08
+Base d'observation: %USERPROFILE%\\Desktop\\CineSort
+
+Contexte confirme
+- Le log APPLY observé correspond bien a 2 executions volontaires:
+  1. dry-run
+  2. apply reel
+- Ce point n'est donc pas un bug.
+
+Etat global du run inspecte
+- Run globalement sain
+- Aucun conflit reel detecte
+- Aucun leftover reel detecte
+- Aucune anomalie en base
+- Aucune erreur en base
+- Apply final termine correctement
+- Undo potentiellement exploitable via apply_operations
+
+==============================
+1. CORRECTIONS PRIORITAIRES
+==============================
+
+P1. Verifier et fiabiliser la persistance des settings TMDb
+Constat:
+- settings.json actuel montre tmdb_api_key vide
+- mais le run stocke une cle TMDb dans config_json
+Impact:
+- risque de comportement degrade sur de futurs runs
+- risque d'incoherence entre ce que l'utilisateur croit avoir configure et ce qui est reellement utilise
+Action:
+- verifier si la cle TMDb est volontairement non persistee
+- si non volontaire: corriger la persistance/rehydratation du champ
+- si volontaire: clarifier le message UI pour l'expliquer
+Risque correction:
+- faible a moyen
+Tests a ajouter:
+- save_settings / get_settings avec cle TMDb
+- relance app avec cle TMDb
+- test_tmdb_key apres relance
+
+P2. Clarifier le resume des ignores non supportes
+Constat:
+- le total affiché et le top extensions n'ont pas la meme apparence de comptage
+Impact:
+- lecture trompeuse du resume
+Action:
+- distinguer explicitement:
+  - entrees ignorees
+  - fichiers annexes/non supportes observes
+- ajuster le wording du summary.txt et de l'UI si expose
+Risque correction:
+- faible
+Tests a ajouter:
+- test du resume texte
+- test breakdown extensions coherent
+
+==============================
+2. AMELIORATIONS UTILES
+==============================
+
+A1. Exploiter les warnings NFO reels pour ameliorer le matching
+Constat:
+- plusieurs NFO mismatch / year reject concrets dans ui_log.txt
+Exemples:
+- Beetlejuice Beetlejuice
+- Le Comte de Monte Cristo
+- Robin des Bois
+Objectif:
+- reduire les faux rejets sur titres/remakes/reprises d'annee
+Approche:
+- constituer un mini dataset de cas reels issus du log
+- ajouter tests heuristiques cibles avant toute retouche
+Risque:
+- moyen si on touche trop large
+- a faire par petits cas verrouilles par tests
+
+A2. Revoir la lisibilite des reglages de securite operationnelle
+Points a revoir:
+- quarantine_unapproved
+- dry_run_apply
+- empty_folders_scope=root_all
+Objectif:
+- rendre plus evident ce qui est prudent vs agressif
+Action:
+- mieux qualifier les options dans l'UI/README
+- eventuellement preset de securite: prudent / standard
+Risque:
+- faible si wording uniquement
+
+A3. Evaluer l'activation du scan incremental sur grosses bibliotheques
+Constat:
+- actuellement desactive
+Objectif:
+- gain de temps sur runs futurs
+Action:
+- tester sur ta bibliotheque reelle si le comportement reste fiable
+Risque:
+- faible a moyen selon confiance souhaitée
+
+==============================
+3. AJOUTS UTILES RECOMMANDES
+==============================
+
+U1. Rapport de run plus explicite pour usage reel
+Ajouter si utile:
+- resume dry-run puis apply reel dans un meme historique clair
+- indicateur visuel que le vrai apply a bien suivi le dry-run
+Benefice:
+- evite les confusions de lecture des logs/resumes
+
+U2. Zone 'Warnings reellement observes' exploitable
+Ajouter si utile:
+- top 10 warnings NFO / year reject dans le dashboard ou dans un export
+Benefice:
+- aide a améliorer la logique sur de vrais cas au lieu de suppositions
+
+U3. Mode diagnostic settings
+Ajouter si utile:
+- bloc lisible affichant:
+  - TMDb actif/inactif
+  - cle presente ou absente
+  - probe backend reel
+  - dry-run actif ou non
+  - niveau de prudence apply
+Benefice:
+- rend l'etat operationnel de l'app evident avant un run
+
+==============================
+4. PLAN D'EXECUTION RECOMMANDE
+==============================
+
+Lot 1 - Settings et clarte resume
+- verifier la persistance TMDb
+- corriger ou expliciter le comportement
+- clarifier le resume ignores non supportes
+- ajouter tests associes
+
+Lot 2 - Heuristiques NFO basees sur cas reels
+- extraire les cas du log
+- ajouter tests cibles
+- ajuster seulement les heuristiques necessaires
+
+Lot 3 - Confort operateur
+- clarifier les options prudentes/agressives
+- ajouter un diagnostic settings plus lisible
+- documenter les bonnes pratiques dans README_FR.txt
+
+==============================
+5. PRIORITE CONSEILLEE
+==============================
+
+Priorite 1
+- settings TMDb
+- resume ignores
+
+Priorite 2
+- heuristiques NFO / year reject sur cas reels
+
+Priorite 3
+- UX des reglages et diagnostic operateur
+- scan incremental si besoin de perf
+
+==============================
+6. DECISION PRAGMATIQUE
+==============================
+
+- Le run observe ne montre pas de bug bloquant moteur.
+- Les prochaines actions utiles sont surtout:
+  1. coherence settings
+  2. clarte des resumes
+  3. ameliorations heuristiques basees sur cas reels
+- Pas besoin de toucher au coeur apply/undo/core pour ce lot.

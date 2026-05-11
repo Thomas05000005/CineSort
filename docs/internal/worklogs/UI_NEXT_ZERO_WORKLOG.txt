@@ -1,0 +1,85 @@
+UI NEXT ZERO - REBOOT FRONT COMPLET
+===================================
+
+Date
+----
+- 2026-03-07
+
+Objectif
+--------
+- Repartir d'un nouveau dossier front sans reutiliser le HTML/CSS de la variante Next precedente.
+- Garder uniquement les fonctionnalites et les endpoints existants.
+- Laisser l'UI stable intacte.
+
+Decision technique
+------------------
+- Nouveau front isole dans `web_next_zero/`
+- `app.py --ui next` pointe maintenant sur `web_next_zero/index.html`
+- L'ancien front Next dans `web/` est conserve mais n'est plus l'entrypoint Next
+- Packaging PyInstaller mis a jour pour embarquer `web_next_zero/`
+
+Contenu du nouveau front
+------------------------
+- `web_next_zero/index.html` : shell complet neuf avec navigation haute, bandeau de contexte et workspace
+- `web_next_zero/styles.css` : design system complet neuf
+- `web_next_zero/app.js` : copie isolee de la logique front Next
+- `web_next_zero/ui_shell.js` : copie isolee des helpers shell
+- `web_next_zero/ui_validation.js` : copie isolee logique Validation
+- `web_next_zero/ui_quality.js` : copie isolee logique Qualite
+- `web_next_zero/ui_apply.js` : copie isolee logique Application
+
+Intentions visuelles
+--------------------
+- Shell horizontal, plus de repere principal en colonne gauche
+- Palette profonde, contraste fort, accent bleu + or structurel
+- Tables et resultats comme centre de gravite
+- Cartes par role, boutons plus compacts, zero scroll horizontal global
+
+Fichiers modifies
+-----------------
+- `app.py`
+- `CineSortApp.spec`
+- `README_FR.txt`
+- `tests/test_ui_next_contracts.py`
+- ajout du dossier `web_next_zero/`
+
+Commandes utiles
+----------------
+Lancement stable:
+`python app.py`
+
+Lancement Next:
+`python app.py --ui next`
+
+Alternative Windows:
+`$env:CINESORT_UI = "next"`
+`python app.py`
+
+EXE Next:
+`$env:CINESORT_UI = "next"`
+`.\dist\CineSort.exe`
+
+Verification attendue
+---------------------
+- Stable intacte
+- Next completement differente visuellement
+- Aucune collision DOM/CSS/JS avec `web/`
+- Backend / endpoints inchanges
+
+Validation finale
+----------------
+- `python -m unittest -v tests.test_ui_next_contracts tests.test_ui_logic_contracts` -> OK
+- `python -W error::ResourceWarning -m unittest discover -s tests -p "test_*.py" -v` -> 167 tests OK
+- `cmd /c build_windows.bat` -> OK
+- smoke dev: `python app.py --ui next` -> vivant apres 8s
+- smoke EXE: `$env:CINESORT_UI = "next"` puis `.\dist\CineSort.exe` -> vivant apres 10s
+
+Packaging
+---------
+- `app.py` pointe maintenant `--ui next` vers `web_next_zero/index.html`
+- `CineSortApp.spec` embarque `web_next_zero/` en plus de `web/`
+
+Commande de test UI Next packagée
+---------------------------------
+`$env:CINESORT_UI = "next"`
+`.\dist\CineSort.exe`

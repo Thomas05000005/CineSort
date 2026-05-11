@@ -1,0 +1,128 @@
+name: CI
+
+# Declencheurs : push sur main + pull requests vers main + lancement manuel
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Lint, Tests, Build
+    runs-on: windows-latest
+
+    steps:
+      # 1. Recuperation du code source
+      - name: Checkout du depot
+        uses: actions/checkout@v4
+
+      # 2. Installation de Python 3.13
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # 3. Cache pip Windows pour accelerer les installations suivantes
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-py3.13-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-py3.13-
+
+      # 4. Installation des dependances (CI2 audit : lire les requirements files
+      # au lieu de pin a la main pour eviter les drift CI/local)
+      - name: Installation des dependances
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
+          python -m pip install pytest pytest-playwright
+
+      # 5. Verification du lint (regles E9, F — bloquant)
+      - name: Lint (ruff check)
+        shell: pwsh
+        run: python -m ruff check .
+
+      # 6. Verification du formatage (bloquant, sans modification)
+      - name: Format check (ruff format)
+        shell: pwsh
+        run: python -m ruff format --check .
+
+      # 7. Execution des tests avec mesure de couverture (unitaires
+      # uniquement — les E2E dashboard/desktop necessitent des navigateurs
+      # Playwright installes, traites apres le build).
+      - name: Tests unitaires avec couverture
+        shell: pwsh
+        run: python -m coverage run -m pytest tests/ --ignore=tests/e2e --ignore=tests/e2e_dashboard --ignore=tests/e2e_desktop --ignore=tests/manual --ignore=tests/live --ignore=tests/stress -v
+
+      # 8. Rapport de couverture — echec si < 80%
+      - name: Rapport de couverture (seuil 80%)
+        shell: pwsh
+        run: python -m coverage report --fail-under=80
+
+      # 9. Generation du rapport coverage HTML (telechargeable depuis Actions)
+      - name: Rapport coverage HTML
+        shell: pwsh
+        run: python -m coverage html -d coverage_html
+
+      # 10. Upload du rapport coverage HTML (retention 14 jours)
+      - name: Upload artefact coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_html/
+          retention-days: 14
+
+      # 11. Build complet PyInstaller (option A — detecte les imports manquants)
+      - name: Build PyInstaller
+        shell: pwsh
+        run: pyinstaller --noconfirm CineSort.spec
+
+      # 12. Verification de la taille de l'EXE — echec si > 60 MB
+      # Limite portee de 20 MB a 60 MB suite a integration moteur perceptuel V2 :
+      # - LPIPS AlexNet ONNX (~9 MB)
+      # - onnxruntime (~30 MB)
+      # - numpy (~15 MB)
+      # - ffmpeg/ffprobe/mediainfo embarques
+      # Bundle actuel mesure ~51 MB. Marge 60 MB pour absorber les evolutions.
+      - name: Verification taille EXE (max 60 MB)
+        shell: pwsh
+        run: |
+          $exe = "dist\CineSort.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "EXE introuvable : $exe"
+            exit 1
+          }
+          $size = (Get-Item $exe).Length
+          $sizeMB = [math]::Round($size / 1MB, 2)
+          Write-Host "Taille de l'EXE : $sizeMB MB"
+          if ($size -gt 60MB) {
+            Write-Error "EXE trop volumineux : $sizeMB MB (limite : 60 MB)"
+            exit 1
+          }
+          Write-Host "OK — sous la limite de 60 MB"
+
+      # 13. Upload de l'artefact EXE (retention 7 jours)
+      - name: Upload artefact EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: CineSort-exe
+          path: dist/CineSort.exe
+          retention-days: 7
+          if-no-files-found: error
+
+      # 14. Tests E2E dashboard (Playwright pur, pas de pywebview)
+      - name: Tests E2E Dashboard
+        shell: pwsh
+        run: |
+          python -m pip install pytest-playwright
+          playwright install chromium
+          python -m pytest tests/e2e/ -v --timeout=120 -x
+        if: success()
+
+      # E2E desktop : necessite pywebview + Windows GUI → executer localement
+      # pytest tests/e2e_desktop/ -v --timeout=600

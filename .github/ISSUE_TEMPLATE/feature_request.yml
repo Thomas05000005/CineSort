@@ -1,0 +1,33 @@
+name: 💡 Proposer une amélioration
+description: Une idée pour rendre CineSort meilleur.
+title: "[Feature] "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Quel problème ça résout ?
+      description: |
+        Ex. "Quand j'ai 5000 films, c'est lent de chercher par acteur"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution proposée
+      description: Décris ce que tu aimerais voir.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+      description: D'autres approches que tu as considérées (optionnel)
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte additionnel
+      description: Captures, liens, exemples

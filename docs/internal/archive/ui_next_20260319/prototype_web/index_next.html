@@ -1,0 +1,1390 @@
+﻿<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CineSort</title>
+  <link rel="stylesheet" href="./styles_next.css" />
+</head>
+<body class="ui-next control-room horizon-core">
+  <div class="app appNext horizonShell">
+    <header class="shellHeader">
+      <section class="shellBrandBlock">
+        <div class="brandStamp" aria-hidden="true">CS</div>
+        <div class="brandCopy">
+          <div class="brandEyebrow">CineSort Next</div>
+          <div class="shellProductTitle">Film Operations Console</div>
+          <div class="shellProductText">Une interface de pilotage plus nette, plus rapide à lire et plus structurée pour l’usage quotidien.</div>
+        </div>
+      </section>
+
+      <section class="shellTopbar topbar">
+        <div class="topbarLeft">
+          <div class="topbarEyebrow">Contrôle de bibliothèque</div>
+          <div class="headline" id="headline">Paramètres</div>
+          <div class="subline" id="subline">Configure la source, les outils et le stockage local avant d’exécuter un run.</div>
+        </div>
+        <div class="topbarRight">
+          <span class="pill shellLivePill" id="pillRun">Run: —</span>
+          <span class="pill shellLivePill" id="pillStatus">En attente</span>
+          <button class="btn ghost" id="btnTheme">Thème clair</button>
+          <button class="btn ghost" id="btnHelp">Aide</button>
+        </div>
+      </section>
+
+      <nav class="workflowRibbon steps" role="tablist" aria-label="Navigation CineSort Next">
+        <div class="workflowCluster workflowClusterPrep">
+          <div class="workflowClusterLabel">Préparer</div>
+          <button id="tab-settings" class="step active" data-view="settings" role="tab" aria-selected="true" aria-controls="view-settings" tabindex="0">
+            <span class="stepnum">01</span>
+            <span class="steptext">Paramètres</span>
+          </button>
+          <button id="tab-plan" class="step" data-view="plan" role="tab" aria-selected="false" aria-controls="view-plan" tabindex="-1">
+            <span class="stepnum">02</span>
+            <span class="steptext">Analyse</span>
+          </button>
+        </div>
+        <div class="workflowCluster workflowClusterDecide">
+          <div class="workflowClusterLabel">Décider</div>
+          <button id="tab-quality" class="step" data-view="quality" role="tab" aria-selected="false" aria-controls="view-quality" tabindex="-1">
+            <span class="stepnum">03</span>
+            <span class="steptext">Qualité</span>
+          </button>
+          <button id="tab-validate" class="step" data-view="validate" role="tab" aria-selected="false" aria-controls="view-validate" tabindex="-1">
+            <span class="stepnum">04</span>
+            <span class="steptext">Validation</span>
+          </button>
+          <button id="tab-duplicates" class="step" data-view="duplicates" role="tab" aria-selected="false" aria-controls="view-duplicates" tabindex="-1">
+            <span class="stepnum">05</span>
+            <span class="steptext">Doublons</span>
+          </button>
+        </div>
+        <div class="workflowCluster workflowClusterExecute">
+          <div class="workflowClusterLabel">Exécuter</div>
+          <button id="tab-apply" class="step" data-view="apply" role="tab" aria-selected="false" aria-controls="view-apply" tabindex="-1">
+            <span class="stepnum">06</span>
+            <span class="steptext">Application</span>
+          </button>
+          <button id="tab-logs" class="step" data-view="logs" role="tab" aria-selected="false" aria-controls="view-logs" tabindex="-1">
+            <span class="stepnum">07</span>
+            <span class="steptext">Journaux</span>
+          </button>
+          <button id="tab-dashboard" class="step insightStep" data-view="dashboard" role="tab" aria-selected="false" aria-controls="view-dashboard" tabindex="-1">
+            <span class="stepnum">08</span>
+            <span class="steptext">Dashboard</span>
+          </button>
+        </div>
+      </nav>
+
+      <section class="commandDeck">
+        <section class="card nextAction" id="nextActionCard">
+          <div class="nextActionMain">
+            <div class="nextActionLabel">Commande recommandée</div>
+            <div class="nextActionTitle" id="nextActionTitle">Configure les paramètres de base</div>
+            <div class="nextActionText" id="nextActionText">Renseigne ROOT, STATE_DIR et teste TMDb avant de lancer l'analyse.</div>
+          </div>
+          <div class="nextActionControls">
+            <button class="btn primary" id="btnNextStep">Ouvrir l’étape suivante</button>
+            <button class="btn ghost" id="btnToggleGuideDetails" aria-expanded="false">Voir la méthode</button>
+          </div>
+          <div class="nextActionDetails hidden" id="nextActionDetails">
+            <ul>
+              <li id="nextActionDetail1">Prépare les paramètres de base.</li>
+              <li id="nextActionDetail2">Passe ensuite à l'analyse.</li>
+              <li id="nextActionDetail3">Continue avec la validation puis l'application.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="card contextBar" id="contextBar">
+          <div class="contextCol contextCell contextRunCell">
+            <div class="contextLabel">Run actif</div>
+            <div class="contextValue" id="ctxRunText">Dernier run</div>
+            <div class="contextActionsRow">
+              <button class="btn smallBtn" id="btnCtxCopyRun">Copier</button>
+              <button class="btn smallBtn" id="btnCtxOpenRun">Ouvrir le dossier</button>
+            </div>
+            <div class="micro mt8" id="ctxRunHint">Le run actif sert aux actions Qualité. Le Dashboard consulte un run sans changer le workflow.</div>
+          </div>
+          <div class="contextCol contextCell contextFilmCell">
+            <div class="contextLabel">Film ciblé</div>
+            <div class="contextValue" id="ctxFilmText">Aucun film sélectionné.</div>
+            <div class="contextActionsRow">
+              <button class="btn smallBtn" id="btnCtxSelectFilm">Choisir un film</button>
+            </div>
+            <div class="advancedOnly hidden mt8 contextMetaStack">
+              <div class="micro">row_id</div>
+              <div class="contextValue mono" id="ctxRowIdText">—</div>
+              <button class="btn smallBtn mt8" id="btnCtxCopyRow">Copier row_id</button>
+            </div>
+          </div>
+          <div class="contextCol contextCell contextActions contextModeCell">
+            <div class="contextLabel">Mode opérateur</div>
+            <label class="chk toolbarChk">
+              <input type="checkbox" id="ckAdvancedMode" />
+              <span>Mode avancé</span>
+            </label>
+            <button class="btn ghost mt10" id="btnIdsHelp">Aide run_id / row_id</button>
+            <div class="micro mt8">La sélection guidée reste prioritaire. Le mode avancé expose seulement les identifiants quand ils sont utiles.</div>
+          </div>
+        </section>
+      </section>
+    </header>
+
+    <main class="main nextMain">
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" aria-hidden="false">
+        <div class="viewLayout viewLayoutWithRail qualityNextLayout">
+          <div class="viewPrimary">
+        <div class="card settingsHeroCard">
+          <div class="onboardingPanel">
+            <div class="row spread wrap">
+              <div>
+                <div class="cardTitle">Assistant premier lancement</div>
+                <div class="muted">Vérifie rapidement les points essentiels avant la première analyse.</div>
+              </div>
+              <span class="badge bad" id="onboardingOverallBadge">Incomplet</span>
+            </div>
+            <div class="onboardingGrid mt10">
+              <div class="onboardingItem">
+                <div class="onboardingHead">
+                  <div class="labelLine">1) Bibliothèque et stockage local</div>
+                  <span class="badge neutral" id="onboardingPathsBadge">À faire</span>
+                </div>
+                <div class="micro" id="onboardingPathsHint">Renseigne les dossiers principaux.</div>
+                <div class="row mt8">
+                  <button class="btn ghost smallBtn" id="btnOnboardingFocusPaths">Configurer</button>
+                </div>
+              </div>
+              <div class="onboardingItem">
+                <div class="onboardingHead">
+                  <div class="labelLine">2) Enrichissement TMDb</div>
+                  <span class="badge neutral" id="onboardingTmdbBadge">À vérifier</span>
+                </div>
+                <div class="micro" id="onboardingTmdbHint">Active TMDb et teste la clé API si utilisée.</div>
+                <div class="row mt8">
+                  <button class="btn ghost smallBtn" id="btnOnboardingTestTmdb">Tester TMDb</button>
+                </div>
+              </div>
+              <div class="onboardingItem">
+                <div class="onboardingHead">
+                  <div class="labelLine">3) Outils d’analyse vidéo</div>
+                  <span class="badge neutral" id="onboardingProbeBadge">À vérifier</span>
+                </div>
+                <div class="micro" id="onboardingProbeHint">Mode hybride conseillé pour un score qualité complet.</div>
+                <div class="row mt8">
+                  <button class="btn ghost smallBtn" id="btnOnboardingProbeRecheck">Réessayer détection</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="operatorDiagPanel mt12">
+              <div class="row spread wrap">
+                <div>
+                  <div class="cardTitle">Diagnostic opérateur</div>
+                  <div class="muted">Lis l'état réel avant de lancer un run ou un apply réel.</div>
+                </div>
+                <span class="badge neutral" id="operatorDiagOverallBadge">À vérifier</span>
+              </div>
+              <div class="operatorDiagGrid mt10">
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">TMDb</div>
+                    <span class="badge neutral" id="operatorDiagTmdbBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagTmdbHint">—</div>
+                </div>
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">Clé API</div>
+                    <span class="badge neutral" id="operatorDiagKeyBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagKeyHint">—</div>
+                </div>
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">Analyse vidéo</div>
+                    <span class="badge neutral" id="operatorDiagProbeBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagProbeHint">—</div>
+                </div>
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">Application</div>
+                    <span class="badge neutral" id="operatorDiagDryRunBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagDryRunHint">—</div>
+                </div>
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">Prudence</div>
+                    <span class="badge neutral" id="operatorDiagSafetyBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagSafetyHint">—</div>
+                </div>
+                <div class="operatorDiagItem">
+                  <div class="onboardingHead">
+                    <div class="labelLine">Dossiers vides</div>
+                    <span class="badge neutral" id="operatorDiagEmptyBadge">—</span>
+                  </div>
+                  <div class="micro" id="operatorDiagEmptyHint">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">Chemins</div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="inRoot">Bibliothèque films (ROOT) <button type="button" class="info" aria-label="Aide ROOT" data-tip="Exemple de dossier films local ou réseau (ex: D:\Films).">i</button></label>
+              <input id="inRoot" placeholder="D:\Films" />
+            </div>
+            <div class="field">
+              <label for="inState">Données locales (STATE_DIR) <button type="button" class="info" aria-label="Aide STATE_DIR" data-tip="Dossier local pour cache TMDb + logs + runs (évite les WinError 5).">i</button></label>
+              <input id="inState" placeholder="%LOCALAPPDATA%\CineSort" />
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">TMDb</div>
+
+          <div class="grid2">
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckTmdbEnabled" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Activer TMDb</div>
+                <div class="muted">Utilise TMDb pour corriger les cas douteux et compléter les années.</div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="inTimeout">Timeout (s) <button type="button" class="info" aria-label="Aide timeout TMDb" data-tip="Temps max par requête TMDb. Monte à 15 si ton réseau est lent.">i</button></label>
+              <input id="inTimeout" type="number" min="3" step="1" value="10" />
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="inApiKey">Clé API TMDb <button type="button" class="info" aria-label="Aide clé TMDb" data-tip="La clé reste sur ton PC. Ne la partage pas dans un chat public.">i</button></label>
+              <div class="row">
+                <input id="inApiKey" type="password" placeholder="••••••••••" />
+                <button class="btn ghost" id="btnRevealKey" type="button" aria-pressed="false">Afficher</button>
+              </div>
+              <div class="row mt8">
+                <label class="chk">
+                  <input type="checkbox" id="ckRememberKey" />
+                  <span>Mémoriser la clé dans les paramètres</span>
+                </label>
+                <button class="btn" id="btnTestKey">Tester la clé</button>
+                <span id="tmdbTestBadge" class="badge neutral">—</span>
+              </div>
+              <div class="muted mt6">Si décoché, la clé n'est pas écrite dans <code>settings.json</code> et devra être ressaisie après relance.</div>
+              <div class="muted mt6 statusMsg" id="tmdbTestMsg" aria-live="polite"></div>
+            </div>
+
+            <div class="field">
+              <label for="ckCollectionMove">Collections <button type="button" class="info" aria-label="Aide collections" data-tip="Si un dossier contient plusieurs films, on crée des sous-dossiers 'Titre (Année)'. Optionnel: on déplace ce dossier sous ROOT\Collection.">i</button></label>
+              <label class="chk">
+                <input type="checkbox" id="ckCollectionMove" />
+                <span>Déplacer les collections dans le dossier dédié</span>
+              </label>
+              <div class="muted mt6">Recommandé: oui (bibliothèque plus propre).</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">Nettoyage et analyse</div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="inCollectionFolderName">Dossier collections <button type="button" class="info" aria-label="Aide dossier collections" data-tip="Nom du dossier racine pour les collections de films multi-titres.">i</button></label>
+              <input id="inCollectionFolderName" placeholder="_Collection" />
+              <div class="muted mt6">Exemple recommandé: <code>_Collection</code>.</div>
+            </div>
+
+            <div class="field">
+              <label for="inEmptyFoldersFolderName">Dossier des dossiers vides <button type="button" class="info" aria-label="Aide dossiers vides" data-tip="Nom du dossier qui recevra les dossiers vides déplacés pendant APPLY.">i</button></label>
+              <input id="inEmptyFoldersFolderName" placeholder="_Vide" />
+              <div class="muted mt6">Exemple recommandé: <code>_Vide</code>.</div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckMoveEmptyFoldersEnabled" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Déplacer les dossiers vides</div>
+                <div class="muted">Option de sécurité désactivée par défaut.</div>
+              </div>
+            </div>
+
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckIncrementalScanEnabled" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Scan des changements (incrémental)</div>
+                <div class="muted">Réutilise le cache dossier/fichier pour accélérer les gros scans.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="selEmptyFoldersScope">Portée <button type="button" class="info" aria-label="Aide portée dossiers vides" data-tip="Définit quels dossiers vides sont déplacés pendant APPLY.">i</button></label>
+              <select id="selEmptyFoldersScope" class="select">
+                <option value="root_all">Racine ROOT (tout, plus agressif)</option>
+                <option value="touched_only">Uniquement ceux touchés par ce run (prudent)</option>
+              </select>
+              <div class="muted mt6">Prudent: <code>touched_only</code>. Plus agressif: <code>root_all</code> sur toute la racine.</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">Nettoyage de fin de run</div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="inResidualCleanupFolderName">Dossier nettoyage <button type="button" class="info" aria-label="Aide dossier nettoyage" data-tip="Nom du dossier qui recevra les dossiers résiduels non vides mais nettoyables.">i</button></label>
+              <input id="inResidualCleanupFolderName" placeholder="_Dossier Nettoyage" />
+              <div class="muted mt6">Aucun fichier n'est supprime : le dossier complet est seulement deplace.</div>
+            </div>
+
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckResidualCleanupEnabled" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Déplacer les dossiers résiduels nettoyables</div>
+                <div class="muted">Désactivé par défaut. En cas d’ambiguïté, rien ne bouge.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="selResidualCleanupScope">Portée <button type="button" class="info" aria-label="Aide portée nettoyage résiduel" data-tip="Définit quels dossiers résiduels non vides peuvent être déplacés en fin de run.">i</button></label>
+              <select id="selResidualCleanupScope" class="select">
+                <option value="touched_only">Uniquement ceux touchés par ce run (prudent)</option>
+                <option value="root_all">Racine ROOT (tout, plus agressif)</option>
+              </select>
+              <div class="muted mt6">Ne s'applique jamais si une vraie vidéo est encore présente.</div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <div class="labelLine">Types considérés comme résiduels</div>
+              <div class="grid2 mt8">
+                <label class="chk"><input type="checkbox" id="ckResidualIncludeNfo" /><span>NFO / XML</span></label>
+                <label class="chk"><input type="checkbox" id="ckResidualIncludeImages" /><span>Images</span></label>
+                <label class="chk"><input type="checkbox" id="ckResidualIncludeSubtitles" /><span>Sous-titres</span></label>
+                <label class="chk"><input type="checkbox" id="ckResidualIncludeTexts" /><span>Textes / URL</span></label>
+              </div>
+              <div class="muted mt6">Si un dossier contient une extension non prévue ou une vidéo, il est laissé en place.</div>
+            </div>
+          </div>
+
+          <div class="row mt12">
+            <button class="btn primary" id="btnSaveSettings">Enregistrer</button>
+            <span class="muted statusMsg" id="saveMsg" aria-live="polite"></span>
+          </div>
+        </div>
+          </div>
+          <aside class="viewRail">
+            <div class="card railCard">
+              <div class="railEyebrow">Prêt pour le premier run</div>
+              <div class="railTitle">Checklist opérateur</div>
+              <ul class="railList">
+                <li>ROOT pointe vers la bonne bibliothèque.</li>
+                <li>STATE_DIR reste local et stable.</li>
+                <li>TMDb est testé si tu l’utilises.</li>
+                <li>Les outils probe sont détectés avant batch qualité.</li>
+              </ul>
+            </div>
+            <div class="card railCard">
+              <div class="railEyebrow">Bonnes pratiques</div>
+              <div class="railTitle">Avant le premier apply réel</div>
+              <ul class="railList">
+                <li>Activer d’abord le mode test.</li>
+                <li>Passer par Qualité pour les cas douteux.</li>
+                <li>Vérifier la vue Doublons avant Application.</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- QUALITY -->
+      <section class="view hidden" id="view-quality" role="tabpanel" aria-labelledby="tab-quality" aria-hidden="true">
+        <div class="viewLayout viewLayoutWithRail applyNextLayout">
+          <div class="viewPrimary">
+        <div class="card qualityHubHeader qualityHubHero">
+          <div class="row spread wrap">
+            <div>
+              <div class="cardTitle">Hub Qualité</div>
+              <div class="muted">Analyse unitaire ou batch, filtres de relecture, outils probe et réglages score dans une seule page.</div>
+            </div>
+            <div class="muted">Profil actif: <b id="qProfileId">—</b> v<span id="qProfileVersion">—</span></div>
+          </div>
+          <div class="qualityHubTabs mt12" role="tablist" aria-label="Navigation interne Qualité">
+            <button class="btn qualityHubTab active" id="qTabOverview" data-quality-panel="overview" role="tab" aria-selected="true">Vue & batch</button>
+            <button class="btn qualityHubTab" id="qTabFilters" data-quality-panel="filters" role="tab" aria-selected="false">Filtres qualité</button>
+            <button class="btn qualityHubTab" id="qTabTools" data-quality-panel="tools" role="tab" aria-selected="false">Outils probe</button>
+            <button class="btn qualityHubTab" id="qTabProfile" data-quality-panel="profile" role="tab" aria-selected="false">Profil avancé</button>
+          </div>
+        </div>
+
+        <div class="qualityHubBody">
+          <section class="qualityPanel" id="quality-panel-overview" aria-hidden="false">
+            <div class="card">
+              <div class="cardTitle">Actions principales</div>
+              <div class="row mt10 wrap">
+                <button class="btn primary" id="btnQualityTestSelected">Tester sur le film sélectionné</button>
+                <button class="btn" id="btnQualitySelectFilm">Sélectionner…</button>
+                <span class="muted statusMsg" id="qualityTestMsg" aria-live="polite"></span>
+              </div>
+              <div class="row mt10 qualityBatchRow">
+                <button class="btn" id="btnQualityBatchSelection">Analyser tous les films valides</button>
+                <button class="btn" id="btnQualityBatchFiltered">Analyser tous les films filtrés</button>
+                <label class="chk">
+                  <input type="checkbox" id="ckQualityReuseExisting" checked />
+                  <span>Réutiliser les résultats déjà calculés</span>
+                </label>
+                <label class="chk">
+                  <input type="checkbox" id="ckQualityForceReanalyze" />
+                  <span>Forcer la réanalyse</span>
+                </label>
+              </div>
+              <div class="muted statusMsg mt6" id="qualityBatchMsg" aria-live="polite">—</div>
+              <pre class="logbox mt10" id="qualityBatchOut">—</pre>
+              <details class="detailsCard mt10 advancedOnly hidden" id="qualityManualIds">
+                <summary>Mode avancé: tester avec run_id / row_id</summary>
+                <div class="grid2 mt10">
+                  <div class="field"><label>run_id (manuel)</label><input id="qTestRunId" placeholder="Ex: 20260222_120000_123" /></div>
+                  <div class="field"><label>row_id (manuel)</label><input id="qTestRowId" placeholder="Ex: row_0012" /></div>
+                </div>
+                <div class="row mt10">
+                  <button class="btn" id="btnQualityTest">Tester en mode avancé</button>
+                </div>
+              </details>
+              <pre class="logbox mt10" id="qualityTestOut">—</pre>
+            </div>
+          </section>
+
+          <section class="qualityPanel hidden" id="quality-panel-filters" aria-hidden="true">
+            <div class="card">
+              <div class="cardTitle">Filtres qualité pour la relecture</div>
+              <div class="muted">Ces filtres s'appliquent à la table Validation pour isoler rapidement les cas à revoir.</div>
+              <div class="row mt12 qualityBatchRow wrap">
+                <label class="srOnly" for="qualityStateFilter">Filtre état qualité</label>
+                <select id="qualityStateFilter" class="select compact">
+                  <option value="all">État: tous</option>
+                  <option value="not_analyzed">Non analysé</option>
+                  <option value="analyzed">Analysé</option>
+                  <option value="ignored_existing">Ignoré (déjà dispo)</option>
+                  <option value="error">Erreur</option>
+                </select>
+                <label class="srOnly" for="qualityTierFilter">Filtre tier qualité</label>
+                <select id="qualityTierFilter" class="select compact">
+                  <option value="all">Tier: tous</option>
+                  <option value="faible">Faible</option>
+                  <option value="moyen">Moyen</option>
+                  <option value="bon">Bon</option>
+                  <option value="premium">Premium</option>
+                </select>
+                <label class="srOnly" for="qualityScoreFilter">Filtre score qualité</label>
+                <select id="qualityScoreFilter" class="select compact">
+                  <option value="all">Score: tous</option>
+                  <option value="lt45">&lt; 45</option>
+                  <option value="45_59">45 à 59</option>
+                  <option value="gte60">≥ 60</option>
+                </select>
+              </div>
+              <div class="muted mt10">Astuce: combine ce panneau avec les presets de Validation pour construire une relecture “à risque”.</div>
+            </div>
+          </section>
+
+          <section class="qualityPanel hidden" id="quality-panel-tools" aria-hidden="true">
+            <div class="card">
+              <div class="cardTitle">Outils d'analyse vidéo</div>
+              <div class="muted">Diagnostic ffprobe + MediaInfo, installation assistée (Windows), puis fallback manuel.</div>
+              <div class="grid2 mt10">
+                <div class="field">
+                  <label>ffprobe</label>
+                  <div class="muted" id="probeFfprobeStatus">—</div>
+                </div>
+                <div class="field">
+                  <label>MediaInfo</label>
+                  <div class="muted" id="probeMediainfoStatus">—</div>
+                </div>
+              </div>
+              <div class="muted mt6" id="probeHybridStatus">—</div>
+              <div class="row mt10 wrap">
+                <button class="btn" id="btnProbeInstall">Installer</button>
+                <button class="btn" id="btnProbeUpdate">Mettre à jour</button>
+                <button class="btn" id="btnProbeRecheck">Réessayer détection</button>
+                <span class="muted statusMsg" id="probeToolsMsg" aria-live="polite"></span>
+              </div>
+              <details class="detailsCard mt10" open>
+                <summary>Configuration manuelle des chemins</summary>
+                <div class="grid2 mt10">
+                  <div class="field">
+                    <label for="inProbeFfprobePath">Chemin ffprobe.exe</label>
+                    <input id="inProbeFfprobePath" placeholder="Ex: C:\Tools\ffprobe.exe" />
+                  </div>
+                  <div class="field">
+                    <label for="inProbeMediainfoPath">Chemin MediaInfo.exe</label>
+                    <input id="inProbeMediainfoPath" placeholder="Ex: C:\Tools\MediaInfo.exe" />
+                  </div>
+                </div>
+                <div class="row mt8 wrap">
+                  <label for="selProbeBackend">Mode d’analyse vidéo</label>
+                  <select id="selProbeBackend" class="select compact">
+                    <option value="auto">Auto (hybride)</option>
+                    <option value="ffprobe">ffprobe</option>
+                    <option value="mediainfo">MediaInfo</option>
+                    <option value="none">Aucun</option>
+                  </select>
+                  <button class="btn" id="btnProbeSavePaths">Enregistrer les chemins</button>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="qualityPanel hidden" id="quality-panel-profile" aria-hidden="true">
+            <div class="card">
+              <div class="cardTitle">Profil scoring CinemaLux</div>
+              <div class="muted">Réglages complets du score 0-100. Les sections techniques sont repliables.</div>
+              <div class="row mt10 wrap qualityPresetRow">
+                <span class="muted">Presets prêts à l'emploi :</span>
+                <button class="btn qualityPresetBtn" id="btnQualityPresetRemux" data-quality-preset="remux_strict" aria-pressed="false">Remux strict</button>
+                <button class="btn qualityPresetBtn" id="btnQualityPresetEquilibre" data-quality-preset="equilibre" aria-pressed="false">Équilibré</button>
+                <button class="btn qualityPresetBtn" id="btnQualityPresetLight" data-quality-preset="light" aria-pressed="false">Light</button>
+              </div>
+              <div class="muted mt6" id="qualityPresetHint">Choisissez un preset pour charger un profil cohérent en un clic.</div>
+
+              <details class="detailsCard mt12" open>
+                <summary>Poids et seuils essentiels</summary>
+                <div class="grid3 mt10">
+                  <div class="field"><label>Vidéo</label><input id="qWeightVideo" type="number" min="0" max="100" step="1" /></div>
+                  <div class="field"><label>Audio</label><input id="qWeightAudio" type="number" min="0" max="100" step="1" /></div>
+                  <div class="field"><label>Extras</label><input id="qWeightExtras" type="number" min="0" max="100" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>Min kbps 2160p</label><input id="qBitrate2160" type="number" min="500" step="100" /></div>
+                  <div class="field"><label>Min kbps 1080p</label><input id="qBitrate1080" type="number" min="500" step="100" /></div>
+                  <div class="field"><label>Pénalité débit faible</label><input id="qPenaltyLowBitrate" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>Pénalité 4K Light</label><input id="qPenalty4kLight" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>Pénalité HDR 8 bits</label><input id="qPenaltyHdr8bit" type="number" min="0" step="1" /></div>
+                  <div class="field inline">
+                    <label class="switch"><input type="checkbox" id="qEnable4kLight" /><span class="slider"></span></label>
+                    <div>
+                      <div class="labelLine">Mode 4K Light</div>
+                      <div class="muted">Pénalité allégée en 2160p faible débit.</div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="detailsCard mt10">
+                <summary>Bonus HDR / codecs vidéo</summary>
+                <div class="grid3 mt10">
+                  <div class="field"><label>DV</label><input id="qDvBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>HDR10+</label><input id="qHdr10pBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>HDR10</label><input id="qHdr10Bonus" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>HEVC</label><input id="qHevcBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>AV1</label><input id="qAv1Bonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>AVC</label><input id="qAvcBonus" type="number" min="0" step="1" /></div>
+                </div>
+              </details>
+
+              <details class="detailsCard mt10">
+                <summary>Audio, langues et tiers</summary>
+                <div class="grid3 mt10">
+                  <div class="field"><label>TrueHD/Atmos</label><input id="qTruehdBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>DTS-HD MA</label><input id="qDtshdBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>DTS</label><input id="qDtsBonus" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>AAC</label><input id="qAacBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>Bonus VO</label><input id="qVoBonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>Bonus VF</label><input id="qVfBonus" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>Canaux 2.0</label><input id="qCh20Bonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>Canaux 5.1</label><input id="qCh51Bonus" type="number" min="0" step="1" /></div>
+                  <div class="field"><label>Canaux 7.1</label><input id="qCh71Bonus" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="grid3 mt10">
+                  <div class="field"><label>Premium &ge;</label><input id="qTierPremium" type="number" min="0" max="100" step="1" /></div>
+                  <div class="field"><label>Bon &ge;</label><input id="qTierBon" type="number" min="0" max="100" step="1" /></div>
+                  <div class="field"><label>Moyen &ge;</label><input id="qTierMoyen" type="number" min="0" max="100" step="1" /></div>
+                </div>
+              </details>
+
+              <div class="row mt12">
+                <label class="chk"><input type="checkbox" id="qIncludeMetadata" /><span>Inclure metadata</span></label>
+                <label class="chk"><input type="checkbox" id="qIncludeNaming" /><span>Inclure nommage</span></label>
+              </div>
+              <div class="row mt12 wrap">
+                <button class="btn primary" id="btnQualitySave">Sauvegarder</button>
+                <button class="btn" id="btnQualityReset">Réinitialiser</button>
+                <button class="btn" id="btnQualityExport">Exporter</button>
+                <button class="btn" id="btnQualityImport">Importer</button>
+                <span class="muted statusMsg" id="qualityMsg" aria-live="polite"></span>
+              </div>
+              <div class="field mt10">
+                <label>Profil JSON (import/export)</label>
+                <textarea id="qProfileJson" class="textarea" placeholder='{"id":"CinemaLux_v1", ...}'></textarea>
+              </div>
+            </div>
+          </section>
+        </div>
+          </div>
+          <aside class="viewRail">
+            <div class="card railCard">
+              <div class="railEyebrow">Séquence conseillée</div>
+              <div class="railTitle">Comment utiliser Qualité</div>
+              <ul class="railList">
+                <li>Tester un film quand un cas précis te semble douteux.</li>
+                <li>Lancer un batch pour prioriser les cas faibles.</li>
+                <li>Filtrer les scores bas avant de revenir à Validation.</li>
+              </ul>
+            </div>
+            <div class="card railCard">
+              <div class="railEyebrow">À retenir</div>
+              <div class="railTitle">Ce que cette page décide</div>
+              <ul class="railList">
+                <li>Qualité ne modifie pas les médias.</li>
+                <li>Les outils probe complètent le score, ils ne changent pas le plan.</li>
+                <li>Le profil avancé sert à calibrer, pas à forcer l’apply.</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- DASHBOARD -->
+      <section class="view hidden" id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" aria-hidden="true">
+        <div class="viewLayout">
+          <div class="viewPrimary">
+        <div class="card">
+          <div class="row spread">
+            <div>
+              <div class="cardTitle">Dashboard premium</div>
+              <div class="muted">Vue synthétique de la qualité sur le dernier run (ou un run précis).</div>
+            </div>
+            <div class="row">
+              <div class="advancedOnly hidden">
+                <input id="dashRunId" class="search" placeholder="run_id précis (mode avancé)" />
+              </div>
+              <button class="btn" id="btnDashboardRefresh">Rafraîchir</button>
+            </div>
+          </div>
+          <div class="muted mt8 statusMsg" id="dashMsg" aria-live="polite">—</div>
+        </div>
+
+        <div class="grid3 mt12">
+          <div class="card kpiCard">
+            <div class="kpiLabel">Score moyen</div>
+            <div class="kpiValue" id="dashKpiScoreAvg">—</div>
+          </div>
+          <div class="card kpiCard">
+            <div class="kpiLabel">Premium (%)</div>
+            <div class="kpiValue" id="dashKpiPremiumPct">—</div>
+          </div>
+          <div class="card kpiCard">
+            <div class="kpiLabel">Films scorés</div>
+            <div class="kpiValue" id="dashKpiScored">—</div>
+          </div>
+        </div>
+
+        <div class="grid3 mt12">
+          <div class="card kpiCard">
+            <div class="kpiLabel">Films planifiés</div>
+            <div class="kpiValue" id="dashKpiTotalMovies">—</div>
+          </div>
+          <div class="card kpiCard">
+            <div class="kpiLabel">Analyse partielle</div>
+            <div class="kpiValue" id="dashKpiProbePartial">—</div>
+          </div>
+          <div class="card kpiCard">
+            <div class="kpiLabel">Run affiché</div>
+            <div class="kpiValue" id="dashRunDisplayed">—</div>
+          </div>
+        </div>
+
+        <div class="card mt12">
+          <div class="cardTitle">Distribution des scores</div>
+          <div class="bars" id="dashScoreBins"></div>
+        </div>
+
+        <div class="grid3 mt12">
+          <div class="card">
+            <div class="cardTitle">Résolutions</div>
+            <div id="dashResolutions" class="listCompact muted">—</div>
+          </div>
+          <div class="card">
+            <div class="cardTitle">HDR</div>
+            <div id="dashHdr" class="listCompact muted">—</div>
+          </div>
+          <div class="card">
+            <div class="cardTitle">Audio (top)</div>
+            <div id="dashAudio" class="listCompact muted">—</div>
+          </div>
+        </div>
+
+        <div class="card mt12">
+          <div class="cardTitle">Top anomalies</div>
+          <div class="tableWrap mt10">
+            <table class="table" id="dashAnomaliesTable">
+              <thead>
+                <tr>
+                  <th>Sévérité</th>
+                  <th>Code</th>
+                  <th>Message</th>
+                  <th>Chemin</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="dashAnomaliesTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card mt12">
+          <div class="cardTitle">Outliers</div>
+          <div class="grid3">
+            <div>
+              <div class="muted"><b>Débit faible</b></div>
+              <div class="tableWrap mt8">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Film</th>
+                      <th>kbps</th>
+                      <th>Chemin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashOutLowBitrate"></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <div class="muted"><b>4K SDR</b></div>
+              <div class="tableWrap mt8">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Film</th>
+                      <th>Chemin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashOutSdr4k"></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <div class="muted"><b>VO manquante</b></div>
+              <div class="tableWrap mt8">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Film</th>
+                      <th>Chemin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashOutVoMissing"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt12">
+          <div class="cardTitle">Historique des runs</div>
+          <div class="tableWrap mt10">
+            <table class="table" id="dashRunsTable">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Début</th>
+                  <th>Durée</th>
+                  <th>Lignes</th>
+                  <th>Appliquées</th>
+                  <th>Erreurs</th>
+                  <th>Anomalies</th>
+                </tr>
+              </thead>
+              <tbody id="dashRunsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLAN -->
+      <section class="view hidden" id="view-plan" role="tabpanel" aria-labelledby="tab-plan" aria-hidden="true">
+        <div class="viewLayout">
+          <div class="viewPrimary">
+        <div class="card">
+          <div class="cardTitle">Analyse / Plan</div>
+          <div class="row">
+            <button class="btn primary" id="btnStartPlan">Lancer l’analyse</button>
+            <button class="btn" id="btnOpenRunDir" disabled>Ouvrir le dossier du run</button>
+          </div>
+
+          <div class="progressWrap mt12">
+            <div class="progressBar"><div class="progressFill" id="progressFill" style="width:0%"></div></div>
+            <div class="progressInfo">
+              <div class="progressMetric">
+                <div class="progressLabel">Dossiers traités</div>
+                <div class="progressValue" id="progCount">0/0</div>
+              </div>
+              <div class="progressMetric">
+                <div class="progressLabel">Débit récent (dossiers/s)</div>
+                <div class="progressValue" id="progSpeed">0.00</div>
+              </div>
+              <div class="progressMetric">
+                <div class="progressLabel">Temps restant estimé</div>
+                <div class="progressValue" id="progEta">—</div>
+              </div>
+            </div>
+            <div class="progressCurrent">
+              <div class="progressLabel">Chemin en cours</div>
+              <div class="muted oneLine" id="progCurrent">—</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="row">
+            <button class="btn" id="btnLoadTable" disabled>Charger la table de validation</button>
+            <span class="muted statusMsg" id="planMsg" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="card mt12">
+          <div class="cardTitle">Journal en direct</div>
+          <pre class="logbox" id="logboxPlan"></pre>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VALIDATE -->
+      <section class="view hidden" id="view-validate" role="tabpanel" aria-labelledby="tab-validate" aria-hidden="true">
+        <div class="viewLayout validationLayout">
+          <div class="viewPrimary">
+        <div class="card validationStageCard">
+          <div class="validationStageHead">
+            <div>
+              <div class="panelEyebrow">Relecture</div>
+              <div class="cardTitle">Validation</div>
+              <div class="muted">Isole les cas à relire, valide les lignes sûres puis contrôle les doublons avant l'application.</div>
+            </div>
+            <details class="detailsCard validationStageHelp">
+              <summary>Aide rapide</summary>
+              <div class="validationHelpBody">
+                <div class="validationHelpGroup">
+                  <div class="validationHelpTitle">Règle simple</div>
+                  <ul class="muted">
+                    <li><b>Haute</b> : souvent applicable en lot.</li>
+                    <li><b>Moyenne</b> : vérifiez rapidement le titre et l’année.</li>
+                    <li><b>Faible</b> : ouvrez "Propositions" ou laissez en review.</li>
+                  </ul>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="validationWorkbench">
+          <div class="card validationControlCard validationFiltersCard">
+            <div class="validationBlockHead">
+              <div>
+                <div class="panelEyebrow">Filtres</div>
+                <div class="validationSectionTitle">Trier les lignes à relire</div>
+                <div class="muted">Commence par la recherche, la confiance et la source. Les cas plus fins restent dans les filtres avancés.</div>
+              </div>
+            </div>
+
+            <div class="validationFilterSearch">
+              <label class="srOnly" for="searchBox">Recherche</label>
+              <input id="searchBox" class="search" placeholder="Recherche titre / dossier / vidéo..." />
+            </div>
+
+            <div class="validationFilterGrid mt12">
+              <div class="validationFilterShort">
+                <label class="micro" for="filterConf">Confiance</label>
+                <select id="filterConf" class="select" size="1">
+                <option value="all">Toutes les confiances</option>
+                <option value="high">Haute</option>
+                <option value="med_low">Moyenne + faible</option>
+                <option value="med">Moyenne</option>
+                <option value="low">Faible</option>
+                </select>
+              </div>
+
+              <div class="validationFilterShort">
+                <label class="micro" for="filterSource">Source retenue</label>
+                <select id="filterSource" class="select" size="1">
+                <option value="all">Toutes les sources</option>
+                <option value="nfo">NFO</option>
+                <option value="tmdb_name">TMDb + nom</option>
+                <option value="tmdb">TMDb</option>
+                <option value="name">Nom</option>
+                <option value="unknown">Inconnu</option>
+                </select>
+              </div>
+            </div>
+
+              <details class="detailsCard validateFiltersDetails">
+                <summary>Filtres avancés</summary>
+                <div class="validationAdvancedGrid mt10">
+                  <div class="validationFilterShort">
+                    <label class="micro" for="filterKind">Type</label>
+                    <select id="filterKind" class="select" size="1">
+                    <option value="all">Tous les types</option>
+                    <option value="single">Single</option>
+                    <option value="collection">Collection</option>
+                    </select>
+                  </div>
+
+                  <div class="validationFilterShort">
+                    <label class="micro" for="filterChangeType">Type de changement</label>
+                    <select id="filterChangeType" class="select" size="1">
+                    <option value="all">Tous les changements</option>
+                    <option value="add_year">Ajout année</option>
+                    <option value="fix_year">Correction année</option>
+                    <option value="normalize_title">Normalisation titre</option>
+                    <option value="already_ok">Déjà conforme</option>
+                    <option value="none">Aucun changement</option>
+                    </select>
+                  </div>
+
+                  <div class="validationFilterShort">
+                    <label class="micro" for="filterWarning">Signaux heuristiques</label>
+                    <select id="filterWarning" class="select" size="1">
+                    <option value="all">Tous les signaux</option>
+                    <option value="nfo_title_mismatch">NFO ignoré (titre mismatch)</option>
+                    <option value="nfo_year_mismatch">NFO ignoré (année mismatch)</option>
+                    <option value="year_conflict_folder_file">Conflit année dossier/fichier</option>
+                    <option value="tmdb_year_delta">TMDb retenu avec delta année</option>
+                    <option value="any_warning">Avertissements présents</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
+
+            <div class="validationPresetBar mt12">
+              <span class="validationPresetLabel">Presets</span>
+              <div class="validationPresetChips">
+                <button class="btn smallBtn ghost" id="btnPresetReviewRisk">À relire (risque)</button>
+                <button class="btn smallBtn ghost" id="btnPresetAddYear">Ajout année seulement</button>
+                <button class="btn smallBtn ghost" id="btnPresetSensitive">Corrections sensibles</button>
+                <button class="btn smallBtn ghost" id="btnPresetCollections">Collections</button>
+                <button class="btn smallBtn ghost" id="btnPresetQualityLow">Qualité faible</button>
+                <button class="btn smallBtn ghost" id="btnPresetReset">Réinitialiser</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card validationControlCard validationActionsCard">
+            <div class="validationBlockHead">
+              <div>
+                <div class="panelEyebrow">Actions</div>
+                <div class="validationSectionTitle">Agir sur la sélection visible</div>
+                <div class="muted">Les actions principales ressortent. Les outils de lot restent disponibles mais plus discrets.</div>
+              </div>
+            </div>
+
+            <div class="validationPrimaryActions mt12">
+              <div class="assistWrap validationAssistCard">
+                <label for="assistProfile">Profil assistant</label>
+                <select id="assistProfile" class="select compact" size="1">
+                  <option value="equilibre">Équilibré</option>
+                  <option value="prudent">Prudent</option>
+                  <option value="agressif">Agressif</option>
+                </select>
+              </div>
+              <button class="btn primary" id="btnAssistValidation">Validation assistée</button>
+              <button class="btn primary" id="btnCheckDuplicates">Vérifier doublons</button>
+            </div>
+
+            <div class="validationSecondaryActions mt12">
+              <button class="btn ghost smallBtn" id="btnCheckVisible">Tout cocher</button>
+              <button class="btn ghost smallBtn" id="btnUncheckVisible">Tout décocher</button>
+              <button class="btn ghost smallBtn" id="btnSaveValidation">Sauvegarder la validation</button>
+              <button class="btn ghost smallBtn" id="btnOpenDuplicates">Ouvrir doublons</button>
+            </div>
+
+            <details class="detailsCard validationSupportDetails mt12">
+              <summary>Aide et méthode</summary>
+              <div class="validationHelpBody">
+                <div class="validationHelpGroup">
+                  <div class="validationHelpTitle">Ce qu’il faut valider ici</div>
+                  <ul class="muted">
+                    <li>Les lignes haute confiance passent en premier.</li>
+                    <li>Les presets servent à isoler les cas à revoir.</li>
+                    <li>Les doublons sont vérifiés avant l'application.</li>
+                  </ul>
+                </div>
+                <div class="validationHelpGroup">
+                  <div class="validationHelpTitle">Méthode rapide</div>
+                  <ul class="muted">
+                    <li>Filtrer MED/LOW si le lot est grand.</li>
+                    <li>Corriger titre/année seulement si le signal est clair.</li>
+                    <li>Tout doute sérieux reste en review.</li>
+                  </ul>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="card validationTableCard">
+            <div class="validationTableHead">
+              <div>
+                <div class="panelEyebrow">Table centrale</div>
+                <div class="validationSectionTitle">Table de validation</div>
+              </div>
+              <div class="validationTableMeta">
+                <span class="pill" id="countPill">0 lignes</span>
+                <span class="muted statusMsg" id="validationMsg" aria-live="polite"></span>
+              </div>
+            </div>
+
+            <div class="tableWrap validationTableWrap mt12">
+            <table class="table" id="planTable">
+              <thead>
+                <tr>
+                  <th>OK</th>
+                  <th>Confiance</th>
+                  <th>Type</th>
+                  <th>Dossier</th>
+                  <th>Vidéo</th>
+                  <th>Titre</th>
+                  <th>Année</th>
+                  <th>Source</th>
+                  <th>Analyse</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="planTbody"></tbody>
+            </table>
+          </div>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DUPLICATES -->
+      <section class="view hidden" id="view-duplicates" role="tabpanel" aria-labelledby="tab-duplicates" aria-hidden="true">
+        <div class="viewLayout">
+          <div class="viewPrimary">
+        <div class="card">
+          <div class="row spread">
+            <div>
+              <div class="cardTitle">Doublons potentiels</div>
+              <div class="muted">Contrôle les conflits avant application: mêmes titres/années déjà présents ou plusieurs lignes validées vers la même cible.</div>
+            </div>
+          </div>
+
+          <div class="row mt10">
+            <button class="btn primary" id="btnRefreshDuplicates">Actualiser la vue doublons</button>
+            <span class="pill" id="dupCountPill">0 groupe</span>
+            <span class="muted statusMsg" id="dupMsg" aria-live="polite"></span>
+          </div>
+
+          <div class="tableWrap mt12">
+            <table class="table" id="dupTable">
+              <thead>
+                <tr>
+                  <th>Film cible</th>
+                  <th>Conflit de plan</th>
+                  <th>Lignes validées (source/cible)</th>
+                  <th>Déjà présent sous ROOT</th>
+                </tr>
+              </thead>
+              <tbody id="dupTbody"></tbody>
+            </table>
+          </div>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- APPLY -->
+      <section class="view hidden" id="view-apply" role="tabpanel" aria-labelledby="tab-apply" aria-hidden="true">
+        <div class="viewLayout viewLayoutWithRail">
+          <div class="viewPrimary">
+        <div class="card">
+          <div class="cardTitle">Application</div>
+
+          <div class="grid2">
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckDryRun" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Mode test</div>
+                <div class="muted">Recommandé pour le premier passage.</div>
+              </div>
+            </div>
+
+            <div class="field inline">
+              <label class="switch">
+                <input type="checkbox" id="ckQuarantine" />
+                <span class="slider"></span>
+              </label>
+              <div>
+                <div class="labelLine">Mettre les non-OK en <code>_review</code></div>
+                <div class="muted">Déplace les cas non validés pour traitement manuel.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="operatorDiagPanel mt12" id="applyCleanupDiagPanel">
+            <div class="cardTitle">Nettoyage résiduel</div>
+            <div class="muted mt6">Prévision prudente pour ce run. Les dossiers vides restent gérés séparément par <code>_Vide</code>.</div>
+            <div class="operatorDiagGrid mt12">
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Activation</div>
+                <div class="operatorDiagRow">
+                  <span class="badge neutral" id="applyCleanupEnabledBadge">—</span>
+                </div>
+                <div class="operatorDiagHint" id="applyCleanupEnabledHint">—</div>
+              </div>
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Portée</div>
+                <div class="operatorDiagValue mono" id="applyCleanupScopeValue">—</div>
+                <div class="operatorDiagHint" id="applyCleanupScopeHint">—</div>
+              </div>
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Dossier cible</div>
+                <div class="operatorDiagValue mono" id="applyCleanupTargetValue">—</div>
+                <div class="operatorDiagHint" id="applyCleanupTargetHint">—</div>
+              </div>
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Familles actives</div>
+                <div class="operatorDiagValue" id="applyCleanupFamiliesValue">—</div>
+                <div class="operatorDiagHint" id="applyCleanupFamiliesHint">—</div>
+              </div>
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Statut courant</div>
+                <div class="operatorDiagRow">
+                  <span class="badge neutral" id="applyCleanupStatusBadge">—</span>
+                </div>
+                <div class="operatorDiagHint" id="applyCleanupStatusHint">—</div>
+              </div>
+              <div class="operatorDiagItem">
+                <div class="operatorDiagTitle">Prévision avant l'application</div>
+                <div class="operatorDiagValue" id="applyCleanupPreviewValue">—</div>
+                <div class="operatorDiagHint" id="applyCleanupPreviewHint">—</div>
+              </div>
+            </div>
+            <details class="detailsCard mt12" id="applyCleanupDetailsCard">
+              <summary>Diagnostic de prévision</summary>
+              <div class="muted" id="applyCleanupDetailText">—</div>
+            </details>
+          </div>
+
+          <div class="row mt12">
+            <button class="btn primary" id="btnApply">Appliquer les lignes validées</button>
+            <span class="muted statusMsg" id="applyMsg" aria-live="polite"></span>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">Résultat détaillé</div>
+          <pre class="logbox" id="applyResult">—</pre>
+
+          <div class="divider"></div>
+
+          <div class="cardTitle">Annuler le dernier apply (Undo)</div>
+          <div class="muted">Utilisez d'abord la prévisualisation. En mode réel, aucune cible existante n'est écrasée.</div>
+          <div class="row mt10 wrap">
+            <button class="btn" id="btnUndoPreview">Prévisualiser Undo</button>
+            <label class="chk">
+              <input type="checkbox" id="ckUndoDryRun" checked />
+              <span>Annulation en mode test</span>
+            </label>
+            <button class="btn primary" id="btnUndoRun">Tester l'annulation</button>
+            <span class="muted statusMsg" id="undoMsg" aria-live="polite"></span>
+          </div>
+          <pre class="logbox mt10" id="undoResult">—</pre>
+        </div>
+          </div>
+          <aside class="viewRail">
+            <div class="card railCard">
+              <div class="railEyebrow">Sécurité</div>
+              <div class="railTitle">Avant application réelle</div>
+              <ul class="railList">
+                <li>Confirmer la validation sauvegardée.</li>
+                <li>Lancer d'abord un mode test.</li>
+                <li>Consulter Doublons si un doute persiste.</li>
+              </ul>
+            </div>
+            <div class="card railCard">
+              <div class="railEyebrow">Undo</div>
+              <div class="railTitle">Règle d’usage</div>
+              <ul class="railList">
+                <li>Prévisualiser avant tout undo réel.</li>
+                <li>L’undo ne force jamais l’écrasement d’une cible existante.</li>
+                <li>Les opérations irréversibles restent signalées.</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- LOGS -->
+      <section class="view hidden" id="view-logs" role="tabpanel" aria-labelledby="tab-logs" aria-hidden="true">
+        <div class="viewLayout">
+          <div class="viewPrimary">
+        <div class="card">
+          <div class="cardTitle">Journaux</div>
+          <div class="row wrap">
+            <button class="btn" id="btnExportRunReportJson">Exporter rapport run (JSON)</button>
+            <button class="btn" id="btnExportRunReportCsv">Exporter rapport run (CSV)</button>
+            <span class="muted statusMsg" id="logsMsg" aria-live="polite"></span>
+          </div>
+          <div class="muted mt8">Le rapport est enregistré dans le dossier du run actif.</div>
+          <div class="divider"></div>
+          <pre class="logbox" id="logboxAll"></pre>
+        </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODALS -->
+  <div class="modal hidden" id="modalHelp" role="dialog" aria-modal="true" aria-labelledby="modalHelpTitle" aria-hidden="true">
+    <div class="modalCard">
+      <div class="row spread">
+        <div class="cardTitle" id="modalHelpTitle">Aide rapide</div>
+        <button class="btn ghost" type="button" data-close="modalHelp" aria-label="Fermer l'aide">✕</button>
+      </div>
+      <div class="muted">
+        <p><b>Étape 1</b> : configure ROOT + STATE_DIR local. Teste la clé TMDb si activée.</p>
+        <p><b>Étape 2</b> : lance l’analyse et attends "PLAN READY".</p>
+        <p><b>Étape 3</b> : coche "OK" seulement pour les lignes sûres. Ajuste titre/année si besoin.</p>
+        <p><b>Étape 4</b> : commence avec le mode simulation activé, puis applique en réel quand tout est validé.</p>
+        <p class="muted">Astuce : active <code>_review</code> pour isoler les cas à revoir.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="modalCandidates" role="dialog" aria-modal="true" aria-labelledby="modalCandidatesTitle" aria-hidden="true">
+    <div class="modalCard wide">
+      <div class="row spread">
+        <div class="cardTitle" id="modalCandidatesTitle">Propositions</div>
+        <button class="btn ghost" type="button" data-close="modalCandidates" aria-label="Fermer la modale de propositions">✕</button>
+      </div>
+      <div class="muted" id="candHeader">—</div>
+      <div class="divider"></div>
+      <div id="candList" class="candList"></div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="modalRunSelector" role="dialog" aria-modal="true" aria-labelledby="modalRunSelectorTitle" aria-hidden="true">
+    <div class="modalCard wide">
+      <div class="row spread">
+        <div class="cardTitle" id="modalRunSelectorTitle">Sélectionner un run et un film</div>
+        <button class="btn ghost" type="button" data-close="modalRunSelector" aria-label="Fermer la sélection run et film">✕</button>
+      </div>
+      <div class="muted" id="selectorMsg">Choisissez d’abord un run, puis un film.</div>
+      <div class="grid2 mt12">
+        <div>
+          <div class="cardTitle">Runs récents</div>
+          <div class="tableWrap mt8">
+            <table class="table" id="selectorRunsTable">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Début</th>
+                  <th>Lignes</th>
+                </tr>
+              </thead>
+              <tbody id="selectorRunsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="cardTitle">Films du run</div>
+          <div class="tableWrap mt8">
+            <table class="table" id="selectorRowsTable">
+              <thead>
+                <tr>
+                  <th>Film</th>
+                  <th>Dossier</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="selectorRowsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="modalIdsHelp" role="dialog" aria-modal="true" aria-labelledby="modalIdsHelpTitle" aria-hidden="true">
+    <div class="modalCard">
+      <div class="row spread">
+        <div class="cardTitle" id="modalIdsHelpTitle">Aide run_id / row_id</div>
+        <button class="btn ghost" type="button" data-close="modalIdsHelp" aria-label="Fermer l'aide des identifiants">✕</button>
+      </div>
+      <div class="muted">
+        <p><b>Run ID</b> : identifie une analyse complète. Les artefacts sont dans <code>STATE_DIR\runs\tri_films_&lt;run_id&gt;</code>.</p>
+        <p><b>Row ID</b> : identifie une ligne de film dans le plan d’analyse (utile pour Qualité et l’analyse vidéo).</p>
+        <p>En usage normal, vous n’avez pas besoin de saisir ces IDs: utilisez <b>Sélectionner…</b>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="modalActionDialog" role="dialog" aria-modal="true" aria-labelledby="modalActionDialogTitle" aria-hidden="true">
+    <div class="modalCard">
+      <div class="row spread">
+        <div class="cardTitle" id="modalActionDialogTitle">Confirmation</div>
+        <button class="btn ghost" type="button" data-close="modalActionDialog" aria-label="Fermer la confirmation">✕</button>
+      </div>
+      <div class="muted" id="modalActionDialogMessage">—</div>
+      <div class="row mt12">
+        <button class="btn" type="button" id="modalActionCancel">Annuler</button>
+        <button class="btn primary" type="button" id="modalActionConfirm">Continuer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./ui_next_shell.js"></script>
+  <script src="./ui_next_validation.js"></script>
+  <script src="./ui_next_quality.js"></script>
+  <script src="./ui_next_apply.js"></script>
+  <script src="./app_next.js"></script>
+</body>
+</html>

@@ -1,0 +1,975 @@
+/* ============================================================
+   CineSort — Systeme de themes V8 "Restraint Premium"
+   Inspiration : Linear, Vercel, Stripe, Raycast 2026.
+   Philosophie : "Restraint is elegance. Shadows at 4% opacity, if you can see it, it's already too much."
+
+   4 palettes harmonisees OKLCh (L=0.80, C=0.15, H varie) :
+     - luxe (defaut)  : Onyx & Aurum  — H=85  or champagne sophistique
+     - studio         : Polar Studio  — H=230 bleu clair
+     - cinema         : Celluloid     — H=25  corail velours
+     - neon           : Ultraviolet   — H=295 lavande douce
+
+   Tokens cles :
+     --accent-l / --accent-c / --accent-h : composantes OKLCh (manipulables)
+     --accent-oklch : couleur calcule (avec fallback hex)
+     --glass-bg : scrim opaque 0.68 (lisibilite AAA)
+     --vignette : assombrit les bords (focus central)
+
+   Mode hybride restraint/intense via [data-effects="intense"] overrides.
+   ============================================================ */
+
+/* --- Variables partagees (non liees au theme) -------------- */
+:root {
+  /* Curseurs d'intensite d'effets (0..1) */
+  --glow-intensity: 0.55;
+  --light-intensity: 0.28;
+  --animation-speed: 1;
+  --effect-opacity: 0.06;
+
+  /* Transitions */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-mid: 220ms;
+  --dur-slow: 360ms;
+
+  /* Radii (8pt scale) */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Typo V8 — echelle modular Major Third (1.25) */
+  --font-sans: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Font sizes : echelle 1.25x (Major Third) */
+  --fs-2xs: 11px;    /* labels tres petits */
+  --fs-xs: 12px;     /* captions, kbd */
+  --fs-sm: 14px;     /* body secondaire */
+  --fs-base: 15px;   /* texte principal */
+  --fs-lg: 18px;     /* sous-titres */
+  --fs-xl: 22px;     /* titres de section */
+  --fs-2xl: 28px;    /* titres majeurs */
+  --fs-3xl: 36px;    /* kpi values */
+  --fs-hero: 52px;   /* hero value (remplace 56px hardcode) */
+
+  /* Font weights nommes */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semi: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+
+  /* Letter-spacing tokens */
+  --ls-tight: -0.03em;     /* hero values */
+  --ls-normal: 0;
+  --ls-wide: 0.06em;       /* uppercase labels */
+
+  /* Spacing 4/8 complet (--sp-7: 28px ajoute) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 28px;      /* ADDED V8 (combler le gap 24->32) */
+  --sp-8: 32px;
+  --sp-9: 48px;
+  --sp-10: 64px;
+
+  /* Alias --radius-* vers --r-* (unification) */
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-pill: var(--r-pill);
+
+  /* Semantic badges V8 : tokens OKLCh avec fallback hex.
+   * Chaque badge a 3 variantes : base / soft (bg avec alpha) / glow.
+   * Les palettes par thème peuvent override. */
+  --badge-warn: #F59E0B;         /* amber 500 : audio premium, 4K light */
+  --badge-warn-soft: rgba(245, 158, 11, 0.15);
+  --badge-danger: #EF4444;       /* red 500 : integrity, upscale, reencode, perc-degrade */
+  --badge-danger-soft: rgba(239, 68, 68, 0.15);
+  --badge-info: #3B82F6;         /* blue 500 : audio standard, perc-bon */
+  --badge-info-soft: rgba(59, 130, 246, 0.15);
+  --badge-success: #10B981;      /* emerald 500 : audio bon, perc-excellent */
+  --badge-success-soft: rgba(16, 185, 129, 0.15);
+  --badge-neutral: #6B7280;      /* gray 500 : audio basique */
+  --badge-neutral-soft: rgba(107, 114, 128, 0.15);
+  --badge-purple: #8B5CF6;       /* violet 500 : saga, edition */
+  --badge-purple-soft: rgba(139, 92, 246, 0.15);
+  --badge-orange: #F97316;       /* orange 500 : not-a-movie, perc-mediocre */
+  --badge-orange-soft: rgba(249, 115, 22, 0.15);
+  --badge-amber: #F59E0B;        /* amber 500 : mkv-title, audio-lang */
+  --badge-amber-soft: rgba(245, 158, 11, 0.15);
+
+  /* Badges legacy (alias vers tokens semantiques) */
+  --badge-not-a-movie: var(--badge-orange);
+  --badge-integrity: var(--badge-danger);
+  --badge-saga: var(--badge-purple);
+  --badge-edition: var(--badge-purple);
+  --badge-upscale: var(--badge-danger);
+  --badge-4k-light: var(--badge-orange);
+  --badge-reencode: var(--badge-danger);
+  --badge-audio-premium: var(--badge-warn);
+  --badge-audio-bon: var(--badge-success);
+  --badge-audio-standard: var(--badge-info);
+  --badge-audio-basique: var(--badge-neutral);
+  --badge-audio-lang: var(--badge-amber);
+  --badge-mkv-title: var(--badge-amber);
+  --badge-perc-reference: var(--badge-warn);
+  --badge-perc-excellent: var(--badge-success);
+  --badge-perc-bon: var(--badge-info);
+  --badge-perc-mediocre: var(--badge-orange);
+  --badge-perc-degrade: var(--badge-danger);
+
+  /* Distribution bars — tokens semantiques */
+  --bar-premium: var(--badge-success);     --bar-premium-end: #6EE7B7;
+  --bar-bon: var(--badge-info);            --bar-bon-end: #93C5FD;
+  --bar-moyen: var(--badge-warn);          --bar-moyen-end: #FCD34D;
+  --bar-mauvais: var(--badge-danger);      --bar-mauvais-end: #FCA5A5;
+}
+
+/* ============================================================
+   PALETTE — LUXE (defaut : Onyx & Aurum) — OKLCh H=85 (or)
+   Inspiration : Rolex boutique, Nolan opening credits
+   ============================================================ */
+[data-theme="luxe"] {
+  /* OKLCh composantes : L=0.80 C=0.15 H=85 */
+  --accent-l: 80%;
+  --accent-c: 0.15;
+  --accent-h: 85;
+
+  /* Fonds : noirs warm (leger shift ambre) */
+  --bg-base: #07070A;
+  --bg-surface: #0D0C10;
+  --bg-raised: #14131A;
+  --bg-overlay: #1D1C25;
+  --bg-sunken: #030305;
+
+  /* Glass V8 : scrim opaque 68% (AAA garanti) */
+  --bg-glass: rgba(22, 19, 14, 0.78);
+  --glass-bg: rgba(22, 19, 14, 0.68);
+  --glass-bg-strong: rgba(28, 24, 18, 0.88);
+  --glass-border: rgba(255, 240, 200, 0.12);
+  --glass-border-hover: rgba(255, 210, 140, 0.40);
+  --glass-inset: rgba(255, 245, 220, 0.06);
+  --glass-sheen: linear-gradient(135deg, rgba(255, 245, 220, 0.04) 0%, transparent 50%);
+
+  /* Texte AAA (>12:1 sur bg-base) */
+  --text-primary: #FAF6EC;
+  --text-secondary: #C4BBA8;   /* WCAG AA 4.5:1 sur glass-bg */
+  --text-muted: #8A7E6A;        /* 4.5:1 AA */
+  --text-inverse: #07070A;
+
+  /* Accent OKLCh avec fallback hex pour compat navigateurs anciens */
+  --accent: #FFD085;                                                    /* fallback */
+  --accent-hover: #FFE4B0;
+  --accent-deep: #C88A3A;
+  --accent-soft: rgba(255, 208, 133, 0.15);
+  --accent-glow: rgba(255, 208, 133, var(--glow-intensity));
+  --accent-border: rgba(255, 208, 133, 0.22);
+  --accent-rgb: 255, 208, 133;
+  --gold: #FFD085;
+  --gold-rgb: 255, 208, 133;
+
+  /* V3-07 — Focus ring or vif (contraste AAA sur noir warm Luxe) */
+  --focus-ring: #FFD700;
+  --focus-ring-rgb: 255, 215, 0;
+
+  /* Status harmonises (L=0.78, C=0.14) */
+  --success: #5EEAA8;
+  --warning: #FFCB48;
+  --danger: #FF7878;
+  --info: #7AB8FF;
+
+  /* Borders plus marquees en mode restraint */
+  --border: rgba(255, 208, 133, 0.12);
+  --border-strong: rgba(255, 208, 133, 0.24);
+
+  --shadow-glow: 0 0 24px rgba(255, 208, 133, var(--glow-intensity));
+  --gradient-accent: linear-gradient(135deg, #FFD085 0%, #C88A3A 100%);
+
+  /* Ambient orbs V8 restraint (-50% vs v7) */
+  --ambient-1: radial-gradient(820px circle at 12% 8%, rgba(255, 208, 133, 0.16), transparent 58%);
+  --ambient-2: radial-gradient(1000px circle at 88% 92%, rgba(200, 138, 58, 0.11), transparent 68%);
+  --ambient-3: radial-gradient(600px circle at 80% 20%, rgba(200, 90, 20, 0.08), transparent 62%);
+  --ambient-4: radial-gradient(500px circle at 20% 90%, rgba(255, 180, 100, 0.07), transparent 58%);
+  --ambient-5: radial-gradient(700px circle at 50% 0%, rgba(255, 220, 150, 0.06), transparent 55%);
+  --vignette: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* OKLCh override si supporte (plus propre, perceptuellement uniforme) */
+@supports (color: oklch(1 0 0)) {
+  [data-theme="luxe"] {
+    --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+    --accent-hover: oklch(0.90 0.10 85);
+    --accent-deep: oklch(0.55 0.14 70);
+    --success: oklch(0.78 0.15 150);
+    --warning: oklch(0.80 0.15 80);
+    --danger: oklch(0.70 0.18 25);
+    --info: oklch(0.75 0.12 230);
+  }
+}
+
+/* ============================================================
+   PALETTE — STUDIO (Polar Studio : bleu clair) — OKLCh H=230
+   Inspiration : Linear, Vercel, Raycast
+   ============================================================ */
+[data-theme="studio"] {
+  --accent-l: 80%;
+  --accent-c: 0.15;
+  --accent-h: 230;
+
+  --bg-base: #08090D;
+  --bg-surface: #0F1117;
+  --bg-raised: #161923;
+  --bg-overlay: #1F2331;
+  --bg-sunken: #04050A;
+
+  --bg-glass: rgba(20, 24, 32, 0.78);
+  --glass-bg: rgba(20, 24, 32, 0.68);
+  --glass-bg-strong: rgba(28, 34, 44, 0.88);
+  --glass-border: rgba(200, 230, 255, 0.14);
+  --glass-border-hover: rgba(100, 180, 255, 0.40);
+  --glass-inset: rgba(220, 240, 255, 0.06);
+  --glass-sheen: linear-gradient(135deg, rgba(220, 240, 255, 0.04) 0%, transparent 50%);
+
+  --text-primary: #F1F5FC;
+  --text-secondary: #B5C0D0;
+  --text-muted: #7D8A9E;
+  --text-inverse: #08090D;
+
+  --accent: #6BA7F9;                                                    /* fallback oklch(0.80 0.15 230) */
+  --accent-hover: #8FBBFC;
+  --accent-deep: #2F68C4;
+  --accent-soft: rgba(107, 167, 249, 0.15);
+  --accent-glow: rgba(107, 167, 249, var(--glow-intensity));
+  --accent-border: rgba(107, 167, 249, 0.22);
+  --accent-rgb: 107, 167, 249;
+  --gold: #FFCB48;
+
+  /* V3-07 — Focus ring jaune ambre (contraste AAA sur bleu Studio, fix WCAG 2.4.7) */
+  --focus-ring: #FBBF24;
+  --focus-ring-rgb: 251, 191, 36;
+
+  --success: #5EEAA8;
+  --warning: #FFCB48;
+  --danger: #FF7878;
+  --info: #7AB8FF;
+
+  --border: rgba(107, 167, 249, 0.12);
+  --border-strong: rgba(107, 167, 249, 0.24);
+  --shadow-glow: 0 0 24px rgba(107, 167, 249, var(--glow-intensity));
+  --gradient-accent: linear-gradient(135deg, #6BA7F9 0%, #2F68C4 100%);
+
+  /* Ambient orbs V8 restraint */
+  --ambient-1: radial-gradient(820px circle at 12% 10%, rgba(107, 167, 249, 0.12), transparent 60%);
+  --ambient-2: radial-gradient(1000px circle at 90% 92%, rgba(140, 130, 255, 0.10), transparent 68%);
+  --ambient-3: radial-gradient(600px circle at 75% 25%, rgba(30, 120, 200, 0.08), transparent 62%);
+  --ambient-4: radial-gradient(500px circle at 25% 85%, rgba(80, 160, 220, 0.07), transparent 58%);
+  --ambient-5: radial-gradient(700px circle at 50% 0%, rgba(100, 160, 255, 0.05), transparent 55%);
+  --vignette: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+@supports (color: oklch(1 0 0)) {
+  [data-theme="studio"] {
+    --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+    --accent-hover: oklch(0.88 0.12 230);
+    --accent-deep: oklch(0.55 0.14 230);
+    --success: oklch(0.78 0.15 150);
+    --warning: oklch(0.80 0.15 80);
+    --danger: oklch(0.70 0.18 25);
+    --info: oklch(0.75 0.12 230);
+  }
+}
+
+/* ============================================================
+   PALETTE — CINEMA (Celluloid : corail velours) — OKLCh H=25
+   Inspiration : Salle de projection, rideau de theatre
+   ============================================================ */
+[data-theme="cinema"] {
+  --accent-l: 78%;
+  --accent-c: 0.15;
+  --accent-h: 25;
+
+  --bg-base: #0B0607;       /* noir warm (cinema privee) */
+  --bg-surface: #130A0C;
+  --bg-raised: #1D1114;
+  --bg-overlay: #2A191D;
+  --bg-sunken: #070405;
+
+  --bg-glass: rgba(25, 14, 17, 0.78);
+  --glass-bg: rgba(25, 14, 17, 0.68);
+  --glass-bg-strong: rgba(35, 20, 24, 0.88);
+  --glass-border: rgba(255, 200, 180, 0.14);
+  --glass-border-hover: rgba(255, 150, 130, 0.40);
+  --glass-inset: rgba(255, 230, 215, 0.06);
+  --glass-sheen: linear-gradient(135deg, rgba(255, 220, 205, 0.04) 0%, transparent 50%);
+
+  --text-primary: #F8ECE3;
+  --text-secondary: #C5B4A8;
+  --text-muted: #8A7970;
+  --text-inverse: #0B0607;
+
+  --accent: #FA8E7B;                                                    /* fallback oklch(0.78 0.15 25) — corail */
+  --accent-hover: #FCA896;
+  --accent-deep: #C85538;
+  --accent-soft: rgba(250, 142, 123, 0.15);
+  --accent-glow: rgba(250, 142, 123, var(--glow-intensity));
+  --accent-border: rgba(250, 142, 123, 0.22);
+  --accent-rgb: 250, 142, 123;
+  --gold: #FFBF44;
+
+  /* V3-07 — Focus ring blanc (contraste maximal sur velours rouge Cinema) */
+  --focus-ring: #FFFFFF;
+  --focus-ring-rgb: 255, 255, 255;
+
+  --success: #5EEAA8;
+  --warning: #FFCB48;
+  --danger: #FF7878;
+  --info: #7AB8FF;
+
+  --border: rgba(250, 142, 123, 0.12);
+  --border-strong: rgba(250, 142, 123, 0.24);
+  --shadow-glow: 0 0 24px rgba(250, 142, 123, var(--glow-intensity));
+  --gradient-accent: linear-gradient(135deg, #FA8E7B 0%, #C85538 100%);
+
+  --ambient-1: radial-gradient(820px circle at 12% 10%, rgba(250, 142, 123, 0.14), transparent 60%);
+  --ambient-2: radial-gradient(1000px circle at 90% 92%, rgba(180, 80, 100, 0.11), transparent 68%);
+  --ambient-3: radial-gradient(600px circle at 75% 25%, rgba(200, 85, 56, 0.09), transparent 62%);
+  --ambient-4: radial-gradient(500px circle at 25% 85%, rgba(120, 40, 50, 0.08), transparent 58%);
+  --ambient-5: radial-gradient(700px circle at 50% 0%, rgba(220, 120, 100, 0.06), transparent 55%);
+  --vignette: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+}
+
+@supports (color: oklch(1 0 0)) {
+  [data-theme="cinema"] {
+    --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+    --accent-hover: oklch(0.86 0.13 25);
+    --accent-deep: oklch(0.55 0.16 25);
+    --success: oklch(0.78 0.15 150);
+    --warning: oklch(0.80 0.15 80);
+    --danger: oklch(0.70 0.18 15);
+    --info: oklch(0.75 0.12 230);
+  }
+}
+
+/* ============================================================
+   PALETTE — NEON (Ultraviolet : violet lavande) — OKLCh H=295
+   Inspiration : Blade Runner 2049, synthwave luxe
+   ============================================================ */
+[data-theme="neon"] {
+  --accent-l: 80%;
+  --accent-c: 0.15;
+  --accent-h: 295;
+
+  --bg-base: #09061A;
+  --bg-surface: #110B28;
+  --bg-raised: #1A143C;
+  --bg-overlay: #241B52;
+  --bg-sunken: #04020E;
+
+  --bg-glass: rgba(22, 16, 44, 0.78);
+  --glass-bg: rgba(22, 16, 44, 0.68);
+  --glass-bg-strong: rgba(32, 24, 60, 0.88);
+  --glass-border: rgba(210, 190, 255, 0.16);
+  --glass-border-hover: rgba(200, 160, 255, 0.42);
+  --glass-inset: rgba(235, 220, 255, 0.06);
+  --glass-sheen: linear-gradient(135deg, rgba(235, 220, 255, 0.04) 0%, transparent 50%);
+
+  --text-primary: #F3EDFF;
+  --text-secondary: #C2B4E0;
+  --text-muted: #8879A6;
+  --text-inverse: #09061A;
+
+  --accent: #C098FA;                                                    /* fallback oklch(0.80 0.15 295) */
+  --accent-hover: #D4B5FB;
+  --accent-deep: #7B4FD8;
+  --accent-soft: rgba(192, 152, 250, 0.15);
+  --accent-glow: rgba(192, 152, 250, var(--glow-intensity));
+  --accent-border: rgba(192, 152, 250, 0.24);
+  --accent-rgb: 192, 152, 250;
+  --gold: #4BE4F5;
+
+  /* V3-07 — Focus ring cyan vif (contraste AAA sur violet/cyber Neon) */
+  --focus-ring: #00FFFF;
+  --focus-ring-rgb: 0, 255, 255;
+
+  --success: #5EEAA8;
+  --warning: #FFCB48;
+  --danger: #FF7878;
+  --info: #7AB8FF;
+
+  --border: rgba(192, 152, 250, 0.14);
+  --border-strong: rgba(192, 152, 250, 0.26);
+  --shadow-glow: 0 0 28px rgba(192, 152, 250, var(--glow-intensity));
+  --gradient-accent: linear-gradient(135deg, #C098FA 0%, #7B4FD8 100%);
+
+  --ambient-1: radial-gradient(820px circle at 12% 10%, rgba(192, 152, 250, 0.15), transparent 60%);
+  --ambient-2: radial-gradient(1000px circle at 90% 92%, rgba(255, 120, 200, 0.11), transparent 68%);
+  --ambient-3: radial-gradient(600px circle at 75% 25%, rgba(120, 60, 200, 0.09), transparent 62%);
+  --ambient-4: radial-gradient(500px circle at 25% 85%, rgba(80, 30, 150, 0.08), transparent 58%);
+  --ambient-5: radial-gradient(700px circle at 50% 0%, rgba(180, 120, 240, 0.06), transparent 55%);
+  --vignette: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+@supports (color: oklch(1 0 0)) {
+  [data-theme="neon"] {
+    --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+    --accent-hover: oklch(0.88 0.12 295);
+    --accent-deep: oklch(0.55 0.15 295);
+    --success: oklch(0.78 0.15 150);
+    --warning: oklch(0.80 0.15 80);
+    --danger: oklch(0.70 0.18 25);
+    --info: oklch(0.75 0.12 230);
+  }
+}
+
+/* ============================================================
+   NIVEAUX D'ANIMATION
+   ============================================================ */
+[data-animation="subtle"] {
+  --dur-fast: 60ms;
+  --dur-mid: 100ms;
+  --dur-slow: 160ms;
+  --glow-intensity: 0.1;
+  --shadow-glow: none;
+}
+
+[data-animation="intense"] {
+  --dur-fast: 180ms;
+  --dur-mid: 300ms;
+  --dur-slow: 480ms;
+  --glow-intensity: 0.45;
+  --effect-opacity: 0.10;
+}
+
+/* ============================================================
+   BODY : fond profondeur (orbes ambients + grille subtile + leak)
+   ============================================================ */
+body {
+  background: var(--bg-base);
+  position: relative;
+}
+
+/* Couche 1 : orbes colores animes (5 orbes + vignette peripherique) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -15%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    var(--ambient-1, transparent),
+    var(--ambient-2, transparent),
+    var(--ambient-3, transparent),
+    var(--ambient-4, transparent),
+    var(--ambient-5, transparent),
+    linear-gradient(180deg, var(--bg-sunken, var(--bg-base)) 0%, var(--bg-base) 100%);
+  animation: ambientDrift 24s ease-in-out infinite alternate;
+  filter: blur(1px);
+}
+
+@keyframes ambientDrift {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  25%  { transform: translate3d(-40px, 20px, 0) scale(1.06); }
+  50%  { transform: translate3d(30px, -25px, 0) scale(0.96); }
+  75%  { transform: translate3d(-15px, -15px, 0) scale(1.03); }
+  100% { transform: translate3d(20px, 15px, 0) scale(1.02); }
+}
+
+/* Couche 2 : grille de points tres subtils + vignette peripherique (focus central) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* vignette qui assombrit les bords (effet chambre noire cinema) */
+    var(--vignette, radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%)),
+    /* grille de points 28px pour casser le flat */
+    radial-gradient(circle at 1px 1px, rgba(255, 245, 220, 0.025) 1px, transparent 0);
+  background-size: 100% 100%, 28px 28px;
+  opacity: 0.9;
+}
+
+/* Light leak diagonal tres subtil (effet cinematique) */
+#app-shell::before,
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg,
+    transparent 0%,
+    transparent 47%,
+    color-mix(in srgb, var(--accent) 3%, transparent) 50%,
+    transparent 53%,
+    transparent 100%);
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+/* ============================================================
+   EFFETS ATMOSPHERIQUES PAR THEME (conserves)
+   ============================================================ */
+
+/* --- CINEMA : grain de pellicule --- */
+[data-theme="cinema"] body > .grain-overlay,
+[data-theme="cinema"]::marker { /* placeholder no-op pour eviter conflit ::after */ }
+
+body[data-theme="cinema"]::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    var(--ambient-1),
+    var(--ambient-2),
+    var(--ambient-3),
+    var(--ambient-4),
+    linear-gradient(180deg, var(--bg-sunken) 0%, var(--bg-base) 100%);
+  animation: ambientDrift 28s ease-in-out infinite alternate;
+}
+
+/* Grain cinema V8 : supprime sur cards (gardé sur body uniquement en mode intense).
+ * Evite la cacophonie visuelle signalee par l'utilisateur ("un truc qui derange"). */
+
+/* --- STUDIO : scan line discret (en haut) --- */
+[data-theme="studio"] .topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 10%, rgba(75, 228, 245, 0.6) 50%, transparent 90%);
+  animation: scanPulse calc(6s / var(--animation-speed)) ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes scanPulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.9; }
+}
+
+/* --- LUXE : shimmer dore subtil sur cards au hover --- */
+[data-theme="luxe"] .card::before,
+[data-theme="luxe"] .kpi-card::before {
+  background:
+    linear-gradient(135deg, rgba(255, 245, 220, 0.08) 0%, transparent 45%, rgba(255, 200, 120, 0.04) 100%);
+}
+
+/* --- NEON V8 : conic-gradient rotatif supprime (trop bruyant, pas premium).
+ * En mode intense uniquement il sera reactive via [data-effects="intense"]. */
+
+/* ============================================================
+   PROFONDEUR V6 — Glass + sheen + ombres multi-couches
+   ============================================================ */
+
+/* Cards globales V8 "Restraint Premium" :
+ * - Solid scrim (glass-bg 0.68) pour lisibilite AAA
+ * - Border subtil accent (au lieu de 5 couches shadow)
+ * - 2 couches shadow seulement (contact + elevation discrete)
+ * - Blur reduit 32px -> 20px (gain perf + lisibilite)
+ */
+.card, .kpi-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),    /* reflet haut tres subtil */
+    0 2px 8px rgba(0, 0, 0, 0.24);               /* elevation discrete */
+  transition:
+    transform var(--dur-mid) var(--ease),
+    border-color var(--dur-mid) var(--ease),
+    box-shadow var(--dur-mid) var(--ease);
+}
+
+/* Backdrop-filter avec @supports fallback pour navigateurs anciens */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .card, .kpi-card {
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+  }
+}
+
+/* Sheen interne (gradient diagonal + spotlight radial haut-centre) */
+.card::before,
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    /* Spotlight : lumière chaude depuis le haut-centre de la card */
+    radial-gradient(ellipse 80% 60% at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent) 0%, transparent 70%),
+    /* Sheen diagonal principal */
+    var(--glass-sheen);
+  opacity: 1;
+}
+
+/* Reflet lumineux haut (style Apple glass) */
+.card > *,
+.kpi-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hover V8 : border highlight accent (Linear/Vercel style, pas de glow geant) */
+.card:hover, .kpi-card:hover {
+  border-color: var(--glass-border-hover);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 16px rgba(0, 0, 0, 0.32);
+}
+
+/* KPI hero V8 : border gauche accent + elevation legerement renforcee (pas de halo complex) */
+.kpi-card--hero {
+  border-left: 3px solid var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.32),
+    0 2px 4px var(--accent-soft);          /* leger glow accent subtil */
+  position: relative;
+}
+/* Note : halo externe + mask supprimes (perf GPU, complexite). Remplaces par border accent. */
+
+/* Sidebar : glass fort + halo accent en haut */
+.sidebar {
+  background: var(--glass-bg);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-right: 1px solid var(--glass-border);
+  box-shadow:
+    inset -1px 0 0 var(--glass-inset),
+    4px 0 32px rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, var(--accent-soft) 0%, transparent 18%),
+    linear-gradient(180deg, transparent 82%, rgba(0, 0, 0, 0.25) 100%);
+  opacity: 0.7;
+}
+
+/* Topbar */
+.topbar {
+  background: var(--glass-bg);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 -1px 0 var(--glass-inset),
+    0 4px 24px rgba(0, 0, 0, 0.2);
+  position: relative;
+}
+
+/* Navigation : active gradient + glow */
+.nav-btn.active,
+.nav-btn[aria-selected="true"] {
+  background: linear-gradient(90deg,
+    var(--accent-soft) 0%,
+    color-mix(in srgb, var(--accent) 6%, transparent) 60%,
+    transparent 100%);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent),
+    0 0 16px var(--accent-glow);
+}
+
+.nav-btn:hover:not(.active):not([aria-selected="true"]) {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text-primary);
+}
+
+/* Boutons primary : gradient + shadow + glow */
+.btn-primary,
+.btn.btn--primary {
+  background: var(--gradient-accent, linear-gradient(135deg, var(--accent), var(--accent-hover)));
+  border: 1px solid transparent;
+  color: var(--text-inverse);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 4px 16px var(--accent-glow),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: all var(--dur-mid) var(--ease);
+  font-weight: 600;
+}
+
+.btn-primary:hover,
+.btn.btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 8px 24px var(--accent-glow),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.btn-primary:active,
+.btn.btn--primary:active {
+  transform: translateY(0);
+}
+
+/* Inputs : depth inset + focus glow */
+.input,
+input[type="text"].input,
+input[type="password"].input,
+input[type="number"].input,
+input[type="email"].input,
+select.input,
+textarea.input {
+  background: color-mix(in srgb, var(--bg-sunken, var(--bg-base)) 70%, transparent);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  transition: border-color 140ms, box-shadow 140ms;
+}
+
+.input:focus,
+input.input:focus,
+select.input:focus,
+textarea.input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.4),
+    0 0 0 3px var(--accent-soft),
+    0 0 16px var(--accent-glow);
+}
+
+/* Badges V8 : selecteur corrige (V7 avait [class*=" badge-"] qui loupait certaines classes) */
+.badge,
+[class^="badge-"],
+[class*="badge-"] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--glass-bg-strong));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.badge:hover,
+[class*="badge-"]:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Classe utilitaire .btn-block pour buttons full-width (remplace style="width:100%" inline) */
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Tables : row hover avec barre laterale + depth */
+table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.01);
+}
+table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Modales : glass card avec gros halo */
+.modal-overlay,
+#cmd-palette-overlay {
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.88));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.modal-card,
+.cmd-palette {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-inset),
+    0 24px 64px rgba(0, 0, 0, 0.7),
+    0 0 48px var(--accent-glow);
+}
+
+/* Scrollbars personnalisees */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--glass-border-hover);
+  background-clip: padding-box;
+}
+
+/* ============================================================
+   SUBTLE : desactiver effets (APRES atmospheriques)
+   ============================================================ */
+body[data-animation="subtle"]::before,
+body[data-animation="subtle"]::after {
+  animation: none !important;
+  opacity: 0.4 !important;
+}
+
+body.is-background::before,
+body.is-background .card::before,
+body.is-background .kpi-card::before {
+  animation-play-state: paused !important;
+}
+
+/* ============================================================
+   V8 MODE HYBRIDE — [data-effects="intense"] reactive les effets V7
+   Par defaut (ou "restraint") : Linear/Vercel style sobre.
+   [data-effects="intense"] : glass transparent + shadows 5 couches + halo + glow.
+   ============================================================ */
+
+[data-effects="intense"] .card,
+[data-effects="intense"] .kpi-card {
+  background: color-mix(in srgb, var(--bg-raised) 50%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 32px rgba(0, 0, 0, 0.32),
+    0 24px 64px rgba(0, 0, 0, 0.22);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  [data-effects="intense"] .card,
+  [data-effects="intense"] .kpi-card {
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
+  }
+}
+
+[data-effects="intense"] .card:hover,
+[data-effects="intense"] .kpi-card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    0 28px 64px rgba(0, 0, 0, 0.4),
+    0 0 64px var(--accent-glow);
+}
+
+[data-effects="intense"] .kpi-card--hero {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.45),
+    0 24px 64px rgba(0, 0, 0, 0.4),
+    0 0 48px var(--accent-glow),
+    0 0 96px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Mode intense : ambient orbs plus intenses (+150%) */
+[data-effects="intense"] body::before {
+  filter: blur(1px) saturate(130%);
+  opacity: 1.5;  /* passe par limit 1 mais amplifie les sous-layers */
+}
+
+/* ============================================================
+   V8 ACCESSIBILITE — focus-visible unifie + skip-link + touch targets
+   ============================================================ */
+
+/* Skip-link : invisible jusqu'au focus clavier */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: var(--sp-4, 16px);
+  padding: var(--sp-2, 8px) var(--sp-4, 16px);
+  background: var(--accent);
+  color: var(--text-inverse);
+  font-weight: var(--fw-semi, 600);
+  border-radius: var(--r-md);
+  z-index: 9999;
+  text-decoration: none;
+  transition: top 180ms var(--ease);
+}
+.skip-link:focus {
+  top: var(--sp-4, 16px);
+  outline: 3px solid var(--focus-ring, var(--accent-hover));
+  outline-offset: 2px;
+}
+
+/* Focus-visible global (boutons, inputs, nav, liens) — V3-07 theme-aware */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+.nav-btn:focus-visible,
+.btn:focus-visible,
+.service-tile:focus-visible,
+.workflow-step:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 6px rgba(var(--focus-ring-rgb, 251, 191, 36), 0.18);
+}
+
+/* V3-07 — Skip mouse focus (le ring n'apparait que pour le clavier) */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Touch targets minimum 44x44px sur pointeur tactile */
+@media (pointer: coarse) {
+  .nav-btn,
+  .btn,
+  .icon-btn,
+  .service-tile,
+  .workflow-step,
+  .topbar-avatar {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Modales : aria-modal styling + focus trap visuel */
+.modal-card[role="dialog"],
+.modal-card {
+  /* role="dialog" ajoute via JS, mais CSS prepare le styling */
+  position: relative;
+}
+
+/* Reduced motion V8 : TOUT desactiver (tous elements + pseudo + scroll) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  body::before, body::after {
+    animation: none !important;
+  }
+  /* Arrete les animations infinies communes du projet */
+  .ring-fill,
+  .service-status-dot.on,
+  .service-status-dot.warn,
+  .service-status-dot.err,
+  .live-dot,
+  .live-dot::after,
+  .progress-fill,
+  [class*="spin"] {
+    animation: none !important;
+  }
+}
