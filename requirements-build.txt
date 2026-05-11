@@ -2,5 +2,5 @@
 # pyinstaller bumpe pour CVE-2025-59042 (elevation locale de privileges via
 # repertoire d'extraction onefile). Bornes hautes laissees ouvertes pour
 # absorber les correctifs ulterieurs.
-pyinstaller>=6.10.0
+pyinstaller>=6.20.0
 pillow>=12.2
