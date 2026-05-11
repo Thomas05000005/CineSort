@@ -135,10 +135,13 @@ def write_summary_section(run_paths: Any, marker: str, section_body: str) -> Non
 def file_logger(api: Any, run_paths: Any, *, env_truthy_fn: Callable[[str], bool]) -> Callable[[str, str], None]:
     def _log(level: str, msg: str) -> None:
         ts = time.strftime("%H:%M:%S")
+        # CodeQL py/clear-text-storage-sensitive-data : scrub avant ecriture
+        # disque (symetrie avec debug_log + SecretsScrubFilter sur stdlib).
+        safe_msg = scrub_secrets(msg)
         try:
             run_paths.ui_log_txt.parent.mkdir(parents=True, exist_ok=True)
             with open(run_paths.ui_log_txt, "a", encoding="utf-8") as file_obj:
-                file_obj.write(f"[{ts}] {level}: {msg}\n")
+                file_obj.write(f"[{ts}] {level}: {safe_msg}\n")
         except (OSError, PermissionError) as exc:
             state_dir_guess = api._state_dir
             try:

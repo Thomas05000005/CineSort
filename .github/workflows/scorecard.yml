@@ -15,18 +15,22 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
-permissions:
-  # Necessaires au scan
-  security-events: write
-  id-token: write
-  contents: read
-  actions: read
+# Scorecard exige permissions: read-all au niveau workflow + permissions
+# specifiques au niveau job. Avoir security-events: write globalement
+# declenche un fail "workflow verification failed: global perm is set to
+# write".
+permissions: read-all
 
 jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout

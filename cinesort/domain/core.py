@@ -544,7 +544,13 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
     if not content:
         return None
     try:
-        root = ET.fromstring(content)
+        # Bandit B314 : ET.fromstring peut etre vulnerable a XXE (XML External
+        # Entity). Python 3.12+ ne resout plus les entites externes par defaut
+        # mais on documente le contexte safe : le NFO est un fichier local du
+        # filesystem utilisateur (cree par Kodi/Jellyfin/manual), pas un input
+        # reseau venant d'un attaquant. Single-user desktop = pas de privilege
+        # escalation possible.
+        root = ET.fromstring(content)  # noqa: S314
     except (ET.ParseError, ValueError):
         return None
 
