@@ -420,7 +420,9 @@ class DashboardSmokeTests(unittest.TestCase):
             cwd=str(_ROOT),
             capture_output=True,
             text=True,
-            timeout=15,
+            # v1.0.0-beta : 60s pour absorber le startup node.js + I/O sur CI
+            # Windows partage (etait 15s, timeout sur GitHub Actions).
+            timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("W:renderInsights,renderKpiGrid,renderPosterCarousel", result.stdout)
