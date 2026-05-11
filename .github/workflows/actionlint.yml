@@ -1,0 +1,41 @@
+name: actionlint
+
+# Lint des fichiers .github/workflows/*.yml :
+# - Syntaxe YAML valide
+# - Actions referencees existent
+# - Expressions GitHub valides
+# - shell scripts conformes (shellcheck integre)
+#
+# Critique car une erreur dans un workflow ne se detecte qu'au runtime
+# (pas de CI sur la CI elle-meme par defaut).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          # shellcheck integre actionlint pour les blocs `run:`
+          # On garde le defaut (toutes les regles activees).
+          fail-on-error: true

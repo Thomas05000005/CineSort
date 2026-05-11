@@ -1,0 +1,56 @@
+name: PR title linter
+
+# Verifie que le titre de la PR suit la convention "Conventional Commits"
+# (feat:, fix:, docs:, ci:, refactor:, test:, chore:, perf:, build:).
+#
+# Le titre est utilise par :
+# - Release Drafter (categorise dans les release notes)
+# - Auto-label (autolabeler matche sur le prefix)
+# - Squash merge (le titre devient le message de commit)
+#
+# Si non conforme : la PR ne peut pas etre mergee (status check fail).
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            ci
+            refactor
+            test
+            chore
+            perf
+            build
+            style
+            revert
+            deps
+          requireScope: false
+          subjectPattern: ^[A-Za-z0-9_].+$
+          subjectPatternError: |
+            Le titre apres le prefix doit commencer par une lettre/chiffre.
+
+            Exemple correct : "feat: ajout export Trakt"
+            Exemple incorrect : "feat: !!! ajout export"
+          validateSingleCommit: false  # ne pas valider chaque commit, juste le titre PR
+          # Tolere "BREAKING CHANGE: ..." comme suffix pour signal majeur

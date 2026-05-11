@@ -1,0 +1,18 @@
+# Configuration "Sponsor" button GitHub
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+#
+# Active : "Sponsor" button apparait sur la page d'accueil du repo.
+# Decommentez les plateformes ou vous avez un compte cree (laissez vides
+# tant que vous n'avez pas de compte sponsor, on peut activer apres).
+
+# github: [Thomas05000005]   # GitHub Sponsors (gratuit, activer sur github.com/sponsors)
+# ko_fi: thomas05000005      # Ko-fi
+# liberapay: Thomas05000005  # Liberapay
+# patreon: thomas05000005    # Patreon
+# polar: thomas05000005      # Polar
+# tidelift: pypi/cinesort    # Tidelift (pour les libs pip publiees)
+# custom: ['https://www.paypal.me/Thomas05000005']  # URLs custom (PayPal, etc.)
+
+# v1.0.0-beta : pas de sponsor configure pour l'instant. Decommentez la
+# plateforme appropriee une fois votre compte cree (recommande : github.com/sponsors,
+# gratuit et integration native GitHub).

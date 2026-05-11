@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+title: CineSort
+message: >-
+  If you use CineSort in research, please cite this software using
+  the metadata below.
+type: software
+authors:
+  - given-names: Thomas
+    alias: Thomas05000005
+    affiliation: ""
+repository-code: "https://github.com/Thomas05000005/CineSort"
+url: "https://github.com/Thomas05000005/CineSort"
+abstract: >-
+  CineSort is a Windows desktop application for automatic sorting,
+  renaming, and organization of movie libraries. It features
+  TMDb-aware identification with intelligent fallback (NFO → folder →
+  filename → API), real perceptual quality scoring using LPIPS ONNX,
+  HDR10+ / Dolby Vision detection, audio analysis (EBU R128, clipping,
+  Atmos/DTS-HD), and native integrations with Jellyfin, Plex, and
+  Radarr. Built with Python 3.13 and pywebview.
+keywords:
+  - movies
+  - media-management
+  - file-renaming
+  - tmdb
+  - perceptual-quality
+  - lpips
+  - jellyfin
+  - plex
+  - radarr
+  - python
+  - pywebview
+  - windows
+license: MIT
+version: 1.0.0-beta
+date-released: "2026-05-11"
