@@ -1,4 +1,4 @@
-pywebview>=5.0
+pywebview>=6.2.1
 requests>=2.33.1
 # urllib3 epingle pour CVE-2024-37891 (fuite Proxy-Authorization sur redirect)
 # et CVE-2025-66418 (zip bomb dans la decompression). Borne haute < 3.0 par
