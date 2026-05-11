@@ -3,6 +3,7 @@
 
 version: "1"
 
+# Dossiers ignores par Sourcery
 ignore:
   - .git
   - .venv
@@ -19,21 +20,46 @@ ignore:
   - web_next_zero
   - docs/internal
   - tests/manual
+  - tests/e2e
+  - tests/e2e_dashboard
+  - tests/e2e_desktop
+  - runtime_hooks
+  - scripts/_phase*.py
 
+# Refactor rules : on prend les recommandations Sourcery par defaut
+# mais on disable les regles qui sont deja gerees par Ruff ou qui ne
+# sont pas pertinentes pour notre style.
 rule_settings:
-  # Concentre sur les refactors Python (notre stack principale)
   enable:
     - default
+    - readability  # readability suggestions (top priorite)
+    - performance  # micro-optimisations Python
+    - complexity   # detecte methodes complexes (similaire C901 Ruff)
   disable:
-    # do-not-use-bare-except : on a deja Ruff BLE001 qui le gere
+    # do-not-use-bare-except : deja Ruff BLE001
     - do-not-use-bare-except
-    # use-fstring-for-concatenation : trop bruyant sur les chaines de log
+    # use-fstring-for-concatenation : bruyant sur les chaines de log
     - use-fstring-for-concatenation
+    # use-named-expression : walrus operator (:=) trop subtile pour notre style
+    - use-named-expression
+    # convert-to-comprehension : parfois rend illisible
+    - convert-to-comprehension-for-conditional
+    # raise-from : pas critique
+    - raise-from-previous-error
 
-# Niveau de severite : suggestions toujours, mais pas bloquant
+# Integration GitHub : commentaires sur les PRs
 github:
+  # Active les reviews automatiques sur les PRs ouvertes
   on_pull_request_review_comments: true
   review_comments:
-    # Sourcery commente la PR directement si une suggestion est applicable
     enabled: true
-  ci_setup_message: false  # Pas de message bruit a chaque PR
+    # Ne commenter QUE les suggestions a haute confiance
+    # (sinon trop bruyant sur du legacy code)
+    severity: high
+  # Pas de message d'introduction a chaque PR (bruit inutile)
+  ci_setup_message: false
+
+# Metrics : remonter la complexite cyclomatique
+metrics:
+  function_length: 60  # warning au-dessus de 60 lignes
+  function_complexity: 12  # cyclomatic complexity

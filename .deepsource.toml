@@ -3,11 +3,13 @@ version = 1
 # Configuration DeepSource pour CineSort
 # https://docs.deepsource.com/docs/configuration
 
-# Test coverage report
+# Test patterns : ou trouver les tests pour metrique test-coverage
 test_patterns = [
   "tests/**/test_*.py",
+  "tests/**/*_test.py",
 ]
 
+# Exclusions : dossiers ou fichiers que DeepSource ne doit pas analyser
 exclude_patterns = [
   "**/__pycache__/**",
   ".venv/**",
@@ -23,7 +25,13 @@ exclude_patterns = [
   "web_next_zero/**",
   "archive_ui_next_*/**",
   "audit_screenshots/**",
+  "runtime_hooks/**",
+  "scripts/_phase*.py",  # scripts d'audit interne v7.8.0
 ]
+
+# ============================================================================
+# Analyzers
+# ============================================================================
 
 [[analyzers]]
 name = "python"
@@ -31,15 +39,28 @@ name = "python"
   [analyzers.meta]
   runtime_version = "3.x.x"
   max_line_length = 120
+  # Skip docstrings convention check pour ne pas spam (la majorite des
+  # functions internes n'ont pas de docstring obligatoire)
+  skip_doc_coverage = ["module", "magic", "init", "class"]
 
 [[analyzers]]
 name = "javascript"
 
   [analyzers.meta]
   environment = ["browser", "nodejs"]
+  module_system = "esm"  # ES modules pour le dashboard, IIFE pour legacy
+  # Plugins additionnels pour mieux comprendre le code
+  plugins = ["vue", "react"]  # noop si pas utilise, harmless
+  dialect = "browser"
+  style_guide = "standard"  # alternative airbnb (trop strict)
 
+# Test coverage analyzer : compare avec les rapports coverage.xml (Codecov)
 [[analyzers]]
 name = "test-coverage"
+
+# ============================================================================
+# Transformers (auto-fix bots) - desactives pour rester en mode review-only
+# ============================================================================
 
 [[transformers]]
 name = "black"
@@ -48,3 +69,7 @@ enabled = false  # On utilise ruff format
 [[transformers]]
 name = "isort"
 enabled = false  # ruff gere les imports
+
+[[transformers]]
+name = "ruff"
+enabled = true  # Aligne avec notre ruff config existante
