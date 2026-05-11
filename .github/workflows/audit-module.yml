@@ -154,6 +154,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pre-autorisation gh + git pour creer issues/PRs/push sans
+          # approbation interactive (non-dispo en CI).
+          # Branch protection main reste active = pas de push direct dessus.
+          claude_args: >-
+            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh label create:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Edit Write Read Glob Grep"
           prompt: >-
             Audit automatique de CineSort, couche "${{ steps.target.outputs.target }}",
             niveau "${{ github.event.inputs.level || 'modere' }}".

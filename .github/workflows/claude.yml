@@ -67,6 +67,14 @@ jobs:
         with:
           # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pre-autorisation des commandes courantes pour eviter "approbation
+          # interactive non disponible en CI". Sans ca, Claude ne peut pas
+          # creer d'issues/PRs/push, il doit juste lister ce qu'il faudrait.
+          # Liste consciemment limitee : pas de delete, pas de force-push,
+          # pas de rm sur des fichiers track. Branch protection main reste
+          # active : Claude ne peut PAS push direct sur main.
+          claude_args: >-
+            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh label create:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Edit Write Read Glob Grep"
           # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
           # (mention contient deja le prompt). Bloc YAML > pour eviter les
           # problemes d'echappement avec les expressions GitHub ${{ }}.
