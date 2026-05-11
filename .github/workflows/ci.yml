@@ -78,6 +78,24 @@ jobs:
         shell: pwsh
         run: python -m coverage html -d coverage_html
 
+      # 9b. Generation rapport XML pour Codecov
+      - name: Rapport coverage XML (pour Codecov)
+        shell: pwsh
+        run: python -m coverage xml -o coverage.xml
+
+      # 9c. Upload vers Codecov (tracking dans le temps + badge)
+      # Pas bloquant : si Codecov est down ou pas configure (token absent),
+      # on continue. Public repos beneficient de tokenless uploads.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          flags: unittests
+          name: cinesort-coverage
+          fail_ci_if_error: false
+          verbose: false
+          token: ${{ secrets.CODECOV_TOKEN }}  # Optional pour public repos
+
       # 10. Upload du rapport coverage HTML (retention 14 jours)
       - name: Upload artefact coverage
         uses: actions/upload-artifact@v4

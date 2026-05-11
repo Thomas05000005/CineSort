@@ -1,0 +1,53 @@
+name: Dependabot auto-merge
+
+# Auto-merge automatique des PRs Dependabot SI :
+# 1. C'est un patch (1.2.3 -> 1.2.4) ou minor securite
+# 2. Tous les CI checks passent vert
+#
+# Les bumps MAJEURS (1.x -> 2.x) restent en review manuelle car risque
+# de breaking changes (cf pywebview 5 -> 6 dans la beta).
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge safe Dependabot updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Seulement pour les PRs Dependabot
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+
+    steps:
+      - name: Get Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-approve patches + minors security
+        # Conditions strictes :
+        # - patch : 1.2.3 -> 1.2.4 (toujours safe)
+        # - minor + dependency-type "indirect" ou "direct:development" (tools, pas prod)
+        # - security update sur n'importe quel type
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          (steps.meta.outputs.update-type == 'version-update:semver-minor' && steps.meta.outputs.dependency-type == 'direct:development') ||
+          contains(steps.meta.outputs.dependency-group, 'security')
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          (steps.meta.outputs.update-type == 'version-update:semver-minor' && steps.meta.outputs.dependency-type == 'direct:development') ||
+          contains(steps.meta.outputs.dependency-group, 'security')
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

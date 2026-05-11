@@ -1,0 +1,117 @@
+# Configuration Release Drafter : genere automatiquement les release notes
+# en cumulant les PRs mergees depuis le dernier tag.
+# Doc : https://github.com/release-drafter/release-drafter
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+# Template des notes auto-generees pour chaque release
+template: |
+  ## 🎬 CineSort $RESOLVED_VERSION
+
+  $CHANGES
+
+  ## 👥 Contributeurs
+  $CONTRIBUTORS
+
+  ---
+  Diff complet : https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+
+# Categories : groupent les PRs par type via leurs labels
+categories:
+  - title: "🚀 Nouvelles fonctionnalites"
+    labels:
+      - "feature"
+      - "enhancement"
+
+  - title: "🐛 Corrections de bugs"
+    labels:
+      - "bug"
+      - "bugfix"
+      - "fix"
+
+  - title: "🛡️ Securite"
+    labels:
+      - "security"
+
+  - title: "⚡ Performance"
+    labels:
+      - "performance"
+
+  - title: "📚 Documentation"
+    labels:
+      - "documentation"
+
+  - title: "🔧 CI/CD & Tooling"
+    labels:
+      - "ci"
+      - "github-actions"
+      - "tooling"
+
+  - title: "📦 Dependances"
+    labels:
+      - "dependencies"
+      - "python"
+
+  - title: "🧪 Tests"
+    labels:
+      - "tests"
+      - "testing"
+
+  - title: "🎨 Refactor & cleanup"
+    labels:
+      - "refactor"
+      - "cleanup"
+      - "chore"
+
+# Resolution version : major si breaking, minor si feature, patch sinon
+version-resolver:
+  major:
+    labels:
+      - "breaking-change"
+      - "major"
+  minor:
+    labels:
+      - "feature"
+      - "minor"
+      - "enhancement"
+  patch:
+    labels:
+      - "patch"
+      - "bug"
+      - "fix"
+      - "security"
+      - "dependencies"
+  default: patch
+
+# Filtre : ne pas inclure les PRs avec ces labels
+exclude-labels:
+  - "skip-changelog"
+  - "no-changelog"
+
+# Format de chaque entree de PR
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+
+autolabeler:
+  - label: "documentation"
+    title:
+      - '/^docs(\(.+\))?:/i'
+  - label: "ci"
+    title:
+      - '/^ci(\(.+\))?:/i'
+  - label: "fix"
+    title:
+      - '/^fix(\(.+\))?:/i'
+  - label: "feature"
+    title:
+      - '/^feat(\(.+\))?:/i'
+  - label: "refactor"
+    title:
+      - '/^refactor(\(.+\))?:/i'
+  - label: "tests"
+    title:
+      - '/^test(\(.+\))?:/i'
+  - label: "chore"
+    title:
+      - '/^chore(\(.+\))?:/i'

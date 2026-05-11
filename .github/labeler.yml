@@ -1,0 +1,84 @@
+# Configuration auto-label PRs selon les fichiers touches.
+# Lu par .github/workflows/labeler.yml (actions/labeler).
+
+backend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cinesort/**"
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "web/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "**/*.txt"
+          - "docs/**"
+          - "README*"
+          - "CHANGELOG.md"
+          - "CONTRIBUTING.md"
+          - "CODE_OF_CONDUCT.md"
+          - "SECURITY.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/dependabot.yml"
+          - "check_project.bat"
+          - "build_windows.bat"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "requirements*.txt"
+          - "pyproject.toml"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cinesort/infra/local_secret_store.py"
+          - "cinesort/infra/log_scrubber.py"
+          - "cinesort/infra/rest_server.py"
+          - "cinesort/infra/db/backup.py"
+          - "cinesort/infra/integration_errors.py"
+          - "SECURITY.md"
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cinesort/infra/db/**"
+          - "cinesort/infra/db/migrations/*.sql"
+
+perceptual:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cinesort/domain/perceptual/**"
+
+i18n:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "locales/**"
+          - "cinesort/domain/i18n_messages.py"
+
+settings:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cinesort/ui/api/settings_support.py"
+          - "settings.json.example"
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "CineSort.spec"
+          - "build_windows.bat"
+          - "runtime_hooks/**"
+          - "version_info.txt"
