@@ -71,7 +71,14 @@
       body.innerHTML = '<p class="activity-drawer__empty">Aucun evenement. Les actions (scan, apply, undo, settings) s&rsquo;afficheront ici en temps reel.</p>';
       return;
     }
-    const escape = window.escapeHtml || ((s) => String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]));
+    // CodeQL js/incomplete-html-attribute-sanitization : fallback inline doit
+    // couvrir aussi " et ' pour les attributs HTML (e.type dans class="...").
+    const escape = window.escapeHtml || ((s) => String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;"));
     body.innerHTML = _log.map((e) => `
       <div class="activity-entry activity-entry--${escape(e.type)}">
         <span class="activity-entry__time">${_formatTime(e.ts)}</span>

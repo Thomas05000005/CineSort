@@ -104,7 +104,15 @@ function renamePreviewHtml(row, decision, settings) {
   if (oldBase && oldBase === newPath) {
     return '<span class="rename-preview rename-preview--noop" data-tip="Deja conforme">✓ Conforme</span>';
   }
-  const escape = window.escapeHtml || ((s) => String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]));
+  // CodeQL js/incomplete-html-attribute-sanitization : le fallback inline doit
+  // couvrir aussi " et ' pour les attributs HTML (sinon ${escape(newPath)}
+  // dans data-tip="..." est vulnerable si newPath contient ").
+  const escape = window.escapeHtml || ((s) => String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;"));
   return `<span class="rename-preview" data-tip="${escape(newPath)}">→ ${escape(newPath)}</span>`;
 }
 

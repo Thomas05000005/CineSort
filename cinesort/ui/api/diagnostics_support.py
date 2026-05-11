@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from cinesort.infra.log_scrubber import scrub_secrets
+
 
 def debug_enabled(
     settings: Optional[Dict[str, Any]],
@@ -35,7 +37,13 @@ def debug_log(
     if not enabled:
         return
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {message}\n"
+    # CodeQL py/clear-text-storage-sensitive-data : on applique le scrubber
+    # AVANT d'ecrire en disque, par symetrie avec le logging stdlib (qui
+    # passe par log_scrubber via SecretsScrubFilter). Si l'appelant passe
+    # accidentellement un message contenant un secret (api_key, token,
+    # password, etc.), il sera masque dans le fichier.
+    safe_message = scrub_secrets(message)
+    line = f"[{ts}] {safe_message}\n"
     try:
         append_text(state_dir / "debug_api.log", line)
     except (OSError, PermissionError):
