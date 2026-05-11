@@ -16,7 +16,7 @@ jobs:
     steps:
       # 1. Recuperation du code source
       - name: Checkout du depot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 2. Installation de Python 3.13
       - name: Setup Python 3.13
