@@ -219,30 +219,72 @@ jobs:
 
 
             ============================
-            ETAPE 4 - DEDUP DES FINDINGS
+            ETAPE 4 - DEDUP + ENRICHISSEMENT
             ============================
 
-            Pour chaque finding qui meriterait une issue ou PR :
+            Pour chaque finding, fais une comparaison SEMANTIQUE (pas stricte)
+            avec les issues + PRs existantes de l'etape 0. Distingue 4 cas :
 
-            (a) Cherche dans la liste etape 0 si un titre similaire existe deja.
-                Compare semantiquement, pas strict : "Bug audio_score returns 0
-                for missing track" ~ "compute_audio_score retourne 0 pour None".
 
-            (b) Si une ISSUE ouverte couvre deja ce sujet :
-                - NE PAS creer de nouvelle issue
-                - Ajoute un commentaire dans l'issue existante avec :
-                  - La date du re-audit
-                  - Le module + ligne ou tu retrouves le finding
-                  - "Confirme toujours present" ou "Status mis a jour : ..."
+            CAS A - Doublon strict : meme finding deja documente
+            ---
+            Si une issue existe avec le meme bug a la meme ligne :
+            - NE PAS creer de nouvelle issue
+            - Ajoute un BREF commentaire dans l'issue : "Confirme present
+              au re-audit du <date>. Aucune nouvelle info." (1 ligne max)
+            - Si l'issue n'a pas eu de commentaire depuis >7 jours, ne re-commente
+              pas pour eviter le spam.
 
-            (c) Si une PR ouverte fixe deja ce point :
-                - NE PAS refaire le meme fix
-                - Saute ce finding (il est en cours de review)
 
-            (d) Si rien d'existant :
-                - Cree une issue avec titre "Conventional Commit" prefix
-                  (ex: "fix(perceptual): ...", "refactor(app): ...")
-                - Body : description + module + ligne + suggestion + label suggere
+            CAS B - Lie + info nouvelle/supplementaire (LE CAS IMPORTANT)
+            ---
+            Si une issue existe mais que ton audit revele quelque chose
+            d'utile EN PLUS :
+            - exemple : "issue #15 traite _score_val_inv granularite, mais je
+              vois maintenant que le meme probleme existe dans _score_bits
+              et _score_temporal (ligne 320, 335)"
+            - exemple : "issue #16 propose de remplacer blur > 0.05 par une
+              constante. Je vois aussi blur > 0.04 ligne 144 (dnr_upscale_combo)
+              et blur > 0.04 ligne 232 (dnr_classic_film) qui meritent le meme
+              traitement"
+            - exemple : "PR #X fixe le bug audio_score==0 mais ne traite pas
+              le cas symetrique visual_score==0 ligne Y"
+            - exemple : "issue #Z couvre la fonction A, je trouve un cas
+              additionnel B avec le meme probleme mais une cause differente"
+
+            Action :
+            - COMMENTE dans l'issue/PR existante avec :
+              - Titre clair : "Re-audit YYYY-MM-DD : info supplementaire"
+              - Liste a puce des informations nouvelles
+              - References fichier + ligne pour chaque
+              - Si pertinent, propose d'etendre la portee de l'issue
+            - Si la PR existante est ouverte et que tu vois un cas similaire
+              non couvert, propose le fix additionnel dans le commentaire de
+              la PR (ne re-fais pas une PR concurrente).
+
+
+            CAS C - PR ouverte fixe deja PARTIELLEMENT
+            ---
+            Si une PR ouverte adresse une partie du finding mais en oublie
+            une autre :
+            - Commente dans la PR : "Suggestion d'extension : ce fix pourrait
+              aussi couvrir <cas>. Sinon, je propose d'ouvrir une PR de suivi
+              apres le merge de celle-ci"
+            - Si le complement est independant : tu peux ouvrir une PR
+              distincte mais reference explicitement la PR existante dans
+              le body ("complement a #PR").
+
+
+            CAS D - Finding totalement nouveau
+            ---
+            Aucune trace dans les issues/PRs. Cree une nouvelle issue avec :
+            - Titre Conventional Commit ("fix(...): ...", "refactor(...): ...")
+            - Body : description + module + ligne + suggestion + label suggere
+            - References au rapport markdown du jour
+
+            REGLE GLOBALE : si tu hesites entre CAS A et CAS B, prefere
+            toujours CAS B (enrichir). Le risque "trop d'info" est moindre
+            que le risque "info perdue".
 
 
             ============================
