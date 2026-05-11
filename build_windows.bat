@@ -8,10 +8,16 @@ set "PYTHON_EXE="
 if exist ".venv313\Scripts\python.exe" set "PYTHON_EXE=.venv313\Scripts\python.exe"
 if "%PYTHON_EXE%"=="" if exist ".venv\Scripts\python.exe" set "PYTHON_EXE=.venv\Scripts\python.exe"
 
-if not exist "%PYTHON_EXE%" (
-  echo [ERREUR] Environnement Python de build introuvable.
-  echo Creez de preference un venv Python 3.13 avec: py -3.13 -m venv .venv313
-  exit /b 1
+REM v1.0.0-beta : sur CI (GitHub Actions), pas de venv local. Python est
+REM installe directement par actions/setup-python. Fallback sur python global.
+if "%PYTHON_EXE%"=="" (
+  where python >nul 2>&1
+  if errorlevel 1 (
+    echo [ERREUR] Environnement Python de build introuvable.
+    echo Creez de preference un venv Python 3.13 avec: py -3.13 -m venv .venv313
+    exit /b 1
+  )
+  set "PYTHON_EXE=python"
 )
 
 echo [1/5] Verification Python venv...
