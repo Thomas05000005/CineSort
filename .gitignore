@@ -84,3 +84,4 @@ preview-*.html
 preview_*.html
 test_output.txt
 *.test_output
+ci_log.txt
