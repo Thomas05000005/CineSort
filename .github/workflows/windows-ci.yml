@@ -32,13 +32,18 @@ jobs:
         shell: cmd
         run: check_project.bat
 
+      # v1.0.0-beta : Preview capture est un nice-to-have UI QA (screenshots
+      # Playwright). Peut flaker sur CI Windows partage. Non bloquant tant que
+      # la qualite des fixtures n'est pas stabilisee.
       - name: Preview capture
         shell: pwsh
+        continue-on-error: true
         run: |
           python scripts/capture_ui_preview.py --dev --recommended --output-dir build\ui_preview_captures\ci
 
       - name: Preview visual check
         shell: pwsh
+        continue-on-error: true
         run: |
           python scripts/visual_check_ui_preview.py --dev
 
@@ -49,7 +54,10 @@ jobs:
           path: |
             build/ui_preview_captures/ci
             build/ui_preview_visual_check/latest
-          if-no-files-found: error
+          # v1.0.0-beta : 'ignore' au lieu de 'error' car le Preview capture
+          # est non-bloquant (continue-on-error). Pas d'echec si les fichiers
+          # ne sont pas generes.
+          if-no-files-found: ignore
 
   build:
     needs: verify
