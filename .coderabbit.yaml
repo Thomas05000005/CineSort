@@ -1,0 +1,65 @@
+# Configuration CodeRabbit pour CineSort
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: fr-FR  # Reviews en francais
+
+# Style des reviews
+review:
+  # auto_review : declenche review automatique sur chaque PR ouverte
+  auto_review:
+    enabled: true
+    drafts: false  # pas de review sur les PRs draft
+
+  # Profil : "chill" (concis, pas pinailleur) vs "assertive" (rigoureux)
+  profile: assertive  # plus de feedback technique, utile pour beta
+
+  # Reviewer les commits push apres la review initiale ?
+  incremental_review: true
+
+  # Resoudre les commentaires automatiquement quand le code est modifie
+  auto_resolve_review_threads: true
+
+  # Type de commentaires
+  review_comments:
+    style: line  # commentaires ligne par ligne (vs commentaire global)
+
+# Filtres : sur quels fichiers reviewer
+path_filters:
+  - "!**/*.lock"
+  - "!**/*.min.js"
+  - "!**/*.min.css"
+  - "!.venv/**"
+  - "!build/**"
+  - "!dist/**"
+  - "!packages/**"
+  - "!docs/internal/**"
+  - "!tests/manual/**"
+  - "!web/preview/**"  # mock data pour preview UI
+
+# Custom instructions par type de fichier
+path_instructions:
+  - path: "cinesort/infra/db/migrations/*.sql"
+    instructions: |
+      Migration SQL CineSort : verifie que la migration est ATOMIQUE (transaction-safe),
+      RETROCOMPAT (n'ecrase pas les donnees existantes sans le marquer explicitement),
+      et IDEMPOTENTE (re-rejouer ne casse pas). Le user_version doit etre incremente.
+
+  - path: "cinesort/infra/local_secret_store.py"
+    instructions: |
+      Module DPAPI Windows : verifie que TOUT secret stocke utilise protect_secret()
+      avec un purpose unique. Aucun secret en clair dans logs (utiliser scrub_secrets()).
+
+  - path: "cinesort/ui/api/settings_support.py"
+    instructions: |
+      Module settings : verifie que les changements ajoutent l'entree dans
+      _LITERAL_DEFAULTS (table declarative) et pas dans le code orchestrateur,
+      sauf si derive (alias, compute, secret).
+
+  - path: "tests/**/*.py"
+    instructions: |
+      Tests CineSort : doivent isoler etat global (setUp/tearDown), pas manipuler
+      sys.modules (cf issue #4 pollution inter-tests), et utiliser des temp dirs.
+
+# Chat : permet @coderabbitai dans les PRs
+chat:
+  auto_reply: true  # repondre aux questions @coderabbitai
