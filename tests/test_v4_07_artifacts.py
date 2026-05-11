@@ -6,7 +6,7 @@ from pathlib import Path
 
 class V4_07ArtifactsTests(unittest.TestCase):
     def test_nvda_checklist_exists(self):
-        self.assertTrue(Path("audit/results/v4-07-nvda-checklist.md").is_file())
+        self.assertTrue(Path("docs/internal/audit_v7_8_0/results/v4-07-nvda-checklist.md").is_file())
 
     def test_axe_test_exists(self):
         self.assertTrue(Path("tests/test_axe_dashboard.py").is_file())

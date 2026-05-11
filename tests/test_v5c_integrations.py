@@ -14,8 +14,8 @@ class V5CIntegrationsTests(unittest.TestCase):
     """Tests structurels minimaux post-V5C-02 (Option B : conservation v4)."""
 
     def test_decision_documented(self) -> None:
-        """La decision V5C-02 doit etre documentee dans audit/results/."""
-        decision = Path("audit/results/v5c-02-decision.md")
+        """La decision V5C-02 doit etre documentee dans docs/internal/audit_v7_8_0/results/."""
+        decision = Path("docs/internal/audit_v7_8_0/results/v5c-02-decision.md")
         self.assertTrue(decision.exists(), "Le fichier de decision V5C-02 doit exister")
         content = decision.read_text(encoding="utf-8")
         self.assertIn("Option B", content, "La decision doit mentionner Option B")

@@ -10,7 +10,7 @@ Ces tests verifient :
 - `_legacy_compat.js` ESM existe et expose les helpers.
 - home.js (le seul vrai consommateur) importe depuis _legacy_compat.js.
 - Les composants v5 shell ne referencent pas window.state/apiCall.
-- Documentation `audit/results/v5c-03-shim-restant.md` toujours presente
+- Documentation `docs/internal/audit_v7_8_0/results/v5c-03-shim-restant.md` toujours presente
   (rationale historique conservee pour traçabilite).
 """
 
@@ -25,7 +25,7 @@ LEGACY_GLOBALS_SHIM = REPO / "web" / "dashboard" / "_legacy_globals.js"
 LEGACY_COMPAT_ESM = REPO / "web" / "views" / "_legacy_compat.js"
 INDEX = REPO / "web" / "dashboard" / "index.html"
 HOME_VIEW = REPO / "web" / "views" / "home.js"
-DOC = REPO / "audit" / "results" / "v5c-03-shim-restant.md"
+DOC = REPO / "docs" / "internal" / "audit_v7_8_0" / "results" / "v5c-03-shim-restant.md"
 COMPONENTS_V5 = (
     "sidebar-v5.js",
     "top-bar-v5.js",

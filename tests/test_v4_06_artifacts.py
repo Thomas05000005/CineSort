@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class V4_06ArtifactsTests(unittest.TestCase):
     def test_checklist_exists(self):
         self.assertTrue(
-            (ROOT / "audit/results/v4-06-devices-checklist.md").is_file(),
+            (ROOT / "docs/internal/audit_v7_8_0/results/v4-06-devices-checklist.md").is_file(),
             "checklist humaine V4-06 manquante",
         )
 

@@ -113,15 +113,27 @@ class AutoQuarantineCorruptedTests(unittest.TestCase):
 class SettingsDefaultTests(unittest.TestCase):
     def test_setting_default_is_false(self) -> None:
         """auto_quarantine_corrupted est defaut False (preserve comportement)."""
-        # Lecture directe du fichier source pour verifier le defaut
-        import cinesort.ui.api.settings_support as ss
+        # v1.0.0-beta : Phase 15 a deplace les defaults litteraux dans la
+        # table `_LITERAL_DEFAULTS` au lieu de `payload.setdefault(...)`.
+        # On verifie directement le contrat via apply_settings_defaults().
+        from pathlib import Path
 
-        src_path = Path(ss.__file__)
-        content = src_path.read_text(encoding="utf-8")
-        # Setdefault avec False
-        self.assertIn('setdefault("auto_quarantine_corrupted", False)', content)
-        # Et exposition dans le payload normalise
-        self.assertIn('"auto_quarantine_corrupted":', content)
+        from cinesort.ui.api.settings_support import apply_settings_defaults
+
+        payload = apply_settings_defaults(
+            {},
+            state_dir=Path("/tmp"),
+            default_root="/r",
+            default_state_dir_example="/r/state",
+            default_collection_folder_name="_Collection",
+            default_empty_folders_folder_name="_Vide",
+            default_residual_cleanup_folder_name="_residuels",
+            default_probe_backend="mediainfo",
+            debug_enabled=False,
+        )
+        # Le defaut doit etre False (preservation comportement)
+        self.assertIn("auto_quarantine_corrupted", payload)
+        self.assertEqual(payload["auto_quarantine_corrupted"], False)
 
 
 if __name__ == "__main__":

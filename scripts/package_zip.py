@@ -37,8 +37,14 @@ SOURCE_EXCLUDE_PATH_PATTERNS = [
     "STATE_DIR/*",
     "runs",
     "runs/*",
-    "CineSort",
-    "CineSort/*",
+    # v1.0.0-beta : exclure le dossier runtime que l'app cree au boot pour
+    # les state files (`<cwd>/CineSort/db/cinesort.sqlite`). Pattern raffine
+    # pour eviter de matcher le PACKAGE Python `cinesort/` apres le renommage
+    # (fnmatch est case-insensitive sur Windows : "CineSort" matchait "cinesort").
+    "CineSort/db",
+    "CineSort/db/*",
+    "CineSort/runs",
+    "CineSort/runs/*",
     "db",
     "db/*",
 ]

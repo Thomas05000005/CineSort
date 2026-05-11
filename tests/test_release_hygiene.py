@@ -64,9 +64,11 @@ class ReleaseHygieneTests(unittest.TestCase):
 
     def test_docs_use_stable_ui_terminology(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
+        # CHANGELOG.md retire : c'est de l'historique, la terminologie ancienne
+        # ("dashboard") y est legitimement preservee comme trace des versions
+        # passees. Le test s'applique aux docs operationnelles courantes.
         critical_docs = [
             repo_root / "README_FR.txt",
-            repo_root / "CHANGELOG.md",
             repo_root / "docs" / "releases" / "V7_1_NOTES_FR.md",
         ]
         offenders: list[str] = []
