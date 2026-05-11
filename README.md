@@ -10,8 +10,11 @@
 ![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)
 ![Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 [![Status: Beta](https://img.shields.io/badge/status-beta-orange.svg)](#statut-beta)
+[![CI](https://github.com/Thomas05000005/CineSort/actions/workflows/ci.yml/badge.svg)](https://github.com/Thomas05000005/CineSort/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Thomas05000005/CineSort/actions/workflows/codeql.yml/badge.svg)](https://github.com/Thomas05000005/CineSort/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Thomas05000005/CineSort/badge)](https://scorecard.dev/viewer/?uri=github.com/Thomas05000005/CineSort)
 [![Tests](https://img.shields.io/badge/tests-4243%20passing-green.svg)](#tests-et-qualité)
-[![Coverage](https://img.shields.io/badge/coverage-82%25-green.svg)](#tests-et-qualité)
+[![Coverage](https://img.shields.io/badge/coverage-80%25%2B-green.svg)](#tests-et-qualité)
 
 > ⚠️ **v1.0.0-beta** — première publication publique. Le code est mature (~50 000 lignes, 4200+ tests, audit complet), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. Les changements de structure ne sont pas attendus, mais possibles selon vos retours. **Ne pas activer en production critique sans dry-run préalable.**
 
