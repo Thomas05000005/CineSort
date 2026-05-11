@@ -68,5 +68,9 @@ jobs:
           # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
-          # (mention contient deja le prompt)
-          prompt: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prompt || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort : verifie qu''il n''y a pas de regressions de qualite, de vulnerabilites, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre une PR avec les fixes (squash safe). Reponds en francais.') || '' }}
+          # (mention contient deja le prompt). Bloc YAML > pour eviter les
+          # problemes d'echappement avec les expressions GitHub ${{ }}.
+          prompt: >-
+            ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prompt
+            || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort. Verifie qu il n y a pas de regressions de qualite, de vulnerabilites, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre une PR avec les fixes. Reponds en francais.')
+            || '' }}
