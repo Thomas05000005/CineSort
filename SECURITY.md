@@ -12,7 +12,7 @@ Les correctifs de sécurité sont appliqués sur la dernière version stable.
 ## Signaler une vulnérabilité
 
 Si tu découvres une vulnérabilité de sécurité dans CineSort, **NE PAS ouvrir d'issue
-publique**. Utilise plutôt les [GitHub Security Advisories privées](https://github.com/PLACEHOLDER/cinesort/security/advisories/new).
+publique**. Utilise plutôt les [GitHub Security Advisories privées](https://github.com/Thomas05000005/CineSort/security/advisories/new).
 
 Tu recevras un accusé de réception sous 48h. Les vulnérabilités confirmées seront
 corrigées et publiées dans un délai raisonnable selon la sévérité (typiquement 7-30 jours).

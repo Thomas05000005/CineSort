@@ -33,7 +33,7 @@ Exemples de comportements inacceptables :
 ## Application
 
 Les cas de comportement abusif, harcelant ou inacceptable peuvent être signalés
-aux mainteneurs à l'adresse : **PLACEHOLDER@example.com**
+aux mainteneurs via une [Security Advisory privée GitHub](https://github.com/Thomas05000005/CineSort/security/advisories/new) (mode confidentiel, seuls les mainteneurs y ont accès).
 
 Les mainteneurs sont tenus de respecter la confidentialité du déclarant.
 

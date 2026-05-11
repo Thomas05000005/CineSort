@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 Discussion communautaire
-    url: https://github.com/PLACEHOLDER/cinesort/discussions
+    url: https://github.com/Thomas05000005/CineSort/discussions
     about: Pour les questions générales, partager ta config, ou discuter de l'évolution du projet.
   - name: 📚 Documentation
-    url: https://github.com/PLACEHOLDER/cinesort#readme
+    url: https://github.com/Thomas05000005/CineSort#readme
     about: Lis le README et la doc avant d'ouvrir une issue.

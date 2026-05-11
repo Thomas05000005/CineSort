@@ -4,16 +4,16 @@ Merci de vouloir contribuer ! 🎬
 
 ## Avant de commencer
 
-- **Bug** ? Ouvre une [issue avec le template Bug Report](https://github.com/PLACEHOLDER/cinesort/issues/new?template=bug_report.yml)
-- **Question** ? Va sur [GitHub Discussions](https://github.com/PLACEHOLDER/cinesort/discussions)
-- **Idée** ? Ouvre une [issue Feature Request](https://github.com/PLACEHOLDER/cinesort/issues/new?template=feature_request.yml) **avant** de coder pour qu'on en discute
+- **Bug** ? Ouvre une [issue avec le template Bug Report](https://github.com/Thomas05000005/CineSort/issues/new?template=bug_report.yml)
+- **Question** ? Va sur [GitHub Discussions](https://github.com/Thomas05000005/CineSort/discussions)
+- **Idée** ? Ouvre une [issue Feature Request](https://github.com/Thomas05000005/CineSort/issues/new?template=feature_request.yml) **avant** de coder pour qu'on en discute
 
 ## Setup environnement de dev
 
 Prérequis : Python 3.13, Git, Windows 10/11.
 
 ```bash
-git clone https://github.com/PLACEHOLDER/cinesort.git
+git clone https://github.com/Thomas05000005/CineSort.git
 cd cinesort
 python -m venv .venv313
 .venv313\Scripts\activate

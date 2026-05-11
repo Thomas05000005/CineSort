@@ -42,7 +42,7 @@
 
 CineSort est une application Windows portable. **Aucun installeur, aucun droit administrateur requis.**
 
-1. Va sur la page [GitHub Releases](https://github.com/PLACEHOLDER/cinesort/releases) du projet.
+1. Va sur la page [GitHub Releases](https://github.com/Thomas05000005/CineSort/releases) du projet.
 2. Télécharge le fichier `CineSort.exe` de la dernière version.
 3. Place-le dans le dossier de ton choix (par exemple `C:\Tools\CineSort\`).
 4. Double-clique pour lancer.
