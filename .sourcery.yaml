@@ -1,0 +1,39 @@
+# Configuration Sourcery pour CineSort
+# https://docs.sourcery.ai/Configuration/Project-Settings/
+
+version: "1"
+
+ignore:
+  - .git
+  - .venv
+  - .venv313
+  - venv
+  - build
+  - dist
+  - packages
+  - __pycache__
+  - .tmp_test
+  - .tmp_audit
+  - .ui_backups
+  - archive_ui_next_20260308
+  - web_next_zero
+  - docs/internal
+  - tests/manual
+
+rule_settings:
+  # Concentre sur les refactors Python (notre stack principale)
+  enable:
+    - default
+  disable:
+    # do-not-use-bare-except : on a deja Ruff BLE001 qui le gere
+    - do-not-use-bare-except
+    # use-fstring-for-concatenation : trop bruyant sur les chaines de log
+    - use-fstring-for-concatenation
+
+# Niveau de severite : suggestions toujours, mais pas bloquant
+github:
+  on_pull_request_review_comments: true
+  review_comments:
+    # Sourcery commente la PR directement si une suggestion est applicable
+    enabled: true
+  ci_setup_message: false  # Pas de message bruit a chaque PR

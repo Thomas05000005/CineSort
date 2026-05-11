@@ -1,0 +1,58 @@
+name: OpenSSF Scorecard
+
+# Note de securite publique pour le repo (0-10).
+# Verifie 18 controles : signed commits, branch protection, deps pinning,
+# CI/CD security, vulnerability scanning, license, etc.
+#
+# Le badge "OpenSSF Scorecard X/10" peut etre ajoute au README pour montrer
+# la maturite securite du projet aux contributeurs/utilisateurs.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Lundi 06h00 UTC : recalcule la note hebdomadaire
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  # Necessaires au scan
+  security-events: write
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          # publish_results: true permet a OpenSSF de publier le score
+          # sur le dashboard public scorecard.dev. Active : signal de
+          # transparence, montre la maturite du projet.
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          retention-days: 7
+
+      - name: Upload to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard-results.sarif
+          category: scorecard

@@ -1,0 +1,50 @@
+version = 1
+
+# Configuration DeepSource pour CineSort
+# https://docs.deepsource.com/docs/configuration
+
+# Test coverage report
+test_patterns = [
+  "tests/**/test_*.py",
+]
+
+exclude_patterns = [
+  "**/__pycache__/**",
+  ".venv/**",
+  ".venv313/**",
+  "build/**",
+  "dist/**",
+  "packages/**",
+  "docs/internal/**",
+  "tests/manual/**",
+  "tests/e2e/**",
+  "tests/e2e_dashboard/**",
+  "tests/e2e_desktop/**",
+  "web_next_zero/**",
+  "archive_ui_next_*/**",
+  "audit_screenshots/**",
+]
+
+[[analyzers]]
+name = "python"
+
+  [analyzers.meta]
+  runtime_version = "3.x.x"
+  max_line_length = 120
+
+[[analyzers]]
+name = "javascript"
+
+  [analyzers.meta]
+  environment = ["browser", "nodejs"]
+
+[[analyzers]]
+name = "test-coverage"
+
+[[transformers]]
+name = "black"
+enabled = false  # On utilise ruff format
+
+[[transformers]]
+name = "isort"
+enabled = false  # ruff gere les imports

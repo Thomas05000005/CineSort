@@ -1,0 +1,46 @@
+# Configuration Codecov pour CineSort
+# https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  # Seuil global : 80% (aligne avec --fail-under=80 dans ci.yml)
+  range: "70...100"
+  round: nearest
+  precision: 1
+
+  status:
+    project:
+      default:
+        target: 80%
+        # Tolere une baisse de 1% sans bloquer la PR (sinon trop bruyant
+        # sur les refactors qui touchent du code peu testable).
+        threshold: 1%
+        # Branches a verifier
+        branches:
+          - main
+    patch:
+      default:
+        # Nouveau code (patch) : on veut idealement 70% de coverage
+        # sur les lignes ajoutees, mais pas bloquant pour la beta.
+        target: 70%
+        threshold: 5%
+        if_no_uploads: success
+
+# Ne pas commenter sur les PRs Dependabot (bruit inutile)
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: false
+  branches:
+    - main
+
+# Ignorer les fichiers non-applicatifs pour le calcul
+ignore:
+  - "tests/**"
+  - "scripts/**"
+  - "build/**"
+  - "dist/**"
+  - "docs/**"
+  - "packages/**"
+  - "**/__init__.py"
