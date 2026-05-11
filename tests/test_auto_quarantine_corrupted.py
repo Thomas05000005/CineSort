@@ -116,8 +116,6 @@ class SettingsDefaultTests(unittest.TestCase):
         # v1.0.0-beta : Phase 15 a deplace les defaults litteraux dans la
         # table `_LITERAL_DEFAULTS` au lieu de `payload.setdefault(...)`.
         # On verifie directement le contrat via apply_settings_defaults().
-        from pathlib import Path
-
         from cinesort.ui.api.settings_support import apply_settings_defaults
 
         payload = apply_settings_defaults(
