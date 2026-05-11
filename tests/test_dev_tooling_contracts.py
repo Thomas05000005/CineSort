@@ -96,7 +96,11 @@ class DevToolingContractsTests(unittest.TestCase):
         self.assertIn("build_windows.bat", self.ci_workflow)
         self.assertIn("scripts/capture_ui_preview.py --dev --recommended", self.ci_workflow)
         self.assertIn("scripts/visual_check_ui_preview.py --dev", self.ci_workflow)
-        self.assertIn("actions/upload-artifact@v4", self.ci_workflow)
+        # v1.0.0-beta : tolere n'importe quelle version >= v4 (Dependabot
+        # bumps periodiques). On verifie juste que l'action est utilisee.
+        import re
+
+        self.assertRegex(self.ci_workflow, r"actions/upload-artifact@v\d+")
         self.assertIn("WINDOWS_CODESIGN_CERT_BASE64", self.ci_workflow)
         self.assertIn("WINDOWS_CODESIGN_CERT_PASSWORD", self.ci_workflow)
         self.assertIn("scripts/sign_windows_release.ps1", self.ci_workflow)
