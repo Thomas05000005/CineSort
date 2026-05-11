@@ -1,0 +1,58 @@
+name: mypy (type checking)
+
+# Type checking statique Python.
+# Mode "tolerant" pour la v1.0.0-beta : le projet a un mix de code
+# annote (recent) et non-annote (legacy v1-v5). mypy s'execute SANS
+# --strict et beaucoup de modules sont en --ignore-missing-imports.
+#
+# Le workflow ne bloque PAS le CI pour l'instant : il fournit un
+# signal pour ajouter progressivement des annotations. Une fois la
+# dette type-hints reduite, passer en mode strict bloquant.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mypy:
+    name: mypy check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install mypy + project deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "mypy>=1.13,<2"
+          # Installer les deps prod pour que mypy puisse resoudre les types
+          # des libs tierces (rapidfuzz, segno, etc.)
+          python -m pip install -r requirements.txt
+
+      - name: Run mypy (informational, non-blocking)
+        # Non-bloquant tant que la dette type-hints est reduite.
+        # Une fois prete a etre stricte, retirer le `|| true` et
+        # ajouter --strict + --warn-unused-ignores.
+        run: |
+          mypy cinesort/ \
+            --ignore-missing-imports \
+            --no-strict-optional \
+            --pretty \
+            --show-error-codes \
+            --show-error-context \
+            --warn-redundant-casts \
+            --check-untyped-defs \
+            || true

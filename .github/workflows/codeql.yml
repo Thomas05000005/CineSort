@@ -1,0 +1,48 @@
+name: "CodeQL"
+
+# SAST officiel GitHub : detecte vulnerabilites securite Python + JS
+# Tourne a chaque push/PR main + planifie hebdomadaire pour rattraper
+# les nouveaux patterns ajoutes par GitHub au fil du temps.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Lundi 03h24 UTC (decalage exact pour eviter peak hours)
+    - cron: "24 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "javascript-typescript"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended : requetes additionnelles au-dela du default
+          # (utile sur du code Python qui manipule fichiers/subprocess/REST)
+          queries: +security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -1,0 +1,40 @@
+name: gitleaks
+
+# Detection secrets accidentellement commit (tokens API, mots de passe,
+# cles privees, DPAPI blobs, etc.). Critique vu que CineSort manipule
+# secrets DPAPI (TMDb, Jellyfin, Plex, Radarr, SMTP).
+#
+# Gitleaks v8 utilise ~150 patterns built-in + extensions custom possible
+# via .gitleaks.toml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Pour scanner l'historique complet
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Plus de bruit si on log les findings (utile pour audit
+          # post-mortem mais sans donner les valeurs en clair). Ne
+          # bloque QUE sur findings nouveaux non whitelistes.
+          GITLEAKS_ENABLE_COMMENTS: true
+          GITLEAKS_ENABLE_SUMMARY: true

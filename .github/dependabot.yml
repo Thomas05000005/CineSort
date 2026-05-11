@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # Dependances Python (requirements*.txt)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Ne pas spammer pour les patches mineurs (3.13.0 -> 3.13.1) sur les
+    # deps critiques bien testees ; uniquement minor + major et patches
+    # avec advisory securite.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-patch"
+    groups:
+      # Groupe les bumps mineurs des libs HTTP en une seule PR pour
+      # reduire le bruit.
+      http-clients:
+        patterns:
+          - "requests"
+          - "urllib3"
+        update-types:
+          - "minor"
+
+  # GitHub Actions (workflows/*.yml)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
