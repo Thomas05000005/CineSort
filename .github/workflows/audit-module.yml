@@ -54,11 +54,14 @@ on:
         default: "true"
 
   schedule:
-    # Rotation auto lun-ven a 04h00 UTC (~05h00 Paris hiver / 06h00 ete).
-    # 1 couche par jour pour eviter de saturer le quota Max.
-    # Le job determine la couche selon le jour de la semaine.
-    # Pas de weekend = pause pour vous laisser reviewer.
-    - cron: "0 4 * * 1-5"
+    # Mode "tout chaque jour" (v1.0.0-beta intensive review).
+    # Audit complet (target=all) tous les jours a 04h00 UTC.
+    # Claude verifie les issues/PRs existantes pour ne pas creer de doublons :
+    # - Si une issue ouverte couvre deja le sujet -> commente dedans
+    # - Si une PR ouverte fixe deja le point -> skip
+    # - Sinon crée nouvelle issue/PR
+    # A enlever apres 1 semaine en remettant le cron en rotation lun-ven.
+    - cron: "0 4 * * *"
 
 permissions:
   contents: write
@@ -79,21 +82,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine target (manual or auto-rotation)
+      - name: Determine target (manual or auto-daily-all)
         id: target
         shell: bash
         run: |
-          # Si declenche manuellement, prendre l'input. Sinon rotation par jour.
+          # Si declenche manuellement : prendre l'input.
+          # Sinon (cron quotidien) : audit complet target=all.
+          # (Mode v1.0.0-beta intensive ; basculera plus tard sur rotation par jour)
           target="${{ github.event.inputs.target }}"
           if [ -z "$target" ]; then
-            day=$(date +%u)  # 1=lundi, 7=dimanche
+            day=$(date +%u)
             case "$day" in
-              1) target="domain" ;;
-              2) target="domain-perceptual" ;;
-              3) target="app" ;;
-              4) target="infra" ;;
-              5) target="ui-api" ;;
-              *) target="transverse" ;;
+              7) target="transverse" ;;
+              *) target="all" ;;
             esac
             echo "Rotation auto jour=$day -> $target"
           fi
@@ -174,30 +175,122 @@ jobs:
 
             Mission :
 
-            1. Pour CHAQUE module liste, lis le contenu integralement.
 
-            2. Cherche : bugs latents (None.method, comparaison douteuse,
-               try/except trop large, race condition), simplifications mineures,
-               patterns dangereux, fonctions trop longues (>100L), magic numbers,
-               duplications.
+            ============================
+            ETAPE 0 - DEDUPLICATION
+            ============================
 
-            3. Produis un rapport markdown structure dans le fichier
-               docs/internal/audits/claude/$(date +%Y-%m-%d)-${{ steps.target.outputs.target }}.md
-               avec format :
-               - Pour chaque module : section avec liste des findings (severite low/med/high
-                 + ligne + description + suggestion)
-               - Resume executif en debut : top 5 findings critiques.
+            AVANT toute action, recense ce qui existe deja :
 
-            4. Si "open_prs" = true ET tu trouves des fixes a haut ROI/bas risque :
-               ouvre une PR par fix (titre conventional commit, branch fix/audit-...).
-               Limite-toi a 3 PRs max par run pour ne pas submerger le reviewer.
+            - `gh issue list --state open --limit 200 --json number,title,body`
+            - `gh pr list --state open --limit 100 --json number,title,headRefName,files`
 
-            5. Ouvre une PR finale qui ajoute le fichier rapport.
-
-            6. Reponds en francais dans tous les commentaires.
+            Stocke ces listes en memoire pour la suite.
 
 
-            Niveau "modere" : seulement les fixes evidents/safe. Niveau "agressif" :
-            n'hesite pas a proposer refactor structurels (mais une PR distincte).
-            Niveau "defensif" : commente seulement, n'ouvre AUCUNE PR meme avec
-            open_prs=true.
+            ============================
+            ETAPE 1 - LECTURE
+            ============================
+
+            Pour CHAQUE module liste, lis le contenu integralement.
+
+
+            ============================
+            ETAPE 2 - ANALYSE
+            ============================
+
+            Cherche : bugs latents (None.method, comparaison douteuse,
+            try/except trop large, race condition), simplifications mineures,
+            patterns dangereux, fonctions trop longues (>100L), magic numbers,
+            duplications, cycles imports, mauvais usage stdlib.
+
+
+            ============================
+            ETAPE 3 - RAPPORT JOURNALIER
+            ============================
+
+            Ecris (et ouvre une PR pour ajouter) :
+            docs/internal/audits/claude/$(date +%Y-%m-%d)-${{ steps.target.outputs.target }}.md
+
+            Format :
+            - Resume executif (top 10 findings critiques)
+            - Section par module avec liste des findings
+              (severite low/med/high + ligne + description + suggestion)
+
+
+            ============================
+            ETAPE 4 - DEDUP DES FINDINGS
+            ============================
+
+            Pour chaque finding qui meriterait une issue ou PR :
+
+            (a) Cherche dans la liste etape 0 si un titre similaire existe deja.
+                Compare semantiquement, pas strict : "Bug audio_score returns 0
+                for missing track" ~ "compute_audio_score retourne 0 pour None".
+
+            (b) Si une ISSUE ouverte couvre deja ce sujet :
+                - NE PAS creer de nouvelle issue
+                - Ajoute un commentaire dans l'issue existante avec :
+                  - La date du re-audit
+                  - Le module + ligne ou tu retrouves le finding
+                  - "Confirme toujours present" ou "Status mis a jour : ..."
+
+            (c) Si une PR ouverte fixe deja ce point :
+                - NE PAS refaire le meme fix
+                - Saute ce finding (il est en cours de review)
+
+            (d) Si rien d'existant :
+                - Cree une issue avec titre "Conventional Commit" prefix
+                  (ex: "fix(perceptual): ...", "refactor(app): ...")
+                - Body : description + module + ligne + suggestion + label suggere
+
+
+            ============================
+            ETAPE 5 - PRS DE FIX
+            ============================
+
+            Si "${{ github.event.inputs.open_prs || 'true' }}" = "true"
+            ET niveau != "defensif" :
+
+            Pour les findings haut ROI / bas risque (apres dedup etape 4) :
+
+            (a) Cherche dans les PRs ouvertes etape 0 si une PR sur le meme
+                fichier traite deja ce point. Si oui, skip.
+
+            (b) Sinon, ouvre une PR :
+                - Branch : fix/audit-${{ steps.target.outputs.target }}-<topic>
+                - Titre Conventional Commit
+                - Body : explique le bug + le fix + reference l'issue creee etape 4
+
+            LIMITE : 10 PRs maximum par run pour ne pas saturer la review.
+            Si plus de 10 trouves, garde les top-10 prioritaires par severite,
+            les autres restent en issue uniquement.
+
+
+            ============================
+            ETAPE 6 - DOCUMENTATION
+            ============================
+
+            En fin de run, poste un commentaire de synthese dans l'issue #14
+            (Audit complet par modules) avec :
+            - Date + couche auditee
+            - Nb modules audites
+            - Nb findings nouveaux / nb deja connus
+            - Nb issues creees / nb PRs ouvertes
+            - Lien vers le rapport markdown
+
+
+            ============================
+            REGLES TRANSVERSES
+            ============================
+
+            - REPONDS EN FRANCAIS dans tous les commentaires.
+            - Niveau "modere" : fixes evidents/safe seulement.
+            - Niveau "agressif" : refactors structurels (PRs distinctes).
+            - Niveau "defensif" : rapport + issues uniquement, ZERO PR.
+            - Conventional Commits obligatoire sur les titres PR (pr-title-lint
+              le verifie sinon ca bloque).
+            - Branch protection main : tu ne peux PAS push direct dessus, tu
+              dois TOUJOURS passer par une branche + PR.
+
+            ${{ steps.target.outputs.target == 'transverse' && 'Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune.' || '' }}
