@@ -1,0 +1,72 @@
+name: Claude Code
+
+# Lance Claude Code (Anthropic) sur le repo via GitHub Actions.
+#
+# Modes :
+# 1. Mention @claude dans une issue/PR comment -> Claude execute la tache
+# 2. Schedule hebdomadaire -> audit complet du repo + ouverture PRs si besoin
+# 3. workflow_dispatch -> lancement manuel
+#
+# Authentification : utilise l'OAuth token de l'abonnement Claude.ai Max.
+# Token a generer via : claude setup-token (en local)
+# A coller dans GitHub Secrets sous le nom CLAUDE_CODE_OAUTH_TOKEN.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+  pull_request:
+    types: [opened, ready_for_review]
+  schedule:
+    # Lundi 04h UTC : audit hebdomadaire automatique
+    # Coute ~5-10 prompts (audit complet ~50k LOC).
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Mission pour Claude (laisser vide = audit complet)"
+        required: false
+        default: "Fais un audit complet du repo CineSort : verifie qu'il n'y a pas de bugs latents, de regressions de qualite, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre des PRs avec les fixes. Reponds en francais."
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  claude:
+    name: Claude Code session
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Ne lance que si la mention contient @claude OU si c'est un schedule/dispatch
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.body, '@claude'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
+          # (mention contient deja le prompt)
+          prompt: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prompt || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort : verifie qu''il n''y a pas de regressions de qualite, de vulnerabilites, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre une PR avec les fixes (squash safe). Reponds en francais.') || '' }}
