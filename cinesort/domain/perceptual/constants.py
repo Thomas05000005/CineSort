@@ -340,6 +340,7 @@ FAKE_4K_FFT_THRESHOLD_AMBIGUOUS = 0.08  # < : fake 4K bicubique
 FAKE_4K_FFT_MIN_Y_AVG = 20.0  # skip frames trop sombres
 FAKE_4K_FFT_MIN_VARIANCE = 200.0  # skip frames uniformes
 FAKE_4K_MIN_HEIGHT = 1800  # skip si pas 4K
+FAKE_4K_VERDICT_MIN_HEIGHT = 2100  # seuil verdict cross-metrique (UHD confirme)
 
 # ---------------------------------------------------------------------------
 # §8 v7.5.0 — Interlacing / Crop / Judder / IMAX

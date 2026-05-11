@@ -151,8 +151,8 @@ class VideoOnlyTests(unittest.TestCase):
         self.assertEqual(result.global_score, result.visual_score)
 
     def test_global_score_no_audio(self) -> None:
-        """compute_global_score avec audio=0 → retourne visual."""
-        self.assertEqual(compute_global_score(80, 0), 80)
+        """compute_global_score avec audio=None → retourne visual."""
+        self.assertEqual(compute_global_score(80, None), 80)
 
 
 class FfmpegAbsentTests(unittest.TestCase):

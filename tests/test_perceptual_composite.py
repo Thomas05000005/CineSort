@@ -116,11 +116,23 @@ class AudioScoreTests(unittest.TestCase):
         audio = AudioPerceptual(track_index=0, audio_score=82)
         self.assertEqual(compute_audio_score(audio), 82)
 
-    def test_no_track_returns_zero(self) -> None:
-        """Pas de piste audio → 0."""
-        self.assertEqual(compute_audio_score(None), 0)
+    def test_no_track_returns_none(self) -> None:
+        """Pas de piste audio → None (distingue de score 0 sur piste reelle)."""
+        self.assertIsNone(compute_audio_score(None))
         empty = AudioPerceptual()  # track_index = -1
-        self.assertEqual(compute_audio_score(empty), 0)
+        self.assertIsNone(compute_audio_score(empty))
+
+    def test_zero_score_real_track_not_confused_with_no_track(self) -> None:
+        """Audio score=0 sur piste reelle ne doit pas etre confondu avec absence de piste."""
+        audio = AudioPerceptual(track_index=0, audio_score=0)
+        self.assertEqual(compute_audio_score(audio), 0)
+        # Le score global ne doit pas ignorer l'audio (100% video)
+        global_score = compute_global_score(80, 0)
+        # 80*60 + 0*40 = 4800 / 100 = 48
+        self.assertEqual(global_score, 48)
+        # Avec None (pas de piste), global = visual
+        global_no_audio = compute_global_score(80, None)
+        self.assertEqual(global_no_audio, 80)
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +151,8 @@ class GlobalScoreTests(unittest.TestCase):
         self.assertEqual(score, 80)
 
     def test_no_audio_100_percent_video(self) -> None:
-        """Pas d'audio (score 0) → 100% video."""
-        score = compute_global_score(75, 0)
+        """Pas d'audio (None) → 100% video."""
+        score = compute_global_score(75, None)
         self.assertEqual(score, 75)
 
 
@@ -232,6 +244,109 @@ class CrossVerdictsTests(unittest.TestCase):
         # Pas de condition remplie pour les verdicts negatifs
         error_verdicts = [v for v in verdicts if v["severity"] in ("error", "warning")]
         self.assertEqual(len(error_verdicts), 0)
+
+    def test_fake_4k(self) -> None:
+        """UHD + bits faibles + flou → verdict fake_4k."""
+        video = VideoPerceptual(
+            blockiness_mean=10.0,
+            blur_mean=0.06,
+            banding_mean=5.0,
+            effective_bits_mean=7.5,
+            resolution_height=2160,
+            bit_depth_nominal=10,
+        )
+        verdicts = detect_cross_verdicts(video, None, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("fake_4k", ids)
+        match = [v for v in verdicts if v["id"] == "fake_4k"][0]
+        self.assertEqual(match["severity"], "error")
+
+    def test_lossy_recompress(self) -> None:
+        """Blockiness et banding eleves → re-compression destructrice."""
+        video = VideoPerceptual(
+            blockiness_mean=50.0,
+            blur_mean=0.02,
+            banding_mean=25.0,
+            effective_bits_mean=8.5,
+            resolution_height=1080,
+            bit_depth_nominal=8,
+        )
+        verdicts = detect_cross_verdicts(video, None, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("lossy_recompress", ids)
+
+    def test_streaming_source(self) -> None:
+        """Blockiness modere + banding + LRA faible → source streaming."""
+        video = VideoPerceptual(
+            blockiness_mean=30.0,
+            blur_mean=0.02,
+            banding_mean=20.0,
+            effective_bits_mean=8.5,
+            resolution_height=1080,
+            bit_depth_nominal=8,
+        )
+        audio = AudioPerceptual(track_index=0, loudness_range=8.0)
+        verdicts = detect_cross_verdicts(video, None, audio)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("streaming_source", ids)
+
+    def test_8bit_insufficient(self) -> None:
+        """Banding sur encode 8-bit → bit depth insuffisant."""
+        video = VideoPerceptual(
+            blockiness_mean=10.0,
+            blur_mean=0.02,
+            banding_mean=20.0,
+            effective_bits_mean=7.8,
+            resolution_height=1080,
+            bit_depth_nominal=8,
+        )
+        verdicts = detect_cross_verdicts(video, None, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("8bit_insufficient", ids)
+
+    def test_banding_10bit(self) -> None:
+        """Banding en 10-bit → encode multi-generation."""
+        video = VideoPerceptual(
+            blockiness_mean=10.0,
+            blur_mean=0.02,
+            banding_mean=25.0,
+            effective_bits_mean=9.0,
+            resolution_height=1080,
+            bit_depth_nominal=10,
+        )
+        verdicts = detect_cross_verdicts(video, None, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("banding_10bit", ids)
+
+    def test_dnr_classic_film(self) -> None:
+        """Film pre-2002 avec flou et absence de grain → DNR probable."""
+        video = VideoPerceptual(
+            blockiness_mean=5.0,
+            blur_mean=0.06,
+            banding_mean=3.0,
+            effective_bits_mean=9.0,
+            resolution_height=1080,
+            bit_depth_nominal=10,
+        )
+        grain = GrainAnalysis(grain_level=0.3, tmdb_year=1990)
+        verdicts = detect_cross_verdicts(video, grain, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("dnr_classic_film", ids)
+
+    def test_noise_digital(self) -> None:
+        """Film post-2015 avec grain excessif → bruit numerique."""
+        video = VideoPerceptual(
+            blockiness_mean=5.0,
+            blur_mean=0.02,
+            banding_mean=3.0,
+            effective_bits_mean=9.0,
+            resolution_height=1080,
+            bit_depth_nominal=10,
+        )
+        grain = GrainAnalysis(grain_level=4.0, tmdb_year=2020)
+        verdicts = detect_cross_verdicts(video, grain, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertIn("noise_digital", ids)
 
 
 # ---------------------------------------------------------------------------
