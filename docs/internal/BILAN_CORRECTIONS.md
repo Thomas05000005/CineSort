@@ -8,6 +8,83 @@
 
 ---
 
+## Phase Audit Claude v3 + Hardening Security (12 mai 2026)
+
+Session intensive : prompt audit Claude Code Action v3, hardening OpenSSF, 1er run productif + 5/6 issues issues du run resolues.
+
+### Resultats globaux
+
+- **18 PRs mergees** (du #22 au #45)
+- **14 issues fermees**
+- **0 alertes Code Scanning open** (148 dismissed + 21 fixed)
+- **0 secrets** detectes (push protection ON)
+- **Dependabot security updates** active (CVE-2025-71176 pytest detectee + bumpe 9.0.3)
+- **21 branches locales orphelines** nettoyees
+
+### Sous-phase 1 : Bugs perceptuels initiaux (PR #22, #23, #24)
+
+| ID | Mission | Resume |
+|----|---------|--------|
+| P-01 | Bug audio_score=0 confondu avec absence | compute_audio_score retourne None au lieu de 0 quand pas de piste |
+| P-02 | Mutation silencieuse de video | Suppression assignation video.visual_score (redondant) |
+| P-03 | Magic numbers verdicts croises | BLUR_THRESHOLD_FAKE_4K + BLUR_THRESHOLD_MASTERING nommees |
+| P-04 | __all__ composite_score.py | API publique explicite |
+| P-05 | Scoring continu par interpolation | Escalier 4 valeurs (95/75/50/20) -> interpolation lineaire continue. ~30-40% films changeront de tier |
+
+### Sous-phase 2 : Audit Claude Code Action v3 (PR #25, #26, #28)
+
+| ID | Mission | Resume |
+|----|---------|--------|
+| A-01 | Prompt v2 (21 categories + ETAPE 2.5 cross-couche) | Lecons subies + research web 2025 (Python 3.13, Windows paths, DPAPI, pywebview, SQLite) |
+| A-02 | Prompt v3 ultra-complet (46 categories) | Multi-agent 6 personas, JSON output, severity 0-4, self-critique 6 filtres, repo-grep before fix |
+| A-03 | Limites supprimees | timeout 180->360 min, max-turns 300->1500, plus de limite 15 PRs/run |
+| A-04 | URGENT prompt externalise .md | GitHub Actions limite input 21000 chars. 61407 chars -> 1100 chars kickoff + .github/audit-prompt.md |
+
+### Sous-phase 3 : Hardening OpenSSF Scorecard (PR #27)
+
+- 42 actions externes pinned par SHA (`@<sha40hex> # v<N>`)
+- Top-level permissions read-only, writes scopes par job
+- Dependabot security updates ACTIVE via API
+- 4 TokenPermissionsID + 2 Bandit B310 dismiss avec justification
+
+### Sous-phase 4 : 1er run Audit Claude (4 PRs auto + 6 issues)
+
+Run `25749726912` (14 min, 130 modules, 4 personas paralleles) :
+
+| PR | Resume |
+|----|----|
+| #35 | plugin_hooks.py : subprocess.run -> tracked_run (cleanup garanti) |
+| #36 | auto_install.py : socket.setdefaulttimeout(120s) sur urlretrieve |
+| #37 | 2 dead-code (tautologie winner + typo `.upper()` fallback) |
+| #38 | Rapport markdown + JSON Lines pour dedup auto |
+
+### Sous-phase 5 : 6 issues -> PRs (PR #39 a #43)
+
+| Issue | PR | Resume |
+|-------|----|----|
+| #34 | #39 | Docstrings DPAPI scope CURRENT_USER explicite |
+| #30 | #40 | `_op_between` sorted(v) defensif (POLS) |
+| #31 | #41 | float comparisons robustes (abs(den)<1e-9, epsilon log10 1e-10) |
+| #33 | #42 | executescript -> BEGIN/COMMIT explicite (rollback DDL safe) |
+| #29 | #43 | rapidfuzz.process.extractOne vectorise C x3 modules (perf x100-x1000) |
+| #32 | (commente) | Plan implementation UI orphan data avec mockup. Decision produit |
+
+### Sous-phase 6 : Maintenance (PR #44, #45)
+
+| PR | Resume |
+|----|----|
+| #44 | Bump pytest 8 -> 9.0.3 (CVE-2025-71176 medium, CVSS 6.8) |
+| #45 | CLAUDE.md + BILAN_CORRECTIONS.md recap session |
+
+### Validation finale
+
+- **0 alerte Code Scanning open**
+- **0 alerte Dependabot open** (apres merge #44)
+- **2 issues ouvertes** : #14 meta-tracker, #32 decision produit UI
+- **Workflow audit-module.yml** fonctionnel, cron quotidien 04h UTC garde le repo a niveau
+
+---
+
 ## Phase Polish Total v7.7.0 (4 mai 2026)
 
 Branche `polish_total_v7_7_0` depuis `audit_qa_v7_6_0_dev_20260428`. Plan d'execution dans [`OPERATION_POLISH_V7_7_0.md`](OPERATION_POLISH_V7_7_0.md). Tracking vivant dans `OPERATION_POLISH_V7_7_0_PROGRESS.md`. Cible note 9.2/10 -> 9.9-10/10.
