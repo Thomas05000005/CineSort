@@ -129,35 +129,54 @@ def compare_watchlist(
             unmatched.append(entry)
 
     # Pass 2 : fuzzy matching sur les non-matches (rattrapage accents, ordre mots)
+    # Cf issue #29 : helper vectorise rapidfuzz.process.extractOne (C-level) au lieu
+    # d'une boucle Python O(n*m). Reduction typique x100 sur 5000+ films.
     missing: List[Dict[str, Any]] = []
     if unmatched:
         from rapidfuzz import fuzz as _fuzz
+        from rapidfuzz import process as _process
 
-        # Construire un index local pour le fuzzy
-        local_items_for_fuzzy: List[tuple[str, int]] = []
+        # Construire un index local groupe par annee pour permettre le filtre
+        # annee strict + vectorisation : titles par annee, plus un bucket "0"
+        # pour les locaux sans annee connue (match potentiel avec n'importe
+        # quelle annee distante).
+        local_by_year: Dict[int, List[str]] = {}
+        all_local_norms: List[str] = []
         for row in local_rows:
             t = str(getattr(row, "proposed_title", "") or "")
             y = int(getattr(row, "proposed_year", 0) or 0)
             n = _normalize_title(t)
             if n:
-                local_items_for_fuzzy.append((n, y))
+                local_by_year.setdefault(y, []).append(n)
+                all_local_norms.append(n)
 
         _FUZZY_THRESHOLD = 85
         for entry in unmatched:
             norm_w = _normalize_title(entry["title"])
-            w_year = entry.get("year", 0)
-            found = False
-            for local_norm, local_year in local_items_for_fuzzy:
-                # Filtre annee strict si les deux ont une annee
-                if w_year and local_year and w_year != local_year:
-                    continue
-                score = _fuzz.token_sort_ratio(norm_w, local_norm)
-                if score >= _FUZZY_THRESHOLD:
-                    owned.append(entry)
-                    logger.debug("[watchlist] fuzzy match '%s' ~ '%s' (%d)", entry["title"], local_norm, int(score))
-                    found = True
-                    break
-            if not found:
+            if not norm_w:
+                missing.append(entry)
+                continue
+            w_year = int(entry.get("year", 0) or 0)
+            # Choix : films de l'annee exacte + films locaux sans annee connue.
+            # Si pas d'annee cote watchlist, on cherche partout.
+            if w_year:
+                candidates = local_by_year.get(w_year, []) + local_by_year.get(0, [])
+            else:
+                candidates = all_local_norms
+            if not candidates:
+                missing.append(entry)
+                continue
+            best = _process.extractOne(
+                norm_w,
+                candidates,
+                scorer=_fuzz.token_sort_ratio,
+                score_cutoff=_FUZZY_THRESHOLD,
+            )
+            if best is not None:
+                match_str, score, _ = best
+                owned.append(entry)
+                logger.debug("[watchlist] fuzzy match '%s' ~ '%s' (%d)", entry["title"], match_str, int(score))
+            else:
                 missing.append(entry)
 
     total = len(watchlist_films)
