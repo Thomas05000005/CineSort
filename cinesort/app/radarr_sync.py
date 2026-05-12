@@ -38,10 +38,15 @@ def build_radarr_report(
     profiles: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Compare films locaux avec Radarr. Retourne le rapport enrichi."""
+    from cinesort.app._fuzzy_utils import normalize_for_fuzzy
+
     # Index Radarr par tmdb_id
     radarr_by_tmdb: Dict[int, Dict[str, Any]] = {}
     radarr_by_path: Dict[str, Dict[str, Any]] = {}
     radarr_by_title_year: Dict[str, Dict[str, Any]] = {}
+    # Cf issue #29 : pre-index Radarr par annee avec titres normalises pour
+    # fuzzy vectorise. dict[year] -> list[(normalized_title, movie_dict)].
+    radarr_by_year_normalized: Dict[int, List[tuple[str, Dict[str, Any]]]] = {}
     for m in radarr_movies:
         tid = int(m.get("tmdb_id") or 0)
         if tid > 0:
@@ -53,6 +58,9 @@ def build_radarr_report(
         year = int(m.get("year") or 0)
         if name and year:
             radarr_by_title_year[f"{name}|{year}"] = m
+            norm = normalize_for_fuzzy(m.get("title") or "")
+            if norm:
+                radarr_by_year_normalized.setdefault(year, []).append((norm, m))
 
     profile_map = {int(p.get("id") or 0): str(p.get("name") or "") for p in profiles}
 
@@ -82,16 +90,25 @@ def build_radarr_report(
             if key in radarr_by_title_year:
                 rm = radarr_by_title_year[key]
             else:
-                # Fallback fuzzy sur les films Radarr de la meme annee
-                from cinesort.app._fuzzy_utils import fuzzy_title_match
+                # Fallback fuzzy vectorise (cf issue #29 : remplace boucle O(n*m)).
+                # On utilise rapidfuzz.process.extractOne sur les titres pre-normalises
+                # de l'annee, ce qui delegue la comparaison au C natif.
+                from rapidfuzz import fuzz, process
 
-                for rk, rmovie in radarr_by_title_year.items():
-                    rk_year = rk.rsplit("|", 1)[-1] if "|" in rk else ""
-                    if rk_year.isdigit() and int(rk_year) == year:
-                        rtitle = rmovie.get("title", "")
-                        if fuzzy_title_match(title, rtitle):
-                            rm = rmovie
-                            break
+                candidates = radarr_by_year_normalized.get(year, [])
+                if candidates:
+                    query_norm = normalize_for_fuzzy(title)
+                    if query_norm:
+                        norm_titles = [c[0] for c in candidates]
+                        best = process.extractOne(
+                            query_norm,
+                            norm_titles,
+                            scorer=fuzz.ratio,
+                            score_cutoff=85,
+                        )
+                        if best is not None:
+                            _, _, idx = best
+                            rm = candidates[idx][1]
 
         if rm:
             pid = int(rm.get("quality_profile_id") or 0)

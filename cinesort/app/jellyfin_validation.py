@@ -32,8 +32,13 @@ def build_sync_report(
     """
     # Index Jellyfin par chemin normalise
     jf_by_path: Dict[str, Dict[str, Any]] = {}
+    from cinesort.app._fuzzy_utils import normalize_for_fuzzy
+
     jf_by_tmdb: Dict[str, Dict[str, Any]] = {}
     jf_by_title_year: Dict[str, Dict[str, Any]] = {}
+    # Cf issue #29 : pre-index Jellyfin par annee avec titres normalises
+    # pour fuzzy vectorise dans la boucle d'identification.
+    jf_by_year_normalized: Dict[int, List[tuple[str, Dict[str, Any]]]] = {}
 
     for movie in jellyfin_movies:
         norm_p = _normalize_path(movie.get("path") or "")
@@ -46,6 +51,9 @@ def build_sync_report(
         year = int(movie.get("year") or 0)
         if name and year:
             jf_by_title_year[f"{name}|{year}"] = movie
+            norm = normalize_for_fuzzy(movie.get("name") or "")
+            if norm:
+                jf_by_year_normalized.setdefault(year, []).append((norm, movie))
 
     matched: List[Dict[str, Any]] = []
     missing_in_jellyfin: List[Dict[str, Any]] = []
@@ -83,16 +91,25 @@ def build_sync_report(
             if key in jf_by_title_year:
                 jf_match = jf_by_title_year[key]
             else:
-                # Fallback fuzzy sur les films Jellyfin de la meme annee
-                from cinesort.app._fuzzy_utils import fuzzy_title_match
+                # Fallback fuzzy vectorise (cf issue #29 : remplace boucle O(n*m)).
+                # rapidfuzz.process.extractOne compare en C natif sur tous les
+                # titres pre-normalises de l'annee.
+                from rapidfuzz import fuzz, process
 
-                for jf_key, jf_movie in jf_by_title_year.items():
-                    jf_year_str = jf_key.rsplit("|", 1)[-1] if "|" in jf_key else ""
-                    if jf_year_str.isdigit() and int(jf_year_str) == local_year:
-                        jf_name = jf_movie.get("name", "")
-                        if fuzzy_title_match(local_title, jf_name):
-                            jf_match = jf_movie
-                            break
+                candidates = jf_by_year_normalized.get(local_year, [])
+                if candidates:
+                    query_norm = normalize_for_fuzzy(local_title)
+                    if query_norm:
+                        norm_titles = [c[0] for c in candidates]
+                        best = process.extractOne(
+                            query_norm,
+                            norm_titles,
+                            scorer=fuzz.ratio,
+                            score_cutoff=85,
+                        )
+                        if best is not None:
+                            _, _, idx = best
+                            jf_match = candidates[idx][1]
 
         if jf_match:
             jf_id = jf_match.get("id", "")
