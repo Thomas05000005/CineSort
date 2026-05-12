@@ -155,18 +155,16 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Modele : Opus 4.7 (le plus puissant). Effort max via
-          # extended thinking budget = 32000 tokens de raisonnement
-          # avant chaque action. Pour l'audit profond ou Claude doit
-          # comparer plusieurs modules entre eux, c'est crucial.
-          # max-turns 100 pour ne pas couper l'execution prematurement
-          # (le run du 12/05 s'est arrete a 3 min sans creer d'issues).
-          model: claude-opus-4-7
-          claude_args: >-
+          # Modele : Opus 4.7. Le modele est passe via --model dans
+          # claude_args (NB : 'model' au niveau input direct n'existe
+          # pas, ca a fait fail le run du 12/05 23h).
+          # max-turns 100 pour ne pas couper prematurement.
+          # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)"
+          # (separe par virgule sans espace, entoure de double-quotes).
+          claude_args: |
             --model claude-opus-4-7
-            --thinking-budget 32000
             --max-turns 100
-            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh issue list:*) Bash(gh issue view:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh pr list:*) Bash(gh pr view:*) Bash(gh label create:*) Bash(gh label list:*) Bash(gh search:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(git diff:*) Bash(git log:*) Bash(git status:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Bash(head:*) Bash(tail:*) Bash(cat:*) Bash(python -m:*) Edit Write Read Glob Grep WebFetch"
+            --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           prompt: >-
             Audit automatique de CineSort, couche "${{ steps.target.outputs.target }}",
             niveau "${{ github.event.inputs.level || 'modere' }}".

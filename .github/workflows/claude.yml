@@ -67,20 +67,16 @@ jobs:
         with:
           # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Opus 4.7 + thinking budget max pour les mentions @claude manuelles
-          # (utilisateur attend reponse de qualite, pas un brouillon).
-          model: claude-opus-4-7
-          # Pre-autorisation des commandes courantes pour eviter "approbation
-          # interactive non disponible en CI". Sans ca, Claude ne peut pas
-          # creer d'issues/PRs/push, il doit juste lister ce qu'il faudrait.
-          # Liste consciemment limitee : pas de delete, pas de force-push,
-          # pas de rm sur des fichiers track. Branch protection main reste
-          # active : Claude ne peut PAS push direct sur main.
-          claude_args: >-
+          # Opus 4.7 via --model dans claude_args (l'input 'model' au niveau
+          # racine n'existe pas dans claude-code-action@v1).
+          # max-turns 100 pour ne pas couper prematurement.
+          # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)".
+          # Branch protection main reste active : Claude doit toujours
+          # passer par une PR, pas de push direct sur main.
+          claude_args: |
             --model claude-opus-4-7
-            --thinking-budget 32000
             --max-turns 100
-            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh issue list:*) Bash(gh issue view:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh pr list:*) Bash(gh pr view:*) Bash(gh label create:*) Bash(gh label list:*) Bash(gh search:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(git diff:*) Bash(git log:*) Bash(git status:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Bash(head:*) Bash(tail:*) Bash(cat:*) Bash(python -m:*) Edit Write Read Glob Grep WebFetch"
+            --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
           # (mention contient deja le prompt). Bloc YAML > pour eviter les
           # problemes d'echappement avec les expressions GitHub ${{ }}.
