@@ -5,6 +5,117 @@ Categories : `Added`, `Changed`, `Fixed`, `Removed`, `Performance`, `Security`.
 
 ---
 
+## [Unreleased] - 2026-05-12 — Beta hardening (audit Claude v3 + security + perf)
+
+> Session intensive post-v7.7.0 sur le repo public : refonte du systeme d'audit
+> automatique via Claude Code Action (46 categories, multi-agent), hardening
+> OpenSSF Scorecard (SHAs pinned, permissions scopees), patch CVE-2025-71176
+> pytest, 18+ PRs auto issues du 1er run d'audit + 6 issues triees manuellement.
+> 24+ PRs mergees au total. **Aucun changement user-visible immediat** : tout
+> est sous le capot (CI, scoring perceptuel plus juste, performance scan).
+
+### Added (Ajoute)
+
+- **Audit Claude Code Action v3** (workflow `.github/workflows/audit-module.yml`) :
+  - 46 categories d'audit (vs 16 initiales) couvrant code/UX/security/DB/perf/ops/compliance
+  - 6 personas multi-agent (Security/Performance/UX/DB/Reliability/Compliance)
+  - JSON output schema `.jsonl` pour dedup automatique + trending 30 jours
+  - Self-critique 6 filtres avant chaque action (~31 faux positifs supprimes
+    sur le 1er run)
+  - Prompt externalise dans `.github/audit-prompt.md` (48k chars, depasse la
+    limite GitHub Actions 21000 chars sur l'input action)
+  - Cron quotidien 04h UTC, 1500 turns max, 6h timeout
+- **Endpoint REST `get_perceptual_details`** : expose audio_fingerprint,
+  ssim_self_ref, upscale_verdict, spectral_cutoff_hz, global_score_v2 +
+  breakdown depuis la DB `perceptual_reports`. Frontend modale a venir (#32).
+- **Dependabot security updates ACTIVE** : detection automatique des CVE
+  sur deps + PRs auto pour patches/minors security.
+
+### Fixed (Corrige)
+
+- **Bug audio_score=0** : `compute_audio_score` retourne `None` quand pas de
+  piste (au lieu de `0`). Avant : films a piste audio catastrophique
+  gonflaient leur score global (#18, PR #22).
+- **Mutation silencieuse de `video`** dans `build_perceptual_result`. Le
+  caller pouvait reutiliser un objet `VideoPerceptual` et trouver un etat
+  modifie en place (#22).
+- **Magic numbers `blur > 0.05` / `< 0.02`** remplaces par constantes nommees
+  `BLUR_THRESHOLD_FAKE_4K` et `BLUR_THRESHOLD_MASTERING` (#23).
+- **`_op_between` bornes inversees** : `_op_between(50, [100, 10])` retournait
+  False silencieusement. Maintenant `sorted(v)` defensif (POLS, #30, PR #40).
+- **Float `== 0.0`** dans `hdr_analysis.py` : `abs(den) < 1e-9` (#31, PR #41).
+- **Epsilon `log10(rms + 1e-20)`** trop petit dans `spectral_analysis.py`
+  (underflow possible) -> `1e-10` (#31, PR #41).
+- **executescript() bootstrap** sans BEGIN/COMMIT : schema partiel possible
+  en cas d'erreur. Refactor en transaction explicite (#33, PR #42).
+- **`has_afgs1_t35`** : `composite_score_v2` lisait `has_afgs1` (n'existe
+  pas). Bonus AV1 AFGS1 silencieusement perdu (#48, PR #54).
+- **`_compute_visual_score`** : `return result` mort retire (signature `-> None`,
+  caller n'utilise pas, #51, PR #55).
+- **`is_major_studio`** : tolere variantes TMDb via tokens canoniques
+  ('Walt Disney Studios Motion Pictures' matche 'walt disney', #52, PR #56).
+- **Regex `_RE_JSON_BLOCK`** loudnorm : prend le DERNIER bloc contenant
+  `input_i` au lieu du 1er match (warnings parasites avec accolades, #53,
+  PR #57).
+- **`_get_session` LPIPS** thread-safe via double-check locking : evitait
+  double-load ONNX ~100MB en batch parallele (#49, PR #58).
+- **`plugin_hooks` subprocess cleanup** : `tracked_run` au lieu de
+  `subprocess.run` pour garantir kill+wait sur `KeyboardInterrupt` /
+  `MemoryError` (PR #35).
+- **`urlretrieve` sans timeout** dans `auto_install.py` : ajout
+  `socket.setdefaulttimeout(120s)` via context manager pour eviter hang
+  infini sur firewall corporate / DNS hijack (PR #36).
+- **Dead code** : tautologie `winner="unknown" if X else "unknown"`,
+  fallback `data.get("status_message".upper())` jamais utilise (PR #37).
+
+### Performance
+
+- **Scoring perceptuel continu par interpolation lineaire** : `_score_val_inv`
+  et `_score_bits` remplaces (escalier 4 valeurs `95/75/50/20` -> continu).
+  Au prochain scan, ~30-40% des films changeront de tier S/A/B/C/D pour
+  refleter leur qualite reelle (#15, PR #24).
+- **Fuzzy matching vectorise** dans 3 modules : `radarr_sync.py`,
+  `jellyfin_validation.py`, `watchlist.py`. Boucles O(n*m) Python remplacees
+  par `rapidfuzz.process.extractOne` (vectorise C). Reduction typique
+  **x100 a x1000** sur catalogues 5000+ films (#29, PR #43).
+- **`detect_crop_multi_segments` paralleliser** 3 ffmpeg en parallele via
+  `run_parallel_tasks` (I/O bound). ~15s -> ~5s par film, ~14h economisees
+  sur batch 5000 films (#50, PR #59).
+- **`luminance_histogram` + `block_variance_stats`** vectorise numpy
+  (`np.bincount`, reshape + `.var(axis)`). Speedup ~15x sur 2M pixels :
+  60-73ms par fonction vs ~1-2s en Python pur (#46 partiel, PR #60).
+- **`compute_inter_frame_diff`** vectorise numpy : 95ms vs ~3s (~30x
+  speedup) sur 2M pixels. Worst case `extract_representative_frames`
+  (20 vs 20) : 400 appels x 30 = 12000x speedup cumule (#47, PR #61).
+
+### Security
+
+- **Pin tous les SHAs** des actions GitHub Actions externes (42 occurrences,
+  16 actions distinctes). Format `@<sha40hex> # v<N>` compatible Dependabot.
+  Si une action est compromise (maintainer hack), nos workflows ne sont pas
+  affectes (SHA immutable, PR #27).
+- **Permissions scopees par job** : top-level `contents: read` sur tous les
+  workflows, writes (`pull-requests/issues/contents`) scopes au job qui en
+  a besoin. OpenSSF Scorecard hardening (PR #27).
+- **CVE-2025-71176 pytest** patche : bump `pytest>=9.0.3,<10` (vulnerable
+  tmpdir handling, CVSS 6.8, GHSA-6w46-j5rx-g56g, PR #44).
+- **DPAPI scope CURRENT_USER documente** dans `local_secret_store.py` :
+  docstrings detaillees sur `protect_secret`/`unprotect_secret` avec les
+  4 consequences pratiques (reinstall Windows, reset password admin, export
+  DB autre PC, roaming profile, #34, PR #39).
+
+### Documentation
+
+- **`docs/internal/CLAUDE.md`** + **`docs/internal/BILAN_CORRECTIONS.md`**
+  recap session (PR #45).
+- **`.github/audit-prompt.md`** : prompt audit detaille externalise du
+  workflow (1228 lignes, 46 categories, 7 techniques d'investigation
+  cross-couche, schema JSON, tools 2026 a mentionner).
+- **`docs/internal/audits/claude/2026-05-12-all.md`** : rapport audit du
+  1er run productif sur 130 modules (#38).
+
+---
+
 ## [v7.7.0] - 2026-05-04 — Operation Polish Total (7 vagues, 47+ findings, 0 regression)
 
 > Operation **Polish Total v7.7.0** : 7 vagues d'execution multi-agents, 47+ commits,
