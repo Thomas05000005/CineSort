@@ -8,6 +8,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# OpenSSF Scorecard : top-level permissions explicites = read-only.
+# Aucun job de ce workflow n'a besoin d'ecrire (juste lint + tests + coverage).
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: Lint, Tests, Build
@@ -16,17 +21,17 @@ jobs:
     steps:
       # 1. Recuperation du code source
       - name: Checkout du depot
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       # 2. Installation de Python 3.13
       - name: Setup Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.13"
 
       # 3. Cache pip Windows pour accelerer les installations suivantes
       - name: Cache pip
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: ~\AppData\Local\pip\Cache
           key: pip-${{ runner.os }}-py3.13-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
@@ -87,7 +92,7 @@ jobs:
       # Pas bloquant : si Codecov est down ou pas configure (token absent),
       # on continue. Public repos beneficient de tokenless uploads.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         with:
           files: coverage.xml
           flags: unittests
@@ -98,7 +103,7 @@ jobs:
 
       # 10. Upload du rapport coverage HTML (retention 14 jours)
       - name: Upload artefact coverage
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-report
           path: coverage_html/
@@ -135,7 +140,7 @@ jobs:
 
       # 13. Upload de l'artefact EXE (retention 7 jours)
       - name: Upload artefact EXE
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CineSort-exe
           path: dist/CineSort.exe

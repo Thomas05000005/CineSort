@@ -63,12 +63,10 @@ on:
     # A enlever apres 1 semaine en remettant le cron en rotation lun-ven.
     - cron: "0 4 * * *"
 
+# Best practice OpenSSF Scorecard : top-level permissions = read-only.
+# Les writes sont scopes au job audit ci-dessous qui en a besoin.
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  id-token: write
-  actions: read
+  contents: read
 
 # Eviter 2 runs d'audit en parallele : si un manuel est lance pendant
 # le cron, le 2eme attend (ne pas annuler, sinon perte du travail en cours).
@@ -80,6 +78,14 @@ jobs:
   audit:
     name: Audit ${{ github.event.inputs.target || 'auto-rotation' }}
     runs-on: ubuntu-latest
+    # Permissions scopees au job audit : besoin de creer issues/PRs
+    # et pousser sur branches non-protegees. main reste protegee.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
     # Timeout pousse au maximum GitHub-hosted runners (6h).
     # Audit profond multi-agent + auto-correction : on prend tout
     # le temps necessaire, ne sacrifie pas la qualite.
@@ -87,7 +93,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
@@ -161,7 +167,7 @@ jobs:
           echo "$modules" | head -20
 
       - name: Run Claude audit
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@dde2242db6af13460b916652159b6ba19a598f30 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Modele : Opus 4.7. Le modele est passe via --model dans
