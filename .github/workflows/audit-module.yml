@@ -70,6 +70,12 @@ permissions:
   id-token: write
   actions: read
 
+# Eviter 2 runs d'audit en parallele : si un manuel est lance pendant
+# le cron, le 2eme attend (ne pas annuler, sinon perte du travail en cours).
+concurrency:
+  group: audit-module-${{ github.event.inputs.target || 'auto' }}
+  cancel-in-progress: false
+
 jobs:
   audit:
     name: Audit ${{ github.event.inputs.target || 'auto-rotation' }}
@@ -198,6 +204,24 @@ jobs:
 
             Stocke ces listes en memoire pour la suite.
 
+            STRATEGIE HASH FINGERPRINT pour dedup robuste :
+            Pour chaque finding, calcule un hash stable des elements stables :
+            fingerprint = sha256(f"{module_path}:{symbol}:{category}:{pattern}")[:8]
+            Embarque ce hash dans le titre : "[audit-bot:abc12345] description"
+            Avant creation : gh issue list --search "audit-bot:abc12345"
+            -> si match, c'est un doublon strict, applique CAS A.
+            Ce systeme evite que tu recrees la meme issue 14 min apres si tu
+            oublies de checker la liste (cf incident #15-17 puis #19-21).
+
+            ANTI LOOP TRAP :
+            - NE JAMAIS fermer une PR/issue ouverte par une run precedente
+              sans verifier qu'elle n'a pas le label "audit-bot-keep".
+            - Max 1 retry sur flaky test, sinon ouvre issue "flaky-test:<nom>"
+              au lieu de relancer infiniment.
+            - Si tu te retrouves a faire la meme action plus de 2 fois
+              (rerun CI, push, edit le meme fichier) : STOP. Quelque chose
+              cloche, commente la situation dans l'issue et passe au suivant.
+
 
             ============================
             ETAPE 1 - LECTURE EXHAUSTIVE
@@ -224,6 +248,19 @@ jobs:
             - Generator epuise re-itere
             - Mutable default argument : def f(x=[]):
             - Closure capture mauvaise variable dans loop
+            - Fonction qui mute son argument d'entree (def f(obj): obj.field = X)
+              -> caller reutilise l'objet et trouve un etat modifie silencieux
+              -> solution : retourner un nouvel objet, ne pas muter en place
+            - Match-case Python 3.13 :
+              * "case active:" sans namespace capture TOUT dans var "active"
+                au lieu de matcher une constante (devait etre case Status.ACTIVE
+                ou case "active")
+              * Wildcard "_" ou "[*args]" place avant un cas specifique
+                rend ce dernier mort
+              * "case x if x > 10:" leve TypeError si subject est None
+                -> guard explicite "case x if x is not None and x > 10:"
+            - PEP 695 generics (class Stack[T]:) : detecter mix ancien TypeVar
+              et nouvelle syntaxe dans le meme module (mypy bugs + incoherence)
 
             (2) BUGS DOMAINE (logique metier)
             - Off-by-one dans index/slice
@@ -233,6 +270,14 @@ jobs:
             - TMDb fallback chain casse (queries vides, results None)
             - DPAPI : secret en clair dans une exception/log
             - Atomicite : journal apply incoherent avec FS
+            - SENTINEL VALUE CONFUSION : 0 vs None vs absent
+              Ex: "return 0" ambigu entre "pas de donnees" et "score reel = 0"
+                  -> caller fait "if x == 0: skip" et perd les vraies valeurs 0
+              Ex: -1 utilise comme "absent" mais aussi valeur metier valide
+              Ex: "" vs None vs "null" string dans champs optionnels
+              Solution : Optional[int] + "is None", ou flag explicite has_X,
+              ou exception explicite ValueError au lieu de sentinel
+              (Cf bug audio_score=0 fixe dans PR #22)
 
             (3) PERFORMANCE
             - Boucle O(n^2) qui pourrait etre O(n) avec set/dict
@@ -247,11 +292,25 @@ jobs:
             - subprocess avec shell=True + variable user
             - SQL formate avec f-string sur user input (sqlite3 param binding ?)
             - eval(), exec(), os.system()
-            - Path traversal : open(user_input)
+            - Path traversal Python : open(user_input) sans validation
+            - Path traversal Windows-specific :
+              * "..\\" (separateur Windows), "..%5c" (URL-encoded)
+              * NTFS Alternate Data Streams "file.txt:hidden"
+              * Short names "PROGRA~1", UNC paths "\\?\C:\"
+              * os.path.normpath ne suffit pas
+              * Solution : Path(user_input).resolve().is_relative_to(safe_root)
             - Secrets dans config sans DPAPI (TMDb/Jellyfin/Plex/Radarr keys)
+            - DPAPI scope incorrect : CryptProtectData sans commentaire sur le
+              scope CRYPTPROTECT_LOCAL_MACHINE -> data illisible apres reinstall
+              Windows ou changement password admin. Documenter le choix.
             - HTTP sans timeout
-            - certif SSL desactivee
+            - certif SSL desactivee (verify=False)
             - XML parsing sans defusedxml (XXE)
+            - Supply chain : verifier requirements.txt contre typosquats connus
+              (requets/requests, colorama-py/colorama, selemium/selenium,
+              python-json-logger 3.2.0/3.2.1 = CVE-2025-27607 RCE)
+            - GitHub Actions : token longue duree dans secrets, exiger
+              Trusted Publishing OIDC quand possible
 
             (5) CONCURRENCE
             - Variable globale modifiee sans lock
@@ -271,6 +330,21 @@ jobs:
             - Promise sans error handler
             - Pas de loading state pendant fetch
             - Bouton clickable pendant fetch (double submit)
+            - DOM reflow dans loop (read-write-read-write des layout properties
+              comme offsetHeight, getBoundingClientRect : batcher read puis write)
+            - JSON.stringify sur gros objets dans event handlers (freeze l'UI)
+            - Animation sans requestAnimationFrame (synchro repaint cassee)
+            - Listeners scroll sans { passive: true } (block scroll perf)
+            (6b) PYWEBVIEW SPECIFIQUE
+            - Methodes js_api exposees : tout input JS arbitraire,
+              traiter comme user input (jamais direct dans subprocess,
+              eval, open(path), SQL builder)
+            - window.evaluate_js(user_data) sans json.dumps -> XSS Python->JS
+            - Pas de Content-Security-Policy dans HTML servi
+              -> ajouter <meta http-equiv="Content-Security-Policy"
+              content="default-src 'self'; script-src 'self'">
+            - Exceptions dans callbacks js_api swallowed silencieusement
+              -> wrapper systematique try/except + logger.exception
 
             (7) ACCESSIBILITE (a11y)
             - <button> manquant aria-label sur icone seule
@@ -295,6 +369,19 @@ jobs:
             - CREATE INDEX sans IF NOT EXISTS
             - Schema_history non-updated
             - Backward compat cassee
+            - SQLite ne supporte PAS IF NOT EXISTS sur ALTER TABLE ADD COLUMN
+              -> wrap dans try/except sqlite3.OperationalError
+              -> ou check PRAGMA table_info(t) avant pour idempotence
+            - Migration sans BEGIN; ... COMMIT; explicite : SQLite supporte
+              rollback DDL (contrairement a MySQL). Exiger transaction.
+            - Tentative ALTER COLUMN type/constraint : non supporte SQLite,
+              utiliser le pattern 12-etapes (create new table, INSERT SELECT,
+              drop old, rename)
+            - File locking SQLite : open() sans gestion PermissionError casse
+              l'app si AV scan (Defender, Avast) tient le fichier
+              -> retry avec backoff + considerer msvcrt.locking pour writes
+            - Foreign keys OFF/ON autour migration : PRAGMA foreign_keys=OFF
+              avant ; PRAGMA foreign_key_check apres COMMIT pour valider
 
             (10) DETTE TECHNIQUE
             - Fonctions > 100L (refactor candidat)
@@ -465,14 +552,52 @@ jobs:
             (a) Cherche dans les PRs ouvertes etape 0 si une PR sur le meme
                 fichier traite deja ce point. Si oui, skip.
 
-            (b) Sinon, OUVRE EFFECTIVEMENT la PR (n'oublie pas EXECUTE) :
+            (b) Sinon, OUVRE EFFECTIVEMENT la PR (n'oublie pas EXECUTE).
+
+            REGLE ABSOLUE : TOUJOURS partir de main A JOUR
+                ```bash
+                # 1. Synchronise avec main pour eviter faux diff
+                git fetch origin
+                git checkout main
+                git pull origin main
+                git checkout -b fix/audit-${{ steps.target.outputs.target }}-<topic>
+                ```
+                Si tu pars d'un commit ancien, ta PR montrera des "suppressions"
+                de fichiers que tu n'as PAS touches (cf incident branche
+                claude/issue-13-... qui semblait supprimer audit-module.yml).
+
+            REGLE ABSOLUE : PRE-COMMIT obligatoire AVANT push
+                ```bash
+                # Apres tes Edit/Write, ces 3 commandes sont OBLIGATOIRES :
+                python -m ruff format <fichiers modifies>
+                python -m ruff check <fichiers modifies>
+                python -m unittest tests.test_<module_concerne> 2>&1 | tail -10
+                ```
+                Si echec : corrige PUIS commit. Sinon la CI sera rouge et tu
+                gaspilles 1 cycle de 5-10 min (cf PR #22 et PR #23 qui ont
+                eu ruff format fail au 1er push).
+
+            REGLE ABSOLUE : SYNTAXE "Closes #N" correcte
+                Dans le body de la PR pour fermer plusieurs issues :
+                OK   : "Closes #17, Closes #18, Closes #21" (avec virgules)
+                KO   : "Closes #17 #18 #21" (GitHub ne ferme que la 1re !)
+                Cf incident squash merge de PR #22 ou seul #17 a ferme auto.
+
+            Workflow PR standard :
                 ```bash
                 git checkout -b fix/audit-${{ steps.target.outputs.target }}-<topic>
                 # ... applique le fix avec Edit/Write
+                python -m ruff format <fichiers>
+                python -m ruff check <fichiers>
+                python -m unittest <tests>
                 git add <fichiers>
-                git commit -m "fix(...): ..."
+                git commit -m "fix(scope): description courte
+
+                Description longue si necessaire.
+
+                Closes #N1, Closes #N2"
                 git push -u origin fix/audit-${{ steps.target.outputs.target }}-<topic>
-                gh pr create --title "fix(...): ..." --body "..." --base main
+                gh pr create --title "fix(scope): ..." --body "...Closes #N1, Closes #N2" --base main
                 ```
 
             LIMITE : 15 PRs maximum par run (au lieu de 10 avant pour ne pas
@@ -480,9 +605,32 @@ jobs:
             Si plus de 15 trouves, garde les top-15 par severite, les autres
             restent en issue uniquement.
 
+            REGLE COVERAGE :
+            - Si tu AJOUTES une fonction publique : ecris au moins 1 test
+            - Si tu MODIFIES la signature d'une fonction publique : adapte
+              les tests existants (signature changes sans test = regression)
+            - Si tu fais juste un REFACTOR (memes valeurs, meme comportement) :
+              les tests existants doivent passer SANS modification
+            - Coverage CI est a 80% minimum. Ne descends jamais dessous.
+
             BRANCH PROTECTION : main exige 7 status checks verts. Une PR sera
             mergee SEULEMENT si elle passe la CI. Ne te soucie pas de merger,
             l'utilisateur le fera.
+
+            REGLE DIAGNOSTIC CI :
+            Si la CI echoue apres ton push :
+            1. Lis le log d'erreur EXACT (gh run view <id> --log-failed)
+            2. Categorise :
+               - TimeoutError sur test_get_dashboard_via_rest / test_apply_*
+                 -> flaky connu Windows CI, relance (gh run rerun <id> --failed)
+               - ImportError / SyntaxError / AssertionError sur valeur exacte
+                 -> bug REEL dans ton code, debug avant rerun
+               - ruff format failed
+                 -> tu as oublie de format. Reformatte + commit + push
+            3. NE PAS modifier le test pour "le faire passer" si le test
+               revele un vrai bug. Diagnostique la cause root.
+            4. Apres 2 reruns flaky consecutifs : commente le pattern dans
+               une issue dediee "stabiliser tests d'integration Windows".
 
 
             ============================
