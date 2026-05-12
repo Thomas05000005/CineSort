@@ -546,8 +546,11 @@ def apply_contextual_adjustments(
             )
 
     # Regle 2 — AV1 AFGS1
+    # Cf issue #48 : l'attribut s'appelle has_afgs1_t35 dans Av1FilmGrainInfo
+    # (av1_grain_metadata.py:47), pas has_afgs1. Le getattr precedent ne
+    # matchait jamais, le bonus AV1 AFGS1 etait silencieusement perdu.
     has_afgs1 = (bool(getattr(grain, "av1_afgs1_present", False)) if grain is not None else False) or bool(
-        getattr(av1_grain_info, "has_afgs1", False) if av1_grain_info else False
+        getattr(av1_grain_info, "has_afgs1_t35", False) if av1_grain_info else False
     )
     if has_afgs1:
         video_subs = _patch(video_subs, "perceptual_visual", ADJUSTMENT_AV1_AFGS1_BONUS, "av1_afgs1")
