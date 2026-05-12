@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
-from .migration_manager import MigrationManager
+from .migration_manager import MigrationManager, _split_sql_statements
 from ._run_mixin import _RunMixin
 from ._probe_mixin import _ProbeMixin
 from ._scan_mixin import _ScanMixin
@@ -109,14 +109,30 @@ class _StoreBase:
         """
         Fallback bootstrap built directly from the ordered migration files.
         This keeps migrations as the single source of truth for schema shape.
+
+        Cf issue #33 : on n'utilise plus executescript() (qui fait un COMMIT
+        implicite par statement et ne permet aucun rollback en cas d'erreur
+        au milieu du schema). A la place, on decoupe en statements
+        individuels et on les execute dans une transaction explicite
+        BEGIN/COMMIT — meme pattern que migration_manager.apply_migrations().
+        SQLite supporte le rollback DDL (contrairement a MySQL), donc
+        le schema bootstrap devient "tout ou rien".
         """
         script, version = self.migrations.build_bootstrap_script()
         if not script or version <= 0:
             raise RuntimeError("Aucune migration SQL disponible pour initialiser le schema SQLite.")
 
+        statements = _split_sql_statements(script)
         with self._managed_conn() as conn:
-            conn.executescript(script)
-            conn.execute(f"PRAGMA user_version = {int(version)}")
+            conn.execute("BEGIN")
+            try:
+                for stmt in statements:
+                    conn.execute(stmt)
+                conn.execute(f"PRAGMA user_version = {int(version)}")
+                conn.commit()
+            except sqlite3.DatabaseError:
+                conn.rollback()
+                raise
         return int(version)
 
     def _prepare_db_directory(self) -> None:
