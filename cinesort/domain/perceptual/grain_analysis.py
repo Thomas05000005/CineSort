@@ -99,9 +99,56 @@ def classify_film_era(year: Optional[int]) -> str:
     return "digital"
 
 
+# Cf issue #52 : tokens canoniques pour matcher les variantes TMDb.
+# TMDb retourne "Walt Disney Studios Motion Pictures", "Walt Disney
+# Animation Studios", "Warner Bros. Entertainment", etc. Le match strict
+# sur MAJOR_STUDIOS ratait ces variantes -> malus grain (Phase III) non
+# applique pour beaucoup de blockbusters.
+_MAJOR_STUDIO_TOKENS: tuple[str, ...] = (
+    "walt disney",
+    "warner bros",
+    "universal pictures",
+    "20th century",
+    "paramount pictures",
+    "columbia pictures",
+    "sony pictures",
+    "metro-goldwyn-mayer",
+    "mgm studios",
+    "lionsgate",
+    "new line cinema",
+    "dreamworks",
+    "a24",
+    "focus features",
+    "searchlight pictures",
+    "studiocanal",
+)
+
+
 def is_major_studio(companies: List[str]) -> bool:
-    """True si au moins une company est un studio majeur."""
-    return any(str(c).strip() in MAJOR_STUDIOS for c in companies or [])
+    """True si au moins une company est un studio majeur.
+
+    Cf issue #52 : utilise une liste de tokens canoniques pour tolerer
+    les variantes TMDb ('Walt Disney Pictures' / 'Walt Disney Studios
+    Motion Pictures' / 'Walt Disney Animation Studios' matchent tous
+    le token 'walt disney').
+
+    Le frozenset MAJOR_STUDIOS reste pour la compatibilite descendante
+    (anciens tests et autres modules qui le referencent).
+    """
+    if not companies:
+        return False
+    for c in companies:
+        c_low = str(c).strip().lower()
+        if not c_low:
+            continue
+        # Match exact MAJOR_STUDIOS (rapide via frozenset, garde compat)
+        if c_low in {s.lower() for s in MAJOR_STUDIOS}:
+            return True
+        # Match token canonique (gere les variantes longues TMDb)
+        for token in _MAJOR_STUDIO_TOKENS:
+            if token in c_low:
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------
