@@ -290,7 +290,9 @@ class TmdbClient:
 
         msg = None
         if isinstance(data, dict):
-            msg = data.get("status_message") or data.get("status_message".upper())
+            # TMDb retourne `status_message` en lowercase ; le fallback .upper()
+            # precedent etait mort (le or short-circuit sur la 1re cle).
+            msg = data.get("status_message")
         return False, f"HTTP {r.status_code}: {msg or r.text[:200]}"
 
     def search_movie(

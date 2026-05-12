@@ -259,7 +259,7 @@ def compare_by_criteria(
                 label="Bitrate",
                 value_a=_bitrate_label(br_a),
                 value_b=_bitrate_label(br_b),
-                winner="unknown" if not same_codec else "unknown",
+                winner="unknown",
                 points_delta=0,
             )
         )
