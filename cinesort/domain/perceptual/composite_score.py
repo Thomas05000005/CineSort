@@ -278,7 +278,12 @@ def build_perceptual_result(
     g_tier = determine_tier(g_score)
     verdicts = detect_cross_verdicts(video, grain, audio, encode_warnings=encode_warnings)
     logger.debug(
-        "perceptual: visual=%d audio=%s global=%d tier=%s verdicts=%d", v_score, a_score_opt, g_score, g_tier, len(verdicts)
+        "perceptual: visual=%d audio=%s global=%d tier=%s verdicts=%d",
+        v_score,
+        a_score_opt,
+        g_score,
+        g_tier,
+        len(verdicts),
     )
     return PerceptualResult(
         version=PERCEPTUAL_ENGINE_VERSION,
