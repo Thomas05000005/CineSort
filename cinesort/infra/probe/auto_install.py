@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import sys
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 from urllib.request import urlretrieve
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,25 @@ logger = logging.getLogger(__name__)
 # URLs officielles des binaires Windows
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 MEDIAINFO_URL = "https://mediaarea.net/download/binary/mediainfo/24.11/MediaInfo_CLI_24.11_Windows_x64.zip"
+
+# Timeout socket pour urlretrieve : sans cela, un serveur muet (hosts en panne,
+# firewall corporate qui drop) fait hang l'install indefiniment.
+# 120s couvre des downloads de ~120 MB sur une connexion lente (1 Mbps).
+_DOWNLOAD_TIMEOUT_S = 120.0
+
+
+@contextmanager
+def _socket_timeout(seconds: float) -> Iterator[None]:
+    """Force un timeout socket global pendant le download (urllib.request n'expose
+    pas de parametre timeout sur urlretrieve). Restaure la valeur precedente
+    en sortie, meme sur exception.
+    """
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(seconds)
+    try:
+        yield
+    finally:
+        socket.setdefaulttimeout(previous)
 
 
 def get_tools_dir() -> Path:
@@ -57,7 +78,8 @@ def install_ffprobe(
 
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = os.path.join(tmp, "ffmpeg.zip")
-        urlretrieve(FFMPEG_URL, zip_path)
+        with _socket_timeout(_DOWNLOAD_TIMEOUT_S):
+            urlretrieve(FFMPEG_URL, zip_path)
 
         logger.info("auto_install: extraction ffprobe.exe")
         if progress_callback:
@@ -97,7 +119,8 @@ def install_mediainfo(
 
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = os.path.join(tmp, "mediainfo.zip")
-        urlretrieve(MEDIAINFO_URL, zip_path)
+        with _socket_timeout(_DOWNLOAD_TIMEOUT_S):
+            urlretrieve(MEDIAINFO_URL, zip_path)
 
         if progress_callback:
             progress_callback("Extraction de MediaInfo...")
