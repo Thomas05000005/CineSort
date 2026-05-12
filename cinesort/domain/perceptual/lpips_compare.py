@@ -11,6 +11,7 @@ desactivee, pas de plantage).
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
@@ -36,6 +37,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _ort_available: Optional[bool] = None
 _ort_session = None
+# Cf issue #49 : verrou pour le double-check sur le chargement de la
+# session ONNX. Sur le batch parallele (4-8 workers), 2 threads peuvent
+# voir _ort_session is None quasi-simultanement et instancier chacun
+# une InferenceSession ~100MB. Le verrou serialise le chargement et
+# garantit le UNE-SEULE-FOIS des log WARNING.
+_ort_lock = threading.Lock()
 # Garde-fous : log WARNING UNE SEULE FOIS pour eviter de spammer les logs
 # lors d'un batch d'analyses successives sur une installation sans le modele.
 _missing_model_warned: bool = False
@@ -93,24 +100,35 @@ def _warn_model_missing_once(model_path: str) -> None:
 
 
 def _get_session(model_path: str = LPIPS_MODEL_PATH):
-    """Charge paresseusement la session ONNX (1x par process)."""
+    """Charge paresseusement la session ONNX (1x par process, thread-safe).
+
+    Cf issue #49 : double-check locking pour eviter qu'un batch parallele
+    (4-8 workers) instancie plusieurs InferenceSession ONNX (~100MB
+    chacune) en parallele, doublant transitoirement le pic memoire.
+    Le fast-path lock-free preserve les perfs en steady-state.
+    """
     global _ort_session
+    # Fast-path : si la session est deja chargee, retour direct sans lock
     if _ort_session is not None:
         return _ort_session
-    if not _is_ort_available():
-        raise RuntimeError("onnxruntime indisponible")
-    resolved = _resolve_model_path(model_path)
-    if resolved is None:
-        # WARNING avec instructions de reinstall (une seule fois par process)
-        _warn_model_missing_once(model_path)
-        raise FileNotFoundError(f"Modele LPIPS absent : {model_path}")
-    import onnxruntime as ort
+    with _ort_lock:
+        # Double-check : un autre thread a peut-etre charge pendant qu'on attendait
+        if _ort_session is not None:
+            return _ort_session
+        if not _is_ort_available():
+            raise RuntimeError("onnxruntime indisponible")
+        resolved = _resolve_model_path(model_path)
+        if resolved is None:
+            # WARNING avec instructions de reinstall (une seule fois par process)
+            _warn_model_missing_once(model_path)
+            raise FileNotFoundError(f"Modele LPIPS absent : {model_path}")
+        import onnxruntime as ort
 
-    _ort_session = ort.InferenceSession(
-        str(resolved),
-        providers=["CPUExecutionProvider"],
-    )
-    logger.info("LPIPS ONNX charge (%s)", resolved.name)
+        _ort_session = ort.InferenceSession(
+            str(resolved),
+            providers=["CPUExecutionProvider"],
+        )
+        logger.info("LPIPS ONNX charge (%s)", resolved.name)
     return _ort_session
 
 
