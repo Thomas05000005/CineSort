@@ -1586,6 +1586,16 @@ class CineSortApi:
         """Analyse perceptuelle d'un film (a la demande)."""
         return perceptual_support.get_perceptual_report(self, run_id, row_id, options)
 
+    def get_perceptual_details(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Retourne toutes les metriques perceptuelles persistees (lecture DB).
+
+        Cf issue #32 : expose audio_fingerprint, ssim_self_ref,
+        upscale_verdict, spectral_cutoff_hz, global_score_v2 + breakdown.
+        Ne declenche AUCUNE analyse, lecture pure. Pour declencher une
+        analyse, utiliser get_perceptual_report().
+        """
+        return perceptual_support.get_perceptual_details(self, run_id, row_id)
+
     def analyze_perceptual_batch(
         self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
