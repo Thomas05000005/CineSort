@@ -436,6 +436,179 @@ jobs:
             - Test pollue sys.modules ou globals (cf issue #4 fixed)
             - Coverage de la branche d'erreur manquante
 
+            (17) DONNEES ORPHELINES (orphan / dead data)
+            Le backend calcule, l'UI ne montre PAS. Audit critique car
+            l'utilisateur ne profite pas du travail deja fait.
+            Pour CHAQUE module :
+            - Lis toutes les fonctions qui ecrivent en DB (INSERT/UPDATE)
+              ou qui calculent un score / une metrique riche.
+            - Cherche si ces donnees sont :
+              (a) Lues quelque part dans cinesort/ui/ ou web/
+              (b) Exposees dans un endpoint REST (trifilms_api.py / *_support.py)
+              (c) Affichees dans un composant JS (web/dashboard/views/ ou web/ui/)
+            Si non -> FINDING : "donnee X calculee mais jamais affichee".
+            Exemples a chercher dans CineSort :
+            - Verdicts cross-perceptuels (10 verdicts dans composite_score) :
+              tous affiches ?
+            - audio_fingerprint, audio_spectral : exposes user-facing ?
+            - SSIM self-ref, FFT 2D, banding fine-grain : visible ?
+            - Probe details (codec, bitrate, audio tracks) : tous montres ?
+            - schema_history : affiche dans diagnostic ?
+            - quality_score sub-scores : breakdown visible ?
+            Action : creer issue "feature: exposer <donnee X> dans <vue Y>"
+
+            (18) WORKFLOW USER INCOMPLET (feature gap)
+            Une fonctionnalite existe mais l'etape logique suivante manque.
+            Pour CHAQUE feature backend, demande-toi :
+            "Si l'utilisateur execute cette fonction, quel est le NEXT STEP
+             naturel ? Est-il propose dans l'UI ?"
+            Exemples (CineSort) :
+            - Detection doublons SHA1 : OK, mais comparaison perceptuelle
+              cote-a-cote (poster + miniatures + waveform audio) proposee ?
+            - Analyse perceptuelle qualite : score affiche, mais "voir
+              les 3 pires moments du film" disponible ? Bouton "exporter
+              rapport qualite" ?
+            - Probe vidéo détaillée : rapport diagnostic PDF/HTML exportable ?
+            - Conflit "_review/" : preview side-by-side ancien vs nouveau
+              nom avant decision ?
+            - TMDb match incertain : afficher les 3 meilleurs candidats
+              avec posters pour validation user ?
+            - Apply termine : suggerer Jellyfin refresh / Plex refresh dans
+              toast (1-click action) ?
+            Action : creer issue "feature: ajouter <next step> apres <action>"
+
+            (19) COHERENCE BACKEND <-> UI
+            Audit la chaine complete d'une feature :
+            (a) Champ stocke en DB jamais lu cote UI
+                -> grep "SELECT <col>" et "INSERT INTO ... <col>", verifier
+                   si <col> apparait dans Python -> endpoint -> JS.
+            (b) Champ UI qui ne reflete pas le state reel (cache stale)
+                -> apres une action user (apply, undo, refresh), tous les
+                   composants dependants sont-ils invalides ?
+                -> exemple : apres un undo, les compteurs sidebar
+                   sont-ils mis a jour automatiquement ?
+            (c) Action UI sans effet backend visible
+                -> grep onClick / addEventListener cote JS et tracer
+                   jusqu'au endpoint REST. Si le endpoint ne fait rien
+                   de visible, c'est suspect.
+            (d) Notifications/toasts manquantes pour actions critiques
+                -> apply rate sans toast d'erreur ? scan termine sans
+                   confirmation ? backup auto silencieux ?
+            (e) State inconsistant entre composants
+                -> 2 endroits affichent le meme count mais pas synchros
+                   (badge sidebar vs header)
+            Action : issue + PR si fix < 30 lignes
+
+            (20) FEATURE PARITY DESKTOP <-> DASHBOARD
+            Le dashboard mobile (web/dashboard/) doit avoir parite
+            fonctionnelle avec le desktop (web/ui/) pour les actions
+            essentielles. Audit a chaque run :
+            - Liste les features desktop UI (vues, boutons, actions)
+            - Liste les features dashboard
+            - Diff : qu'est-ce qui manque cote dashboard ?
+            - Exemple : si desktop a "Voir les 3 pires moments" mais pas
+              le dashboard, c'est une feature gap a documenter.
+            - Mode "debutant" cache des features utiles ? Doit-on les
+              exposer plus tot ?
+            - CLI vs GUI : commandes utiles manquantes des deux cotes ?
+            Action : issue "parity: <feature> existe desktop, absente dashboard"
+
+            (21) AMELIORATIONS PROACTIVES (continuous improvement)
+            Au-dela des bugs, propose des AMELIORATIONS basees sur le
+            code existant :
+            - "Tu as X, tu pourrais aussi avoir Y avec peu d'effort"
+              Ex: tu as score perceptuel par film -> graphique evolution
+              qualite de la lib dans le temps
+              Ex: tu as journal apply -> heatmap des dossiers modifies
+              Ex: tu as TMDb match scores -> stats "auto-approuve rate"
+              dans diagnostic
+            - "You have X -> free Y" heuristics :
+              * Si table contient serie temporelle (timestamped scores)
+                -> graphique gratuit (sparkline FilmCard, page evolution)
+              * Si journal append-only existe -> undo granulaire gratuit
+              * Si plusieurs metriques homogenes -> radar chart gratuit
+            - Cherche les patterns que d'autres outils similaires
+              (Plex, Jellyfin, Radarr, Tdarr) ont et qui manquent ici.
+            - Suggere des shortcuts clavier utiles non implementes.
+            - Propose des exports (CSV, JSON, PDF) si donnees riches
+              non exportables.
+            - Ameliore les empty states avec exemples ou CTA.
+            Action : issue "enhancement: <suggestion>" avec mockup texte
+            si UI concerne. Label "needs-discussion".
+
+
+            ============================
+            ETAPE 2.5 - TECHNIQUES D'INVESTIGATION CROSS-COUCHE
+            ============================
+
+            Pour les categories 17-21 (audit cohérence end-to-end), utilise
+            ces methodes concretes plutot que de juste lire les fichiers
+            individuellement :
+
+            (A) ENDPOINT INVENTORY DIFFING
+            Liste tous les endpoints REST cote backend :
+                grep -rn "@.*\\.(get\\|post\\|put\\|delete)" cinesort/ui/api/
+                # ou si Flask : "@app.route"
+            Liste tous les fetch() / axios cote JS :
+                grep -rn "fetch(['\"]/" web/ | grep -v node_modules
+                grep -rn "this.api.\\|trifilms_api\\." web/
+            Diff les 2 listes :
+                - Endpoints backend SANS appel JS = candidats orphan
+                - fetch() JS vers endpoint INEXISTANT = bug runtime
+            (cf earezki.com a supprime 16000 lignes Node.js ainsi)
+
+            (B) COLUMN/FIELD USAGE TRACING
+            Pour chaque colonne DB calculee (perceptual, quality, score) :
+                grep -rn "<col_name>" cinesort/   # backend reads
+                grep -rn "<col_name>" web/        # frontend display
+            Si 0 match cote web/ : la colonne est ecrite mais jamais lue
+            user-facing -> finding "orphan data".
+
+            (C) USER JOURNEY COMPLETENESS MATRIX
+            Pour chaque feature, mappe les 5 etapes canoniques :
+                Detect (l'app trouve quelque chose)
+                Analyze (l'app analyse / score)
+                Decide (l'utilisateur voit + decide)
+                Act (l'utilisateur applique l'action)
+                Verify (l'utilisateur peut verifier le resultat)
+            Si une etape manque (typiquement "Decide" ou "Verify"),
+            ouvre une issue "workflow gap: <feature>".
+            Exemple CineSort doublons :
+                Detect : OK (SHA1 + perceptual hash)
+                Analyze : OK (lpips, dist_score calcules)
+                Decide : MANQUE (pas de vue side-by-side preview)
+                Act : OK (keep/delete dans UI)
+                Verify : MANQUE (pas d'undo specifique doublon)
+
+            (D) CACHE INVALIDATION TRACE
+            Apres chaque mutation backend (apply, undo, rescan) :
+                grep -rn "invalidate\\|refresh\\|reload" web/
+            Pour chaque action user critique, verifie que les composants
+            dependants (sidebar counts, badges, listes) sont invalides.
+            Si pas d'invalidation -> UI stale apres action = bug UX.
+
+            (E) NOTIFICATION COVERAGE MATRIX
+            Liste les actions critiques (apply, undo, scan, integration test)
+                grep -rn "POST.*apply\\|POST.*undo\\|POST.*scan" web/
+            Cross-check avec les appels notify() / toast() / showError().
+            Cellule vide = action silencieuse pour l'utilisateur (bug UX).
+
+            (F) CLI vs GUI PARITY
+            Liste commandes Click/Typer du module CLI s'il existe :
+                grep -n "@click.command\\|@app.command" app.py cinesort/
+            Cross-check avec les actions desktop UI (menubar, settings, panels).
+            Toute commande CLI sans equivalent GUI = candidat feature parity.
+
+            (G) DESKTOP vs DASHBOARD PARITY
+            Liste les vues desktop : ls web/ui/views/ (ou equivalent)
+            Liste les vues dashboard : ls web/dashboard/views/
+            Diff -> features manquantes cote dashboard mobile a documenter.
+
+            ATTENTION TEMPS : ces analyses cross-couche sont LOURDES.
+            Limite-toi a 2-3 features par run d'audit (rotation possible
+            entre les runs). Documente lesquelles tu as auditees dans
+            le rapport pour ne pas les refaire au prochain run.
+
 
             ============================
             ETAPE 3 - RAPPORT JOURNALIER
