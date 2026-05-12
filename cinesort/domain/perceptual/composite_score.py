@@ -13,6 +13,8 @@ from .constants import (
     BLUR_SHARP,
     BLUR_NORMAL,
     BLUR_SOFT,
+    BLUR_THRESHOLD_FAKE_4K,
+    BLUR_THRESHOLD_MASTERING,
     BANDING_NONE,
     BANDING_SLIGHT,
     BANDING_MODERATE,
@@ -163,7 +165,7 @@ def detect_cross_verdicts(
         )
 
     # 2. Faux 4K
-    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and bits < 8.0 and blur > 0.05:
+    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and bits < 8.0 and blur > BLUR_THRESHOLD_FAKE_4K:
         verdicts.append(
             {
                 "id": "fake_4k",
@@ -185,7 +187,7 @@ def detect_cross_verdicts(
         )
 
     # 4. Mastering reference
-    if block < BLOCK_NONE and blur < 0.02 and banding < BANDING_NONE and bits > 9.0:
+    if block < BLOCK_NONE and blur < BLUR_THRESHOLD_MASTERING and banding < BANDING_NONE and bits > 9.0:
         verdicts.append(
             {
                 "id": "excellent_mastering",

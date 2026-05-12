@@ -33,6 +33,12 @@ BLUR_NORMAL = 0.03  # 0.01-0.03 : douceur cinematique normale
 BLUR_SOFT = 0.06  # 0.03-0.06 : doux, possible DNR / upscale
 BLUR_VERY_SOFT = 0.10  # > 0.06 : tres doux, DNR probable
 
+# Seuils dedies aux verdicts croises (composite_score.detect_cross_verdicts).
+# Choix volontaires : pas alignes sur BLUR_SHARP/SOFT car la semantique
+# differe (signal cross-metrique combine avec d'autres conditions).
+BLUR_THRESHOLD_FAKE_4K = 0.05  # Faux 4K : flou suspect quand h>=2100 + bits<8
+BLUR_THRESHOLD_MASTERING = 0.02  # Mastering reference : nettete superieure a NORMAL
+
 # ---------------------------------------------------------------------------
 # Banding (score calcule, 0-100)
 # ---------------------------------------------------------------------------
