@@ -555,7 +555,16 @@ def _apply_pixel_aggregates(result: VideoPerceptual, agg: Dict[str, Any]) -> Non
 
 
 def _compute_visual_score(result: VideoPerceptual, multiplier: float, temporal_score: int) -> None:
-    """Calcule le score visuel composite et le tier."""
+    """Calcule le score visuel composite et le tier (mute result en place).
+
+    Note : le score final affiche/persiste est recalcule autoritairement
+    par compute_visual_score(video, grain) dans build_perceptual_result
+    avec le vrai grain.score (au lieu du 50 hardcode ici).
+    Ce calcul intermediaire reste utile car :
+    - composite_score_v2._score_from_visual lit result.visual_score
+    - les logs debug exposent ce score
+    - la persistence DB stocke ce champ via _perceptual_mixin
+    """
     s_block = _score_blockiness(result.blockiness_mean, multiplier)
     s_blur = _score_blur(result.blur_mean, multiplier)
     s_banding = _score_banding(result.banding_mean, multiplier)
@@ -581,8 +590,9 @@ def _compute_visual_score(result: VideoPerceptual, multiplier: float, temporal_s
         result.visual_tier = "mediocre"
     else:
         result.visual_tier = "degrade"
-
-    return result
+    # Cf issue #51 : pas de return car la signature declare -> None et le
+    # caller (analyze_video_frames) n'utilise pas la valeur. Le return
+    # result mort precedent suggerait a tort une fonction pure.
 
 
 # ---------------------------------------------------------------------------
