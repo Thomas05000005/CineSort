@@ -4,5 +4,8 @@ ruff>=0.15.12,<0.16
 coverage>=7.14.0,<8
 pre-commit>=4.0,<5
 # v1.0.0-beta : pytest est invoque par check_project.bat (quality gate windows-ci)
-# meme si le projet utilise majoritairement unittest. Pin majeur safe.
-pytest>=8.0,<9
+# meme si le projet utilise majoritairement unittest.
+# Pin >=9.0.3 pour fixer CVE-2025-71176 (vulnerable tmpdir handling, medium,
+# CVSS 6.8, GHSA-6w46-j5rx-g56g). API pytest 8->9 retro-compatible pour
+# notre usage (decouverte + execution + coverage, pas de plugin custom).
+pytest>=9.0.3,<10
