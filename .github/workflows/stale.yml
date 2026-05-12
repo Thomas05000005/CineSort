@@ -11,17 +11,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   stale:
     name: Stale check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
 
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
         with:
           # ===== Issues =====
           days-before-issue-stale: 60  # 2 mois d'inactivite -> tag stale

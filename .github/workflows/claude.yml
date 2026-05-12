@@ -33,18 +33,26 @@ on:
         required: false
         default: "Fais un audit complet du repo CineSort : verifie qu'il n'y a pas de bugs latents, de regressions de qualite, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre des PRs avec les fixes. Reponds en francais."
 
+# Best practice OpenSSF Scorecard : top-level permissions = read-only.
+# Les writes (contents/pull-requests/issues) sont scopes au job ci-dessous
+# qui en a besoin.
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  id-token: write
-  actions: read
+  contents: read
 
 jobs:
   claude:
     name: Claude Code session
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Permissions scopees ici : ce job a besoin de creer issues/PRs
+    # et pousser sur branches non-protegees. main reste protegee par
+    # branch protection rules (PR + 7 status checks).
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
 
     # Ne lance que si la mention contient @claude OU si c'est un schedule/dispatch
     if: |
@@ -58,12 +66,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@dde2242db6af13460b916652159b6ba19a598f30 # v1
         with:
           # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

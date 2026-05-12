@@ -11,17 +11,19 @@ on:
     types: [opened, reopened, synchronize]
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 jobs:
   update_release_draft:
     name: Update release draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write  # cree/edite le draft de release
+      pull-requests: read
 
     steps:
-      - uses: release-drafter/release-drafter@v6
+      - uses: release-drafter/release-drafter@6a93d829887aa2e0748befe2e808c66c0ec6e4c7 # v6
         with:
           config-name: release-drafter.yml
         env:

@@ -5,15 +5,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+# OpenSSF Scorecard : top-level permissions explicites = read-only.
+# Aucun job de ce workflow n'a besoin d'ecrire.
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.13"
 
@@ -48,7 +53,7 @@ jobs:
           python scripts/visual_check_ui_preview.py --dev
 
       - name: Upload verification artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-preview-proof
           path: |
@@ -64,10 +69,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup Python 3.13
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.13"
 
@@ -95,7 +100,7 @@ jobs:
           python scripts/package_zip.py --qa --release
 
       - name: Upload Windows build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-build-artifacts
           path: |

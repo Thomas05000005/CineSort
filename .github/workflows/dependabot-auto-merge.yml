@@ -10,8 +10,7 @@ name: Dependabot auto-merge
 on: pull_request
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   auto-merge:
@@ -20,11 +19,14 @@ jobs:
     timeout-minutes: 5
     # Seulement pour les PRs Dependabot
     if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      contents: write  # squash merge sur main
+      pull-requests: write  # approve + auto-merge
 
     steps:
       - name: Get Dependabot metadata
         id: meta
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
