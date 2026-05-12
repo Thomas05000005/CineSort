@@ -205,7 +205,10 @@ def compute_rms_db(samples: np.ndarray) -> float:
     if mean_sq <= 0.0:
         return float("-inf")
     rms = np.sqrt(mean_sq)
-    return 20.0 * float(np.log10(rms + 1e-20))
+    # Epsilon 1e-10 (au lieu de 1e-20 trop petit) : reste calculable en
+    # float64 sans underflow, et 20*log10(1e-10) = -200 dBFS reste un
+    # plancher physique acceptable pour l'audio. Cf issue #31.
+    return 20.0 * float(np.log10(rms + 1e-10))
 
 
 def classify_cutoff(
