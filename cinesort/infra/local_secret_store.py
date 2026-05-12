@@ -132,11 +132,68 @@ def _unprotect_bytes(blob_b64: str, *, purpose: str) -> Tuple[bool, bytes, str]:
 
 
 def protect_secret(value: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Chiffre un secret via DPAPI Windows (scope CURRENT_USER).
+
+    SCOPE EFFECTIF : CURRENT_USER (defaut DPAPI sans flag
+    CRYPTPROTECT_LOCAL_MACHINE). La cle de chiffrement est derivee du
+    mot de passe utilisateur Windows + identifiant machine.
+
+    CONSEQUENCES IMPORTANTES :
+    - Reinstall Windows -> les secrets ne se dechiffrent plus.
+    - Reset password admin via rescue mode -> idem.
+    - Export DB vers une autre machine ou un autre profil utilisateur
+      -> secrets illisibles, l'utilisateur doit re-saisir les cles API
+      (TMDb, Jellyfin, Plex, Radarr).
+    - Roaming profile : le profil utilisateur doit etre intact.
+
+    Ce comportement est volontaire : un attaquant qui copie le fichier
+    DB sur sa machine ne peut PAS lire les secrets. C'est aussi
+    pourquoi on ne stocke jamais les secrets en clair.
+
+    Pour les setups multi-utilisateurs sur la meme machine (ex. PC
+    familial partage), un futur parametre prefer_machine_scope=True
+    pourrait basculer sur CRYPTPROTECT_LOCAL_MACHINE (cle derivee de
+    la machine seule, accessible a tous les utilisateurs locaux).
+    Pas implemente car cas d'usage marginal et reduit la securite.
+
+    Args:
+        value: La valeur secrete a chiffrer (cle API, token).
+        purpose: Identifiant unique d'usage (ex. "tmdb_api_key").
+            Inclus dans l'entropie pour empecher la reutilisation
+            d'un blob entre purposes distincts.
+
+    Returns:
+        (ok, blob_b64, error) : si ok=True, blob_b64 contient le
+        secret chiffre encode base64 (pret pour stockage SQLite).
+
+    See Also:
+        https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata
+    """
     raw = str(value or "").encode("utf-8")
     return _protect_bytes(raw, purpose=purpose)
 
 
 def unprotect_secret(blob_b64: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Dechiffre un secret protege par protect_secret.
+
+    Si le dechiffrement echoue, cela signifie typiquement que le scope
+    DPAPI CURRENT_USER a change (reinstall Windows, reset password,
+    copie DB sur autre machine). Le caller DOIT loguer un message
+    clair a l'utilisateur du style :
+
+        "Secret <X> illisible. Cela peut arriver apres une reinstallation
+         Windows ou si la base est copiee depuis un autre PC. Re-saisis
+         la cle dans Reglages."
+
+    Args:
+        blob_b64: Le secret chiffre encode base64 (issu de protect_secret).
+        purpose: Identifiant d'usage (DOIT matcher celui de protect_secret).
+
+    Returns:
+        (ok, value, error) : si ok=True, value contient le secret en
+        clair (string UTF-8). Si ok=False, error contient un message
+        Windows DPAPI ou "Secret protege non UTF-8".
+    """
     ok, payload, error = _unprotect_bytes(blob_b64, purpose=purpose)
     if not ok:
         return False, "", error
