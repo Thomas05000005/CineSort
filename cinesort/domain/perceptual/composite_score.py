@@ -6,8 +6,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
 from .constants import (
     BLOCK_NONE,
     BLOCK_SLIGHT,
@@ -18,11 +16,13 @@ from .constants import (
     BANDING_NONE,
     BANDING_SLIGHT,
     BANDING_MODERATE,
+    DNR_BLUR_THRESHOLD,
     DNR_GRAIN_ABSENT_THRESHOLD,
     EFFECTIVE_BITS_EXCELLENT,
     EFFECTIVE_BITS_GOOD,
     EFFECTIVE_BITS_MEDIOCRE,
     ERA_CLASSIC_FILM,
+    FAKE_4K_VERDICT_MIN_HEIGHT,
     GLOBAL_WEIGHT_AUDIO,
     GLOBAL_WEIGHT_VIDEO,
     GRAIN_MODERATE,
@@ -41,6 +41,17 @@ from .constants import (
     VISUAL_WEIGHT_TEMPORAL,
 )
 from .models import AudioPerceptual, GrainAnalysis, PerceptualResult, VideoPerceptual
+
+__all__ = [
+    "compute_visual_score",
+    "compute_audio_score",
+    "compute_global_score",
+    "determine_tier",
+    "detect_cross_verdicts",
+    "build_perceptual_result",
+]
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +84,10 @@ def compute_visual_score(video: VideoPerceptual, grain: Optional[GrainAnalysis] 
 # ---------------------------------------------------------------------------
 
 
-def compute_audio_score(audio: Optional[AudioPerceptual]) -> int:
-    """Score audio composite pondere (0-100). 0 si pas de piste."""
+def compute_audio_score(audio: Optional[AudioPerceptual]) -> Optional[int]:
+    """Score audio composite pondere (0-100). None si pas de piste."""
     if not audio or audio.track_index < 0:
-        return 0
+        return None
     # Si audio_score deja calcule par audio_perceptual.py, le reutiliser
     return audio.audio_score
 
@@ -86,9 +97,9 @@ def compute_audio_score(audio: Optional[AudioPerceptual]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def compute_global_score(visual_score: int, audio_score: int) -> int:
+def compute_global_score(visual_score: int, audio_score: Optional[int]) -> int:
     """Score perceptuel global : video 60 % + audio 40 %. 100% video si pas d'audio."""
-    if audio_score == 0:
+    if audio_score is None:
         return visual_score
     total = (visual_score * GLOBAL_WEIGHT_VIDEO + audio_score * GLOBAL_WEIGHT_AUDIO) / 100
     return max(0, min(100, int(round(total))))
@@ -141,7 +152,7 @@ def detect_cross_verdicts(
     lra = audio.loudness_range if audio and audio.loudness_range is not None else 99.0
 
     # 1. DNR + upscale
-    if blur > 0.04 and "upscale_suspect" in enc:
+    if blur > DNR_BLUR_THRESHOLD and "upscale_suspect" in enc:
         verdicts.append(
             {
                 "id": "dnr_upscale_combo",
@@ -152,7 +163,7 @@ def detect_cross_verdicts(
         )
 
     # 2. Faux 4K
-    if h >= 2100 and bits < 8.0 and blur > 0.05:
+    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and bits < 8.0 and blur > 0.05:
         verdicts.append(
             {
                 "id": "fake_4k",
@@ -229,7 +240,7 @@ def detect_cross_verdicts(
         )
 
     # 9. DNR suspect pre-2002
-    if blur > 0.04 and gl < DNR_GRAIN_ABSENT_THRESHOLD and 0 < year < ERA_CLASSIC_FILM:
+    if blur > DNR_BLUR_THRESHOLD and gl < DNR_GRAIN_ABSENT_THRESHOLD and 0 < year < ERA_CLASSIC_FILM:
         verdicts.append(
             {
                 "id": "dnr_classic_film",
@@ -269,18 +280,19 @@ def build_perceptual_result(
 ) -> PerceptualResult:
     """Construit le resultat perceptuel complet."""
     v_score = compute_visual_score(video, grain) if video else 0
-    a_score = compute_audio_score(audio)
-    g_score = compute_global_score(v_score, a_score)
-
-    # Mettre a jour les tiers sur les composants
-    if video:
-        video.visual_score = v_score
-        video.visual_tier = determine_tier(v_score)
+    a_score_opt = compute_audio_score(audio)
+    g_score = compute_global_score(v_score, a_score_opt)
+    a_score = a_score_opt if a_score_opt is not None else 0
 
     g_tier = determine_tier(g_score)
     verdicts = detect_cross_verdicts(video, grain, audio, encode_warnings=encode_warnings)
     logger.debug(
-        "perceptual: visual=%d audio=%d global=%d tier=%s verdicts=%d", v_score, a_score, g_score, g_tier, len(verdicts)
+        "perceptual: visual=%d audio=%s global=%d tier=%s verdicts=%d",
+        v_score,
+        a_score_opt,
+        g_score,
+        g_tier,
+        len(verdicts),
     )
     return PerceptualResult(
         version=PERCEPTUAL_ENGINE_VERSION,
