@@ -23,6 +23,7 @@ from .constants import (
     EFFECTIVE_BITS_EXCELLENT,
     EFFECTIVE_BITS_GOOD,
     EFFECTIVE_BITS_MEDIOCRE,
+    EFFECTIVE_BITS_POOR,
     ERA_CLASSIC_FILM,
     FAKE_4K_VERDICT_MIN_HEIGHT,
     GLOBAL_WEIGHT_AUDIO,
@@ -318,25 +319,44 @@ def build_perceptual_result(
 
 
 def _score_val_inv(val: float, good: float, medium: float, bad: float) -> int:
-    """Score inverse : plus la valeur est basse, meilleur c'est."""
-    if val < good:
+    """Score inverse interpole (plus val est bas, meilleur c'est).
+
+    Interpolation lineaire entre les paliers good (95), medium (75),
+    bad (50). Au-dela de bad : degradation continue jusqu'a 0 (a val=2*bad).
+
+    Remplace l'ancien comportement en escalier (4 valeurs discretes 95/75/50/20)
+    qui donnait le meme score a deux films de qualites tres differentes
+    tombant dans le meme intervalle. Cf issue #15.
+    """
+    if val <= good:
         return 95
-    if val < medium:
-        return 75
-    if val < bad:
-        return 50
-    return 20
+    if val <= medium:
+        score = 95 - 20 * (val - good) / (medium - good)
+    elif val <= bad:
+        score = 75 - 25 * (val - medium) / (bad - medium)
+    else:
+        score = 50 * (1 - (val - bad) / bad)
+    return max(0, min(100, int(round(score))))
 
 
 def _score_bits(mean_bits: float) -> int:
-    """Score profondeur effective."""
+    """Score profondeur effective interpole (positif : + de bits = mieux).
+
+    Interpolation lineaire entre EXCELLENT (95), GOOD (75),
+    MEDIOCRE (50), POOR (25). En dessous de POOR : degradation
+    continue jusqu'a 0.
+    """
     if mean_bits >= EFFECTIVE_BITS_EXCELLENT:
         return 95
     if mean_bits >= EFFECTIVE_BITS_GOOD:
-        return 75
-    if mean_bits >= EFFECTIVE_BITS_MEDIOCRE:
-        return 50
-    return 25
+        score = 75 + 20 * (mean_bits - EFFECTIVE_BITS_GOOD) / (EFFECTIVE_BITS_EXCELLENT - EFFECTIVE_BITS_GOOD)
+    elif mean_bits >= EFFECTIVE_BITS_MEDIOCRE:
+        score = 50 + 25 * (mean_bits - EFFECTIVE_BITS_MEDIOCRE) / (EFFECTIVE_BITS_GOOD - EFFECTIVE_BITS_MEDIOCRE)
+    elif mean_bits >= EFFECTIVE_BITS_POOR:
+        score = 25 + 25 * (mean_bits - EFFECTIVE_BITS_POOR) / (EFFECTIVE_BITS_MEDIOCRE - EFFECTIVE_BITS_POOR)
+    else:
+        score = 25 * max(0.0, mean_bits / EFFECTIVE_BITS_POOR)
+    return max(0, min(100, int(round(score))))
 
 
 def _score_temporal(stddev: float) -> int:
