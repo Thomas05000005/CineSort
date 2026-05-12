@@ -41,6 +41,45 @@ def get_perceptual_report(
         return {"ok": False, "message": str(exc)}
 
 
+def get_perceptual_details(
+    api: Any,
+    run_id: str,
+    row_id: str,
+) -> Dict[str, Any]:
+    """Retourne TOUTES les metriques perceptuelles d'un film (lecture DB).
+
+    Backend pour issue #32 : expose les donnees orphelines actuellement
+    calculees et persistees mais non visibles cote UI :
+    - audio_fingerprint (Chromaprint hash hex)
+    - ssim_self_ref (auto-similarite spatiale 0-1)
+    - upscale_verdict ('native_4k' / 'upscaled_1080p' / etc.)
+    - spectral_cutoff_hz + lossy_verdict (audio)
+    - global_score_v2 + tier_v2 + breakdown JSON
+
+    Ne declenche AUCUNE analyse : lecture pure de la DB.
+    Returns 404-like si pas d'analyse persistee.
+    """
+    if not run_id or not row_id:
+        return {"ok": False, "message": "run_id et row_id requis"}
+    try:
+        # Pattern CineSortApi : le store est obtenu via _get_or_create_infra,
+        # pas attache directement sur self.store (cf commentaire BUG dans
+        # cinesort_api.py:955).
+        store, _runner = api._get_or_create_infra(api._state_dir)
+        report = store.get_perceptual_report(run_id=str(run_id), row_id=str(row_id))
+        if not report:
+            return {
+                "ok": False,
+                "message": "Aucune analyse perceptuelle persistee pour ce film. Lancez l'analyse depuis l'inspecteur.",
+                "missing": True,
+            }
+        # Le DB mixin renvoie deja un dict complet. On le wrap juste avec ok=True.
+        return {"ok": True, "details": report}
+    except (KeyError, ValueError, OSError) as exc:
+        logger.warning("get_perceptual_details error run=%s row=%s: %s", run_id, row_id, exc)
+        return {"ok": False, "message": str(exc)}
+
+
 def _validate_and_load_context(
     api: Any,
     run_id: str,
