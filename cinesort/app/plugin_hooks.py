@@ -16,6 +16,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.infra.subprocess_safety import tracked_run
+
 logger = logging.getLogger("cinesort.plugins")
 
 # Evenements supportes
@@ -135,7 +137,10 @@ def _run_plugin(
 
     logger.info("[plugins] exec %s for %s", plugin_path.name, event)
     try:
-        result = subprocess.run(
+        # tracked_run garantit kill+wait du child meme sur KeyboardInterrupt
+        # ou MemoryError (subprocess.run brut le fait uniquement sur
+        # TimeoutExpired). Drop-in compatible avec subprocess.run.
+        result = tracked_run(
             cmd,
             input=payload,
             capture_output=True,
