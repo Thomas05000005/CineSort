@@ -155,11 +155,18 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Pre-autorisation gh + git pour creer issues/PRs/push sans
-          # approbation interactive (non-dispo en CI).
-          # Branch protection main reste active = pas de push direct dessus.
+          # Modele : Opus 4.7 (le plus puissant). Effort max via
+          # extended thinking budget = 32000 tokens de raisonnement
+          # avant chaque action. Pour l'audit profond ou Claude doit
+          # comparer plusieurs modules entre eux, c'est crucial.
+          # max-turns 100 pour ne pas couper l'execution prematurement
+          # (le run du 12/05 s'est arrete a 3 min sans creer d'issues).
+          model: claude-opus-4-7
           claude_args: >-
-            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh label create:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Edit Write Read Glob Grep"
+            --model claude-opus-4-7
+            --thinking-budget 32000
+            --max-turns 100
+            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh issue list:*) Bash(gh issue view:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh pr list:*) Bash(gh pr view:*) Bash(gh label create:*) Bash(gh label list:*) Bash(gh search:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(git diff:*) Bash(git log:*) Bash(git status:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Bash(head:*) Bash(tail:*) Bash(cat:*) Bash(python -m:*) Edit Write Read Glob Grep WebFetch"
           prompt: >-
             Audit automatique de CineSort, couche "${{ steps.target.outputs.target }}",
             niveau "${{ github.event.inputs.level || 'modere' }}".
@@ -173,7 +180,11 @@ jobs:
             ${{ steps.target.outputs.target != 'transverse' && steps.modules.outputs.list || '' }}
 
 
-            Mission :
+            Mission : tu es un developpeur senior expert qui audite CineSort
+            tres rigoureusement. Tu DOIS EXECUTER les actions (gh issue create,
+            gh pr create, etc.), pas juste les decrire. Le run precedent a
+            consomme 0.54 USD mais cree 0 issue car tu avais juste analyse
+            sans rien executer. Cette fois, EXECUTE.
 
 
             ============================
@@ -182,27 +193,162 @@ jobs:
 
             AVANT toute action, recense ce qui existe deja :
 
-            - `gh issue list --state open --limit 200 --json number,title,body`
-            - `gh pr list --state open --limit 100 --json number,title,headRefName,files`
+            - `gh issue list --state open --limit 300 --json number,title,body,labels`
+            - `gh pr list --state open --limit 100 --json number,title,headRefName,files,body`
+            - `gh issue list --state closed --limit 100 --json number,title` (les fermees recentes pour eviter recreer)
 
             Stocke ces listes en memoire pour la suite.
 
 
             ============================
-            ETAPE 1 - LECTURE
+            ETAPE 1 - LECTURE EXHAUSTIVE
             ============================
 
-            Pour CHAQUE module liste, lis le contenu integralement.
+            Pour CHAQUE module liste, lis le contenu integralement (Read tool).
+            Si un module fait plus de 1000 lignes, lis-le en plusieurs fois
+            sans rien sauter. NE pas faire d'analyse statistique sur le code,
+            lire vraiment.
 
 
             ============================
-            ETAPE 2 - ANALYSE
+            ETAPE 2 - ANALYSE PROFONDE (16 CATEGORIES)
             ============================
 
-            Cherche : bugs latents (None.method, comparaison douteuse,
-            try/except trop large, race condition), simplifications mineures,
-            patterns dangereux, fonctions trop longues (>100L), magic numbers,
-            duplications, cycles imports, mauvais usage stdlib.
+            Pour CHAQUE module, cherche TOUS ces patterns :
+
+            (1) BUGS LATENTS PYTHON
+            - None.method() : variable potentiellement None deref
+            - == None, != None (devrait etre is None / is not None)
+            - Comparaison float == 0.0 (use math.isclose)
+            - try/except Exception (trop large) ou bare except:
+            - Race conditions : modification dict/list/set partage entre threads
+            - Generator epuise re-itere
+            - Mutable default argument : def f(x=[]):
+            - Closure capture mauvaise variable dans loop
+
+            (2) BUGS DOMAINE (logique metier)
+            - Off-by-one dans index/slice
+            - Division par 0 possible (sans guard)
+            - Boundary conditions oubliees (liste vide, 1 element, max value)
+            - Edge cases NFO/probe : tags manquants, types invalides
+            - TMDb fallback chain casse (queries vides, results None)
+            - DPAPI : secret en clair dans une exception/log
+            - Atomicite : journal apply incoherent avec FS
+
+            (3) PERFORMANCE
+            - Boucle O(n^2) qui pourrait etre O(n) avec set/dict
+            - I/O dans loop (read file par film -> lire batch)
+            - re.compile() dans loop au lieu de module-level
+            - Query DB dans loop (N+1)
+            - Lecture fichier sans buffering
+            - subprocess.run pour chaque fichier (devrait etre batch)
+            - Cache manquant sur fonction pure et coûteuse
+
+            (4) SECURITE
+            - subprocess avec shell=True + variable user
+            - SQL formate avec f-string sur user input (sqlite3 param binding ?)
+            - eval(), exec(), os.system()
+            - Path traversal : open(user_input)
+            - Secrets dans config sans DPAPI (TMDb/Jellyfin/Plex/Radarr keys)
+            - HTTP sans timeout
+            - certif SSL desactivee
+            - XML parsing sans defusedxml (XXE)
+
+            (5) CONCURRENCE
+            - Variable globale modifiee sans lock
+            - Singleton mute sans verrou
+            - threading.Event mal utilise
+            - asyncio mix avec sync sans run_in_executor
+
+            (6) UI / FRONTEND
+            - innerHTML avec variable non escape (XSS)
+            - addEventListener sans removeEventListener (memory leak)
+            - setTimeout/setInterval non cleared
+            - DOM query dans loop (cache le selector)
+            - querySelector(id) au lieu de getElementById (perf)
+            - alert() / confirm() / prompt() en prod (UX cassee)
+            - localStorage sans JSON.parse safe (crash sur valeur corrompue)
+            - fetch() sans catch
+            - Promise sans error handler
+            - Pas de loading state pendant fetch
+            - Bouton clickable pendant fetch (double submit)
+
+            (7) ACCESSIBILITE (a11y)
+            - <button> manquant aria-label sur icone seule
+            - <img> sans alt
+            - <input> sans <label> ou aria-label
+            - Couleur seule pour info (sans icone/texte)
+            - Contraste insuffisant (text + bg)
+            - <div onclick> au lieu de <button>
+            - Focus trap dans modale manquant
+            - aria-live oublie sur notifications
+            - role= manque sur menu/dialog/tab
+
+            (8) I18N
+            - String hardcoded en FR/EN dans le code au lieu de t("key")
+            - Cles de traduction manquantes en EN
+            - Date/nombre formate avec locale fixe (pas Intl.DateTimeFormat)
+            - Pluriels mal geres (pas de regle plurielle)
+
+            (9) MIGRATIONS DB
+            - ALTER TABLE sans IF NOT EXISTS (cf v7.8.0 idempotence)
+            - Migration non-reversible sans documentation
+            - CREATE INDEX sans IF NOT EXISTS
+            - Schema_history non-updated
+            - Backward compat cassee
+
+            (10) DETTE TECHNIQUE
+            - Fonctions > 100L (refactor candidat)
+            - Magic numbers (chiffres en dur sans explication)
+            - Duplication code (3+ blocs similaires)
+            - Imports lazy (`import cinesort.X` indentes) = cycle import
+            - TODO / FIXME / XXX dans le code
+            - Commentaires obsoletes (parlent de v3, code est v7)
+            - Tests skipes sans raison documentee
+
+            (11) CODE MORT
+            - Fonctions/methodes jamais appelees
+            - Variables affectees jamais lues
+            - Imports inutilises
+            - Conditions impossibles (always-true / always-false)
+            - Branches if/elif/else jamais atteignables
+
+            (12) PATTERNS STANDARDS PYTHON
+            - Iteration manuelle au lieu de for-each
+            - if x == True: au lieu de if x:
+            - for i in range(len(x)): au lieu de enumerate
+            - Concat string en loop au lieu de "".join()
+            - Open sans context manager
+            - dict[k] avec KeyError au lieu de dict.get(k)
+            - try/except autour de int(x) au lieu de re-pattern propre
+
+            (13) TYPING (mypy errors potentiels)
+            - Optional implicite : def f(x: int = None) -> doit etre Optional[int]
+            - Any partout au lieu de types precis
+            - return type manquant sur fonctions publiques
+            - dict[str, Any] partout au lieu de TypedDict
+            - Variables annotees Tuple[X] alors qu'on assigne List
+
+            (14) ERROR HANDLING
+            - except qui silence sans logger ni propager
+            - except + return None sans contexte au caller
+            - raise sans chainer (raise ... from exc) -> perte stacktrace
+            - try qui englobe trop de code (impossible de savoir quoi a fail)
+
+            (15) LOGGING
+            - print() au lieu de logger.X
+            - logger.error sans traceback (use logger.exception)
+            - Logs en clair contenant secrets (DPAPI keys, tokens)
+            - Niveau log incoherent (DEBUG pour erreurs, ERROR pour info)
+            - f-string evaluee meme si niveau desactive (use lazy %s)
+
+            (16) TESTS
+            - Module sans test direct
+            - Test qui mock TROP (test n'exerce rien de reel)
+            - Test sans assertion (juste smoke test)
+            - Test timing-sensitive sans tolerance
+            - Test pollue sys.modules ou globals (cf issue #4 fixed)
+            - Coverage de la branche d'erreur manquante
 
 
             ============================
@@ -212,10 +358,31 @@ jobs:
             Ecris (et ouvre une PR pour ajouter) :
             docs/internal/audits/claude/$(date +%Y-%m-%d)-${{ steps.target.outputs.target }}.md
 
-            Format :
-            - Resume executif (top 10 findings critiques)
-            - Section par module avec liste des findings
-              (severite low/med/high + ligne + description + suggestion)
+            Format obligatoire :
+            ```
+            # Audit Claude - YYYY-MM-DD - Couche <target>
+
+            ## Resume executif
+            Top 10 findings critiques (severite HIGH ou bug exploit/casse comportement)
+
+            ## Par categorie
+            Pour chacune des 16 categories : nb findings + 2 exemples.
+
+            ## Par module
+            Section par module avec :
+            - severite (low/med/high/critical)
+            - categorie (numero parmi les 16)
+            - fichier:ligne
+            - description
+            - suggestion fix
+
+            ## Statistiques
+            - Modules audites : N
+            - Findings totaux : N (high X, med Y, low Z)
+            - Issues creees : N (cf liste etape 4)
+            - PRs ouvertes : N (cf liste etape 5)
+            - Findings deja connus (dedup) : N
+            ```
 
 
             ============================
@@ -299,40 +466,83 @@ jobs:
             (a) Cherche dans les PRs ouvertes etape 0 si une PR sur le meme
                 fichier traite deja ce point. Si oui, skip.
 
-            (b) Sinon, ouvre une PR :
-                - Branch : fix/audit-${{ steps.target.outputs.target }}-<topic>
-                - Titre Conventional Commit
-                - Body : explique le bug + le fix + reference l'issue creee etape 4
+            (b) Sinon, OUVRE EFFECTIVEMENT la PR (n'oublie pas EXECUTE) :
+                ```bash
+                git checkout -b fix/audit-${{ steps.target.outputs.target }}-<topic>
+                # ... applique le fix avec Edit/Write
+                git add <fichiers>
+                git commit -m "fix(...): ..."
+                git push -u origin fix/audit-${{ steps.target.outputs.target }}-<topic>
+                gh pr create --title "fix(...): ..." --body "..." --base main
+                ```
 
-            LIMITE : 10 PRs maximum par run pour ne pas saturer la review.
-            Si plus de 10 trouves, garde les top-10 prioritaires par severite,
-            les autres restent en issue uniquement.
+            LIMITE : 15 PRs maximum par run (au lieu de 10 avant pour ne pas
+            saturer, mais maintenant on est plus ambitieux).
+            Si plus de 15 trouves, garde les top-15 par severite, les autres
+            restent en issue uniquement.
+
+            BRANCH PROTECTION : main exige 7 status checks verts. Une PR sera
+            mergee SEULEMENT si elle passe la CI. Ne te soucie pas de merger,
+            l'utilisateur le fera.
 
 
             ============================
-            ETAPE 6 - DOCUMENTATION
+            ETAPE 6 - DOCUMENTATION + SYNTHESE
             ============================
 
             En fin de run, poste un commentaire de synthese dans l'issue #14
             (Audit complet par modules) avec :
-            - Date + couche auditee
-            - Nb modules audites
-            - Nb findings nouveaux / nb deja connus
-            - Nb issues creees / nb PRs ouvertes
-            - Lien vers le rapport markdown
+
+            ```markdown
+            ## Re-audit YYYY-MM-DD - Couche <target>
+
+            **Modele** : Opus 4.7 (thinking budget 32K)
+            **Modules audites** : N
+            **Categories couvertes** : 16/16
+
+            ### Findings
+            - HIGH : N (X nouveaux, Y deja connus enrichi)
+            - MED : N (X nouveaux, Y deja connus enrichi)
+            - LOW : N
+
+            ### Actions creees
+            - Issues : nouvelles #X, #Y, #Z + commentaires enrichis sur #A, #B
+            - PRs : nouvelles #P, #Q + commentaires sur #R existante
+
+            ### Rapport detaille
+            -> [docs/internal/audits/claude/YYYY-MM-DD-<target>.md]
+
+            ### Tendance
+            Compare avec audit precedent (si rapport existe) : +X / -Y findings.
+            ```
 
 
             ============================
-            REGLES TRANSVERSES
+            REGLES TRANSVERSES (LIRE AVANT D'AGIR)
             ============================
 
+            **CRITIQUE - EXECUTE LES ACTIONS, NE LES DECRIS PAS** :
+            Le run du 12/05 06h37 a coute 0.54 USD et n'a CREE aucune issue
+            ni PR car tu avais juste reflechi sans rien executer. Cette fois,
+            UTILISE les outils bash effectivement :
+            - gh issue create ... (cree vraiment)
+            - gh pr create ... (cree vraiment)
+            - git push ... (push vraiment)
+
+            REGLES :
             - REPONDS EN FRANCAIS dans tous les commentaires.
-            - Niveau "modere" : fixes evidents/safe seulement.
-            - Niveau "agressif" : refactors structurels (PRs distinctes).
+            - Niveau "modere" : fixes evidents/safe seulement, PRs petites.
+            - Niveau "agressif" : refactors structurels OK (PRs distinctes).
             - Niveau "defensif" : rapport + issues uniquement, ZERO PR.
-            - Conventional Commits obligatoire sur les titres PR (pr-title-lint
-              le verifie sinon ca bloque).
-            - Branch protection main : tu ne peux PAS push direct dessus, tu
-              dois TOUJOURS passer par une branche + PR.
+            - Conventional Commits obligatoire sur titres PR ("fix(scope): ...",
+              "refactor(scope): ...", "perf(scope): ...", "test(scope): ...",
+              "docs(scope): ...", "chore(scope): ..."). pr-title-lint bloque sinon.
+            - Branch protection main : tu ne peux PAS push direct dessus.
+              Toujours branche + PR.
+            - Tu as 100 turns max. Sois EFFICACE : lis batch, agis batch.
+            - Tu as Opus 4.7 + 32K thinking : utilise ta puissance pour des
+              analyses cross-module, pas juste fichier par fichier isole.
 
             ${{ steps.target.outputs.target == 'transverse' && 'Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune.' || '' }}
+
+            ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.

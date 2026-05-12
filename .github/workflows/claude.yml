@@ -67,6 +67,9 @@ jobs:
         with:
           # OAuth token de l'abonnement Max (cf instructions setup au-dessus)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Opus 4.7 + thinking budget max pour les mentions @claude manuelles
+          # (utilisateur attend reponse de qualite, pas un brouillon).
+          model: claude-opus-4-7
           # Pre-autorisation des commandes courantes pour eviter "approbation
           # interactive non disponible en CI". Sans ca, Claude ne peut pas
           # creer d'issues/PRs/push, il doit juste lister ce qu'il faudrait.
@@ -74,11 +77,14 @@ jobs:
           # pas de rm sur des fichiers track. Branch protection main reste
           # active : Claude ne peut PAS push direct sur main.
           claude_args: >-
-            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh label create:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Edit Write Read Glob Grep"
+            --model claude-opus-4-7
+            --thinking-budget 32000
+            --max-turns 100
+            --allowed-tools "Bash(gh issue create:*) Bash(gh issue comment:*) Bash(gh issue edit:*) Bash(gh issue list:*) Bash(gh issue view:*) Bash(gh pr create:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh pr list:*) Bash(gh pr view:*) Bash(gh label create:*) Bash(gh label list:*) Bash(gh search:*) Bash(git push:*) Bash(git checkout:*) Bash(git commit:*) Bash(git add:*) Bash(git branch:*) Bash(git tag:*) Bash(git merge:*) Bash(git rebase:*) Bash(git diff:*) Bash(git log:*) Bash(git status:*) Bash(find:*) Bash(grep:*) Bash(rg:*) Bash(wc:*) Bash(sort:*) Bash(uniq:*) Bash(head:*) Bash(tail:*) Bash(cat:*) Bash(python -m:*) Edit Write Read Glob Grep WebFetch"
           # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
           # (mention contient deja le prompt). Bloc YAML > pour eviter les
           # problemes d'echappement avec les expressions GitHub ${{ }}.
           prompt: >-
             ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prompt
-            || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort. Verifie qu il n y a pas de regressions de qualite, de vulnerabilites, de patterns dangereux. Si tu trouves des problemes corrigeables, ouvre une PR avec les fixes. Reponds en francais.')
+            || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort avec Opus 4.7 + thinking max. Verifie systematiquement les 16 categories : (1) bugs latents Python, (2) bugs domaine metier, (3) performance O(n^2)/I/O loop/N+1, (4) securite (subprocess shell, SQL injection, secrets clear, XXE), (5) concurrence (race, lock), (6) UI/frontend (XSS innerHTML, memory leak listeners, fetch sans catch), (7) accessibilite a11y, (8) i18n strings hardcodes, (9) migrations DB (idempotence), (10) dette technique (fonctions >100L, magic numbers, duplications, imports lazy), (11) code mort, (12) patterns Python non-idiomatiques, (13) typing mypy, (14) error handling, (15) logging (secrets en clair, niveau errone), (16) tests (mock excessif, sans assertion). Avant action : `gh issue list --state open` et `gh pr list --state open` pour dedup. EXECUTE les actions (gh issue create / gh pr create / git push), ne les decris pas. Reponds en francais.')
             || '' }}
