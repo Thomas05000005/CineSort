@@ -91,7 +91,12 @@ def _op_nin(a, v):
 def _op_between(a, v):
     if not (isinstance(v, list) and len(v) == 2):
         return False
-    return _num(v[0]) <= _num(a) <= _num(v[1])
+    # Normalisation defensive : si l'utilisateur fournit [100, 10] (bornes
+    # inversees), on les trie pour matcher l'intention (entre 10 et 100).
+    # Avant ce fix, la regle echouait silencieusement sur toutes les valeurs.
+    # Cf issue #30 + principle of least surprise (POLS, prompt v3 cat 45).
+    lo, hi = sorted([_num(v[0]), _num(v[1])])
+    return lo <= _num(a) <= hi
 
 
 def _op_contains(a, v):
