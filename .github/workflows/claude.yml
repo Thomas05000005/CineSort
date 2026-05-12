@@ -44,7 +44,7 @@ jobs:
   claude:
     name: Claude Code session
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
 
     # Ne lance que si la mention contient @claude OU si c'est un schedule/dispatch
     if: |
@@ -69,13 +69,14 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Opus 4.7 via --model dans claude_args (l'input 'model' au niveau
           # racine n'existe pas dans claude-code-action@v1).
-          # max-turns 100 pour ne pas couper prematurement.
+          # max-turns 200 + timeout 90min pour les sessions @claude longues
+          # (mention sur PR avec demande d'analyse + fix + tests).
           # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)".
           # Branch protection main reste active : Claude doit toujours
           # passer par une PR, pas de push direct sur main.
           claude_args: |
             --model claude-opus-4-7
-            --max-turns 100
+            --max-turns 200
             --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           # Prompt par defaut sur schedule/dispatch ; ignore en mode mention
           # (mention contient deja le prompt). Bloc YAML > pour eviter les

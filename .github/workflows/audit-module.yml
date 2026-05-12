@@ -74,7 +74,7 @@ jobs:
   audit:
     name: Audit ${{ github.event.inputs.target || 'auto-rotation' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -158,12 +158,13 @@ jobs:
           # Modele : Opus 4.7. Le modele est passe via --model dans
           # claude_args (NB : 'model' au niveau input direct n'existe
           # pas, ca a fait fail le run du 12/05 23h).
-          # max-turns 100 pour ne pas couper prematurement.
+          # max-turns 300 + timeout 180min : audit complet sans coupure
+          # prematuree (120+ modules a lire/analyser + PRs/issues a creer).
           # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)"
           # (separe par virgule sans espace, entoure de double-quotes).
           claude_args: |
             --model claude-opus-4-7
-            --max-turns 100
+            --max-turns 300
             --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           prompt: >-
             Audit automatique de CineSort, couche "${{ steps.target.outputs.target }}",
@@ -537,7 +538,9 @@ jobs:
               "docs(scope): ...", "chore(scope): ..."). pr-title-lint bloque sinon.
             - Branch protection main : tu ne peux PAS push direct dessus.
               Toujours branche + PR.
-            - Tu as 100 turns max. Sois EFFICACE : lis batch, agis batch.
+            - Tu as 300 turns max + 180 min de runtime. Tu peux te
+              permettre une analyse approfondie sans rusher, mais reste
+              efficace : lis batch, agis batch.
             - Tu as Opus 4.7 + 32K thinking : utilise ta puissance pour des
               analyses cross-module, pas juste fichier par fichier isole.
 
