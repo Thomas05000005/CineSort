@@ -16,6 +16,69 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## OPERATION TERMINEE — Audit Claude v3 + Hardening security (12 mai 2026) ✅
+
+Session intensive d'amelioration de l'audit automatique via GitHub Actions + 
+hardening security + fixes issus du 1er run audit.
+
+### Resultats
+
+- **Audit Claude Code Action v3** : prompt 1406 lignes externalise dans
+  `.github/audit-prompt.md` (cf #28 fix size limit GitHub Actions 21000).
+  46 categories d'audit (vs 16 initiales), 6 personas multi-agent
+  (Security/Performance/UX/DB/Reliability/Compliance), JSON output schema
+  + dedup via hash, self-critique 6 filtres, 1500 turns / 6h timeout.
+- **Workflow audit-module.yml** : limites supprimees (15 PRs max -> illimite,
+  300 turns -> 1500, 180 min -> 360 min). Cron quotidien 04h UTC.
+- **OpenSSF Scorecard** : 42 actions externes pinned par SHA + permissions
+  scopees par job (PR #27). Dependabot security updates ACTIVE via API.
+- **1er run audit (14 min, 130 modules)** : 4 PRs auto fixes (plugin_hooks
+  tracked_run, urlretrieve timeout, dead code, rapport docs) + 6 issues
+  detaillees. Self-critique a supprime 31 faux positifs.
+- **6 issues issues du run resolues** : DPAPI docs (#34), _op_between
+  bornes inversees (#30), float comparisons HDR+spectral (#31), executescript
+  transaction-safe (#33), O(n^2) fuzzy matching x3 modules (#29 perf x100-x1000),
+  plan commente pour feature UI orphan data (#32).
+- **CVE-2025-71176 pytest** bumpe a 9.0.3 (PR #44).
+- **Bugs perceptuels precoces** : audio_score=0 conflate fixed,
+  interpolation continue _score_val_inv/_score_bits (vs escalier 4 valeurs),
+  magic numbers blur -> constantes nommees, __all__ ajoute composite_score.
+
+### 16 PRs mergees
+
+#22 fix(perceptual): 4 bugs composite_score + 8 tests + __all__
+#23 refactor(perceptual): nommer seuils blur des verdicts croises
+#24 feat(perceptual): scoring continu par interpolation lineaire
+#25 chore(ci): prompt audit v2 (21 categories + ETAPE 2.5 techniques cross-couche)
+#26 feat(ci): prompt audit v3 ultra-complet (46 categories + multi-agent + JSON)
+#27 chore(security): pin SHAs + scope permissions par job (Scorecard fixes)
+#28 fix(ci): URGENT - prompt > 21000 chars bloque les runs (externalisation .md)
+#35 fix(plugins): plugin_hooks tracked_run pour cleanup garanti
+#36 fix(probe): timeout socket sur urlretrieve dans auto_install
+#37 refactor(audit): nettoyer 2 dead-code mineurs (tautologie + typo .upper)
+#38 docs(audit): rapport Claude audit 2026-05-12 couche all (130 modules)
+#39 docs(security): scope DPAPI CURRENT_USER documente
+#40 fix(domain): _op_between normalise les bornes inversees (POLS)
+#41 fix(perceptual): comparaisons flottantes robustes (HDR + spectral)
+#42 fix(db): bootstrap schema dans transaction BEGIN/COMMIT (rollback-safe)
+#43 perf(app): vectoriser fuzzy matching titres x3 modules
+
+### 14 issues fermees
+
+#13 #15 #16 #17 #18 #19 #20 #21 (audits perceptual + cleanup doublons)
+#29 #30 #31 #32 (commente) #33 #34 (audit Claude run 1)
+
+### Restant
+
+- Issue #14 : meta-tracker audit (permanent, OK)
+- Issue #32 : feature UI exposure (decision produit a prendre : modale /
+  inline / page dediee pour exposer audio_fingerprint, ssim_self_ref,
+  upscale_verdict, voir commentaire detaille)
+- Cron audit auto 04h UTC quotidien : continuera a livrer findings sur
+  les categories non encore epuisees
+
+---
+
 ## OPERATION TERMINEE — Polish Total v7.7.0 (4 mai 2026) ✅
 
 **7 vagues completees** sur la branche `polish_total_v7_7_0` (depuis `audit_qa_v7_6_0_dev_20260428`).
