@@ -94,7 +94,9 @@ def parse_ratio(value: Any) -> float:
             num_str, den_str = s.split("/", 1)
             num = float(num_str)
             den = float(den_str)
-            if den == 0.0:
+            # Comparaison float robuste : den peut etre tres petit (1e-300)
+            # apres parsing/normalisation mais != 0.0 exact. Cf issue #31.
+            if abs(den) < 1e-9:
                 return 0.0
             return num / den
         except (ValueError, TypeError):
