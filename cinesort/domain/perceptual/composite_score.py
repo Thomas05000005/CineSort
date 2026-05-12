@@ -42,6 +42,15 @@ from .constants import (
 )
 from .models import AudioPerceptual, GrainAnalysis, PerceptualResult, VideoPerceptual
 
+__all__ = [
+    "compute_visual_score",
+    "compute_audio_score",
+    "compute_global_score",
+    "determine_tier",
+    "detect_cross_verdicts",
+    "build_perceptual_result",
+]
+
 logger = logging.getLogger(__name__)
 
 
