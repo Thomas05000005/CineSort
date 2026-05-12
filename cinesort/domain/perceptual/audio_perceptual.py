@@ -72,7 +72,13 @@ _RE_PEAK = re.compile(r"Peak level.*?:\s*([-\d.]+)", re.IGNORECASE)
 _RE_NOISE = re.compile(r"Noise floor.*?:\s*([-\d.]+)", re.IGNORECASE)
 _RE_CREST = re.compile(r"Crest factor.*?:\s*([\d.]+)", re.IGNORECASE)
 _RE_DYNRANGE = re.compile(r"Dynamic range.*?:\s*([\d.]+)", re.IGNORECASE)
-_RE_JSON_BLOCK = re.compile(r"\{[^}]+\}")
+# Cf issue #53 : on cible specifiquement le bloc loudnorm via la cle
+# 'input_i' (toujours presente dans le JSON loudnorm ffmpeg). Le pattern
+# precedent r'\{[^}]+\}' (1) ne supportait pas le JSON nested et (2)
+# prenait le PREMIER match alors que loudnorm imprime son resultat en
+# dernier (un avertissement contenant des accolades passait avant).
+# DOTALL autorise les newlines dans le bloc, findall+[-1] prend le dernier.
+_RE_JSON_BLOCK = re.compile(r"\{[^{}]*input_i[^{}]*\}", re.DOTALL)
 
 _DEFAULT_SAMPLE_RATE = 48000
 
@@ -136,16 +142,20 @@ def analyze_loudnorm(
         logger.debug("loudnorm: pas de sortie stderr rc=%d", rc)
         return None
 
-    # Trouver le bloc JSON dans stderr
-    m = _RE_JSON_BLOCK.search(stderr)
-    if not m:
-        logger.debug("loudnorm: bloc JSON introuvable dans stderr")
+    # Cf issue #53 : prendre le DERNIER bloc loudnorm (filtre sur 'input_i'
+    # via la regex). ffmpeg peut imprimer plusieurs blocs JSON-like dans
+    # stderr (Parsed_loudnorm warnings) avant le vrai bloc loudnorm final.
+    matches = _RE_JSON_BLOCK.findall(stderr)
+    if not matches:
+        logger.debug("loudnorm: bloc JSON contenant 'input_i' introuvable dans stderr")
         return None
+    raw_json = matches[-1]
 
     try:
-        data = json.loads(m.group(0))
+        data = json.loads(raw_json)
     except (json.JSONDecodeError, ValueError) as exc:
-        logger.debug("loudnorm: JSON invalide: %s", exc)
+        # Loggue le raw JSON tronque pour diagnostic ulterieur
+        logger.warning("loudnorm: JSON invalide: %s (raw=%s)", exc, raw_json[:200])
         return None
 
     il = _safe_float(data.get("input_i"))
