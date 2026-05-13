@@ -131,9 +131,11 @@ def check_disk_space_for_apply(
         )
         return False, info
 
+    free_mb = usage.free / (1024 * 1024)
+    needed_mb = needed / (1024 * 1024)
     info["message"] = (
         f"Espace disque OK sur {target_root} : "
-        f"{usage.free // (1024 * 1024)} Mo libres, "
-        f"{needed // (1024 * 1024)} Mo requis."
+        f"{free_mb:.0f} Mo libres, "
+        f"{needed_mb:.0f} Mo requis."
     )
     return True, info
