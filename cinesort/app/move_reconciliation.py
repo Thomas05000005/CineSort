@@ -83,8 +83,8 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
 
     try:
         pending = store.list_pending_moves()
-    except Exception as exc:
-        _logger.warning("reconcile_pending_moves: list_pending_moves echoue: %s", exc)
+    except Exception:
+        _logger.exception("reconcile_pending_moves: list_pending_moves echoue")
         return report
 
     if not pending:
@@ -141,11 +141,10 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         # une fois examinee (ou serait re-examinee a chaque boot).
         try:
             store.delete_pending_move(int(entry.get("id", 0)))
-        except Exception as exc:
-            _logger.warning(
-                "reconcile: delete_pending_move(id=%s) echoue: %s",
+        except Exception:
+            _logger.exception(
+                "reconcile: delete_pending_move(id=%s) echoue",
                 entry.get("id"),
-                exc,
             )
 
     if report["duplicated"] or report["lost"]:
@@ -175,6 +174,6 @@ def reconcile_at_boot(store: Any, *, notify: Optional[Any] = None) -> Dict[str, 
                 "Reconciliation apres crash",
                 f"{n_dup} conflit(s) et {n_lost} fichier(s) perdu(s) detectes. Verifiez les logs.",
             )
-        except Exception as exc:
-            _logger.warning("reconcile_at_boot: notify echoue: %s", exc)
+        except Exception:
+            _logger.exception("reconcile_at_boot: notify echoue")
     return report
