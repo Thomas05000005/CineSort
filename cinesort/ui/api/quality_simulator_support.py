@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -21,8 +22,14 @@ from cinesort.domain import (
 
 logger = logging.getLogger(__name__)
 
+# Cache partage entre tous les threads du REST server (ThreadingHTTPServer).
+# Sans lock, l'eviction FIFO `_SIM_CACHE.pop(next(iter(_SIM_CACHE)))`
+# peut crasher si un autre thread mute le dict pendant l'iteration
+# (RuntimeError: dictionary changed size during iteration), et un
+# clear_cache concurrent peut faire perdre l'entree qu'on vient d'inserer.
 _SIM_CACHE: Dict[str, Dict[str, Any]] = {}
 _SIM_CACHE_LIMIT = 20
+_SIM_CACHE_LOCK = threading.Lock()
 
 _TIER_ORDER = {
     # Nouveaux tiers (v7.2.0-dev, migration 011)
@@ -57,7 +64,8 @@ def run_simulation(
 
         # Cache hit ?
         cache_key = _cache_key(run_id, preset_id, overrides, scope)
-        cached = _SIM_CACHE.get(cache_key)
+        with _SIM_CACHE_LOCK:
+            cached = _SIM_CACHE.get(cache_key)
         if cached is not None:
             logger.debug("simulate: cache hit %s/%s", scope, preset_id)
             return {**cached, "cache_hit": True}
@@ -85,10 +93,12 @@ def run_simulation(
         report["ok"] = True
         report["cache_hit"] = False
 
-        # Cache FIFO
-        if len(_SIM_CACHE) >= _SIM_CACHE_LIMIT:
-            _SIM_CACHE.pop(next(iter(_SIM_CACHE)))
-        _SIM_CACHE[cache_key] = report
+        # Cache FIFO (sous lock pour eviter RuntimeError sur iter
+        # concurrent dans un autre thread REST).
+        with _SIM_CACHE_LOCK:
+            if len(_SIM_CACHE) >= _SIM_CACHE_LIMIT:
+                _SIM_CACHE.pop(next(iter(_SIM_CACHE)))
+            _SIM_CACHE[cache_key] = report
 
         return report
     except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -133,7 +143,8 @@ def _cache_key(run_id: str, preset_id: str, overrides: Any, scope: str) -> str:
 
 
 def _invalidate_cache() -> None:
-    _SIM_CACHE.clear()
+    with _SIM_CACHE_LOCK:
+        _SIM_CACHE.clear()
 
 
 def _resolve_target_profile(preset_id: str, overrides: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
