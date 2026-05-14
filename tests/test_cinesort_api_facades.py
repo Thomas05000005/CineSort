@@ -1,4 +1,4 @@
-"""Tests des facades CineSortApi (issue #84 PR 1 pilote + PR 2 RunFacade).
+"""Tests des facades CineSortApi (issue #84 PR 1 pilote + PR 2 RunFacade + PR 3 SettingsFacade).
 
 Cf docs/internal/REFACTOR_PLAN_84.md.
 
@@ -10,6 +10,11 @@ PR 1 verifie :
 
 PR 2 ajoute :
 - Les 7 methodes du bounded context Run sont exposees sur RunFacade
+- Chaque methode delegue correctement vers CineSortApi
+- Backward-compat : les anciennes methodes directes fonctionnent toujours
+
+PR 3 ajoute :
+- Les 6 methodes du bounded context Settings sont exposees sur SettingsFacade
 - Chaque methode delegue correctement vers CineSortApi
 - Backward-compat : les anciennes methodes directes fonctionnent toujours
 """
@@ -219,6 +224,115 @@ class RunFacadeBackwardCompatTests(unittest.TestCase):
         # Les deux doivent etre des dicts avec une cle "ok"
         self.assertIsInstance(old, dict)
         self.assertIsInstance(new, dict)
+        self.assertEqual(set(old.keys()), set(new.keys()))
+
+
+class SettingsFacadeFullMigrationTests(unittest.TestCase):
+    """PR 3 : les 6 methodes du bounded context Settings sont exposees sur SettingsFacade.
+
+    Chaque test verifie :
+    1. La methode existe sur SettingsFacade et est callable
+    2. La methode delegue vers CineSortApi (memes args, meme retour)
+    """
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_settings_facade_exposes_6_methods(self) -> None:
+        """Sanity : les 6 methodes du bounded context Settings existent."""
+        expected = {
+            "get_settings",
+            "save_settings",
+            "set_locale",
+            "restart_api_server",
+            "reset_all_user_data",
+            "get_user_data_size",
+        }
+        for name in expected:
+            self.assertTrue(
+                hasattr(self.api.settings, name),
+                f"SettingsFacade.{name} manquante",
+            )
+            self.assertTrue(
+                callable(getattr(self.api.settings, name)),
+                f"SettingsFacade.{name} non callable",
+            )
+
+    def test_get_settings_delegates(self) -> None:
+        sentinel = {"root": "C:/test", "state_dir": "C:/state"}
+        with patch.object(self.api, "get_settings", return_value=sentinel) as mocked:
+            result = self.api.settings.get_settings()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_save_settings_delegates(self) -> None:
+        sentinel = {"ok": True}
+        settings = {"root": "C:/new_root"}
+        with patch.object(self.api, "save_settings", return_value=sentinel) as mocked:
+            result = self.api.settings.save_settings(settings)
+        mocked.assert_called_once_with(settings)
+        self.assertEqual(result, sentinel)
+
+    def test_set_locale_delegates(self) -> None:
+        sentinel = {"ok": True, "locale": "en"}
+        with patch.object(self.api, "set_locale", return_value=sentinel) as mocked:
+            result = self.api.settings.set_locale("en")
+        mocked.assert_called_once_with("en")
+        self.assertEqual(result, sentinel)
+
+    def test_restart_api_server_delegates(self) -> None:
+        sentinel = {"ok": True, "restarted": True}
+        with patch.object(self.api, "restart_api_server", return_value=sentinel) as mocked:
+            result = self.api.settings.restart_api_server()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_reset_all_user_data_delegates(self) -> None:
+        sentinel = {"ok": True, "backup_path": "C:/backup.zip"}
+        with patch.object(self.api, "reset_all_user_data", return_value=sentinel) as mocked:
+            result = self.api.settings.reset_all_user_data("CONFIRM")
+        mocked.assert_called_once_with("CONFIRM")
+        self.assertEqual(result, sentinel)
+
+    def test_reset_all_user_data_default_confirmation(self) -> None:
+        """Le default confirmation='' doit etre transmis correctement."""
+        sentinel = {"ok": False, "message": "confirmation manquante"}
+        with patch.object(self.api, "reset_all_user_data", return_value=sentinel) as mocked:
+            self.api.settings.reset_all_user_data()
+        mocked.assert_called_once_with("")
+
+    def test_get_user_data_size_delegates(self) -> None:
+        sentinel = {"data": {"total_bytes": 12345}}
+        with patch.object(self.api, "get_user_data_size", return_value=sentinel) as mocked:
+            result = self.api.settings.get_user_data_size()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+
+class SettingsFacadeBackwardCompatTests(unittest.TestCase):
+    """Les 6 anciennes methodes Settings directes restent fonctionnelles."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_all_6_old_settings_methods_still_exist(self) -> None:
+        for name in (
+            "get_settings",
+            "save_settings",
+            "set_locale",
+            "restart_api_server",
+            "reset_all_user_data",
+            "get_user_data_size",
+        ):
+            self.assertTrue(
+                hasattr(self.api, name),
+                f"CineSortApi.{name} a disparu (regression backward-compat)",
+            )
+
+    def test_get_settings_via_old_and_new_returns_same_keys(self) -> None:
+        """Parite structurelle : memes cles via api.X et api.settings.X."""
+        old = self.api.get_settings()
+        new = self.api.settings.get_settings()
         self.assertEqual(set(old.keys()), set(new.keys()))
 
 
