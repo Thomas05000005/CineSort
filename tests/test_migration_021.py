@@ -93,7 +93,9 @@ class FreshMigration021Tests(unittest.TestCase):
 
     def test_indexes_preserved_quality_reports(self) -> None:
         names = _index_names(self.conn, "quality_reports")
-        self.assertIn("idx_quality_reports_run", names)
+        # Migration 022 drop idx_quality_reports_run (redondant avec PK
+        # composite run_id,row_id, cf issue #77). Les autres indexes
+        # restent utiles (tier/score filtrent independamment).
         self.assertIn("idx_quality_reports_tier", names)
         self.assertIn("idx_quality_reports_score", names)
 
@@ -268,7 +270,9 @@ class ExistingDbMigrationTests(unittest.TestCase):
         # 2) Migre vers v21 (avec le repertoire reel qui inclut 021)
         mgr_v21 = MigrationManager(self.db_path, _REAL_MIG_DIR)
         v = mgr_v21.apply()
-        self.assertEqual(v, 21)
+        # Migration 022 ajoutee (drop indexes redondants) -> on attend >= 21
+        # plutot que strict 21 pour rester robuste aux futures migrations.
+        self.assertGreaterEqual(v, 21)
 
         # 3) Toutes les donnees legitimes preservees
         with closing(connect_sqlite(str(self.db_path))) as conn:
@@ -318,7 +322,9 @@ class ExistingDbMigrationTests(unittest.TestCase):
 
         mgr_v21 = MigrationManager(self.db_path, _REAL_MIG_DIR)
         v = mgr_v21.apply()
-        self.assertEqual(v, 21)
+        # Migration 022 ajoutee (drop indexes redondants) -> on attend >= 21
+        # plutot que strict 21 pour rester robuste aux futures migrations.
+        self.assertGreaterEqual(v, 21)
 
         with closing(connect_sqlite(str(self.db_path))) as conn:
             # Le legitime est preserve

@@ -336,6 +336,19 @@ def _build_delta_report(
     degraded = sum(1 for r in results if _TIER_ORDER.get(r["tier_after"], 0) < _TIER_ORDER.get(r["tier_before"], 0))
     unchanged = sum(1 for r in results if r["tier_before"] == r["tier_after"] and r["delta"] == 0)
 
+    # Cf issue #107 : champ `warnings` etait toujours [] (contrat API trompeur).
+    # On le remplit avec des warnings derives des deltas pour signaler les
+    # situations a impact eleve avant que l'utilisateur applique le preset.
+    warnings: List[str] = []
+    if degraded > improved and (degraded - improved) >= max(5, n // 20):
+        warnings.append(f"Plus de films degrades ({degraded}) qu'ameliores ({improved}) avec ce preset.")
+    if prem_delta <= -5:
+        warnings.append(f"{-prem_delta} films perdraient leur statut Premium.")
+    if fail_delta >= 10:
+        warnings.append(f"{fail_delta} films passeraient en Reject.")
+    if abs(avg_after - avg_before) < 0.5 and n >= 20:
+        warnings.append("Impact moyen quasi-nul (< 0.5 pts) : ce preset modifie peu votre bibliotheque.")
+
     return {
         "preset_id": preset_id,
         "preset_label": target.get("label") or preset_id,
@@ -367,7 +380,7 @@ def _build_delta_report(
         "distribution_shift": shift,
         "by_codec": by_codec,
         "by_resolution": by_res,
-        "warnings": [],
+        "warnings": warnings,
         "apply_estimate": {
             "write_count": n,
             "ms_estimate": max(100, int(elapsed_ms * 1.2)),

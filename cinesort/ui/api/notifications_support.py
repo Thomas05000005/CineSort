@@ -38,6 +38,7 @@ _MAX_NOTIFICATIONS = 200
 _VALID_LEVELS = {"info", "success", "warning", "error"}
 _VALID_CATEGORIES = {"event", "insight", "watchlist", "integration", "system"}
 _EVENT_TO_LEVEL = {
+    "scan_triggered": "info",  # cf #108 : watcher a detecte un changement
     "scan_done": "success",
     "apply_done": "success",
     "undo_done": "info",
