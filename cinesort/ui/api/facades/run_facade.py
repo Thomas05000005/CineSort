@@ -1,12 +1,21 @@
-"""RunFacade : bounded context Run Flow (issue #84 PR 1 pilote).
+"""RunFacade : bounded context Run Flow (issue #84 PR 2 — migration complete).
 
-Methodes prevues a terme (7) :
-    start_plan, get_status, get_plan, export_run_report,
-    cancel_run, build_apply_preview, list_apply_history
+Cf docs/internal/REFACTOR_PLAN_84.md.
 
-Cette PR (pilote) implemente UNE methode : start_plan. Les 6 autres seront
-ajoutees dans PR 2 (refactor: full RunFacade migration). Pendant ce temps,
-toutes les anciennes methodes sur CineSortApi continuent de fonctionner.
+7 methodes du bounded context Run :
+    - start_plan : demarre scan+plan en thread background
+    - get_status : progression + logs + sante d'un run
+    - get_plan : liste PlanRow persistees (plan.jsonl)
+    - export_run_report : export json/csv/html du rapport
+    - cancel_run : pose cancel_requested=1
+    - build_apply_preview : plan avant/apres des deplacements
+    - list_apply_history : batches apply reels + dry-run
+
+Strategie Strangler Fig + Adapter pattern :
+- Les 7 methodes existent EN PARALLELE sur CineSortApi (preserve backward-compat)
+- Cette facade delegue simplement vers self._api.X
+- Les nouveaux call sites peuvent utiliser api.run.X(...)
+- Les anciens call sites (api.X(...)) continuent de fonctionner
 """
 
 from __future__ import annotations
@@ -22,7 +31,48 @@ class RunFacade(_BaseFacade):
     def start_plan(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Demarre un scan+plan en thread background.
 
-        Delegation vers CineSortApi.start_plan (preserve backward-compat).
-        Cf docs/internal/REFACTOR_PLAN_84.md PR 1.
+        Cf CineSortApi.start_plan pour la doc complete.
         """
         return self._api.start_plan(settings)
+
+    def get_status(self, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
+        """Progression + logs + sante d'un run.
+
+        Cf CineSortApi.get_status pour la doc complete.
+        """
+        return self._api.get_status(run_id, last_log_index)
+
+    def get_plan(self, run_id: str) -> Dict[str, Any]:
+        """Retourne la liste des PlanRow persistees dans plan.jsonl.
+
+        Cf CineSortApi.get_plan pour la doc complete.
+        """
+        return self._api.get_plan(run_id)
+
+    def export_run_report(self, run_id: str, fmt: str = "json") -> Dict[str, Any]:
+        """Exporte le rapport du run au format json / csv / html.
+
+        Cf CineSortApi.export_run_report pour la doc complete.
+        """
+        return self._api.export_run_report(run_id, fmt)
+
+    def cancel_run(self, run_id: str) -> Dict[str, Any]:
+        """Demande l'annulation d'un run en cours (pose cancel_requested=1).
+
+        Cf CineSortApi.cancel_run pour la doc complete.
+        """
+        return self._api.cancel_run(run_id)
+
+    def build_apply_preview(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Plan structure "avant/apres" des deplacements, par film.
+
+        Cf CineSortApi.build_apply_preview pour la doc complete.
+        """
+        return self._api.build_apply_preview(run_id, decisions)
+
+    def list_apply_history(self, run_id: str) -> Dict[str, Any]:
+        """Historique de tous les applies d'un run (batches reels + dry-run).
+
+        Cf CineSortApi.list_apply_history pour la doc complete.
+        """
+        return self._api.list_apply_history(run_id)
