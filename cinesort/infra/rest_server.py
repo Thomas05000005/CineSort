@@ -312,10 +312,19 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # --- CORS ---------------------------------------------------------------
 
     def _send_cors_headers(self) -> None:
+        # Cf issue #69 : Vary: Origin obligatoire quand on echo une origin
+        # specifique (cache HTTP correcte cote browser/proxy). Pour le default
+        # "*" on n'a pas besoin de Vary mais le mettre quand meme ne nuit pas
+        # — il signale juste que la reponse depend de l'Origin (info honnete).
         self.send_header("Access-Control-Allow-Origin", self.cors_origin)
+        if self.cors_origin != "*":
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Max-Age", "86400")
+        # NB : pas de "Access-Control-Allow-Credentials: true" — l'auth Bearer
+        # passe par header Authorization, pas par cookie. Le combo "*" +
+        # credentials est interdit par la spec CORS, on est conforme.
 
     def do_OPTIONS(self) -> None:
         # V3-04 polish v7.7.0 : positionner aussi un request_id pour les

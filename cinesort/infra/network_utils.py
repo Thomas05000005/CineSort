@@ -2,10 +2,66 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import socket
+from typing import Tuple
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Cf issue #70 : hosts metadata cloud que les URLs Jellyfin/Plex/Radarr ne
+# doivent jamais cibler. Si un attaquant distant LAN reconfigure les URLs
+# via REST API, il pourrait scanner ces endpoints internes.
+_CLOUD_METADATA_HOSTS = frozenset(
+    {
+        "169.254.169.254",  # AWS, Azure, OpenStack
+        "fd00:ec2::254",  # AWS IPv6
+        "metadata.google.internal",  # GCP
+        "metadata",  # GCP short
+        "instance-data.ec2.internal",  # AWS DNS
+        "metadata.azure.com",  # Azure
+    }
+)
+
+
+def is_safe_external_url(url: str) -> Tuple[bool, str]:
+    """Cf issue #70 : valide qu'une URL externe (Jellyfin/Plex/Radarr/etc.) ne
+    cible pas un endpoint cloud metadata sensible.
+
+    Retourne (True, "") si OK, (False, reason) sinon.
+
+    Politique :
+    - scheme MUST be http ou https (refuse file:, ftp:, gopher:, etc.)
+    - host MUST NOT etre dans _CLOUD_METADATA_HOSTS (169.254.169.254 etc.)
+    - host MUST NOT etre dans 169.254.0.0/16 (link-local IPv4)
+
+    Note : localhost / IPs privees (127.x, 10.x, 192.168.x) sont AUTORISES
+    car un user perso peut avoir Plex sur la meme machine que CineSort. Le
+    SSRF reel concerne les metadata cloud, pas le LAN domestique.
+    """
+    if not url or not isinstance(url, str):
+        return False, "URL vide"
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError as exc:
+        return False, f"URL invalide ({exc})"
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        return False, f"Scheme '{scheme}' interdit (http/https uniquement)"
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False, "Host absent"
+    if host in _CLOUD_METADATA_HOSTS:
+        return False, f"Host '{host}' interdit (cloud metadata)"
+    # Bloquer le bloc link-local IPv4 169.254.0.0/16
+    try:
+        ip = ipaddress.ip_address(host)
+        if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.IPv4Network("169.254.0.0/16"):
+            return False, f"Host '{host}' interdit (link-local IPv4)"
+    except ValueError:
+        pass  # host n'est pas une IP litterale, c'est un FQDN — OK
+    return True, ""
 
 
 def get_local_ip() -> str:

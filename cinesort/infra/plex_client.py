@@ -35,10 +35,20 @@ class PlexError(IntegrationError):
 
 
 def _normalize_url(url: str) -> str:
-    """Normalise l'URL du serveur Plex."""
+    """Normalise l'URL du serveur Plex.
+
+    Cf issue #70 : valide aussi que l'URL ne pointe pas vers un endpoint
+    cloud metadata. Leve PlexError si invalide.
+    """
+    from cinesort.infra.network_utils import is_safe_external_url
+
     url = (url or "").strip().rstrip("/")
-    if url and not url.startswith(("http://", "https://")):
+    if url and "://" not in url:
         url = f"http://{url}"
+    if url:
+        ok, reason = is_safe_external_url(url)
+        if not ok:
+            raise PlexError(f"URL Plex refusee : {reason}")
     return url
 
 

@@ -26,6 +26,16 @@ _WINGET_IDS = {
 }
 
 _SUPPORTED_TOOLS = ("ffprobe", "mediainfo")
+
+# Cf issue #71 : whitelist des noms de binaire pour validate_tool_path —
+# empeche d'executer un binaire arbitraire avec "-version" via les settings.
+# Mapping tool_name -> noms acceptes (sensible casse-insensible). On accepte
+# le nom Windows (.exe) et le nom Unix (sans extension) pour la portabilite
+# tests/CI Linux.
+_EXPECTED_BINARY_NAMES = {
+    "ffprobe": frozenset({"ffprobe.exe", "ffprobe"}),
+    "mediainfo": frozenset({"mediainfo.exe", "mediainfo", "MediaInfo.exe"}),
+}
 _STATUS_OK = "ok"
 _STATUS_MISSING = "missing"
 _STATUS_INVALID = "invalid_executable"
@@ -511,6 +521,16 @@ def validate_tool_path(
     p = Path(explicit)
     if not p.exists() or not p.is_file():
         return {"ok": False, "message": "Executable introuvable.", "tool": t}
+    # Cf issue #71 : valider que le nom du binaire correspond a l'outil attendu
+    # AVANT de l'executer avec -version. Empeche d'invoquer n'importe quel
+    # .exe (calc.exe, cmd.exe, malware.exe...) via les settings REST.
+    expected_names = _EXPECTED_BINARY_NAMES.get(t, frozenset())
+    if p.name.lower() not in {n.lower() for n in expected_names}:
+        return {
+            "ok": False,
+            "message": f"Nom de binaire invalide : attendu {sorted(expected_names)}, recu '{p.name}'.",
+            "tool": t,
+        }
     ok_exec, first_line, _full = _probe_version_line(tool_name=t, tool_path=str(p), runner=runner)
     if not ok_exec:
         return {"ok": False, "message": "Executable invalide ou non executable.", "tool": t}
