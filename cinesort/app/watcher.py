@@ -185,13 +185,17 @@ class FolderWatcher(threading.Thread):
         try:
             settings = self._api.get_settings()
             logger.info("[watcher] scan triggered")
-            self._api._notify.notify(
-                "scan_done",
-                "Scan automatique",
-                f"Changement detecte. Scan lance. ({detail})",
-            )
             result = self._api.start_plan(settings)
             if result.get("ok"):
+                # Cf issue #108 : notification ENVOYEE APRES start_plan succes
+                # avec event "scan_triggered" (et plus "scan_done" qui mentait).
+                # Le vrai "scan_done" est envoye par run_flow_support quand le
+                # scan termine effectivement.
+                self._api._notify.notify(
+                    "scan_triggered",
+                    "Scan automatique",
+                    f"Changement detecte. Scan lance en arriere-plan. ({detail})",
+                )
                 logger.info("[watcher] scan started run_id=%s", result.get("run_id", "?"))
             else:
                 logger.warning("[watcher] scan failed: %s", result.get("message", "?"))

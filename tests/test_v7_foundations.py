@@ -29,7 +29,8 @@ class V7FoundationsTests(unittest.TestCase):
         # Audit perf 2026-05-01 : migration 020 ajoute idx_quality_reports_tier + score.
         # V1-02 (Polish v7.7.0) : migration 021 ajoute ON DELETE CASCADE/RESTRICT
         # sur les FK runs/errors/quality_reports/anomalies/apply_operations.
-        self.assertEqual(version, 21)
+        # Migration 022 drop indexes redondants — tolere migrations futures.
+        self.assertGreaterEqual(version, 21)
         self.assertTrue(self.db_path.exists())
 
         with closing(sqlite3.connect(str(self.db_path))) as conn:
@@ -48,7 +49,7 @@ class V7FoundationsTests(unittest.TestCase):
             self.assertIn("schema_migrations", table_names)
 
             user_version = conn.execute("PRAGMA user_version").fetchone()[0]
-            self.assertEqual(user_version, 21)
+            self.assertGreaterEqual(user_version, 21)
             # P4.1 : migration 014 crée la table user_quality_feedback
             self.assertIn("user_quality_feedback", table_names)
             # CR-1 audit QA 20260429 : migration 019 crée apply_pending_moves

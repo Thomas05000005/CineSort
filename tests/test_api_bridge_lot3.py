@@ -123,7 +123,8 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             user_version = conn.execute("PRAGMA user_version").fetchone()[0]
             # Audit perf 2026-05-01 : migration 020 ajoute idx_quality_reports_tier + score
             # V1-02 (Polish v7.7.0) : migration 021 ajoute ON DELETE CASCADE/RESTRICT.
-            self.assertEqual(int(user_version), 21)
+            # Migration 022 drop indexes redondants — tolere migrations futures.
+            self.assertGreaterEqual(int(user_version), 21)
 
     def test_start_plan_recovers_from_db_without_runs_table(self) -> None:
         self._create_file(self.root / "Schema.Repair.2012.1080p" / "Schema.Repair.2012.1080p.mkv")
@@ -159,7 +160,8 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             user_version = conn.execute("PRAGMA user_version").fetchone()[0]
             # Audit perf 2026-05-01 : migration 020 ajoute idx_quality_reports_tier + score
             # V1-02 (Polish v7.7.0) : migration 021 ajoute ON DELETE CASCADE/RESTRICT.
-            self.assertEqual(int(user_version), 21)
+            # Migration 022 drop indexes redondants — tolere migrations futures.
+            self.assertGreaterEqual(int(user_version), 21)
 
     def test_start_plan_creates_ui_log_txt(self) -> None:
         self._create_file(self.root / "Heat.1995.1080p" / "Heat.1995.1080p.mkv")

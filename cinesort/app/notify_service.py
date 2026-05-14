@@ -16,12 +16,14 @@ import contextlib
 logger = logging.getLogger(__name__)
 
 # Event types that can be individually toggled.
+EVENT_SCAN_TRIGGERED = "scan_triggered"  # cf #108 : watcher detecte un changement
 EVENT_SCAN_DONE = "scan_done"
 EVENT_APPLY_DONE = "apply_done"
 EVENT_UNDO_DONE = "undo_done"
 EVENT_ERROR = "error"
 
 _SETTING_KEYS = {
+    EVENT_SCAN_TRIGGERED: "notifications_scan_triggered",
     EVENT_SCAN_DONE: "notifications_scan_done",
     EVENT_APPLY_DONE: "notifications_apply_done",
     EVENT_UNDO_DONE: "notifications_undo_done",

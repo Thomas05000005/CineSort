@@ -439,11 +439,19 @@ def main_api() -> None:
 
 
 def _update_splash(splash_window: object, step: int, text: str, percent: int) -> None:
-    """Met a jour la progression du splash. Silencieux si le splash est deja ferme."""
-    # Echapper les caracteres dangereux pour l'interpolation JS dans une string entre apostrophes
-    safe_text = str(text).replace("\\", "\\\\").replace("'", "\\'")
+    """Met a jour la progression du splash. Silencieux si le splash est deja ferme.
+
+    Cf issue #64 : json.dumps echappe correctement TOUS les chars dangereux
+    (\\n, </script>, U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR) alors
+    que l'escape manuel precedent ne couvrait que \\ et '. Resultat : un text
+    contenant un retour ligne cassait la string JS et permettait injection.
+    """
+    import json
+
     try:
-        splash_window.evaluate_js(f"updateProgress({step}, '{safe_text}', {percent})")  # type: ignore[union-attr]
+        splash_window.evaluate_js(  # type: ignore[union-attr]
+            f"updateProgress({step}, {json.dumps(str(text))}, {percent})"
+        )
     except Exception:
         pass  # splash peut etre deja ferme
 
@@ -648,11 +656,13 @@ def main() -> None:
 
                 _atexit.register(lambda: api._notify.shutdown())
 
-                # Version dans le splash
+                # Version dans le splash (issue #64 : json.dumps pour echappement sur)
                 try:
                     version = getattr(api, "_app_version", "")
                     if version:
-                        splash.evaluate_js(f"setVersion('v{version}')")  # type: ignore[union-attr]
+                        import json as _json
+
+                        splash.evaluate_js(f"setVersion({_json.dumps(f'v{version}')})")  # type: ignore[union-attr]
                 except Exception:
                     pass
 
@@ -676,12 +686,17 @@ def main() -> None:
                 # Le dashboard utilise les cles 'cinesort.dashboard.token' et 'cinesort.dashboard.persist'.
                 if _desktop_dashboard_token:
                     try:
-                        safe_tk = _desktop_dashboard_token.replace("\\", "\\\\").replace("'", "\\'")
+                        # Cf issue #64 : json.dumps echappe correctement le token
+                        # (peut contenir des chars exotiques selon settings user).
+                        # L'escape manuel precedent ratait \\n, </script>, U+2028/2029.
+                        import json as _json
+
+                        tk_js = _json.dumps(_desktop_dashboard_token)
                         inject_js = (
                             "try {"
-                            f"  localStorage.setItem('cinesort.dashboard.token', '{safe_tk}');"
+                            f"  localStorage.setItem('cinesort.dashboard.token', {tk_js});"
                             "  localStorage.setItem('cinesort.dashboard.persist', '1');"
-                            f"  sessionStorage.setItem('cinesort.dashboard.token', '{safe_tk}');"
+                            f"  sessionStorage.setItem('cinesort.dashboard.token', {tk_js});"
                             "  window.__CINESORT_NATIVE__ = true;"
                             "} catch (e) { console.warn('token inject fail', e); }"
                         )

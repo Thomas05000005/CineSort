@@ -615,6 +615,7 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     ("radarr_timeout_s", 10.0),
     # --- Notifications ---
     ("notifications_enabled", False),
+    ("notifications_scan_triggered", True),  # cf #108 : watcher detecte un changement
     ("notifications_scan_done", True),
     ("notifications_apply_done", True),
     ("notifications_undo_done", True),
@@ -1129,6 +1130,7 @@ def _save_section_radarr(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_notifications(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "notifications_enabled": to_bool(payload.get("notifications_enabled"), False),
+        "notifications_scan_triggered": to_bool(payload.get("notifications_scan_triggered"), True),
         "notifications_scan_done": to_bool(payload.get("notifications_scan_done"), True),
         "notifications_apply_done": to_bool(payload.get("notifications_apply_done"), True),
         "notifications_undo_done": to_bool(payload.get("notifications_undo_done"), True),

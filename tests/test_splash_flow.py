@@ -15,7 +15,8 @@ class SplashUpdateTests(unittest.TestCase):
 
         mock_window = MagicMock()
         _update_splash(mock_window, 1, "Test", 50)
-        mock_window.evaluate_js.assert_called_once_with("updateProgress(1, 'Test', 50)")
+        # Cf issue #64 : json.dumps() utilise des doubles quotes (JSON spec).
+        mock_window.evaluate_js.assert_called_once_with('updateProgress(1, "Test", 50)')
 
     def test_update_splash_silent_on_error(self):
         """_update_splash ne crash pas si la fenetre est deja detruite."""

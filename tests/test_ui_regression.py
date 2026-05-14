@@ -35,8 +35,11 @@ class SplashUpdateTests(unittest.TestCase):
         app_module._update_splash(splash, 4, "Préparation de l'interface...", 60)
         self.assertEqual(len(splash.calls), 1)
         code = splash.calls[0]
-        # L'apostrophe doit etre echappee en \'
-        self.assertIn("l\\'interface", code)
+        # Cf issue #64 : json.dumps wrap en doubles quotes, apostrophe preservee
+        # (JSON spec : seul " et \ sont echappes). La string JS reste valide
+        # car ouverte par " — l'apostrophe ne ferme rien.
+        self.assertIn("l'interface", code)
+        self.assertTrue(code.startswith('updateProgress(4, "'))
 
     def test_splash_text_with_backslash(self) -> None:
         splash = _FakeSplash()
@@ -65,13 +68,27 @@ class SplashUpdateTests(unittest.TestCase):
             self.fail("_update_splash doit capturer les exceptions du splash")
 
     def test_splash_injection_neutralized(self) -> None:
-        """Injection JS via apostrophe doit etre neutralisee."""
+        """Injection JS via double-quote ou newline doit etre neutralisee.
+
+        Cf issue #64 : json.dumps wrap en " et echappe ", \\, \\n, U+2028 etc.
+        Une string avec ' n'est plus une attaque (pas le delimiteur), mais on
+        verifie qu'une attaque via " ou \\n est correctement defusee.
+        """
         splash = _FakeSplash()
-        evil = "abc'); alert('pwned'); //"
+        evil = 'abc"); alert("pwned"); //'
         app_module._update_splash(splash, 1, evil, 10)
         code = splash.calls[0]
-        # Apres echappement, la chaine ne doit plus fermer prematurement
-        self.assertNotIn("abc');", code.replace("\\'", ""))
+        # Le " injecte doit etre echappe \" dans la sortie
+        self.assertNotIn('abc");', code)
+        self.assertIn('abc\\"', code)
+
+        # Attaque via newline (was a vulnerability avant json.dumps)
+        splash2 = _FakeSplash()
+        app_module._update_splash(splash2, 1, "ligne1\nalert('x');//", 10)
+        code2 = splash2.calls[0]
+        # Le \n litteral ne doit pas casser la string JS
+        self.assertNotIn("\nalert", code2)
+        self.assertIn("\\n", code2)
 
 
 class PollingStopContractTests(unittest.TestCase):

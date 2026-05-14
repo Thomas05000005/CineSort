@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import ssl
 import threading
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -82,12 +83,16 @@ def send_email_report(
     msg["To"] = to_addr
 
     try:
+        # Cf issue #66 : SSL context strict avec verification hostname + chaine
+        # certificats. Sans cela, smtplib accepte les certs auto-signes/invalides
+        # et MITM LAN pourrait intercepter le password SMTP.
+        ssl_ctx = ssl.create_default_context()
         if port == 465:
-            smtp = smtplib.SMTP_SSL(host, port, timeout=15)
+            smtp = smtplib.SMTP_SSL(host, port, timeout=15, context=ssl_ctx)
         else:
             smtp = smtplib.SMTP(host, port, timeout=15)
             if use_tls:
-                smtp.starttls()
+                smtp.starttls(context=ssl_ctx)
         if user and password:
             smtp.login(user, password)
         smtp.sendmail(from_addr, [to_addr], msg.as_string())

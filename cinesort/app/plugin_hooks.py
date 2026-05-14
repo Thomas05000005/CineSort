@@ -117,9 +117,41 @@ def _run_plugin(
     data: Dict[str, Any],
     timeout_s: int,
 ) -> None:
-    """Execute un script plugin avec JSON sur stdin et env vars."""
+    """Execute un script plugin avec JSON sur stdin et env vars.
+
+    Cf issue #102 : whitelist d'env vars exposees aux plugins user au lieu
+    de partager TOUT os.environ. Avant : OPENAI_API_KEY, GITHUB_TOKEN,
+    AWS_*, SSH_AUTH_SOCK, etc. fuitaient si presents dans la session
+    Windows qui a lance CineSort.
+    Whitelist : variables essentielles a l'execution Python/Windows + les
+    CINESORT_* explicites.
+    """
     payload = json.dumps({"event": event, **data}, ensure_ascii=False, default=str)
-    env = dict(os.environ)
+    # Vars essentielles pour Python + Windows shell + locale
+    _ENV_WHITELIST = (
+        "PATH",
+        "PATHEXT",
+        "WINDIR",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "OS",
+        "PROCESSOR_ARCHITECTURE",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONIOENCODING",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+    )
+    env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env["CINESORT_EVENT"] = event
     env["CINESORT_RUN_ID"] = str(data.get("run_id") or "")
 
