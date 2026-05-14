@@ -829,12 +829,21 @@ async function showCandidates(rowId) {
     return;
   }
 
+  // Cf issue #93 : affiche un mini-poster TMDb (60x90) pour chaque candidat
+  // afin de departager visuellement les remake/reboot (Dune 1984 vs 2021).
+  // poster_url est rempli au scan via tmdb_poster_thumb_url (w92 thumb).
+  // safeUrl valide le scheme http(s) — fallback vide si URL invalide.
   list.innerHTML = candidates.map((c, i) => {
     const title = String(c.title || "?");
     const year = Number(c.year || 0);
     const src = sourceLabel(c.source);
     const note = String(c.note || "");
+    const posterSrc = safeUrl(c.poster_url || "");
+    const posterHtml = posterSrc
+      ? `<img src="${posterSrc}" alt="" loading="lazy" style="width:60px;height:90px;object-fit:cover;border-radius:var(--radius-sm);flex-shrink:0;background:var(--bg-overlay)">`
+      : `<div aria-hidden="true" style="width:60px;height:90px;border-radius:var(--radius-sm);flex-shrink:0;background:var(--bg-overlay);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:24px">🎬</div>`;
     return `<div class="flex items-center gap-3 mb-3" style="padding:var(--sp-2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+      ${posterHtml}
       <div class="flex-1">
         <div class="fw-medium">${escapeHtml(title)}${year ? ` (${year})` : ""}</div>
         <div class="font-xs text-muted">${escapeHtml(src)} ${note ? "— " + escapeHtml(note) : ""}</div>
