@@ -28,9 +28,18 @@ class RadarrError(IntegrationError):
 
 
 def _normalize_url(url: str) -> str:
+    """Cf issue #70 : valide qu'on ne cible pas un endpoint cloud metadata
+    (169.254.169.254 etc.). Leve RadarrError si invalide.
+    """
+    from cinesort.infra.network_utils import is_safe_external_url
+
     url = (url or "").strip().rstrip("/")
-    if url and not url.startswith(("http://", "https://")):
+    if url and "://" not in url:
         url = f"http://{url}"
+    if url:
+        ok, reason = is_safe_external_url(url)
+        if not ok:
+            raise RadarrError(f"URL Radarr refusee : {reason}")
     return url
 
 

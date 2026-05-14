@@ -30,10 +30,25 @@ class JellyfinError(IntegrationError):
 
 
 def _normalize_url(url: str) -> str:
-    """Normalise l'URL du serveur Jellyfin (strip, trailing slash)."""
+    """Normalise l'URL du serveur Jellyfin (strip, trailing slash).
+
+    Cf issue #70 : valide aussi que l'URL ne pointe pas vers un endpoint
+    cloud metadata (169.254.169.254 etc.) — empeche SSRF si un attaquant
+    distant reconfigure jellyfin_url via REST API. Leve JellyfinError si
+    invalide pour que le caller affiche un message clair a l'utilisateur.
+    """
+    from cinesort.infra.network_utils import is_safe_external_url
+
     url = (url or "").strip().rstrip("/")
-    if url and not url.startswith(("http://", "https://")):
+    # Cf issue #70 : ne forcer http:// QUE si l'URL n'a pas du tout de scheme.
+    # Si l'URL contient deja un scheme suspect (file:, ftp:, gopher:), on le
+    # laisse intact pour que is_safe_external_url puisse le refuser.
+    if url and "://" not in url:
         url = f"http://{url}"
+    if url:
+        ok, reason = is_safe_external_url(url)
+        if not ok:
+            raise JellyfinError(f"URL Jellyfin refusee : {reason}")
     return url
 
 
