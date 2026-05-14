@@ -8,7 +8,7 @@
  */
 
 import { $$ } from "./core/dom.js";
-import { hasToken, setToken } from "./core/state.js";
+import { hasToken, setToken, onClearToken } from "./core/state.js";
 
 /* H1 fix : window.onerror global pour capturer les erreurs JS non-attrapees
  * (sinon : page blanche silencieuse). Affiche un toast minimaliste. */
@@ -343,9 +343,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 /* === V3-04 : compteurs sidebar + V3-01 integrations + V1-13 update ====== */
 
+// Cf issue #89 : stocker les interval IDs pour pouvoir les clear au logout.
+// Sans ca, apres clearToken() les setInterval continuent a tourner (boucle
+// 401 si fetch + leak memoire si listeners restent attaches).
+let _sidebarCountersInterval = null;
+let _updateBadgeInterval = null;
+let _notificationFallbackInterval = null;
+
 async function _initSidebarFeatures() {
   await _loadSidebarCounters();
-  setInterval(_loadSidebarCounters, 30000);
+  if (_sidebarCountersInterval == null) {
+    _sidebarCountersInterval = setInterval(_loadSidebarCounters, 30000);
+  }
   await _checkIntegrationNav();
   await _checkUpdateBadge();
 }
@@ -387,7 +396,8 @@ async function _checkUpdateBadge() {
 }
 
 // Re-check une fois par heure (cache backend, pas d'appel reseau).
-setInterval(_checkUpdateBadge, 3600000);
+// Cf issue #89 : stocker l'ID pour clear au logout.
+_updateBadgeInterval = setInterval(_checkUpdateBadge, 3600000);
 
 /* === V7.6.0 Notification center — polling 30s ============= */
 
@@ -396,8 +406,12 @@ async function _initNotificationPolling() {
     notifCenter.startNotificationPolling(30000);
     return;
   }
-  // Fallback : polling manuel via get_notifications_unread_count
-  setInterval(async () => {
+  // Fallback : polling manuel via get_notifications_unread_count.
+  // Cf issue #89 : check hasToken() au debut de chaque tick + stocker l'ID
+  // pour clear au logout (evite boucle 401 + leak).
+  if (_notificationFallbackInterval != null) return;
+  _notificationFallbackInterval = setInterval(async () => {
+    if (!hasToken()) return;
     try {
       const res = await apiPost("get_notifications_unread_count");
       const count = (res && res.data && res.data.count) || (res && res.count) || 0;
@@ -407,6 +421,23 @@ async function _initNotificationPolling() {
     } catch { /* silencieux */ }
   }, 30000);
 }
+
+// Cf issue #89 : cleanup central des intervals au logout. Appele par
+// clearToken() via le mecanisme onClearToken (state.js).
+onClearToken(() => {
+  if (_sidebarCountersInterval != null) {
+    clearInterval(_sidebarCountersInterval);
+    _sidebarCountersInterval = null;
+  }
+  if (_updateBadgeInterval != null) {
+    clearInterval(_updateBadgeInterval);
+    _updateBadgeInterval = null;
+  }
+  if (_notificationFallbackInterval != null) {
+    clearInterval(_notificationFallbackInterval);
+    _notificationFallbackInterval = null;
+  }
+});
 
 /* === V3-05 : demo wizard premier-run ====================== */
 

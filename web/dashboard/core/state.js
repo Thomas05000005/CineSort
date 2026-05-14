@@ -40,13 +40,38 @@ export function setToken(token, persist = false) {
   } catch { /* no-op */ }
 }
 
-/** Efface le token de tous les storages. */
+/* Cf issue #89 : permet aux modules qui creent des setInterval/AbortController
+ * de s'enregistrer pour cleanup au logout. Evite les boucles 401 + leaks
+ * apres clearToken().
+ */
+const _onClearCallbacks = new Set();
+
+/** Enregistre une callback appelee a chaque clearToken(). Retourne un
+ *  identifiant qu'on peut passer a removeOnClearToken pour desinscrire.
+ */
+export function onClearToken(cb) {
+  _onClearCallbacks.add(cb);
+  return cb;
+}
+
+/** Desinscrit une callback precedemment enregistree. */
+export function removeOnClearToken(cb) {
+  _onClearCallbacks.delete(cb);
+}
+
+/** Efface le token de tous les storages. Invoque les callbacks enregistrees
+ *  via onClearToken (pour cleanup des intervals/listeners).
+ */
 export function clearToken() {
   try {
     sessionStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(PERSIST_KEY);
   } catch { /* no-op */ }
+  // Notifier les modules pour qu'ils cleanup leurs intervals/listeners.
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { /* silencieux : un cleanup ne doit pas bloquer le logout */ }
+  }
 }
 
 /** Retourne true si un token est present. */
