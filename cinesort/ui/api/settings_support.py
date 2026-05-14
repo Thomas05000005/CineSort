@@ -629,11 +629,14 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     ("radarr_api_key", ""),
     ("radarr_timeout_s", 10.0),
     # --- Notifications ---
+    # Cf issue #92 quick win #6 : default = apply done + errors uniquement,
+    # le reste off. Reduit le spam pour le power user qui scan souvent.
+    # L'utilisateur peut activer les autres via Settings -> Notifications.
     ("notifications_enabled", False),
-    ("notifications_scan_triggered", True),  # cf #108 : watcher detecte un changement
-    ("notifications_scan_done", True),
+    ("notifications_scan_triggered", False),  # cf #108 : watcher detecte un changement
+    ("notifications_scan_done", False),
     ("notifications_apply_done", True),
-    ("notifications_undo_done", True),
+    ("notifications_undo_done", False),
     ("notifications_errors", True),
     # --- Updates (ID-V1-M13 + V3-12) ---
     ("update_check_enabled", True),
@@ -1145,10 +1148,11 @@ def _save_section_radarr(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_notifications(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "notifications_enabled": to_bool(payload.get("notifications_enabled"), False),
-        "notifications_scan_triggered": to_bool(payload.get("notifications_scan_triggered"), True),
-        "notifications_scan_done": to_bool(payload.get("notifications_scan_done"), True),
+        # Cf issue #92 quick win #6 : defauts conservateurs (apply + errors only)
+        "notifications_scan_triggered": to_bool(payload.get("notifications_scan_triggered"), False),
+        "notifications_scan_done": to_bool(payload.get("notifications_scan_done"), False),
         "notifications_apply_done": to_bool(payload.get("notifications_apply_done"), True),
-        "notifications_undo_done": to_bool(payload.get("notifications_undo_done"), True),
+        "notifications_undo_done": to_bool(payload.get("notifications_undo_done"), False),
         "notifications_errors": to_bool(payload.get("notifications_errors"), True),
     }
 

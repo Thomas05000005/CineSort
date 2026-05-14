@@ -64,8 +64,10 @@ function renderQualityView(dash) {
     const probeOk = _t.ffprobe?.available || _t.mediainfo?.available;
     const msg = probeOk
       ? "Aucun film scoré. Lancez un scan pour analyser votre bibliothèque."
-      : "Aucun film analysé. Les outils d'analyse vidéo (FFprobe, MediaInfo) ne sont pas installés. Installez-les depuis la page Accueil puis relancez un scan.";
-    const ctaLabel = probeOk ? "Lancer un scan" : "Aller à l'Accueil";
+      : "Aucun film analysé. Les outils d'analyse vidéo (FFprobe, MediaInfo) ne sont pas installés. Cliquez pour les installer maintenant.";
+    // Cf issue #92 quick win #9 : CTA direct install probe (au lieu de
+    // rediriger vers Home -> install). Reduit la friction utilisateur.
+    const ctaLabel = probeOk ? "Lancer un scan" : "Installer FFprobe + MediaInfo";
     if (emptyEl) {
       // V2-07 : factory + bind helper (remplace l'ancienne markup inline V1-05).
       emptyEl.innerHTML = buildEmptyState({
@@ -76,7 +78,40 @@ function renderQualityView(dash) {
         testId: "quality-empty-cta",
       });
       emptyEl.classList.remove("hidden");
-      bindEmptyStateCta(emptyEl, () => {
+      bindEmptyStateCta(emptyEl, async () => {
+        if (!probeOk) {
+          // CTA direct install (quick win #9) — pas de navigation
+          const btn = emptyEl.querySelector('[data-testid="quality-empty-cta"]');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Installation en cours...";
+          }
+          try {
+            const res = await apiPost("auto_install_probe_tools");
+            if (res?.data?.ok || res?.ok) {
+              if (typeof window.toast === "function") {
+                window.toast({ type: "success", text: "FFprobe + MediaInfo installes. Lancez un scan." });
+              }
+              // Recharge la vue pour refleter le nouveau status probe
+              if (typeof renderQualityView === "function") setTimeout(() => location.reload(), 500);
+            } else {
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = ctaLabel;
+              }
+              const errMsg = res?.data?.error || res?.error || "Echec installation. Essayez depuis Accueil.";
+              if (typeof window.toast === "function") {
+                window.toast({ type: "error", text: errMsg });
+              }
+            }
+          } catch (e) {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = ctaLabel;
+            }
+          }
+          return;
+        }
         if (typeof navigateTo === "function") navigateTo("home");
         // Laisser le temps a la vue Accueil de se monter avant scroll/focus.
         setTimeout(() => {
