@@ -1726,6 +1726,17 @@ class CineSortApi:
         """Exporte le rapport du run au format json / csv / html."""
         return dashboard_support.export_run_report(self, run_id, fmt)
 
+    def export_full_library(self) -> Dict[str, Any]:
+        """RGPD Art. 20 — export portable de toute la bibliotheque (films +
+        decisions + scores + settings sanitises) en JSON v1.0.
+
+        Cf issue #95. Format documente dans docs/EXPORT_FORMAT.md.
+        Le caller frontend serialise la reponse en JSON et offre le download.
+        """
+        from cinesort.ui.api import export_support
+
+        return export_support.export_full_library(self)
+
     def export_run_nfo(self, run_id: str, overwrite: bool = False, dry_run: bool = True) -> Dict[str, Any]:
         """Génère des fichiers .nfo (Kodi/Jellyfin) pour chaque film du run."""
         if not self._is_valid_run_id(run_id):
