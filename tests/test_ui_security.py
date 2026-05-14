@@ -110,18 +110,22 @@ class XssNonRegressionTests(unittest.TestCase):
 
 
 class SplashEscapingTests(unittest.TestCase):
-    """H8 : _update_splash echappe apostrophe et backslash."""
+    """H8 : _update_splash echappe correctement les chars dangereux.
 
-    def test_update_splash_escapes_apostrophe(self) -> None:
-        """app.py _update_splash doit echapper les apostrophes."""
+    Cf issue #64 : remplacement de l'escape manuel (qui ne couvrait que \\ et ')
+    par json.dumps() qui echappe TOUS les chars dangereux (\", \\, \\n, \\r,
+    U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR).
+    """
+
+    def test_update_splash_uses_json_dumps(self) -> None:
+        """app.py _update_splash doit utiliser json.dumps pour l'escape."""
         app_py = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
         # Cherche la fonction et son corps
         match = re.search(r"def _update_splash\([^)]*\)[^:]*:.*?(?=\n\ndef |\Z)", app_py, re.DOTALL)
         self.assertIsNotNone(match)
         body = match.group(0)
-        # L'echappement doit etre present
-        self.assertIn("\\\\'", body, "Echappement apostrophe manquant dans _update_splash")
-        self.assertIn("\\\\\\\\", body, "Echappement backslash manquant dans _update_splash")
+        # json.dumps doit etre utilise (couvre tous les chars dangereux)
+        self.assertIn("json.dumps", body, "json.dumps manquant dans _update_splash")
 
 
 if __name__ == "__main__":
