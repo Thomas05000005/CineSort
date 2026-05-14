@@ -13,7 +13,9 @@ if TYPE_CHECKING:
 
 
 def _collect_root_all_empty_dirs(cfg: "Config") -> List[Path]:
-    from cinesort.domain.core import _is_dir_empty
+    # Cf issue #83 phase 2 : import direct depuis l'origine app au lieu du
+    # re-export domain.core (qui creait un cycle domain -> app).
+    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
 
     out: List[Path] = []
     try:
@@ -60,7 +62,9 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
     Renvoie une étiquette utilisée par le preview et le move pour distinguer les dossiers
     sûrs à déplacer (`eligible`/`empty`) des dossiers à protéger (vidéos, symlinks).
     """
-    from cinesort.domain.core import _is_dir_empty
+    # Cf issue #83 phase 2 : import direct depuis l'origine app au lieu du
+    # re-export domain.core (qui creait un cycle domain -> app).
+    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
 
     if not path.exists() or not path.is_dir():
         return "invalid"
@@ -269,7 +273,11 @@ def _move_dirs_to_bucket(
 
     Renvoie le nombre de dossiers réellement déplacés (0 si dry_run ou aucun éligible).
     """
-    from cinesort.domain.core import _record_apply_op, _unique_path, windows_safe
+    # Cf issue #83 phase 2 : imports directs depuis les origines pour casser
+    # le cycle domain.core -> app. windows_safe reste dans domain (logique
+    # de naming pur), record_apply_op et unique_path sont dans app.apply_core.
+    from cinesort.app.apply_core import record_apply_op as _record_apply_op, unique_path as _unique_path
+    from cinesort.domain.core import windows_safe
 
     moved = 0
     for src in candidates:
@@ -339,7 +347,11 @@ def _move_empty_top_level_dirs(
     No-op si l'option `move_empty_folders_enabled` est désactivée. Met à jour
     `res.empty_folders_moved_count`.
     """
-    from cinesort.domain.core import _is_dir_empty, ensure_inside_root
+    # Cf issue #83 phase 2 : imports directs depuis origines. is_dir_empty
+    # vient d'app.apply_core, ensure_inside_root reste dans domain.core
+    # (logique de validation path-traversal pure).
+    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
+    from cinesort.domain.core import ensure_inside_root
 
     if not cfg.move_empty_folders_enabled:
         return

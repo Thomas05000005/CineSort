@@ -432,7 +432,10 @@ class SingleFolderIsConformWithTemplateTests(unittest.TestCase):
 
     def test_conform_with_default_template(self) -> None:
         from cinesort.domain.duplicate_support import single_folder_is_conform, movie_dir_title_year
-        from cinesort.domain.core import windows_safe, _norm_for_tokens
+
+        # Cf issue #83 phase 2 : _norm_for_tokens depuis l'origine (title_helpers)
+        from cinesort.domain.core import windows_safe
+        from cinesort.domain.title_helpers import _norm_for_tokens
 
         result = single_folder_is_conform(
             "Inception (2010)",
@@ -448,7 +451,10 @@ class SingleFolderIsConformWithTemplateTests(unittest.TestCase):
     def test_conform_fallback_without_template(self) -> None:
         """Sans template, le fallback historique fonctionne."""
         from cinesort.domain.duplicate_support import single_folder_is_conform, movie_dir_title_year
-        from cinesort.domain.core import windows_safe, _norm_for_tokens
+
+        # Cf issue #83 phase 2 : _norm_for_tokens depuis l'origine (title_helpers)
+        from cinesort.domain.core import windows_safe
+        from cinesort.domain.title_helpers import _norm_for_tokens
 
         result = single_folder_is_conform(
             "Inception (2010)",
