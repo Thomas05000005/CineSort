@@ -53,6 +53,12 @@ DEFAULT_LOG_FORMAT_WITH_CONTEXT = "%(asctime)s [%(levelname)s] %(name)s [run=%(r
 _run_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("cinesort_run_id", default=None)
 _request_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("cinesort_request_id", default=None)
 
+# Cf issues #72 + #73 : flag set par le dispatch REST si la requete vient d'une
+# IP non-locale (LAN distant). Lu par les handlers/helpers qui veulent restreindre
+# une operation au caller local (open_logs_folder DoS UX, expandvars path manipulation).
+# Default False = caller local par defaut (cas desktop/test, on n'est pas dans un REST).
+_remote_request_var: contextvars.ContextVar[bool] = contextvars.ContextVar("cinesort_is_remote_request", default=False)
+
 
 # --- API publique : run_id ----------------------------------------------------
 
@@ -102,6 +108,31 @@ def clear_request_id() -> None:
 def reset_request_id(token: contextvars.Token) -> None:
     """Restaure l'etat du request_id ContextVar d'avant un set_request_id."""
     _request_id_var.reset(token)
+
+
+# --- Flag local vs remote pour les requetes REST ----------------------------
+
+
+def set_remote_request(is_remote: bool) -> contextvars.Token:
+    """Positionne le flag "requete distante" pour le scope courant.
+
+    Cf issues #72 + #73 : appele par le dispatch REST au debut de chaque
+    do_GET/do_POST si l'IP du client n'est pas locale (127.0.0.1 / ::1).
+    """
+    return _remote_request_var.set(bool(is_remote))
+
+
+def is_remote_request() -> bool:
+    """Retourne True si la requete courante vient d'un client REST non-local.
+
+    Defaut False (caller desktop natif / test / contexte hors REST).
+    """
+    return _remote_request_var.get()
+
+
+def reset_remote_request(token: contextvars.Token) -> None:
+    """Restaure l'etat du flag remote_request d'avant un set_remote_request."""
+    _remote_request_var.reset(token)
 
 
 # --- Filter logging stdlib ----------------------------------------------------
