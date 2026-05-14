@@ -58,6 +58,16 @@ _EXCLUDED_METHODS: Set[str] = {
     "progress",
 }
 
+# Issue #84 PR 8 : noms des 5 facades introduites par le refactor god class.
+# Le dispatcher REST decouvre les methodes de chaque facade et les expose sous
+# l'URL "/api/{facade_name}/{method_name}" en plus des methodes directes
+# (backward-compat preservee jusqu'a la PR 10).
+# Cf docs/internal/REFACTOR_PLAN_84.md.
+_FACADE_ATTR_NAMES: tuple = ("run", "settings", "quality", "integrations", "library")
+
+# Separateur dans l'URL pour distinguer facade et methode (ex: "run/start_plan").
+_FACADE_SEPARATOR = "/"
+
 # Maximum request body size (16 MB).
 _MAX_BODY_SIZE = 16 * 1024 * 1024
 
@@ -149,16 +159,48 @@ def _resolve_locales_root() -> Path:
 
 
 def _get_api_methods(api: Any) -> Dict[str, Any]:
-    """Discover public callable methods on the API object."""
+    """Discover public callable methods on the API object.
+
+    Issue #84 PR 8 : decouvre aussi les methodes des 5 facades (api.run,
+    api.settings, ...) et les expose sous le path "{facade}/{method}".
+
+    Resultat : les 2 voies sont actives simultanement, sans rupture
+    de backward-compat :
+    - "/api/start_plan" -> api.start_plan(...)
+    - "/api/run/start_plan" -> api.run.start_plan(...)
+
+    Quand la PR 10 supprimera les methodes directes de CineSortApi, seuls
+    les paths "/api/{facade}/{method}" continueront a fonctionner.
+    """
     methods: Dict[str, Any] = {}
+
+    # Pass 1 : methodes directes sur l'API (comportement legacy).
     for name in dir(api):
         if name.startswith("_"):
             continue
         if name in _EXCLUDED_METHODS:
             continue
+        if name in _FACADE_ATTR_NAMES:
+            # La facade elle-meme n'est pas un endpoint ; on walk dans la pass 2.
+            continue
         attr = getattr(api, name, None)
         if callable(attr):
             methods[name] = attr
+
+    # Pass 2 : methodes exposees par les facades (route "/api/{facade}/{method}").
+    for facade_name in _FACADE_ATTR_NAMES:
+        facade = getattr(api, facade_name, None)
+        if facade is None:
+            continue
+        for method_name in dir(facade):
+            if method_name.startswith("_"):
+                continue
+            if method_name in _EXCLUDED_METHODS:
+                continue
+            method = getattr(facade, method_name, None)
+            if callable(method):
+                methods[f"{facade_name}{_FACADE_SEPARATOR}{method_name}"] = method
+
     return methods
 
 

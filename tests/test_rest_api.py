@@ -194,6 +194,37 @@ class RestServerHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data.get("ok"))
 
+    # --- PR 8 du #84 : facade routes via HTTP ---
+
+    def test_facade_route_get_settings(self) -> None:
+        """POST /api/settings/get_settings route vers api.settings.get_settings."""
+        status, data = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(data["root"], str(self.root))
+
+    def test_facade_route_get_quality_profile(self) -> None:
+        """POST /api/quality/get_quality_profile route vers api.quality.get_quality_profile."""
+        status, data = self._request("POST", "/api/quality/get_quality_profile", body={}, token=self.token)
+        self.assertEqual(status, 200)
+
+    def test_facade_and_direct_routes_coexist(self) -> None:
+        """Backward-compat : ancien path et nouveau path retournent meme structure."""
+        s1, d1 = self._request("POST", "/api/get_settings", body={}, token=self.token)
+        s2, d2 = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
+        self.assertEqual(s1, 200)
+        self.assertEqual(s2, 200)
+        self.assertEqual(set(d1.keys()), set(d2.keys()))
+
+    def test_facade_attribute_alone_returns_404(self) -> None:
+        """POST /api/run (sans methode) doit retourner 404."""
+        status, _ = self._request("POST", "/api/run", body={}, token=self.token)
+        self.assertEqual(status, 404)
+
+    def test_facade_unknown_method_returns_404(self) -> None:
+        """POST /api/run/nonexistent_xyz doit retourner 404."""
+        status, _ = self._request("POST", "/api/run/nonexistent_xyz", body={}, token=self.token)
+        self.assertEqual(status, 404)
+
     # --- CORS ---
 
     def test_options_returns_cors_headers(self) -> None:
@@ -219,6 +250,108 @@ class RestServerHttpTests(unittest.TestCase):
     def test_log_api_exception_not_exposed(self) -> None:
         status, data = self._request("POST", "/api/log_api_exception", body={}, token=self.token)
         self.assertEqual(status, 404)
+
+
+class RestFacadeDispatchTests(unittest.TestCase):
+    """PR 8 du #84 : le dispatcher REST walk dans les 5 facades.
+
+    Les methodes de chaque facade sont exposees sous "/api/{facade}/{method}"
+    en plus des methodes directes "/api/{method}". Les 2 voies fonctionnent
+    en parallele (backward-compat preservee jusqu'a la PR 10).
+    """
+
+    def test_facade_methods_discovered(self) -> None:
+        """Les 54 methodes des 5 facades doivent etre exposees avec leur prefix."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        # Compte des methodes facade (avec separateur "/")
+        facade_methods = [name for name in methods if "/" in name]
+
+        # 5 facades * leurs methodes respectives :
+        # Run 7 + Settings 6 + Quality 21 + Integrations 11 + Library 9 = 54
+        self.assertEqual(
+            len(facade_methods),
+            54,
+            f"Attendu 54 methodes facade, trouve {len(facade_methods)}",
+        )
+
+    def test_each_facade_has_methods(self) -> None:
+        """Chaque facade doit avoir au moins une methode exposee."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        for facade_name, min_count in (
+            ("run", 7),
+            ("settings", 6),
+            ("quality", 21),
+            ("integrations", 11),
+            ("library", 9),
+        ):
+            count = sum(1 for n in methods if n.startswith(f"{facade_name}/"))
+            self.assertEqual(
+                count,
+                min_count,
+                f"Facade {facade_name} : attendu {min_count} methodes, trouve {count}",
+            )
+
+    def test_facade_method_examples_present(self) -> None:
+        """Sanity : quelques methodes facade specifiques doivent etre la."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        for expected in (
+            "run/start_plan",
+            "run/get_status",
+            "settings/get_settings",
+            "settings/save_settings",
+            "quality/get_quality_profile",
+            "quality/get_quality_report",
+            "integrations/test_jellyfin_connection",
+            "integrations/test_plex_connection",
+            "library/get_library_filtered",
+            "library/export_full_library",
+        ):
+            self.assertIn(expected, methods, f"{expected} manquante dans api_methods")
+
+    def test_direct_methods_still_present(self) -> None:
+        """Backward-compat : les methodes directes sont toujours exposees."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        for expected in (
+            "start_plan",
+            "get_status",
+            "get_settings",
+            "get_quality_profile",
+            "test_jellyfin_connection",
+            "get_library_filtered",
+        ):
+            self.assertIn(expected, methods, f"Methode directe {expected} manquante")
+
+    def test_facade_attributes_not_exposed_as_callable(self) -> None:
+        """Les facades elles-memes ne sont pas exposees comme endpoint."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        for facade_name in ("run", "settings", "quality", "integrations", "library"):
+            self.assertNotIn(
+                facade_name,
+                methods,
+                f"La facade {facade_name} ne doit pas etre directement appelable",
+            )
+
+    def test_facade_dispatch_returns_same_result_as_direct(self) -> None:
+        """Sanity end-to-end : api.run.get_status delegue bien vers api.get_status."""
+        api = backend.CineSortApi()
+        methods = _get_api_methods(api)
+
+        # Appel via methode directe
+        direct_result = methods["get_status"]("run_inexistant_xyz")
+        # Appel via methode facade
+        facade_result = methods["run/get_status"]("run_inexistant_xyz")
+
+        self.assertEqual(set(direct_result.keys()), set(facade_result.keys()))
 
 
 class RestOpenApiSpecTests(unittest.TestCase):
