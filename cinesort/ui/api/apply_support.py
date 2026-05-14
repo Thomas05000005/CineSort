@@ -12,6 +12,7 @@ import requests
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
@@ -270,9 +271,8 @@ def build_undo_preview_payload(
     return payload, store, run_paths, batch, reversible_ops
 
 
+@requires_valid_run_id
 def undo_last_apply_preview(api: Any, run_id: str) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     try:
         payload, _store, _run_paths, _batch, _ops = api._build_undo_preview_payload(run_id)
         return payload
@@ -527,10 +527,9 @@ def _write_undo_summary(
         log_fn("WARN", f"Resume undo non ecrit: {exc}")
 
 
+@requires_valid_run_id
 def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = None) -> Dict[str, Any]:
     """Preview undo detaille par film : pour chaque row_id, liste des operations et conflits predits."""
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     found = api._find_run_row(run_id)
     if not found:
         return {"ok": False, "message": t("errors.run_not_found")}
@@ -616,6 +615,7 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     }
 
 
+@requires_valid_run_id
 def undo_selected_rows(
     api: Any,
     run_id: str,
@@ -630,8 +630,6 @@ def undo_selected_rows(
     (sha1 différent), l'undo entier est refusé avec un rapport. atomic=False
     force le best-effort (skipe les fichiers modifiés).
     """
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     if not row_ids or not isinstance(row_ids, list):
         return {"ok": False, "message": t("errors.row_ids_required")}
 
@@ -755,10 +753,9 @@ def undo_selected_rows(
     }
 
 
+@requires_valid_run_id
 def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     """Historique de tous les applies d'un run."""
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     found = api._find_run_row(run_id)
     if not found:
         return {"ok": False, "message": t("errors.run_not_found")}
@@ -896,6 +893,7 @@ def _execute_and_finalize_undo(
     }
 
 
+@requires_valid_run_id
 def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = True) -> Dict[str, Any]:
     """Annule le dernier apply d'un run (dry-run ou reel).
 
@@ -904,8 +902,6 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
     atomic=False pour forcer le best-effort.
     """
     _log.info("api: undo run_id=%s dry_run=%s atomic=%s", run_id, dry_run, atomic)
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     try:
         preview, store, run_paths, batch, reversible_ops = api._build_undo_preview_payload(run_id)
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
@@ -960,6 +956,7 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
     )
 
 
+@requires_valid_run_id
 def _validate_apply(
     api: Any,
     run_id: str,
@@ -967,8 +964,6 @@ def _validate_apply(
     dry_run: bool,
     quarantine_unapproved: bool,
 ) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     if not isinstance(decisions, dict):
         return {"ok": False, "message": t("errors.payload_decisions_invalid")}
     if not api._acquire_apply_slot(run_id):
@@ -1788,6 +1783,7 @@ def apply_changes(
         api._release_apply_slot(run_id)
 
 
+@requires_valid_run_id
 def export_apply_audit(
     api: Any,
     run_id: str,
@@ -1802,8 +1798,6 @@ def export_apply_audit(
 
     Filtrage optionnel par batch_id.
     """
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     found = api._find_run_row(run_id)
     if not found:
         return {"ok": False, "message": t("errors.run_not_found")}

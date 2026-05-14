@@ -5,12 +5,11 @@ from typing import Any, Dict, List, Optional, Set
 
 import cinesort.domain.core as core
 from cinesort.domain.run_models import RunStatus
+from cinesort.ui.api._validators import requires_valid_run_id
 
 
+@requires_valid_run_id
 def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
-
     rs = api._get_run(run_id)
     if rs and not rs.done:
         return {"ok": False, "message": "Plan pas pret."}
@@ -112,6 +111,7 @@ def touched_top_level_dirs_for_rows(
     return touched
 
 
+@requires_valid_run_id
 def get_auto_approved_summary(
     api: Any,
     run_id: str,
@@ -127,8 +127,6 @@ def get_auto_approved_summary(
     Le frontend peut utiliser auto_quarantine_row_ids pour pre-cocher la
     decision "reject" sur ces films.
     """
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     rs = api._get_run(run_id)
     if not rs or not rs.done:
         return {"ok": False, "message": "Plan pas pret."}
