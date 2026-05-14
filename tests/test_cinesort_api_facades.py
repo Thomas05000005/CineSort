@@ -12,6 +12,7 @@ PR 2 ajoute : les 7 methodes du bounded context Run sur RunFacade
 PR 3 ajoute : les 6 methodes du bounded context Settings sur SettingsFacade
 PR 4 ajoute : les 21 methodes du bounded context Quality sur QualityFacade
 PR 5 ajoute : les 11 methodes du bounded context Integrations sur IntegrationsFacade
+PR 6 ajoute : les 9 methodes du bounded context Library sur LibraryFacade
 """
 
 from __future__ import annotations
@@ -772,6 +773,169 @@ class IntegrationsFacadeBackwardCompatTests(unittest.TestCase):
             "test_radarr_connection",
             "get_radarr_status",
             "request_radarr_upgrade",
+        ):
+            self.assertTrue(
+                hasattr(self.api, name),
+                f"CineSortApi.{name} a disparu (regression backward-compat)",
+            )
+
+
+class LibraryFacadeFullMigrationTests(unittest.TestCase):
+    """PR 6 : les 9 methodes du bounded context Library sont exposees."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_library_facade_exposes_9_methods(self) -> None:
+        expected = {
+            # Library + agregats (5)
+            "get_library_filtered",
+            "get_smart_playlists",
+            "save_smart_playlist",
+            "delete_smart_playlist",
+            "get_scoring_rollup",
+            # Film (3)
+            "get_film_full",
+            "get_film_history",
+            "list_films_with_history",
+            # Export (1)
+            "export_full_library",
+        }
+        self.assertEqual(len(expected), 9)
+        for name in expected:
+            self.assertTrue(
+                hasattr(self.api.library, name),
+                f"LibraryFacade.{name} manquante",
+            )
+            self.assertTrue(
+                callable(getattr(self.api.library, name)),
+                f"LibraryFacade.{name} non callable",
+            )
+
+    # ----- Library + agregats (5) -----
+
+    def test_get_library_filtered_delegates(self) -> None:
+        sentinel = {"ok": True, "films": []}
+        filters = {"tier_v2": "platinum"}
+        with patch.object(self.api, "get_library_filtered", return_value=sentinel) as mocked:
+            result = self.api.library.get_library_filtered(
+                run_id="run_xyz", filters=filters, sort="score", page=2, page_size=25
+            )
+        mocked.assert_called_once_with(run_id="run_xyz", filters=filters, sort="score", page=2, page_size=25)
+        self.assertEqual(result, sentinel)
+
+    def test_get_library_filtered_defaults(self) -> None:
+        """Sanity check : les defaults matchent ceux de CineSortApi (sort='title')."""
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_library_filtered", return_value=sentinel) as mocked:
+            self.api.library.get_library_filtered()
+        mocked.assert_called_once_with(run_id=None, filters=None, sort="title", page=1, page_size=50)
+
+    def test_get_smart_playlists_delegates(self) -> None:
+        sentinel = {"ok": True, "playlists": []}
+        with patch.object(self.api, "get_smart_playlists", return_value=sentinel) as mocked:
+            result = self.api.library.get_smart_playlists()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_save_smart_playlist_delegates(self) -> None:
+        sentinel = {"ok": True, "playlist_id": "pl_42"}
+        filters = {"tier_v2": "gold"}
+        with patch.object(self.api, "save_smart_playlist", return_value=sentinel) as mocked:
+            result = self.api.library.save_smart_playlist("My Playlist", filters, playlist_id="pl_42")
+        mocked.assert_called_once_with("My Playlist", filters, "pl_42")
+        self.assertEqual(result, sentinel)
+
+    def test_save_smart_playlist_no_id(self) -> None:
+        """playlist_id optionnel : None doit etre transmis quand absent."""
+        sentinel = {"ok": True}
+        filters = {}
+        with patch.object(self.api, "save_smart_playlist", return_value=sentinel) as mocked:
+            self.api.library.save_smart_playlist("New", filters)
+        mocked.assert_called_once_with("New", filters, None)
+
+    def test_delete_smart_playlist_delegates(self) -> None:
+        sentinel = {"ok": True, "deleted": True}
+        with patch.object(self.api, "delete_smart_playlist", return_value=sentinel) as mocked:
+            result = self.api.library.delete_smart_playlist("pl_42")
+        mocked.assert_called_once_with("pl_42")
+        self.assertEqual(result, sentinel)
+
+    def test_get_scoring_rollup_delegates(self) -> None:
+        sentinel = {"ok": True, "rollup": []}
+        with patch.object(self.api, "get_scoring_rollup", return_value=sentinel) as mocked:
+            result = self.api.library.get_scoring_rollup(by="decade", limit=10, run_id="run_xyz")
+        mocked.assert_called_once_with(by="decade", limit=10, run_id="run_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_get_scoring_rollup_defaults(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_scoring_rollup", return_value=sentinel) as mocked:
+            self.api.library.get_scoring_rollup()
+        mocked.assert_called_once_with(by="franchise", limit=20, run_id=None)
+
+    # ----- Film (3) -----
+
+    def test_get_film_full_delegates(self) -> None:
+        sentinel = {"ok": True, "film": {}}
+        with patch.object(self.api, "get_film_full", return_value=sentinel) as mocked:
+            result = self.api.library.get_film_full("row_42", run_id="run_xyz")
+        mocked.assert_called_once_with("row_42", "run_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_get_film_full_no_run_id(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_film_full", return_value=sentinel) as mocked:
+            self.api.library.get_film_full("row_42")
+        mocked.assert_called_once_with("row_42", None)
+
+    def test_get_film_history_delegates(self) -> None:
+        sentinel = {"ok": True, "timeline": []}
+        with patch.object(self.api, "get_film_history", return_value=sentinel) as mocked:
+            result = self.api.library.get_film_history("film_xyz")
+        mocked.assert_called_once_with("film_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_list_films_with_history_delegates(self) -> None:
+        sentinel = {"ok": True, "films": []}
+        with patch.object(self.api, "list_films_with_history", return_value=sentinel) as mocked:
+            result = self.api.library.list_films_with_history(limit=25)
+        mocked.assert_called_once_with(25)
+        self.assertEqual(result, sentinel)
+
+    def test_list_films_with_history_default_limit(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "list_films_with_history", return_value=sentinel) as mocked:
+            self.api.library.list_films_with_history()
+        mocked.assert_called_once_with(50)
+
+    # ----- Export RGPD (1) -----
+
+    def test_export_full_library_delegates(self) -> None:
+        sentinel = {"ok": True, "version": "1.0", "films": []}
+        with patch.object(self.api, "export_full_library", return_value=sentinel) as mocked:
+            result = self.api.library.export_full_library()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+
+class LibraryFacadeBackwardCompatTests(unittest.TestCase):
+    """Les 9 anciennes methodes Library directes restent fonctionnelles."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_all_9_old_library_methods_still_exist(self) -> None:
+        for name in (
+            "get_library_filtered",
+            "get_smart_playlists",
+            "save_smart_playlist",
+            "delete_smart_playlist",
+            "get_scoring_rollup",
+            "get_film_full",
+            "get_film_history",
+            "list_films_with_history",
+            "export_full_library",
         ):
             self.assertTrue(
                 hasattr(self.api, name),
