@@ -11,11 +11,31 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tupl
 
 logger = logging.getLogger(__name__)
 
-# M10 : reduction du couplage domain→infra/app.
-# Les imports ci-dessous existent uniquement pour fournir des re-exports de compatibilite
-# au niveau module. Un refactoring majeur devra les supprimer — pour l'instant ils sont
-# conserves car utilises par tous les appelants historiques (backward-compat).
-# TmdbClient est deplace sous TYPE_CHECKING car utilise uniquement comme annotation.
+# M10 + Issue #83 : couplage domain->app residuel, dette technique documentee.
+#
+# Etat actuel (#83 phases 1 + 2 appliquees) :
+# - Phase 1 (PR #126) : domain/perceptual ne depend plus de
+#   infra/subprocess_safety (Service Locator via domain/_runners.py).
+# - Phase 2 (cette PR) : callers externes (app/cleanup, tests/test_naming)
+#   migres vers les vraies origines au lieu de passer par domain.core
+#   re-exports. Surface de cycle reduite.
+#
+# Cycle restant (phase 3 future) :
+# Les imports top-level ci-dessous (lignes ~ apres ce commentaire) cassent
+# la regle "domain ne depend pas d'app" car le CODE INTERNE de ce module
+# utilise ~41 helpers d'app.apply_core et app.plan_support via les alias
+# core_apply_support.X et core_plan_support.X plus bas (lignes ~1216-1492).
+#
+# Pour casser ce cycle proprement il faut decider :
+# (a) Bouger ces helpers vers domain (s'ils sont metier pur), ou
+# (b) Bouger les fonctions de domain/core qui les utilisent vers app
+#     (si elles sont en fait orchestration applicative).
+#
+# C'est une vraie decision architecturale (5-7 jours selon audit), pas un
+# simple refactor. Phase 3 a planifier en sprint dedie avec validation
+# manuelle de chaque deplacement.
+#
+# TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation.
 import cinesort.app.apply_core as core_apply_support
 import cinesort.domain.duplicate_support as core_duplicate_support
 from cinesort.domain.scan_helpers import (
