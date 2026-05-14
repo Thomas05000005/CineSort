@@ -67,10 +67,12 @@ class HomeV5PortedTests(unittest.TestCase):
         )
 
     def test_apipost_for_start_plan_uses_kwargs(self):
-        """V5bis-01 — Verifier que start_plan est appele en kwargs `{ settings }`."""
-        # Le pattern attendu est `apiPost("start_plan", { settings })`. On cherche
-        # une occurrence du nom de methode + de `apiPost` proches.
-        self.assertIn('apiPost("start_plan"', self.src)
+        """V5bis-01 — Verifier que start_plan est appele en kwargs `{ settings }`.
+
+        Issue #84 PR 9 : le path a ete prefixe par sa facade (run/start_plan).
+        """
+        # Le pattern attendu est `apiPost("run/start_plan", { settings })`.
+        self.assertIn('apiPost("run/start_plan"', self.src)
 
 
 if __name__ == "__main__":
