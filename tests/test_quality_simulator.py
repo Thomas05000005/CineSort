@@ -230,6 +230,48 @@ class RunSimulationIntegrationTests(unittest.TestCase):
         api._store.save_quality_profile.assert_not_called()
         api._save_active_quality_profile.assert_not_called()
 
+    def test_concurrent_simulations_thread_safe(self):
+        """Audit 2026-05-13 : _SIM_CACHE est mute par plusieurs threads
+        REST (ThreadingHTTPServer). Sans lock, l'eviction FIFO
+        `_SIM_CACHE.pop(next(iter(...)))` peut crasher avec
+        RuntimeError si un autre thread mute le dict pendant l'iteration.
+        Ce test simule N threads qui appellent run_simulation +
+        clear_cache en parallele et exige zero exception."""
+        import threading
+
+        reports = [
+            {
+                "row_id": str(i),
+                "score": 60 + i,
+                "tier": "Moyen",
+                "metrics": {
+                    "subscores": {"video": 60 + i, "audio": 60, "extras": 60},
+                    "detected": {"video_codec": "hevc", "resolution": "1080p"},
+                },
+            }
+            for i in range(5)
+        ]
+        api = self._make_api(reports)
+        errors: list[BaseException] = []
+        clear_cache()
+
+        def worker(idx: int) -> None:
+            try:
+                # Vary run_id pour forcer beaucoup de cache misses + evictions.
+                run_simulation(api, run_id=f"RUN{idx}", preset_id="equilibre", scope="run")
+                if idx % 7 == 0:
+                    clear_cache()
+            except BaseException as exc:  # noqa: BLE001 - on capture tout
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(40)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        clear_cache()
+        self.assertEqual(errors, [], f"thread errors: {errors}")
+
     def test_distribution_shift_sums_to_total(self):
         reports = [
             {
