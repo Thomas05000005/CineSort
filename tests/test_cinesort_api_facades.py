@@ -11,6 +11,7 @@ PR 1 verifie :
 PR 2 ajoute : les 7 methodes du bounded context Run sur RunFacade
 PR 3 ajoute : les 6 methodes du bounded context Settings sur SettingsFacade
 PR 4 ajoute : les 21 methodes du bounded context Quality sur QualityFacade
+PR 5 ajoute : les 11 methodes du bounded context Integrations sur IntegrationsFacade
 """
 
 from __future__ import annotations
@@ -608,6 +609,174 @@ class QualityFacadeBackwardCompatTests(unittest.TestCase):
         old = self.api.get_quality_profile()
         new = self.api.quality.get_quality_profile()
         self.assertEqual(set(old.keys()), set(new.keys()))
+
+
+class IntegrationsFacadeFullMigrationTests(unittest.TestCase):
+    """PR 5 : les 11 methodes du bounded context Integrations sont exposees."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_integrations_facade_exposes_11_methods(self) -> None:
+        """Sanity : les 11 methodes du bounded context Integrations existent."""
+        expected = {
+            # TMDb (2)
+            "test_tmdb_key",
+            "get_tmdb_posters",
+            # Jellyfin (3)
+            "test_jellyfin_connection",
+            "get_jellyfin_libraries",
+            "get_jellyfin_sync_report",
+            # Plex (3)
+            "test_plex_connection",
+            "get_plex_libraries",
+            "get_plex_sync_report",
+            # Radarr (3)
+            "test_radarr_connection",
+            "get_radarr_status",
+            "request_radarr_upgrade",
+        }
+        self.assertEqual(len(expected), 11)
+        for name in expected:
+            self.assertTrue(
+                hasattr(self.api.integrations, name),
+                f"IntegrationsFacade.{name} manquante",
+            )
+            self.assertTrue(
+                callable(getattr(self.api.integrations, name)),
+                f"IntegrationsFacade.{name} non callable",
+            )
+
+    # ----- TMDb (2) -----
+
+    def test_test_tmdb_key_delegates(self) -> None:
+        sentinel = {"ok": True, "capabilities": []}
+        with patch.object(self.api, "test_tmdb_key", return_value=sentinel) as mocked:
+            result = self.api.integrations.test_tmdb_key("KEY123", "C:/state", 5.0)
+        mocked.assert_called_once_with("KEY123", "C:/state", 5.0)
+        self.assertEqual(result, sentinel)
+
+    def test_test_tmdb_key_default_timeout(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "test_tmdb_key", return_value=sentinel) as mocked:
+            self.api.integrations.test_tmdb_key("KEY", "C:/state")
+        mocked.assert_called_once_with("KEY", "C:/state", 10.0)
+
+    def test_get_tmdb_posters_delegates(self) -> None:
+        sentinel = {"ok": True, "posters": {}}
+        with patch.object(self.api, "get_tmdb_posters", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_tmdb_posters([27205, 19995], size="w185")
+        mocked.assert_called_once_with([27205, 19995], "w185")
+        self.assertEqual(result, sentinel)
+
+    def test_get_tmdb_posters_default_size(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_tmdb_posters", return_value=sentinel) as mocked:
+            self.api.integrations.get_tmdb_posters([1])
+        mocked.assert_called_once_with([1], "w92")
+
+    # ----- Jellyfin (3) -----
+
+    def test_test_jellyfin_connection_delegates(self) -> None:
+        sentinel = {"ok": True, "server": "Jellyfin"}
+        with patch.object(self.api, "test_jellyfin_connection", return_value=sentinel) as mocked:
+            result = self.api.integrations.test_jellyfin_connection(url="http://jf:8096", api_key="KEY", timeout_s=5.0)
+        mocked.assert_called_once_with(url="http://jf:8096", api_key="KEY", timeout_s=5.0)
+        self.assertEqual(result, sentinel)
+
+    def test_get_jellyfin_libraries_delegates(self) -> None:
+        sentinel = {"ok": True, "libraries": []}
+        with patch.object(self.api, "get_jellyfin_libraries", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_jellyfin_libraries()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_get_jellyfin_sync_report_delegates(self) -> None:
+        sentinel = {"ok": True, "matched": []}
+        with patch.object(self.api, "get_jellyfin_sync_report", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_jellyfin_sync_report("run_xyz")
+        mocked.assert_called_once_with("run_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_get_jellyfin_sync_report_default_run_id(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_jellyfin_sync_report", return_value=sentinel) as mocked:
+            self.api.integrations.get_jellyfin_sync_report()
+        mocked.assert_called_once_with("")
+
+    # ----- Plex (3) -----
+
+    def test_test_plex_connection_delegates(self) -> None:
+        sentinel = {"ok": True, "server": "Plex"}
+        with patch.object(self.api, "test_plex_connection", return_value=sentinel) as mocked:
+            result = self.api.integrations.test_plex_connection(url="http://plex:32400", token="TOKEN", timeout_s=8.0)
+        mocked.assert_called_once_with(url="http://plex:32400", token="TOKEN", timeout_s=8.0)
+        self.assertEqual(result, sentinel)
+
+    def test_get_plex_libraries_delegates(self) -> None:
+        sentinel = {"ok": True, "libraries": []}
+        with patch.object(self.api, "get_plex_libraries", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_plex_libraries(url="http://plex:32400", token="TOKEN", timeout_s=10.0)
+        mocked.assert_called_once_with(url="http://plex:32400", token="TOKEN", timeout_s=10.0)
+        self.assertEqual(result, sentinel)
+
+    def test_get_plex_sync_report_delegates(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_plex_sync_report", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_plex_sync_report("run_xyz")
+        mocked.assert_called_once_with("run_xyz")
+        self.assertEqual(result, sentinel)
+
+    # ----- Radarr (3) -----
+
+    def test_test_radarr_connection_delegates(self) -> None:
+        sentinel = {"ok": True, "version": "5.0"}
+        with patch.object(self.api, "test_radarr_connection", return_value=sentinel) as mocked:
+            result = self.api.integrations.test_radarr_connection(
+                url="http://radarr:7878", api_key="KEY", timeout_s=10.0
+            )
+        mocked.assert_called_once_with(url="http://radarr:7878", api_key="KEY", timeout_s=10.0)
+        self.assertEqual(result, sentinel)
+
+    def test_get_radarr_status_delegates(self) -> None:
+        sentinel = {"ok": True, "matched": 0}
+        with patch.object(self.api, "get_radarr_status", return_value=sentinel) as mocked:
+            result = self.api.integrations.get_radarr_status("run_xyz")
+        mocked.assert_called_once_with("run_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_request_radarr_upgrade_delegates(self) -> None:
+        sentinel = {"ok": True, "task_id": 42}
+        with patch.object(self.api, "request_radarr_upgrade", return_value=sentinel) as mocked:
+            result = self.api.integrations.request_radarr_upgrade(123)
+        mocked.assert_called_once_with(123)
+        self.assertEqual(result, sentinel)
+
+
+class IntegrationsFacadeBackwardCompatTests(unittest.TestCase):
+    """Les 11 anciennes methodes Integrations directes restent fonctionnelles."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_all_11_old_integrations_methods_still_exist(self) -> None:
+        for name in (
+            "test_tmdb_key",
+            "get_tmdb_posters",
+            "test_jellyfin_connection",
+            "get_jellyfin_libraries",
+            "get_jellyfin_sync_report",
+            "test_plex_connection",
+            "get_plex_libraries",
+            "get_plex_sync_report",
+            "test_radarr_connection",
+            "get_radarr_status",
+            "request_radarr_upgrade",
+        ):
+            self.assertTrue(
+                hasattr(self.api, name),
+                f"CineSortApi.{name} a disparu (regression backward-compat)",
+            )
 
 
 class BackwardCompatTests(unittest.TestCase):

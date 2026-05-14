@@ -1,18 +1,24 @@
-"""IntegrationsFacade : bounded context Integrations externes (issue #84 PR 1 pilote).
+"""IntegrationsFacade : bounded context Integrations externes (issue #84 PR 5 — migration complete).
 
-Methodes prevues a terme (11) :
+Cf docs/internal/REFACTOR_PLAN_84.md.
+
+11 methodes du bounded context Integrations :
+    - TMDb (2) : test_tmdb_key, get_tmdb_posters
     - Jellyfin (3) : test_jellyfin_connection, get_jellyfin_libraries,
                      get_jellyfin_sync_report
     - Plex (3) : test_plex_connection, get_plex_libraries, get_plex_sync_report
     - Radarr (3) : test_radarr_connection, get_radarr_status, request_radarr_upgrade
-    - TMDb (2) : test_tmdb_key, get_tmdb_posters
 
-PR 1 (pilote) : test_jellyfin_connection.
+Strategie Strangler Fig + Adapter pattern :
+- Les 11 methodes existent EN PARALLELE sur CineSortApi (preserve backward-compat)
+- Cette facade delegue simplement vers self._api.X
+- Les nouveaux call sites peuvent utiliser api.integrations.X(...)
+- Les anciens call sites (api.X(...)) continuent de fonctionner
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from cinesort.ui.api.facades._base import _BaseFacade
 
@@ -20,14 +26,107 @@ from cinesort.ui.api.facades._base import _BaseFacade
 class IntegrationsFacade(_BaseFacade):
     """Bounded context Integrations : Jellyfin, Plex, Radarr, TMDb."""
 
+    # ---------- TMDb (2) ----------
+
+    def test_tmdb_key(self, api_key: str, state_dir: str, timeout_s: float = 10.0) -> Dict[str, Any]:
+        """Test la cle TMDb et retourne les capacites.
+
+        Cf CineSortApi.test_tmdb_key pour la doc complete.
+        """
+        return self._api.test_tmdb_key(api_key, state_dir, timeout_s)
+
+    def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+        """Recupere les URL posters TMDb pour une liste d'IDs.
+
+        Cf CineSortApi.get_tmdb_posters pour la doc complete.
+        """
+        return self._api.get_tmdb_posters(tmdb_ids, size)
+
+    # ---------- Jellyfin (3) ----------
+
     def test_jellyfin_connection(
         self,
         url: str = "",
         api_key: str = "",
         timeout_s: float = 10.0,
     ) -> Dict[str, Any]:
-        """Test la connexion Jellyfin et retourne infos serveur + user + bibliotheques.
+        """Test la connexion au serveur Jellyfin.
 
-        Delegation vers CineSortApi.test_jellyfin_connection (backward-compat).
+        Cf CineSortApi.test_jellyfin_connection pour la doc complete.
         """
         return self._api.test_jellyfin_connection(url=url, api_key=api_key, timeout_s=timeout_s)
+
+    def get_jellyfin_libraries(self) -> Dict[str, Any]:
+        """Retourne les bibliotheques Jellyfin configurees.
+
+        Cf CineSortApi.get_jellyfin_libraries pour la doc complete.
+        """
+        return self._api.get_jellyfin_libraries()
+
+    def get_jellyfin_sync_report(self, run_id: str = "") -> Dict[str, Any]:
+        """Rapport de sync Jellyfin pour un run (ou dernier run).
+
+        Cf CineSortApi.get_jellyfin_sync_report pour la doc complete.
+        """
+        return self._api.get_jellyfin_sync_report(run_id)
+
+    # ---------- Plex (3) ----------
+
+    def test_plex_connection(
+        self,
+        url: str = "",
+        token: str = "",
+        timeout_s: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Test la connexion au serveur Plex.
+
+        Cf CineSortApi.test_plex_connection pour la doc complete.
+        """
+        return self._api.test_plex_connection(url=url, token=token, timeout_s=timeout_s)
+
+    def get_plex_libraries(
+        self,
+        url: str = "",
+        token: str = "",
+        timeout_s: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Retourne les bibliotheques Plex configurees.
+
+        Cf CineSortApi.get_plex_libraries pour la doc complete.
+        """
+        return self._api.get_plex_libraries(url=url, token=token, timeout_s=timeout_s)
+
+    def get_plex_sync_report(self, run_id: str = "") -> Dict[str, Any]:
+        """Rapport de sync Plex pour un run (ou dernier run).
+
+        Cf CineSortApi.get_plex_sync_report pour la doc complete.
+        """
+        return self._api.get_plex_sync_report(run_id)
+
+    # ---------- Radarr (3) ----------
+
+    def test_radarr_connection(
+        self,
+        url: str = "",
+        api_key: str = "",
+        timeout_s: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Test la connexion au serveur Radarr.
+
+        Cf CineSortApi.test_radarr_connection pour la doc complete.
+        """
+        return self._api.test_radarr_connection(url=url, api_key=api_key, timeout_s=timeout_s)
+
+    def get_radarr_status(self, run_id: str = "") -> Dict[str, Any]:
+        """Statut Radarr pour un run (films trouves vs absents).
+
+        Cf CineSortApi.get_radarr_status pour la doc complete.
+        """
+        return self._api.get_radarr_status(run_id)
+
+    def request_radarr_upgrade(self, radarr_movie_id: int) -> Dict[str, Any]:
+        """Declenche un upgrade Radarr pour un film.
+
+        Cf CineSortApi.request_radarr_upgrade pour la doc complete.
+        """
+        return self._api.request_radarr_upgrade(radarr_movie_id)
