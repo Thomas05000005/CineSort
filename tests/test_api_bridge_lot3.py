@@ -400,16 +400,14 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         }
 
-        original_find = core.find_duplicate_targets
-
+        # Cf issue #88 : utiliser mock.patch.object au lieu d'assignation
+        # directe pour cleanup automatique (thread-safe + restore en cas
+        # d'exception inattendue dans le test).
         def boom(*args, **kwargs):
             raise OSError("dup-check boom")
 
-        core.find_duplicate_targets = boom
-        try:
+        with mock.patch.object(core, "find_duplicate_targets", side_effect=boom):
             res = api.apply(run_id, decisions, True, False)
-        finally:
-            core.find_duplicate_targets = original_find
 
         self.assertFalse(res.get("ok"), res)
         self.assertIn("doublons impossible", str(res.get("message", "")).lower())

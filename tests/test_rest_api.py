@@ -71,7 +71,28 @@ class RestServerHttpTests(unittest.TestCase):
         cls.token = "test-secret-42"
         cls.server = RestApiServer(cls.api, port=cls.port, token=cls.token)
         cls.server.start()
-        time.sleep(0.2)  # wait for server to be ready
+        # Cf issue #88 : poll sur /api/health au lieu d'un sleep fixe.
+        # Sur CI Windows lente, time.sleep(0.2) ne garantit pas que le
+        # ThreadingHTTPServer accepte deja les connexions, d'ou flakies.
+        cls._wait_server_ready(cls.port, timeout_s=5.0)
+
+    @staticmethod
+    def _wait_server_ready(port: int, timeout_s: float = 5.0) -> None:
+        """Poll GET /api/health jusqu'a 200 ou timeout."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                conn = HTTPConnection("127.0.0.1", port, timeout=0.5)
+                conn.request("GET", "/api/health")
+                resp = conn.getresponse()
+                resp.read()
+                conn.close()
+                if resp.status == 200:
+                    return
+            except (ConnectionRefusedError, OSError):
+                pass
+            time.sleep(0.05)
+        raise RuntimeError(f"Serveur REST pas pret apres {timeout_s}s sur port {port}")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -418,16 +439,31 @@ class HttpsRealCertTests(unittest.TestCase):
             key_path=self.key_path,
         )
         server.start()
-        time.sleep(0.3)
+        # Cf issue #88 : poll de readiness HTTPS au lieu d'un sleep fixe.
+        import http.client
+        import ssl
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        deadline = time.monotonic() + 5.0
+        ready = False
+        while time.monotonic() < deadline:
+            try:
+                c = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=0.5)
+                c.request("GET", "/api/health")
+                r = c.getresponse()
+                r.read()
+                c.close()
+                if r.status == 200:
+                    ready = True
+                    break
+            except (ConnectionRefusedError, OSError, ssl.SSLError):
+                pass
+            time.sleep(0.05)
+        self.assertTrue(ready, "Serveur HTTPS pas pret dans 5s")
         try:
             self.assertTrue(server._is_https)
-            # Tester le health via HTTPSConnection (auto-signe → desactiver la verification)
-            import http.client
-            import ssl
-
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
             conn = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=5)
             conn.request("GET", "/api/health")
             resp = conn.getresponse()
