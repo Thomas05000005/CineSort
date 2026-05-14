@@ -79,6 +79,15 @@ class MatchingTests(unittest.TestCase):
         report = build_sync_report(local, jf)
         self.assertEqual(report["matched"], 1)
 
+    def test_match_skips_invalid_tmdb_id(self) -> None:
+        # Audit 2026-05-13 : tmdb_id non-numerique ne doit pas crasher
+        # _extract_local_tmdb_id (ex: NFO corrompu, tag string "tt0123" IMDb).
+        local = [_local_row("Film", 2020, folder="/films/x", video="x.mkv", tmdb_id="tt0123")]
+        jf = [_jf_movie("Film", 2020, "/films/x/x.mkv")]
+        report = build_sync_report(local, jf)
+        # Le match tombe au niveau 3 (titre+annee), pas de crash.
+        self.assertEqual(report["matched"], 1)
+
     def test_match_by_title_year_fallback(self) -> None:
         local = [_local_row("Inception", 2010, folder="/a", video="x.mkv")]
         jf = [_jf_movie("Inception", 2010, "/b/inception.mkv")]
