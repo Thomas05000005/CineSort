@@ -35,7 +35,7 @@ def _create_file(path: Path, size: int = 2048) -> None:
 def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> dict:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        last = api.get_status(run_id, 0)
+        last = api.run.get_status(run_id, 0)
         if last.get("done"):
             return last
         time.sleep(0.05)
@@ -88,7 +88,7 @@ class _ApplyRobustnessBase(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _scan_to_done(self, api: CineSortApi) -> str:
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -102,7 +102,7 @@ class _ApplyRobustnessBase(unittest.TestCase):
         return run_id
 
     def _decisions_for_all(self, run_id: str, api: CineSortApi) -> dict:
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         return {
             row["row_id"]: {"ok": True, "title": row.get("proposed_title") or "", "year": row.get("proposed_year") or 0}
@@ -233,7 +233,7 @@ class ScanAfterPartialApplyTests(_ApplyRobustnessBase):
 
         # Nouveau scan
         run_id2 = self._scan_to_done(api)
-        plan2 = api.get_plan(run_id2)
+        plan2 = api.run.get_plan(run_id2)
         rows2 = plan2.get("rows", [])
         # Tous les films doivent etre retrouves (pas de doublon fantome)
         # Le nombre de rows scannes doit etre egal au nombre initial (les fichiers existent tous encore)

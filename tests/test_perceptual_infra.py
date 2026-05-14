@@ -355,7 +355,7 @@ class SettingsDefaultsTests(unittest.TestCase):
         try:
             api = backend.CineSortApi()
             api._state_dir = Path(tmp)
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertFalse(s.get("perceptual_enabled"))
             self.assertFalse(s.get("perceptual_auto_on_scan"))
             self.assertTrue(s.get("perceptual_auto_on_quality"))
@@ -380,7 +380,7 @@ class SettingsDefaultsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -390,7 +390,7 @@ class SettingsDefaultsTests(unittest.TestCase):
                     "perceptual_comparison_timeout_s": 900,
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["perceptual_enabled"])
             self.assertEqual(s["perceptual_frames_count"], 25)
             self.assertEqual(s["perceptual_comparison_timeout_s"], 900)

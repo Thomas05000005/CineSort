@@ -20,7 +20,7 @@ class DashboardApiTests(unittest.TestCase):
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
         self.api = backend.CineSortApi()
-        saved = self.api.save_settings(
+        saved = self.api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),

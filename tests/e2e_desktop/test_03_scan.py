@@ -46,7 +46,7 @@ class TestScan:
         # D'abord configurer le dossier racine via l'API JS
         page.evaluate(f"""() => {{
             if (window.pywebview?.api?.save_settings) {{
-                window.pywebview.api.save_settings({{
+                window.pywebview.api.settings.save_settings({{
                     root: "{test_films_dir.replace(chr(92), "/")}",
                     roots: ["{test_films_dir.replace(chr(92), "/")}"],
                     tmdb_enabled: false,

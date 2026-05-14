@@ -112,7 +112,7 @@ class SettingsRobustnessTests(unittest.TestCase):
     def test_settings_save_during_active_run_no_crash(self) -> None:
         """save_settings pendant qu'un run est actif : pas de corruption cross-thread."""
         api = CineSortApi()
-        api.save_settings(
+        api.settings.save_settings(
             {
                 "root": str(self.state_dir / "root"),
                 "state_dir": str(self.state_dir),
@@ -127,7 +127,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         _orig_min = core.MIN_VIDEO_BYTES
         core.MIN_VIDEO_BYTES = 1
         try:
-            start = api.start_plan(
+            start = api.run.start_plan(
                 {
                     "root": str(self.state_dir / "root"),
                     "state_dir": str(self.state_dir),
@@ -141,7 +141,7 @@ class SettingsRobustnessTests(unittest.TestCase):
             def _save_repeatedly():
                 for _ in range(10):
                     try:
-                        api.save_settings(
+                        api.settings.save_settings(
                             {
                                 "root": str(self.state_dir / "root"),
                                 "state_dir": str(self.state_dir),
@@ -165,7 +165,7 @@ class SettingsRobustnessTests(unittest.TestCase):
             # Attendre fin du scan
             deadline = time.time() + 10
             while time.time() < deadline:
-                s = api.get_status(start["run_id"], 0)
+                s = api.run.get_status(start["run_id"], 0)
                 if s.get("done"):
                     break
                 time.sleep(0.02)
@@ -189,7 +189,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         good_root.mkdir()
         # remember_key=True pour persister la cle TMDb (sinon settings_support
         # nettoie la cle a la sauvegarde par defaut).
-        api.save_settings(
+        api.settings.save_settings(
             {
                 "root": str(good_root),
                 "state_dir": str(self.state_dir),
@@ -203,7 +203,7 @@ class SettingsRobustnessTests(unittest.TestCase):
                 "email_smtp_password": "my-email-password",
             }
         )
-        loaded = api.get_settings()
+        loaded = api.settings.get_settings()
         mask = "\u2022" * 8
 
         # SEC-H2 : tmdb_api_key et jellyfin_api_key sont MAINTENANT masques aussi
@@ -234,7 +234,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         api = CineSortApi()
         good_root = self.state_dir / "root"
         good_root.mkdir()
-        api.save_settings(
+        api.settings.save_settings(
             {
                 "root": str(good_root),
                 "state_dir": str(self.state_dir),
@@ -246,7 +246,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         )
         # Le frontend renvoie le masque (user n'a pas touche aux champs)
         mask = "\u2022" * 8
-        api.save_settings(
+        api.settings.save_settings(
             {
                 "root": str(good_root),
                 "state_dir": str(self.state_dir),

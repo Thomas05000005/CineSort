@@ -215,7 +215,7 @@ class RadarrSettingsTests(unittest.TestCase):
         try:
             api = backend.CineSortApi()
             api._state_dir = Path(tmp)
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertFalse(s.get("radarr_enabled"))
             self.assertEqual(s.get("radarr_url"), "")
         finally:
@@ -231,7 +231,7 @@ class RadarrSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -241,7 +241,7 @@ class RadarrSettingsTests(unittest.TestCase):
                     "radarr_api_key": "abc123",
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["radarr_enabled"])
             self.assertEqual(s["radarr_url"], "http://radarr:7878")
         finally:
@@ -266,14 +266,14 @@ class RadarrEndpointTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.get_radarr_status()
+        result = api.integrations.get_radarr_status()
         self.assertFalse(result["ok"])
 
     def test_request_radarr_upgrade_disabled(self) -> None:
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.request_radarr_upgrade(1)
+        result = api.integrations.request_radarr_upgrade(1)
         self.assertFalse(result["ok"])
 
 

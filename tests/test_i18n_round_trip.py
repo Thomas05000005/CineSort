@@ -345,7 +345,7 @@ class RestRoundTripTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),
@@ -429,12 +429,12 @@ class RestRoundTripTests(unittest.TestCase):
         self.assertTrue(payload.get("persisted"))
 
         # Verifie que le fichier settings.json contient bien locale=en
-        settings = self.api.get_settings()
+        settings = self.api.settings.get_settings()
         self.assertEqual(settings.get("locale"), "en")
 
         # Retour fr et verifie
         self._post("/api/set_locale", {"locale": "fr"})
-        settings = self.api.get_settings()
+        settings = self.api.settings.get_settings()
         self.assertEqual(settings.get("locale"), "fr")
 
 

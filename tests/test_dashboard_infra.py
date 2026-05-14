@@ -163,7 +163,7 @@ class DashboardStaticFileTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),
@@ -303,7 +303,7 @@ class DashboardStaticFileTests(unittest.TestCase):
         _, body1, _ = self._get("/api/health")
         ts1 = json.loads(body1)["last_event_ts"]
         # Sauvegarder des settings valides
-        self.api.save_settings(
+        self.api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -327,7 +327,7 @@ class RateLimitHttpTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),

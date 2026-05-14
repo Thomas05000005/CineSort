@@ -201,7 +201,7 @@ class PlexEndpointTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.get_plex_sync_report()
+        result = api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
 
 
@@ -217,7 +217,7 @@ class PlexSettingsTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertFalse(s.get("plex_enabled"))
         self.assertEqual(s.get("plex_url"), "")
         self.assertTrue(s.get("plex_refresh_on_apply"))
@@ -232,7 +232,7 @@ class PlexSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -243,7 +243,7 @@ class PlexSettingsTests(unittest.TestCase):
                     "plex_library_id": "1",
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["plex_enabled"])
             self.assertEqual(s["plex_url"], "http://plex:32400")
             self.assertEqual(s["plex_library_id"], "1")

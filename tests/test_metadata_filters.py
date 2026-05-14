@@ -344,10 +344,10 @@ class TestSettings(unittest.TestCase):
     def _save(self, extra):
         base = {"root": str(self._root), "state_dir": str(self._sd)}
         base.update(extra)
-        return self.api.save_settings(base)
+        return self.api.settings.save_settings(base)
 
     def test_defaults(self):
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertTrue(s.get("perceptual_interlacing_detection_enabled"))
         self.assertTrue(s.get("perceptual_crop_detection_enabled"))
         self.assertFalse(s.get("perceptual_judder_detection_enabled"))  # opt-in
@@ -360,7 +360,7 @@ class TestSettings(unittest.TestCase):
                 "perceptual_judder_detection_enabled": True,
             }
         )
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertFalse(s.get("perceptual_interlacing_detection_enabled"))
         self.assertFalse(s.get("perceptual_crop_detection_enabled"))
         self.assertTrue(s.get("perceptual_judder_detection_enabled"))

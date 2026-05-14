@@ -14,80 +14,80 @@ class ThemeSettingsTests(unittest.TestCase):
     def test_theme_has_value(self):
         """Le setting theme est present et a une valeur valide."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertIn(s.get("theme"), ("cinema", "studio", "luxe", "neon"))
 
     def test_animation_level_has_value(self):
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertIn(s.get("animation_level"), ("subtle", "moderate", "intense"))
 
     def test_effect_speed_in_range(self):
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertGreaterEqual(s.get("effect_speed", 0), 1)
         self.assertLessEqual(s.get("effect_speed", 999), 100)
 
     def test_glow_intensity_in_range(self):
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertGreaterEqual(s.get("glow_intensity", -1), 0)
         self.assertLessEqual(s.get("glow_intensity", 999), 100)
 
     def test_light_intensity_in_range(self):
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertGreaterEqual(s.get("light_intensity", -1), 0)
         self.assertLessEqual(s.get("light_intensity", 999), 100)
 
     def test_theme_valid_values(self):
         """Seules les valeurs cinema/studio/luxe/neon sont acceptees."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["theme"] = "cinema"
-        result = api.save_settings(s)
+        result = api.settings.save_settings(s)
         self.assertTrue(result.get("ok"), result)
-        s2 = api.get_settings()
+        s2 = api.settings.get_settings()
         self.assertEqual(s2["theme"], "cinema")
 
     def test_theme_invalid_fallback(self):
         """Une valeur invalide retombe sur le defaut (luxe depuis refonte V6)."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["theme"] = "invalid"
-        api.save_settings(s)
-        s2 = api.get_settings()
+        api.settings.save_settings(s)
+        s2 = api.settings.get_settings()
         self.assertEqual(s2["theme"], "luxe")
 
     def test_effect_speed_clamp(self):
         """effect_speed est clampe entre 1 et 100."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["effect_speed"] = 200
-        api.save_settings(s)
-        s2 = api.get_settings()
+        api.settings.save_settings(s)
+        s2 = api.settings.get_settings()
         self.assertEqual(s2["effect_speed"], 100)
 
     def test_glow_intensity_clamp_zero(self):
         """glow_intensity accepte 0 (aucun glow)."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["glow_intensity"] = 0
-        api.save_settings(s)
-        s2 = api.get_settings()
+        api.settings.save_settings(s)
+        s2 = api.settings.get_settings()
         self.assertEqual(s2["glow_intensity"], 0)
 
     def test_settings_round_trip(self):
         """Les 5 settings theme font un round-trip correct."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["theme"] = "neon"
         s["animation_level"] = "intense"
         s["effect_speed"] = 75
         s["glow_intensity"] = 60
         s["light_intensity"] = 40
-        api.save_settings(s)
-        s2 = api.get_settings()
+        api.settings.save_settings(s)
+        s2 = api.settings.get_settings()
         self.assertEqual(s2["theme"], "neon")
         self.assertEqual(s2["animation_level"], "intense")
         self.assertEqual(s2["effect_speed"], 75)

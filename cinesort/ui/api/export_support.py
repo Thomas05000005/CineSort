@@ -108,7 +108,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
 
         # 1. Settings sanitises
         try:
-            settings_resp = api.get_settings()
+            settings_resp = api.settings.get_settings()
             raw_settings = settings_resp.get("data", settings_resp) if isinstance(settings_resp, dict) else {}
             settings = _sanitize_settings(raw_settings) if isinstance(raw_settings, dict) else {}
         except (AttributeError, KeyError, TypeError) as exc:

@@ -319,14 +319,14 @@ class ApiEndpointTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.get_film_history("")
+        result = api.library.get_film_history("")
         self.assertFalse(result.get("ok"))
 
     def test_list_films_default(self) -> None:
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.list_films_with_history()
+        result = api.library.list_films_with_history()
         # Peut retourner ok=True avec films=[] ou ok=False si pas de state
         self.assertIn("ok", result)
 

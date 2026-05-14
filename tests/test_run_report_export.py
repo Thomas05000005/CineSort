@@ -33,7 +33,7 @@ class RunReportExportTests(unittest.TestCase):
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            status = api.get_status(run_id, 0)
+            status = api.run.get_status(run_id, 0)
             if status.get("done"):
                 return
             time.sleep(0.05)
@@ -44,7 +44,7 @@ class RunReportExportTests(unittest.TestCase):
         self._create_file(self.root / "Dune.2021.2160p" / "Dune.2021.2160p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -56,7 +56,7 @@ class RunReportExportTests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 2)
@@ -72,13 +72,13 @@ class RunReportExportTests(unittest.TestCase):
         saved = api.save_validation(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
-        score_one = api.get_quality_report(run_id, rows[0]["row_id"], {"reuse_existing": False})
+        score_one = api.quality.get_quality_report(run_id, rows[0]["row_id"], {"reuse_existing": False})
         self.assertTrue(score_one.get("ok"), score_one)
 
         dry = api.apply(run_id, decisions, True, False)
         self.assertTrue(dry.get("ok"), dry)
 
-        exported_json = api.export_run_report(run_id, "json")
+        exported_json = api.run.export_run_report(run_id, "json")
         self.assertTrue(exported_json.get("ok"), exported_json)
         json_path = Path(exported_json["path"])
         self.assertTrue(json_path.exists(), json_path)
@@ -89,7 +89,7 @@ class RunReportExportTests(unittest.TestCase):
         self.assertEqual(int(counts.get("rows_total") or 0), len(rows))
         self.assertGreaterEqual(int(counts.get("quality_reports") or 0), 1)
 
-        exported_csv = api.export_run_report(run_id, "csv")
+        exported_csv = api.run.export_run_report(run_id, "csv")
         self.assertTrue(exported_csv.get("ok"), exported_csv)
         csv_path = Path(exported_csv["path"])
         self.assertTrue(csv_path.exists(), csv_path)
@@ -102,13 +102,13 @@ class RunReportExportTests(unittest.TestCase):
 
     def test_export_run_report_rejects_bad_format(self) -> None:
         api = CineSortApi()
-        result = api.export_run_report("abcd1234", "xml")
+        result = api.run.export_run_report("abcd1234", "xml")
         self.assertFalse(result.get("ok"), result)
         self.assertIn("format invalide", str(result.get("message", "")).lower())
 
     def test_export_run_report_requires_existing_run(self) -> None:
         api = CineSortApi()
-        result = api.export_run_report("abcd1234", "json")
+        result = api.run.export_run_report("abcd1234", "json")
         self.assertFalse(result.get("ok"), result)
         self.assertIn("introuvable", str(result.get("message", "")).lower())
 

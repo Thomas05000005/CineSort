@@ -51,7 +51,7 @@ def _extract_validated_ids(val_payload: Any) -> Optional[set]:
 def _resolve_ids_from_scope(api: Any, run_id: str, scope: str) -> Dict[str, Any]:
     """Charge les row_ids depuis le plan du run pour scope=all ou validated."""
     try:
-        plan_payload = api.get_plan(run_id)
+        plan_payload = api.run.get_plan(run_id)
     except (OSError, TypeError, ValueError) as exc:
         return {"ok": False, "message": t("errors.cannot_load_plan", detail=str(exc))}
     if not plan_payload.get("ok"):
@@ -76,7 +76,7 @@ def _resolve_ids_from_scope(api: Any, run_id: str, scope: str) -> Dict[str, Any]
 
 
 def _process_one_row(api: Any, run_id: str, row_id: str, reuse_existing: bool) -> Dict[str, Any]:
-    one = api.get_quality_report(run_id, row_id, {"reuse_existing": reuse_existing})
+    one = api.quality.get_quality_report(run_id, row_id, {"reuse_existing": reuse_existing})
     if one.get("ok"):
         status = str(one.get("status") or "analyzed")
         return {

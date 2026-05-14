@@ -62,13 +62,13 @@ class FacadeDelegationTests(unittest.TestCase):
 
     def test_settings_get_settings_delegates(self) -> None:
         """SettingsFacade.get_settings retourne le meme resultat que CineSortApi.get_settings."""
-        old = self.api.get_settings()
+        old = self.api.settings.get_settings()
         new = self.api.settings.get_settings()
         # Memes cles (le contenu peut varier si timing/ts mais structure identique)
         self.assertEqual(set(old.keys()), set(new.keys()))
 
     def test_quality_get_quality_profile_delegates(self) -> None:
-        old = self.api.get_quality_profile()
+        old = self.api.quality.get_quality_profile()
         new = self.api.quality.get_quality_profile()
         # Memes cles structurelles (les ts/version peuvent varier)
         self.assertEqual(set(old.keys()), set(new.keys()))
@@ -190,7 +190,7 @@ class RunFacadeFullMigrationTests(unittest.TestCase):
 class RunFacadeBackwardCompatTests(unittest.TestCase):
     """Les 7 anciennes methodes directes restent fonctionnelles (Strangler Fig).
 
-    Frontend JS et REST API continuent d'appeler api.start_plan(...) etc.
+    Frontend JS et REST API continuent d'appeler api.run.start_plan(...) etc.
     Tant que la PR 10 n'a pas migre tous les callers, ces methodes doivent rester.
     """
 
@@ -215,7 +215,7 @@ class RunFacadeBackwardCompatTests(unittest.TestCase):
     def test_get_status_invalid_run_id_via_old_and_new(self) -> None:
         """Sanity : appeler get_status sur un run_id inexistant retourne le meme
         type de reponse via l'ancienne et la nouvelle voie."""
-        old = self.api.get_status("run_inexistant_xyz")
+        old = self.api.run.get_status("run_inexistant_xyz")
         new = self.api.run.get_status("run_inexistant_xyz")
         # Les deux doivent etre des dicts avec une cle "ok"
         self.assertIsInstance(old, dict)
@@ -327,7 +327,7 @@ class SettingsFacadeBackwardCompatTests(unittest.TestCase):
 
     def test_get_settings_via_old_and_new_returns_same_keys(self) -> None:
         """Parite structurelle : memes cles via api.X et api.settings.X."""
-        old = self.api.get_settings()
+        old = self.api.settings.get_settings()
         new = self.api.settings.get_settings()
         self.assertEqual(set(old.keys()), set(new.keys()))
 
@@ -607,7 +607,7 @@ class QualityFacadeBackwardCompatTests(unittest.TestCase):
 
     def test_get_quality_profile_via_old_and_new_returns_same_keys(self) -> None:
         """Parite structurelle : memes cles via api.X et api.quality.X."""
-        old = self.api.get_quality_profile()
+        old = self.api.quality.get_quality_profile()
         new = self.api.quality.get_quality_profile()
         self.assertEqual(set(old.keys()), set(new.keys()))
 
@@ -960,7 +960,7 @@ class BackwardCompatTests(unittest.TestCase):
     def test_old_methods_callable(self) -> None:
         """Les anciennes methodes sont toujours callables."""
         # get_settings ne necessite aucun arg, retourne directement le dict settings
-        result = self.api.get_settings()
+        result = self.api.settings.get_settings()
         self.assertIsInstance(result, dict)
         # Sanity check : contient au moins quelques cles attendues
         self.assertIn("root", result)

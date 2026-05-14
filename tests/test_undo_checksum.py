@@ -132,7 +132,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return
             time.sleep(0.05)
@@ -146,7 +146,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         vid.write_bytes(b"VERSION_ORIGINALE" * 1024)
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -157,7 +157,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertTrue(rows, plan)
         decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}

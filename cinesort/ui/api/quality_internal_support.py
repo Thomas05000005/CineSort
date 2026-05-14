@@ -12,7 +12,7 @@ from cinesort.ui.api.settings_support import normalize_user_path
 
 
 def quality_store(api: Any) -> Tuple[Path, SQLiteStore]:
-    settings = api.get_settings()
+    settings = api.settings.get_settings()
     state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
     store, _runner = api._get_or_create_infra(state_dir)
     return state_dir, store

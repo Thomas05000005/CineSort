@@ -84,7 +84,7 @@ class TvPlanFlowTests(unittest.TestCase):
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            s = api.get_status(run_id, 0)
+            s = api.run.get_status(run_id, 0)
             if s.get("done"):
                 return
             time.sleep(0.05)
@@ -97,7 +97,7 @@ class TvPlanFlowTests(unittest.TestCase):
         self._create_file(series_dir / "Breaking.Bad.S01E03.720p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -110,7 +110,7 @@ class TvPlanFlowTests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         tv_rows = [r for r in rows if r.get("kind") == "tv_episode"]
@@ -127,7 +127,7 @@ class TvPlanFlowTests(unittest.TestCase):
         self._create_file(series_dir / "Skipped.S01E03.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -140,7 +140,7 @@ class TvPlanFlowTests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         tv_rows = [r for r in rows if r.get("kind") == "tv_episode"]
         self.assertEqual(len(tv_rows), 0, "TV should be skipped without enable_tv_detection")
@@ -152,7 +152,7 @@ class TvPlanFlowTests(unittest.TestCase):
         self._create_file(series_dir / "TestSeries.S01E03.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -165,7 +165,7 @@ class TvPlanFlowTests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         tv_rows = [r for r in rows if r.get("kind") == "tv_episode"]
         if not tv_rows:

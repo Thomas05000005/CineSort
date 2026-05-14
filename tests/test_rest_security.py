@@ -80,7 +80,7 @@ class RestSecurityHttpTests(unittest.TestCase):
         cls.root.mkdir()
         cls.state_dir.mkdir()
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),
@@ -203,7 +203,7 @@ class RestSecurityHttpTests(unittest.TestCase):
         tmpdir = _tmp.mkdtemp(prefix="cinesort_cors_")
         try:
             api = backend.CineSortApi()
-            api.save_settings({"root": tmpdir, "state_dir": tmpdir, "tmdb_enabled": False})
+            api.settings.save_settings({"root": tmpdir, "state_dir": tmpdir, "tmdb_enabled": False})
             server = RestApiServer(api, port=port, token="t", cors_origin="http://192.168.1.50:8642")
             server.start()
             time.sleep(0.2)
@@ -238,7 +238,7 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.mkdtemp(prefix="cinesort_rate_limit_")
         self.api = backend.CineSortApi()
-        self.api.save_settings(
+        self.api.settings.save_settings(
             {
                 "root": self._tmp,
                 "state_dir": self._tmp,

@@ -26,7 +26,7 @@ def _create_file(path: Path, size: int = 2048) -> None:
 def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 15.0) -> dict:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        s = api.get_status(run_id, 0)
+        s = api.run.get_status(run_id, 0)
         if s.get("done"):
             return s
         time.sleep(0.05)
@@ -57,7 +57,7 @@ class StateDirRaceTests(_ConcurrencyBase):
 
         api = CineSortApi()
         # Pre-save pour avoir un etat initial coherent
-        api.save_settings(
+        api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -70,7 +70,7 @@ class StateDirRaceTests(_ConcurrencyBase):
 
         def _start():
             try:
-                results["start"] = api.start_plan(
+                results["start"] = api.run.start_plan(
                     {
                         "root": str(self.root),
                         "state_dir": str(self.state_dir),
@@ -82,7 +82,7 @@ class StateDirRaceTests(_ConcurrencyBase):
 
         def _save():
             try:
-                results["save"] = api.save_settings(
+                results["save"] = api.settings.save_settings(
                     {
                         "root": str(self.root),
                         "state_dir": str(self.state_dir),
@@ -118,7 +118,7 @@ class MemoryStabilityTests(_ConcurrencyBase):
 
         # Warmup + mesure via RSS si psutil dispo, sinon on se contente de la verification _runs
         for _ in range(5):
-            start = api.start_plan(
+            start = api.run.start_plan(
                 {
                     "root": str(self.root),
                     "state_dir": str(self.state_dir),
@@ -130,7 +130,7 @@ class MemoryStabilityTests(_ConcurrencyBase):
 
         # Lancer 30 scans supplementaires
         for _ in range(30):
-            start = api.start_plan(
+            start = api.run.start_plan(
                 {
                     "root": str(self.root),
                     "state_dir": str(self.state_dir),
@@ -158,7 +158,7 @@ class GetStatusConcurrencyTests(_ConcurrencyBase):
             _create_file(self.root / f"Film{i}.2020" / f"Film{i}.2020.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -172,7 +172,7 @@ class GetStatusConcurrencyTests(_ConcurrencyBase):
 
         def _poll():
             for _ in range(100):
-                s = api.get_status(run_id, 0)
+                s = api.run.get_status(run_id, 0)
                 # Incoherence : running et done simultanement (avant le fix)
                 if s.get("done") and s.get("running"):
                     incoherences.append(dict(s))
@@ -196,7 +196,7 @@ class TwoAppliesSimultaneousTests(_ConcurrencyBase):
             _create_file(self.root / f"Movie{i}.2021" / f"Movie{i}.2021.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -206,7 +206,7 @@ class TwoAppliesSimultaneousTests(_ConcurrencyBase):
         run_id = start["run_id"]
         _wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         decisions = {
             r["row_id"]: {"ok": True, "title": r.get("proposed_title") or "", "year": r.get("proposed_year") or 0}
             for r in plan.get("rows", [])
@@ -238,7 +238,7 @@ class ApplyUndoSimultaneousTests(_ConcurrencyBase):
             _create_file(self.root / f"Film{i}.2020" / f"Film{i}.2020.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -247,7 +247,7 @@ class ApplyUndoSimultaneousTests(_ConcurrencyBase):
         )
         run_id = start["run_id"]
         _wait_done(api, run_id)
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         decisions = {
             r["row_id"]: {"ok": True, "title": r.get("proposed_title") or "", "year": r.get("proposed_year") or 0}
             for r in plan.get("rows", [])
@@ -293,7 +293,7 @@ class CancelDuringApplyTests(_ConcurrencyBase):
             _create_file(self.root / f"Movie{i}.2020" / f"Movie{i}.2020.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -305,18 +305,18 @@ class CancelDuringApplyTests(_ConcurrencyBase):
 
         # Attendre un peu puis annuler
         time.sleep(0.05)
-        cancel_result = api.cancel_run(run_id)
+        cancel_result = api.run.cancel_run(run_id)
         self.assertIsInstance(cancel_result, dict)
 
         # Attendre que le run termine
         deadline = time.time() + 10
         while time.time() < deadline:
-            s = api.get_status(run_id, 0)
+            s = api.run.get_status(run_id, 0)
             if s.get("done"):
                 break
             time.sleep(0.05)
         # Pas de crash — le run doit etre dans un etat terminal
-        final = api.get_status(run_id, 0)
+        final = api.run.get_status(run_id, 0)
         self.assertTrue(final.get("done"), final)
 
 

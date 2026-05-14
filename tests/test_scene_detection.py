@@ -233,15 +233,15 @@ class TestSettingDefaults(unittest.TestCase):
     def _save(self, extra):
         base = {"root": str(self._root), "state_dir": str(self._sd)}
         base.update(extra)
-        return self.api.save_settings(base)
+        return self.api.settings.save_settings(base)
 
     def test_default_enabled(self):
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertTrue(s.get("perceptual_scene_detection_enabled"))
 
     def test_roundtrip_false(self):
         self._save({"perceptual_scene_detection_enabled": False})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertFalse(s.get("perceptual_scene_detection_enabled"))
 
 

@@ -43,7 +43,7 @@ class DashboardShellHttpTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),

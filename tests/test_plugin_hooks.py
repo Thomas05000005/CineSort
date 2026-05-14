@@ -172,7 +172,7 @@ class PluginSettingsTests(unittest.TestCase):
         try:
             api = backend.CineSortApi()
             api._state_dir = Path(tmp)
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertFalse(s.get("plugins_enabled"))
             self.assertEqual(s.get("plugins_timeout_s"), 30)
         finally:
@@ -188,7 +188,7 @@ class PluginSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -197,7 +197,7 @@ class PluginSettingsTests(unittest.TestCase):
                     "plugins_timeout_s": 15,
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["plugins_enabled"])
             self.assertEqual(s["plugins_timeout_s"], 15)
         finally:

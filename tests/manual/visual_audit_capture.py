@@ -97,7 +97,7 @@ def _start_server() -> Tuple[Dict[str, Any], Any]:
     state_dir.mkdir()
 
     api = backend.CineSortApi()
-    api.save_settings(get_settings_dict(root, state_dir))
+    api.settings.save_settings(get_settings_dict(root, state_dir))
 
     db_path = db_path_for_state_dir(state_dir)
     store = SQLiteStore(db_path)

@@ -21,7 +21,7 @@ class ExpertModeBackendTests(unittest.TestCase):
     def test_expert_mode_default_false(self):
         """Le setting expert_mode est present et faux par defaut (mode debutant)."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertIn("expert_mode", s)
         self.assertFalse(s["expert_mode"])
 
@@ -46,18 +46,18 @@ class ExpertModeBackendTests(unittest.TestCase):
     def test_expert_mode_round_trip(self):
         """save_settings(expert_mode=True) → get_settings retourne True."""
         api = CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         s["expert_mode"] = True
-        result = api.save_settings(s)
+        result = api.settings.save_settings(s)
         self.assertTrue(result.get("ok"), result)
         try:
-            s2 = api.get_settings()
+            s2 = api.settings.get_settings()
             self.assertTrue(s2["expert_mode"])
         finally:
             # Restore default pour ne pas polluer les autres tests
-            s2 = api.get_settings()
+            s2 = api.settings.get_settings()
             s2["expert_mode"] = False
-            api.save_settings(s2)
+            api.settings.save_settings(s2)
 
 
 @unittest.skip(

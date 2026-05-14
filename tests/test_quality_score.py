@@ -75,7 +75,7 @@ class QualityScoreTests(unittest.TestCase):
         core.MIN_VIDEO_BYTES = 1
         self.addCleanup(setattr, core, "MIN_VIDEO_BYTES", old_min)
 
-        save = api.save_settings(
+        save = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -86,7 +86,7 @@ class QualityScoreTests(unittest.TestCase):
         )
         self.assertTrue(save.get("ok"), save)
 
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -100,14 +100,14 @@ class QualityScoreTests(unittest.TestCase):
 
         deadline = time.monotonic() + 6.0
         while time.monotonic() < deadline:
-            st = api.get_status(run_id, 0)
+            st = api.run.get_status(run_id, 0)
             if st.get("done"):
                 break
             time.sleep(0.03)
         else:
             self.fail("Timeout plan run")
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertTrue(rows, rows)
@@ -232,7 +232,7 @@ class QualityScoreTests(unittest.TestCase):
 
     def test_profile_reset_restore_defaults(self) -> None:
         api = backend.CineSortApi()
-        save = api.save_settings(
+        save = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -247,10 +247,10 @@ class QualityScoreTests(unittest.TestCase):
         custom["weights"]["video"] = 50
         custom["weights"]["audio"] = 40
         custom["weights"]["extras"] = 10
-        saved = api.save_quality_profile(custom)
+        saved = api.quality.save_quality_profile(custom)
         self.assertTrue(saved.get("ok"), saved)
 
-        reset = api.reset_quality_profile()
+        reset = api.quality.reset_quality_profile()
         self.assertTrue(reset.get("ok"), reset)
         profile = reset.get("profile_json", {})
         self.assertEqual(profile.get("id"), "CinemaLux_v1")
@@ -265,7 +265,7 @@ class QualityScoreTests(unittest.TestCase):
 
     def test_api_get_quality_presets_returns_expected_ids(self) -> None:
         api = backend.CineSortApi()
-        out = api.get_quality_presets()
+        out = api.quality.get_quality_presets()
         self.assertTrue(out.get("ok"), out)
         presets = out.get("presets") if isinstance(out.get("presets"), list) else []
         ids = {str(x.get("preset_id")) for x in presets if isinstance(x, dict)}
@@ -279,7 +279,7 @@ class QualityScoreTests(unittest.TestCase):
 
     def test_apply_quality_preset_persists_active_profile(self) -> None:
         api = backend.CineSortApi()
-        save = api.save_settings(
+        save = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -289,19 +289,19 @@ class QualityScoreTests(unittest.TestCase):
         )
         self.assertTrue(save.get("ok"), save)
 
-        applied = api.apply_quality_preset("remux_strict")
+        applied = api.quality.apply_quality_preset("remux_strict")
         self.assertTrue(applied.get("ok"), applied)
         profile = applied.get("profile_json", {})
         self.assertEqual(str(profile.get("id")), "CinemaLux_RemuxStrict_v1")
 
-        loaded = api.get_quality_profile()
+        loaded = api.quality.get_quality_profile()
         self.assertTrue(loaded.get("ok"), loaded)
         loaded_profile = loaded.get("profile_json", {})
         self.assertEqual(str(loaded_profile.get("id")), "CinemaLux_RemuxStrict_v1")
 
     def test_apply_quality_preset_invalid_returns_fr_error(self) -> None:
         api = backend.CineSortApi()
-        out = api.apply_quality_preset("unknown_preset")
+        out = api.quality.apply_quality_preset("unknown_preset")
         self.assertFalse(out.get("ok"), out)
         self.assertIn("Preset qualite inconnu", str(out.get("message", "")))
 
@@ -325,7 +325,7 @@ class QualityScoreTests(unittest.TestCase):
 
     def test_profile_import_invalid_returns_fr_error(self) -> None:
         api = backend.CineSortApi()
-        save = api.save_settings(
+        save = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -335,14 +335,14 @@ class QualityScoreTests(unittest.TestCase):
         )
         self.assertTrue(save.get("ok"), save)
 
-        bad = api.import_quality_profile("{invalid_json")
+        bad = api.quality.import_quality_profile("{invalid_json")
         self.assertFalse(bad.get("ok"), bad)
         txt = f"{bad.get('message', '')} {' '.join(bad.get('errors', []) if isinstance(bad.get('errors'), list) else [])}".lower()
         self.assertTrue(("json invalide" in txt) or ("profil invalide" in txt), bad)
 
     def test_profile_unknown_toggle_values_fallback_to_defaults(self) -> None:
         api = backend.CineSortApi()
-        save = api.save_settings(
+        save = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -356,10 +356,10 @@ class QualityScoreTests(unittest.TestCase):
         profile["toggles"]["include_metadata"] = "maybe"
         profile["toggles"]["include_naming"] = "unknown"
         profile["toggles"]["enable_4k_light"] = "unexpected"
-        out = api.save_quality_profile(profile)
+        out = api.quality.save_quality_profile(profile)
         self.assertTrue(out.get("ok"), out)
 
-        loaded = api.get_quality_profile()
+        loaded = api.quality.get_quality_profile()
         self.assertTrue(loaded.get("ok"), loaded)
         toggles = loaded.get("profile_json", {}).get("toggles", {})
         self.assertFalse(bool(toggles.get("include_metadata")))
@@ -369,7 +369,7 @@ class QualityScoreTests(unittest.TestCase):
     def test_report_written_in_db_and_reloaded(self) -> None:
         api, run_id, row_id = self._prepare_single_run()
 
-        rep = api.get_quality_report(run_id, row_id)
+        rep = api.quality.get_quality_report(run_id, row_id)
         self.assertTrue(rep.get("ok"), rep)
         self.assertIn("score", rep)
         self.assertIn("tier", rep)
@@ -385,39 +385,39 @@ class QualityScoreTests(unittest.TestCase):
 
     def test_reuse_existing_is_invalidated_when_profile_engine_changes(self) -> None:
         api, run_id, row_id = self._prepare_single_run()
-        first = api.get_quality_report(run_id, row_id, {"reuse_existing": False})
+        first = api.quality.get_quality_report(run_id, row_id, {"reuse_existing": False})
         self.assertTrue(first.get("ok"), first)
-        cached = api.get_quality_report(run_id, row_id, {"reuse_existing": True})
+        cached = api.quality.get_quality_report(run_id, row_id, {"reuse_existing": True})
         self.assertTrue(cached.get("ok"), cached)
         self.assertEqual(str(cached.get("status")), "ignored_existing")
 
         profile = default_quality_profile()
         profile["version"] = int(profile.get("version") or 1) + 1
         profile["engine_version"] = "CinemaLux_v1_test_bump"
-        saved = api.save_quality_profile(profile)
+        saved = api.quality.save_quality_profile(profile)
         self.assertTrue(saved.get("ok"), saved)
 
-        refreshed = api.get_quality_report(run_id, row_id, {"reuse_existing": True})
+        refreshed = api.quality.get_quality_report(run_id, row_id, {"reuse_existing": True})
         self.assertTrue(refreshed.get("ok"), refreshed)
         self.assertEqual(str(refreshed.get("status")), "analyzed")
         self.assertFalse(bool(refreshed.get("cache_hit_quality")))
 
     def test_analyze_quality_batch_rejects_empty_selection(self) -> None:
         api = backend.CineSortApi()
-        res = api.analyze_quality_batch("abcd", [], {"reuse_existing": True})
+        res = api.quality.analyze_quality_batch("abcd", [], {"reuse_existing": True})
         self.assertFalse(res.get("ok"), res)
         self.assertIn("Aucune ligne sélectionnée", str(res.get("message", "")))
 
     def test_analyze_quality_batch_summary_with_analyzed_ignored_and_errors(self) -> None:
         api, run_id, row_id = self._prepare_single_run()
 
-        first = api.analyze_quality_batch(run_id, [row_id, "row_introuvable"], {"reuse_existing": False})
+        first = api.quality.analyze_quality_batch(run_id, [row_id, "row_introuvable"], {"reuse_existing": False})
         self.assertTrue(first.get("ok"), first)
         self.assertEqual(int(first.get("analyzed") or 0), 1, first)
         self.assertEqual(int(first.get("ignored") or 0), 0, first)
         self.assertEqual(int(first.get("errors") or 0), 1, first)
 
-        second = api.analyze_quality_batch(run_id, [row_id], {"reuse_existing": True})
+        second = api.quality.analyze_quality_batch(run_id, [row_id], {"reuse_existing": True})
         self.assertTrue(second.get("ok"), second)
         self.assertEqual(int(second.get("analyzed") or 0), 0, second)
         self.assertEqual(int(second.get("ignored") or 0), 1, second)
@@ -448,13 +448,13 @@ class QualityScoreTests(unittest.TestCase):
         first_result: dict = {}
 
         def run_first():
-            first_result.update(api.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False}))
+            first_result.update(api.quality.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False}))
 
         t = threading.Thread(target=run_first, daemon=True)
         try:
             t.start()
             self.assertTrue(entered.wait(1.0), "Le premier batch n'a pas démarré")
-            second = api.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False})
+            second = api.quality.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False})
             self.assertFalse(second.get("ok"), second)
             self.assertIn("déjà en cours", str(second.get("message", "")).lower())
         finally:
@@ -469,7 +469,7 @@ class QualityScoreTests(unittest.TestCase):
         store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
 
         with mock.patch.object(api, "get_quality_report", side_effect=OSError("quality batch boom")):
-            out = api.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False})
+            out = api.quality.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False})
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible de terminer l'analyse qualite.")

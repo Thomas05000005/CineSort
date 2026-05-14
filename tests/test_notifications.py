@@ -186,7 +186,7 @@ class NotificationsIntegrationTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -216,7 +216,7 @@ class NotificationsSettingsPersistenceTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -228,7 +228,7 @@ class NotificationsSettingsPersistenceTests(unittest.TestCase):
                     "notifications_errors": True,
                 }
             )
-            loaded = api.get_settings()
+            loaded = api.settings.get_settings()
             self.assertTrue(loaded["notifications_enabled"])
             self.assertFalse(loaded["notifications_scan_done"])
             self.assertTrue(loaded["notifications_apply_done"])

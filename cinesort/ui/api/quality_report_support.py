@@ -287,7 +287,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         from cinesort.ui.api.settings_support import _normalize_composite_score_version
 
         try:
-            settings = api.get_settings() if api else {}
+            settings = api.settings.get_settings() if api else {}
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             settings = {}
         score_version = _normalize_composite_score_version(

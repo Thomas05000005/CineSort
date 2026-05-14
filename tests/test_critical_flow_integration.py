@@ -35,7 +35,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         deadline = time.time() + timeout_s
         last = {}
         while time.time() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return last
             time.sleep(0.05)
@@ -43,7 +43,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
 
     def _configured_api(self) -> CineSortApi:
         api = CineSortApi()
-        saved = api.save_settings(
+        saved = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),

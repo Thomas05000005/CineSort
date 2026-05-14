@@ -61,7 +61,7 @@ class V71FeaturesTests(unittest.TestCase):
     def test_collection_folder_name_defaults_to__Collection(self) -> None:
         api = backend.CineSortApi()
         api._state_dir = self.state_dir / "defaults_v71"  # type: ignore[attr-defined]
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
 
         self.assertEqual(settings.get("collection_folder_name"), "_Collection")
         self.assertEqual(settings.get("empty_folders_folder_name"), "_Vide")

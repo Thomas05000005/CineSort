@@ -59,7 +59,7 @@ class RestServerHttpTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),
@@ -388,7 +388,7 @@ class RestSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -398,7 +398,7 @@ class RestSettingsTests(unittest.TestCase):
                     "rest_api_token": "my-secret",
                 }
             )
-            loaded = api.get_settings()
+            loaded = api.settings.get_settings()
             self.assertTrue(loaded["rest_api_enabled"])
             self.assertEqual(loaded["rest_api_port"], 9090)
             # BUG 1 : rest_api_token est retourne en clair (l'utilisateur doit pouvoir
@@ -416,7 +416,7 @@ class RestSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -424,7 +424,7 @@ class RestSettingsTests(unittest.TestCase):
                     "rest_api_port": 80,  # should be clamped to 1024
                 }
             )
-            loaded = api.get_settings()
+            loaded = api.settings.get_settings()
             self.assertGreaterEqual(loaded["rest_api_port"], 1024)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -614,7 +614,7 @@ class HttpsSettingsTests(unittest.TestCase):
     def test_settings_defaults(self) -> None:
         """Les 3 settings HTTPS ont des valeurs par defaut."""
         api = backend.CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertFalse(s.get("rest_api_https_enabled"))
         self.assertEqual(s.get("rest_api_cert_path"), "")
         self.assertEqual(s.get("rest_api_key_path"), "")
@@ -628,7 +628,7 @@ class HttpsSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -638,7 +638,7 @@ class HttpsSettingsTests(unittest.TestCase):
                     "rest_api_key_path": "/path/to/key.pem",
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["rest_api_https_enabled"])
             self.assertEqual(s["rest_api_cert_path"], "/path/to/cert.pem")
             self.assertEqual(s["rest_api_key_path"], "/path/to/key.pem")

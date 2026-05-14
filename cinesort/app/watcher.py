@@ -183,9 +183,9 @@ class FolderWatcher(threading.Thread):
             pass
 
         try:
-            settings = self._api.get_settings()
+            settings = self._api.settings.get_settings()
             logger.info("[watcher] scan triggered")
-            result = self._api.start_plan(settings)
+            result = self._api.run.start_plan(settings)
             if result.get("ok"):
                 # Cf issue #108 : notification ENVOYEE APRES start_plan succes
                 # avec event "scan_triggered" (et plus "scan_done" qui mentait).

@@ -83,7 +83,7 @@ class DeleteFeedbackEndpointTests(unittest.TestCase):
     def test_returns_ok_structure(self):
         api = CineSortApi()
         # Suppression d'un feedback inexistant : ok=True, deleted_count=0
-        result = api.delete_score_feedback(999_999_999)
+        result = api.quality.delete_score_feedback(999_999_999)
         # Soit ok=True avec 0 supprimés, soit ok=False si store indispo
         self.assertIn("ok", result)
         if result.get("ok"):

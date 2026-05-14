@@ -289,18 +289,18 @@ class TestSettings(unittest.TestCase):
         self._shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_default_enabled(self):
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertTrue(s.get("perceptual_audio_mel_enabled"))
 
     def test_roundtrip_false(self):
-        self.api.save_settings(
+        self.api.settings.save_settings(
             {
                 "root": str(self._root),
                 "state_dir": str(self._sd),
                 "perceptual_audio_mel_enabled": False,
             }
         )
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertFalse(s.get("perceptual_audio_mel_enabled"))
 
 

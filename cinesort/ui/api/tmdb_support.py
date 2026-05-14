@@ -23,7 +23,7 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         if not ids:
             return {"ok": True, "posters": {}}
 
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             return {"ok": True, "posters": {}}

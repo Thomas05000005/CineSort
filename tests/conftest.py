@@ -129,7 +129,7 @@ def wait_run_terminal() -> Callable[..., dict]:
         deadline = time.monotonic() + float(timeout_s)
         last: dict = {}
         while time.monotonic() < deadline:
-            last = api.get_status(run_id, 0) or {}
+            last = api.run.get_status(run_id, 0) or {}
             if last.get("done"):
                 return last
             time.sleep(0.03)

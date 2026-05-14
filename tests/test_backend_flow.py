@@ -34,7 +34,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         deadline = time.time() + timeout_s
         last = {}
         while time.time() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return last
             time.sleep(0.05)
@@ -49,7 +49,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         self._create_file(collection / "The.Matrix.Reloaded.2003.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -63,7 +63,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         status = self._wait_done(api, run_id)
         self.assertIsNone(status.get("error"), status.get("error"))
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 3)
@@ -125,7 +125,7 @@ class CineSortApiFlowTests(unittest.TestCase):
     def test_start_plan_reports_missing_root(self) -> None:
         api = CineSortApi()
         bad_root = self.root / "__missing__"
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(bad_root),
                 "state_dir": str(self.state_dir),
@@ -145,7 +145,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         self._create_file(self.root / "Movie.2020" / "Movie.2020.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
