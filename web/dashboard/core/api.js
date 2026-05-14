@@ -155,7 +155,7 @@ export async function apiPost(method, params = {}, opts = {}) {
     }
     /* V2-B : invalidation automatique du cache get_settings sur save_settings.
      * Defensif : meme si l'appelant oublie, le cache reste coherent. */
-    if (method === "save_settings" && data && data.ok !== false) {
+    if ((method === "save_settings" || method === "settings/save_settings") && data && data.ok !== false) {
       invalidateSettingsCache();
     }
   }
@@ -170,14 +170,14 @@ export async function apiPost(method, params = {}, opts = {}) {
  * round-trip => ~200ms latence inutile + 4x charge serveur.
  *
  * cachedGetSettings() :
- *  - Premier appel  -> reel apiPost("get_settings"), cache la reponse.
+ *  - Premier appel  -> reel apiPost("settings/get_settings"), cache la reponse.
  *  - Appels concurrents (avant fin du premier) -> retournent la MEME
  *    Promise (singleton in-flight) => 1 seule requete reseau pour N sites.
  *  - Appels suivants (< CACHE_TTL_MS) -> reponse cachee directe.
  *  - Invalidation explicite : invalidateSettingsCache() (a appeler
  *    apres save_settings ou si health.last_settings_ts change).
  *
- * Compatibilite : signature publique apiPost("get_settings") inchangee,
+ * Compatibilite : signature publique apiPost("settings/get_settings") inchangee,
  * les appelants peuvent migrer site par site vers cachedGetSettings().
  */
 const _SETTINGS_CACHE_TTL_MS = 30000;  // 30s safe
@@ -187,7 +187,7 @@ let _settingsInFlight = null;           // Promise pendante de la requete en cou
 
 /**
  * Recupere les settings avec cache memoire + dedup des requetes paralleles.
- * Signature de retour identique a apiPost("get_settings") => drop-in.
+ * Signature de retour identique a apiPost("settings/get_settings") => drop-in.
  * @returns {Promise<{status: number, data: any}>}
  */
 export function cachedGetSettings() {
@@ -201,7 +201,7 @@ export function cachedGetSettings() {
     return _settingsInFlight;
   }
   // Nouvelle requete
-  _settingsInFlight = apiPost("get_settings")
+  _settingsInFlight = apiPost("settings/get_settings")
     .then((resp) => {
       // Cacher uniquement les reponses 2xx (pas de cache d'erreur 5xx)
       if (resp && resp.status >= 200 && resp.status < 300) {

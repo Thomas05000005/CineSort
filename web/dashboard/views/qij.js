@@ -95,7 +95,7 @@ async function _qualityFetchAll() {
   const labels = ["get_global_stats", "get_scoring_rollup"];
   const results = await Promise.allSettled([
     _call("get_global_stats", { limit_runs: 20 }, { signal: navSig }),
-    _call("get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null }, { signal: navSig }),
+    _call("library/get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null }, { signal: navSig }),
   ]);
   const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
   const [stats, rollup] = results.map(_val);
@@ -295,7 +295,7 @@ function _qualityBindEvents(root) {
     btn.addEventListener("click", async () => {
       _qState.rollupBy = btn.dataset.rollupBy;
       try {
-        _qState.rollupData = await _call("get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null });
+        _qState.rollupData = await _call("library/get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null });
       } catch (e) { console.error("[qij-quality] rollup:", e); }
       _qualityRender();
     });
@@ -317,7 +317,7 @@ function _qualityBindEvents(root) {
     try {
       const lastRun = (_qState.globalStats?.runs_summary || [])[0];
       if (!lastRun?.run_id) { if (msg) { msg.textContent = t("qij.quality.batch_no_run"); msg.style.color = "var(--danger)"; } return; }
-      const res = await _call("analyze_quality_batch", { run_id: lastRun.run_id, row_ids: [], options: { scope: "validated" } });
+      const res = await _call("quality/analyze_quality_batch", { run_id: lastRun.run_id, row_ids: [], options: { scope: "validated" } });
       if (msg) { msg.textContent = res?.message || t("qij.quality.batch_success"); msg.style.color = "var(--success)"; }
     } catch { if (msg) { msg.textContent = t("common.error_network"); msg.style.color = "var(--danger)"; } }
   });
@@ -325,7 +325,7 @@ function _qualityBindEvents(root) {
   // V7-port : Profil scoring (export/import/reset)
   root.querySelector("#qBtnExportProfile")?.addEventListener("click", async () => {
     try {
-      const res = await _call("export_quality_profile");
+      const res = await _call("quality/export_quality_profile");
       const blob = new Blob([JSON.stringify(res, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = "quality_profile.json"; a.click();
@@ -341,7 +341,7 @@ function _qualityBindEvents(root) {
       try {
         const text = await file.text();
         const profile = JSON.parse(text);
-        await _call("import_quality_profile", { profile_json: profile });
+        await _call("quality/import_quality_profile", { profile_json: profile });
         window.alert(t("qij.quality.import_success"));
       } catch { window.alert(t("qij.quality.import_error")); }
     });
@@ -349,7 +349,7 @@ function _qualityBindEvents(root) {
   });
   root.querySelector("#qBtnResetProfile")?.addEventListener("click", async () => {
     if (!window.confirm(t("qij.quality.reset_profile_confirm"))) return;
-    try { await _call("reset_quality_profile"); window.alert(t("qij.quality.reset_profile_success")); }
+    try { await _call("quality/reset_quality_profile"); window.alert(t("qij.quality.reset_profile_success")); }
     catch { window.alert(t("common.error")); }
   });
 
@@ -395,22 +395,22 @@ const _iState = { containerRef: null, settings: null, statuses: {}, syncReports:
 const INTEGRATIONS = [
   { id: "jellyfin", label: "Jellyfin", iconPath: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
     enabledKey: "jellyfin_enabled", urlKey: "jellyfin_url", apiKeyKey: "jellyfin_api_key",
-    testMethod: "test_jellyfin_connection", syncMethod: "get_jellyfin_sync_report", librariesMethod: "get_jellyfin_libraries" },
+    testMethod: "integrations/test_jellyfin_connection", syncMethod: "get_jellyfin_sync_report", librariesMethod: "get_jellyfin_libraries" },
   { id: "plex", label: "Plex", iconPath: '<polygon points="5 3 19 12 5 21 5 3"/>',
     enabledKey: "plex_enabled", urlKey: "plex_url", apiKeyKey: "plex_token",
-    testMethod: "test_plex_connection", syncMethod: "get_plex_sync_report", librariesMethod: null },
+    testMethod: "integrations/test_plex_connection", syncMethod: "get_plex_sync_report", librariesMethod: null },
   { id: "radarr", label: "Radarr", iconPath: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     enabledKey: "radarr_enabled", urlKey: "radarr_url", apiKeyKey: "radarr_api_key",
-    testMethod: "test_radarr_connection", syncMethod: "get_radarr_status", upgradeMethod: "request_radarr_upgrade" },
+    testMethod: "integrations/test_radarr_connection", syncMethod: "get_radarr_status", upgradeMethod: "request_radarr_upgrade" },
   { id: "tmdb", label: "TMDb", iconPath: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
-    enabledKey: null, urlKey: null, apiKeyKey: "tmdb_api_key", testMethod: "test_tmdb_key" },
+    enabledKey: null, urlKey: null, apiKeyKey: "tmdb_api_key", testMethod: "integrations/test_tmdb_key" },
 ];
 
 export async function initIntegrations(container, _opts = {}) {
   if (!container) return;
   _iState.containerRef = container;
   container.innerHTML = `<div class="v5-qij-loading">${_esc(t("qij.loading_integrations"))}</div>`;
-  try { _iState.settings = await _call("get_settings"); }
+  try { _iState.settings = await _call("settings/get_settings"); }
   catch (e) { console.error("[qij-integ] settings:", e); }
   _integrationsRender();
 }
@@ -620,7 +620,7 @@ function _showSyncReportModal(integ, data) {
       const movieId = btn.dataset.radarrUpgrade;
       btn.disabled = true; btn.textContent = "Demande...";
       try {
-        const r = await _call("request_radarr_upgrade", { movie_id: movieId });
+        const r = await _call("integrations/request_radarr_upgrade", { movie_id: movieId });
         btn.textContent = r?.ok ? "✓ Demandé" : "✗ Échec";
       } catch { btn.textContent = "✗ Erreur"; }
     });
@@ -925,7 +925,7 @@ function _journalBindEvents(root) {
   if (btnCancel) {
     btnCancel.addEventListener("click", async () => {
       btnCancel.disabled = true;
-      try { await _call("cancel_run", { run_id: _jState.activeRunId }); }
+      try { await _call("run/cancel_run", { run_id: _jState.activeRunId }); }
       catch { btnCancel.disabled = false; }
     });
   }
@@ -968,7 +968,7 @@ async function _journalExportRun(fmt) {
   const msg = document.getElementById("journal-export-msg");
   if (msg) { msg.textContent = t("qij.journal.exporting"); msg.style.color = "var(--text-muted)"; }
   try {
-    const res = await _call("export_run_report", { run_id: _jState.selectedRunId, fmt });
+    const res = await _call("run/export_run_report", { run_id: _jState.selectedRunId, fmt });
     if (res?.content) {
       const content = typeof res.content === "string" ? res.content : JSON.stringify(res.content, null, 2);
       const mime = fmt === "json" ? "application/json" : fmt === "csv" ? "text/csv" : "text/html";

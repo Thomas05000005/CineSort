@@ -46,8 +46,8 @@ const ICON_REFRESH = '<path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51
  */
 async function _loadFilmFull(filmId) {
   const results = await Promise.allSettled([
-    apiPost("get_film_full", { row_id: filmId }),
-    apiPost("get_film_history", { film_id: filmId }),
+    apiPost("library/get_film_full", { row_id: filmId }),
+    apiPost("library/get_film_history", { film_id: filmId }),
   ]);
   const fullRes = results[0];
   const histRes = results[1];

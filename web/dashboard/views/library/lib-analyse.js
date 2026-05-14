@@ -78,7 +78,7 @@ function _hookEvents() {
       btnStart.disabled = true;
       _showMsg("Démarrage de l'analyse...");
       try {
-        const res = await apiPost("start_plan", { settings: _state.settings });
+        const res = await apiPost("run/start_plan", { settings: _state.settings });
         if (res.data?.ok) {
           _activeRunId = res.data.run_id || null;
           _state.runId = _activeRunId;
@@ -97,7 +97,7 @@ function _hookEvents() {
   if (btnCancel) {
     btnCancel.addEventListener("click", async () => {
       btnCancel.disabled = true;
-      try { await apiPost("cancel_run", { run_id: _activeRunId }); _showMsg("Annulation demandée."); }
+      try { await apiPost("run/cancel_run", { run_id: _activeRunId }); _showMsg("Annulation demandée."); }
       catch { /* ignore */ }
       finally { btnCancel.disabled = false; }
     });
@@ -167,7 +167,7 @@ function _startPolling() {
 async function _pollRunStatus() {
   if (!_activeRunId) return;
   try {
-    const res = await apiPost("get_status", { run_id: _activeRunId, last_log_index: _lastLogIndex });
+    const res = await apiPost("run/get_status", { run_id: _activeRunId, last_log_index: _lastLogIndex });
     const d = res.data || {};
 
     // Barre de progression

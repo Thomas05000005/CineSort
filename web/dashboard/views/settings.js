@@ -128,7 +128,7 @@ export const SETTINGS_GROUPS = [
         // V7-port : bouton test inline via testMethod.
         // V2-D (a11y) : requis pour utiliser TMDb (matching/posters/collections).
         { key: "tmdb_api_key", label: "Clé API TMDb", type: "api-key", glossaryTerm: "TMDb",
-          testMethod: "test_tmdb_key", testParams: { api_key: "$value", state_dir: "" }, required: true },
+          testMethod: "integrations/test_tmdb_key", testParams: { api_key: "$value", state_dir: "" }, required: true },
         // V5-03 polish v7.7.0 (R5-STRESS-4) : TTL configurable du cache local.
         { key: "tmdb_cache_ttl_days", label: "Durée du cache TMDb (jours)", type: "number",
           min: 1, max: 365, hint: "Au-delà, les fiches sont rafraîchies. Purge automatique au démarrage." },
@@ -137,7 +137,7 @@ export const SETTINGS_GROUPS = [
         { key: "jellyfin_enabled", label: "Activer", type: "toggle" },
         { key: "jellyfin_url", label: "URL", type: "text", placeholder: "http://jellyfin.local:8096" },
         { key: "jellyfin_api_key", label: "Clé API", type: "api-key",
-          testMethod: "test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" } },
+          testMethod: "integrations/test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" } },
         { key: "jellyfin_refresh_on_apply", label: "Refresh auto après apply", type: "toggle" },
         { key: "jellyfin_sync_watched", label: "Sync watched", type: "toggle" },
       ]},
@@ -145,14 +145,14 @@ export const SETTINGS_GROUPS = [
         { key: "plex_enabled", label: "Activer", type: "toggle" },
         { key: "plex_url", label: "URL", type: "text" },
         { key: "plex_token", label: "Token", type: "api-key",
-          testMethod: "test_plex_connection", testParams: { url: "$plex_url", token: "$value" } },
+          testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" } },
         { key: "plex_refresh_on_apply", label: "Refresh après apply", type: "toggle" },
       ]},
       { id: "radarr", label: "Radarr", labelKey: "settings.sections.radarr", fields: [
         { key: "radarr_enabled", label: "Activer", type: "toggle" },
         { key: "radarr_url", label: "URL", type: "text" },
         { key: "radarr_api_key", label: "Clé API", type: "api-key",
-          testMethod: "test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
+          testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
       ]},
     ],
   },
@@ -727,7 +727,7 @@ function _renderDangerZone() {
 function _bindDangerZoneEvents(container) {
   const sizeEl = container.querySelector("#userDataSizeInfo");
   if (sizeEl) {
-    apiPost("get_user_data_size").then((res) => {
+    apiPost("settings/get_user_data_size").then((res) => {
       const data = (res && res.data) || {};
       sizeEl.textContent = t("danger_zone.current_data_known", { items: data.items || 0, size: data.size_mb || 0 });
     }).catch(() => { sizeEl.textContent = t("danger_zone.current_data_unavailable"); });
@@ -737,14 +737,14 @@ function _bindDangerZoneEvents(container) {
 }
 
 async function _openResetDialog() {
-  const sizeRes = await apiPost("get_user_data_size");
+  const sizeRes = await apiPost("settings/get_user_data_size");
   const sizeData = (sizeRes && sizeRes.data) || {};
   const sizeMb = sizeData.size_mb || 0;
   const items = sizeData.items || 0;
   const c1 = window.prompt(t("danger_zone.prompt_confirm", { items, size: sizeMb }));
   if (c1 !== "RESET") { if (c1 !== null) window.alert(t("danger_zone.wrong_confirm")); return; }
   if (!window.confirm(t("danger_zone.last_chance"))) return;
-  const res = await apiPost("reset_all_user_data", { confirmation: "RESET" });
+  const res = await apiPost("settings/reset_all_user_data", { confirmation: "RESET" });
   if (res && res.data && res.data.ok) {
     const backupPath = (res.data.backup_path) || "";
     window.alert(t("danger_zone.reset_done", { path: backupPath }));
@@ -870,7 +870,7 @@ function _bindContentEvents(container) {
       btn.disabled = true;
       if (resultEl) { resultEl.textContent = t("settings.restart_in_progress"); resultEl.style.color = "var(--text-muted)"; }
       try {
-        const res = await apiPost("restart_api_server");
+        const res = await apiPost("settings/restart_api_server");
         const ok = !!(res?.data?.ok);
         if (resultEl) {
           resultEl.textContent = ok
@@ -953,7 +953,7 @@ function _scheduleSave() {
   if (_state.saveTimer) clearTimeout(_state.saveTimer);
   _state.saveTimer = setTimeout(async () => {
     try {
-      const res = await apiPost("save_settings", { settings: _state.settings });
+      const res = await apiPost("settings/save_settings", { settings: _state.settings });
       if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
         _state.savedAt = new Date();
         _updateSavedStateLabel();
@@ -994,7 +994,7 @@ function _updateSavedStateLabel() {
 }
 
 async function _loadSettings() {
-  const res = await apiPost("get_settings");
+  const res = await apiPost("settings/get_settings");
   if (res && res.data && typeof res.data === "object") _state.settings = res.data;
 }
 

@@ -145,7 +145,7 @@ function _hookEvents(container) {
   $("btnLogsCancel")?.addEventListener("click", async () => {
     const btn = $("btnLogsCancel");
     if (btn) btn.disabled = true;
-    try { await apiPost("cancel_run", { run_id: _runId }); } catch {}
+    try { await apiPost("run/cancel_run", { run_id: _runId }); } catch {}
     finally { if (btn) btn.disabled = false; }
   });
 
@@ -185,7 +185,7 @@ async function _exportRun(fmt) {
   const msg = $("logExportMsg");
   if (msg) { msg.textContent = "Export en cours..."; msg.className = "status-msg"; }
   try {
-    const res = await apiPost("export_run_report", { run_id: _selectedRunId, fmt });
+    const res = await apiPost("run/export_run_report", { run_id: _selectedRunId, fmt });
     if (res.data?.content) {
       const blob = new Blob([typeof res.data.content === "string" ? res.data.content : JSON.stringify(res.data.content, null, 2)],
         { type: fmt === "json" ? "application/json" : fmt === "csv" ? "text/csv" : "text/html" });
@@ -213,7 +213,7 @@ async function _exportNfo() {
 async function _pollLogs() {
   if (!_runId) return;
   try {
-    const res = await apiPost("get_status", { run_id: _runId, last_log_index: _lastLogIndex });
+    const res = await apiPost("run/get_status", { run_id: _runId, last_log_index: _lastLogIndex });
     const d = res.data || {};
 
     const progressText = $("logsProgressText");

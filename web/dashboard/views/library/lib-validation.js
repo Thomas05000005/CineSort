@@ -53,7 +53,7 @@ async function _loadRows(el) {
     const navSig = getNavSignal();
     const labels = ["get_plan", "load_validation"];
     const results = await Promise.allSettled([
-      apiPost("get_plan", { run_id: _state.runId }, { signal: navSig }),
+      apiPost("run/get_plan", { run_id: _state.runId }, { signal: navSig }),
       apiPost("load_validation", { run_id: _state.runId }, { signal: navSig }),
     ]);
     const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
@@ -394,7 +394,7 @@ async function _hookDetailModalActions() {
     const action = btn.dataset.action;
     if (action === "film-history") {
       const { apiPost } = await import("../../core/api.js");
-      const r = await apiPost("get_film_history", { film_id: btn.dataset.filmId || "" });
+      const r = await apiPost("library/get_film_history", { film_id: btn.dataset.filmId || "" });
       const events = r.data?.events || [];
       if (!events.length) { alert("Aucun historique."); return; }
       let h = '<div class="timeline-container">';
@@ -404,7 +404,7 @@ async function _hookDetailModalActions() {
       showM({ title: "Historique", body: h });
     } else if (action === "perceptual-report") {
       const { apiPost } = await import("../../core/api.js");
-      const r = await apiPost("get_perceptual_report", { run_id: btn.dataset.runId || "", row_id: btn.dataset.rowId || "" });
+      const r = await apiPost("quality/get_perceptual_report", { run_id: btn.dataset.runId || "", row_id: btn.dataset.rowId || "" });
       const d = r.data || {};
       if (!d.ok && d.ok !== undefined) { alert(d.message || "Pas de rapport."); return; }
       let h = `<p>Score global : <strong>${d.global_score || "—"}</strong></p>`;

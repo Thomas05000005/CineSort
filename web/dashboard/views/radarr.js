@@ -19,7 +19,7 @@ async function _load() {
   }
 
   try {
-    const sRes = await apiPost("get_settings");
+    const sRes = await apiPost("settings/get_settings");
     const s = sRes.data || {};
 
     if (!s.radarr_enabled) {
@@ -29,7 +29,7 @@ async function _load() {
       return;
     }
 
-    const connRes = await apiPost("test_radarr_connection", { url: s.radarr_url || "", api_key: s.radarr_api_key || "" });
+    const connRes = await apiPost("integrations/test_radarr_connection", { url: s.radarr_url || "", api_key: s.radarr_api_key || "" });
     const conn = connRes.data || {};
     const ok = !!conn.ok;
 
@@ -49,7 +49,7 @@ async function _load() {
     el.innerHTML = html;
 
     $("btnRadarrTest")?.addEventListener("click", async () => {
-      const r = await apiPost("test_radarr_connection", { url: s.radarr_url, api_key: s.radarr_api_key });
+      const r = await apiPost("integrations/test_radarr_connection", { url: s.radarr_url, api_key: s.radarr_api_key });
       alert(r.data?.ok ? `OK — ${r.data.server_name}` : (r.data?.error || "Echec"));
     });
 
@@ -58,7 +58,7 @@ async function _load() {
       if (!container) return;
       container.innerHTML = '<p class="text-muted">Chargement...</p>';
       let r;
-      try { r = await apiPost("get_radarr_status"); }
+      try { r = await apiPost("integrations/get_radarr_status"); }
       catch { container.innerHTML = '<p class="text-muted">Erreur reseau.</p>'; return; }
       const d = r.data || {};
       if (!d.ok && d.message) { container.innerHTML = `<p class="text-muted">${escapeHtml(d.message)}</p>`; return; }
@@ -84,7 +84,7 @@ async function _load() {
           btn.disabled = true;
           btn.textContent = "...";
           const rid = parseInt(btn.dataset.rid, 10);
-          const res = await apiPost("request_radarr_upgrade", { movie_id: rid });
+          const res = await apiPost("integrations/request_radarr_upgrade", { movie_id: rid });
           btn.textContent = res.data?.ok ? "Lance !" : "Echec";
         });
       });

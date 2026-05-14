@@ -104,7 +104,7 @@ async function _loadRunContext() {
     const labels = ["/api/health", "get_settings"];
     const results = await Promise.allSettled([
       apiGet("/api/health"),
-      apiPost("get_settings", {}, { signal: navSig }),
+      apiPost("settings/get_settings", {}, { signal: navSig }),
     ]);
     const _val = (r) => (r && r.status === "fulfilled" && r.value ? r.value.data || {} : {});
     const [healthData, settingsData] = results.map(_val);

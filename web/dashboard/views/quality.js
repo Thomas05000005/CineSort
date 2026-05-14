@@ -258,7 +258,7 @@ async function _analyzeBatch(scope) {
   try {
     const lastRun = (_globalData.runs_summary || [])[0];
     if (!lastRun?.run_id) { if (msg) { msg.textContent = "Aucun run disponible."; msg.className = "status-msg error"; } return; }
-    const res = await apiPost("analyze_quality_batch", { run_id: lastRun.run_id, row_ids: [], options: { scope } });
+    const res = await apiPost("quality/analyze_quality_batch", { run_id: lastRun.run_id, row_ids: [], options: { scope } });
     if (msg) { msg.textContent = res.data?.message || "Analyse lancée."; msg.className = "status-msg success"; }
   } catch { if (msg) { msg.textContent = "Erreur réseau."; msg.className = "status-msg error"; } }
 }
@@ -267,7 +267,7 @@ async function _analyzeBatch(scope) {
 
 async function _exportProfile() {
   try {
-    const res = await apiPost("export_quality_profile");
+    const res = await apiPost("quality/export_quality_profile");
     const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -285,7 +285,7 @@ async function _importProfile() {
     try {
       const text = await file.text();
       const profile = JSON.parse(text);
-      await apiPost("import_quality_profile", { profile_json: profile });
+      await apiPost("quality/import_quality_profile", { profile_json: profile });
       alert("Profil importé avec succès.");
     } catch { alert("Erreur import profil."); }
   });
@@ -295,7 +295,7 @@ async function _importProfile() {
 async function _resetProfile() {
   if (!confirm("Réinitialiser le profil de scoring aux valeurs par défaut ?")) return;
   try {
-    await apiPost("reset_quality_profile");
+    await apiPost("quality/reset_quality_profile");
     alert("Profil réinitialisé.");
   } catch { alert("Erreur réinitialisation."); }
 }

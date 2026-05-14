@@ -56,7 +56,7 @@ function _persistState() {
 }
 
 async function _fetchLibrary() {
-  const r = await apiPost("get_library_filtered", {
+  const r = await apiPost("library/get_library_filtered", {
     run_id: null,
     filters: _state.filters,
     sort: _state.sort,
@@ -70,7 +70,7 @@ async function _fetchLibrary() {
 }
 
 async function _fetchPlaylists() {
-  const r = await apiPost("get_smart_playlists");
+  const r = await apiPost("library/get_smart_playlists");
   if (r.ok && r.data && Array.isArray(r.data.playlists)) {
     return r.data.playlists;
   }
@@ -245,7 +245,7 @@ function _renderSidebar() {
       onSaveCurrent: async () => {
         const name = window.prompt("Nom de la playlist :");
         if (!name) return;
-        const r = await apiPost("save_smart_playlist", {
+        const r = await apiPost("library/save_smart_playlist", {
           name,
           filters: _state.filters,
         });
@@ -257,7 +257,7 @@ function _renderSidebar() {
       },
       onDelete: async (id) => {
         if (!window.confirm("Supprimer cette playlist ?")) return;
-        const r = await apiPost("delete_smart_playlist", { playlist_id: id });
+        const r = await apiPost("library/delete_smart_playlist", { playlist_id: id });
         if (r.ok) {
           _state.playlists = await _fetchPlaylists();
           if (_state.activePlaylistId === id) _state.activePlaylistId = null;

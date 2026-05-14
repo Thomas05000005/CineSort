@@ -244,9 +244,9 @@ async function _load() {
     const navSig = getNavSignal();
     const labels = ["get_plan", "load_validation", "get_settings"];
     const results = await Promise.allSettled([
-      apiPost("get_plan", { run_id: _runId }, { signal: navSig }),
+      apiPost("run/get_plan", { run_id: _runId }, { signal: navSig }),
       apiPost("load_validation", { run_id: _runId }, { signal: navSig }),
-      apiPost("get_settings", {}, { signal: navSig }),
+      apiPost("settings/get_settings", {}, { signal: navSig }),
     ]);
     const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
     const [planRes, valRes, settingsRes] = results.map(_val);
@@ -524,7 +524,7 @@ function _hookBulkActions() {
       btnPreviewApply.disabled = true;
       try {
         const decisions = _buildDecisionsPayload();
-        const r = await apiPost("build_apply_preview", { run_id: _runId, decisions });
+        const r = await apiPost("run/build_apply_preview", { run_id: _runId, decisions });
         const data = r.data || {};
         if (!data.ok) {
           alert(data.message || "Apercu impossible.");

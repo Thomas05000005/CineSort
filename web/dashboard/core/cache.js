@@ -9,6 +9,7 @@ const _TTL_MS = 24 * 3600 * 1000;
 const _MAX_BYTES = 2 * 1024 * 1024; // ~2 MB cap par entree
 
 const _CACHEABLE = new Set([
+  // Methodes directes (legacy, conservees pour backward-compat jusqu'a PR 10)
   "get_dashboard",
   "get_global_stats",
   "get_settings",
@@ -17,6 +18,11 @@ const _CACHEABLE = new Set([
   "get_jellyfin_libraries",
   "get_plex_libraries",
   "get_radarr_status",
+  // Issue #84 PR 9 : memes methodes via le path facade prefixe
+  "settings/get_settings",
+  "integrations/get_jellyfin_libraries",
+  "integrations/get_plex_libraries",
+  "integrations/get_radarr_status",
 ]);
 
 export function isCacheable(method) {
