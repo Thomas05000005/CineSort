@@ -26,7 +26,7 @@ from .constants import (
     SSIM_SELF_REF_SEGMENT_DURATION_S,
     SSIM_SELF_REF_TIMEOUT_S,
 )
-from cinesort.infra.subprocess_safety import tracked_run
+from cinesort.domain._runners import tracked_run
 
 from .ffmpeg_runner import _runner_platform_kwargs
 

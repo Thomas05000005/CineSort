@@ -14,6 +14,12 @@ import cinesort.domain.core as core
 import cinesort.infra.state as state
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
+
+# Cf issue #83 : import direct au lieu de via re-export domain.core (qui cree un
+# cycle domain -> app). NB : find_duplicate_targets reste accede via core.X car
+# c'est un wrapper qui injecte 7 helpers internes de domain/core.py — pas un
+# simple re-export.
+from cinesort.app.apply_core import apply_rows as _apply_rows_fn
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
 from cinesort.domain.i18n_messages import t
@@ -1202,7 +1208,7 @@ def _execute_apply(
                 store=store,
                 batch_id=str(apply_batch_id),
             )
-        partial = core.apply_rows(
+        partial = _apply_rows_fn(
             cfg_for_root,
             root_rows,
             safe_decisions,

@@ -22,7 +22,7 @@ from .constants import (
     HDR_MAX_CLL_WARNING_THRESHOLD,
     HDR_QUALITY_SCORE,
 )
-from cinesort.infra.subprocess_safety import tracked_run
+from cinesort.domain._runners import tracked_run
 
 from .ffmpeg_runner import _runner_platform_kwargs
 
