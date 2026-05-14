@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 TMDB_API_BASE = "https://api.themoviedb.org/3"
 _DEBUG_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
+
+# Cf issue #75 : hard cap LRU sur le cache TMDb. ~1 KB par entree (movie detail
+# moyen) → 100k entries = ~100 MB max RAM. Au-dela on evict la plus ancienne
+# entree non-acedee (popitem(last=False)). Evite la derive memoire sur grosses
+# bibliotheques (50k+ films + recherches multi-fuzzy → 200+ MB sans cap).
+_TMDB_CACHE_MAX_ENTRIES = 100_000
 
 # V5-03 polish v7.7.0 (R5-STRESS-4) : TTL du cache TMDb configurable.
 # Defaut 30 jours = bon compromis : suffisant pour eviter de marteler l'API
@@ -121,7 +128,9 @@ class TmdbClient:
         # V5-03 polish v7.7.0 : TTL configurable. None -> defaut historique.
         self.cache_ttl_days = _clamp_ttl_days(cache_ttl_days) if cache_ttl_days is not None else None
         self._lock = threading.Lock()
-        self._cache: Dict[str, Any] = {}
+        # Cf issue #75 : OrderedDict pour LRU eviction. Comportement Dict
+        # identique pour le code existant (get/set/contains/iter).
+        self._cache: OrderedDict[str, Any] = OrderedDict()
         self._dirty = False
         self._last_save_ts = 0.0
 
@@ -150,12 +159,25 @@ class TmdbClient:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.exists():
-                self._cache = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                # OrderedDict preserve l'ordre d'insertion JSON. Si le cache
+                # depasse MAX_ENTRIES (cache historique pre-#75), on garde
+                # les MAX_ENTRIES dernieres entrees ecrites (heuristique :
+                # plus recentes = plus probables d'etre reaccedees).
+                if isinstance(raw, dict):
+                    if len(raw) > _TMDB_CACHE_MAX_ENTRIES:
+                        items = list(raw.items())[-_TMDB_CACHE_MAX_ENTRIES:]
+                        self._cache = OrderedDict(items)
+                        self._debug(f"cache pruned to {_TMDB_CACHE_MAX_ENTRIES} entries (was {len(raw)})")
+                    else:
+                        self._cache = OrderedDict(raw)
+                else:
+                    self._cache = OrderedDict()
             else:
-                self._cache = {}
+                self._cache = OrderedDict()
         except (OSError, PermissionError, json.JSONDecodeError, ValueError) as exc:
             # Cache corrompu -> on repart propre.
-            self._cache = {}
+            self._cache = OrderedDict()
             self._debug(f"cache load warning path={self.cache_path} error={exc}")
 
     def _cache_get(self, key: str) -> Any:
@@ -221,9 +243,17 @@ class TmdbClient:
         return entry
 
     def _cache_set(self, key: str, value: Any) -> None:
-        """Ecrit une entree avec timestamp pour le TTL (H1)."""
+        """Ecrit une entree avec timestamp pour le TTL (H1).
+
+        Cf issue #75 : LRU eviction si on depasse _TMDB_CACHE_MAX_ENTRIES.
+        move_to_end marque l'entree comme la plus recente. popitem(last=False)
+        retire la plus ancienne.
+        """
         with self._lock:
             self._cache[key] = {"_cached_at": time.time(), "value": value}
+            self._cache.move_to_end(key)
+            while len(self._cache) > _TMDB_CACHE_MAX_ENTRIES:
+                self._cache.popitem(last=False)
             self._dirty = True
 
     def _save_cache_atomic(self, *, force: bool = False) -> None:

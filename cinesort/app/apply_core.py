@@ -939,6 +939,9 @@ def apply_rows(
                         record_op=row_record_op,
                         tmdb_collection_name=getattr(row, "tmdb_collection_name", None),
                         edition=getattr(row, "edition", None),
+                        # Cf issue #78 : passer le nom du video deja resolu au
+                        # scan pour eviter un iterdir+stat dans apply_single.
+                        main_video_filename=getattr(row, "video", None) or None,
                     )
                 else:
                     apply_collection_item(
@@ -1070,6 +1073,7 @@ def apply_single(
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
     tmdb_collection_name: Optional[str] = None,
     edition: Optional[str] = None,
+    main_video_filename: Optional[str] = None,
 ) -> None:
     """Renomme/déplace un dossier de film "single" vers `Titre (Année)` (option Edition).
 
@@ -1132,8 +1136,17 @@ def apply_single(
     src_size: Optional[int] = None
 
     if not dry_run:
-        # P1.2 : capturer le hash du fichier video principal AVANT le rename
-        main_video = find_main_video_in_folder(folder, cfg)
+        # P1.2 : capturer le hash du fichier video principal AVANT le rename.
+        # Cf issue #78 : si le caller a deja le nom du fichier video (depuis
+        # PlanRow.video au scan), on evite le iterdir+stat de
+        # find_main_video_in_folder — coute 50-500s sur 5000 films SMB.
+        main_video: Optional[Path] = None
+        if main_video_filename:
+            candidate = folder / main_video_filename
+            if candidate.is_file():
+                main_video = candidate
+        if main_video is None:
+            main_video = find_main_video_in_folder(folder, cfg)
         if main_video is not None:
             try:
                 src_size = main_video.stat().st_size
