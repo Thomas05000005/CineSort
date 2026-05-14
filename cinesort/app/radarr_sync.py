@@ -160,7 +160,8 @@ def should_propose_upgrade(
         return True
 
     # Verifier les encode warnings
-    metrics = quality_report.get("metrics") if isinstance(quality_report.get("metrics"), dict) else {}
+    metrics_raw = quality_report.get("metrics")
+    metrics = metrics_raw if isinstance(metrics_raw, dict) else {}
     detected = metrics.get("detected") or {}
     codec = str(detected.get("codec") or "").strip().lower()
     if codec in _OBSOLETE_CODECS:
