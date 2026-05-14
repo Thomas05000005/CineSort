@@ -21,7 +21,8 @@ def _resolve_state_dir(api: Any) -> Optional[Path]:
     if hasattr(api, "_get_state_dir"):
         try:
             value = api._get_state_dir()
-        except Exception:
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            logger.warning("reset_support: _get_state_dir a echoue (%s), fallback _state_dir", exc)
             value = None
         if value:
             return Path(value)
