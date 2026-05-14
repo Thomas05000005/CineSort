@@ -13,6 +13,7 @@ import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.domain.conversions import to_bool, to_float, to_int
+from cinesort.ui.api._responses import err
 from cinesort.infra.local_secret_store import (
     SECRET_PROTECTION_NONE,
     SECRET_PROTECTION_UNAVAILABLE,
@@ -1440,16 +1441,16 @@ def test_tmdb_key(
 ) -> Dict[str, Any]:
     resolved_api_key = str(api_key or "").strip()
     if not resolved_api_key:
-        return {"ok": False, "message": t("errors.tmdb_key_empty")}
+        return err(t("errors.tmdb_key_empty"), category="validation", level="info")
     resolved_state_dir = normalize_user_path(state_dir, default_state_dir)
     cache = resolved_state_dir / "tmdb_cache.json"
     try:
         tmdb = tmdb_client_cls(api_key=resolved_api_key, cache_path=cache, timeout_s=float(timeout_s))
-        ok, msg = tmdb.validate_key()
+        ok_val, msg = tmdb.validate_key()
         tmdb.flush()
-        return {"ok": bool(ok), "message": msg}
+        return {"ok": bool(ok_val), "message": msg}
     except (OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"TMDb connection failed: {exc}", category="runtime", level="error")
 
 
 def test_jellyfin_connection(
@@ -1469,15 +1470,19 @@ def test_jellyfin_connection(
     url = _normalize_jellyfin_url(url)
     api_key = str(api_key or "").strip()
     if not url:
-        return {"ok": False, "message": t("errors.jellyfin_url_empty")}
+        return err(t("errors.jellyfin_url_empty"), category="validation", level="info")
     if not api_key:
-        return {"ok": False, "message": t("errors.jellyfin_key_empty")}
+        return err(t("errors.jellyfin_key_empty"), category="validation", level="info")
 
     try:
         client = jellyfin_client_cls(url, api_key, timeout_s=float(timeout_s))
         result = client.validate_connection()
         if not result.get("ok"):
-            return {"ok": False, "message": result.get("error", t("errors.connection_failed"))}
+            return err(
+                result.get("error", t("errors.connection_failed")),
+                category="runtime",
+                level="warning",
+            )
 
         # Enrichir avec les bibliothèques
         user_id = result.get("user_id", "")
@@ -1501,7 +1506,7 @@ def test_jellyfin_connection(
             "movies_count": movies_count,
         }
     except (ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"Jellyfin connection failed: {exc}", category="runtime", level="error")
 
 
 # Audit ID-J-001 (V1-M10) : API publique pour gestion UI des backups settings.

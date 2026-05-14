@@ -9,6 +9,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.ui.api._responses import err
 
 
 def get_quality_profile(api: Any) -> Dict[str, Any]:
@@ -22,7 +23,7 @@ def get_quality_profile(api: Any) -> Dict[str, Any]:
             "profile_json": payload["profile_json"],
         }
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"get_quality_profile failed: {exc}", category="runtime", level="error")
 
 
 def get_quality_presets(_api: Any) -> Dict[str, Any]:
@@ -34,20 +35,25 @@ def get_quality_presets(_api: Any) -> Dict[str, Any]:
             "default_preset_id": "equilibre",
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"get_quality_presets failed: {exc}", category="runtime", level="error")
 
 
 def apply_quality_preset(api: Any, preset_id: str) -> Dict[str, Any]:
     try:
         pid = str(preset_id or "").strip().lower()
         if not pid:
-            return {"ok": False, "message": "Preset qualite requis."}
+            return err("Preset qualite requis.", category="validation", level="info")
         preset_profile = quality_profile_from_preset(pid)
         if not isinstance(preset_profile, dict):
-            return {"ok": False, "message": "Preset qualite inconnu."}
+            return err("Preset qualite inconnu.", category="validation", level="warning")
         ok, errs, normalized = validate_quality_profile(preset_profile)
         if not ok:
-            return {"ok": False, "message": "Preset qualite invalide.", "errors": errs}
+            return err(
+                "Preset qualite invalide.",
+                category="validation",
+                level="warning",
+                errors=errs,
+            )
         saved = api._save_active_quality_profile(normalized)
         return {
             "ok": True,
@@ -55,14 +61,14 @@ def apply_quality_preset(api: Any, preset_id: str) -> Dict[str, Any]:
             **saved,
         }
     except (OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"apply_quality_preset failed: {exc}", category="runtime", level="error")
 
 
 def save_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
     try:
         ok, errs, normalized = api._parse_profile_payload(profile_json)
         if not ok:
-            return {"ok": False, "message": "Profil invalide.", "errors": errs}
+            return err("Profil invalide.", category="validation", level="warning", errors=errs)
         # Custom rules (G6) : validation stricte si presentes
         raw_rules = normalized.get("custom_rules")
         if raw_rules:
@@ -70,7 +76,12 @@ def save_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
 
             rules_ok, rules_errs, rules_norm = _validate_custom_rules(raw_rules)
             if not rules_ok:
-                return {"ok": False, "message": "Regles custom invalides.", "errors": rules_errs}
+                return err(
+                    "Regles custom invalides.",
+                    category="validation",
+                    level="warning",
+                    errors=rules_errs,
+                )
             normalized["custom_rules"] = rules_norm
         saved = api._save_active_quality_profile(normalized)
         return {
@@ -79,7 +90,7 @@ def save_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
             "profile_version": int(saved["profile_version"]),
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"save_quality_profile failed: {exc}", category="runtime", level="error")
 
 
 def reset_quality_profile(api: Any) -> Dict[str, Any]:
@@ -88,7 +99,7 @@ def reset_quality_profile(api: Any) -> Dict[str, Any]:
         saved = api._save_active_quality_profile(profile)
         return {"ok": True, **saved}
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"reset_quality_profile failed: {exc}", category="runtime", level="error")
 
 
 def export_quality_profile(api: Any) -> Dict[str, Any]:
@@ -101,7 +112,7 @@ def export_quality_profile(api: Any) -> Dict[str, Any]:
             "profile_version": int(payload["profile_version"]),
         }
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return err(f"export_quality_profile failed: {exc}", category="runtime", level="error")
 
 
 def import_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
