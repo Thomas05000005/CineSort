@@ -8,6 +8,7 @@ from cinesort.domain import compute_quality_score, default_quality_profile
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.probe import ProbeService
 from cinesort.domain.conversions import to_bool
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 
@@ -137,11 +138,10 @@ def _probe_and_score(
     return probe_result, out
 
 
+@requires_valid_run_id
 def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) -> Dict[str, Any]:
     if not run_id or not row_id:
         return {"ok": False, "message": "Les identifiants run_id et row_id sont requis."}
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     try:
         opts = options if isinstance(options, dict) else {}
         reuse_existing = to_bool(opts.get("reuse_existing"), False)

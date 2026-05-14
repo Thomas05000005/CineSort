@@ -18,6 +18,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.domain.conversions import to_bool, to_float
 from cinesort.app.plan_support import plan_multi_roots
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 
@@ -583,9 +584,8 @@ def _compute_speed_and_eta(
     return speed, eta
 
 
+@requires_valid_run_id
 def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -666,9 +666,8 @@ def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]
     }
 
 
+@requires_valid_run_id
 def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     if not isinstance(decisions, dict):
         return {"ok": False, "message": t("errors.payload_decisions_invalid")}
     rs = api._get_run(run_id)
@@ -834,9 +833,8 @@ def _enrich_groups_with_quality_comparison(
         _enrich_one_group(group, run_id, store)
 
 
+@requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
     if not isinstance(decisions, dict):
         return {"ok": False, "message": t("errors.payload_decisions_invalid")}
     rs = api._get_run(run_id)

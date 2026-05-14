@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cinesort.domain.core as core
+from cinesort.ui.api._validators import requires_valid_run_id
 import cinesort.infra.state as state
 from cinesort.infra.db import SQLiteStore
 from cinesort.domain.conversions import to_bool, to_int
@@ -778,9 +779,8 @@ def write_run_report_file(
     return out_path
 
 
+@requires_valid_run_id
 def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     export_format = str(fmt or "json").strip().lower()
     if export_format not in {"json", "csv", "html"}:
         return {"ok": False, "message": "Format invalide. Utilisez 'json', 'csv' ou 'html'."}

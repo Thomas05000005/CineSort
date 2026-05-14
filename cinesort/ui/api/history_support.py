@@ -8,14 +8,14 @@ from typing import Any, Dict, List
 
 import cinesort.infra.state as state
 from cinesort.domain.run_models import RunStatus
+from cinesort.ui.api._validators import requires_valid_run_id
 
 logger = logging.getLogger(__name__)
 
 
+@requires_valid_run_id
 def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
     logger.debug("api: get_plan run_id=%s", run_id)
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
@@ -45,9 +45,8 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
         return {"ok": False, "message": str(exc)}
 
 
+@requires_valid_run_id
 def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     rs = api._get_run(run_id)
     if rs:
         path = rs.paths.validation_json
@@ -92,9 +91,8 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
         return {"ok": True, "decisions": {}}
 
 
+@requires_valid_run_id
 def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "run_id": str(run_id or ""), "message": "run_id invalide."}
     rs = api._get_run(run_id)
     if not rs:
         return {"ok": False, "run_id": run_id, "message": "Run introuvable."}

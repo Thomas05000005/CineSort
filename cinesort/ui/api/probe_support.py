@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional
 
 import cinesort.infra.state as state
 from cinesort.infra.probe import ProbeService
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_probe_backend, normalize_user_path
 
 
@@ -345,6 +346,7 @@ def auto_install_probe_tools(
         return {"ok": False, "message": f"Echec de l'installation : {exc}", "errors": [str(exc)]}
 
 
+@requires_valid_run_id
 def get_probe(
     api: Any,
     run_id: str,
@@ -354,8 +356,6 @@ def get_probe(
 ) -> Dict[str, Any]:
     if not run_id or not row_id:
         return {"ok": False, "message": "Les identifiants run_id et row_id sont requis."}
-    if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": "run_id invalide."}
     try:
         found = api._find_run_row(run_id)
         if not found:
