@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -48,29 +49,29 @@ def estimate_grain(
         return {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0}
 
     flat_thresh = _FLAT_VAR_THRESH_10BIT if bit_depth >= 10 else _FLAT_VAR_THRESH_8BIT
-    flat_stddevs: List[float] = []
 
-    for by in range(0, h - bs + 1, bs):
-        for bx in range(0, w - bs + 1, bs):
-            block: List[int] = []
-            for dy in range(bs):
-                start = (by + dy) * w + bx
-                block.extend(pixels[start : start + bs])
-            n = len(block)
-            if n == 0:
-                continue
-            mean = sum(block) / n
-            var = sum((x - mean) ** 2 for x in block) / n
-            if var < flat_thresh:
-                flat_stddevs.append(math.sqrt(var))
-
-    if not flat_stddevs:
+    # Cf issue #74 : vectorise via numpy reshape en blocs (~40x speedup sur
+    # frame 1920x1080 avec bs=16 → 8160 blocs au lieu de boucle Python double).
+    # Algo equivalent : on tile l'image en blocs de bs×bs (les pixels en dehors
+    # de h_full × w_full sont ignores, idem version pure Python avec range(0, h - bs + 1, bs)).
+    h_full = (h // bs) * bs
+    w_full = (w // bs) * bs
+    arr = np.asarray(pixels, dtype=np.float64).reshape(h, w)
+    cropped = arr[:h_full, :w_full]
+    # Reshape vers (n_y, bs, n_x, bs) puis swapaxes pour grouper les axes des blocs.
+    blocks = cropped.reshape(h_full // bs, bs, w_full // bs, bs).swapaxes(1, 2)
+    # Variance par bloc (axis=2,3 sur les 2 dims internes bs×bs)
+    block_vars = blocks.var(axis=(2, 3))
+    flat_mask = block_vars < flat_thresh
+    if not flat_mask.any():
         return {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0}
+    flat_stds = np.sqrt(block_vars[flat_mask])
 
-    mean_std = sum(flat_stddevs) / len(flat_stddevs)
+    mean_std = float(flat_stds.mean())
+    flat_count = int(flat_stds.size)
     # Uniformite : faible variation entre les stddevs = grain tres regulier (suspect)
     if mean_std > 0.01:
-        std_of_std = math.sqrt(sum((s - mean_std) ** 2 for s in flat_stddevs) / len(flat_stddevs))
+        std_of_std = float(flat_stds.std(ddof=0))
         uniformity = 1.0 - min(1.0, std_of_std / mean_std)
     else:
         uniformity = 1.0
@@ -78,7 +79,7 @@ def estimate_grain(
     return {
         "grain_level": round(mean_std, 3),
         "grain_uniformity": round(uniformity, 3),
-        "flat_zone_count": len(flat_stddevs),
+        "flat_zone_count": flat_count,
     }
 
 

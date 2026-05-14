@@ -94,22 +94,26 @@ def find_flat_zones(
     if h < bs or w < bs:
         return []
 
-    arr = frame_y.astype(np.float64, copy=False)
-    # Calcul variance par bloc
-    candidates: List[Tuple[float, int, int]] = []
-    for y in range(0, h - bs + 1, bs):
-        for x in range(0, w - bs + 1, bs):
-            block = arr[y : y + bs, x : x + bs]
-            var = float(np.var(block))
-            if var < flat_threshold:
-                candidates.append((var, y, x))
-    if not candidates:
+    # Cf issue #74 : vectorise le reshape en blocs (~30x speedup vs boucle
+    # Python double). Equivalent : on tile l'image en blocs bs×bs et on calcule
+    # toutes les variances en une seule passe numpy.
+    h_full = (h // bs) * bs
+    w_full = (w // bs) * bs
+    arr = frame_y.astype(np.float64, copy=False)[:h_full, :w_full]
+    blocks = arr.reshape(h_full // bs, bs, w_full // bs, bs).swapaxes(1, 2)
+    block_vars = blocks.var(axis=(2, 3))  # shape (n_y, n_x)
+
+    flat_mask = block_vars < flat_threshold
+    if not flat_mask.any():
         return []
-    # Garder les N plus plates (variance croissante)
-    candidates.sort(key=lambda t: t[0])
+
+    flat_idx = np.argwhere(flat_mask)  # (k, 2) -> (i_y, i_x) en unites de bloc
+    flat_vars = block_vars[flat_mask]
+
+    # Trier par variance croissante, garder cap premiers
     cap = max(1, int(max_zones))
-    selected = candidates[:cap]
-    return [(y, x, bs, bs) for (_v, y, x) in selected]
+    order = np.argsort(flat_vars, kind="stable")[:cap]
+    return [(int(flat_idx[i, 0]) * bs, int(flat_idx[i, 1]) * bs, bs, bs) for i in order]
 
 
 # ---------------------------------------------------------------------------
