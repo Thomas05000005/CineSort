@@ -128,10 +128,24 @@ class TestRunBatchParallel(unittest.TestCase):
         for ok, _ in results:
             self.assertFalse(ok)
 
-    def test_parallelism_observable_speedup(self):
-        """4 taches qui dorment 0.1s chacune en pool=4 -> total < 0.2s."""
+    def test_parallelism_uses_multiple_threads(self):
+        """Verifie le parallelisme par observation structurelle (thread ids).
+
+        Cf issue #88 : l'ancien test mesurait elapsed < 0.25s sur 4 taches de
+        0.10s. Tres flaky sur CI Windows (threadpool init >50ms + AV). Remplace
+        par une verification deterministe : on collecte les thread idents
+        utilises par les workers et on assert >= 2 distincts. C'est la vraie
+        definition de "parallelism observable".
+
+        Garde un check soft elapsed < 0.5s (1.25x sequential 0.4s) pour
+        detecter une regression majeure ou parallel serait plus lent.
+        """
+        thread_ids: set = set()
+        lock = threading.Lock()
 
         def slow(x):
+            with lock:
+                thread_ids.add(threading.get_ident())
             time.sleep(0.10)
             return x
 
@@ -139,8 +153,15 @@ class TestRunBatchParallel(unittest.TestCase):
         t0 = time.time()
         results = run_batch_parallel(items, slow, max_workers=4)
         elapsed = time.time() - t0
-        # Sequentiel ~0.4s, parallele ~0.10s. Marge confortable a 0.25s.
-        self.assertLess(elapsed, 0.25, f"parallelisme casse, elapsed={elapsed:.3f}s")
+
+        # Assertion principale : au moins 2 threads distincts.
+        self.assertGreater(
+            len(thread_ids),
+            1,
+            f"Parallel doit utiliser plusieurs threads, vu seulement {len(thread_ids)}",
+        )
+        # Check soft anti-regression (marge tres large 0.5s).
+        self.assertLess(elapsed, 0.5, f"Parallel anormalement lent, elapsed={elapsed:.3f}s")
         self.assertEqual([r[1] for r in results], items)
 
     def test_results_indexed_correctly_with_jitter(self):

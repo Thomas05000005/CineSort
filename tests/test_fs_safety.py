@@ -32,16 +32,21 @@ class RunWithTimeoutTests(unittest.TestCase):
         self.assertEqual(result, 42)
 
     def test_returns_default_on_timeout(self) -> None:
+        """Cf issue #88 : timeout=1.0s + marge x3 pour tolerer la latence
+        Windows + AV (l'ancien timeout=0.3s + marge 2x echouait sporadiquement).
+        """
+
         def slow_fn() -> int:
-            time.sleep(2.0)
+            time.sleep(5.0)
             return 99
 
         start = time.monotonic()
-        result = run_with_timeout(slow_fn, timeout_s=0.3, default=-1)
+        result = run_with_timeout(slow_fn, timeout_s=1.0, default=-1)
         elapsed = time.monotonic() - start
         self.assertEqual(result, -1)
-        # Doit avoir respecte le timeout (< 0.6s avec un peu de marge)
-        self.assertLess(elapsed, 0.6)
+        # Marge 3x = 3.0s. Le timeout reel est 1.0s, on tolere 2.0s de
+        # latence Windows + AV scanning + threadpool teardown.
+        self.assertLess(elapsed, 3.0, f"elapsed={elapsed:.3f}s (timeout=1.0s)")
 
     def test_returns_default_on_exception(self) -> None:
         def fail_fn() -> int:

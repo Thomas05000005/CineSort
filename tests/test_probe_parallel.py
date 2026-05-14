@@ -191,12 +191,23 @@ class ProbeFilesBatchTests(unittest.TestCase):
         for mp in self.media_paths[2:]:
             self.assertFalse(out[str(mp)].get("cache_hit"))
 
-    def test_parallel_faster_than_sequential(self) -> None:
-        """Verifie que parallel est mesurablement plus rapide que mono-thread."""
+    def test_parallel_uses_multiple_threads(self) -> None:
+        """Verifie que parallel a effectivement utilise plusieurs threads.
+
+        Cf issue #88 : l'ancien test test_parallel_faster_than_sequential
+        comparait des durees wall-clock (par < seq * 0.75), tres flaky sur CI
+        Windows (preemption, AV, threadpool init >50ms). Remplace par une
+        verification structurelle : runner.thread_ids contient > 1 ident
+        distincts quand parallelism_enabled=True + probe_workers=4. C'est la
+        VRAIE definition de "parallel" et c'est deterministe.
+
+        On garde un check timing soft (par_dur < seq_dur * 1.5) pour detecter
+        un crash hypothetique ou parallel serait dramatiquement plus lent —
+        marge tres large, ne fail que sur regression majeure.
+        """
         # 5 films, 100ms chacun.
         runner_seq = _SlowRunnerSpy(sleep_s=0.10)
         service_seq = ProbeService(self.store, runner=runner_seq, which_fn=lambda n: str(n))
-        # Empty cache : creer un nouveau store pour chaque run.
         t0 = time.monotonic()
         service_seq.probe_files(
             media_paths=self.media_paths,
@@ -217,9 +228,24 @@ class ProbeFilesBatchTests(unittest.TestCase):
         )
         par_dur = time.monotonic() - t0
 
-        # Parallel doit etre au moins 1.5x plus rapide (5 films, 4 workers, sleep 100ms :
-        # sequential ≈ 500ms, parallel ≈ 200ms attendus).
-        self.assertLess(par_dur, seq_dur * 0.75, f"par={par_dur:.3f}s seq={seq_dur:.3f}s")
+        # Assertion principale : parallelism observable via les thread idents
+        # uniques utilises par le runner. Avec 5 fichiers et 4 workers, on
+        # s'attend a >= 2 threads (souvent 4, mais 2 suffit pour valider).
+        self.assertGreater(
+            len(runner_par.thread_ids),
+            1,
+            f"Parallel doit utiliser plusieurs threads, vu seulement {len(runner_par.thread_ids)}",
+        )
+        # Sequential doit utiliser exactement 1 thread.
+        self.assertEqual(len(runner_seq.thread_ids), 1)
+
+        # Check soft : parallel pas catastrophiquement plus lent que sequential
+        # (regression majeure). Marge 50% pour tolerer la variance CI.
+        self.assertLess(
+            par_dur,
+            seq_dur * 1.5,
+            f"Parallel anormalement lent: par={par_dur:.3f}s seq={seq_dur:.3f}s",
+        )
 
     def test_invalid_probe_workers_value_falls_back_to_auto(self) -> None:
         """Settings avec probe_workers='abc' tombe sur l'auto resolution."""
