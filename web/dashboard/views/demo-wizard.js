@@ -83,6 +83,26 @@ function _renderWizardOverlay() {
     overlay.remove();
     navigateTo("/settings");
   });
+
+  // Cf issue #92 quick win #10 : Esc ferme le wizard + toast info.
+  // Power user heureux, alternative au flow lineaire impose.
+  const escHandler = (e) => {
+    if (e.key !== "Escape") return;
+    if (!document.getElementById(OVERLAY_ID)) {
+      document.removeEventListener("keydown", escHandler);
+      return;
+    }
+    overlay.remove();
+    document.removeEventListener("keydown", escHandler);
+    if (typeof window.toast === "function") {
+      window.toast({
+        type: "info",
+        text: "Wizard fermé. Vous pouvez configurer vos dossiers depuis Paramètres.",
+        duration: 4000,
+      });
+    }
+  };
+  document.addEventListener("keydown", escHandler);
 }
 
 /**
@@ -115,9 +135,19 @@ export async function renderDemoBanner() {
   banner.innerHTML = `
     <span class="demo-banner__text">Mode démo actif — données fictives. Configure tes vrais dossiers dans <a href="#/settings">Paramètres</a>.</span>
     <button type="button" class="btn demo-banner__btn" id="btnStopDemo">Sortir du mode démo</button>
+    <button type="button" class="demo-banner__close" id="btnDismissDemoBanner" aria-label="Masquer la banniere demo" title="Masquer (sans sortir du mode demo)">×</button>
   `;
   document.body.insertBefore(banner, document.body.firstChild);
   document.body.classList.add("demo-mode-active");
+
+  // Cf issue #92 quick win #8 : bouton X qui masque le banner sans sortir du
+  // mode demo (sortie evidente sans engagement). Le banner reapparait au
+  // prochain init si toujours en mode demo.
+  const btnDismiss = banner.querySelector("#btnDismissDemoBanner");
+  btnDismiss?.addEventListener("click", () => {
+    banner.remove();
+    document.body.classList.remove("demo-mode-active");
+  });
 
   const btnStop = banner.querySelector("#btnStopDemo");
   btnStop?.addEventListener("click", async () => {

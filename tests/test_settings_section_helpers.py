@@ -204,11 +204,13 @@ class SaveSectionRadarrTests(unittest.TestCase):
 class SaveSectionNotificationsTests(unittest.TestCase):
     def test_defaults(self) -> None:
         result = _save_section_notifications({})
-        # enabled defaults to False, individuels a True
+        # enabled defaults to False, apply_done + errors True (defauts conservateurs
+        # cf #92 quick win #6 : reduit le spam pour les scans frequents).
         self.assertEqual(result["notifications_enabled"], False)
-        self.assertEqual(result["notifications_scan_done"], True)
+        self.assertEqual(result["notifications_scan_done"], False)
+        self.assertEqual(result["notifications_scan_triggered"], False)
         self.assertEqual(result["notifications_apply_done"], True)
-        self.assertEqual(result["notifications_undo_done"], True)
+        self.assertEqual(result["notifications_undo_done"], False)
         self.assertEqual(result["notifications_errors"], True)
 
 
