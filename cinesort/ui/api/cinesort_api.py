@@ -232,6 +232,25 @@ class CineSortApi:
             )
         )
 
+        # Cf issue #84 PR 1 (pilote) : facades par bounded context.
+        # Strategie Strangler Fig - les anciennes methodes directes coexistent
+        # avec les facades pendant la migration (backward-compat 100%).
+        # Cf docs/internal/REFACTOR_PLAN_84.md.
+        # Import tardif pour eviter cycle (facades importent CineSortApi en TYPE_CHECKING).
+        from cinesort.ui.api.facades import (
+            IntegrationsFacade,
+            LibraryFacade,
+            QualityFacade,
+            RunFacade,
+            SettingsFacade,
+        )
+
+        self.run = RunFacade(self)
+        self.settings = SettingsFacade(self)
+        self.quality = QualityFacade(self)
+        self.integrations = IntegrationsFacade(self)
+        self.library = LibraryFacade(self)
+
     def _touch_event(self) -> None:
         """Met a jour le timestamp du dernier evenement significatif (scan, apply, settings)."""
         self._last_event_ts = time.time()
