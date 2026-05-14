@@ -509,8 +509,28 @@ def main() -> None:
 
     _check_dpapi_availability()
 
+    # Cf issue #68 : verrou inter-process avant toute initialisation lourde.
+    # Empeche 2 CineSort.exe simultanees sur le meme state_dir (corruption DB
+    # via apply_rows concurrents). Le lock est libere automatiquement par l'OS
+    # a la mort du process — pas de stale lock meme apres kill -9.
+    from cinesort.infra.single_instance import InstanceLock
+
+    instance_lock = InstanceLock(state_dir)
+    if not instance_lock.acquire():
+        other_pid = instance_lock.read_holder_pid()
+        pid_msg = f" (PID {other_pid})" if other_pid else ""
+        _startup_error(
+            f"Une autre instance de CineSort tourne deja{pid_msg}.\n"
+            "Fermer l'autre fenetre, ou supprimer manuellement le fichier "
+            f"{instance_lock.lock_path} si l'instance precedente a crashe.",
+        )
+        raise SystemExit(2)
+
     if _is_api_mode():
-        main_api()
+        try:
+            main_api()
+        finally:
+            instance_lock.release()
         return
 
     try:
@@ -767,6 +787,13 @@ def main() -> None:
                 _log.warning("V2-10: parcours stores au shutdown echoue: %s", _exc)
         if rest_server and hasattr(rest_server, "stop"):
             rest_server.stop()
+        # Cf issue #68 : liberer le verrou inter-process en dernier (apres
+        # arret du REST et fermeture des stores). Garantit qu'au prochain
+        # lancement le lock est dispo.
+        try:
+            instance_lock.release()
+        except Exception as _exc:  # noqa: BLE001 — shutdown must continue
+            _log.warning("instance_lock release failed (ignored): %s", _exc)
 
 
 if __name__ == "__main__":

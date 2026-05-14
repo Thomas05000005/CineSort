@@ -191,7 +191,32 @@ class _StoreBase:
         if self._integrity_status != "ok" and self._integrity_status != "unknown":
             self._attempt_auto_restore()
         self._backup_before_migrations()
-        version = self._apply_schema_migrations()
+        # Cf issue #80 : si une migration leve, restaurer la DB depuis le
+        # backup pre_migration cree juste au-dessus. Empeche de laisser la DB
+        # dans un etat partial (ex : ALTER TABLE applique mais CREATE INDEX
+        # plante au milieu).
+        try:
+            version = self._apply_schema_migrations()
+        except (OSError, sqlite3.DatabaseError, RuntimeError) as exc:
+            restored = self._restore_from_pre_migration_backup()
+            if restored is not None:
+                logger.error(
+                    "Migration ratee (%s). DB restauree depuis %s. L'app doit redemarrer.",
+                    exc,
+                    restored,
+                )
+                self._integrity_event = {
+                    "status": "migration_rolled_back",
+                    "raw": str(exc),
+                    "backup_used": str(restored),
+                    "ts": time.time(),
+                }
+                raise RuntimeError(
+                    f"Migration SQLite echouee ({exc}). DB restauree depuis backup pre_migration."
+                ) from exc
+            # Pas de backup pre_migration disponible → on remonte tel quel
+            logger.error("Migration ratee (%s) — pas de backup pre_migration pour restore.", exc)
+            raise
         version = self._ensure_required_schema(version)
         self._debug(f"SQLite initialized, schema version = {version}")
         return version
@@ -348,6 +373,32 @@ class _StoreBase:
     def _backup_dir(self) -> Path:
         """Dossier ou sont stockes les backups : <db_dir>/backups/."""
         return self.db_path.parent / "backups"
+
+    def _restore_from_pre_migration_backup(self) -> Optional[Path]:
+        """Cf issue #80 : restaure la DB depuis le backup pre_migration le plus
+        recent, cree juste avant la serie de migrations en cours.
+
+        Retourne le chemin du backup utilise, ou None si aucun backup
+        pre_migration n'est disponible (cas tests sans backup ou fresh install).
+        """
+        try:
+            all_backups = list_backups(self._backup_dir(), stem_filter=self.db_path.stem)
+        except (OSError, PermissionError) as exc:
+            logger.warning("rollback_migration: list_backups echoue (%s)", exc)
+            return None
+        # Filtrer pour ne garder que les backups pre_migration (les plus pertinents
+        # ici — un post_apply backup pourrait dater d'avant les nouvelles tables
+        # introduites par les migrations precedentes).
+        pre_migration = [p for p in all_backups if ".pre_migration." in p.name]
+        if not pre_migration:
+            return None
+        most_recent = pre_migration[0]  # list_backups trie plus recent d'abord
+        try:
+            restore_backup(most_recent, self.db_path)
+        except (sqlite3.Error, OSError, FileNotFoundError) as exc:
+            logger.error("rollback_migration: restore depuis %s echoue: %s", most_recent, exc)
+            return None
+        return most_recent
 
     def _backup_before_migrations(self) -> None:
         """CR-2 : si la DB existe deja, faire un backup avant d'appliquer
