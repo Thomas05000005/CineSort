@@ -28,7 +28,7 @@ from .constants import (
     SCENE_DETECTION_THRESHOLD,
     SCENE_DETECTION_TIMEOUT_S,
 )
-from cinesort.infra.subprocess_safety import tracked_run
+from cinesort.domain._runners import tracked_run
 
 from .ffmpeg_runner import _runner_platform_kwargs
 

@@ -7,6 +7,11 @@ from unittest import skipUnless
 
 import cinesort.domain.core as core
 
+# Cf issue #83 : import direct au lieu de via re-export domain.core.
+# core.find_duplicate_targets reste accede via core.X (wrapper qui injecte
+# 7 helpers internes, pas un simple re-export).
+from cinesort.app.apply_core import apply_rows as _apply_rows_fn
+
 
 @skipUnless(__import__("os").environ.get("CINESORT_STRESS") == "1", "CINESORT_STRESS=1 requis pour la suite stress.")
 class LargeVolumeFlowStressTests(unittest.TestCase):
@@ -66,7 +71,7 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         dup_data = core.find_duplicate_targets(cfg, subset, decisions)
         self.assertEqual(int(dup_data.get("total_groups") or 0), 0)
 
-        result = core.apply_rows(
+        result = _apply_rows_fn(
             cfg,
             subset,
             decisions,

@@ -347,7 +347,6 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         entered = threading.Event()
         release = threading.Event()
-        original_apply_rows = core.apply_rows
 
         def slow_apply_rows(*args, **kwargs):
             entered.set()
@@ -359,7 +358,12 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         def call_first():
             first_result.update(api.apply(run_id, decisions, True, False))
 
-        core.apply_rows = slow_apply_rows
+        # Cf issue #83 : apply_support.py importe apply_rows directement (pas
+        # via re-export domain.core), donc patcher au point d'usage.
+        import cinesort.ui.api.apply_support as _apply_support_mod
+
+        original_apply_rows = _apply_support_mod._apply_rows_fn
+        _apply_support_mod._apply_rows_fn = slow_apply_rows
         try:
             t = threading.Thread(target=call_first, daemon=True)
             t.start()
@@ -373,7 +377,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             t.join(2.0)
             self.assertTrue(first_result.get("ok"), first_result)
         finally:
-            core.apply_rows = original_apply_rows
+            _apply_support_mod._apply_rows_fn = original_apply_rows
             release.set()
 
     def test_apply_stops_if_duplicate_check_fails(self) -> None:
@@ -449,9 +453,13 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         store.close_apply_batch.side_effect = OSError("close failed boom")
         ctx = (core.Config(root=self.root).normalized(), run_paths, rows, log_fn, store)
 
+        # Cf issue #83 : apply_support importe apply_rows directement (pas via
+        # core), donc patcher au point d'usage.
+        import cinesort.ui.api.apply_support as _apply_support_mod
+
         with mock.patch.object(api, "_run_context_for_apply", return_value=ctx):
             with mock.patch.object(core, "find_duplicate_targets", return_value=[]):
-                with mock.patch.object(core, "apply_rows", side_effect=OSError("primary apply boom")):
+                with mock.patch.object(_apply_support_mod, "_apply_rows_fn", side_effect=OSError("primary apply boom")):
                     res = api.apply(run_id, {}, False, False)
 
         self.assertFalse(res.get("ok"), res)

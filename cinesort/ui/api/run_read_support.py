@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import cinesort.domain.core as core
+from cinesort.app.cleanup import preview_cleanup_residual_folders as _preview_cleanup_fn
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._validators import requires_valid_run_id
 
@@ -28,7 +29,7 @@ def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
         return {"ok": False, "message": "Plan indisponible."}
 
     cfg, _run_paths, rows, _log_fn, _store = ctx
-    preview = core.preview_cleanup_residual_folders(cfg, api._touched_top_level_dirs_for_rows(cfg, rows))
+    preview = _preview_cleanup_fn(cfg, api._touched_top_level_dirs_for_rows(cfg, rows))
     return {
         "ok": True,
         "run_id": run_id,

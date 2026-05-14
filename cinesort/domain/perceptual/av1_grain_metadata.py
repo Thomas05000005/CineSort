@@ -17,7 +17,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from cinesort.infra.subprocess_safety import tracked_run
+from cinesort.domain._runners import tracked_run
 
 from .ffmpeg_runner import _runner_platform_kwargs
 

@@ -52,10 +52,22 @@ def _count_imports_in_subprocess() -> dict[str, int]:
 
     Utilise subprocess (pas manipulation de sys.modules) pour eviter de
     polluer les caches module-level des tests suivants.
+
+    Cf issue #83 v7.8.0 : on track AUSSI les imports declenches par
+    cinesort.domain.perceptual (8 modules qui importaient infra directement
+    avant le fix Option C / Service Locator).
     """
     script = (
         "import sys; "
         "import cinesort.domain.core; "
+        "import cinesort.domain.perceptual.audio_fingerprint; "
+        "import cinesort.domain.perceptual.av1_grain_metadata; "
+        "import cinesort.domain.perceptual.ffmpeg_runner; "
+        "import cinesort.domain.perceptual.hdr_analysis; "
+        "import cinesort.domain.perceptual.metadata_analysis; "
+        "import cinesort.domain.perceptual.scene_detection; "
+        "import cinesort.domain.perceptual.spectral_analysis; "
+        "import cinesort.domain.perceptual.ssim_self_ref; "
         "loaded = list(sys.modules); "
         "n_app = sum(1 for m in loaded if m.startswith('cinesort.app')); "
         "n_ui = sum(1 for m in loaded if m.startswith('cinesort.ui')); "
@@ -73,6 +85,59 @@ def _count_imports_in_subprocess() -> dict[str, int]:
     output = result.stdout.strip().splitlines()[-1]  # derniere ligne (ignore warnings)
     parts = output.split(",")
     return {"app": int(parts[0]), "ui": int(parts[1]), "infra": int(parts[2])}
+
+
+class DomainPerceptualNoInfraImportTests(unittest.TestCase):
+    """Cf issue #83 : domain/perceptual/* ne doit plus importer infra/* directement.
+
+    Avant le fix Option C (Service Locator), les 8 fichiers de
+    domain/perceptual/ importaient `cinesort.infra.subprocess_safety.tracked_run`
+    en top-level — violation de couche.
+
+    Apres : ils importent `cinesort.domain._runners.tracked_run` qui resoud
+    au runtime via get_runner(). L'implementation concrete est injectee
+    par cinesort/__init__.py au boot.
+
+    Ce test garantit qu'on ne regresse pas — inspection statique sur les
+    sources, indep du runtime.
+    """
+
+    _PERCEPTUAL_FILES = [
+        "audio_fingerprint.py",
+        "av1_grain_metadata.py",
+        "ffmpeg_runner.py",
+        "hdr_analysis.py",
+        "metadata_analysis.py",
+        "scene_detection.py",
+        "spectral_analysis.py",
+        "ssim_self_ref.py",
+    ]
+
+    def test_no_direct_import_from_infra(self) -> None:
+        perceptual_dir = REPO_ROOT / "cinesort" / "domain" / "perceptual"
+        violations: list[str] = []
+        for fname in self._PERCEPTUAL_FILES:
+            src = (perceptual_dir / fname).read_text(encoding="utf-8")
+            for line_no, line in enumerate(src.splitlines(), start=1):
+                stripped = line.strip()
+                # Imports top-level (pas dans une fonction) qui ciblent cinesort.infra.*
+                if stripped.startswith("from cinesort.infra") or stripped.startswith("import cinesort.infra"):
+                    # Acceptable : imports lazy dans une fonction (indented > 0)
+                    if line.startswith("from ") or line.startswith("import "):
+                        violations.append(f"{fname}:{line_no} : {stripped}")
+        self.assertEqual(
+            violations,
+            [],
+            "domain/perceptual/* ne doit pas importer infra directement (Service Locator via "
+            "domain._runners requis). Violations:\n  " + "\n  ".join(violations),
+        )
+
+    def test_runners_module_provides_tracked_run(self) -> None:
+        """Le module _runners expose tracked_run + set_runner + get_runner."""
+        runners_src = (REPO_ROOT / "cinesort" / "domain" / "_runners.py").read_text(encoding="utf-8")
+        self.assertIn("def tracked_run", runners_src)
+        self.assertIn("def set_runner", runners_src)
+        self.assertIn("def get_runner", runners_src)
 
 
 class ImportCycleGuardTests(unittest.TestCase):

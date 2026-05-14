@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from cinesort.infra.subprocess_safety import tracked_run
+from cinesort.domain._runners import tracked_run
 
 logger = logging.getLogger(__name__)
 
