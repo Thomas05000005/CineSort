@@ -109,6 +109,67 @@ class XssNonRegressionTests(unittest.TestCase):
             self.assertIn("escapeHtml", content, f"{rel} devrait utiliser escapeHtml pour eviter XSS")
 
 
+class XssDashboardFixesTests(unittest.TestCase):
+    """Cf issue #67 : 3 XSS fixes verifies par inspection statique."""
+
+    def test_dashboard_dom_exposes_safe_url_helper(self) -> None:
+        """web/dashboard/core/dom.js doit exposer safeUrl(u) qui valide le scheme."""
+        dom = (PROJECT_ROOT / "web" / "dashboard" / "core" / "dom.js").read_text(encoding="utf-8")
+        self.assertIn("export function safeUrl", dom, "safeUrl helper manquant dans dashboard/core/dom.js")
+        # Doit valider http/https et rejeter le reste
+        self.assertIn("http:", dom)
+        self.assertIn("https:", dom)
+
+    def test_library_view_uses_safe_url_for_poster(self) -> None:
+        """library.js ne doit plus injecter posterUrl brut dans src=""."""
+        lib = (PROJECT_ROOT / "web" / "dashboard" / "views" / "library.js").read_text(encoding="utf-8")
+        self.assertIn("safeUrl", lib, "library.js doit importer safeUrl")
+        # Pattern vulnerable banni : src="${posterUrl}" sans validation
+        self.assertNotIn('src="${posterUrl}"', lib, "posterUrl injecte sans validation — XSS via src")
+
+    def test_dashboard_app_error_banner_no_inner_html(self) -> None:
+        """app.js error banner doit utiliser createElement + textContent, pas innerHTML."""
+        app_js = (PROJECT_ROOT / "web" / "dashboard" / "app.js").read_text(encoding="utf-8")
+        # La construction doit utiliser createElement
+        self.assertIn("createElement", app_js)
+        # Pas de pattern innerHTML avec concatenation de msg
+        self.assertNotIn("banner.innerHTML", app_js, "banner.innerHTML expose XSS via window.onerror msg")
+
+    def test_error_boundary_uses_text_content(self) -> None:
+        """error-boundary.js doit utiliser textContent (pas innerHTML+escape manuel)."""
+        eb = (PROJECT_ROOT / "web" / "core" / "error-boundary.js").read_text(encoding="utf-8")
+        self.assertIn("textContent", eb)
+        # Pattern d'escape manuel incomplet (couvrait <>& mais pas "/') doit avoir disparu
+        self.assertNotIn('"<": "&lt;"', eb, "escape manuel incomplet — switcher sur textContent")
+
+
+class TokenStorageTests(unittest.TestCase):
+    """Cf issue #65 : token desktop natif → sessionStorage only (pas localStorage)."""
+
+    def test_app_py_native_token_uses_session_storage_only(self) -> None:
+        """app.py mode natif ne doit PAS persister le token en localStorage.
+
+        Justification : le token est regenere/relu cote serveur Python a chaque
+        demarrage. Persister en localStorage etend inutilement la fenetre
+        d'exfiltration en cas de XSS (survit a la fermeture du browser/PyWebView).
+        """
+        app_py = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+        # Cherche le bloc d'injection du token (entre les deux marqueurs)
+        match = re.search(
+            r"if _desktop_dashboard_token:.*?main_window\.evaluate_js\(inject_js\)",
+            app_py,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Bloc d'injection token natif introuvable")
+        block = match.group(0)
+        self.assertIn("sessionStorage.setItem", block)
+        self.assertNotIn(
+            "localStorage.setItem('cinesort.dashboard.token'",
+            block,
+            "Token natif ne doit pas etre stocke en localStorage (issue #65)",
+        )
+
+
 class SplashEscapingTests(unittest.TestCase):
     """H8 : _update_splash echappe correctement les chars dangereux.
 

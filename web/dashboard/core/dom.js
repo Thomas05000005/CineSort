@@ -17,6 +17,26 @@ export function escapeHtml(s) {
 }
 
 /**
+ * Cf issue #67 : valide qu'une URL utilise un scheme autorise (http/https/data img)
+ * avant injection dans un attribut src="" ou style="url(...)". Retourne chaine vide
+ * si invalide — provoque un fallback safe cote appelant.
+ */
+export function safeUrl(u) {
+  const s = String(u ?? "").trim();
+  if (!s) return "";
+  try {
+    const parsed = new URL(s, window.location.href);
+    const proto = parsed.protocol.toLowerCase();
+    if (proto === "http:" || proto === "https:") return escapeHtml(s);
+    // data: autorise UNIQUEMENT pour images (data:image/...)
+    if (proto === "data:" && s.toLowerCase().startsWith("data:image/")) return escapeHtml(s);
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * V2-D (a11y) : bascule l'attribut aria-busy d'un conteneur ARIA-live.
  * Utilise en wrap des appels async (fetch / apiPost) sur les vues a polling
  * pour annoncer aux lecteurs d'ecran "chargement en cours" puis "termine".

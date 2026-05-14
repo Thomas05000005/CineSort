@@ -681,27 +681,32 @@ def main() -> None:
                 # en arriere-plan (non-bloquant). Evite l'accumulation orphelins.
                 _purge_tmdb_cache_in_background(api, settings)
 
-                # Injecter le token dans le localStorage du dashboard avant l'affichage
+                # Injecter le token dans le sessionStorage du dashboard avant l'affichage
                 # pour bypass automatique de la page login (mode desktop natif).
-                # Le dashboard utilise les cles 'cinesort.dashboard.token' et 'cinesort.dashboard.persist'.
+                # Cle 'cinesort.dashboard.token' lue par web/dashboard/core/state.js
+                # (priorite sessionStorage > localStorage).
                 if _desktop_dashboard_token:
                     try:
                         # Cf issue #64 : json.dumps echappe correctement le token
                         # (peut contenir des chars exotiques selon settings user).
                         # L'escape manuel precedent ratait \\n, </script>, U+2028/2029.
+                        # Cf issue #65 : mode desktop natif → sessionStorage only
+                        # (token regenere/relu cote serveur a chaque demarrage,
+                        # pas besoin de persister entre sessions). Reduit la
+                        # surface d'exfiltration en cas de XSS futur — un token
+                        # en localStorage survit a la fermeture du browser,
+                        # sessionStorage non.
                         import json as _json
 
                         tk_js = _json.dumps(_desktop_dashboard_token)
                         inject_js = (
                             "try {"
-                            f"  localStorage.setItem('cinesort.dashboard.token', {tk_js});"
-                            "  localStorage.setItem('cinesort.dashboard.persist', '1');"
                             f"  sessionStorage.setItem('cinesort.dashboard.token', {tk_js});"
                             "  window.__CINESORT_NATIVE__ = true;"
                             "} catch (e) { console.warn('token inject fail', e); }"
                         )
                         main_window.evaluate_js(inject_js)
-                        _log.info("splash: token injecte dans localStorage (mode natif)")
+                        _log.info("splash: token injecte dans sessionStorage (mode natif)")
                     except Exception as exc:
                         _log.warning("splash: injection token echouee — %s", exc)
 
