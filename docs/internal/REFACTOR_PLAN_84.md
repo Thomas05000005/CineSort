@@ -1,8 +1,77 @@
 # Plan refactor #84 — God class CineSortApi → 5 façades par bounded context
 
-**Version** : 1.0 (préparation, en attente validation utilisateur)
+**Version** : 1.1 (PRs 1-6 mergées 2026-05-14)
 **Auteur** : Claude Code (session 2026-05-14)
-**Statut** : ⏳ En attente validation avant exécution
+**Statut** : ✅ Phase 1 (façades complètes) **TERMINÉE** — Phase 2 (migration callers) en attente
+
+## Résumé d'avancement (au 2026-05-14)
+
+| PR | Bounded context | Méthodes | Tests | Commit | Statut |
+|----|-----------------|----------|-------|--------|--------|
+| #129 (PR 1) | Squelette 5 façades pilote | 5 × 1 méthode | 12 | b40a977 | ✅ Mergée |
+| #130 (PR 2) | RunFacade complète | 7 | +11 | e042af2 | ✅ Mergée |
+| #131 (PR 3) | SettingsFacade complète | 6 | +10 | 882cb6f | ✅ Mergée |
+| #132 (PR 4) | QualityFacade complète | 21 | +27 | 854e9a7 | ✅ Mergée |
+| #133 (PR 5) | IntegrationsFacade complète | 11 | +15 | 3689e98 | ✅ Mergée |
+| #134 (PR 6) | LibraryFacade complète | 9 | +16 | 7dafb5a | ✅ Mergée |
+| **Phase 1 total** | **5 façades, 54 méthodes** | **54** | **+91** | — | ✅ **TERMINÉE** |
+| PR 7 | Documentation finale | — | — | (cette PR) | 🟡 En cours |
+| PR 8 | Migration frontend JS | — | — | — | ⏳ Pending |
+| PR 9 | Migration REST dispatch | — | — | — | ⏳ Pending |
+| PR 10 | Suppression méthodes directes | — | — | — | ⏳ Pending |
+
+**Backward-compat 100% préservée** : les 104 méthodes directes de `CineSortApi` coexistent avec les 5 façades. Les anciens call sites (`api.X(...)`) et les nouveaux (`api.context.X(...)`) fonctionnent en parallèle. La suppression des méthodes directes ne se fera qu'à la PR 10, après migration complète des callers JS et REST.
+
+**Snapshot de sécurité** : `tests/test_cinesort_api_snapshot.py` garde les 104 signatures publiques (échoue si une méthode disparaît ou change de signature). Régénération via `regenerate_snapshot()` si suppression intentionnelle.
+
+---
+
+## Utilisation des façades (guide rapide)
+
+### Pour ajouter une nouvelle méthode dans un bounded context
+
+```python
+# 1. Ajouter la méthode dans CineSortApi (cinesort/ui/api/cinesort_api.py)
+def my_new_method(self, arg: str) -> Dict[str, Any]:
+    """Doc complète ici."""
+    return some_support.my_new_method(self, arg)
+
+# 2. Ajouter la délégation dans la façade correspondante
+# Exemple : cinesort/ui/api/facades/quality_facade.py
+def my_new_method(self, arg: str) -> Dict[str, Any]:
+    """Référence vers CineSortApi.my_new_method.
+
+    Cf CineSortApi.my_new_method pour la doc complète.
+    """
+    return self._api.my_new_method(arg)
+
+# 3. Ajouter un test de délégation
+# Exemple : tests/test_cinesort_api_facades.py
+def test_my_new_method_delegates(self) -> None:
+    sentinel = {"ok": True}
+    with patch.object(self.api, "my_new_method", return_value=sentinel) as mocked:
+        result = self.api.quality.my_new_method("foo")
+    mocked.assert_called_once_with("foo")
+    self.assertEqual(result, sentinel)
+```
+
+### Pour utiliser une façade depuis du code Python
+
+```python
+# Ancien style (toujours fonctionnel jusqu'à PR 10)
+result = api.start_plan(settings)
+
+# Nouveau style (préféré pour nouveau code)
+result = api.run.start_plan(settings)
+```
+
+### Mapping rapide bounded context → façade
+
+- **Run** (cycle de vie scan/plan/apply preview) → `api.run`
+- **Settings** (configuration, locale, reset, restart) → `api.settings`
+- **Quality** (scoring, profiles, perceptual, feedback) → `api.quality`
+- **Integrations** (TMDb, Jellyfin, Plex, Radarr) → `api.integrations`
+- **Library** (films filtres, smart playlists, history, export RGPD) → `api.library`
 
 ---
 
