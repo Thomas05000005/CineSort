@@ -53,10 +53,12 @@ def resolve_media_path_for_row(
     if video_name:
         direct = folder / video_name
         candidates.append(direct)
+        found_in_iterdir = False
         try:
             for path in folder.iterdir():
                 if path.is_file() and path.name.lower() == video_name.lower():
                     candidates.append(path)
+                    found_in_iterdir = True
         except (OSError, PermissionError, TypeError, ValueError) as exc:
             if env_truthy_fn("CINESORT_DEBUG"):
                 api._debug_log(
@@ -65,19 +67,22 @@ def resolve_media_path_for_row(
                     enabled=True,
                     message=f"_resolve_media_path_for_row iterdir warning folder={folder}: {exc}",
                 )
-        try:
-            for path in folder.rglob("*"):
-                if path.is_file() and path.name.lower() == video_name.lower():
-                    candidates.append(path)
-                    break
-        except (OSError, PermissionError) as exc:
-            if env_truthy_fn("CINESORT_DEBUG"):
-                api._debug_log(
-                    state_dir=api._state_dir,
-                    run_id=None,
-                    enabled=True,
-                    message=f"_resolve_media_path_for_row rglob warning folder={folder}: {exc}",
-                )
+        # Audit 2026-05-14 : rglob recursif est lourd sur grosses arborescences NAS.
+        # On ne descend dans les sous-dossiers que si iterdir n'a rien trouve.
+        if not found_in_iterdir:
+            try:
+                for path in folder.rglob("*"):
+                    if path.is_file() and path.name.lower() == video_name.lower():
+                        candidates.append(path)
+                        break
+            except (OSError, PermissionError) as exc:
+                if env_truthy_fn("CINESORT_DEBUG"):
+                    api._debug_log(
+                        state_dir=api._state_dir,
+                        run_id=None,
+                        enabled=True,
+                        message=f"_resolve_media_path_for_row rglob warning folder={folder}: {exc}",
+                    )
 
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
