@@ -1,6 +1,6 @@
 /* views/library.js — Bibliotheque de films du dashboard distant */
 
-import { $, escapeHtml } from "../core/dom.js";
+import { $, escapeHtml, safeUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { tableHtml, attachSort } from "../components/table.js";
 import { badgeHtml, scoreBadgeHtml, tierPill } from "../components/badge.js";
@@ -278,8 +278,10 @@ async function _renderMosaic() {
     const title = escapeHtml(row.proposed_title || "Sans titre");
     const year = row.proposed_year ? ` (${row.proposed_year})` : "";
     const tier = row.tier || "";
-    const posterHtml = posterUrl
-      ? `<img class="film-tile__poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" />`
+    // Cf issue #67 : valider scheme + escape posterUrl avant injection dans src=""
+    const safePoster = posterUrl ? safeUrl(posterUrl) : "";
+    const posterHtml = safePoster
+      ? `<img class="film-tile__poster" src="${safePoster}" alt="Affiche ${title}" loading="lazy" />`
       : `<div class="film-tile__poster film-tile__poster--empty" aria-hidden="true"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg></div>`;
     const tierBadge = tier ? `<span class="film-tile__tier">${tierPill(tier, { compact: true })}</span>` : "";
     html += `<button class="film-tile" data-row-idx="${i}" type="button" aria-label="Voir ${title}${year}">

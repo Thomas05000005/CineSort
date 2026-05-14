@@ -48,13 +48,33 @@ async function renderViewSafe(viewId, renderFn) {
     _logError(`[error-boundary] view ${viewId}`, err);
     const el = document.getElementById(viewId);
     if (el) {
-      el.innerHTML = `
-        <div class="card" style="margin:24px;text-align:center">
-          <h2 style="color:var(--danger,#F87171)">Erreur de rendu</h2>
-          <p class="text-muted">La vue n'a pas pu s'afficher correctement.</p>
-          <pre style="text-align:left;background:var(--bg-overlay);padding:8px;border-radius:6px;overflow:auto;max-height:160px">${String(err && err.message ? err.message : err).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c])}</pre>
-          <button class="btn btn-primary" onclick="location.reload()">Recharger l'application</button>
-        </div>`;
+      // Cf issue #67 : construction DOM safe (createElement + textContent)
+      // au lieu d'innerHTML avec escape manuel — l'escape precedent couvrait
+      // <>& mais pas "/' (attribut HTML injection possible si err.message en contient).
+      el.replaceChildren();
+      const card = document.createElement("div");
+      card.className = "card";
+      card.style.cssText = "margin:24px;text-align:center";
+
+      const h2 = document.createElement("h2");
+      h2.style.color = "var(--danger,#F87171)";
+      h2.textContent = "Erreur de rendu";
+
+      const p = document.createElement("p");
+      p.className = "text-muted";
+      p.textContent = "La vue n'a pas pu s'afficher correctement.";
+
+      const pre = document.createElement("pre");
+      pre.style.cssText = "text-align:left;background:var(--bg-overlay);padding:8px;border-radius:6px;overflow:auto;max-height:160px";
+      pre.textContent = String(err && err.message ? err.message : err);
+
+      const btn = document.createElement("button");
+      btn.className = "btn btn-primary";
+      btn.textContent = "Recharger l'application";
+      btn.addEventListener("click", () => location.reload());
+
+      card.append(h2, p, pre, btn);
+      el.appendChild(card);
     }
     return null;
   }

@@ -18,10 +18,27 @@ import { hasToken, setToken } from "./core/state.js";
     if (_errorBannerShown) return;
     _errorBannerShown = true;
     try {
+      // Cf issue #67 : construction DOM safe (createElement + textContent)
+      // au lieu de innerHTML — empeche XSS via msg quand window.onerror
+      // recoit un Error.message contenant du HTML/JS arbitraire.
       const banner = document.createElement("div");
       banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:#DC2626;color:#fff;padding:8px 16px;z-index:99999;font-family:sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
-      banner.innerHTML = '<strong>Erreur JS :</strong> ' + String(msg || "Erreur inconnue").substring(0, 200) +
-        ' <button style="float:right;background:transparent;border:1px solid #fff;color:#fff;padding:2px 8px;border-radius:4px;cursor:pointer" onclick="this.parentElement.remove();window.__cinesortErrorBannerShown=false">Fermer</button>';
+
+      const label = document.createElement("strong");
+      label.textContent = "Erreur JS :";
+      banner.appendChild(label);
+      banner.appendChild(document.createTextNode(" " + String(msg || "Erreur inconnue").substring(0, 200) + " "));
+
+      const closeBtn = document.createElement("button");
+      closeBtn.style.cssText = "float:right;background:transparent;border:1px solid #fff;color:#fff;padding:2px 8px;border-radius:4px;cursor:pointer";
+      closeBtn.textContent = "Fermer";
+      closeBtn.addEventListener("click", () => {
+        banner.remove();
+        window.__cinesortErrorBannerShown = false;
+        _errorBannerShown = false;
+      });
+      banner.appendChild(closeBtn);
+
       document.body.appendChild(banner);
       window.__cinesortErrorBannerShown = true;
       setTimeout(() => { _errorBannerShown = false; }, 5000);
