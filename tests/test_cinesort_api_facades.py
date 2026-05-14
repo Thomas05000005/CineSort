@@ -1,4 +1,4 @@
-"""Tests des facades CineSortApi (issue #84 PR 1 pilote + PR 2 RunFacade + PR 3 SettingsFacade).
+"""Tests des facades CineSortApi (issue #84 — PRs 1 pilote + 2 Run + 3 Settings + 4 Quality).
 
 Cf docs/internal/REFACTOR_PLAN_84.md.
 
@@ -8,15 +8,9 @@ PR 1 verifie :
 - 1 methode pilote par facade fonctionne via la nouvelle voie
 - La symetrie ancienne/nouvelle voie est preservee (backward-compat)
 
-PR 2 ajoute :
-- Les 7 methodes du bounded context Run sont exposees sur RunFacade
-- Chaque methode delegue correctement vers CineSortApi
-- Backward-compat : les anciennes methodes directes fonctionnent toujours
-
-PR 3 ajoute :
-- Les 6 methodes du bounded context Settings sont exposees sur SettingsFacade
-- Chaque methode delegue correctement vers CineSortApi
-- Backward-compat : les anciennes methodes directes fonctionnent toujours
+PR 2 ajoute : les 7 methodes du bounded context Run sur RunFacade
+PR 3 ajoute : les 6 methodes du bounded context Settings sur SettingsFacade
+PR 4 ajoute : les 21 methodes du bounded context Quality sur QualityFacade
 """
 
 from __future__ import annotations
@@ -333,6 +327,286 @@ class SettingsFacadeBackwardCompatTests(unittest.TestCase):
         """Parite structurelle : memes cles via api.X et api.settings.X."""
         old = self.api.get_settings()
         new = self.api.settings.get_settings()
+        self.assertEqual(set(old.keys()), set(new.keys()))
+
+
+class QualityFacadeFullMigrationTests(unittest.TestCase):
+    """PR 4 : les 21 methodes du bounded context Quality sont exposees sur QualityFacade.
+
+    Strategie de test : verifier que toutes les methodes existent, sont callables,
+    et que chacune delegue correctement vers self._api.X(...) avec les memes args.
+
+    On regroupe les tests par sous-domaine (Profile / Report / Perceptual / Feedback).
+    """
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_quality_facade_exposes_21_methods(self) -> None:
+        """Sanity : les 21 methodes du bounded context Quality existent."""
+        expected = {
+            # Profile (8)
+            "get_quality_profile",
+            "save_quality_profile",
+            "reset_quality_profile",
+            "export_quality_profile",
+            "import_quality_profile",
+            "get_quality_presets",
+            "apply_quality_preset",
+            "simulate_quality_preset",
+            # Report & rules (5)
+            "get_quality_report",
+            "analyze_quality_batch",
+            "save_custom_quality_preset",
+            "get_custom_rules_templates",
+            "get_custom_rules_catalog",
+            # Validation (1)
+            "validate_custom_rules",
+            # Perceptual (4)
+            "get_perceptual_report",
+            "get_perceptual_details",
+            "analyze_perceptual_batch",
+            "compare_perceptual",
+            # Feedback / Calibration (3)
+            "submit_score_feedback",
+            "delete_score_feedback",
+            "get_calibration_report",
+        }
+        self.assertEqual(len(expected), 21)
+        for name in expected:
+            self.assertTrue(
+                hasattr(self.api.quality, name),
+                f"QualityFacade.{name} manquante",
+            )
+            self.assertTrue(
+                callable(getattr(self.api.quality, name)),
+                f"QualityFacade.{name} non callable",
+            )
+
+    # ----- Profile (8) -----
+
+    def test_get_quality_profile_delegates(self) -> None:
+        sentinel = {"version": 1, "weights": {}}
+        with patch.object(self.api, "get_quality_profile", return_value=sentinel) as mocked:
+            result = self.api.quality.get_quality_profile()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_save_quality_profile_delegates(self) -> None:
+        sentinel = {"ok": True}
+        profile = {"version": 1, "weights": {"video": 50}}
+        with patch.object(self.api, "save_quality_profile", return_value=sentinel) as mocked:
+            result = self.api.quality.save_quality_profile(profile)
+        mocked.assert_called_once_with(profile)
+        self.assertEqual(result, sentinel)
+
+    def test_reset_quality_profile_delegates(self) -> None:
+        sentinel = {"ok": True, "reset": True}
+        with patch.object(self.api, "reset_quality_profile", return_value=sentinel) as mocked:
+            result = self.api.quality.reset_quality_profile()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_export_quality_profile_delegates(self) -> None:
+        sentinel = {"ok": True, "profile_json": {}}
+        with patch.object(self.api, "export_quality_profile", return_value=sentinel) as mocked:
+            result = self.api.quality.export_quality_profile()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_import_quality_profile_delegates(self) -> None:
+        sentinel = {"ok": True}
+        profile = {"version": 1}
+        with patch.object(self.api, "import_quality_profile", return_value=sentinel) as mocked:
+            result = self.api.quality.import_quality_profile(profile)
+        mocked.assert_called_once_with(profile)
+        self.assertEqual(result, sentinel)
+
+    def test_get_quality_presets_delegates(self) -> None:
+        sentinel = {"ok": True, "presets": []}
+        with patch.object(self.api, "get_quality_presets", return_value=sentinel) as mocked:
+            result = self.api.quality.get_quality_presets()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_apply_quality_preset_delegates(self) -> None:
+        sentinel = {"ok": True, "applied": "equilibre"}
+        with patch.object(self.api, "apply_quality_preset", return_value=sentinel) as mocked:
+            result = self.api.quality.apply_quality_preset("equilibre")
+        mocked.assert_called_once_with("equilibre")
+        self.assertEqual(result, sentinel)
+
+    def test_simulate_quality_preset_delegates_with_defaults(self) -> None:
+        """Les 4 defaults (run_id, preset_id, overrides, scope) sont transmis correctement."""
+        sentinel = {"ok": True}
+        with patch.object(self.api, "simulate_quality_preset", return_value=sentinel) as mocked:
+            self.api.quality.simulate_quality_preset()
+        mocked.assert_called_once_with(run_id="latest", preset_id="equilibre", overrides=None, scope="run")
+
+    def test_simulate_quality_preset_delegates_with_overrides(self) -> None:
+        sentinel = {"ok": True, "summary": {}}
+        overrides = {"weights": {"video": 60}}
+        with patch.object(self.api, "simulate_quality_preset", return_value=sentinel) as mocked:
+            self.api.quality.simulate_quality_preset(
+                run_id="run_xyz", preset_id="strict", overrides=overrides, scope="film"
+            )
+        mocked.assert_called_once_with(run_id="run_xyz", preset_id="strict", overrides=overrides, scope="film")
+
+    # ----- Report & rules (5) -----
+
+    def test_get_quality_report_delegates(self) -> None:
+        sentinel = {"ok": True, "score": 85}
+        with patch.object(self.api, "get_quality_report", return_value=sentinel) as mocked:
+            result = self.api.quality.get_quality_report("run_xyz", "row_42", {"verbose": True})
+        mocked.assert_called_once_with("run_xyz", "row_42", {"verbose": True})
+        self.assertEqual(result, sentinel)
+
+    def test_get_quality_report_default_options(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_quality_report", return_value=sentinel) as mocked:
+            self.api.quality.get_quality_report("run_xyz", "row_42")
+        mocked.assert_called_once_with("run_xyz", "row_42", None)
+
+    def test_analyze_quality_batch_delegates(self) -> None:
+        sentinel = {"ok": True, "processed": 3}
+        with patch.object(self.api, "analyze_quality_batch", return_value=sentinel) as mocked:
+            result = self.api.quality.analyze_quality_batch("run_xyz", ["a", "b", "c"], None)
+        mocked.assert_called_once_with("run_xyz", ["a", "b", "c"], None)
+        self.assertEqual(result, sentinel)
+
+    def test_save_custom_quality_preset_delegates(self) -> None:
+        sentinel = {"ok": True}
+        profile = {"weights": {}}
+        with patch.object(self.api, "save_custom_quality_preset", return_value=sentinel) as mocked:
+            result = self.api.quality.save_custom_quality_preset("MyPreset", profile)
+        mocked.assert_called_once_with("MyPreset", profile)
+        self.assertEqual(result, sentinel)
+
+    def test_get_custom_rules_templates_delegates(self) -> None:
+        sentinel = {"ok": True, "templates": []}
+        with patch.object(self.api, "get_custom_rules_templates", return_value=sentinel) as mocked:
+            result = self.api.quality.get_custom_rules_templates()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_get_custom_rules_catalog_delegates(self) -> None:
+        sentinel = {"ok": True, "fields": []}
+        with patch.object(self.api, "get_custom_rules_catalog", return_value=sentinel) as mocked:
+            result = self.api.quality.get_custom_rules_catalog()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    # ----- Validation (1) -----
+
+    def test_validate_custom_rules_delegates(self) -> None:
+        sentinel = {"ok": True, "errors": [], "normalized": []}
+        rules = [{"field": "score", "operator": "gt", "value": 80}]
+        with patch.object(self.api, "validate_custom_rules", return_value=sentinel) as mocked:
+            result = self.api.quality.validate_custom_rules(rules)
+        mocked.assert_called_once_with(rules)
+        self.assertEqual(result, sentinel)
+
+    # ----- Perceptual (4) -----
+
+    def test_get_perceptual_report_delegates(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "get_perceptual_report", return_value=sentinel) as mocked:
+            result = self.api.quality.get_perceptual_report("run_xyz", "row_42", None)
+        mocked.assert_called_once_with("run_xyz", "row_42", None)
+        self.assertEqual(result, sentinel)
+
+    def test_get_perceptual_details_delegates(self) -> None:
+        sentinel = {"ok": True, "metrics": {}}
+        with patch.object(self.api, "get_perceptual_details", return_value=sentinel) as mocked:
+            result = self.api.quality.get_perceptual_details("run_xyz", "row_42")
+        mocked.assert_called_once_with("run_xyz", "row_42")
+        self.assertEqual(result, sentinel)
+
+    def test_analyze_perceptual_batch_delegates(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "analyze_perceptual_batch", return_value=sentinel) as mocked:
+            result = self.api.quality.analyze_perceptual_batch("run_xyz", ["a", "b"], None)
+        mocked.assert_called_once_with("run_xyz", ["a", "b"], None)
+        self.assertEqual(result, sentinel)
+
+    def test_compare_perceptual_delegates(self) -> None:
+        sentinel = {"ok": True, "similarity": 0.95}
+        with patch.object(self.api, "compare_perceptual", return_value=sentinel) as mocked:
+            result = self.api.quality.compare_perceptual("run_xyz", "row_a", "row_b", None)
+        mocked.assert_called_once_with("run_xyz", "row_a", "row_b", None)
+        self.assertEqual(result, sentinel)
+
+    # ----- Feedback / Calibration (3) -----
+
+    def test_submit_score_feedback_delegates(self) -> None:
+        sentinel = {"ok": True, "feedback_id": 1}
+        with patch.object(self.api, "submit_score_feedback", return_value=sentinel) as mocked:
+            result = self.api.quality.submit_score_feedback(
+                "run_xyz", "row_42", "Gold", category_focus="video", comment="nice"
+            )
+        mocked.assert_called_once_with("run_xyz", "row_42", "Gold", "video", "nice")
+        self.assertEqual(result, sentinel)
+
+    def test_submit_score_feedback_minimal_args(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "submit_score_feedback", return_value=sentinel) as mocked:
+            self.api.quality.submit_score_feedback("run_xyz", "row_42", "Gold")
+        mocked.assert_called_once_with("run_xyz", "row_42", "Gold", None, None)
+
+    def test_delete_score_feedback_delegates(self) -> None:
+        sentinel = {"ok": True, "deleted_count": 1}
+        with patch.object(self.api, "delete_score_feedback", return_value=sentinel) as mocked:
+            result = self.api.quality.delete_score_feedback(42)
+        mocked.assert_called_once_with(42)
+        self.assertEqual(result, sentinel)
+
+    def test_get_calibration_report_delegates(self) -> None:
+        sentinel = {"ok": True, "bias": {}}
+        with patch.object(self.api, "get_calibration_report", return_value=sentinel) as mocked:
+            result = self.api.quality.get_calibration_report()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+
+class QualityFacadeBackwardCompatTests(unittest.TestCase):
+    """Les 21 anciennes methodes Quality directes restent fonctionnelles."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_all_21_old_quality_methods_still_exist(self) -> None:
+        for name in (
+            "get_quality_profile",
+            "save_quality_profile",
+            "reset_quality_profile",
+            "export_quality_profile",
+            "import_quality_profile",
+            "get_quality_presets",
+            "apply_quality_preset",
+            "simulate_quality_preset",
+            "get_quality_report",
+            "analyze_quality_batch",
+            "save_custom_quality_preset",
+            "get_custom_rules_templates",
+            "get_custom_rules_catalog",
+            "validate_custom_rules",
+            "get_perceptual_report",
+            "get_perceptual_details",
+            "analyze_perceptual_batch",
+            "compare_perceptual",
+            "submit_score_feedback",
+            "delete_score_feedback",
+            "get_calibration_report",
+        ):
+            self.assertTrue(
+                hasattr(self.api, name),
+                f"CineSortApi.{name} a disparu (regression backward-compat)",
+            )
+
+    def test_get_quality_profile_via_old_and_new_returns_same_keys(self) -> None:
+        """Parite structurelle : memes cles via api.X et api.quality.X."""
+        old = self.api.get_quality_profile()
+        new = self.api.quality.get_quality_profile()
         self.assertEqual(set(old.keys()), set(new.keys()))
 
 
