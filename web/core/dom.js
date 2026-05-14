@@ -20,6 +20,25 @@ function escapeHtml(s) {
 }
 
 /**
+ * Cf issue #67/#93 : valide qu'une URL utilise un scheme autorise (http/https/data:image)
+ * avant injection dans un attribut src="" ou style="url(...)". Retourne chaine vide
+ * si invalide — le caller doit gerer le fallback (placeholder vide).
+ */
+function safeUrl(u) {
+  const s = String(u ?? "").trim();
+  if (!s) return "";
+  try {
+    const parsed = new URL(s, window.location.href);
+    const proto = parsed.protocol.toLowerCase();
+    if (proto === "http:" || proto === "https:") return escapeHtml(s);
+    if (proto === "data:" && s.toLowerCase().startsWith("data:image/")) return escapeHtml(s);
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Tag template litteral securise contre XSS : echappe toutes les interpolations
  * par defaut, sauf si la valeur est marquee via rawHtml(). Usage :
  *
