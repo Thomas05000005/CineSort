@@ -76,7 +76,9 @@ class InstanceLock:
             return False
 
         try:
-            self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+            # Cf CodeQL py/overly-permissive-file : 0o600 (owner read/write only)
+            # suffit largement pour un lock file (lu uniquement par le meme user).
+            self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o600)
         except (OSError, PermissionError) as exc:
             logger.warning("InstanceLock: impossible d'ouvrir %s (%s)", self.lock_path, exc)
             return False

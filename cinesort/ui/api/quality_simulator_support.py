@@ -139,7 +139,9 @@ def _cache_key(run_id: str, preset_id: str, overrides: Any, scope: str) -> str:
         sort_keys=True,
         default=str,
     )
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    # MD5 utilise comme cache key (non securite-sensible). usedforsecurity=False
+    # informe les linters (bandit B324, CodeQL py/weak-cryptographic-hash).
+    return hashlib.md5(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _invalidate_cache() -> None:
