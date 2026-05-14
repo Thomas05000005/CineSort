@@ -627,7 +627,7 @@ function _renderDangerZone() {
 function _bindDangerZoneEvents(container) {
   const sizeEl = container.querySelector("#userDataSizeInfo");
   if (sizeEl) {
-    apiPost("get_user_data_size").then((res) => {
+    apiPost("settings/get_user_data_size").then((res) => {
       const data = (res && res.data) || {};
       sizeEl.textContent = `Donnees actuelles : ${data.items || 0} fichiers (${data.size_mb || 0} MB)`;
     }).catch(() => {
@@ -640,7 +640,7 @@ function _bindDangerZoneEvents(container) {
 }
 
 async function _openResetDialog() {
-  const sizeRes = await apiPost("get_user_data_size");
+  const sizeRes = await apiPost("settings/get_user_data_size");
   const sizeData = (sizeRes && sizeRes.data) || {};
   const sizeMb = sizeData.size_mb || 0;
   const items = sizeData.items || 0;
@@ -656,7 +656,7 @@ async function _openResetDialog() {
 
   if (!window.confirm("DERNIERE CHANCE : continuer le reset ?\n(un backup sera cree avant la suppression)")) return;
 
-  const res = await apiPost("reset_all_user_data", { confirmation: "RESET" });
+  const res = await apiPost("settings/reset_all_user_data", { confirmation: "RESET" });
   if (res.ok) {
     const backupPath = (res.data && res.data.backup_path) || "";
     window.alert(`Reset termine.\n\nBackup cree : ${backupPath}\n\nL'application va se rafraichir.`);
@@ -770,7 +770,7 @@ function _findFieldByKey(key) {
 function _scheduleSave() {
   if (_state.saveTimer) clearTimeout(_state.saveTimer);
   _state.saveTimer = setTimeout(async () => {
-    const res = await apiPost("save_settings", { settings: _state.settings });
+    const res = await apiPost("settings/save_settings", { settings: _state.settings });
     if (res.ok) {
       _state.savedAt = new Date();
       _updateSavedStateLabel();
@@ -794,7 +794,7 @@ function _updateSavedStateLabel() {
 }
 
 async function _loadSettings() {
-  const res = await apiPost("get_settings");
+  const res = await apiPost("settings/get_settings");
   if (res.ok && res.data && typeof res.data === "object") {
     _state.settings = res.data;
   }

@@ -74,14 +74,14 @@ async function _fetchAll() {
   const calls = [
     apiGet("/api/health"),
     apiPost("get_global_stats", { limit_runs: 10 }, { signal: navSig }),
-    apiPost("get_settings", {}, { signal: navSig }),
+    apiPost("settings/get_settings", {}, { signal: navSig }),
     apiPost("get_probe_tools_status", {}, { signal: navSig }),
   ];
   // Si on sait qu'un run est actif (pre-tick), on ajoute get_status pour
   // avoir le vrai progres (idx/total/eta) sans attendre la fin.
   const wantStatus = _activeRunId;
   if (wantStatus) {
-    calls.push(apiPost("get_status", { run_id: wantStatus, last_log_index: 0 }, { signal: navSig }));
+    calls.push(apiPost("run/get_status", { run_id: wantStatus, last_log_index: 0 }, { signal: navSig }));
   }
   const results = await Promise.allSettled(calls);
   const _val = (r) => (r && r.status === "fulfilled" && r.value ? r.value.data || {} : {});
@@ -807,7 +807,7 @@ async function _pollIdleWithEventCheck() {
       // aux autres consommateurs (sidebar features, integrations, etc.).
       invalidateSettingsCache();
       try {
-        const sRes = await apiPost("get_settings");
+        const sRes = await apiPost("settings/get_settings");
         if (sRes.data) {
           const s = sRes.data;
           document.body.dataset.theme = s.theme || "luxe";
@@ -857,7 +857,7 @@ function _hookActions(settings) {
       btnCancel.disabled = true;
       btnCancel.textContent = "Annulation…";
       try {
-        const res = await apiPost("cancel_run", { run_id: _activeRunId });
+        const res = await apiPost("run/cancel_run", { run_id: _activeRunId });
         if (res?.data?.ok) {
           btnCancel.textContent = "Annule";
         } else {

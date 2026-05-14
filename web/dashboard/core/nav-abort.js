@@ -11,8 +11,8 @@
  *   import { getNavSignal } from "../core/nav-abort.js";
  *   const sig = getNavSignal();
  *   await Promise.allSettled([
- *     apiPost("get_plan", { run_id }, { signal: sig }),
- *     apiPost("get_settings", {}, { signal: sig }),
+ *     apiPost("run/get_plan", { run_id }, { signal: sig }),
+ *     apiPost("settings/get_settings", {}, { signal: sig }),
  *   ]);
  *
  * Le router appelle abortCurrent() avant chaque switch de route, ce qui

@@ -210,7 +210,7 @@ async function _onBulkAction(e) {
   }
   if (action === "reanalyze") {
     try {
-      await apiPost("analyze_quality_batch", { run_id: "latest", row_ids: ids, options: { reuse_existing: false } });
+      await apiPost("quality/analyze_quality_batch", { run_id: "latest", row_ids: ids, options: { reuse_existing: false } });
       if (window.toast) window.toast({ type: "success", text: `Re-analyse lancee pour ${ids.length} film(s).` });
     } catch (err) {
       if (window.toast) window.toast({ type: "error", text: "Re-analyse impossible." });
@@ -320,7 +320,7 @@ async function _prefetchPosters(rows) {
   if (_posterFetchPromise) return _posterFetchPromise;
   _posterFetchPromise = (async () => {
     try {
-      const res = await apiPost("get_tmdb_posters", { tmdb_ids: ids, size: "w342" });
+      const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: ids, size: "w342" });
       const posters = res && res.data && res.data.posters ? res.data.posters : {};
       for (const [id, url] of Object.entries(posters)) {
         _posterCache.set(Number(id), url);
@@ -605,7 +605,7 @@ async function _loadDashPerceptual(row) {
   if (!container) return;
   container.innerHTML = `<p class="text-muted">Analyse en cours...</p>`;
   try {
-    const r = await apiPost("get_perceptual_report", { run_id: row.run_id || "", row_id: row.row_id || "" });
+    const r = await apiPost("quality/get_perceptual_report", { run_id: row.run_id || "", row_id: row.row_id || "" });
     if (!r?.data?.ok) { container.innerHTML = `<p class="text-muted">Erreur : ${escapeHtml(r?.data?.message || "echec")}</p>`; return; }
     const p = r.data.perceptual || {};
     const cv = p.cross_verdicts || [];
@@ -762,7 +762,7 @@ async function _loadDashExplainScore(row) {
   if (!container) return;
   container.innerHTML = `<p class="text-muted">Chargement du score...</p>`;
   try {
-    const r = await apiPost("get_quality_report", { run_id: row.run_id || "", row_id: row.row_id || "" });
+    const r = await apiPost("quality/get_quality_report", { run_id: row.run_id || "", row_id: row.row_id || "" });
     const data = r?.data || {};
     if (!data.ok) {
       container.innerHTML = `<p class="text-muted">${escapeHtml(data.message || "Erreur")}</p>`;
@@ -789,7 +789,7 @@ function _hookDashFeedbackForm() {
     btn.disabled = true;
     if (result) result.textContent = "Enregistrement...";
     try {
-      const r = await apiPost("submit_score_feedback", {
+      const r = await apiPost("quality/submit_score_feedback", {
         run_id: runId, row_id: rowId, user_tier: userTier,
         category_focus: categoryFocus, comment
       });
@@ -828,7 +828,7 @@ async function _loadFilmHistory(row) {
   if (!container) return;
   container.innerHTML = skeletonLinesHtml(4);
   try {
-    const r = await apiPost("get_film_history", { film_id: _filmId(row) });
+    const r = await apiPost("library/get_film_history", { film_id: _filmId(row) });
     if (!r?.data?.ok || !(r.data.events || []).length) {
       container.innerHTML = `<p class="text-muted">Aucun historique disponible.</p>`;
       return;

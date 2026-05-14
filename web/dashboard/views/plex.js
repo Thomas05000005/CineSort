@@ -19,7 +19,7 @@ async function _load() {
   }
 
   try {
-    const sRes = await apiPost("get_settings");
+    const sRes = await apiPost("settings/get_settings");
     const s = sRes.data || {};
 
     if (!s.plex_enabled) {
@@ -29,7 +29,7 @@ async function _load() {
       return;
     }
 
-    const connRes = await apiPost("test_plex_connection", { url: s.plex_url || "", token: s.plex_token || "" });
+    const connRes = await apiPost("integrations/test_plex_connection", { url: s.plex_url || "", token: s.plex_token || "" });
     const conn = connRes.data || {};
     const ok = !!conn.ok;
 
@@ -51,7 +51,7 @@ async function _load() {
     el.innerHTML = html;
 
     $("btnPlexTest")?.addEventListener("click", async () => {
-      const r = await apiPost("test_plex_connection", { url: s.plex_url, token: s.plex_token });
+      const r = await apiPost("integrations/test_plex_connection", { url: s.plex_url, token: s.plex_token });
       alert(r.data?.ok ? `OK — ${r.data.server_name}` : (r.data?.error || "Echec"));
     });
 
@@ -60,7 +60,7 @@ async function _load() {
       if (!container) return;
       container.innerHTML = '<p class="text-muted">Chargement...</p>';
       let r;
-      try { r = await apiPost("get_plex_sync_report"); }
+      try { r = await apiPost("integrations/get_plex_sync_report"); }
       catch { container.innerHTML = '<p class="text-muted">Erreur reseau.</p>'; return; }
       const d = r.data || {};
       if (!d.ok && d.message) { container.innerHTML = `<p class="text-muted">${escapeHtml(d.message)}</p>`; return; }

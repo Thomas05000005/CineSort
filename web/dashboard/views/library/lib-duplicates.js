@@ -103,7 +103,7 @@ function _buildComparisonHtml(cmp) {
 
 async function _comparePerceptual(rowIdA, rowIdB) {
   try {
-    const res = await apiPost("compare_perceptual", {
+    const res = await apiPost("quality/compare_perceptual", {
       run_id: libState.runId,
       row_id_a: rowIdA,
       row_id_b: rowIdB,

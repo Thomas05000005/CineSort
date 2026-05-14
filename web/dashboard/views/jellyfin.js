@@ -22,7 +22,7 @@ async function _load() {
   }
 
   try {
-    const settingsRes = await apiPost("get_settings");
+    const settingsRes = await apiPost("settings/get_settings");
     const settings = settingsRes.data || {};
 
     // Guard : Jellyfin doit etre active
@@ -43,12 +43,12 @@ async function _load() {
     const navSig = getNavSignal();
     const labels = ["test_jellyfin_connection", "get_jellyfin_libraries"];
     const results = await Promise.allSettled([
-      apiPost("test_jellyfin_connection", {
+      apiPost("integrations/test_jellyfin_connection", {
         url: settings.jellyfin_url || "",
         api_key: settings.jellyfin_api_key || "",
         timeout_s: settings.jellyfin_timeout_s || 10,
       }, { signal: navSig }),
-      apiPost("get_jellyfin_libraries", {}, { signal: navSig }),
+      apiPost("integrations/get_jellyfin_libraries", {}, { signal: navSig }),
     ]);
     const _val = (r) => (r && r.status === "fulfilled" && r.value ? r.value.data || {} : {});
     const [conn, lib] = results.map(_val);
@@ -152,7 +152,7 @@ function _hookActions(settings) {
       btnTest.disabled = true;
       _showMsg("Test en cours...");
       try {
-        const res = await apiPost("test_jellyfin_connection", {
+        const res = await apiPost("integrations/test_jellyfin_connection", {
           url: settings.jellyfin_url || "",
           api_key: settings.jellyfin_api_key || "",
           timeout_s: settings.jellyfin_timeout_s || 10,
@@ -178,7 +178,7 @@ function _hookActions(settings) {
         // puis on re-render la vue pour afficher les nouvelles donnees.
         // Le refresh SCAN cote Jellyfin (reindexation) se fait en hook post-apply
         // et ne peut pas etre declenche cote dashboard sans un endpoint dedie.
-        const res = await apiPost("get_jellyfin_libraries");
+        const res = await apiPost("integrations/get_jellyfin_libraries");
         const d = res.data || {};
         if (d.ok) {
           const libs = Array.isArray(d.libraries) ? d.libraries : [];
@@ -210,7 +210,7 @@ function _hookSyncButton() {
     btn.disabled = true;
     _showMsg("Verification en cours...");
     try {
-      const r = await apiPost("get_jellyfin_sync_report", {});
+      const r = await apiPost("integrations/get_jellyfin_sync_report", {});
       if (!r?.data?.ok) {
         _showMsg(r?.data?.message || "Erreur", true);
         btn.disabled = false;

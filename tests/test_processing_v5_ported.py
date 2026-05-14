@@ -59,14 +59,17 @@ class ProcessingV5PortedTests(unittest.TestCase):
         self.assertIn('from "../dashboard/components/empty-state.js"', self.src)
 
     def test_apipost_calls_use_kwargs(self):
-        # apiPost utilise des kwargs (objet) — pas de positional args
-        self.assertIn('apiPost("get_status"', self.src)
-        self.assertIn('apiPost("start_plan"', self.src)
+        # apiPost utilise des kwargs (objet) — pas de positional args.
+        # Issue #84 PR 9 : les methodes appartenant aux 5 facades ont leur
+        # path prefixe (run/, settings/, ...). load_validation, save_validation,
+        # apply et get_dashboard restent en path direct (pas dans une facade).
+        self.assertIn('apiPost("run/get_status"', self.src)
+        self.assertIn('apiPost("run/start_plan"', self.src)
         self.assertIn('apiPost("load_validation"', self.src)
         self.assertIn('apiPost("save_validation"', self.src)
         self.assertIn('apiPost("apply"', self.src)
-        self.assertIn('apiPost("cancel_run"', self.src)
-        self.assertIn('apiPost("get_settings"', self.src)
+        self.assertIn('apiPost("run/cancel_run"', self.src)
+        self.assertIn('apiPost("settings/get_settings"', self.src)
         self.assertIn('apiPost("get_dashboard"', self.src)
 
 

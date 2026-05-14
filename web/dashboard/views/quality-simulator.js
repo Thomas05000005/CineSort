@@ -270,7 +270,7 @@ async function _runSimulation() {
   _setLoading(true);
   try {
     const scope = document.getElementById("qsimScope")?.value || "run";
-    const res = await apiPost("simulate_quality_preset", {
+    const res = await apiPost("quality/simulate_quality_preset", {
       run_id: simState.runId || "latest",
       preset_id: simState.selectedPreset,
       overrides: simState.overrides,
@@ -430,7 +430,7 @@ function _renderAdvancedStats(data) {
 async function _applyPreset() {
   if (!simState.selectedPreset) return;
   if (!window.confirm(`Appliquer le preset "${simState.selectedPreset}" ? Le profil qualité actif sera remplacé.`)) return;
-  const res = await apiPost("apply_quality_preset", { preset_id: simState.selectedPreset });
+  const res = await apiPost("quality/apply_quality_preset", { preset_id: simState.selectedPreset });
   if (res?.data?.ok) {
     closeModal();
     if (window.showToast) window.showToast({ type: "success", text: `Preset "${simState.selectedPreset}" appliqué.` });
@@ -443,7 +443,7 @@ async function _saveCustom() {
   if (!simState.lastResult) return;
   const name = window.prompt("Nom du preset custom :");
   if (!name || !name.trim()) return;
-  const base = await apiPost("get_quality_presets");
+  const base = await apiPost("quality/get_quality_presets");
   let profileJson = null;
   const presets = base?.data?.presets || [];
   const match = presets.find((p) => p.preset_id === simState.selectedPreset);
@@ -456,7 +456,7 @@ async function _saveCustom() {
     profileJson.weights = { ...(profileJson.weights || {}), ...(simState.overrides.weights || {}) };
     profileJson.tiers = { ...(profileJson.tiers || {}), ...(simState.overrides.tiers || {}) };
   }
-  const res = await apiPost("save_custom_quality_preset", { name: name.trim(), profile_json: profileJson });
+  const res = await apiPost("quality/save_custom_quality_preset", { name: name.trim(), profile_json: profileJson });
   if (res?.data?.ok && window.showToast) {
     window.showToast({ type: "success", text: `Preset "${name}" enregistré.` });
   }

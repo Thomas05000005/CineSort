@@ -197,7 +197,7 @@ function _hookExportBtns() {
       _showMsg("runsExportMsg", `Export ${fmt} en cours...`);
 
       try {
-        const res = await apiPost("export_run_report", { run_id: runId, fmt });
+        const res = await apiPost("run/export_run_report", { run_id: runId, fmt });
         const d = res.data || {};
 
         if (!d.ok) {

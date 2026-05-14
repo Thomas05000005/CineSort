@@ -124,7 +124,7 @@ async function _qualityFetchAll() {
   const labels = ["get_global_stats", "get_scoring_rollup"];
   const results = await Promise.allSettled([
     _call("get_global_stats"),
-    _call("get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null }),
+    _call("library/get_scoring_rollup", { by: _qState.rollupBy, limit: 20, run_id: null }),
   ]);
   const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
   const [stats, rollup] = results.map(_val);
@@ -208,7 +208,7 @@ function _qualityRender() {
     btn.addEventListener("click", async () => {
       _qState.rollupBy = btn.dataset.rollupBy;
       try {
-        _qState.rollupData = await _call("get_scoring_rollup", {
+        _qState.rollupData = await _call("library/get_scoring_rollup", {
           by: _qState.rollupBy,
           limit: 20,
           run_id: null,
@@ -294,7 +294,7 @@ const INTEGRATIONS = [
     enabledKey: "jellyfin_enabled",
     urlKey: "jellyfin_url",
     apiKeyKey: "jellyfin_api_key",
-    testMethod: "test_jellyfin_connection",
+    testMethod: "integrations/test_jellyfin_connection",
   },
   {
     id: "plex",
@@ -303,7 +303,7 @@ const INTEGRATIONS = [
     enabledKey: "plex_enabled",
     urlKey: "plex_url",
     apiKeyKey: "plex_token",
-    testMethod: "test_plex_connection",
+    testMethod: "integrations/test_plex_connection",
   },
   {
     id: "radarr",
@@ -312,7 +312,7 @@ const INTEGRATIONS = [
     enabledKey: "radarr_enabled",
     urlKey: "radarr_url",
     apiKeyKey: "radarr_api_key",
-    testMethod: "test_radarr_connection",
+    testMethod: "integrations/test_radarr_connection",
   },
   {
     id: "tmdb",
@@ -330,7 +330,7 @@ export async function initIntegrations(container, _opts = {}) {
   _iState.containerRef = container;
   container.innerHTML = `<div class="v5-qij-loading">Chargement Integrations...</div>`;
   try {
-    _iState.settings = await _call("get_settings");
+    _iState.settings = await _call("settings/get_settings");
   } catch (e) {
     console.error("[integrations-v5] settings:", e);
   }
@@ -481,7 +481,7 @@ function _journalRender() {
       btn.disabled = true;
       btn.textContent = "Export...";
       try {
-        const result = await _call("export_run_report", { run_id: runId, fmt });
+        const result = await _call("run/export_run_report", { run_id: runId, fmt });
         btn.textContent = result?.ok ? "OK" : "Erreur";
       } catch (_e) {
         btn.textContent = "Erreur";

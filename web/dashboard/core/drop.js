@@ -56,7 +56,7 @@ async function _processDrop(e) {
   }
   const resolved = result.data.path || path;
   // Charger settings courants, ajouter le root, sauver
-  const sr = await apiPost("get_settings");
+  const sr = await apiPost("settings/get_settings");
   const s = sr?.data || {};
   const roots = Array.isArray(s.roots) ? s.roots.slice() : (s.root ? [s.root] : []);
   if (roots.some(r => String(r).toLowerCase() === resolved.toLowerCase())) {
@@ -65,7 +65,7 @@ async function _processDrop(e) {
   }
   roots.push(resolved);
   const newSettings = { ...s, roots, root: roots[0] };
-  const save = await apiPost("save_settings", { settings: newSettings });
+  const save = await apiPost("settings/save_settings", { settings: newSettings });
   if (save?.data?.ok) {
     alert(`Dossier ajouté : ${resolved}`);
     // Recharger la vue courante

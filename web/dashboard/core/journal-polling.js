@@ -74,7 +74,7 @@ class JournalLivePoller {
       // si le backend pend (la prochaine intervalle se declenchera sans avoir
       // attendu le retour, donc fetchs zombie cumulent → memory leak).
       const res = await apiPost(
-        "get_status",
+        "run/get_status",
         { run_id: this.runId, last_log_index: this.lastLogIndex },
         { timeoutMs: 5000 },
       );

@@ -689,7 +689,7 @@ async function startPlan() {
 
   // V5bis-01 : `apiPost` au lieu du bridge pywebview direct.
   // Le backend signature `start_plan(self, settings)` -> kwargs `{ settings }`.
-  const res = await apiPost("start_plan", { settings });
+  const res = await apiPost("run/start_plan", { settings });
   if (!res.ok) {
     const errMsg = res.error || res.data?.message || "Erreur de démarrage.";
     setStatusMessage("planMsg", "Erreur : " + errMsg, { error: true });
@@ -776,7 +776,7 @@ async function pollStatus() {
   state.pollInFlight = true;
   try {
     // V5bis-01 : signature backend `get_status(self, run_id, last_log_index=0)`.
-    const res = await apiPost("get_status", { run_id: state.runId, last_log_index: state.logIndex });
+    const res = await apiPost("run/get_status", { run_id: state.runId, last_log_index: state.logIndex });
     if (!res.ok) {
       setStatusMessage("planMsg", "Impossible de recuperer l'etat.", { error: true });
       return;

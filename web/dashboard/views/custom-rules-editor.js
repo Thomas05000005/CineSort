@@ -239,7 +239,7 @@ function _setMsg(text, level) {
 async function _loadTemplates() {
   if (state.templates) return state.templates;
   try {
-    const res = await apiPost("get_custom_rules_templates");
+    const res = await apiPost("quality/get_custom_rules_templates");
     state.templates = (res && res.templates) || [];
   } catch { state.templates = []; }
   return state.templates;
@@ -283,13 +283,13 @@ function _importJson(file) {
 
 async function _saveRules() {
   const rules = _gatherAll();
-  const v = await apiPost("validate_custom_rules", { rules });
+  const v = await apiPost("quality/validate_custom_rules", { rules });
   if (!v || !v.ok) { _setMsg("Règles invalides : " + ((v && v.errors) || []).join(" ; "), "error"); return; }
-  const profRes = await apiPost("get_quality_profile");
+  const profRes = await apiPost("quality/get_quality_profile");
   if (!profRes || !profRes.ok) { _setMsg("Profil qualité introuvable.", "error"); return; }
   const profile = profRes.profile_json || {};
   profile.custom_rules = v.normalized || rules;
-  const save = await apiPost("save_quality_profile", { profile_json: profile });
+  const save = await apiPost("quality/save_quality_profile", { profile_json: profile });
   if (!save || !save.ok) { _setMsg("Sauvegarde impossible.", "error"); return; }
   _setMsg(`${rules.length} règles enregistrées.`, "success");
 }
@@ -386,7 +386,7 @@ function _hook() {
 export async function openCustomRulesEditor() {
   state.rules = [];
   try {
-    const profRes = await apiPost("get_quality_profile");
+    const profRes = await apiPost("quality/get_quality_profile");
     const profile = (profRes && profRes.profile_json) || {};
     state.rules = (profile.custom_rules || []).map(r => _normalizeRule({ ...r, id: r.id || _genId() }));
   } catch {

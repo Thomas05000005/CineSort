@@ -485,10 +485,10 @@ async function _applyTheme(theme) {
   document.body.setAttribute("data-theme", theme);
   try {
     // V2-B : cachedGetSettings beneficie du cache warm si le boot vient juste
-    // de finir. apiPost("save_settings") invalide le cache automatiquement.
+    // de finir. apiPost("settings/save_settings") invalide le cache automatiquement.
     const cur = await cachedGetSettings();
     const merged = { ...((cur && cur.data) || {}), theme };
-    await apiPost("save_settings", { settings: merged });
+    await apiPost("settings/save_settings", { settings: merged });
   } catch { /* silencieux : le visuel est deja applique */ }
 }
 

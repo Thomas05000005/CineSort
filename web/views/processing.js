@@ -413,8 +413,8 @@ async function _startScan() {
   // Promise.allSettled pour resilience — un endpoint en echec ne bloque
   // pas le scan si on peut s'en passer (settings est obligatoire, status optionnel).
   const results = await Promise.allSettled([
-    apiPost("get_settings", {}),
-    apiPost("get_status", { run_id: _state.currentRunId || "", last_log_index: 0 }),
+    apiPost("settings/get_settings", {}),
+    apiPost("run/get_status", { run_id: _state.currentRunId || "", last_log_index: 0 }),
   ]);
   const settingsRes = results[0];
   if (settingsRes.status !== "fulfilled" || !settingsRes.value?.ok) {
@@ -422,7 +422,7 @@ async function _startScan() {
     return;
   }
   try {
-    const res = await apiPost("start_plan", { settings: settingsRes.value.data });
+    const res = await apiPost("run/start_plan", { settings: settingsRes.value.data });
     if (res.ok && res.data?.run_id) {
       _state.currentRunId = res.data.run_id;
       _pollStatus();
@@ -435,7 +435,7 @@ async function _startScan() {
 async function _cancelRun() {
   if (!_state.currentRunId) return;
   try {
-    await apiPost("cancel_run", { run_id: _state.currentRunId });
+    await apiPost("run/cancel_run", { run_id: _state.currentRunId });
   } catch (e) {
     console.error("[processing] cancel:", e);
   }
@@ -447,7 +447,7 @@ function _pollStatus() {
 
   const tick = async () => {
     try {
-      const res = await apiPost("get_status", { run_id: _state.currentRunId, last_log_index: 0 });
+      const res = await apiPost("run/get_status", { run_id: _state.currentRunId, last_log_index: 0 });
       _state.status = res.data;
       if (_state.activeStep === "scan") _renderActiveStep();
       if (_state.status && _state.status.status !== "running") {
