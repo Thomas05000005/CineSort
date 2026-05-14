@@ -176,9 +176,23 @@ def clamp_year(value: int) -> int:
 
 
 def normalize_user_path(value: Any, default: Path) -> Path:
+    """Normalise un chemin user-fourni (expanduser + expandvars).
+
+    Cf issue #73 (audit-2026-05-12:a4b6) : si la requete vient d'un client REST
+    distant, on n'expand PAS les variables d'environnement (%USERPROFILE%,
+    %TEMP%, %APPDATA%) qui exposeraient le filesystem du serveur. expanduser
+    reste actif (~ → home directory) car non-amplifiant. Pour le caller local
+    (desktop natif), comportement inchange.
+    """
+    from cinesort.infra.log_context import is_remote_request
+
     raw = str(value or "").strip().strip('"').strip("'")
     if not raw:
         return Path(default)
+    if is_remote_request():
+        # Pas d'expandvars cote REST distant — empeche path manipulation
+        # via env vars du serveur.
+        return Path(os.path.expanduser(raw))
     expanded = os.path.expandvars(os.path.expanduser(raw))
     return Path(expanded)
 

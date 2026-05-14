@@ -21,7 +21,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from cinesort.infra.log_context import clear_request_id, set_request_id
+from cinesort.infra.log_context import (
+    clear_request_id,
+    reset_remote_request,
+    set_remote_request,
+    set_request_id,
+)
+
+# Cf issues #72 + #73 : IPs considerees locales (loopback IPv4 + IPv6). Toute
+# autre IP declenche le flag remote_request via ContextVar pour que les handlers
+# sensibles (open_logs_folder, normalize_user_path) puissent reagir.
+_LOCAL_CLIENT_IPS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 import contextlib
 
 logger = logging.getLogger(__name__)
@@ -679,9 +689,12 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # V3-04 polish v7.7.0 (R4-LOG-2) : positionner request_id dans
         # ContextVar pour enrichir tous les logs emis pendant cette requete.
         token = set_request_id(self._new_request_id())
+        # Cf issues #72 + #73 : flag is_remote_request si l'IP n'est pas locale.
+        remote_token = set_remote_request(self._client_ip() not in _LOCAL_CLIENT_IPS)
         try:
             self._handle_get()
         finally:
+            reset_remote_request(remote_token)
             clear_request_id()
             del token  # explicit (le clear suffit, mais lisible)
 
@@ -755,9 +768,12 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         # V3-04 polish v7.7.0 (R4-LOG-2) : meme principe que do_GET.
         token = set_request_id(self._new_request_id())
+        # Cf issues #72 + #73 : flag is_remote_request si l'IP n'est pas locale.
+        remote_token = set_remote_request(self._client_ip() not in _LOCAL_CLIENT_IPS)
         try:
             self._handle_post()
         finally:
+            reset_remote_request(remote_token)
             clear_request_id()
             del token
 

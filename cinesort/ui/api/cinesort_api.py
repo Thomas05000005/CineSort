@@ -2169,14 +2169,19 @@ class CineSortApi:
     def open_logs_folder(self) -> Dict[str, Any]:
         """V3-13 — Ouvre le dossier des logs dans l'explorateur Windows.
 
-        V2-09 (4 mai 2026, polish v7.7.0, finding H18) : EXPOSEE via REST pour
-        que le bouton "Ouvrir les logs" du dashboard distant fonctionne. Notez
-        que `os.startfile(...)` ouvre l'explorateur sur la MACHINE SERVEUR (la
-        ou tourne CineSort), pas sur le client distant — comportement attendu
-        en supervision LAN normale (l'utilisateur supervise sa propre instance).
-        En LAN partage, la combinaison auth Bearer + token >= 32 chars +
-        rate-limiter atterissent le risque a un acteur deja authentifie.
+        Cf issue #72 (audit-2026-05-12:e3f5) : si la requete vient d'un client
+        REST distant (LAN), on refuse l'ouverture pour eviter le DoS UX (un
+        attaquant authentifie pouvait spammer cet endpoint et ouvrir des
+        fenetres Explorer en chaine sur le PC server). Operation autorisee
+        uniquement depuis le caller local (desktop natif ou 127.0.0.1).
         """
+        from cinesort.infra.log_context import is_remote_request
+
+        if is_remote_request():
+            return {
+                "ok": False,
+                "error": "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
+            }
         log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CineSort", "logs")
         if not os.path.isdir(log_dir):
             return {"ok": False, "error": "Dossier logs introuvable", "log_dir": log_dir}
