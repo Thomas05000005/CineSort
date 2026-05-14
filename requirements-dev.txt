@@ -9,3 +9,6 @@ pre-commit>=4.0,<5
 # CVSS 6.8, GHSA-6w46-j5rx-g56g). API pytest 8->9 retro-compatible pour
 # notre usage (decouverte + execution + coverage, pas de plugin custom).
 pytest>=9.0.3,<10
+# Cf issue #87 : property-based testing pour les modules domain purs
+# (naming, conversions, fuzzy_matching, etc.). MIT, pure Python, ~2 MB.
+hypothesis>=6.0,<7
