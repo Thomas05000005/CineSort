@@ -14,7 +14,6 @@ Le mode --apply modifie effectivement les fichiers et affiche un resume.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
