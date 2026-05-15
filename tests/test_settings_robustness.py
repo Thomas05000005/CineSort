@@ -171,6 +171,7 @@ class SettingsRobustnessTests(unittest.TestCase):
             t.join(timeout=5)
 
             self.assertEqual(errors, [], f"Erreurs save pendant run : {errors}")
+
     # 40
     def test_secrets_masked_in_get_settings(self) -> None:
         """H2 : secrets externes (plex, radarr, email) sont masques.
