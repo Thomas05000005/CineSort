@@ -106,6 +106,20 @@ function _hookEvents() {
   $("libDiagnosticDetails")?.addEventListener("toggle", (e) => {
     if (e.target.open) _loadDiagnostic();
   });
+
+  // Cf #92 quick win #3 : Ctrl+Z = undo geste universel. Le shortcut
+  // dispatch par core/keyboard.js declenche l'undo preview (jamais d'undo
+  // direct sans preview, pour eviter une destruction accidentelle).
+  // L'AbortController est associe a la duree de vie du DOM de la vue :
+  // quand la vue est demontee, le listener est detache automatiquement.
+  if (libState.runId && !libState._undoShortcutBound) {
+    libState._undoShortcutBound = true;
+    window.addEventListener("cinesort:undo-shortcut", () => {
+      // Verifier que la vue Apply est toujours active (sinon ignorer).
+      if (!libState.runId || !$("libBtnUndoPreview")) return;
+      _onUndoPreview();
+    });
+  }
 }
 
 /* --- Apply ---------------------------------------------------- */
