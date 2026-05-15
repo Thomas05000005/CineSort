@@ -16,6 +16,60 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## OPERATION TERMINEE — Logging structure API (#103) ✅ (15 mai 2026)
+
+Issue #103 (audit-2026-05-13:logoff) **`return {"ok": False, ...}` sans logging** mergee en 7 PRs (#150 -> #156). 198 / 198 sites migres vers le helper `_err_response()` dans tout `cinesort/ui/api/`.
+
+### Helper API standard
+
+Toutes les reponses d'erreur API passent desormais par `cinesort/ui/api/_responses.py:err()` :
+
+```python
+from cinesort.ui.api._responses import err as _err_response
+
+return _err_response(
+    "Message FR montre a l'utilisateur",
+    category="state",     # validation | state | resource | permission | config | runtime
+    level="info",         # debug | info | warning | error
+    log_module=__name__,  # logger contextuel
+    key="message",        # defaut. Param `key="error"` pour endpoints historiques
+    run_id=run_id,        # extra fields (**kwargs)
+)
+```
+
+Chaque appel log automatiquement `api err [<category>]: <message>` au bon niveau, ce qui resout le probleme initial de **diagnostic impossible** des bugs utilisateur ("le bouton XYZ marche pas").
+
+### Categories conventionnelles
+
+| Category | Quand l'utiliser |
+|---|---|
+| `validation` | input vide / manquant / mauvais type |
+| `state` | pre-condition metier echouee (feature off, aucun run, plan pas pret) |
+| `resource` | ressource introuvable / network error (TMDb, Jellyfin, Plex) |
+| `permission` | operation refusee (local-only, lock detenu) |
+| `config` | configuration invalide (key/url/path manquant) |
+| `runtime` | exception runtime (DB locked, FS error) |
+
+### 7 PRs mergees (#150 -> #156)
+
+| PR | Module(s) | Sites |
+|---|---|---|
+| #150 | run_flow_support | 18 |
+| #151 | apply_support | 18 |
+| #152 | perceptual_support + probe_support | 27 |
+| #153 | history + quality + library + dashboard | 34 |
+| #154 | 7 modules misc (export, film, tmdb, ...) | 25 |
+| #155 | cinesort_api.py | 63 |
+| #156 | err() param `key` + 13 sites "error" key | 13 |
+| **Total** | | **198** |
+
+### Tests
+
+- `tests/test_responses_helper.py` : 10 tests sur le helper (categories, levels, **extra, custom key)
+- 4020+ tests existants : 0 regression sur les 7 PRs
+
+---
+
 ## OPERATION TERMINEE — Refactor god class CineSortApi + Quick UX (15 mai 2026) ✅
 
 Issue #84 (ARCH-P1) **god class CineSortApi** mergee en 10 PRs Strangler Fig (pattern Adapter + Facade pattern). Surface publique reduite de 104 -> 50 methodes (-52%). 5 facades par bounded context. PR fixes UX bonus (#143) + Issue #83 etape 1 (#144, #145).
