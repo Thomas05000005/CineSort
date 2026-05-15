@@ -93,7 +93,9 @@ class QualityFacade(_BaseFacade):
 
         Cf CineSortApi.simulate_quality_preset pour la doc complete.
         """
-        return self._api._simulate_quality_preset_impl(run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope)
+        return self._api._simulate_quality_preset_impl(
+            run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope
+        )
 
     # ---------- Report & rules (5) ----------
 

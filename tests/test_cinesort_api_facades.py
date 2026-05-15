@@ -186,6 +186,7 @@ class RunFacadeFullMigrationTests(unittest.TestCase):
         mocked.assert_called_once_with("run_xyz")
         self.assertEqual(result, sentinel)
 
+
 class SettingsFacadeFullMigrationTests(unittest.TestCase):
     """PR 3 : les 6 methodes du bounded context Settings sont exposees sur SettingsFacade.
 
@@ -266,6 +267,7 @@ class SettingsFacadeFullMigrationTests(unittest.TestCase):
             result = self.api.settings.get_user_data_size()
         mocked.assert_called_once_with()
         self.assertEqual(result, sentinel)
+
 
 class QualityFacadeFullMigrationTests(unittest.TestCase):
     """PR 4 : les 21 methodes du bounded context Quality sont exposees sur QualityFacade.
@@ -504,6 +506,7 @@ class QualityFacadeFullMigrationTests(unittest.TestCase):
         mocked.assert_called_once_with()
         self.assertEqual(result, sentinel)
 
+
 class IntegrationsFacadeFullMigrationTests(unittest.TestCase):
     """PR 5 : les 11 methodes du bounded context Integrations sont exposees."""
 
@@ -645,6 +648,7 @@ class IntegrationsFacadeFullMigrationTests(unittest.TestCase):
         mocked.assert_called_once_with(123)
         self.assertEqual(result, sentinel)
 
+
 class LibraryFacadeFullMigrationTests(unittest.TestCase):
     """PR 6 : les 9 methodes du bounded context Library sont exposees."""
 
@@ -782,6 +786,7 @@ class LibraryFacadeFullMigrationTests(unittest.TestCase):
             result = self.api.library.export_full_library()
         mocked.assert_called_once_with()
         self.assertEqual(result, sentinel)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

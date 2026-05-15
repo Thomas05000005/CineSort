@@ -701,7 +701,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_save_settings_without_root_reuses_saved_root(self) -> None:
         api = backend.CineSortApi()
-        initial = api.settings.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        initial = api.settings.save_settings(
+            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
         self.assertTrue(initial.get("ok"), initial)
 
         result = api.settings.save_settings({"state_dir": str(self.state_dir), "tmdb_enabled": True})
@@ -1038,7 +1040,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_start_plan_without_root_uses_saved_root(self) -> None:
         self._create_file(self.root / "Saved.Root.2014.1080p" / "Saved.Root.2014.1080p.mkv")
         api = backend.CineSortApi()
-        saved = api.settings.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        saved = api.settings.save_settings(
+            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
         self.assertTrue(saved.get("ok"), saved)
 
         start = api.run.start_plan(
@@ -1060,7 +1064,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         other_state.mkdir(parents=True, exist_ok=True)
         target_state.mkdir(parents=True, exist_ok=True)
         self.assertTrue(
-            api.settings.save_settings({"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}).get("ok")
+            api.settings.save_settings(
+                {"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}
+            ).get("ok")
         )
         api._state_dir = other_state  # type: ignore[attr-defined]
 
@@ -1075,7 +1081,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         other_state.mkdir(parents=True, exist_ok=True)
         target_state.mkdir(parents=True, exist_ok=True)
         self.assertTrue(
-            api.settings.save_settings({"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}).get("ok")
+            api.settings.save_settings(
+                {"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}
+            ).get("ok")
         )
         api._state_dir = other_state  # type: ignore[attr-defined]
 

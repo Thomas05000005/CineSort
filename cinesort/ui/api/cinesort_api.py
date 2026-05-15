@@ -1031,7 +1031,9 @@ class CineSortApi:
         )
 
     # ---------- Jellyfin ----------
-    def _test_jellyfin_connection_impl(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _test_jellyfin_connection_impl(
+        self, url: str = "", api_key: str = "", timeout_s: float = 10.0
+    ) -> Dict[str, Any]:
         """Teste la connexion au serveur Jellyfin."""
         return settings_support.test_jellyfin_connection(url, api_key, timeout_s)
 
@@ -1587,7 +1589,9 @@ class CineSortApi:
         """Importe un profil de scoring depuis JSON (valide, persiste, active)."""
         return quality_profile_support.import_quality_profile(self, profile_json)
 
-    def _get_quality_report_impl(self, run_id: str, row_id: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _get_quality_report_impl(
+        self, run_id: str, row_id: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Retourne le rapport de scoring qualite d'un film (score, tier, reasons, metrics)."""
         return quality_report_support.get_quality_report(self, run_id, row_id, options)
 

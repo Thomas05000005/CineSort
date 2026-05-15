@@ -210,9 +210,7 @@ class RestServerHttpTests(unittest.TestCase):
     def test_legacy_path_returns_404_after_pr10(self) -> None:
         """PR 10 du #84 : la voie legacy /api/get_settings est supprimee."""
         s_legacy, _ = self._request("POST", "/api/get_settings", body={}, token=self.token)
-        s_facade, d_facade = self._request(
-            "POST", "/api/settings/get_settings", body={}, token=self.token
-        )
+        s_facade, d_facade = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
         self.assertEqual(s_legacy, 404)
         self.assertEqual(s_facade, 200)
         self.assertIn("root", d_facade)

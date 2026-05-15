@@ -133,9 +133,7 @@ def _build_pattern_for_method(method: str) -> re.Pattern[str]:
     # Pattern : (root).method(
     # On utilise non-capture pour roots_alt, puis on rebuild le replacement
     # via la chaine matchee complete.
-    pattern = re.compile(
-        rf"(?P<root>(?:{roots_alt}))\.{re.escape(method)}\("
-    )
+    pattern = re.compile(rf"(?P<root>(?:{roots_alt}))\.{re.escape(method)}\(")
     return pattern
 
 
