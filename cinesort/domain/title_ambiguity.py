@@ -183,17 +183,7 @@ def disambiguate_by_context(
         note_extra = "disambig: " + ",".join(reasons)
         existing_note = str(getattr(c, "note", "") or "")
         new_note = f"{existing_note}, {note_extra}" if existing_note else note_extra
-        try:
-            # Candidate est un dataclass frozen → replace pour créer une copie.
-            promoted = replace(c, score=new_score, note=new_note)
-        except (TypeError, ValueError):
-            # Fallback : mutation directe si replace échoue
-            try:
-                c.score = new_score  # type: ignore[attr-defined]
-                c.note = new_note  # type: ignore[attr-defined]
-                promoted = c
-            except (AttributeError, TypeError):
-                promoted = c
+        promoted = replace(c, score=new_score, note=new_note)
         out.append(promoted)
 
     return out, True, ambiguous_title
