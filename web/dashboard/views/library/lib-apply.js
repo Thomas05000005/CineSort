@@ -205,6 +205,11 @@ async function _onUndoExec() {
     const res = await apiPost("undo_last_apply", { run_id: libState.runId, dry_run: dryRun });
     const d = res.data || {};
     _showMsg("libUndoMsg", d.ok ? `${dryRun ? "[TEST] " : ""}Annulation réussie.` : (d.message || "Échec."), !d.ok);
+    // Cf #92 quick win #2 : refresh sidebar badges (counters faux apres undo
+    // reel = perte confiance). On ne dispatch que pour les undo non-dry-run.
+    if (d.ok && !dryRun) {
+      window.dispatchEvent(new CustomEvent("cinesort:undo"));
+    }
   } catch { _showMsg("libUndoMsg", "Erreur réseau.", true); }
   finally { if (btn) btn.disabled = false; }
 }

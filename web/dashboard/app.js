@@ -254,6 +254,17 @@ document.addEventListener("v5:notif-count", (ev) => {
   }
 });
 
+// Cf #92 quick win #2 : refresh immediat des badges sidebar apres un undo.
+// Sans ca, les compteurs restent stales jusqu'au tick 30s de l'interval,
+// donnant l'impression que l'undo n'a pas fonctionne (perte de confiance).
+window.addEventListener("cinesort:undo", () => {
+  // Best-effort : si la fonction n'est pas encore declaree (avant boot
+  // complet), l'event est juste ignore.
+  if (typeof _loadSidebarCounters === "function") {
+    _loadSidebarCounters().catch(() => { /* silencieux */ });
+  }
+});
+
 /* === Sync sidebar/breadcrumb au changement de route ====== */
 
 const ROUTE_BREADCRUMBS = {
