@@ -44,6 +44,7 @@ from cinesort.ui.api import (
     tmdb_support,
 )
 from cinesort.domain.conversions import to_bool as _to_bool
+from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import (
     build_cfg_from_run_row as _build_cfg_from_run_row,
     build_cfg_from_settings as _build_cfg_from_settings_payload,
@@ -757,11 +758,13 @@ class CineSortApi:
 
         normalized = str(locale or "").strip().lower()
         if normalized not in _I18N_SUPPORTED:
-            return {
-                "ok": False,
-                "message": _i18n_t("errors.invalid_locale", locale=locale),
-                "locale": _i18n_get_locale(),
-            }
+            return _err_response(
+                _i18n_t("errors.invalid_locale", locale=locale),
+                category="validation",
+                level="info",
+                log_module=__name__,
+                locale=_i18n_get_locale(),
+            )
         # 1) Activation immediate cote backend
         _i18n_set_locale(normalized)
         # 2) Persistance dans settings.json (passe par save_settings_payload pour
@@ -835,7 +838,7 @@ class CineSortApi:
 
         server = self._rest_server
         if server is None or not getattr(server, "is_running", False):
-            return {"ok": False, "message": "Serveur REST non demarre."}
+            return _err_response("Serveur REST non demarre.", category="state", level="info", log_module=__name__)
         ip = get_local_ip()
         port = getattr(server, "_port", 8642)
         is_https = getattr(server, "_is_https", False)
@@ -871,7 +874,7 @@ class CineSortApi:
             svg_str = buf.getvalue().decode("utf-8")
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             _log.warning("api: echec generation QR — %s", exc)
-            return {"ok": False, "message": f"Erreur generation QR: {exc}"}
+            return _err_response(f"Erreur generation QR: {exc}", category="runtime", level="error", log_module=__name__)
 
         _log.info("api: QR code genere pour %s", url)
         return {"ok": True, "svg": svg_str, "url": url}
@@ -888,11 +891,13 @@ class CineSortApi:
         settings = self._get_settings_impl()
         repo = str(settings.get("update_github_repo") or "").strip()
         if not repo:
-            return {
-                "ok": False,
-                "message": "Aucun depot GitHub configure (update_github_repo).",
-                "data": _updater.info_to_dict(None, self._app_version),
-            }
+            return _err_response(
+                "Aucun depot GitHub configure (update_github_repo).",
+                category="config",
+                level="info",
+                log_module=__name__,
+                data=_updater.info_to_dict(None, self._app_version),
+            )
         cache_path = _updater.default_cache_path(self._state_dir)
         info = _updater.force_check(self._app_version, repo, cache_path=cache_path)
         try:
@@ -927,10 +932,12 @@ class CineSortApi:
 
         settings = self._get_settings_impl()
         if not settings.get("rest_api_enabled"):
-            return {"ok": False, "message": "API REST desactivee dans les reglages."}
+            return _err_response(
+                "API REST desactivee dans les reglages.", category="runtime", level="warning", log_module=__name__
+            )
         token = str(settings.get("rest_api_token") or "").strip()
         if not token:
-            return {"ok": False, "message": "Aucun token configure."}
+            return _err_response("Aucun token configure.", category="state", level="info", log_module=__name__)
 
         from cinesort.infra.rest_server import RestApiServer
 
@@ -980,10 +987,12 @@ class CineSortApi:
             store, _runner = self._get_or_create_infra(self._state_dir)
         except Exception as exc:
             _log.exception("api: reset_incremental_cache echec init store")
-            return {
-                "ok": False,
-                "message": f"Store indisponible : {type(exc).__name__}: {exc}",
-            }
+            return _err_response(
+                f"Store indisponible : {type(exc).__name__}: {exc}",
+                category="state",
+                level="error",
+                log_module=__name__,
+            )
 
         try:
             counts = store.clear_all_incremental_caches()
@@ -993,10 +1002,12 @@ class CineSortApi:
             # clair plutot que de laisser pywebview transformer l'exception en
             # fallback JS generique "Purge du cache impossible".
             _log.exception("api: reset_incremental_cache echec purge")
-            return {
-                "ok": False,
-                "message": f"Purge echouee : {type(exc).__name__}: {exc}",
-            }
+            return _err_response(
+                f"Purge echouee : {type(exc).__name__}: {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
 
         n_folder = int(counts.get("folder_cache", 0))
         n_row = int(counts.get("row_cache", 0))
@@ -1063,7 +1074,7 @@ class CineSortApi:
         user_id = str(data.get("jellyfin_user_id") or "").strip()
         timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
         if not url or not api_key:
-            return {"ok": False, "message": "Jellyfin non configuré."}
+            return _err_response("Jellyfin non configuré.", category="state", level="info", log_module=__name__)
 
         from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
 
@@ -1072,13 +1083,18 @@ class CineSortApi:
             if not user_id:
                 info = client.validate_connection()
                 if not info.get("ok"):
-                    return {"ok": False, "message": info.get("error", "Connexion échouée.")}
+                    return _err_response(
+                        info.get("error", "Connexion échouée."),
+                        category="runtime",
+                        level="warning",
+                        log_module=__name__,
+                    )
                 user_id = info.get("user_id", "")
             libraries = client.get_libraries(user_id)
             movies_count = client.get_movies_count(user_id)
             return {"ok": True, "libraries": libraries, "movies_count": movies_count}
         except JellyfinError as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     # ---------- Email ----------
     def test_email_report(self) -> Dict[str, Any]:
@@ -1087,7 +1103,12 @@ class CineSortApi:
 
         settings = self._get_settings_impl()
         if not settings.get("email_smtp_host") or not settings.get("email_to"):
-            return {"ok": False, "message": "Configurez d'abord le serveur SMTP et le destinataire."}
+            return _err_response(
+                "Configurez d'abord le serveur SMTP et le destinataire.",
+                category="validation",
+                level="info",
+                log_module=__name__,
+            )
         mock_data = {
             "run_id": "test",
             "ts": time.time(),
@@ -1101,12 +1122,14 @@ class CineSortApi:
         """Compare la bibliotheque locale avec Jellyfin. Retourne le rapport de coherence."""
         settings = self._get_settings_impl()
         if not settings.get("jellyfin_enabled"):
-            return {"ok": False, "message": "Jellyfin non configure."}
+            return _err_response("Jellyfin non configure.", category="state", level="info", log_module=__name__)
         jf_url = str(settings.get("jellyfin_url") or "").strip()
         jf_key = str(settings.get("jellyfin_api_key") or "").strip()
         jf_user_id = str(settings.get("jellyfin_user_id") or "").strip()
         if not jf_url or not jf_key:
-            return {"ok": False, "message": "URL ou cle API Jellyfin manquante."}
+            return _err_response(
+                "URL ou cle API Jellyfin manquante.", category="validation", level="info", log_module=__name__
+            )
 
         # Charger les PlanRows du dernier run
         state_dir = Path(self._state_dir)
@@ -1122,14 +1145,14 @@ class CineSortApi:
                     target_run_id = str(r.get("run_id") or "")
                     break
         if not target_run_id:
-            return {"ok": False, "message": "Aucun run termine disponible."}
+            return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
         if not local_rows:
-            return {"ok": False, "message": "Aucun film dans ce run."}
+            return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         # Appeler Jellyfin
         from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
@@ -1143,7 +1166,9 @@ class CineSortApi:
             # BUG 2 : utiliser le scan multi-library pour eviter les tronques
             jellyfin_movies = client.get_all_movies_from_all_libraries(jf_user_id)
         except JellyfinError as exc:
-            return {"ok": False, "message": f"Connexion Jellyfin echouee : {exc}"}
+            return _err_response(
+                f"Connexion Jellyfin echouee : {exc}", category="resource", level="error", log_module=__name__
+            )
 
         from cinesort.app.jellyfin_validation import build_sync_report
 
@@ -1155,10 +1180,15 @@ class CineSortApi:
         """Importe une watchlist CSV et compare avec la bibliotheque locale."""
         src = str(source or "").strip().lower()
         if src not in ("letterboxd", "imdb"):
-            return {"ok": False, "message": "Source inconnue. Utilisez 'letterboxd' ou 'imdb'."}
+            return _err_response(
+                "Source inconnue. Utilisez 'letterboxd' ou 'imdb'.",
+                category="runtime",
+                level="warning",
+                log_module=__name__,
+            )
         content = str(csv_content or "")
         if not content.strip():
-            return {"ok": False, "message": "Contenu CSV vide."}
+            return _err_response("Contenu CSV vide.", category="state", level="info", log_module=__name__)
 
         from cinesort.app.watchlist import parse_letterboxd_csv, parse_imdb_csv, compare_watchlist
 
@@ -1167,7 +1197,7 @@ class CineSortApi:
         else:
             films = parse_imdb_csv(content)
         if not films:
-            return {"ok": False, "message": "Aucun film trouve dans le CSV."}
+            return _err_response("Aucun film trouve dans le CSV.", category="state", level="info", log_module=__name__)
 
         # Charger les PlanRows du dernier run
         state_dir = Path(self._state_dir)
@@ -1182,7 +1212,7 @@ class CineSortApi:
                 target_run_id = str(r.get("run_id") or "")
                 break
         if not target_run_id:
-            return {"ok": False, "message": "Aucun run termine disponible."}
+            return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
@@ -1200,7 +1230,7 @@ class CineSortApi:
         purl = (url or "").strip()
         ptok = self._unmask_or_stored("plex_token", token)
         if not purl or not ptok:
-            return {"ok": False, "message": "URL et token requis."}
+            return _err_response("URL et token requis.", category="validation", level="info", log_module=__name__)
         client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
@@ -1215,24 +1245,26 @@ class CineSortApi:
             purl = purl or str(settings.get("plex_url") or "").strip()
             ptok = ptok or str(settings.get("plex_token") or "").strip()
         if not purl or not ptok:
-            return {"ok": False, "message": "URL et token Plex requis."}
+            return _err_response("URL et token Plex requis.", category="validation", level="info", log_module=__name__)
         try:
             client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
             libs = client.get_libraries("movie")
             return {"ok": True, "libraries": libs}
         except PlexError as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Plex."""
         settings = self._get_settings_impl()
         if not settings.get("plex_enabled"):
-            return {"ok": False, "message": "Plex non configure."}
+            return _err_response("Plex non configure.", category="state", level="info", log_module=__name__)
         purl = str(settings.get("plex_url") or "").strip()
         ptok = str(settings.get("plex_token") or "").strip()
         plib = str(settings.get("plex_library_id") or "").strip()
         if not purl or not ptok or not plib:
-            return {"ok": False, "message": "URL, token ou library Plex manquant."}
+            return _err_response(
+                "URL, token ou library Plex manquant.", category="validation", level="info", log_module=__name__
+            )
 
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
@@ -1247,14 +1279,14 @@ class CineSortApi:
                     target_run_id = str(r.get("run_id") or "")
                     break
         if not target_run_id:
-            return {"ok": False, "message": "Aucun run termine disponible."}
+            return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
         if not local_rows:
-            return {"ok": False, "message": "Aucun film dans ce run."}
+            return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         from cinesort.infra.plex_client import PlexClient, PlexError
 
@@ -1263,7 +1295,9 @@ class CineSortApi:
             client = PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except PlexError as exc:
-            return {"ok": False, "message": f"Connexion Plex echouee : {exc}"}
+            return _err_response(
+                f"Connexion Plex echouee : {exc}", category="resource", level="error", log_module=__name__
+            )
 
         from cinesort.app.jellyfin_validation import build_sync_report
 
@@ -1278,7 +1312,7 @@ class CineSortApi:
         rurl = (url or "").strip()
         rkey = self._unmask_or_stored("radarr_api_key", api_key)
         if not rurl or not rkey:
-            return {"ok": False, "message": "URL et cle API requis."}
+            return _err_response("URL et cle API requis.", category="validation", level="info", log_module=__name__)
         client = RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
@@ -1286,11 +1320,13 @@ class CineSortApi:
         """Rapport Radarr : matching, upgrade candidates."""
         settings = self._get_settings_impl()
         if not settings.get("radarr_enabled"):
-            return {"ok": False, "message": "Radarr non configure."}
+            return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
         rkey = str(settings.get("radarr_api_key") or "").strip()
         if not rurl or not rkey:
-            return {"ok": False, "message": "URL ou cle API Radarr manquante."}
+            return _err_response(
+                "URL ou cle API Radarr manquante.", category="validation", level="info", log_module=__name__
+            )
 
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
@@ -1305,7 +1341,7 @@ class CineSortApi:
                     target_run_id = str(r.get("run_id") or "")
                     break
         if not target_run_id:
-            return {"ok": False, "message": "Aucun run termine disponible."}
+            return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
@@ -1320,7 +1356,9 @@ class CineSortApi:
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
         except RadarrError as exc:
-            return {"ok": False, "message": f"Connexion Radarr echouee : {exc}"}
+            return _err_response(
+                f"Connexion Radarr echouee : {exc}", category="resource", level="error", log_module=__name__
+            )
 
         # Collecter les quality reports pour les upgrade candidates
         qr_map: Dict[str, Dict[str, Any]] = {}
@@ -1341,12 +1379,12 @@ class CineSortApi:
         """Demande a Radarr de chercher une meilleure version d'un film."""
         settings = self._get_settings_impl()
         if not settings.get("radarr_enabled"):
-            return {"ok": False, "message": "Radarr non configure."}
+            return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
         rkey = str(settings.get("radarr_api_key") or "").strip()
         mid = int(radarr_movie_id or 0)
         if mid <= 0:
-            return {"ok": False, "message": "radarr_movie_id invalide."}
+            return _err_response("radarr_movie_id invalide.", category="validation", level="info", log_module=__name__)
         from cinesort.infra.radarr_client import RadarrClient, RadarrError
 
         try:
@@ -1355,7 +1393,7 @@ class CineSortApi:
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
         except RadarrError as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     def get_naming_presets(self) -> Dict[str, Any]:
         """Retourne la liste des presets de renommage disponibles."""
@@ -1385,7 +1423,13 @@ class CineSortApi:
         tpl = str(template or "{title} ({year})").strip()
         ok, errors = validate_template(tpl)
         if not ok:
-            return {"ok": False, "errors": errors, "message": "Template invalide."}
+            return _err_response(
+                "Template invalide.",
+                category="validation",
+                level="info",
+                log_module=__name__,
+                errors=errors,
+            )
 
         # Essayer de charger un vrai film depuis la BDD
         context = None
@@ -1423,14 +1467,19 @@ class CineSortApi:
         """
         raw = str(path or "").strip()
         if not raw:
-            return {"ok": False, "message": "Chemin vide."}
+            return _err_response("Chemin vide.", category="state", level="info", log_module=__name__)
 
         # M-7 : reject UNC namespaces speciaux Windows (\\?\, \\.\)
         # Ces prefixes contournent la normalisation Win32 et permettent
         # d'acceder a des paths > 260 chars ou des devices systeme.
         norm = raw.replace("/", "\\")
         if norm.startswith("\\\\?\\") or norm.startswith("\\\\.\\"):
-            return {"ok": False, "message": "Chemin UNC special non autorise (\\\\?\\ ou \\\\.\\)."}
+            return _err_response(
+                "Chemin UNC special non autorise (\\\\?\\ ou \\\\.\\).",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
 
         p = Path(raw)
 
@@ -1439,29 +1488,43 @@ class CineSortApi:
 
         exists = safe_path_exists(p, timeout_s=5.0)
         if exists is None:
-            return {"ok": False, "message": "Chemin inaccessible (NAS debranche ou timeout)."}
+            return _err_response(
+                "Chemin inaccessible (NAS debranche ou timeout).",
+                category="runtime",
+                level="warning",
+                log_module=__name__,
+            )
         if not exists:
-            return {"ok": False, "message": f"Chemin introuvable : {p}"}
+            return _err_response(f"Chemin introuvable : {p}", category="state", level="info", log_module=__name__)
 
         # M-7 : refuser les symlinks (peuvent pointer ailleurs apres validation)
         try:
             if p.is_symlink():
-                return {
-                    "ok": False,
-                    "message": "Les liens symboliques ne sont pas autorises (resolvez la cible directement).",
-                }
+                return _err_response(
+                    "Les liens symboliques ne sont pas autorises (resolvez la cible directement).",
+                    category="permission",
+                    level="info",
+                    log_module=__name__,
+                )
         except (OSError, PermissionError):
-            return {"ok": False, "message": "Impossible de lire l'attribut symlink du chemin."}
+            return _err_response(
+                "Impossible de lire l'attribut symlink du chemin.",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
 
         if not p.is_dir():
-            return {"ok": False, "message": "Ce n'est pas un dossier."}
+            return _err_response("Ce n'est pas un dossier.", category="state", level="info", log_module=__name__)
 
         # Resolution finale + verification que le resultat n'est pas un symlink
         # remontant ailleurs (defense en profondeur)
         try:
             resolved = p.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
-            return {"ok": False, "message": f"Impossible de resoudre le chemin : {exc}"}
+            return _err_response(
+                f"Impossible de resoudre le chemin : {exc}", category="runtime", level="error", log_module=__name__
+            )
 
         return {"ok": True, "path": str(resolved)}
 
@@ -1781,14 +1844,14 @@ class CineSortApi:
     def export_run_nfo(self, run_id: str, overwrite: bool = False, dry_run: bool = True) -> Dict[str, Any]:
         """Génère des fichiers .nfo (Kodi/Jellyfin) pour chaque film du run."""
         if not self._is_valid_run_id(run_id):
-            return {"ok": False, "message": "run_id invalide."}
+            return _err_response("run_id invalide.", category="validation", level="info", log_module=__name__)
         built, _paths = dashboard_support.build_run_report_payload(self, run_id)
         if not built.get("ok"):
             return built
         report = built.get("report") if isinstance(built.get("report"), dict) else {}
         rows = report.get("rows") or []
         if not rows:
-            return {"ok": False, "message": "Aucune ligne dans le run."}
+            return _err_response("Aucune ligne dans le run.", category="state", level="info", log_module=__name__)
 
         from cinesort.app.export_support import export_nfo_for_run
 
@@ -1981,14 +2044,16 @@ class CineSortApi:
         ok, profile, msg = parse_and_validate_import(content or "")
         meta = extract_import_metadata(content or "")
         if not ok:
-            return {"ok": False, "message": msg, "meta": meta}
+            return _err_response(msg, category="validation", level="info", log_module=__name__, meta=meta)
 
         try:
             store, _runner = self._get_or_create_infra(self._state_dir)
         except (OSError, TypeError, ValueError) as exc:
-            return {"ok": False, "message": f"Store indisponible : {exc}", "meta": meta}
+            return _err_response(
+                f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__, meta=meta
+            )
         if not store:
-            return {"ok": False, "message": "Store indisponible.", "meta": meta}
+            return _err_response("Store indisponible.", category="state", level="info", log_module=__name__, meta=meta)
 
         # save_quality_profile requiert profile_id + version. On les déduit
         # du profile importé, avec fallback sur l'app_version si absents.
@@ -2016,7 +2081,9 @@ class CineSortApi:
             )
         except (OSError, TypeError, ValueError, AttributeError) as exc:
             self.log_api_exception("import_quality_profile", exc)
-            return {"ok": False, "message": f"Sauvegarde échouée : {exc}", "meta": meta}
+            return _err_response(
+                f"Sauvegarde échouée : {exc}", category="runtime", level="error", log_module=__name__, meta=meta
+            )
         return {
             "ok": True,
             "meta": meta,
@@ -2041,13 +2108,15 @@ class CineSortApi:
         from cinesort.domain.calibration import compute_tier_delta
 
         if not self._is_valid_run_id(run_id):
-            return {"ok": False, "message": "run_id invalide."}
+            return _err_response("run_id invalide.", category="validation", level="info", log_module=__name__)
         if not row_id or not user_tier:
-            return {"ok": False, "message": "row_id et user_tier sont requis."}
+            return _err_response(
+                "row_id et user_tier sont requis.", category="validation", level="info", log_module=__name__
+            )
 
         found = self._find_run_row(run_id)
         if not found:
-            return {"ok": False, "message": "Run introuvable."}
+            return _err_response("Run introuvable.", category="state", level="info", log_module=__name__)
         _row, store = found
 
         try:
@@ -2055,7 +2124,9 @@ class CineSortApi:
         except (KeyError, TypeError, ValueError, OSError):
             qr = None
         if not qr:
-            return {"ok": False, "message": "Rapport qualité introuvable pour ce film."}
+            return _err_response(
+                "Rapport qualité introuvable pour ce film.", category="state", level="info", log_module=__name__
+            )
 
         computed_score = int(qr.get("score") or 0)
         computed_tier = str(qr.get("tier") or "")
@@ -2074,7 +2145,9 @@ class CineSortApi:
             )
         except (OSError, TypeError, ValueError) as exc:
             self.log_api_exception("submit_score_feedback", exc, run_id=run_id)
-            return {"ok": False, "message": "Impossible d'enregistrer le feedback."}
+            return _err_response(
+                "Impossible d'enregistrer le feedback.", category="runtime", level="error", log_module=__name__
+            )
         return {
             "ok": True,
             "feedback_id": fb_id,
@@ -2092,14 +2165,14 @@ class CineSortApi:
         try:
             store, _runner = self._get_or_create_infra(self._state_dir)
         except (OSError, TypeError, ValueError) as exc:
-            return {"ok": False, "message": f"Store indisponible : {exc}"}
+            return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if not store:
-            return {"ok": False, "message": "Store indisponible."}
+            return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
             count = store.delete_user_quality_feedback(feedback_id=int(feedback_id))
         except (OSError, TypeError, ValueError, AttributeError) as exc:
             self.log_api_exception("delete_score_feedback", exc)
-            return {"ok": False, "message": "Suppression échouée."}
+            return _err_response("Suppression échouée.", category="runtime", level="error", log_module=__name__)
         return {"ok": True, "deleted_count": int(count)}
 
     def _get_calibration_report_impl(self) -> Dict[str, Any]:
@@ -2114,14 +2187,14 @@ class CineSortApi:
         try:
             store, _runner = self._get_or_create_infra(self._state_dir)
         except (OSError, TypeError, ValueError) as exc:
-            return {"ok": False, "message": f"Store indisponible : {exc}"}
+            return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if store is None:
-            return {"ok": False, "message": "Store indisponible."}
+            return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
             feedbacks = store.list_user_quality_feedback(limit=10_000)
         except (OSError, TypeError, ValueError) as exc:
             self.log_api_exception("get_calibration_report", exc)
-            return {"ok": False, "message": "Lecture feedbacks échouée."}
+            return _err_response("Lecture feedbacks échouée.", category="runtime", level="error", log_module=__name__)
 
         bias = analyze_feedback_bias(feedbacks)
         # Profil actif pour calculer la suggestion
