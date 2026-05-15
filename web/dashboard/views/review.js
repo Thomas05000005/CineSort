@@ -497,6 +497,8 @@ function _hookBulkActions() {
             const forced = await apiPost("undo_last_apply", { run_id: _runId, dry_run: false, atomic: false });
             if (forced.data?.ok) {
               alert("Annulation forcee terminee.");
+              // Cf #92 quick win #2 : refresh sidebar badges (counters faux apres undo = perte confiance)
+              window.dispatchEvent(new CustomEvent("cinesort:undo"));
               await _load();
             } else {
               alert(forced.data?.message || "Erreur lors de l'annulation forcee.");
@@ -504,6 +506,8 @@ function _hookBulkActions() {
           }
         } else if (data.ok) {
           alert("Annulation reussie !");
+          // Cf #92 quick win #2 : refresh sidebar badges (counters faux apres undo = perte confiance)
+          window.dispatchEvent(new CustomEvent("cinesort:undo"));
           await _load();
         } else {
           alert(data.message || "Erreur lors de l'annulation.");
