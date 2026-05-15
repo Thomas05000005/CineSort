@@ -20,6 +20,9 @@ Usage :
 from __future__ import annotations
 
 import socket
+import time
+from pathlib import Path
+from typing import Any
 
 
 def find_free_port() -> int:
@@ -35,3 +38,39 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
+
+
+def create_file(path: Path, size: int = 2048) -> None:
+    """Cree un fichier video minimal de taille `size` bytes.
+
+    Remplace les 8+ definitions duplicatees de `_create_file` dans les
+    fichiers de test (issue #86). Cree les parents manquants automatiquement.
+
+    Defaut size=2048 bytes (> MIN_VIDEO_BYTES dans la plupart des configs).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+
+
+def wait_run_done(api: Any, run_id: str, timeout_s: float = 10.0) -> dict:
+    """Poll `api.run.get_status(run_id)` jusqu'a etat terminal (done=True).
+
+    Remplace les 10+ definitions duplicatees de `_wait_done` /
+    `_wait_terminal` dans les fichiers de test (issue #86).
+
+    - Retourne le dernier status (dict avec done=True)
+    - Raise AssertionError si timeout (compatible avec unittest self.fail
+      qui wrappe AssertionError)
+    - Poll 30 ms (compromis entre charge CPU et reactivite)
+
+    Si le caller ignore le return (pattern `self._wait_done(api, run_id)`
+    sans assignation), c'est OK — la valeur est retournee mais ignoree.
+    """
+    deadline = time.monotonic() + float(timeout_s)
+    last: dict = {}
+    while time.monotonic() < deadline:
+        last = api.run.get_status(run_id, 0) or {}
+        if last.get("done"):
+            return last
+        time.sleep(0.03)
+    raise AssertionError(f"Timeout {timeout_s}s en attendant run_id={run_id}. Dernier status={last}")

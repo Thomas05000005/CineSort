@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -18,6 +17,7 @@ from pathlib import Path
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.apply_support import preverify_undo_operations
+from tests._helpers import wait_run_done as _wait_done
 
 
 class PreverifyUndoOperationsPureTests(unittest.TestCase):
@@ -131,15 +131,6 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return
-            time.sleep(0.05)
-        self.fail(f"Timeout waiting run completion run_id={run_id}")
-
     def test_atomic_undo_refuses_when_destination_file_replaced(self):
         # 1. Créer un film à la racine
         folder = self.root / "Inception.2010.1080p"
@@ -157,7 +148,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
 
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])

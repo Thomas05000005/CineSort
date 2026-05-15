@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import wait_run_done as _wait_done
 
 
 class BuildApplyPreviewTests(unittest.TestCase):
@@ -32,15 +32,6 @@ class BuildApplyPreviewTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return
-            time.sleep(0.05)
-        self.fail(f"Timeout run_id={run_id}")
-
     def _make_plan(self, n_films: int = 2) -> tuple[CineSortApi, str, list]:
         for i in range(n_films):
             folder = self.root / f"Film.{2010 + i}.1080p"
@@ -57,7 +48,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"))
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
         plan = api.run.get_plan(run_id)
         return api, run_id, plan.get("rows", [])
 

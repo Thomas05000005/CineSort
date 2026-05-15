@@ -15,6 +15,8 @@ import cinesort.ui.api.cinesort_api as backend
 import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
 from cinesort.ui.api import cinesort_api as api_mod
+from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_terminal
 
 
 class ApiBridgeLot3Tests(unittest.TestCase):
@@ -33,27 +35,13 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _create_file(self, path: Path, size: int = 2048) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x" * size)
-
     def _read_saved_settings_json(self) -> dict:
         path = self.state_dir / "settings.json"
         self.assertTrue(path.exists(), path)
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def _wait_terminal(self, api: backend.CineSortApi, run_id: str, timeout_s: float = 8.0):
-        deadline = time.monotonic() + timeout_s
-        last = {}
-        while time.monotonic() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return last
-            time.sleep(0.03)
-        self.fail(f"Timeout waiting terminal status for run_id={run_id}, last={last}")
-
     def test_start_plan_payload_is_strict_v6_shape(self) -> None:
-        self._create_file(self.root / "Inception.2010.1080p" / "Inception.2010.1080p.mkv")
+        _create_file(self.root / "Inception.2010.1080p" / "Inception.2010.1080p.mkv")
 
         api = backend.CineSortApi()
         start = api.run.start_plan(
@@ -69,7 +57,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIsInstance(start["run_id"], str)
         self.assertTrue(start["run_id"])
         self.assertIsInstance(start["run_dir"], str)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_defaults_are_generic(self) -> None:
         api = backend.CineSortApi()
@@ -93,7 +81,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertEqual(str(settings.get("ffprobe_path") or ""), "")
 
     def test_start_plan_initializes_missing_db_schema(self) -> None:
-        self._create_file(self.root / "Schema.Test.2011.1080p" / "Schema.Test.2011.1080p.mkv")
+        _create_file(self.root / "Schema.Test.2011.1080p" / "Schema.Test.2011.1080p.mkv")
 
         db_path = self.state_dir / "db" / "cinesort.sqlite"
         if db_path.exists():
@@ -109,7 +97,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         self.assertTrue(db_path.exists(), str(db_path))
         with closing(sqlite3.connect(str(db_path))) as conn:
@@ -129,7 +117,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             self.assertGreaterEqual(int(user_version), 21)
 
     def test_start_plan_recovers_from_db_without_runs_table(self) -> None:
-        self._create_file(self.root / "Schema.Repair.2012.1080p" / "Schema.Repair.2012.1080p.mkv")
+        _create_file(self.root / "Schema.Repair.2012.1080p" / "Schema.Repair.2012.1080p.mkv")
         db_dir = self.state_dir / "db"
         db_dir.mkdir(parents=True, exist_ok=True)
         db_path = db_dir / "cinesort.sqlite"
@@ -147,7 +135,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         with closing(sqlite3.connect(str(db_path))) as conn:
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -166,7 +154,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             self.assertGreaterEqual(int(user_version), 21)
 
     def test_start_plan_creates_ui_log_txt(self) -> None:
-        self._create_file(self.root / "Heat.1995.1080p" / "Heat.1995.1080p.mkv")
+        _create_file(self.root / "Heat.1995.1080p" / "Heat.1995.1080p.mkv")
 
         api = backend.CineSortApi()
         start = api.run.start_plan(
@@ -187,10 +175,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         self.assertTrue(ui_log.exists(), f"ui_log.txt missing in {run_dir}")
         self.assertGreater(ui_log.stat().st_size, 0)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_get_status_keeps_v6_fields_and_adds_status_cancel_requested(self) -> None:
-        self._create_file(self.root / "Avatar.2009.1080p" / "Avatar.2009.1080p.mkv")
+        _create_file(self.root / "Avatar.2009.1080p" / "Avatar.2009.1080p.mkv")
 
         api = backend.CineSortApi()
         start = api.run.start_plan(
@@ -221,7 +209,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(expected_v6.issubset(set(status.keys())))
         self.assertIn("status", status)
         self.assertIn("cancel_requested", status)
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
     def test_cancel_run_idempotent(self) -> None:
         original_plan_library = plan_support.plan_library
@@ -249,7 +237,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
             first = api.run.cancel_run(run_id)
             self.assertTrue(first["ok"], first)
-            terminal = self._wait_terminal(api, run_id)
+            terminal = _wait_terminal(api, run_id)
             self.assertEqual(terminal.get("status"), "CANCELLED")
 
             second = api.run.cancel_run(run_id)
@@ -258,7 +246,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             plan_support.plan_library = original_plan_library
 
     def test_start_plan_handles_internal_exception_without_raising(self) -> None:
-        self._create_file(self.root / "ErrorCase.2000.1080p" / "ErrorCase.2000.1080p.mkv")
+        _create_file(self.root / "ErrorCase.2000.1080p" / "ErrorCase.2000.1080p.mkv")
         api = backend.CineSortApi()
 
         original = api._get_or_create_infra  # type: ignore[attr-defined]
@@ -283,7 +271,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIn("boom infra", str(start.get("message", "")))
 
     def test_apply_fallback_uses_plan_jsonl_and_validation_when_memory_missing(self) -> None:
-        self._create_file(self.root / "Interstellar.2014.1080p" / "Interstellar.2014.1080p.mkv")
+        _create_file(self.root / "Interstellar.2014.1080p" / "Interstellar.2014.1080p.mkv")
 
         api = backend.CineSortApi()
         start = api.run.start_plan(
@@ -295,7 +283,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        status = self._wait_terminal(api, run_id)
+        status = _wait_terminal(api, run_id)
         self.assertFalse(bool(status.get("error")), status)
 
         plan = api.run.get_plan(run_id)
@@ -321,7 +309,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIn("result", applied)
 
     def test_apply_rejects_second_concurrent_call_for_same_run(self) -> None:
-        self._create_file(self.root / "Concurrent.2016.1080p" / "Concurrent.2016.1080p.mkv")
+        _create_file(self.root / "Concurrent.2016.1080p" / "Concurrent.2016.1080p.mkv")
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -332,7 +320,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
         plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
@@ -383,7 +371,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             release.set()
 
     def test_apply_stops_if_duplicate_check_fails(self) -> None:
-        self._create_file(self.root / "DupFail.2017.1080p" / "DupFail.2017.1080p.mkv")
+        _create_file(self.root / "DupFail.2017.1080p" / "DupFail.2017.1080p.mkv")
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -394,7 +382,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
@@ -517,7 +505,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(callable(api.settings.get_settings))
 
     def test_runstate_logs_are_capped_in_memory(self) -> None:
-        self._create_file(self.root / "Cap.Logs.2001.1080p" / "Cap.Logs.2001.1080p.mkv")
+        _create_file(self.root / "Cap.Logs.2001.1080p" / "Cap.Logs.2001.1080p.mkv")
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -528,7 +516,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
         rs = api._get_run(run_id)  # type: ignore[attr-defined]
         self.assertIsNotNone(rs)
@@ -809,7 +797,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertFalse(bool(saved.get("cleanup_residual_include_texts")))
 
     def test_get_cleanup_residual_preview_reports_disabled_state(self) -> None:
-        self._create_file(self.root / "Movie.Disabled.2020" / "Movie.Disabled.2020.mkv")
+        _create_file(self.root / "Movie.Disabled.2020" / "Movie.Disabled.2020.mkv")
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -821,7 +809,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -831,9 +819,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertEqual(str(payload.get("reason_code") or ""), "disabled")
 
     def test_get_cleanup_residual_preview_reports_probable_eligible_dirs(self) -> None:
-        self._create_file(self.root / "Movie.Ready.2021" / "Movie.Ready.2021.mkv")
-        self._create_file(self.root / "ResiduelA" / "movie.nfo", 64)
-        self._create_file(self.root / "ResiduelA" / "poster.jpg", 64)
+        _create_file(self.root / "Movie.Ready.2021" / "Movie.Ready.2021.mkv")
+        _create_file(self.root / "ResiduelA" / "movie.nfo", 64)
+        _create_file(self.root / "ResiduelA" / "poster.jpg", 64)
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -847,7 +835,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -860,9 +848,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIn("ResiduelA", " ".join(str(x) for x in (payload.get("sample_eligible_dirs") or [])))
 
     def test_get_cleanup_residual_preview_reports_video_blocking_reason(self) -> None:
-        self._create_file(self.root / "Movie.HasVideo.2022" / "Movie.HasVideo.2022.mkv")
-        self._create_file(self.root / "ResiduelAvecVideo" / "movie.nfo", 64)
-        self._create_file(self.root / "ResiduelAvecVideo" / "featurette.mkv", 64)
+        _create_file(self.root / "Movie.HasVideo.2022" / "Movie.HasVideo.2022.mkv")
+        _create_file(self.root / "ResiduelAvecVideo" / "movie.nfo", 64)
+        _create_file(self.root / "ResiduelAvecVideo" / "featurette.mkv", 64)
         api = backend.CineSortApi()
         start = api.run.start_plan(
             {
@@ -876,7 +864,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -1040,7 +1028,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIn("ROOT", str(result.get("message") or ""))
 
     def test_start_plan_without_root_uses_saved_root(self) -> None:
-        self._create_file(self.root / "Saved.Root.2014.1080p" / "Saved.Root.2014.1080p.mkv")
+        _create_file(self.root / "Saved.Root.2014.1080p" / "Saved.Root.2014.1080p.mkv")
         api = backend.CineSortApi()
         saved = api.settings.save_settings(
             {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
@@ -1051,7 +1039,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             {"state_dir": str(self.state_dir), "tmdb_enabled": False, "collection_folder_enabled": True}
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_start_plan_without_root_rejects_when_no_saved_root_exists(self) -> None:
         api = backend.CineSortApi()

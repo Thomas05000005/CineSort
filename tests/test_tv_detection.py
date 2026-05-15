@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.domain.tv_helpers import parse_tv_info
+from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_done
 
 
 class TvParsingTests(unittest.TestCase):
@@ -79,24 +80,11 @@ class TvPlanFlowTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _create_file(self, path: Path, size: int = 2048) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x" * size)
-
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            s = api.run.get_status(run_id, 0)
-            if s.get("done"):
-                return
-            time.sleep(0.05)
-        self.fail("Timeout")
-
     def test_tv_episodes_detected_with_enable_tv_detection(self) -> None:
         series_dir = self.root / "Breaking Bad"
-        self._create_file(series_dir / "Breaking.Bad.S01E01.720p.mkv")
-        self._create_file(series_dir / "Breaking.Bad.S01E02.720p.mkv")
-        self._create_file(series_dir / "Breaking.Bad.S01E03.720p.mkv")
+        _create_file(series_dir / "Breaking.Bad.S01E01.720p.mkv")
+        _create_file(series_dir / "Breaking.Bad.S01E02.720p.mkv")
+        _create_file(series_dir / "Breaking.Bad.S01E03.720p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -110,7 +98,7 @@ class TvPlanFlowTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
 
         plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
@@ -124,9 +112,9 @@ class TvPlanFlowTests(unittest.TestCase):
 
     def test_tv_skipped_without_enable_tv_detection(self) -> None:
         series_dir = self.root / "Skipped Series"
-        self._create_file(series_dir / "Skipped.S01E01.mkv")
-        self._create_file(series_dir / "Skipped.S01E02.mkv")
-        self._create_file(series_dir / "Skipped.S01E03.mkv")
+        _create_file(series_dir / "Skipped.S01E01.mkv")
+        _create_file(series_dir / "Skipped.S01E02.mkv")
+        _create_file(series_dir / "Skipped.S01E03.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -140,7 +128,7 @@ class TvPlanFlowTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
 
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
@@ -149,9 +137,9 @@ class TvPlanFlowTests(unittest.TestCase):
 
     def test_tv_apply_creates_series_structure(self) -> None:
         series_dir = self.root / "TestSeries"
-        self._create_file(series_dir / "TestSeries.S01E01.mkv")
-        self._create_file(series_dir / "TestSeries.S01E02.mkv")
-        self._create_file(series_dir / "TestSeries.S01E03.mkv")
+        _create_file(series_dir / "TestSeries.S01E01.mkv")
+        _create_file(series_dir / "TestSeries.S01E02.mkv")
+        _create_file(series_dir / "TestSeries.S01E03.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -165,7 +153,7 @@ class TvPlanFlowTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
 
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])

@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_done
 
 
 class RunReportExportTests(unittest.TestCase):
@@ -28,22 +29,9 @@ class RunReportExportTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _create_file(self, path: Path, size: int = 2048) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x" * size)
-
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            status = api.run.get_status(run_id, 0)
-            if status.get("done"):
-                return
-            time.sleep(0.05)
-        self.fail(f"Timeout waiting completion for run_id={run_id}")
-
     def test_export_run_report_json_and_csv(self) -> None:
-        self._create_file(self.root / "Interstellar.2014.1080p" / "Interstellar.2014.1080p.mkv")
-        self._create_file(self.root / "Dune.2021.2160p" / "Dune.2021.2160p.mkv")
+        _create_file(self.root / "Interstellar.2014.1080p" / "Interstellar.2014.1080p.mkv")
+        _create_file(self.root / "Dune.2021.2160p" / "Dune.2021.2160p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -56,7 +44,7 @@ class RunReportExportTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = start["run_id"]
-        self._wait_done(api, run_id)
+        _wait_done(api, run_id)
 
         plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
