@@ -150,11 +150,30 @@ class BackupWithRotationTests(unittest.TestCase):
         # Cree 6 backups successifs (assez pour declencher rotation a max=5)
         for _ in range(6):
             backup_db_with_rotation(self.src, self.bdir, trigger="post_apply", max_count=5)
-            time.sleep(0.001)  # garantit timestamp different
+            # Pas de time.sleep necessaire : depuis #81, le naming inclut
+            # les microsecondes (UTC), donc plus de collision meme rafale.
         backups = list_backups(self.bdir)
-        # max 5 actifs, mais le naming peut creer collisions si meme seconde —
-        # on accepte 5 ou 6 selon resolution timestamp
-        self.assertLessEqual(len(backups), 6)
+        self.assertEqual(len(backups), 5)
+
+    def test_naming_uses_utc_with_microseconds(self) -> None:
+        # Cf issue #81 : le nom doit contenir le suffixe `Z` (UTC) et
+        # les microsecondes (6 chiffres apres un `-`).
+        result = backup_db_with_rotation(self.src, self.bdir, trigger="manual")
+        self.assertIsNotNone(result)
+        # Pattern attendu : cinesort.YYYYMMDD-HHMMSS-NNNNNNZ.manual.bak
+        self.assertRegex(result.name, r"^cinesort\.\d{8}-\d{6}-\d{6}Z\.manual\.bak$")
+
+    def test_naming_no_collision_in_same_microsecond(self) -> None:
+        # Defensive : meme si on passe deux ts identiques, les noms diffèrent
+        # parce que la 2eme creation ecrase la 1ere (memes microsecondes →
+        # meme fichier, comportement deterministe et acceptable).
+        from cinesort.infra.db.backup import _format_backup_name
+
+        n1 = _format_backup_name("cinesort", "manual", ts=1747320000.123456)
+        n2 = _format_backup_name("cinesort", "manual", ts=1747320000.123456)
+        self.assertEqual(n1, n2)  # ts identique → meme nom (correct)
+        n3 = _format_backup_name("cinesort", "manual", ts=1747320000.123457)
+        self.assertNotEqual(n1, n3)  # +1 microsec → nom different
 
 
 class RestoreBackupTests(unittest.TestCase):

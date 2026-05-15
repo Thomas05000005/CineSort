@@ -36,10 +36,21 @@ BACKUP_SUFFIX = ".bak"
 
 
 def _format_backup_name(stem: str, trigger: str, ts: Optional[float] = None) -> str:
-    """Construit le nom du backup : {stem}.{YYYYMMDD-HHMMSS}.{trigger}.bak"""
+    """Construit le nom du backup : {stem}.{YYYYMMDD-HHMMSS-NNNNNN}Z.{trigger}.bak
+
+    Cf issue #81 (audit-2026-05-12:b1c3) :
+    - `gmtime` (UTC) plutot que `localtime` evite les collisions de noms a
+      chaque changement DST (le 31 octobre 2h heure d'ete = 1h heure d'hiver,
+      memes timestamps formattes deux fois).
+    - Suffixe `Z` marque explicitement le fuseau UTC dans le nom.
+    - Microsecondes (`NNNNNN`, 6 chiffres) garantissent l'unicite meme
+      lorsque deux backups sont declenches dans la meme seconde (cas typique :
+      backup pre-migration + post-apply en moins d'une seconde au boot).
+    """
     t = float(ts if ts is not None else time.time())
-    timestr = time.strftime("%Y%m%d-%H%M%S", time.localtime(t))
-    return f"{stem}.{timestr}.{trigger}{BACKUP_SUFFIX}"
+    timestr = time.strftime("%Y%m%d-%H%M%S", time.gmtime(t))
+    micros = int(round((t - int(t)) * 1_000_000)) % 1_000_000
+    return f"{stem}.{timestr}-{micros:06d}Z.{trigger}{BACKUP_SUFFIX}"
 
 
 def backup_db(src_path: Path, dst_path: Path) -> Path:
