@@ -31,6 +31,7 @@ function _showHelp() {
       <tr><td><kbd>1</kbd>...<kbd>8</kbd></td><td>Navigation (hors champ texte)</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Enregistrer</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Palette de commandes</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Annuler la derniere application (depuis Bibliotheque)</td></tr>
       <tr><td><kbd>F5</kbd></td><td>Rafraîchir la vue</td></tr>
       <tr><td><kbd>?</kbd> ou <kbd>F1</kbd></td><td>Afficher cette aide</td></tr>
       <tr><td><kbd>Escape</kbd></td><td>Fermer la modale</td></tr>
@@ -85,6 +86,18 @@ export function initKeyboard() {
     if (e.ctrlKey && e.key.toLowerCase() === "k" && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("cinesort:command-palette"));
+      return;
+    }
+
+    // 4b. Ctrl+Z : undo last apply (#92 quick win #3).
+    // Geste universel attendu par tous les power users. Skip si focus est
+    // dans un input/textarea (sinon on bloque l'undo natif du navigateur
+    // dans les champs texte). Le handler dispatche un event que les vues
+    // interessees ecoutent (typiquement library/lib-apply.js).
+    if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.altKey && !e.shiftKey) {
+      if (_isInputFocused()) return;
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent("cinesort:undo-shortcut"));
       return;
     }
 

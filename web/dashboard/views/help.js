@@ -42,6 +42,7 @@ const SHORTCUTS = [
     items: [
       { keys: "Ctrl+K", desc: "Ouvrir la palette de commandes (recherche)" },
       { keys: "Ctrl+S", desc: "Sauvegarder les decisions de validation" },
+      { keys: "Ctrl+Z", desc: "Annuler la derniere application (vue Bibliotheque uniquement)" },
       { keys: "F5", desc: "Rafraichir la vue active" },
       { keys: "F1 / ?", desc: "Afficher la modale des raccourcis (avec lien vers cette page)" },
       { keys: "Esc", desc: "Fermer la modale ou le drawer actif" },
