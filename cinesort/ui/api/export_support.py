@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from cinesort.ui.api._responses import err as _err_response
+
 logger = logging.getLogger(__name__)
 
 # Cf issue #95 : ces cles ne doivent JAMAIS apparaitre dans l'export.
@@ -104,7 +106,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
     try:
         state_dir = Path(getattr(api, "_state_dir", "")) if getattr(api, "_state_dir", None) else None
         if state_dir is None or not state_dir.is_dir():
-            return {"ok": False, "message": "state_dir indisponible."}
+            return _err_response("state_dir indisponible.", category="state", level="info", log_module=__name__)
 
         # 1. Settings sanitises
         try:
@@ -196,7 +198,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
         }
     except (AttributeError, OSError, TypeError) as exc:
         logger.error("export_full_library failed: %s", exc)
-        return {"ok": False, "message": f"Export echoue : {exc}"}
+        return _err_response(f"Export echoue : {exc}", category="runtime", level="error", log_module=__name__)
 
 
 def _read_app_version() -> str:

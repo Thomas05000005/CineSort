@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from cinesort.infra import state
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,13 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
     """
     resolved_rid = _resolve_run_id(api, run_id)
     if not resolved_rid:
-        return {"ok": False, "message": "Aucun run disponible."}
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
 
     row = _find_plan_row(api, resolved_rid, row_id)
     if not row:
-        return {"ok": False, "message": f"Film introuvable (row_id={row_id})."}
+        return _err_response(
+            f"Film introuvable (row_id={row_id}).", category="runtime", level="error", log_module=__name__
+        )
 
     # Probe (via quality_reports store)
     probe_dict = None

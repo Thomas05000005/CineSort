@@ -7,26 +7,27 @@ import cinesort.domain.core as core
 from cinesort.app.cleanup import preview_cleanup_residual_folders as _preview_cleanup_fn
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._responses import err as _err_response
 
 
 @requires_valid_run_id
 def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
     rs = api._get_run(run_id)
     if rs and not rs.done:
-        return {"ok": False, "message": "Plan pas pret."}
+        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
 
     found = api._find_run_row(run_id)
     if not rs and not found:
-        return {"ok": False, "message": "Run introuvable."}
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     if found and not rs:
         row, _store = found
         status_text = str(row.get("status") or "")
         if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-            return {"ok": False, "message": "Plan pas pret."}
+            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
 
     ctx = api._run_context_for_apply(run_id)
     if not ctx:
-        return {"ok": False, "message": "Plan indisponible."}
+        return _err_response("Plan indisponible.", category="state", level="info", log_module=__name__)
 
     cfg, _run_paths, rows, _log_fn, _store = ctx
     preview = _preview_cleanup_fn(cfg, api._touched_top_level_dirs_for_rows(cfg, rows))
@@ -130,7 +131,7 @@ def get_auto_approved_summary(
     """
     rs = api._get_run(run_id)
     if not rs or not rs.done:
-        return {"ok": False, "message": "Plan pas pret."}
+        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
     rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
     if not rows:
         return {
