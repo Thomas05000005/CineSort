@@ -20,16 +20,12 @@ import cinesort.domain.core as core
 from cinesort.app.apply_core import record_apply_op
 from cinesort.ui.api.apply_support import _execute_undo_ops
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import create_file as _create_file
 
 
 # ---------------------------------------------------------------------------
 # Helpers partages
 # ---------------------------------------------------------------------------
-
-
-def _create_file(path: Path, size: int = 2048) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"x" * size)
 
 
 def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> dict:

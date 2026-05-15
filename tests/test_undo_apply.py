@@ -9,6 +9,7 @@ from unittest import mock
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import create_file as _create_file
 
 
 class UndoApplyTests(unittest.TestCase):
@@ -25,10 +26,6 @@ class UndoApplyTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def _create_file(self, path: Path, size: int = 2048) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x" * size)
 
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
@@ -52,7 +49,7 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_real_apply_creates_journal_and_undo_restores(self) -> None:
         src_folder = self.root / "Old.Name.2010.1080p"
-        self._create_file(src_folder / "Old.Name.2010.1080p.mkv")
+        _create_file(src_folder / "Old.Name.2010.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -97,7 +94,7 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_dry_run_apply_does_not_create_undo_candidate(self) -> None:
         src_folder = self.root / "DryRun.Movie.2011.1080p"
-        self._create_file(src_folder / "DryRun.Movie.2011.1080p.mkv")
+        _create_file(src_folder / "DryRun.Movie.2011.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -125,9 +122,9 @@ class UndoApplyTests(unittest.TestCase):
     def test_cleanup_residual_folder_is_included_in_undo_preview_and_restored(self) -> None:
         movie_folder = self.root / "Residual.Movie.2012.1080p"
         noise_folder = self.root / "Residual.Noise"
-        self._create_file(movie_folder / "Residual.Movie.2012.1080p.mkv")
-        self._create_file(noise_folder / "movie.nfo", size=64)
-        self._create_file(noise_folder / "poster.jpg", size=64)
+        _create_file(movie_folder / "Residual.Movie.2012.1080p.mkv")
+        _create_file(noise_folder / "movie.nfo", size=64)
+        _create_file(noise_folder / "poster.jpg", size=64)
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -218,9 +215,9 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_undo_by_row_preview_shows_per_film_details(self) -> None:
         src1 = self.root / "Film.Alpha.2020.1080p"
-        self._create_file(src1 / "Film.Alpha.2020.1080p.mkv")
+        _create_file(src1 / "Film.Alpha.2020.1080p.mkv")
         src2 = self.root / "Film.Beta.2021.1080p"
-        self._create_file(src2 / "Film.Beta.2021.1080p.mkv")
+        _create_file(src2 / "Film.Beta.2021.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -256,9 +253,9 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_undo_selected_rows_restores_only_chosen_films(self) -> None:
         src1 = self.root / "Sel.Movie.A.2022.1080p"
-        self._create_file(src1 / "Sel.Movie.A.2022.1080p.mkv")
+        _create_file(src1 / "Sel.Movie.A.2022.1080p.mkv")
         src2 = self.root / "Sel.Movie.B.2023.1080p"
-        self._create_file(src2 / "Sel.Movie.B.2023.1080p.mkv")
+        _create_file(src2 / "Sel.Movie.B.2023.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -293,7 +290,7 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_list_apply_history_returns_batches(self) -> None:
         src = self.root / "Hist.Movie.2019.1080p"
-        self._create_file(src / "Hist.Movie.2019.1080p.mkv")
+        _create_file(src / "Hist.Movie.2019.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(
@@ -321,7 +318,7 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_undo_selected_rows_dry_run_returns_preview(self) -> None:
         src = self.root / "DrySelective.2020.1080p"
-        self._create_file(src / "DrySelective.2020.1080p.mkv")
+        _create_file(src / "DrySelective.2020.1080p.mkv")
 
         api = CineSortApi()
         start = api.run.start_plan(

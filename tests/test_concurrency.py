@@ -17,11 +17,7 @@ from pathlib import Path
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
-
-
-def _create_file(path: Path, size: int = 2048) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"x" * size)
+from tests._helpers import create_file as _create_file
 
 
 def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 15.0) -> dict:

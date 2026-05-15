@@ -12,6 +12,7 @@ from pathlib import Path
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+from tests._helpers import create_file as _create_file
 
 
 class CriticalFlowIntegrationTests(unittest.TestCase):
@@ -28,10 +29,6 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def _create_file(self, path: Path, size: int = 2048) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x" * size)
 
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> dict:
         deadline = time.time() + timeout_s
@@ -78,8 +75,8 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         return row
 
     def test_plan_validation_duplicates_survive_reconfigured_api_instances(self) -> None:
-        self._create_file(self.root / "Movie.2020.1080p" / "movie_a.mkv")
-        self._create_file(self.root / "Movie.2020.BluRay" / "movie_b.mkv")
+        _create_file(self.root / "Movie.2020.1080p" / "movie_a.mkv")
+        _create_file(self.root / "Movie.2020.BluRay" / "movie_b.mkv")
 
         api_plan = CineSortApi()
         start = api_plan.run.start_plan(
@@ -153,7 +150,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
     def test_real_apply_and_undo_use_disk_state_logs_and_sqlite_journal(self) -> None:
         source_dir = self.root / "Old.Name.2010.1080p"
         source_video = source_dir / "Old.Name.2010.1080p.mkv"
-        self._create_file(source_video)
+        _create_file(source_video)
 
         api_plan = CineSortApi()
         start = api_plan.run.start_plan(
