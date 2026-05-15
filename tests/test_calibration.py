@@ -164,6 +164,35 @@ class SuggestWeightAdjustmentTests(unittest.TestCase):
         self.assertIn("audio", r["rationale"].lower())
         self.assertIn("5", r["rationale"])
 
+    def test_extreme_weights_invariant_sum_or_none(self):
+        # Cas pathologique : poids extremes (focus presque sature, autres au plancher).
+        # L'avant-correctif drift de la somme (91 -> 92) car le clamp [1, 90] sur le
+        # dernier ajustement masquait l'impossibilite. La fonction doit soit retourner
+        # un suggestion qui conserve la somme, soit None (configuration insatisfiable).
+        bias = {
+            "bias_direction": "underscore",
+            "bias_strength": "strong",
+            "category_bias": {"video": 5, "audio": 0, "extras": 0},
+            "total_feedbacks": 5,
+        }
+        weights = {"video": 89, "audio": 1, "extras": 1}
+        r = suggest_weight_adjustment(bias, weights)
+        if r is not None:
+            self.assertEqual(sum(r["to"].values()), sum(weights.values()))
+
+    def test_normal_weights_invariant_holds(self):
+        # Cas nominal : la somme doit toujours etre conservee.
+        bias = {
+            "bias_direction": "overscore",
+            "bias_strength": "moderate",
+            "category_bias": {"video": 5, "audio": 0, "extras": 0},
+            "total_feedbacks": 5,
+        }
+        weights = {"video": 60, "audio": 30, "extras": 10}
+        r = suggest_weight_adjustment(bias, weights)
+        assert r is not None
+        self.assertEqual(sum(r["to"].values()), sum(weights.values()))
+
 
 class SubmitFeedbackIntegrationTests(unittest.TestCase):
     """End-to-end : créer un run, soumettre feedback, lire calibration report."""

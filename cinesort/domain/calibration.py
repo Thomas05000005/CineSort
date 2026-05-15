@@ -175,11 +175,22 @@ def suggest_weight_adjustment(
         for c in others:
             new_weights[c] = weights[c]
 
-    # Normaliser : ajuster le dernier pour forcer la somme exacte
+    # Normaliser : repartir le diff sur les autres categories en respectant
+    # les bornes [1, 90]. La distribution proportionnelle peut introduire un
+    # delta a cause de l'arrondi entier (banker's rounding) et des clamps.
+    # Si toutes les autres sont au clamp et le diff persiste, l'invariant
+    # somme=total_before ne peut etre maintenu : on retourne None.
     diff = total_before - sum(new_weights.values())
-    if diff != 0 and others:
-        last = others[-1]
-        new_weights[last] = max(1, min(90, new_weights[last] + diff))
+    if diff != 0:
+        for cat in others:
+            if diff == 0:
+                break
+            old = new_weights[cat]
+            adjusted = max(1, min(90, old + diff))
+            diff -= adjusted - old
+            new_weights[cat] = adjusted
+        if diff != 0:
+            return None
 
     direction_label = "augmenté" if actual_delta > 0 else "diminué"
     rationale = (
