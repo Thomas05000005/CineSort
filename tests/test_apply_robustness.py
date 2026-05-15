@@ -11,7 +11,6 @@ import logging
 import shutil
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,21 +20,12 @@ from cinesort.app.apply_core import record_apply_op
 from cinesort.ui.api.apply_support import _execute_undo_ops
 from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_done
 
 
 # ---------------------------------------------------------------------------
 # Helpers partages
 # ---------------------------------------------------------------------------
-
-
-def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> dict:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        last = api.run.get_status(run_id, 0)
-        if last.get("done"):
-            return last
-        time.sleep(0.05)
-    raise AssertionError(f"Timeout attente fin scan run_id={run_id}")
 
 
 class _FakeStore:

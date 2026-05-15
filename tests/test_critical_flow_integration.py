@@ -4,7 +4,6 @@ import json
 import shutil
 import sqlite3
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -13,6 +12,7 @@ import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_done
 
 
 class CriticalFlowIntegrationTests(unittest.TestCase):
@@ -29,16 +29,6 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> dict:
-        deadline = time.time() + timeout_s
-        last = {}
-        while time.time() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return last
-            time.sleep(0.05)
-        self.fail(f"Timeout waiting run completion run_id={run_id} last={last}")
 
     def _configured_api(self) -> CineSortApi:
         api = CineSortApi()
@@ -90,7 +80,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.assertTrue(start.get("ok"), start)
         run_id = str(start["run_id"])
 
-        status = self._wait_done(api_plan, run_id)
+        status = _wait_done(api_plan, run_id)
         self.assertIsNone(status.get("error"), status)
 
         plan = api_plan.run.get_plan(run_id)
@@ -163,7 +153,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(start.get("ok"), start)
         run_id = str(start["run_id"])
-        self._wait_done(api_plan, run_id)
+        _wait_done(api_plan, run_id)
 
         plan = api_plan.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)

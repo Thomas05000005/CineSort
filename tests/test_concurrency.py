@@ -18,16 +18,7 @@ from pathlib import Path
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
-
-
-def _wait_done(api: CineSortApi, run_id: str, timeout_s: float = 15.0) -> dict:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        s = api.run.get_status(run_id, 0)
-        if s.get("done"):
-            return s
-        time.sleep(0.05)
-    raise AssertionError(f"Timeout run_id={run_id}")
+from tests._helpers import wait_run_done as _wait_done
 
 
 class _ConcurrencyBase(unittest.TestCase):

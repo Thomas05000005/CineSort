@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -10,6 +9,7 @@ from pathlib import Path
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_done
 
 
 class CineSortApiFlowTests(unittest.TestCase):
@@ -28,16 +28,6 @@ class CineSortApiFlowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0):
-        deadline = time.time() + timeout_s
-        last = {}
-        while time.time() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return last
-            time.sleep(0.05)
-        self.fail(f"Timeout waiting plan completion for run_id={run_id}, last={last}")
 
     def test_plan_validation_apply_full_flow(self) -> None:
         single = self.root / "Inception.2010.1080p"
@@ -59,7 +49,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         self.assertTrue(start.get("ok"), start)
 
         run_id = start["run_id"]
-        status = self._wait_done(api, run_id)
+        status = _wait_done(api, run_id)
         self.assertIsNone(status.get("error"), status.get("error"))
 
         plan = api.run.get_plan(run_id)
@@ -153,7 +143,7 @@ class CineSortApiFlowTests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_done(api, start["run_id"])
+        _wait_done(api, start["run_id"])
 
         summary_txt = self.state_dir / "runs" / f"tri_films_{start['run_id']}" / "summary.txt"
         self.assertTrue(summary_txt.exists(), summary_txt)

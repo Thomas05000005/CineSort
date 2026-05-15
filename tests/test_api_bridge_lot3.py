@@ -16,6 +16,7 @@ import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
 from cinesort.ui.api import cinesort_api as api_mod
 from tests._helpers import create_file as _create_file
+from tests._helpers import wait_run_done as _wait_terminal
 
 
 class ApiBridgeLot3Tests(unittest.TestCase):
@@ -39,16 +40,6 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(path.exists(), path)
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def _wait_terminal(self, api: backend.CineSortApi, run_id: str, timeout_s: float = 8.0):
-        deadline = time.monotonic() + timeout_s
-        last = {}
-        while time.monotonic() < deadline:
-            last = api.run.get_status(run_id, 0)
-            if last.get("done"):
-                return last
-            time.sleep(0.03)
-        self.fail(f"Timeout waiting terminal status for run_id={run_id}, last={last}")
-
     def test_start_plan_payload_is_strict_v6_shape(self) -> None:
         _create_file(self.root / "Inception.2010.1080p" / "Inception.2010.1080p.mkv")
 
@@ -66,7 +57,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIsInstance(start["run_id"], str)
         self.assertTrue(start["run_id"])
         self.assertIsInstance(start["run_dir"], str)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_defaults_are_generic(self) -> None:
         api = backend.CineSortApi()
@@ -106,7 +97,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         self.assertTrue(db_path.exists(), str(db_path))
         with closing(sqlite3.connect(str(db_path))) as conn:
@@ -144,7 +135,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         with closing(sqlite3.connect(str(db_path))) as conn:
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -184,7 +175,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         self.assertTrue(ui_log.exists(), f"ui_log.txt missing in {run_dir}")
         self.assertGreater(ui_log.stat().st_size, 0)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_get_status_keeps_v6_fields_and_adds_status_cancel_requested(self) -> None:
         _create_file(self.root / "Avatar.2009.1080p" / "Avatar.2009.1080p.mkv")
@@ -218,7 +209,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(expected_v6.issubset(set(status.keys())))
         self.assertIn("status", status)
         self.assertIn("cancel_requested", status)
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
     def test_cancel_run_idempotent(self) -> None:
         original_plan_library = plan_support.plan_library
@@ -246,7 +237,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
             first = api.run.cancel_run(run_id)
             self.assertTrue(first["ok"], first)
-            terminal = self._wait_terminal(api, run_id)
+            terminal = _wait_terminal(api, run_id)
             self.assertEqual(terminal.get("status"), "CANCELLED")
 
             second = api.run.cancel_run(run_id)
@@ -292,7 +283,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        status = self._wait_terminal(api, run_id)
+        status = _wait_terminal(api, run_id)
         self.assertFalse(bool(status.get("error")), status)
 
         plan = api.run.get_plan(run_id)
@@ -329,7 +320,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
         plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
@@ -391,7 +382,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
@@ -525,7 +516,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        self._wait_terminal(api, run_id)
+        _wait_terminal(api, run_id)
 
         rs = api._get_run(run_id)  # type: ignore[attr-defined]
         self.assertIsNotNone(rs)
@@ -818,7 +809,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -844,7 +835,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -873,7 +864,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
         preview = api.get_cleanup_residual_preview(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
@@ -1048,7 +1039,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             {"state_dir": str(self.state_dir), "tmdb_enabled": False, "collection_folder_enabled": True}
         )
         self.assertTrue(start.get("ok"), start)
-        self._wait_terminal(api, start["run_id"])
+        _wait_terminal(api, start["run_id"])
 
     def test_start_plan_without_root_rejects_when_no_saved_root_exists(self) -> None:
         api = backend.CineSortApi()
