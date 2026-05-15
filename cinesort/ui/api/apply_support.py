@@ -27,6 +27,7 @@ from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
+from cinesort.ui.api._responses import err as _err_response
 import contextlib
 
 _log = logging.getLogger(__name__)
@@ -195,7 +196,13 @@ def build_undo_preview_payload(
 ]:
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}, None, None, None, []
+        return (
+            _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__),
+            None,
+            None,
+            None,
+            [],
+        )
     row, store = found
     state_dir = normalize_user_path(row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
@@ -284,7 +291,7 @@ def undo_last_apply_preview(api: Any, run_id: str) -> Dict[str, Any]:
         return payload
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception("undo_last_apply_preview", exc, run_id=run_id)
-        return {"ok": False, "message": t("errors.cannot_prepare_undo")}
+        return _err_response(t("errors.cannot_prepare_undo"), category="state", level="warning", log_module=__name__)
 
 
 def _execute_undo_ops(
@@ -538,7 +545,7 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     """Preview undo detaille par film : pour chaque row_id, liste des operations et conflits predits."""
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _row, store = found
 
     if batch_id:
@@ -637,11 +644,11 @@ def undo_selected_rows(
     force le best-effort (skipe les fichiers modifiés).
     """
     if not row_ids or not isinstance(row_ids, list):
-        return {"ok": False, "message": t("errors.row_ids_required")}
+        return _err_response(t("errors.row_ids_required"), category="validation", level="info", log_module=__name__)
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _row, store = found
     state_dir = normalize_user_path(_row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
@@ -652,7 +659,7 @@ def undo_selected_rows(
     else:
         batch = store.get_last_reversible_apply_batch(run_id)
     if not batch:
-        return {"ok": False, "message": t("errors.no_reversible_batch")}
+        return _err_response(t("errors.no_reversible_batch"), category="state", level="info", log_module=__name__)
 
     bid = str(batch["batch_id"])
     if bool(dry_run):
@@ -764,7 +771,7 @@ def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     """Historique de tous les applies d'un run."""
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _row, store = found
     batches = store.list_apply_batches_for_run(run_id=run_id, limit=20)
     return {"ok": True, "run_id": run_id, "batches": batches}
@@ -912,7 +919,7 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
         preview, store, run_paths, batch, reversible_ops = api._build_undo_preview_payload(run_id)
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception("undo_last_apply", exc, run_id=run_id, extra={"dry_run": bool(dry_run)})
-        return {"ok": False, "message": t("errors.cannot_undo_last_apply")}
+        return _err_response(t("errors.cannot_undo_last_apply"), category="state", level="warning", log_module=__name__)
     if not preview.get("ok"):
         return preview
     if batch is None or store is None or run_paths is None:
@@ -971,9 +978,11 @@ def _validate_apply(
     quarantine_unapproved: bool,
 ) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
-        return {"ok": False, "message": t("errors.payload_decisions_invalid")}
+        return _err_response(
+            t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
+        )
     if not api._acquire_apply_slot(run_id):
-        return {"ok": False, "message": t("errors.apply_already_in_progress")}
+        return _err_response(t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__)
     try:
         ctx = api._run_context_for_apply(run_id)
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
@@ -989,16 +998,16 @@ def _validate_apply(
                 "phase": "load_context",
             },
         )
-        return {"ok": False, "message": t("errors.cannot_apply_changes")}
+        return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
 
     if not ctx:
         api._release_apply_slot(run_id)
-        return {"ok": False, "message": t("errors.plan_unavailable")}
+        return _err_response(t("errors.plan_unavailable"), category="state", level="warning", log_module=__name__)
     cfg, run_paths, rows, log_fn, store = ctx
 
     if not rows:
         api._release_apply_slot(run_id)
-        return {"ok": False, "message": t("errors.plan_empty_or_missing")}
+        return _err_response(t("errors.plan_empty_or_missing"), category="state", level="warning", log_module=__name__)
 
     incoming = decisions if isinstance(decisions, dict) else {}
     disk_decisions = api._load_decisions_from_validation(run_paths)
@@ -1677,7 +1686,7 @@ def apply_changes(
                 batch_state=batch_state,
             )
         except _DuplicateCheckError as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
 
@@ -1784,7 +1793,7 @@ def apply_changes(
                 "decision_count": len(decisions),
             },
         )
-        return {"ok": False, "message": t("errors.cannot_apply_changes")}
+        return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
     finally:
         api._release_apply_slot(run_id)
 
@@ -1806,7 +1815,7 @@ def export_apply_audit(
     """
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     row, _store = found
     state_dir = normalize_user_path(row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -1815,7 +1824,9 @@ def export_apply_audit(
         events = read_apply_audit(run_paths.run_dir, batch_id=batch_id)
     except (OSError, PermissionError, ValueError, TypeError) as exc:
         api.log_api_exception("export_apply_audit", exc, run_id=run_id, extra={"batch_id": batch_id})
-        return {"ok": False, "message": t("errors.audit_log_read_failed")}
+        return _err_response(
+            t("errors.audit_log_read_failed"), category="resource", level="warning", log_module=__name__
+        )
 
     fmt = str(as_format or "json").lower()
     if fmt == "jsonl":
@@ -1924,7 +1935,7 @@ def build_apply_preview(
             preview_ops_out=preview_ops,
         )
     except _DuplicateCheckError as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
     # Indexer les rows par row_id pour enrichir
     rows_by_id = {str(getattr(r, "row_id", "") or ""): r for r in rows}
