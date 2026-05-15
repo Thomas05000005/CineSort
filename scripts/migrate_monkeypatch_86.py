@@ -62,7 +62,6 @@ def migrate_file(path: Path, apply: bool) -> int:
     except (OSError, UnicodeDecodeError):
         return 0
 
-    original = content
     setup_count = 0
     teardown_count = 0
 
