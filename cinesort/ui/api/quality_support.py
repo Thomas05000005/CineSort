@@ -6,17 +6,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.conversions import to_bool
 from cinesort.domain.i18n_messages import t
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
 
 def _validate_inputs(api: Any, run_id: str, row_ids: Any) -> Optional[Dict[str, Any]]:
     if not run_id:
-        return {"ok": False, "message": t("errors.run_id_required")}
+        return _err_response(t("errors.run_id_required"), category="validation", level="info", log_module=__name__)
     if not api._is_valid_run_id(run_id):
-        return {"ok": False, "message": t("errors.run_invalid_id")}
+        return _err_response(t("errors.run_invalid_id"), category="validation", level="info", log_module=__name__)
     if not isinstance(row_ids, list):
-        return {"ok": False, "message": t("errors.payload_row_ids_invalid")}
+        return _err_response(
+            t("errors.payload_row_ids_invalid"), category="validation", level="info", log_module=__name__
+        )
     return None
 
 
@@ -53,9 +56,19 @@ def _resolve_ids_from_scope(api: Any, run_id: str, scope: str) -> Dict[str, Any]
     try:
         plan_payload = api.run.get_plan(run_id)
     except (OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": t("errors.cannot_load_plan", detail=str(exc))}
+        return _err_response(
+            t("errors.cannot_load_plan", detail=str(exc)),
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
     if not plan_payload.get("ok"):
-        return {"ok": False, "message": plan_payload.get("message") or t("errors.plan_not_found")}
+        return _err_response(
+            plan_payload.get("message") or t("errors.plan_not_found"),
+            category="state",
+            level="warning",
+            log_module=__name__,
+        )
     rows = plan_payload.get("rows") or []
     validated_ids: Optional[set] = None
     if scope == "validated":
@@ -203,14 +216,14 @@ def analyze_quality_batch(
     if not cleaned_ids and scope in ("all", "validated"):
         scoped = _resolve_ids_from_scope(api, run_id, scope)
         if not scoped["ok"]:
-            return {"ok": False, "message": scoped["message"]}
+            return _err_response(scoped["message"], category="resource", level="warning", log_module=__name__)
         cleaned_ids = scoped["row_ids"]
 
     if not cleaned_ids:
-        return {"ok": False, "message": t("errors.no_rows_for_quality")}
+        return _err_response(t("errors.no_rows_for_quality"), category="state", level="info", log_module=__name__)
 
     if not api._acquire_quality_batch_slot(run_id):
-        return {"ok": False, "message": t("errors.quality_already_running")}
+        return _err_response(t("errors.quality_already_running"), category="state", level="info", log_module=__name__)
 
     try:
         # V5-04 : pre-warm cache probe en parallele AVANT le scoring serie.
@@ -241,6 +254,8 @@ def analyze_quality_batch(
                 "continue_on_error": continue_on_error,
             },
         )
-        return {"ok": False, "message": t("errors.cannot_finish_quality_analysis")}
+        return _err_response(
+            t("errors.cannot_finish_quality_analysis"), category="runtime", level="error", log_module=__name__
+        )
     finally:
         api._release_quality_batch_slot(run_id)

@@ -15,6 +15,7 @@ import cinesort.infra.state as state
 from cinesort.infra.db import SQLiteStore
 from cinesort.domain.conversions import to_bool, to_int
 from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -518,7 +519,9 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             store=store if "store" in locals() else None,
             extra={"requested_run_id": target_run},
         )
-        return {"ok": False, "message": "Impossible de charger la synthese du run."}
+        return _err_response(
+            "Impossible de charger la synthese du run.", category="runtime", level="warning", log_module=__name__
+        )
 
 
 def _load_report_context(api: Any, run_id: str) -> Optional[Tuple[Any, Any, list, Any, str, Dict[str, Any]]]:
@@ -632,8 +635,8 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
     if ctx is None:
         run_state = api._get_run(run_id)
         if run_state and not run_state.done:
-            return {"ok": False, "message": "Plan pas pret."}, None
-        return {"ok": False, "message": "Run introuvable."}, None
+            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__), None
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__), None
     store, run_paths, rows, run_state, cfg_root, run_row = ctx
 
     decisions = api._normalize_decisions_for_rows(rows, api._load_decisions_from_validation(run_paths))
@@ -783,14 +786,21 @@ def write_run_report_file(
 def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any]:
     export_format = str(fmt or "json").strip().lower()
     if export_format not in {"json", "csv", "html"}:
-        return {"ok": False, "message": "Format invalide. Utilisez 'json', 'csv' ou 'html'."}
+        return _err_response(
+            "Format invalide. Utilisez 'json', 'csv' ou 'html'.",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
 
     built, run_paths = build_run_report_payload(api, run_id)
     if not built.get("ok"):
         return built
     report = built.get("report") if isinstance(built.get("report"), dict) else {}
     if not report or run_paths is None:
-        return {"ok": False, "message": "Impossible de construire le rapport de run."}
+        return _err_response(
+            "Impossible de construire le rapport de run.", category="runtime", level="warning", log_module=__name__
+        )
 
     try:
         out_path = write_run_report_file(
@@ -801,7 +811,7 @@ def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any
             report=report,
         )
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": f"Echec export rapport: {exc}"}
+        return _err_response(f"Echec export rapport: {exc}", category="runtime", level="error", log_module=__name__)
 
     counts = report.get("counts") if isinstance(report.get("counts"), dict) else {}
     return {
@@ -1330,7 +1340,12 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.warning("get_global_stats error: %s", exc, exc_info=True)
-        return {"ok": False, "message": f"Impossible de calculer les statistiques globales: {exc}"}
+        return _err_response(
+            f"Impossible de calculer les statistiques globales: {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
 
 
 # =========================================================
