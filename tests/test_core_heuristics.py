@@ -9,6 +9,7 @@ import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
 import cinesort.domain.scan_helpers as core_scan_helpers
 from cinesort.infra.tmdb_client import TmdbResult
+from unittest import mock
 
 
 class _FakeTmdb:
@@ -279,16 +280,13 @@ class CoreHeuristicsTests(unittest.TestCase):
                 calls["n"] += 1
                 return original(path)
 
-            core._sha1_quick = wrapped
-            try:
+            with mock.patch.object(core, "_sha1_quick", wrapped):
                 cache = {}
                 self.assertTrue(core._files_identical_quick(src, dst, hash_cache=cache))
                 first_calls = calls["n"]
                 self.assertEqual(first_calls, 2)
                 self.assertTrue(core._files_identical_quick(src, dst, hash_cache=cache))
                 self.assertEqual(calls["n"], first_calls)
-            finally:
-                core._sha1_quick = original
 
     def test_find_duplicate_targets_marks_existing_folder_as_mergeable(self) -> None:
         with tempfile.TemporaryDirectory(prefix="dupe_") as tmp:
@@ -327,9 +325,7 @@ class CoreHeuristicsTests(unittest.TestCase):
                 folder.mkdir(parents=True, exist_ok=True)
                 (folder / f"Movie.{i}.2010.1080p.mkv").write_bytes(b"x" * 2048)
 
-            old_min_video_bytes = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 logs = []
                 state = {"cancel": False}
 
@@ -351,9 +347,6 @@ class CoreHeuristicsTests(unittest.TestCase):
                     progress=progress,
                     should_cancel=should_cancel,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min_video_bytes
-
             self.assertEqual(stats.planned_rows, len(rows))
             self.assertLess(stats.folders_scanned, 10)
             self.assertTrue(
@@ -372,18 +365,13 @@ class CoreHeuristicsTests(unittest.TestCase):
             (p1 / "Movie.Part.1.2010.1080p.mkv").write_bytes(b"x" * 4096)
             (p2 / "Movie.Part.2.2011.1080p.mkv").write_bytes(b"x" * 4096)
 
-            old_min_video_bytes = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 rows, stats = plan_support.plan_library(
                     core.Config(root=root, enable_tmdb=False),
                     tmdb=None,
                     log=lambda *_args: None,
                     progress=lambda *_args: None,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min_video_bytes
-
             self.assertGreaterEqual(len(rows), 2)
             folders = {Path(r.folder).name for r in rows}
             self.assertIn("Premiere partie", folders)
@@ -402,18 +390,13 @@ class CoreHeuristicsTests(unittest.TestCase):
             (part1 / "Movie.Part.1.2010.1080p.mkv").write_bytes(b"x" * 4096)
             (part2 / "Movie.Part.2.2011.1080p.mkv").write_bytes(b"x" * 4096)
 
-            old_min_video_bytes = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 rows, stats = plan_support.plan_library(
                     core.Config(root=root, enable_tmdb=False),
                     tmdb=None,
                     log=lambda *_args: None,
                     progress=lambda *_args: None,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min_video_bytes
-
             folders = {Path(r.folder).name for r in rows}
             self.assertIn("Premiere partie", folders)
             self.assertIn("Deuxieme partie", folders)
@@ -449,9 +432,7 @@ class CoreHeuristicsTests(unittest.TestCase):
                 (folder / f"Movie.{idx:03d}.2010.1080p.mkv").write_bytes(b"x" * 4096)
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
-            old_min_video_bytes = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 stream = core_scan_helpers.stream_scan_targets(cfg, min_video_bytes=core.MIN_VIDEO_BYTES)
                 self.assertFalse(isinstance(stream, list))
                 first_batch = list(itertools.islice(stream, 5))
@@ -467,9 +448,6 @@ class CoreHeuristicsTests(unittest.TestCase):
                     log=lambda *_args: None,
                     progress=lambda idx, total, current: progress_calls.append((idx, total, current)),
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min_video_bytes
-
             self.assertEqual(len(rows), 60)
             self.assertEqual(int(stats.folders_scanned or 0), 60)
             self.assertEqual(len(progress_calls), 60)

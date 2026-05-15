@@ -71,9 +71,7 @@ class QualityScoreTests(unittest.TestCase):
         movie_dir.mkdir(parents=True, exist_ok=True)
         (movie_dir / "Gravity.2013.1080p.mkv").write_bytes(b"x" * 2048)
 
-        old_min = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
-        self.addCleanup(setattr, core, "MIN_VIDEO_BYTES", old_min)
+        self.enterContext(mock.patch.object(core, "MIN_VIDEO_BYTES", 1))
 
         save = api.settings.save_settings(
             {
