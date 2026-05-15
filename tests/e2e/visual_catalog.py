@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import socket
 import sys
 import tempfile
 import time
@@ -36,6 +35,7 @@ from create_test_data import (
     write_plan_file,
 )
 import contextlib
+from tests._helpers import find_free_port as _find_free_port
 
 VIEWPORTS = {
     "desktop": {"width": 1920, "height": 1080},
@@ -44,12 +44,6 @@ VIEWPORTS = {
 }
 
 VIEWS = ["status", "library", "runs", "review", "jellyfin", "logs"]
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _wait_server(port: int, timeout_s: float = 5.0) -> None:

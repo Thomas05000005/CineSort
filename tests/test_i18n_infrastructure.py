@@ -29,18 +29,11 @@ from cinesort.ui.api.settings_support import (
     SUPPORTED_LOCALES,
     _normalize_locale,
 )
+from tests._helpers import find_free_port as _find_free_port
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = PROJECT_ROOT / "locales"
-
-
-def _find_free_port() -> int:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 # ---------------------------------------------------------------------------

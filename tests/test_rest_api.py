@@ -13,15 +13,7 @@ from typing import Any, Dict
 
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer, generate_openapi_spec, _get_api_methods
-
-
-def _find_free_port() -> int:
-    """Find a free port to avoid conflicts."""
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from tests._helpers import find_free_port as _find_free_port
 
 
 class RestServerLifecycleTests(unittest.TestCase):
