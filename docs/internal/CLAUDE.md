@@ -16,6 +16,67 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## OPERATION TERMINEE — Refactor god class CineSortApi + Quick UX (15 mai 2026) ✅
+
+Issue #84 (ARCH-P1) **god class CineSortApi** mergee en 10 PRs Strangler Fig (pattern Adapter + Facade pattern). Surface publique reduite de 104 -> 50 methodes (-52%). 5 facades par bounded context. PR fixes UX bonus (#143) + Issue #83 etape 1 (#144, #145).
+
+### Architecture facades
+
+5 facades injectees comme attributs sur CineSortApi :
+
+| Facade | Methodes | Acces |
+|---|---|---|
+| `api.run` | start_plan, get_status, get_plan, export_run_report, cancel_run, build_apply_preview, list_apply_history | **7** |
+| `api.settings` | get_settings, save_settings, set_locale, restart_api_server, reset_all_user_data, get_user_data_size | **6** |
+| `api.quality` | profil scoring + perceptual + feedback (21 methodes) | **21** |
+| `api.integrations` | TMDb + Jellyfin + Plex + Radarr | **11** |
+| `api.library` | get_library_filtered, smart playlists, scoring rollup, film history, export RGPD | **9** |
+| **Total** | **5 contextes** | **54** |
+
+### Pattern de delegation
+
+- **Avant** : `api.start_plan(payload)` (god class, 1 fichier 2200 lignes 104 methodes)
+- **Apres** : `api.run.start_plan(payload)` (facade, methode publique)
+- **Methodes directes privatisees** : `api._start_plan_impl(payload)` (encore appelable mais souligne)
+- **REST routes** : `POST /api/run/start_plan` (et plus `/api/start_plan` qui renvoie 404)
+
+### 10 PRs mergees (#129 -> #142)
+
+1. **#129 PR 1** : 5 facades squelette + 5 methodes pilote
+2. **#130 PR 2** : RunFacade complete (7 methodes)
+3. **#131 PR 3** : SettingsFacade complete (6 methodes)
+4. **#132 PR 4** : QualityFacade complete (21 methodes)
+5. **#133 PR 5** : IntegrationsFacade complete (11 methodes)
+6. **#134 PR 6** : LibraryFacade complete (9 methodes)
+7. **#135 PR 7** : Documentation finale REFACTOR_PLAN_84.md
+8. **#136 PR 8** : REST dispatcher walk facades (additif backward-compat)
+9. **#137 PR 9** : Frontend JS migre vers /api/<facade>/<method>
+10. **#142 PR 10** : Suppression 54 methodes directes (privatisation `_X_impl`)
+
+### PRs UX bonus (#143, #144, #145)
+
+- **#143** : routes Actions rapides Accueil corrigees (/library#step-analyse mort → /processing, /quality → /qij), helper `_unmask_or_stored` pour Test connexion avec cle masquee (4 endpoints test_* Jellyfin/Plex/Radarr/TMDb)
+- **#144** : Issue #83 etape 1 — 17 callers externes migres hors re-exports `domain.core` (preparation casser cycle domain↔app)
+- **#145** : Documentation REFACTOR_PLAN_83.md (suite a faire : 3-5 jours)
+
+### Tests + smoke test
+
+- **Snapshot test** `tests/test_cinesort_api_snapshot.py` regenere : 104 -> 50 methodes publiques
+- **Build EXE** : 50.78 MB (cohérent vs 49.84 MB baseline v7.7.0)
+- **REST spec** : 102 endpoints exposes (50 directs + 52 facade routes)
+- **Suite pytest** : 4020+ tests passent
+- **Scripts one-shot commites** pour audit : `scripts/migrate_js_to_facades_84.py`, `migrate_py_to_facades_84.py`, `privatize_cinesort_api_84.py`, `fix_patch_object_84.py`, `fix_remaining_assertions_84.py`
+
+### Reste sur #83 (4 etapes a faire en sessions futures, 3-5 jours)
+
+- Etape 2 : bouger fonctions de `domain/core.py` (qui utilisent app.X) vers `app/`
+- Etape 3 : convertir 179 lazy imports en top-level
+- Etape 4 : installer import-linter en CI
+
+Cf `docs/internal/REFACTOR_PLAN_83.md` pour le plan complet.
+
+---
+
 ## OPERATION TERMINEE — Audit Claude v3 + Hardening security (12 mai 2026) ✅
 
 Session intensive d'amelioration de l'audit automatique via GitHub Actions + 
@@ -632,7 +693,7 @@ Decomposition par axe (notation justifiable, pas marketing) :
 | **Packaging** | 9.0 / 10 | PyInstaller solide, signing CI, splash, manifest DPI, ICO multi-res, bundle 49.84 MB |
 | **Securite** | 8.0 / 10 | DPAPI 5 secrets, scrubber, REST hardening, mais 2 HIGH connus (cf section "Dette technique connue") |
 | **Tests** | 7.0 / 10 | 4187 fonctions test, coverage 81 %, mais 31 skip caches dont 26 "V5C-01/V5C-03" deferred ; modules securite-critiques (move_journal, move_reconciliation, composite_score V1, local_secret_store) sans test direct ; visual regression e2e est une coquille vide |
-| **Architecture** | 7.0 / 10 | Couches domain/infra/app/ui respectees en surface mais cycle `domain → app` resolu par 161 imports lazy ; frontend triple-systeme (legacy + shared + dashboard) |
+| **Architecture** | 7.5 / 10 | God class CineSortApi -> 5 facades par bounded context (issue #84 mergee 15 mai). Cycle `domain → app` partiellement reduit (issue #83 etape 1 mergee, reste 3-5 j). Frontend triple-systeme toujours present. |
 | **Performance** | 7.0 / 10 | Parallelisme perceptual + probe livre ; 6 optims triviales identifiees non faites (gain ~15-20 min sur scan 5k NAS) |
 | **Qualite code** | 6.5 / 10 | 49 fonctions > 100L (vs "0" revendique), 17 fonctions > 150L, 276 magic numbers, 120 fonctions ≥ 6 params, Ruff config trop laxiste pour appliquer les regles ecrites dans CLAUDE.md |
 | **Documentation** | 6.0 / 10 | CLAUDE.md desaligne (corrige par ce commit), ROADMAP.md s'arrete a v4 (mai 2026 = v7.7.0 livree), absence de SETTINGS.md exhaustif |
@@ -658,7 +719,7 @@ Decomposition par axe (notation justifiable, pas marketing) :
 | **`# noqa` morts** (RUF100) | 23 | `ruff check --select RUF100` |
 | **Composants JS dupliques** (desktop ↔ dashboard) | **22** | `comm -12 <(ls web/components) <(ls web/dashboard/components)` |
 | **Migrations SQL** | 21 (jusqu'a 021 ON DELETE CASCADE) | `ls cinesort/infra/db/migrations/` |
-| **Endpoints REST publics** | ~135 (vs ~95 reellement appeles par le frontend) | introspection `cinesort_api.py` |
+| **Endpoints REST publics** | **102** (50 directs + 52 facade routes, depuis #84) | introspection `cinesort_api.py` |
 | **Packaging** | 49.84 MB onefile (incluant LPIPS ONNX + onnxruntime) | `dist/CineSort.exe` |
 
 ### Verification continue
@@ -699,8 +760,9 @@ Ajouter `python scripts/measure_codebase_health.py --output ...` au workflow CI 
 
 ### Dette structurelle (Phases 6, 8, 9, 10, 12)
 
+- ✅ **God class CineSortApi (issue #84)** : RESOLU le 15 mai 2026 via 10 PRs Strangler Fig. 104 -> 50 methodes publiques sur CineSortApi, 5 facades par bounded context (api.run, api.settings, api.quality, api.integrations, api.library). REST routes prefixees `/api/<facade>/<method>`.
 - **49 fonctions > 100L** dont 17 > 150L (top : `_execute_perceptual_analysis` 309L, `apply_rows` 271L, `_build_dashboard_section` 241L)
-- **Cycle d'imports `domain/core.py → app/`** (commentaire admet "M10 : refactoring majeur devra les supprimer") resolu par 161 `import cinesort.X` indentes dans des fonctions
+- **Cycle d'imports `domain/core.py → app/` (issue #83)** : EN COURS. PR #144 (etape 1, 17 callers migres) mergee. 4 imports top-level + 38 re-exports + 179 lazy imports a finir en 3-5 jours. Cf `docs/internal/REFACTOR_PLAN_83.md`.
 - **22 composants JS dupliques** entre `web/components/` (IIFE) et `web/dashboard/components/` (ESM) — bugs corriges deux fois
 - **Frontend triple-systeme** : `web/styles.css` (87 KB) + `web/dashboard/styles.css` (82 KB) + `web/shared/components.css` (94 KB) — CLAUDE.md note "reporte v7.7.0+" non resolu
 - **`web/index.html` + `web/views/*.js` (~9000 LOC)** potentiellement dead code (le dashboard charge `web/dashboard/index.html` ; le legacy desktop n'apparait pas dans `app.py` cote pywebview)
