@@ -118,7 +118,7 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if not candidate.exists():
             return {"ok": False, "message": "Chemin introuvable."}
 
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         root_raw = str(settings.get("root") or "").strip()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 

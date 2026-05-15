@@ -177,7 +177,7 @@ def _check_updates_in_background(api: CineSortApi, settings: dict | None = None)
 
     def _worker() -> None:
         try:
-            s = settings or api.get_settings()
+            s = settings or api.settings.get_settings()
             enabled = s.get("auto_check_updates")
             if enabled is None:
                 enabled = s.get("update_check_enabled", True)
@@ -215,7 +215,7 @@ def _purge_tmdb_cache_in_background(api: CineSortApi, settings: dict | None = No
 
     def _worker() -> None:
         try:
-            s = settings or api.get_settings()
+            s = settings or api.settings.get_settings()
             try:
                 ttl_days = int(s.get("tmdb_cache_ttl_days") or 30)
             except (TypeError, ValueError):
@@ -253,7 +253,7 @@ def _start_watcher(api: CineSortApi, settings: dict | None = None) -> None:
     """Start the folder watcher if enabled in settings."""
     from cinesort.app.watcher import FolderWatcher
 
-    s = settings or api.get_settings()
+    s = settings or api.settings.get_settings()
     if not s.get("watch_enabled"):
         return
     roots_raw = s.get("roots") or ([s.get("root")] if s.get("root") else [])
@@ -276,7 +276,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     """
     from cinesort.infra.rest_server import RestApiServer
 
-    s = settings or api.get_settings()
+    s = settings or api.settings.get_settings()
     token = str(s.get("rest_api_token") or "").strip()
     # Auto-persistance : `apply_settings_defaults` genere un token aleatoire si
     # absent du settings.json, mais ne le persiste pas (= NOUVEAU token a chaque
@@ -292,7 +292,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
         if settings_path and settings_path.is_file():
             raw = _json.loads(settings_path.read_text(encoding="utf-8"))
             if not str(raw.get("rest_api_token") or "").strip() and token:
-                api.save_settings({**s, "rest_api_token": token})
+                api.settings.save_settings({**s, "rest_api_token": token})
                 print("[REST] Token persiste dans settings.json (auto-gen).", file=sys.stderr)
     except Exception as exc:
         print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
@@ -360,7 +360,7 @@ def main_api() -> None:
     install_rotating_log(state_dir / "logs", level=boot_level)
 
     api = CineSortApi()
-    settings = api.get_settings()
+    settings = api.settings.get_settings()
 
     # V3-04 polish v7.7.0 : appliquer le log_level depuis settings.json (sauf
     # si une env var l'a deja override).
@@ -573,7 +573,7 @@ def main() -> None:
         # Le pywebview charge le dashboard depuis ce serveur local.
         # Le serveur bind sur 127.0.0.1 si rest_api_enabled=False (desktop local seul)
         # ou sur 0.0.0.0 si rest_api_enabled=True (LAN distant).
-        settings_early = api.get_settings()
+        settings_early = api.settings.get_settings()
 
         # V3-04 polish v7.7.0 : appliquer log_level depuis settings.json (si
         # une env var n'a pas deja override).
@@ -597,7 +597,7 @@ def main() -> None:
         # Re-lire les settings au cas ou _start_rest_server a auto-genere et persiste
         # un nouveau token (cf fix : token vide -> auto-gen + save). Indispensable
         # pour que la construction de main_url ci-dessous trouve le bon token.
-        settings_early = api.get_settings()
+        settings_early = api.settings.get_settings()
 
         # --- 3. Determiner l'URL a charger : dashboard local ou fallback legacy ---
         ui_variant = resolve_ui_variant()
@@ -650,7 +650,7 @@ def main() -> None:
 
                 _log.info("splash: etape 2 — Chargement des reglages")
                 _update_splash(splash, 2, "Chargement des reglages...", 25)
-                settings = api.get_settings()
+                settings = api.settings.get_settings()
                 _time.sleep(0.1)
 
                 _log.info("splash: etape 3 — Base de donnees")

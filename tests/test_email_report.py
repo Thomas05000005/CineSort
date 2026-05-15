@@ -164,7 +164,7 @@ class EmailSettingsTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertFalse(s.get("email_enabled"))
         self.assertEqual(s.get("email_smtp_port"), 587)
         self.assertTrue(s.get("email_smtp_tls"))
@@ -181,7 +181,7 @@ class EmailSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -192,7 +192,7 @@ class EmailSettingsTests(unittest.TestCase):
                     "email_to": "a@b.c",
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["email_enabled"])
             self.assertEqual(s["email_smtp_host"], "smtp.x.com")
             self.assertEqual(s["email_smtp_port"], 465)

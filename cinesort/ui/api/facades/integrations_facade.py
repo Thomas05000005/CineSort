@@ -33,14 +33,14 @@ class IntegrationsFacade(_BaseFacade):
 
         Cf CineSortApi.test_tmdb_key pour la doc complete.
         """
-        return self._api.test_tmdb_key(api_key, state_dir, timeout_s)
+        return self._api._test_tmdb_key_impl(api_key, state_dir, timeout_s)
 
     def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
         """Recupere les URL posters TMDb pour une liste d'IDs.
 
         Cf CineSortApi.get_tmdb_posters pour la doc complete.
         """
-        return self._api.get_tmdb_posters(tmdb_ids, size)
+        return self._api._get_tmdb_posters_impl(tmdb_ids, size)
 
     # ---------- Jellyfin (3) ----------
 
@@ -54,21 +54,21 @@ class IntegrationsFacade(_BaseFacade):
 
         Cf CineSortApi.test_jellyfin_connection pour la doc complete.
         """
-        return self._api.test_jellyfin_connection(url=url, api_key=api_key, timeout_s=timeout_s)
+        return self._api._test_jellyfin_connection_impl(url=url, api_key=api_key, timeout_s=timeout_s)
 
     def get_jellyfin_libraries(self) -> Dict[str, Any]:
         """Retourne les bibliotheques Jellyfin configurees.
 
         Cf CineSortApi.get_jellyfin_libraries pour la doc complete.
         """
-        return self._api.get_jellyfin_libraries()
+        return self._api._get_jellyfin_libraries_impl()
 
     def get_jellyfin_sync_report(self, run_id: str = "") -> Dict[str, Any]:
         """Rapport de sync Jellyfin pour un run (ou dernier run).
 
         Cf CineSortApi.get_jellyfin_sync_report pour la doc complete.
         """
-        return self._api.get_jellyfin_sync_report(run_id)
+        return self._api._get_jellyfin_sync_report_impl(run_id)
 
     # ---------- Plex (3) ----------
 
@@ -82,7 +82,7 @@ class IntegrationsFacade(_BaseFacade):
 
         Cf CineSortApi.test_plex_connection pour la doc complete.
         """
-        return self._api.test_plex_connection(url=url, token=token, timeout_s=timeout_s)
+        return self._api._test_plex_connection_impl(url=url, token=token, timeout_s=timeout_s)
 
     def get_plex_libraries(
         self,
@@ -94,14 +94,14 @@ class IntegrationsFacade(_BaseFacade):
 
         Cf CineSortApi.get_plex_libraries pour la doc complete.
         """
-        return self._api.get_plex_libraries(url=url, token=token, timeout_s=timeout_s)
+        return self._api._get_plex_libraries_impl(url=url, token=token, timeout_s=timeout_s)
 
     def get_plex_sync_report(self, run_id: str = "") -> Dict[str, Any]:
         """Rapport de sync Plex pour un run (ou dernier run).
 
         Cf CineSortApi.get_plex_sync_report pour la doc complete.
         """
-        return self._api.get_plex_sync_report(run_id)
+        return self._api._get_plex_sync_report_impl(run_id)
 
     # ---------- Radarr (3) ----------
 
@@ -115,18 +115,18 @@ class IntegrationsFacade(_BaseFacade):
 
         Cf CineSortApi.test_radarr_connection pour la doc complete.
         """
-        return self._api.test_radarr_connection(url=url, api_key=api_key, timeout_s=timeout_s)
+        return self._api._test_radarr_connection_impl(url=url, api_key=api_key, timeout_s=timeout_s)
 
     def get_radarr_status(self, run_id: str = "") -> Dict[str, Any]:
         """Statut Radarr pour un run (films trouves vs absents).
 
         Cf CineSortApi.get_radarr_status pour la doc complete.
         """
-        return self._api.get_radarr_status(run_id)
+        return self._api._get_radarr_status_impl(run_id)
 
     def request_radarr_upgrade(self, radarr_movie_id: int) -> Dict[str, Any]:
         """Declenche un upgrade Radarr pour un film.
 
         Cf CineSortApi.request_radarr_upgrade pour la doc complete.
         """
-        return self._api.request_radarr_upgrade(radarr_movie_id)
+        return self._api._request_radarr_upgrade_impl(radarr_movie_id)

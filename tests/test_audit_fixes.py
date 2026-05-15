@@ -23,14 +23,16 @@ class EndpointCoexistenceTests(unittest.TestCase):
 
     def test_both_export_endpoints_exist(self):
         api = CineSortApi()
+        # Issue #84 PR 10 : export_quality_profile est sur la QualityFacade
         # Historique : profile brut
-        self.assertTrue(hasattr(api, "export_quality_profile"))
+        self.assertTrue(hasattr(api.quality, "export_quality_profile"))
         # P4.3 : wrappé avec metadata
         self.assertTrue(hasattr(api, "export_shareable_profile"))
 
     def test_both_import_endpoints_exist(self):
         api = CineSortApi()
-        self.assertTrue(hasattr(api, "import_quality_profile"))
+        # Issue #84 PR 10 : import_quality_profile est sur la QualityFacade
+        self.assertTrue(hasattr(api.quality, "import_quality_profile"))
         self.assertTrue(hasattr(api, "import_shareable_profile"))
 
     def test_shareable_endpoints_distinct_signatures(self):
@@ -38,7 +40,8 @@ class EndpointCoexistenceTests(unittest.TestCase):
 
         api = CineSortApi()
         sig_shareable = inspect.signature(api.export_shareable_profile)
-        sig_legacy = inspect.signature(api.export_quality_profile)
+        # Issue #84 PR 10 : export_quality_profile est sur la QualityFacade
+        sig_legacy = inspect.signature(api.quality.export_quality_profile)
         # shareable a plus de params
         self.assertGreater(len(sig_shareable.parameters), len(sig_legacy.parameters))
 
@@ -76,14 +79,15 @@ class DeleteFeedbackEndpointTests(unittest.TestCase):
     """FIX 5 : delete_score_feedback exposé et fonctionnel."""
 
     def test_endpoint_exists(self):
+        # Issue #84 PR 10 : delete_score_feedback est sur la QualityFacade
         api = CineSortApi()
-        self.assertTrue(hasattr(api, "delete_score_feedback"))
-        self.assertTrue(callable(api.delete_score_feedback))
+        self.assertTrue(hasattr(api.quality, "delete_score_feedback"))
+        self.assertTrue(callable(api.quality.delete_score_feedback))
 
     def test_returns_ok_structure(self):
         api = CineSortApi()
         # Suppression d'un feedback inexistant : ok=True, deleted_count=0
-        result = api.delete_score_feedback(999_999_999)
+        result = api.quality.delete_score_feedback(999_999_999)
         # Soit ok=True avec 0 supprimés, soit ok=False si store indispo
         self.assertIn("ok", result)
         if result.get("ok"):

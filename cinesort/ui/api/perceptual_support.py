@@ -87,7 +87,7 @@ def _validate_and_load_context(
     options: Optional[Dict[str, Any]],
 ) -> Any:
     """Valide les pre-requis et charge le contexte. Retourne un dict erreur ou un tuple contexte."""
-    settings = api.get_settings()
+    settings = api.settings.get_settings()
     if not settings.get("perceptual_enabled"):
         return {"ok": False, "message": "Analyse perceptuelle desactivee dans les reglages."}
 
@@ -491,7 +491,7 @@ def analyze_perceptual_batch(
     parallelism_enabled = True
     configured_workers = 0
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         parallelism_enabled = bool(settings.get("perceptual_parallelism_enabled", True))
         configured_workers = int(settings.get("perceptual_workers", 0) or 0)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -554,7 +554,7 @@ def compare_perceptual(
 ) -> Dict[str, Any]:
     """Comparaison perceptuelle profonde entre 2 fichiers du meme film."""
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         if not settings.get("perceptual_enabled"):
             return {"ok": False, "message": "Analyse perceptuelle desactivee dans les reglages."}
 

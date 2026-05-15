@@ -19,9 +19,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _make_mock_api():
+    # Issue #84 PR 10 : les helpers backend appellent maintenant via les facades
+    # (api.settings.get_settings, api.run.get_plan, api.integrations.get_tmdb_posters).
+    # On configure les mocks via les facades correspondantes.
     api = MagicMock()
-    api.get_settings.return_value = {"state_dir": None, "tmdb_api_key": ""}
-    api.get_plan.return_value = {
+    api.settings.get_settings.return_value = {"state_dir": None, "tmdb_api_key": ""}
+    api.run.get_plan.return_value = {
         "ok": True,
         "rows": [
             {
@@ -62,7 +65,7 @@ def _make_mock_api():
         },
     }
     api._get_or_create_infra.return_value = (store, None)
-    api.get_tmdb_posters.return_value = {"ok": True, "posters": {}}
+    api.integrations.get_tmdb_posters.return_value = {"ok": True, "posters": {}}
     return api, store
 
 
@@ -124,7 +127,7 @@ class FilmSupportBackendTests(unittest.TestCase):
         from cinesort.ui.api import film_support
 
         api = MagicMock()
-        api.get_settings.return_value = {"state_dir": None}
+        api.settings.get_settings.return_value = {"state_dir": None}
         store = MagicMock()
         store.list_runs.return_value = []
         api._get_or_create_infra.return_value = (store, None)
@@ -143,8 +146,10 @@ class FilmSupportBackendTests(unittest.TestCase):
 
 class TrifilmsApiEndpointTests(unittest.TestCase):
     def test_get_film_full_endpoint_exposed(self) -> None:
+        """Issue #84 PR 10 : get_film_full est sur la LibraryFacade (private impl)."""
         src = (_ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py").read_text(encoding="utf-8")
-        self.assertIn("def get_film_full", src)
+        # La methode est privatisee : `def _get_film_full_impl(self,...)`
+        self.assertIn("def _get_film_full_impl", src)
         self.assertIn("film_support.get_film_full", src)
 
     def test_film_support_module_imported(self) -> None:

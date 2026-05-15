@@ -318,7 +318,7 @@ class RestRequestIdHeaderTests(unittest.TestCase):
         state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(root),
                 "state_dir": str(state_dir),

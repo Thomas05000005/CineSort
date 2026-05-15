@@ -26,7 +26,7 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
     if run_id:
         return str(run_id)
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
         runs = store.list_runs(limit=1)
@@ -39,7 +39,7 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
 
 def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
     try:
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
     except (OSError, AttributeError, KeyError, TypeError, ValueError):
         return None
     if not plan or not plan.get("ok"):
@@ -54,7 +54,7 @@ def _fetch_poster_url(api: Any, tmdb_id: int) -> Optional[str]:
     if not tmdb_id or int(tmdb_id) <= 0:
         return None
     try:
-        result = api.get_tmdb_posters([int(tmdb_id)], "w342")
+        result = api.integrations.get_tmdb_posters([int(tmdb_id)], "w342")
         if result and result.get("ok"):
             return result.get("posters", {}).get(str(int(tmdb_id)))
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -104,7 +104,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
     probe_dict = None
     perceptual_dict = None
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
 

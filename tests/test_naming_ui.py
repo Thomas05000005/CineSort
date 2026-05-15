@@ -178,7 +178,7 @@ class NamingHttpTests(unittest.TestCase):
         cls.state_dir.mkdir()
 
         cls.api = backend.CineSortApi()
-        cls.api.save_settings(
+        cls.api.settings.save_settings(
             {
                 "root": str(cls.root),
                 "state_dir": str(cls.state_dir),
@@ -221,13 +221,16 @@ class NamingHttpTests(unittest.TestCase):
         self.assertEqual(len(data["presets"]), 5)
 
     def test_save_naming_preset_via_rest(self) -> None:
-        """Sauvegarder un preset via save_settings et verifier."""
+        """Sauvegarder un preset via save_settings et verifier.
+
+        Issue #84 PR 10 : routes get/save_settings sont sur SettingsFacade.
+        """
         # Charger settings actuels
-        _, settings = self._post("/api/get_settings")
+        _, settings = self._post("/api/settings/get_settings")
         settings["naming_preset"] = "jellyfin"
-        _, save_result = self._post("/api/save_settings", {"settings": settings})
+        _, save_result = self._post("/api/settings/save_settings", {"settings": settings})
         # Recharger
-        _, reloaded = self._post("/api/get_settings")
+        _, reloaded = self._post("/api/settings/get_settings")
         self.assertEqual(reloaded.get("naming_preset"), "jellyfin")
         self.assertIn("resolution", reloaded.get("naming_movie_template", ""))
 

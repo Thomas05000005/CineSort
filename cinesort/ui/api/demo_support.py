@@ -229,7 +229,7 @@ def _row_id_for(run_id: str, film: Dict[str, Any]) -> str:
 
 def _resolve_store(api: Any):
     """Retourne (settings, state_dir, store) en respectant le pattern api standard."""
-    settings = api.get_settings()
+    settings = api.settings.get_settings()
     state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
     store, _runner = api._get_or_create_infra(state_dir)
     return settings, state_dir, store

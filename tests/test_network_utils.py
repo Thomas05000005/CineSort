@@ -99,8 +99,8 @@ class ServerInfoEndpointTests(unittest.TestCase):
 
         api = CineSortApi()
         # Forcer enabled sans token → echec "aucun token"
-        with patch.object(api, "get_settings", return_value={"rest_api_enabled": True, "rest_api_token": ""}):
-            result = api.restart_api_server()
+        with patch.object(api, "_get_settings_impl", return_value={"rest_api_enabled": True, "rest_api_token": ""}):
+            result = api.settings.restart_api_server()
             self.assertFalse(result["ok"])
             self.assertIn("token", result["message"])
 
@@ -108,8 +108,8 @@ class ServerInfoEndpointTests(unittest.TestCase):
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         api = CineSortApi()
-        with patch.object(api, "get_settings", return_value={"rest_api_enabled": False}):
-            result = api.restart_api_server()
+        with patch.object(api, "_get_settings_impl", return_value={"rest_api_enabled": False}):
+            result = api.settings.restart_api_server()
             self.assertFalse(result["ok"])
             self.assertIn("desactivee", result["message"])
 

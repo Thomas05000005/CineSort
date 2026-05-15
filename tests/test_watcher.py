@@ -126,8 +126,8 @@ class WatcherLifecycleTests(unittest.TestCase):
             api = mock.MagicMock()
             api._runs = {}
             api._runs_lock = __import__("threading").Lock()
-            api.get_settings.return_value = {"roots": [str(root)]}
-            api.start_plan.return_value = {"ok": True, "run_id": "test"}
+            api.settings.get_settings.return_value = {"roots": [str(root)]}
+            api.run.start_plan.return_value = {"ok": True, "run_id": "test"}
 
             watcher = FolderWatcher(api, interval_s=0.1, roots=[root])
             watcher.start()
@@ -164,7 +164,7 @@ class WatcherSettingsTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        s = api.get_settings()
+        s = api.settings.get_settings()
         self.assertFalse(s.get("watch_enabled"))
         self.assertEqual(s.get("watch_interval_minutes"), 5)
 
@@ -178,7 +178,7 @@ class WatcherSettingsTests(unittest.TestCase):
             root.mkdir()
             sd.mkdir()
             api = backend.CineSortApi()
-            api.save_settings(
+            api.settings.save_settings(
                 {
                     "root": str(root),
                     "state_dir": str(sd),
@@ -187,7 +187,7 @@ class WatcherSettingsTests(unittest.TestCase):
                     "watch_interval_minutes": 10,
                 }
             )
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertTrue(s["watch_enabled"])
             self.assertEqual(s["watch_interval_minutes"], 10)
         finally:

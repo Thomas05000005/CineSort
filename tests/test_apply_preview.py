@@ -33,7 +33,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
     def _wait_done(self, api: CineSortApi, run_id: str, timeout_s: float = 10.0) -> None:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return
             time.sleep(0.05)
@@ -46,7 +46,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
             (folder / f"Film.{2010 + i}.1080p.mkv").write_bytes(b"x" * 2048)
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -56,7 +56,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         self.assertTrue(start.get("ok"))
         run_id = start["run_id"]
         self._wait_done(api, run_id)
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         return api, run_id, plan.get("rows", [])
 
     def test_preview_returns_films_and_totals(self):
@@ -64,7 +64,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         self.assertTrue(rows)
         decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
 
-        preview = api.build_apply_preview(run_id, decisions)
+        preview = api.run.build_apply_preview(run_id, decisions)
         self.assertTrue(preview.get("ok"), preview)
         self.assertIn("films", preview)
         self.assertIn("totals", preview)
@@ -77,7 +77,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         # Snapshot initial
         initial_entries = {p.name for p in self.root.iterdir()}
 
-        preview = api.build_apply_preview(run_id, decisions)
+        preview = api.run.build_apply_preview(run_id, decisions)
         self.assertTrue(preview.get("ok"))
 
         # Le filesystem doit être identique après preview
@@ -89,7 +89,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         row = rows[0]
         decisions = {row["row_id"]: {"ok": True, "title": row["proposed_title"], "year": row["proposed_year"]}}
 
-        preview = api.build_apply_preview(run_id, decisions)
+        preview = api.run.build_apply_preview(run_id, decisions)
         self.assertTrue(preview.get("films"))
         film = preview["films"][0]
         # Chaque film expose title, confidence, ops
@@ -102,7 +102,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
     def test_preview_classifies_change_type(self):
         api, run_id, rows = self._make_plan(n_films=1)
         decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
-        preview = api.build_apply_preview(run_id, decisions)
+        preview = api.run.build_apply_preview(run_id, decisions)
         film = preview["films"][0]
         # Un film à renommer à la racine doit être classé comme rename_folder ou move_mixed
         self.assertIn(film["change_type"], ("rename_folder", "move_mixed", "move_files", "noop"))
@@ -110,7 +110,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
     def test_preview_with_no_decisions_returns_empty_or_error(self):
         api, run_id, _ = self._make_plan(n_films=1)
         # Décisions vides
-        preview = api.build_apply_preview(run_id, {})
+        preview = api.run.build_apply_preview(run_id, {})
         # Peut retourner ok=False (validation) ou totals.films=0 selon la logique
         if preview.get("ok"):
             self.assertEqual(preview["totals"]["total_ops"], 0)
@@ -120,7 +120,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
     def test_preview_totals_consistent(self):
         api, run_id, rows = self._make_plan(n_films=2)
         decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
-        preview = api.build_apply_preview(run_id, decisions)
+        preview = api.run.build_apply_preview(run_id, decisions)
         totals = preview["totals"]
         # Les totals.changes_count + noop_count doit égaler films (au plus)
         self.assertLessEqual(totals["changes_count"] + totals["noop_count"], totals["films"] + 1)

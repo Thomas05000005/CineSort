@@ -303,30 +303,32 @@ class ApiEndpointTests(unittest.TestCase):
     """Tests que les endpoints sont enregistres dans CineSortApi."""
 
     def test_get_film_history_exists(self) -> None:
+        """Issue #84 PR 10 : get_film_history est sur la LibraryFacade."""
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "get_film_history"))
-        self.assertTrue(callable(api.get_film_history))
+        self.assertTrue(hasattr(api.library, "get_film_history"))
+        self.assertTrue(callable(api.library.get_film_history))
 
     def test_list_films_with_history_exists(self) -> None:
+        """Issue #84 PR 10 : list_films_with_history est sur la LibraryFacade."""
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "list_films_with_history"))
+        self.assertTrue(hasattr(api.library, "list_films_with_history"))
 
     def test_get_film_history_empty_id(self) -> None:
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.get_film_history("")
+        result = api.library.get_film_history("")
         self.assertFalse(result.get("ok"))
 
     def test_list_films_default(self) -> None:
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        result = api.list_films_with_history()
+        result = api.library.list_films_with_history()
         # Peut retourner ok=True avec films=[] ou ok=False si pas de state
         self.assertIn("ok", result)
 

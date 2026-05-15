@@ -150,26 +150,26 @@ class TestPerceptualSettingDefaults(unittest.TestCase):
     def _save(self, extra):
         base = {"root": str(self._root), "state_dir": str(self._sd)}
         base.update(extra)
-        return self.api.save_settings(base)
+        return self.api.settings.save_settings(base)
 
     def test_default_mode_is_auto(self):
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_parallelism_mode"), "auto")
 
     def test_roundtrip_valid_modes(self):
         for mode in ("auto", "max", "safe", "serial"):
             self._save({"perceptual_parallelism_mode": mode})
-            s = self.api.get_settings()
+            s = self.api.settings.get_settings()
             self.assertEqual(s.get("perceptual_parallelism_mode"), mode)
 
     def test_invalid_mode_fallbacks_to_auto(self):
         self._save({"perceptual_parallelism_mode": "bogus"})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_parallelism_mode"), "auto")
 
     def test_case_insensitive(self):
         self._save({"perceptual_parallelism_mode": "SERIAL"})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_parallelism_mode"), "serial")
 
 

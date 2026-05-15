@@ -33,7 +33,7 @@ class UndoApplyTests(unittest.TestCase):
         deadline = time.time() + timeout_s
         last = {}
         while time.time() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return
             time.sleep(0.05)
@@ -54,7 +54,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src_folder / "Old.Name.2010.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -66,7 +66,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
@@ -99,7 +99,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src_folder / "DryRun.Movie.2011.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -111,7 +111,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
         dry = api.apply(run_id, decisions, True, False)
@@ -129,7 +129,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(noise_folder / "poster.jpg", size=64)
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -144,7 +144,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
         applied = api.apply(run_id, decisions, False, False)
@@ -174,7 +174,7 @@ class UndoApplyTests(unittest.TestCase):
 
     def test_undo_preview_logs_structured_error_and_returns_clean_message(self) -> None:
         api = CineSortApi()
-        saved = api.save_settings(
+        saved = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -222,7 +222,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src2 / "Film.Beta.2021.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -234,7 +234,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 2)
         decisions = self._build_decisions(rows)
@@ -260,7 +260,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src2 / "Sel.Movie.B.2023.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -272,7 +272,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 2)
         decisions = self._build_decisions(rows)
@@ -295,7 +295,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src / "Hist.Movie.2019.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -307,12 +307,12 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
         api.apply(run_id, decisions, False, False)
 
-        history = api.list_apply_history(run_id)
+        history = api.run.list_apply_history(run_id)
         self.assertTrue(history.get("ok"), history)
         batches = history.get("batches", [])
         self.assertGreaterEqual(len(batches), 1)
@@ -323,7 +323,7 @@ class UndoApplyTests(unittest.TestCase):
         self._create_file(src / "DrySelective.2020.1080p.mkv")
 
         api = CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -335,7 +335,7 @@ class UndoApplyTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
         api.apply(run_id, decisions, False, False)

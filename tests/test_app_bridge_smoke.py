@@ -89,7 +89,9 @@ class AppBridgeSmokeTests(unittest.TestCase):
         self.assertTrue(main.get("hidden"))
         # js_api doit etre passe a create_window (pas assigne apres coup)
         self.assertIsNotNone(main.get("js_api"), "js_api doit etre passe a create_window")
-        self.assertTrue(hasattr(main.get("js_api"), "get_settings"))
+        # Issue #84 PR 10 : get_settings est sur la SettingsFacade
+        self.assertTrue(hasattr(main.get("js_api"), "settings"))
+        self.assertTrue(hasattr(main.get("js_api").settings, "get_settings"))
 
 
 if __name__ == "__main__":

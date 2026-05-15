@@ -486,13 +486,13 @@ class NamingSettingsTests(unittest.TestCase):
         root.mkdir()
         state.mkdir()
         api = backend.CineSortApi()
-        api.save_settings({"root": str(root), "state_dir": str(state), "tmdb_enabled": False})
+        api.settings.save_settings({"root": str(root), "state_dir": str(state), "tmdb_enabled": False})
         return api, tmp
 
     def test_default_naming_settings(self) -> None:
         api, tmp = self._make_api()
         try:
-            s = api.get_settings()
+            s = api.settings.get_settings()
             self.assertEqual(s.get("naming_preset"), "default")
             self.assertEqual(s.get("naming_movie_template"), "{title} ({year})")
             self.assertEqual(s.get("naming_tv_template"), "{series} ({year})")
@@ -504,10 +504,10 @@ class NamingSettingsTests(unittest.TestCase):
     def test_save_plex_preset(self) -> None:
         api, tmp = self._make_api()
         try:
-            s = api.get_settings()
+            s = api.settings.get_settings()
             s["naming_preset"] = "plex"
-            api.save_settings(s)
-            reloaded = api.get_settings()
+            api.settings.save_settings(s)
+            reloaded = api.settings.get_settings()
             self.assertEqual(reloaded["naming_preset"], "plex")
             self.assertIn("tmdb_tag", reloaded["naming_movie_template"])
         finally:
@@ -518,11 +518,11 @@ class NamingSettingsTests(unittest.TestCase):
     def test_custom_template_preserved(self) -> None:
         api, tmp = self._make_api()
         try:
-            s = api.get_settings()
+            s = api.settings.get_settings()
             s["naming_preset"] = "custom"
             s["naming_movie_template"] = "{title} [{resolution}]"
-            api.save_settings(s)
-            reloaded = api.get_settings()
+            api.settings.save_settings(s)
+            reloaded = api.settings.get_settings()
             self.assertEqual(reloaded["naming_preset"], "custom")
             self.assertEqual(reloaded["naming_movie_template"], "{title} [{resolution}]")
         finally:
@@ -533,11 +533,11 @@ class NamingSettingsTests(unittest.TestCase):
     def test_invalid_custom_template_fallback(self) -> None:
         api, tmp = self._make_api()
         try:
-            s = api.get_settings()
+            s = api.settings.get_settings()
             s["naming_preset"] = "custom"
             s["naming_movie_template"] = "{foobar} [{badvar}]"
-            api.save_settings(s)
-            reloaded = api.get_settings()
+            api.settings.save_settings(s)
+            reloaded = api.settings.get_settings()
             # Template invalide → fallback
             self.assertEqual(reloaded["naming_movie_template"], "{title} ({year})")
         finally:
@@ -548,10 +548,10 @@ class NamingSettingsTests(unittest.TestCase):
     def test_invalid_preset_fallback(self) -> None:
         api, tmp = self._make_api()
         try:
-            s = api.get_settings()
+            s = api.settings.get_settings()
             s["naming_preset"] = "nonexistent"
-            api.save_settings(s)
-            reloaded = api.get_settings()
+            api.settings.save_settings(s)
+            reloaded = api.settings.get_settings()
             self.assertEqual(reloaded["naming_preset"], "default")
         finally:
             import shutil
@@ -578,7 +578,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
         root.mkdir()
         state.mkdir()
         api = backend.CineSortApi()
-        api.save_settings({"root": str(root), "state_dir": str(state), "tmdb_enabled": False})
+        api.settings.save_settings({"root": str(root), "state_dir": str(state), "tmdb_enabled": False})
         return api, tmp
 
     def test_preview_default_template(self) -> None:

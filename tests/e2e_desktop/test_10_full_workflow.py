@@ -79,7 +79,7 @@ class TestFullWorkflow:
             root = test_library["root"]
             # Desactiver TMDb pour eviter les lookups reseau lents
             result = page.evaluate(f"""async () => {{
-                return await window.pywebview.api.save_settings({{
+                return await window.pywebview.api.settings.save_settings({{
                     roots: ["{root.replace(chr(92), chr(92) * 2)}"],
                     root: "{root.replace(chr(92), chr(92) * 2)}",
                     probe_backend: "none",

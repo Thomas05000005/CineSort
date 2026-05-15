@@ -20,7 +20,7 @@ def get_film_history(api: Any, film_id: str) -> Dict[str, Any]:
         return {"ok": False, "message": "film_id requis."}
 
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
         timeline = get_film_timeline(fid, Path(state_dir), store)
@@ -33,7 +33,7 @@ def list_films_with_history(api: Any, limit: int = 50) -> Dict[str, Any]:
     """Retourne la liste des films du dernier run avec un resume."""
     lim = max(1, min(200, int(limit or 50)))
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
         films = list_films_overview(Path(state_dir), store, limit=lim)

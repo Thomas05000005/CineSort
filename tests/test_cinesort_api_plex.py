@@ -23,16 +23,16 @@ class TestPlexConnection(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_url_or_token_missing_returns_message(self) -> None:
-        result = self.api.test_plex_connection(url="", token="")
+        result = self.api.integrations.test_plex_connection(url="", token="")
         self.assertFalse(result["ok"])
         self.assertIn("URL", result["message"])
 
     def test_only_url_returns_message(self) -> None:
-        result = self.api.test_plex_connection(url="http://10.0.0.1:32400", token="")
+        result = self.api.integrations.test_plex_connection(url="http://10.0.0.1:32400", token="")
         self.assertFalse(result["ok"])
 
     def test_only_token_returns_message(self) -> None:
-        result = self.api.test_plex_connection(url="", token="abc")
+        result = self.api.integrations.test_plex_connection(url="", token="abc")
         self.assertFalse(result["ok"])
 
     @patch("cinesort.infra.plex_client.PlexClient")
@@ -40,7 +40,7 @@ class TestPlexConnection(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": True, "version": "1.30", "server_name": "Plex"}
         mock_client_cls.return_value = client
-        result = self.api.test_plex_connection(url="http://10.0.0.1:32400", token="abc", timeout_s=10.0)
+        result = self.api.integrations.test_plex_connection(url="http://10.0.0.1:32400", token="abc", timeout_s=10.0)
         self.assertTrue(result["ok"])
         self.assertEqual(result["version"], "1.30")
         mock_client_cls.assert_called_once()
@@ -53,7 +53,7 @@ class TestPlexConnection(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": True}
         mock_client_cls.return_value = client
-        self.api.test_plex_connection(url="http://x", token="t", timeout_s=999.0)
+        self.api.integrations.test_plex_connection(url="http://x", token="t", timeout_s=999.0)
         kwargs = mock_client_cls.call_args.kwargs
         self.assertLessEqual(kwargs.get("timeout_s", 0), 30)
 
@@ -62,7 +62,7 @@ class TestPlexConnection(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": True}
         mock_client_cls.return_value = client
-        self.api.test_plex_connection(url="http://x", token="t", timeout_s=0.0)
+        self.api.integrations.test_plex_connection(url="http://x", token="t", timeout_s=0.0)
         kwargs = mock_client_cls.call_args.kwargs
         self.assertGreaterEqual(kwargs.get("timeout_s", 0), 1)
 
@@ -79,7 +79,7 @@ class TestGetPlexLibraries(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_no_url_no_token_no_settings(self) -> None:
-        result = self.api.get_plex_libraries(url="", token="")
+        result = self.api.integrations.get_plex_libraries(url="", token="")
         self.assertFalse(result["ok"])
         self.assertIn("requis", result["message"])
 
@@ -88,7 +88,7 @@ class TestGetPlexLibraries(unittest.TestCase):
         client = MagicMock()
         client.get_libraries.return_value = [{"id": "1", "name": "Films", "type": "movie"}]
         mock_client_cls.return_value = client
-        result = self.api.get_plex_libraries(url="http://10.0.0.1:32400", token="abc")
+        result = self.api.integrations.get_plex_libraries(url="http://10.0.0.1:32400", token="abc")
         self.assertTrue(result["ok"])
         self.assertEqual(len(result["libraries"]), 1)
         self.assertEqual(result["libraries"][0]["name"], "Films")
@@ -100,11 +100,11 @@ class TestGetPlexLibraries(unittest.TestCase):
         client = MagicMock()
         client.get_libraries.side_effect = PlexError("server unreachable")
         mock_client_cls.return_value = client
-        result = self.api.get_plex_libraries(url="http://x", token="t")
+        result = self.api.integrations.get_plex_libraries(url="http://x", token="t")
         self.assertFalse(result["ok"])
         self.assertIn("server unreachable", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.plex_client.PlexClient")
     def test_fallback_settings(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         # Mock settings : retourne URL/token configurés
@@ -115,7 +115,7 @@ class TestGetPlexLibraries(unittest.TestCase):
         client = MagicMock()
         client.get_libraries.return_value = []
         mock_client_cls.return_value = client
-        result = self.api.get_plex_libraries(url="", token="")
+        result = self.api.integrations.get_plex_libraries(url="", token="")
         self.assertTrue(result["ok"])
         args = mock_client_cls.call_args.args
         self.assertEqual(args[0], "http://settings.local:32400")
@@ -133,14 +133,14 @@ class TestGetPlexSyncReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plex_enabled": False}
-        result = self.api.get_plex_sync_report()
+        result = self.api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("Plex non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_but_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -148,11 +148,11 @@ class TestGetPlexSyncReport(unittest.TestCase):
             "plex_token": "abc",
             "plex_library_id": "1",
         }
-        result = self.api.get_plex_sync_report()
+        result = self.api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("manquant", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_but_library_id_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -160,11 +160,11 @@ class TestGetPlexSyncReport(unittest.TestCase):
             "plex_token": "abc",
             "plex_library_id": "",
         }
-        result = self.api.get_plex_sync_report()
+        result = self.api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("manquant", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_no_run_done(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -172,11 +172,11 @@ class TestGetPlexSyncReport(unittest.TestCase):
             "plex_token": "abc",
             "plex_library_id": "1",
         }
-        result = self.api.get_plex_sync_report()
+        result = self.api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.plex_client.PlexClient")
     def test_plex_connection_error_returns_message(
         self, mock_client_cls: MagicMock, mock_get_settings: MagicMock
@@ -204,7 +204,7 @@ class TestGetPlexSyncReport(unittest.TestCase):
             (self.state_dir / "runs" / "r1").mkdir(parents=True)
             (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
 
-            result = self.api.get_plex_sync_report(run_id="r1")
+            result = self.api.integrations.get_plex_sync_report(run_id="r1")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun film", result["message"])
 

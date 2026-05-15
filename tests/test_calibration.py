@@ -191,16 +191,16 @@ class SubmitFeedbackIntegrationTests(unittest.TestCase):
         folder.mkdir()
         (folder / "movie.mkv").write_bytes(b"x" * 2048)
         api = CineSortApi()
-        start = api.start_plan({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        start = api.run.start_plan({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
         import time as _time
 
-        while not api.get_status(start["run_id"], 0).get("done"):
+        while not api.run.get_status(start["run_id"], 0).get("done"):
             _time.sleep(0.05)
-        plan = api.get_plan(start["run_id"])
+        plan = api.run.get_plan(start["run_id"])
         rows = plan.get("rows", [])
         self.assertTrue(rows)
         # Pas de quality_report généré → le endpoint doit refuser
-        r = api.submit_score_feedback(
+        r = api.quality.submit_score_feedback(
             run_id=start["run_id"],
             row_id=rows[0]["row_id"],
             user_tier="Gold",
@@ -211,14 +211,14 @@ class SubmitFeedbackIntegrationTests(unittest.TestCase):
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         api = CineSortApi()
-        r = api.submit_score_feedback(run_id="not_a_valid_id", row_id="x", user_tier="Gold")
+        r = api.quality.submit_score_feedback(run_id="not_a_valid_id", row_id="x", user_tier="Gold")
         self.assertFalse(r.get("ok"))
 
     def test_missing_row_id(self):
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         api = CineSortApi()
-        r = api.submit_score_feedback(run_id="20260101_120000_000", row_id="", user_tier="Gold")
+        r = api.quality.submit_score_feedback(run_id="20260101_120000_000", row_id="", user_tier="Gold")
         self.assertFalse(r.get("ok"))
 
 

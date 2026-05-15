@@ -209,10 +209,11 @@ class EndpointTests(unittest.TestCase):
     """Tests que l'endpoint est dans CineSortApi."""
 
     def test_compare_perceptual_exists(self) -> None:
+        """Issue #84 PR 10 : compare_perceptual est sur QualityFacade."""
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "compare_perceptual"))
+        self.assertTrue(hasattr(api.quality, "compare_perceptual"))
 
 
 if __name__ == "__main__":

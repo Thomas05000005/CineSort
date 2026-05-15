@@ -1546,7 +1546,7 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if dry_run:
         return
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
     except (OSError, PermissionError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return
     if not _to_bool(settings.get("plex_enabled"), False):

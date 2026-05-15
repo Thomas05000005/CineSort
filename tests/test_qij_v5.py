@@ -12,8 +12,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 class ScoringRollupBackendTests(unittest.TestCase):
     def _make_api(self):
         api = MagicMock()
-        api.get_settings.return_value = {"state_dir": None}
-        api.get_plan.return_value = {
+        api.settings.get_settings.return_value = {"state_dir": None}
+        api.run.get_plan.return_value = {
             "ok": True,
             "rows": [
                 {
@@ -144,7 +144,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
         api = MagicMock()
         store = MagicMock()
         store.list_runs.return_value = []
-        api.get_settings.return_value = {"state_dir": None}
+        api.settings.get_settings.return_value = {"state_dir": None}
         api._get_or_create_infra.return_value = (store, None)
         result = library_support.get_scoring_rollup(api, by="franchise")
         self.assertEqual(result["groups"], [])
@@ -153,7 +153,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
 class TrifilmsApiRollupEndpointTests(unittest.TestCase):
     def test_get_scoring_rollup_endpoint_exposed(self) -> None:
         src = (_ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py").read_text(encoding="utf-8")
-        self.assertIn("def get_scoring_rollup", src)
+        self.assertIn("def _get_scoring_rollup_impl", src)
         self.assertIn("library_support.get_scoring_rollup", src)
 
 

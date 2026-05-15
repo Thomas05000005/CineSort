@@ -80,7 +80,7 @@ def effective_probe_settings_for_runtime(
     *,
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
-    current = api.get_settings()
+    current = api.settings.get_settings()
     base = probe_settings_from_run_row(run_row) if isinstance(run_row, dict) else {}
     cfg = probe_settings_from_dict(current if current else base)
     if not cfg.get("ffprobe_path") and base.get("ffprobe_path"):
@@ -111,7 +111,7 @@ def get_probe_tools_status(
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         payload = probe_tools_status_payload(
             api,
@@ -138,7 +138,7 @@ def recheck_probe_tools(
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         payload = probe_tools_status_payload(
             api,
@@ -168,7 +168,7 @@ def set_probe_tool_paths(
 ) -> Dict[str, Any]:
     try:
         incoming = payload if isinstance(payload, dict) else {}
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         ff_path = str(incoming.get("ffprobe_path") or "").strip()
         mi_path = str(incoming.get("mediainfo_path") or "").strip()
@@ -187,7 +187,7 @@ def set_probe_tool_paths(
         merged["probe_backend"] = backend
         merged["ffprobe_path"] = ff_path
         merged["mediainfo_path"] = mi_path
-        save_res = api.save_settings(merged)
+        save_res = api.settings.save_settings(merged)
         if not save_res.get("ok"):
             return save_res
         return api.recheck_probe_tools()
@@ -227,7 +227,7 @@ def install_probe_tools(
 ) -> Dict[str, Any]:
     opts = options if isinstance(options, dict) else {}
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         managed = manage_probe_tools_fn(
             action="install",
@@ -236,7 +236,7 @@ def install_probe_tools(
             state_dir=state_dir,
         )
         merged = _refresh_settings_with_detected_tool_paths(settings, managed)
-        api.save_settings(merged)
+        api.settings.save_settings(merged)
         managed["status"] = probe_tools_status_payload(
             api,
             settings=probe_settings_from_dict(merged),
@@ -269,7 +269,7 @@ def update_probe_tools(
 ) -> Dict[str, Any]:
     opts = options if isinstance(options, dict) else {}
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         managed = manage_probe_tools_fn(
             action="update",
@@ -278,7 +278,7 @@ def update_probe_tools(
             state_dir=state_dir,
         )
         merged = _refresh_settings_with_detected_tool_paths(settings, managed)
-        api.save_settings(merged)
+        api.settings.save_settings(merged)
         managed["status"] = probe_tools_status_payload(
             api,
             settings=probe_settings_from_dict(merged),
@@ -319,12 +319,12 @@ def auto_install_probe_tools(
         errors = result.get("errors", [])
 
         # Mettre a jour les settings avec les chemins installes
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         if installed.get("ffprobe"):
             settings["ffprobe_path"] = installed["ffprobe"]
         if installed.get("mediainfo"):
             settings["mediainfo_path"] = installed["mediainfo"]
-        api.save_settings(settings)
+        api.settings.save_settings(settings)
 
         # Rafraichir le statut probe
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())

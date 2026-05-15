@@ -21,7 +21,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.api = backend.CineSortApi()
-        self.api.save_settings(
+        self.api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -121,7 +121,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.api = backend.CineSortApi()
-        self.api.save_settings(
+        self.api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),

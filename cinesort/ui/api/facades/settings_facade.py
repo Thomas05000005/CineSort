@@ -32,39 +32,39 @@ class SettingsFacade(_BaseFacade):
 
         Cf CineSortApi.get_settings pour la doc complete.
         """
-        return self._api.get_settings()
+        return self._api._get_settings_impl()
 
     def save_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Persiste les settings + applique side effects (state_dir, locale, etc).
 
         Cf CineSortApi.save_settings pour la doc complete.
         """
-        return self._api.save_settings(settings)
+        return self._api._save_settings_impl(settings)
 
     def set_locale(self, locale: str) -> Dict[str, Any]:
         """Change la locale active (fr|en) et active immediatement le backend i18n.
 
         Cf CineSortApi.set_locale pour la doc complete.
         """
-        return self._api.set_locale(locale)
+        return self._api._set_locale_impl(locale)
 
     def restart_api_server(self) -> Dict[str, Any]:
         """Arrete et relance le serveur REST avec les settings actuels.
 
         Cf CineSortApi.restart_api_server pour la doc complete.
         """
-        return self._api.restart_api_server()
+        return self._api._restart_api_server_impl()
 
     def reset_all_user_data(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique).
 
         Cf CineSortApi.reset_all_user_data pour la doc complete.
         """
-        return self._api.reset_all_user_data(confirmation)
+        return self._api._reset_all_user_data_impl(confirmation)
 
     def get_user_data_size(self) -> Dict[str, Any]:
         """V3-09 — Taille actuelle du user-data (pour affichage UI Danger Zone).
 
         Cf CineSortApi.get_user_data_size pour la doc complete.
         """
-        return self._api.get_user_data_size()
+        return self._api._get_user_data_size_impl()

@@ -166,7 +166,7 @@ def _get_api_methods(api: Any) -> Dict[str, Any]:
 
     Resultat : les 2 voies sont actives simultanement, sans rupture
     de backward-compat :
-    - "/api/start_plan" -> api.start_plan(...)
+    - "/api/start_plan" -> api.run.start_plan(...)
     - "/api/run/start_plan" -> api.run.start_plan(...)
 
     Quand la PR 10 supprimera les methodes directes de CineSortApi, seuls

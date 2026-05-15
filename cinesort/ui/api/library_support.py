@@ -126,7 +126,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     """Construit la liste des rows Library enrichies (probe + perceptual V2)."""
     # Charger le plan
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -148,7 +148,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     quality_by_row = {str(q.get("row_id", "")): q for q in quality_list}
 
     # PlanRows
-    plan_result = api.get_plan(run_id)
+    plan_result = api.run.get_plan(run_id)
     if not plan_result or not plan_result.get("ok"):
         return []
     plan_rows = plan_result.get("rows") or []
@@ -290,7 +290,7 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
     if run_id:
         return str(run_id)
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
         runs = store.list_runs(limit=1)
@@ -382,7 +382,7 @@ def get_library_filtered(
 
 def _get_playlists_from_settings(api: Any) -> List[Dict[str, Any]]:
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
     except (OSError, AttributeError, KeyError, TypeError, ValueError):
         return []
     raw = settings.get("smart_playlists")
@@ -393,9 +393,9 @@ def _get_playlists_from_settings(api: Any) -> List[Dict[str, Any]]:
 
 def _write_playlists_to_settings(api: Any, playlists: List[Dict[str, Any]]) -> bool:
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         settings["smart_playlists"] = playlists
-        api.save_settings(settings)
+        api.settings.save_settings(settings)
         return True
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("save smart_playlists failed: %s", exc)

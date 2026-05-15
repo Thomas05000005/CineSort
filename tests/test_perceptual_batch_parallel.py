@@ -186,7 +186,7 @@ class TestRunBatchParallel(unittest.TestCase):
 
 def _make_api_mock(*, parallelism_enabled=True, workers=0):
     api = mock.MagicMock()
-    api.get_settings.return_value = {
+    api.settings.get_settings.return_value = {
         "perceptual_parallelism_enabled": parallelism_enabled,
         "perceptual_workers": workers,
     }
@@ -273,10 +273,10 @@ class TestAnalyzePerceptualBatch(unittest.TestCase):
 
     @mock.patch("cinesort.ui.api.perceptual_support.get_perceptual_report")
     def test_settings_lookup_failure_fallback(self, mock_get):
-        """Si api.get_settings() leve, on retombe sur defauts (auto + enabled)."""
+        """Si api.settings.get_settings() leve, on retombe sur defauts (auto + enabled)."""
         mock_get.return_value = {"ok": True, "perceptual": {"global_score": 80}}
         api = mock.MagicMock()
-        api.get_settings.side_effect = AttributeError("no settings")
+        api.settings.get_settings.side_effect = AttributeError("no settings")
         api._perceptual_cancel_event = None
         result = analyze_perceptual_batch(api, "run1", ["r1", "r2"])
         # Pas de crash, tout traite. workers_used >= 1.
@@ -337,47 +337,47 @@ class TestPerceptualWorkersSetting(unittest.TestCase):
     def _save(self, extra):
         base = {"root": str(self._root), "state_dir": str(self._sd)}
         base.update(extra)
-        return self.api.save_settings(base)
+        return self.api.settings.save_settings(base)
 
     def test_default_values(self):
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertTrue(s.get("perceptual_parallelism_enabled"))
         self.assertEqual(s.get("perceptual_workers"), 0)
 
     def test_kill_switch_persists(self):
         self._save({"perceptual_parallelism_enabled": False})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertFalse(s.get("perceptual_parallelism_enabled"))
 
     def test_workers_clamped_to_16(self):
         self._save({"perceptual_workers": 99})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 16)
 
     def test_workers_negative_falls_to_zero(self):
         self._save({"perceptual_workers": -5})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 0)
 
     def test_workers_string_auto(self):
         self._save({"perceptual_workers": "auto"})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 0)
 
     def test_workers_string_numeric(self):
         self._save({"perceptual_workers": "4"})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 4)
 
     def test_workers_invalid_string_falls_to_zero(self):
         self._save({"perceptual_workers": "bogus"})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 0)
 
     def test_workers_bool_rejected(self):
         # bool est sous-classe d'int -> on rejette pour eviter True->1 silencieux.
         self._save({"perceptual_workers": True})
-        s = self.api.get_settings()
+        s = self.api.settings.get_settings()
         self.assertEqual(s.get("perceptual_workers"), 0)
 
 

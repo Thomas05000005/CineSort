@@ -154,10 +154,11 @@ class EndpointAndUiTests(unittest.TestCase):
     """Tests endpoint et presence UI."""
 
     def test_endpoint_exists(self) -> None:
+        """Issue #84 PR 10 : get_jellyfin_sync_report est sur IntegrationsFacade."""
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "get_jellyfin_sync_report"))
+        self.assertTrue(hasattr(api.integrations, "get_jellyfin_sync_report"))
 
     def test_ui_sync_button(self) -> None:
         root = Path(__file__).resolve().parents[1]

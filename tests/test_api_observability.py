@@ -21,7 +21,7 @@ class ApiObservabilityTests(unittest.TestCase):
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
         self.api = backend.CineSortApi()
-        saved = self.api.save_settings(
+        saved = self.api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -125,8 +125,8 @@ class ApiObservabilityTests(unittest.TestCase):
     def test_analyze_quality_batch_logs_structured_error_and_returns_clean_message(self) -> None:
         run_id = "20260309_120000_010"
         with self.assertLogs(api_mod.logger, level="ERROR") as logs:
-            with mock.patch.object(self.api, "get_quality_report", side_effect=OSError("quality batch boom")):
-                out = self.api.analyze_quality_batch(run_id, ["row_1"], {"reuse_existing": False})
+            with mock.patch.object(self.api, "_get_quality_report_impl", side_effect=OSError("quality batch boom")):
+                out = self.api.quality.analyze_quality_batch(run_id, ["row_1"], {"reuse_existing": False})
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible de terminer l'analyse qualite.")

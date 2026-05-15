@@ -22,21 +22,21 @@ class TestEmailReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_smtp_host_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "", "email_to": "x@y"}
         result = self.api.test_email_report()
         self.assertFalse(result["ok"])
         self.assertIn("SMTP", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_email_to_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "smtp.example.com", "email_to": ""}
         result = self.api.test_email_report()
         self.assertFalse(result["ok"])
 
     @patch("cinesort.app.email_report.send_email_report")
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_send_success(self, mock_get_settings: MagicMock, mock_send: MagicMock) -> None:
         mock_get_settings.return_value = {
             "email_smtp_host": "smtp.example.com",
@@ -52,7 +52,7 @@ class TestEmailReport(unittest.TestCase):
         self.assertEqual(args[1], "post_scan")
 
     @patch("cinesort.app.email_report.send_email_report")
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_send_failure(self, mock_get_settings: MagicMock, mock_send: MagicMock) -> None:
         mock_get_settings.return_value = {
             "email_smtp_host": "smtp.example.com",
@@ -78,7 +78,7 @@ class TestGetJellyfinLibraries(unittest.TestCase):
     @patch("cinesort.ui.api.cinesort_api._read_settings")
     def test_jellyfin_url_missing(self, mock_read_settings: MagicMock) -> None:
         mock_read_settings.return_value = {"jellyfin_url": "", "jellyfin_api_key": "k"}
-        result = self.api.get_jellyfin_libraries()
+        result = self.api.integrations.get_jellyfin_libraries()
         self.assertFalse(result["ok"])
         self.assertIn("non configur", result["message"])
 
@@ -95,7 +95,7 @@ class TestGetJellyfinLibraries(unittest.TestCase):
         client.get_libraries.return_value = [{"id": "1", "name": "Films"}]
         client.get_movies_count.return_value = 100
         mock_jf_cls.return_value = client
-        result = self.api.get_jellyfin_libraries()
+        result = self.api.integrations.get_jellyfin_libraries()
         self.assertTrue(result["ok"])
         self.assertEqual(result["movies_count"], 100)
         client.get_libraries.assert_called_once_with("uid42")
@@ -115,7 +115,7 @@ class TestGetJellyfinLibraries(unittest.TestCase):
         client.get_libraries.return_value = []
         client.get_movies_count.return_value = 0
         mock_jf_cls.return_value = client
-        result = self.api.get_jellyfin_libraries()
+        result = self.api.integrations.get_jellyfin_libraries()
         self.assertTrue(result["ok"])
         client.validate_connection.assert_called_once()
         client.get_libraries.assert_called_once_with("auto_uid")
@@ -131,7 +131,7 @@ class TestGetJellyfinLibraries(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": False, "error": "401 unauthorized"}
         mock_jf_cls.return_value = client
-        result = self.api.get_jellyfin_libraries()
+        result = self.api.integrations.get_jellyfin_libraries()
         self.assertFalse(result["ok"])
         self.assertIn("unauthorized", result["message"])
 
@@ -148,7 +148,7 @@ class TestGetJellyfinLibraries(unittest.TestCase):
         client = MagicMock()
         client.get_libraries.side_effect = JellyfinError("connection refused")
         mock_jf_cls.return_value = client
-        result = self.api.get_jellyfin_libraries()
+        result = self.api.integrations.get_jellyfin_libraries()
         self.assertFalse(result["ok"])
         self.assertIn("connection refused", result["message"])
 
@@ -164,25 +164,25 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"jellyfin_enabled": False}
-        result = self.api.get_jellyfin_sync_report()
+        result = self.api.integrations.get_jellyfin_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "jellyfin_enabled": True,
             "jellyfin_url": "",
             "jellyfin_api_key": "k",
         }
-        result = self.api.get_jellyfin_sync_report()
+        result = self.api.integrations.get_jellyfin_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("manquante", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_no_run(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "jellyfin_enabled": True,
@@ -190,11 +190,11 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
             "jellyfin_api_key": "k",
             "jellyfin_user_id": "uid",
         }
-        result = self.api.get_jellyfin_sync_report()
+        result = self.api.integrations.get_jellyfin_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.jellyfin_client.JellyfinClient")
     def test_jellyfin_connection_error(self, mock_jf_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.jellyfin_client import JellyfinError
@@ -216,7 +216,7 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
             (self.state_dir / "runs" / "r1").mkdir(parents=True)
             (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
 
-            result = self.api.get_jellyfin_sync_report(run_id="r1")
+            result = self.api.integrations.get_jellyfin_sync_report(run_id="r1")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun film", result["message"])
 

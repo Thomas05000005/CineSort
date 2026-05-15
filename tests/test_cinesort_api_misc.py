@@ -54,7 +54,7 @@ class TestServerInfoAndQR(unittest.TestCase):
     def test_get_dashboard_qr_fallback(self) -> None:
         # Pas de serveur → fallback settings
         self.api._rest_server = None  # type: ignore[attr-defined]
-        with patch.object(backend.CineSortApi, "get_settings") as mock_gs:
+        with patch.object(backend.CineSortApi, "_get_settings_impl") as mock_gs:
             mock_gs.return_value = {"rest_api_port": 8642, "rest_api_https_enabled": False}
             with (
                 patch("cinesort.infra.network_utils.get_local_ip", return_value="10.0.0.5"),
@@ -68,7 +68,7 @@ class TestServerInfoAndQR(unittest.TestCase):
 
     def test_get_dashboard_qr_segno_failure(self) -> None:
         self.api._rest_server = None  # type: ignore[attr-defined]
-        with patch.object(backend.CineSortApi, "get_settings") as mock_gs:
+        with patch.object(backend.CineSortApi, "_get_settings_impl") as mock_gs:
             mock_gs.return_value = {"rest_api_port": 8642}
             with (
                 patch("cinesort.infra.network_utils.get_local_ip", return_value="10.0.0.5"),
@@ -91,21 +91,21 @@ class TestRestartApiServer(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_restart_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"rest_api_enabled": False}
-        result = self.api.restart_api_server()
+        result = self.api.settings.restart_api_server()
         self.assertFalse(result["ok"])
         self.assertIn("desactivee", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_restart_no_token(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"rest_api_enabled": True, "rest_api_token": ""}
-        result = self.api.restart_api_server()
+        result = self.api.settings.restart_api_server()
         self.assertFalse(result["ok"])
         self.assertIn("token", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.rest_server.RestApiServer")
     def test_restart_success(self, mock_server_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
@@ -117,12 +117,12 @@ class TestRestartApiServer(unittest.TestCase):
         server.dashboard_url = "http://x:8642/"
         server._is_https = False
         mock_server_cls.return_value = server
-        result = self.api.restart_api_server()
+        result = self.api.settings.restart_api_server()
         self.assertTrue(result["ok"])
         self.assertEqual(result["dashboard_url"], "http://x:8642/")
         server.start.assert_called_once()
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.rest_server.RestApiServer")
     def test_restart_stops_old_server(self, mock_server_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
@@ -136,7 +136,7 @@ class TestRestartApiServer(unittest.TestCase):
         new_server.dashboard_url = "http://new:8642/"
         new_server._is_https = False
         mock_server_cls.return_value = new_server
-        self.api.restart_api_server()
+        self.api.settings.restart_api_server()
         old_server.stop.assert_called_once()
 
 
@@ -255,24 +255,24 @@ class TestCustomRulesEndpoints(unittest.TestCase):
         self.api = backend.CineSortApi()
 
     def test_get_custom_rules_templates(self) -> None:
-        result = self.api.get_custom_rules_templates()
+        result = self.api.quality.get_custom_rules_templates()
         self.assertTrue(result["ok"])
         self.assertIsInstance(result["templates"], list)
 
     def test_get_custom_rules_catalog(self) -> None:
-        result = self.api.get_custom_rules_catalog()
+        result = self.api.quality.get_custom_rules_catalog()
         self.assertTrue(result["ok"])
         for k in ("fields", "operators", "actions"):
             self.assertIn(k, result)
             self.assertIsInstance(result[k], list)
 
     def test_validate_custom_rules_empty(self) -> None:
-        result = self.api.validate_custom_rules(rules=[])
+        result = self.api.quality.validate_custom_rules(rules=[])
         self.assertTrue(result["ok"])
         self.assertEqual(result["normalized"], [])
 
     def test_validate_custom_rules_invalid(self) -> None:
-        result = self.api.validate_custom_rules(rules=[{"invalid": "structure"}])
+        result = self.api.quality.validate_custom_rules(rules=[{"invalid": "structure"}])
         self.assertFalse(result["ok"])
         self.assertIsInstance(result["errors"], list)
 
@@ -426,19 +426,19 @@ class TestSubmitScoreFeedback(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_invalid_run_id(self) -> None:
-        result = self.api.submit_score_feedback(run_id="bad id!", row_id="r1", user_tier="Gold")
+        result = self.api.quality.submit_score_feedback(run_id="bad id!", row_id="r1", user_tier="Gold")
         self.assertFalse(result["ok"])
         self.assertIn("run_id", result["message"])
 
     def test_missing_row_id(self) -> None:
         with patch.object(self.api, "_is_valid_run_id", return_value=True):
-            result = self.api.submit_score_feedback(run_id="x", row_id="", user_tier="Gold")
+            result = self.api.quality.submit_score_feedback(run_id="x", row_id="", user_tier="Gold")
             self.assertFalse(result["ok"])
             self.assertIn("requis", result["message"])
 
     def test_missing_user_tier(self) -> None:
         with patch.object(self.api, "_is_valid_run_id", return_value=True):
-            result = self.api.submit_score_feedback(run_id="x", row_id="r", user_tier="")
+            result = self.api.quality.submit_score_feedback(run_id="x", row_id="r", user_tier="")
             self.assertFalse(result["ok"])
 
     def test_run_not_found(self) -> None:
@@ -446,7 +446,7 @@ class TestSubmitScoreFeedback(unittest.TestCase):
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=None),
         ):
-            result = self.api.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
+            result = self.api.quality.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
             self.assertFalse(result["ok"])
             self.assertIn("introuvable", result["message"])
 
@@ -457,7 +457,7 @@ class TestSubmitScoreFeedback(unittest.TestCase):
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
         ):
-            result = self.api.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
+            result = self.api.quality.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
             self.assertFalse(result["ok"])
             self.assertIn("Rapport qualit", result["message"])
 
@@ -469,7 +469,7 @@ class TestSubmitScoreFeedback(unittest.TestCase):
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
         ):
-            result = self.api.submit_score_feedback(
+            result = self.api.quality.submit_score_feedback(
                 run_id="x", row_id="r", user_tier="Platinum", category_focus="video", comment="great"
             )
             self.assertTrue(result["ok"])
@@ -485,7 +485,7 @@ class TestSubmitScoreFeedback(unittest.TestCase):
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
             patch.object(self.api, "log_api_exception"),
         ):
-            result = self.api.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
+            result = self.api.quality.submit_score_feedback(run_id="x", row_id="r", user_tier="Gold")
             self.assertFalse(result["ok"])
 
 
@@ -505,13 +505,13 @@ class TestDeleteScoreFeedback(unittest.TestCase):
             store = MagicMock()
             store.delete_user_quality_feedback.return_value = 1
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.delete_score_feedback(feedback_id=42)
+            result = self.api.quality.delete_score_feedback(feedback_id=42)
             self.assertTrue(result["ok"])
             self.assertEqual(result["deleted_count"], 1)
 
     def test_store_init_fails(self) -> None:
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("err")):
-            result = self.api.delete_score_feedback(feedback_id=1)
+            result = self.api.quality.delete_score_feedback(feedback_id=1)
             self.assertFalse(result["ok"])
 
     def test_delete_failure(self) -> None:
@@ -520,7 +520,7 @@ class TestDeleteScoreFeedback(unittest.TestCase):
             store.delete_user_quality_feedback.side_effect = OSError("sql")
             mock_infra.return_value = (store, MagicMock())
             with patch.object(self.api, "log_api_exception"):
-                result = self.api.delete_score_feedback(feedback_id=1)
+                result = self.api.quality.delete_score_feedback(feedback_id=1)
                 self.assertFalse(result["ok"])
 
 
@@ -537,7 +537,7 @@ class TestGetCalibrationReport(unittest.TestCase):
 
     def test_store_init_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("err")):
-            result = self.api.get_calibration_report()
+            result = self.api.quality.get_calibration_report()
             self.assertFalse(result["ok"])
 
     def test_no_feedbacks_no_active_profile(self) -> None:
@@ -546,7 +546,7 @@ class TestGetCalibrationReport(unittest.TestCase):
             store.list_user_quality_feedback.return_value = []
             store.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.get_calibration_report()
+            result = self.api.quality.get_calibration_report()
             self.assertTrue(result["ok"])
             self.assertIn("bias", result)
             self.assertIn("current_weights", result)
@@ -557,7 +557,7 @@ class TestGetCalibrationReport(unittest.TestCase):
             store.list_user_quality_feedback.return_value = []
             store.get_active_quality_profile.return_value = {"profile_json": "not_json"}
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.get_calibration_report()
+            result = self.api.quality.get_calibration_report()
             self.assertTrue(result["ok"])
 
     def test_list_feedbacks_failure(self) -> None:
@@ -566,7 +566,7 @@ class TestGetCalibrationReport(unittest.TestCase):
             store.list_user_quality_feedback.side_effect = OSError("read fail")
             mock_infra.return_value = (store, MagicMock())
             with patch.object(self.api, "log_api_exception"):
-                result = self.api.get_calibration_report()
+                result = self.api.quality.get_calibration_report()
                 self.assertFalse(result["ok"])
 
 

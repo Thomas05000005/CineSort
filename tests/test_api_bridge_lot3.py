@@ -44,7 +44,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         deadline = time.monotonic() + timeout_s
         last = {}
         while time.monotonic() < deadline:
-            last = api.get_status(run_id, 0)
+            last = api.run.get_status(run_id, 0)
             if last.get("done"):
                 return last
             time.sleep(0.03)
@@ -54,7 +54,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "Inception.2010.1080p" / "Inception.2010.1080p.mkv")
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -72,7 +72,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_defaults_are_generic(self) -> None:
         api = backend.CineSortApi()
         api._state_dir = self.state_dir / "fresh_defaults"  # type: ignore[attr-defined]
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
 
         root = str(settings.get("root") or "")
         self.assertEqual(root, r"D:\Films")
@@ -98,7 +98,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             db_path.unlink()
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -136,7 +136,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             conn.commit()
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -167,7 +167,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "Heat.1995.1080p" / "Heat.1995.1080p.mkv")
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -191,7 +191,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "Avatar.2009.1080p" / "Avatar.2009.1080p.mkv")
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -200,7 +200,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             }
         )
         run_id = start["run_id"]
-        status = api.get_status(run_id, 0)
+        status = api.run.get_status(run_id, 0)
         self.assertTrue(status.get("ok"), status)
 
         expected_v6 = {
@@ -235,7 +235,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         core.plan_library = slow_plan_library
         try:
             api = backend.CineSortApi()
-            start = api.start_plan(
+            start = api.run.start_plan(
                 {
                     "root": str(self.root),
                     "state_dir": str(self.state_dir),
@@ -245,12 +245,12 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             )
             run_id = start["run_id"]
 
-            first = api.cancel_run(run_id)
+            first = api.run.cancel_run(run_id)
             self.assertTrue(first["ok"], first)
             terminal = self._wait_terminal(api, run_id)
             self.assertEqual(terminal.get("status"), "CANCELLED")
 
-            second = api.cancel_run(run_id)
+            second = api.run.cancel_run(run_id)
             self.assertFalse(second["ok"], second)
         finally:
             core.plan_library = original_plan_library
@@ -266,7 +266,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         api._get_or_create_infra = boom  # type: ignore[attr-defined]
         try:
-            start = api.start_plan(
+            start = api.run.start_plan(
                 {
                     "root": str(self.root),
                     "state_dir": str(self.state_dir),
@@ -284,7 +284,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "Interstellar.2014.1080p" / "Interstellar.2014.1080p.mkv")
 
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -296,7 +296,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         status = self._wait_terminal(api, run_id)
         self.assertFalse(bool(status.get("error")), status)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
@@ -321,7 +321,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_apply_rejects_second_concurrent_call_for_same_run(self) -> None:
         self._create_file(self.root / "Concurrent.2016.1080p" / "Concurrent.2016.1080p.mkv")
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -332,7 +332,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         run_id = start["run_id"]
         self._wait_terminal(api, run_id)
 
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
@@ -383,7 +383,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_apply_stops_if_duplicate_check_fails(self) -> None:
         self._create_file(self.root / "DupFail.2017.1080p" / "DupFail.2017.1080p.mkv")
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -393,7 +393,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         )
         run_id = start["run_id"]
         self._wait_terminal(api, run_id)
-        plan = api.get_plan(run_id)
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
         decisions = {
@@ -489,7 +489,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_install_probe_tools_logs_structured_error_and_returns_clean_message(self) -> None:
         api = backend.CineSortApi()
-        saved = api.save_settings(
+        saved = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -509,14 +509,15 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(any("API_EXCEPTION endpoint=install_probe_tools" in line for line in logs.output), logs.output)
 
     def test_backend_wrapper_import_compat(self) -> None:
+        """Issue #84 PR 10 : get_settings est desormais sur api.settings (facade)."""
         self.assertTrue(hasattr(backend, "CineSortApi"))
         api = backend.CineSortApi()
-        self.assertTrue(callable(api.get_settings))
+        self.assertTrue(callable(api.settings.get_settings))
 
     def test_runstate_logs_are_capped_in_memory(self) -> None:
         self._create_file(self.root / "Cap.Logs.2001.1080p" / "Cap.Logs.2001.1080p.mkv")
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -688,31 +689,33 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_save_settings_rejects_explicit_empty_root(self) -> None:
         api = backend.CineSortApi()
-        result = api.save_settings({"root": "", "state_dir": str(self.state_dir)})
+        result = api.settings.save_settings({"root": "", "state_dir": str(self.state_dir)})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
     def test_start_plan_rejects_explicit_empty_root(self) -> None:
         api = backend.CineSortApi()
-        result = api.start_plan({"root": "", "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        result = api.run.start_plan({"root": "", "state_dir": str(self.state_dir), "tmdb_enabled": False})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
     def test_save_settings_without_root_reuses_saved_root(self) -> None:
         api = backend.CineSortApi()
-        initial = api.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        initial = api.settings.save_settings(
+            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
         self.assertTrue(initial.get("ok"), initial)
 
-        result = api.save_settings({"state_dir": str(self.state_dir), "tmdb_enabled": True})
+        result = api.settings.save_settings({"state_dir": str(self.state_dir), "tmdb_enabled": True})
         self.assertTrue(result.get("ok"), result)
 
-        saved = api.get_settings()
+        saved = api.settings.get_settings()
         self.assertEqual(str(saved.get("root") or ""), str(self.root))
 
     def test_save_settings_persists_tmdb_key_when_remember_enabled(self) -> None:
         api = backend.CineSortApi()
         protection_ok = api_mod.protection_available()
-        result = api.save_settings(
+        result = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -728,7 +731,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             "windows_dpapi_current_user" if protection_ok else "unavailable",
         )
 
-        saved = api.get_settings()
+        saved = api.settings.get_settings()
         # SEC-H2 (v7.8.0) : la cle TMDb est MASQUEE dans get_settings (8 bullets •).
         # Avant le fix, elle etait retournee en clair — fuite REST si attaquant LAN.
         mask = "•" * 8
@@ -754,7 +757,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_save_settings_does_not_persist_tmdb_key_when_remember_disabled(self) -> None:
         api = backend.CineSortApi()
-        result = api.save_settings(
+        result = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -767,7 +770,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertFalse(result.get("tmdb_key_persisted"), result)
         self.assertEqual(str(result.get("tmdb_key_protection") or ""), "none")
 
-        saved = api.get_settings()
+        saved = api.settings.get_settings()
         self.assertEqual(str(saved.get("tmdb_api_key") or ""), "")
         self.assertFalse(bool(saved.get("remember_key")))
         self.assertEqual(str(saved.get("tmdb_key_protection") or ""), "none")
@@ -779,7 +782,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_save_settings_persists_residual_cleanup_settings(self) -> None:
         api = backend.CineSortApi()
-        result = api.save_settings(
+        result = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -794,7 +797,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         )
         self.assertTrue(result.get("ok"), result)
 
-        saved = api.get_settings()
+        saved = api.settings.get_settings()
         self.assertTrue(bool(saved.get("cleanup_residual_folders_enabled")))
         self.assertEqual(str(saved.get("cleanup_residual_folders_folder_name") or ""), "_Dossier Nettoyage")
         self.assertEqual(str(saved.get("cleanup_residual_folders_scope") or ""), "root_all")
@@ -806,7 +809,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_get_cleanup_residual_preview_reports_disabled_state(self) -> None:
         self._create_file(self.root / "Movie.Disabled.2020" / "Movie.Disabled.2020.mkv")
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -830,7 +833,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "ResiduelA" / "movie.nfo", 64)
         self._create_file(self.root / "ResiduelA" / "poster.jpg", 64)
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -859,7 +862,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._create_file(self.root / "ResiduelAvecVideo" / "movie.nfo", 64)
         self._create_file(self.root / "ResiduelAvecVideo" / "featurette.mkv", 64)
         api = backend.CineSortApi()
-        start = api.start_plan(
+        start = api.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -884,7 +887,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_partial_save_settings_preserves_remembered_tmdb_key(self) -> None:
         api = backend.CineSortApi()
         protection_ok = api_mod.protection_available()
-        first = api.save_settings(
+        first = api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -895,7 +898,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         )
         self.assertTrue(first.get("ok"), first)
 
-        partial = api.save_settings(
+        partial = api.settings.save_settings(
             {
                 "state_dir": str(self.state_dir),
                 "tmdb_enabled": True,
@@ -909,7 +912,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             "windows_dpapi_current_user" if protection_ok else "none",
         )
 
-        saved = api.get_settings()
+        saved = api.settings.get_settings()
         # SEC-H2 (v7.8.0) : la cle TMDb est MASQUEE dans get_settings (8 bullets •).
         # Avant le fix, elle etait retournee en clair — fuite REST si attaquant LAN.
         mask = "•" * 8
@@ -927,7 +930,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_tmdb_key_is_available_after_relaunch_when_remembered(self) -> None:
         protection_ok = api_mod.protection_available()
         first_api = backend.CineSortApi()
-        saved = first_api.save_settings(
+        saved = first_api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -940,7 +943,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         second_api = backend.CineSortApi()
         second_api._state_dir = self.state_dir  # type: ignore[attr-defined]
-        loaded = second_api.get_settings()
+        loaded = second_api.settings.get_settings()
         # SEC-H2 (v7.8.0) : get_settings() masque les cles maintenant. La cle reste
         # disponible en interne (DPAPI blob), seul le retour REST est masque.
         mask = "•" * 8
@@ -966,7 +969,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         fake_tmdb = mock.Mock()
         fake_tmdb.validate_key.return_value = (True, "TMDb OK")
         with mock.patch.object(api_mod, "TmdbClient", return_value=fake_tmdb):
-            result = second_api.test_tmdb_key(raw_tmdb_key, str(self.state_dir), 10.0)
+            result = second_api.integrations.test_tmdb_key(raw_tmdb_key, str(self.state_dir), 10.0)
 
         if protection_ok:
             self.assertTrue(result.get("ok"), result)
@@ -997,7 +1000,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         api = backend.CineSortApi()
         api._state_dir = self.state_dir  # type: ignore[attr-defined]
-        loaded = api.get_settings()
+        loaded = api.settings.get_settings()
         # SEC-H2 (v7.8.0) : meme la cle legacy plaintext est masquee dans le retour
         # de get_settings (defense en profondeur). La vraie valeur est accessible
         # via read_settings() interne pour la migration.
@@ -1006,7 +1009,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(loaded.get("_has_tmdb_api_key"))
         self.assertEqual(str(loaded.get("tmdb_key_protection") or ""), "plaintext_legacy")
 
-        migrated = api.save_settings(
+        migrated = api.settings.save_settings(
             {
                 "state_dir": str(self.state_dir),
                 "tmdb_enabled": True,
@@ -1030,17 +1033,19 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_save_settings_without_root_rejects_when_no_saved_root_exists(self) -> None:
         api = backend.CineSortApi()
-        result = api.save_settings({"state_dir": str(self.state_dir), "tmdb_enabled": False})
+        result = api.settings.save_settings({"state_dir": str(self.state_dir), "tmdb_enabled": False})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
     def test_start_plan_without_root_uses_saved_root(self) -> None:
         self._create_file(self.root / "Saved.Root.2014.1080p" / "Saved.Root.2014.1080p.mkv")
         api = backend.CineSortApi()
-        saved = api.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        saved = api.settings.save_settings(
+            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
         self.assertTrue(saved.get("ok"), saved)
 
-        start = api.start_plan(
+        start = api.run.start_plan(
             {"state_dir": str(self.state_dir), "tmdb_enabled": False, "collection_folder_enabled": True}
         )
         self.assertTrue(start.get("ok"), start)
@@ -1048,7 +1053,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
     def test_start_plan_without_root_rejects_when_no_saved_root_exists(self) -> None:
         api = backend.CineSortApi()
-        result = api.start_plan({"state_dir": str(self.state_dir), "tmdb_enabled": False})
+        result = api.run.start_plan({"state_dir": str(self.state_dir), "tmdb_enabled": False})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
@@ -1059,11 +1064,13 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         other_state.mkdir(parents=True, exist_ok=True)
         target_state.mkdir(parents=True, exist_ok=True)
         self.assertTrue(
-            api.save_settings({"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}).get("ok")
+            api.settings.save_settings(
+                {"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}
+            ).get("ok")
         )
         api._state_dir = other_state  # type: ignore[attr-defined]
 
-        result = api.save_settings({"state_dir": str(target_state), "tmdb_enabled": False})
+        result = api.settings.save_settings({"state_dir": str(target_state), "tmdb_enabled": False})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
@@ -1074,11 +1081,13 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         other_state.mkdir(parents=True, exist_ok=True)
         target_state.mkdir(parents=True, exist_ok=True)
         self.assertTrue(
-            api.save_settings({"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}).get("ok")
+            api.settings.save_settings(
+                {"root": str(self.root), "state_dir": str(other_state), "tmdb_enabled": False}
+            ).get("ok")
         )
         api._state_dir = other_state  # type: ignore[attr-defined]
 
-        result = api.start_plan({"state_dir": str(target_state), "tmdb_enabled": False})
+        result = api.run.start_plan({"state_dir": str(target_state), "tmdb_enabled": False})
         self.assertFalse(result.get("ok"), result)
         self.assertIn("ROOT", str(result.get("message") or ""))
 
@@ -1093,11 +1102,11 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         api = backend.CineSortApi()
         bad_ids = ["", "../evil", "abc/def", "run id", "x", "tri:123"]
         for bad in bad_ids:
-            st = api.get_status(bad, 0)
+            st = api.run.get_status(bad, 0)
             self.assertFalse(st.get("ok"), (bad, st))
             self.assertIn("run_id invalide", str(st.get("message", "")))
 
-            plan = api.get_plan(bad)
+            plan = api.run.get_plan(bad)
             self.assertFalse(plan.get("ok"), (bad, plan))
             self.assertIn("run_id invalide", str(plan.get("message", "")))
 

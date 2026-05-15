@@ -61,7 +61,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Meme sans aucun run, l'export doit retourner un payload bien forme."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.get_settings.return_value = {"data": {"tmdb_enabled": True}}
+        api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
         # Mock store with no runs
         store = MagicMock()
         store.get_runs_summary.return_value = []
@@ -79,7 +79,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Les settings dans l'export ne contiennent pas les secrets clairs."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.get_settings.return_value = {
+        api.settings.get_settings.return_value = {
             "data": {
                 "tmdb_api_key": "MY-REAL-KEY",
                 "tmdb_enabled": True,
@@ -99,7 +99,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Si un run DONE existe, ses films sont serialises avec decisions + scores."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.get_settings.return_value = {"data": {}}
+        api.settings.get_settings.return_value = {"data": {}}
 
         # Creer un run DONE avec plan.jsonl + validation.json
         run_id = "test_run_001"
@@ -155,7 +155,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Le payload doit etre serialisable JSON sans erreur."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.get_settings.return_value = {"data": {"tmdb_enabled": True}}
+        api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
         store = MagicMock()
         store.get_runs_summary.return_value = []
         api._get_or_create_infra.return_value = (store, MagicMock())
@@ -179,7 +179,7 @@ class ExportFullLibraryEdgeCasesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             api = MagicMock()
             api._state_dir = Path(tmp)
-            api.get_settings.side_effect = TypeError("settings broken")
+            api.settings.get_settings.side_effect = TypeError("settings broken")
             store = MagicMock()
             store.get_runs_summary.return_value = []
             api._get_or_create_infra.return_value = (store, MagicMock())

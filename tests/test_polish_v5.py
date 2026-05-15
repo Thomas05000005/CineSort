@@ -197,14 +197,15 @@ class BackendEndpointsV76Tests(unittest.TestCase):
         self.api_src = (_ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py").read_text(encoding="utf-8")
 
     def test_vague_3_endpoints(self) -> None:
+        """Issue #84 PR 10 : ces methodes sont privatisees en _X_impl (exposees via LibraryFacade)."""
         for method in ("get_library_filtered", "get_smart_playlists", "save_smart_playlist", "delete_smart_playlist"):
-            self.assertIn(f"def {method}", self.api_src)
+            self.assertIn(f"def _{method}_impl", self.api_src)
 
     def test_vague_4_endpoints(self) -> None:
-        self.assertIn("def get_film_full", self.api_src)
+        self.assertIn("def _get_film_full_impl", self.api_src)
 
     def test_vague_7_endpoints(self) -> None:
-        self.assertIn("def get_scoring_rollup", self.api_src)
+        self.assertIn("def _get_scoring_rollup_impl", self.api_src)
 
     def test_vague_9_endpoints(self) -> None:
         for method in (

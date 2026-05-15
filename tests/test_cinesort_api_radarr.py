@@ -23,16 +23,16 @@ class TestRadarrConnection(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_url_or_key_missing(self) -> None:
-        result = self.api.test_radarr_connection(url="", api_key="")
+        result = self.api.integrations.test_radarr_connection(url="", api_key="")
         self.assertFalse(result["ok"])
         self.assertIn("URL", result["message"])
 
     def test_only_url(self) -> None:
-        result = self.api.test_radarr_connection(url="http://10.0.0.1:7878", api_key="")
+        result = self.api.integrations.test_radarr_connection(url="http://10.0.0.1:7878", api_key="")
         self.assertFalse(result["ok"])
 
     def test_only_key(self) -> None:
-        result = self.api.test_radarr_connection(url="", api_key="abc")
+        result = self.api.integrations.test_radarr_connection(url="", api_key="abc")
         self.assertFalse(result["ok"])
 
     @patch("cinesort.infra.radarr_client.RadarrClient")
@@ -40,7 +40,7 @@ class TestRadarrConnection(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": True, "version": "5.1.0", "instance_name": "Radarr"}
         mock_client_cls.return_value = client
-        result = self.api.test_radarr_connection(url="http://10.0.0.1:7878", api_key="key")
+        result = self.api.integrations.test_radarr_connection(url="http://10.0.0.1:7878", api_key="key")
         self.assertTrue(result["ok"])
         self.assertEqual(result["version"], "5.1.0")
         mock_client_cls.assert_called_once()
@@ -50,7 +50,7 @@ class TestRadarrConnection(unittest.TestCase):
         client = MagicMock()
         client.validate_connection.return_value = {"ok": True}
         mock_client_cls.return_value = client
-        self.api.test_radarr_connection(url="http://x", api_key="k", timeout_s=999.0)
+        self.api.integrations.test_radarr_connection(url="http://x", api_key="k", timeout_s=999.0)
         kwargs = mock_client_cls.call_args.kwargs
         self.assertLessEqual(kwargs.get("timeout_s", 0), 30)
 
@@ -66,36 +66,36 @@ class TestGetRadarrStatus(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"radarr_enabled": False}
-        result = self.api.get_radarr_status()
+        result = self.api.integrations.get_radarr_status()
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_enabled_but_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
             "radarr_url": "",
             "radarr_api_key": "k",
         }
-        result = self.api.get_radarr_status()
+        result = self.api.integrations.get_radarr_status()
         self.assertFalse(result["ok"])
         self.assertIn("manquante", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_no_run(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
             "radarr_url": "http://x",
             "radarr_api_key": "k",
         }
-        result = self.api.get_radarr_status()
+        result = self.api.integrations.get_radarr_status()
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_radarr_connection_error(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.radarr_client import RadarrError
@@ -116,7 +116,7 @@ class TestGetRadarrStatus(unittest.TestCase):
             (self.state_dir / "runs" / "r1").mkdir(parents=True)
             (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
 
-            result = self.api.get_radarr_status(run_id="r1")
+            result = self.api.integrations.get_radarr_status(run_id="r1")
             self.assertFalse(result["ok"])
             self.assertIn("network down", result["message"])
 
@@ -132,36 +132,36 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"radarr_enabled": False}
-        result = self.api.request_radarr_upgrade(radarr_movie_id=42)
+        result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=42)
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_invalid_movie_id(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
             "radarr_url": "http://x",
             "radarr_api_key": "k",
         }
-        result = self.api.request_radarr_upgrade(radarr_movie_id=0)
+        result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=0)
         self.assertFalse(result["ok"])
         self.assertIn("invalide", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_negative_movie_id(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
             "radarr_url": "http://x",
             "radarr_api_key": "k",
         }
-        result = self.api.request_radarr_upgrade(radarr_movie_id=-1)
+        result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=-1)
         self.assertFalse(result["ok"])
         self.assertIn("invalide", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_upgrade_success(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
@@ -172,12 +172,12 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
         client = MagicMock()
         client.search_movie.return_value = True
         mock_client_cls.return_value = client
-        result = self.api.request_radarr_upgrade(radarr_movie_id=42)
+        result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=42)
         self.assertTrue(result["ok"])
         self.assertIn("42", result["message"])
         client.search_movie.assert_called_once_with(42)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_upgrade_radarr_error(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.radarr_client import RadarrError
@@ -190,7 +190,7 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
         client = MagicMock()
         client.search_movie.side_effect = RadarrError("server overloaded")
         mock_client_cls.return_value = client
-        result = self.api.request_radarr_upgrade(radarr_movie_id=42)
+        result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=42)
         self.assertFalse(result["ok"])
         self.assertIn("server overloaded", result["message"])
 

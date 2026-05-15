@@ -24,15 +24,20 @@ class SidebarCountersBackendTests(unittest.TestCase):
         self.assertTrue(callable(get_sidebar_counters))
 
     def test_returns_expected_keys_when_no_run(self) -> None:
+        """Issue #84 PR 10 : dashboard_support appelle api.settings.get_settings()."""
         from cinesort.ui.api.dashboard_support import get_sidebar_counters
 
         class FakeStore:
             def get_latest_run(self):
                 return None
 
-        class FakeApi:
+        class FakeSettingsFacade:
             def get_settings(self):
                 return {"state_dir": str(Path.cwd())}
+
+        class FakeApi:
+            def __init__(self) -> None:
+                self.settings = FakeSettingsFacade()
 
             def _get_or_create_infra(self, _state_dir):
                 return FakeStore(), None
@@ -47,9 +52,13 @@ class SidebarCountersBackendTests(unittest.TestCase):
         """Si get_settings explose, on retourne {0,0,0} (pas une exception)."""
         from cinesort.ui.api.dashboard_support import get_sidebar_counters
 
-        class BrokenApi:
+        class BrokenSettingsFacade:
             def get_settings(self):
                 raise OSError("boom")
+
+        class BrokenApi:
+            def __init__(self) -> None:
+                self.settings = BrokenSettingsFacade()
 
         out = get_sidebar_counters(BrokenApi())
         self.assertEqual(out, {"validation": 0, "application": 0, "quality": 0})

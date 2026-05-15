@@ -22,7 +22,7 @@ class TestDispatchPluginHook(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plugins_disabled_skips_dispatch(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plugins_enabled": False}
         # Import dispatch_hook to ensure it's not called
@@ -30,7 +30,7 @@ class TestDispatchPluginHook(unittest.TestCase):
             self.api._dispatch_plugin_hook("post_scan", {"x": 1})
             mock_dispatch.assert_not_called()
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plugins_enabled_calls_dispatch(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plugins_enabled": True, "plugins_timeout_s": 15}
         with patch("cinesort.app.plugin_hooks.dispatch_hook") as mock_dispatch:
@@ -42,14 +42,14 @@ class TestDispatchPluginHook(unittest.TestCase):
             self.assertEqual(args[0], "post_scan")
             self.assertEqual(args[1], {"x": 1})
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plugins_dispatch_swallows_errors(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plugins_enabled": True}
         with patch("cinesort.app.plugin_hooks.dispatch_hook", side_effect=ImportError("boom")):
             # Doit retourner sans exception (catch BLE001-like)
             self.api._dispatch_plugin_hook("post_scan", {})
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plugins_dispatch_default_timeout(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plugins_enabled": True}
         with patch("cinesort.app.plugin_hooks.dispatch_hook") as mock_dispatch:
@@ -69,7 +69,7 @@ class TestDispatchEmail(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_dispatch_email_calls_dispatch(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_enabled": True, "email_smtp_host": "smtp.x"}
         with patch("cinesort.app.email_report.dispatch_email") as mock_dispatch:
@@ -80,7 +80,7 @@ class TestDispatchEmail(unittest.TestCase):
             self.assertEqual(args[1], "post_scan")
             self.assertEqual(args[2], {"x": 1})
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_dispatch_email_swallows_errors(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_enabled": True}
         with patch("cinesort.app.email_report.dispatch_email", side_effect=ValueError("boom")):

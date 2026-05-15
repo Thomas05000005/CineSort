@@ -434,7 +434,7 @@ def _build_library_rows(rows: list, reports: list) -> list:
 def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
     target_run = str(run_id or "latest").strip()
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
 
@@ -1183,7 +1183,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
     """Aggregate statistics across multiple runs for global dashboard."""
     lim = max(2, min(100, int(limit_runs or 20)))
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
 
@@ -1358,7 +1358,7 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
     """
     empty = {"validation": 0, "application": 0, "quality": 0}
     try:
-        settings = api.get_settings()
+        settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
 
