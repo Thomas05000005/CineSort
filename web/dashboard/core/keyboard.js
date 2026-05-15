@@ -20,6 +20,11 @@ function _isInputFocused() {
 }
 
 function _showHelp() {
+  // Cf #92 quick win #7 : la modale reste un acces rapide aux raccourcis
+  // (utile pour le power user en cours de navigation) mais expose maintenant
+  // un lien explicite vers /help qui contient FAQ + glossaire en plus des
+  // raccourcis. Resout l'incoherence "2 portes" remontee par l'audit :
+  // l'utilisateur sait desormais qu'il y a plus de contenu disponible.
   const body = `
     <table class="tbl shortcuts-table"><tbody>
       <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>...<kbd>8</kbd></td><td>Navigation directe vers une vue</td></tr>
@@ -29,8 +34,21 @@ function _showHelp() {
       <tr><td><kbd>F5</kbd></td><td>Rafraîchir la vue</td></tr>
       <tr><td><kbd>?</kbd> ou <kbd>F1</kbd></td><td>Afficher cette aide</td></tr>
       <tr><td><kbd>Escape</kbd></td><td>Fermer la modale</td></tr>
-    </tbody></table>`;
+    </tbody></table>
+    <p class="mt-4 text-muted">Aide complete (FAQ, glossaire, raccourcis de validation) : <a href="#/help" class="link-primary" id="kbd-help-full-link">Voir l'aide complète &rarr;</a></p>`;
   showModal({ title: "Raccourcis clavier", body });
+  // Auto-ferme la modale quand l'utilisateur clique le lien (sinon le clic
+  // navigue mais la modale reste affichee, masquant le contenu de /help).
+  setTimeout(() => {
+    const link = document.getElementById("kbd-help-full-link");
+    if (link) {
+      link.addEventListener("click", () => {
+        const overlay = document.querySelector(".modal-overlay");
+        const closeBtn = overlay?.querySelector(".modal-close-btn");
+        if (closeBtn) closeBtn.click();
+      });
+    }
+  }, 0);
 }
 
 export function initKeyboard() {
