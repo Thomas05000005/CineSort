@@ -22,6 +22,7 @@ import uuid
 from typing import Any, Dict, List, Tuple
 
 from cinesort.infra import state
+from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -319,13 +320,15 @@ def _build_quality_metrics(film: Dict[str, Any]) -> Dict[str, Any]:
 def start_demo_mode(api: Any) -> Dict[str, Any]:
     """Active le mode démo : 1 run + 15 films + quality_reports + plan.jsonl."""
     if is_demo_active(api):
-        return {"ok": False, "error": "Mode démo déjà actif"}
+        return _err_response("Mode démo déjà actif", category="state", level="info", log_module=__name__, key="error")
 
     try:
         _, state_dir, store = _resolve_store(api)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.exception("V3-05 start_demo_mode resolve store")
-        return {"ok": False, "error": f"store indisponible: {exc}"}
+        return _err_response(
+            f"store indisponible: {exc}", category="state", level="error", log_module=__name__, key="error"
+        )
 
     started = time.time()
     run_id = f"demo_{int(started)}_{uuid.uuid4().hex[:6]}"
@@ -373,7 +376,7 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
         return {"ok": True, "run_id": run_id, "count": len(DEMO_FILMS)}
     except (OSError, AttributeError, KeyError, TypeError, ValueError, sqlite3.Error) as exc:
         logger.exception("V3-05 start_demo_mode failed")
-        return {"ok": False, "error": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
 
 
 def stop_demo_mode(api: Any) -> Dict[str, Any]:
@@ -387,13 +390,15 @@ def stop_demo_mode(api: Any) -> Dict[str, Any]:
         _, state_dir, store = _resolve_store(api)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.exception("V3-05 stop_demo_mode resolve store")
-        return {"ok": False, "error": f"store indisponible: {exc}"}
+        return _err_response(
+            f"store indisponible: {exc}", category="state", level="error", log_module=__name__, key="error"
+        )
 
     try:
         demo_run_ids = _list_demo_run_ids(store)
     except (OSError, AttributeError, TypeError, ValueError, sqlite3.Error) as exc:
         logger.exception("V3-05 stop_demo_mode list runs")
-        return {"ok": False, "error": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
 
     removed = 0
     for rid in demo_run_ids:
