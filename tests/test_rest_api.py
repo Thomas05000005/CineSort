@@ -253,7 +253,7 @@ class RestFacadeDispatchTests(unittest.TestCase):
     """
 
     def test_facade_methods_discovered(self) -> None:
-        """Les 54 methodes des 5 facades doivent etre exposees avec leur prefix."""
+        """Les 56 methodes des 5 facades doivent etre exposees avec leur prefix."""
         api = backend.CineSortApi()
         methods = _get_api_methods(api)
 
@@ -261,11 +261,13 @@ class RestFacadeDispatchTests(unittest.TestCase):
         facade_methods = [name for name in methods if "/" in name]
 
         # 5 facades * leurs methodes respectives :
-        # Run 7 + Settings 6 + Quality 21 + Integrations 11 + Library 9 = 54
+        # Run 7 + Settings 6 + Quality 21 + Integrations 13 + Library 9 = 56
+        # (#92 #1 a ajoute 2 methodes a Integrations :
+        #  refresh_jellyfin_library_now + refresh_plex_library_now)
         self.assertEqual(
             len(facade_methods),
-            54,
-            f"Attendu 54 methodes facade, trouve {len(facade_methods)}",
+            56,
+            f"Attendu 56 methodes facade, trouve {len(facade_methods)}",
         )
 
     def test_each_facade_has_methods(self) -> None:
@@ -277,7 +279,8 @@ class RestFacadeDispatchTests(unittest.TestCase):
             ("run", 7),
             ("settings", 6),
             ("quality", 21),
-            ("integrations", 11),
+            # Integrations : 11 d'origine + 2 (#92 #1 refresh_jellyfin/plex_library_now) = 13
+            ("integrations", 13),
             ("library", 9),
         ):
             count = sum(1 for n in methods if n.startswith(f"{facade_name}/"))
