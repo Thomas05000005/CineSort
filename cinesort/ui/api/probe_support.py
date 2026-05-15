@@ -9,6 +9,7 @@ import cinesort.infra.state as state
 from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_probe_backend, normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 
 def probe_settings_from_dict(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -129,7 +130,9 @@ def get_probe_tools_status(
             exc,
             extra={"force": False, "check_versions": True, "scan_winget_packages": True},
         )
-        return {"ok": False, "message": "Impossible de verifier les outils probe."}
+        return _err_response(
+            "Impossible de verifier les outils probe.", category="runtime", level="warning", log_module=__name__
+        )
 
 
 def recheck_probe_tools(
@@ -156,7 +159,9 @@ def recheck_probe_tools(
             exc,
             extra={"force": True, "check_versions": True, "scan_winget_packages": True},
         )
-        return {"ok": False, "message": "Impossible de recontroler les outils probe."}
+        return _err_response(
+            "Impossible de recontroler les outils probe.", category="runtime", level="warning", log_module=__name__
+        )
 
 
 def set_probe_tool_paths(
@@ -177,11 +182,21 @@ def set_probe_tool_paths(
         if ff_path:
             check_ff = validate_tool_path_fn(tool_name="ffprobe", tool_path=ff_path, state_dir=state_dir)
             if not check_ff.get("ok"):
-                return {"ok": False, "message": f"Chemin ffprobe invalide: {check_ff.get('message') or ''}"}
+                return _err_response(
+                    f"Chemin ffprobe invalide: {check_ff.get('message') or ''}",
+                    category="config",
+                    level="warning",
+                    log_module=__name__,
+                )
         if mi_path:
             check_mi = validate_tool_path_fn(tool_name="mediainfo", tool_path=mi_path, state_dir=state_dir)
             if not check_mi.get("ok"):
-                return {"ok": False, "message": f"Chemin MediaInfo invalide: {check_mi.get('message') or ''}"}
+                return _err_response(
+                    f"Chemin MediaInfo invalide: {check_mi.get('message') or ''}",
+                    category="config",
+                    level="warning",
+                    log_module=__name__,
+                )
 
         merged = dict(settings)
         merged["probe_backend"] = backend
@@ -202,7 +217,12 @@ def set_probe_tool_paths(
                 "has_mediainfo_path": bool(mi_path) if "mi_path" in locals() else False,
             },
         )
-        return {"ok": False, "message": "Impossible d'enregistrer les chemins des outils probe."}
+        return _err_response(
+            "Impossible d'enregistrer les chemins des outils probe.",
+            category="runtime",
+            level="warning",
+            log_module=__name__,
+        )
 
 
 def _refresh_settings_with_detected_tool_paths(settings: Dict[str, Any], managed: Dict[str, Any]) -> Dict[str, Any]:
@@ -257,7 +277,9 @@ def install_probe_tools(
                 "tools": list(opts.get("tools") or []) if isinstance(opts.get("tools"), list) else [],
             },
         )
-        return {"ok": False, "message": "Impossible d'installer les outils probe."}
+        return _err_response(
+            "Impossible d'installer les outils probe.", category="runtime", level="warning", log_module=__name__
+        )
 
 
 def update_probe_tools(
@@ -299,7 +321,9 @@ def update_probe_tools(
                 "tools": list(opts.get("tools") or []) if isinstance(opts.get("tools"), list) else [],
             },
         )
-        return {"ok": False, "message": "Impossible de mettre a jour les outils probe."}
+        return _err_response(
+            "Impossible de mettre a jour les outils probe.", category="runtime", level="warning", log_module=__name__
+        )
 
 
 def auto_install_probe_tools(
@@ -355,11 +379,13 @@ def get_probe(
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     if not run_id or not row_id:
-        return {"ok": False, "message": "Les identifiants run_id et row_id sont requis."}
+        return _err_response(
+            "Les identifiants run_id et row_id sont requis.", category="validation", level="info", log_module=__name__
+        )
     try:
         found = api._find_run_row(run_id)
         if not found:
-            return {"ok": False, "message": "Run introuvable."}
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
         run_row, store = found
         state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -372,12 +398,16 @@ def get_probe(
 
         row = next((candidate for candidate in rows if str(candidate.row_id) == str(row_id)), None)
         if row is None:
-            return {"ok": False, "message": "Film introuvable dans ce plan (row_id)."}
+            return _err_response(
+                "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
+            )
 
         cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
         media_path = api._resolve_media_path_for_row(cfg, row)
         if media_path is None or (not media_path.exists()):
-            return {"ok": False, "message": "Fichier media introuvable pour cette ligne."}
+            return _err_response(
+                "Fichier media introuvable pour cette ligne.", category="resource", level="warning", log_module=__name__
+            )
 
         probe_settings = effective_probe_settings_for_runtime(
             api,
@@ -406,4 +436,4 @@ def get_probe(
             **result,
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)

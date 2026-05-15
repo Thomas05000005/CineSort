@@ -20,6 +20,7 @@ from cinesort.domain.perceptual.parallelism import (
     run_parallel_tasks,
 )
 from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def get_perceptual_report(
         return _execute_perceptual_analysis(api, run_id, row_id, ctx)
     except (ImportError, OSError) as exc:
         logger.warning("get_perceptual_report error run=%s row=%s: %s", run_id, row_id, exc)
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def get_perceptual_details(
@@ -60,7 +61,7 @@ def get_perceptual_details(
     Returns 404-like si pas d'analyse persistee.
     """
     if not run_id or not row_id:
-        return {"ok": False, "message": "run_id et row_id requis"}
+        return _err_response("run_id et row_id requis", category="validation", level="info", log_module=__name__)
     try:
         # Pattern CineSortApi : le store est obtenu via _get_or_create_infra,
         # pas attache directement sur self.store (cf commentaire BUG dans
@@ -77,7 +78,7 @@ def get_perceptual_details(
         return {"ok": True, "details": report}
     except (KeyError, ValueError, OSError) as exc:
         logger.warning("get_perceptual_details error run=%s row=%s: %s", run_id, row_id, exc)
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def _validate_and_load_context(
@@ -89,7 +90,9 @@ def _validate_and_load_context(
     """Valide les pre-requis et charge le contexte. Retourne un dict erreur ou un tuple contexte."""
     settings = api.settings.get_settings()
     if not settings.get("perceptual_enabled"):
-        return {"ok": False, "message": "Analyse perceptuelle desactivee dans les reglages."}
+        return _err_response(
+            "Analyse perceptuelle desactivee dans les reglages.", category="state", level="info", log_module=__name__
+        )
 
     ffprobe_path = str(settings.get("ffprobe_path") or "")
     ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
@@ -109,7 +112,7 @@ def _validate_and_load_context(
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": "Run introuvable."}
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     run_row, store = found
 
     opts = options if isinstance(options, dict) else {}
@@ -124,12 +127,14 @@ def _validate_and_load_context(
     rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
     row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
     if row is None:
-        return {"ok": False, "message": "Film introuvable dans ce plan (row_id)."}
+        return _err_response(
+            "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
+        )
 
     cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
     media_path = api._resolve_media_path_for_row(cfg, row)
     if media_path is None or not media_path.exists():
-        return {"ok": False, "message": "Fichier media introuvable."}
+        return _err_response("Fichier media introuvable.", category="resource", level="warning", log_module=__name__)
 
     probe_result = _load_probe(api, store, run_row, media_path)
     normalized = probe_result.get("normalized") if isinstance(probe_result.get("normalized"), dict) else {}
@@ -138,15 +143,24 @@ def _validate_and_load_context(
     height = int(video_info.get("height") or 0)
     probe_quality = str(normalized.get("probe_quality") or "")
     if probe_quality == "FAILED" and width == 0 and height == 0:
-        return {"ok": False, "message": "Probe echouee (fichier corrompu ou format non supporte)."}
+        return _err_response(
+            "Probe echouee (fichier corrompu ou format non supporte).",
+            category="runtime",
+            level="warning",
+            log_module=__name__,
+        )
 
     has_video = width > 0 and height > 0
     has_audio = len(normalized.get("audio_tracks") or []) > 0
     if not has_video and not has_audio:
-        return {"ok": False, "message": "Probe incomplete (ni video ni audio detectes)."}
+        return _err_response(
+            "Probe incomplete (ni video ni audio detectes).", category="runtime", level="warning", log_module=__name__
+        )
     duration_s = float(normalized.get("duration_s") or 0)
     if duration_s <= 0:
-        return {"ok": False, "message": "Probe incomplete (duree manquante)."}
+        return _err_response(
+            "Probe incomplete (duree manquante).", category="runtime", level="warning", log_module=__name__
+        )
 
     return (settings, ffmpeg_path, store, run_row, row, media_path, normalized, video_info)
 
@@ -556,7 +570,12 @@ def compare_perceptual(
     try:
         settings = api.settings.get_settings()
         if not settings.get("perceptual_enabled"):
-            return {"ok": False, "message": "Analyse perceptuelle desactivee dans les reglages."}
+            return _err_response(
+                "Analyse perceptuelle desactivee dans les reglages.",
+                category="state",
+                level="info",
+                log_module=__name__,
+            )
 
         ffprobe_path = str(settings.get("ffprobe_path") or "")
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
@@ -587,10 +606,10 @@ def compare_perceptual(
         ok_b, report_b = reports.get("b", (False, {"ok": False, "message": "non execute"}))
         if not ok_a or not isinstance(report_a, dict) or not report_a.get("ok"):
             msg = report_a.get("message", "") if isinstance(report_a, dict) else str(report_a)
-            return {"ok": False, "message": f"Erreur fichier A: {msg}"}
+            return _err_response(f"Erreur fichier A: {msg}", category="validation", level="info", log_module=__name__)
         if not ok_b or not isinstance(report_b, dict) or not report_b.get("ok"):
             msg = report_b.get("message", "") if isinstance(report_b, dict) else str(report_b)
-            return {"ok": False, "message": f"Erreur fichier B: {msg}"}
+            return _err_response(f"Erreur fichier B: {msg}", category="validation", level="info", log_module=__name__)
 
         perc_a = report_a.get("perceptual", {})
         perc_b = report_b.get("perceptual", {})
@@ -598,7 +617,7 @@ def compare_perceptual(
         # Charger les probes pour les dimensions
         found = api._find_run_row(run_id)
         if not found:
-            return {"ok": False, "message": "Run introuvable."}
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
         run_row, store = found
         state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -609,12 +628,16 @@ def compare_perceptual(
         row_a = next((r for r in rows if str(r.row_id) == str(row_id_a)), None)
         row_b = next((r for r in rows if str(r.row_id) == str(row_id_b)), None)
         if not row_a or not row_b:
-            return {"ok": False, "message": "Film introuvable dans le plan."}
+            return _err_response(
+                "Film introuvable dans le plan.", category="resource", level="info", log_module=__name__
+            )
 
         media_a = api._resolve_media_path_for_row(cfg, row_a)
         media_b = api._resolve_media_path_for_row(cfg, row_b)
         if not media_a or not media_b:
-            return {"ok": False, "message": "Fichier media introuvable."}
+            return _err_response(
+                "Fichier media introuvable.", category="resource", level="warning", log_module=__name__
+            )
 
         probe_a = _load_probe(api, store, run_row, media_a)
         probe_b = _load_probe(api, store, run_row, media_b)
@@ -679,7 +702,7 @@ def compare_perceptual(
 
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.warning("compare_perceptual error: %s", exc)
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def enrich_quality_report_with_perceptual(
