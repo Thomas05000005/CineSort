@@ -75,7 +75,10 @@ class CineSortApiSnapshotTests(unittest.TestCase):
 
     def test_snapshot_file_exists(self) -> None:
         self.assertTrue(SNAPSHOT_PATH.is_file(), f"Snapshot manquant: {SNAPSHOT_PATH}")
-        self.assertGreater(len(self.snapshot), 50, "Snapshot suspectement petit")
+        # Apres PR 10 du #84, le baseline est ~50 methodes publiques sur
+        # CineSortApi (54 ont ete privatisees -> migrees sur les 5 facades).
+        # Le seuil de "suspectement petit" devient 40.
+        self.assertGreater(len(self.snapshot), 40, "Snapshot suspectement petit")
 
     def test_no_method_removed(self) -> None:
         """Aucune methode du snapshot ne doit avoir disparu.
@@ -114,12 +117,16 @@ class CineSortApiSnapshotTests(unittest.TestCase):
             "Signatures divergentes :\n  " + "\n  ".join(diverged),
         )
 
-    def test_baseline_104_methods(self) -> None:
-        """Sanity check sur le nombre baseline."""
-        # Le baseline du 2026-05-14 = 104 methodes. Si ce nombre change BEAUCOUP
-        # (ex: 80 ou 150), investiguer.
-        self.assertGreaterEqual(len(self.snapshot), 100)
-        self.assertLessEqual(len(self.snapshot), 150)
+    def test_baseline_50_methods(self) -> None:
+        """Sanity check sur le nombre baseline.
+
+        Pre PR 10 #84 : 104 methodes publiques sur CineSortApi (god class).
+        Post PR 10 #84 : ~50 methodes publiques (les 54 facade-isees ont
+        ete privatisees). Si ce nombre change beaucoup (< 40 ou > 70),
+        investiguer.
+        """
+        self.assertGreaterEqual(len(self.snapshot), 40)
+        self.assertLessEqual(len(self.snapshot), 70)
 
 
 if __name__ == "__main__":

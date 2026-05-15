@@ -186,7 +186,7 @@ class TestRunBatchParallel(unittest.TestCase):
 
 def _make_api_mock(*, parallelism_enabled=True, workers=0):
     api = mock.MagicMock()
-    api.get_settings.return_value = {
+    api.settings.get_settings.return_value = {
         "perceptual_parallelism_enabled": parallelism_enabled,
         "perceptual_workers": workers,
     }
@@ -276,7 +276,7 @@ class TestAnalyzePerceptualBatch(unittest.TestCase):
         """Si api.settings.get_settings() leve, on retombe sur defauts (auto + enabled)."""
         mock_get.return_value = {"ok": True, "perceptual": {"global_score": 80}}
         api = mock.MagicMock()
-        api.get_settings.side_effect = AttributeError("no settings")
+        api.settings.get_settings.side_effect = AttributeError("no settings")
         api._perceptual_cancel_event = None
         result = analyze_perceptual_batch(api, "run1", ["r1", "r2"])
         # Pas de crash, tout traite. workers_used >= 1.

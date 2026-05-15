@@ -66,14 +66,14 @@ class TestGetRadarrStatus(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"radarr_enabled": False}
         result = self.api.integrations.get_radarr_status()
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_enabled_but_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
@@ -84,7 +84,7 @@ class TestGetRadarrStatus(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("manquante", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_no_run(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
@@ -95,7 +95,7 @@ class TestGetRadarrStatus(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_radarr_connection_error(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.radarr_client import RadarrError
@@ -132,14 +132,14 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_radarr_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"radarr_enabled": False}
         result = self.api.integrations.request_radarr_upgrade(radarr_movie_id=42)
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_invalid_movie_id(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
@@ -150,7 +150,7 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("invalide", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_negative_movie_id(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "radarr_enabled": True,
@@ -161,7 +161,7 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("invalide", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_upgrade_success(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
@@ -177,7 +177,7 @@ class TestRequestRadarrUpgrade(unittest.TestCase):
         self.assertIn("42", result["message"])
         client.search_movie.assert_called_once_with(42)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.radarr_client.RadarrClient")
     def test_upgrade_radarr_error(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.radarr_client import RadarrError

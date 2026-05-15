@@ -29,8 +29,9 @@ def _make_mock_api_with_rows():
         {"row_id": "f4", "proposed_title": "Matrix", "proposed_year": 1999, "mtime": 1700000000},
         {"row_id": "f5", "proposed_title": "Old Movie", "proposed_year": 1995, "mtime": 1700000000},
     ]
-    api.get_plan.return_value = {"ok": True, "rows": rows}
-    api.get_settings.return_value = {"state_dir": None, "smart_playlists": []}
+    # Issue #84 PR 10 : library_support appelle via les facades (api.run.get_plan, api.settings.get_settings)
+    api.run.get_plan.return_value = {"ok": True, "rows": rows}
+    api.settings.get_settings.return_value = {"state_dir": None, "smart_playlists": []}
 
     # Mock store + _get_or_create_infra
     store = MagicMock()
@@ -225,7 +226,7 @@ class SmartPlaylistsTests(unittest.TestCase):
         from cinesort.ui.api import library_support
 
         api = MagicMock()
-        api.get_settings.return_value = {"smart_playlists": []}
+        api.settings.get_settings.return_value = {"smart_playlists": []}
         res = library_support.get_smart_playlists(api)
         self.assertTrue(res["ok"])
         ids = [p["id"] for p in res["playlists"]]
@@ -237,8 +238,8 @@ class SmartPlaylistsTests(unittest.TestCase):
         from cinesort.ui.api import library_support
 
         api = MagicMock()
-        api.get_settings.return_value = {"smart_playlists": []}
-        api.save_settings.return_value = {"ok": True}
+        api.settings.get_settings.return_value = {"smart_playlists": []}
+        api.settings.save_settings.return_value = {"ok": True}
         res = library_support.save_smart_playlist(api, "Ma liste", {"tier_v2": ["gold"]})
         self.assertTrue(res["ok"])
         self.assertTrue(res["playlist_id"].startswith("sp_"))
@@ -254,12 +255,12 @@ class SmartPlaylistsTests(unittest.TestCase):
         from cinesort.ui.api import library_support
 
         api = MagicMock()
-        api.get_settings.return_value = {
+        api.settings.get_settings.return_value = {
             "smart_playlists": [
                 {"id": "sp_abc", "name": "Test", "filters": {}},
             ]
         }
-        api.save_settings.return_value = {"ok": True}
+        api.settings.save_settings.return_value = {"ok": True}
         res = library_support.delete_smart_playlist(api, "sp_abc")
         self.assertTrue(res["ok"])
 
@@ -452,11 +453,12 @@ class IntegrationVague3Tests(unittest.TestCase):
         self.assertIn("mount", js)
 
     def test_cinesort_api_exposes_new_endpoints(self) -> None:
+        """Issue #84 PR 10 : methodes privatisees en _X_impl (LibraryFacade les expose)."""
         py = (_ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py").read_text(encoding="utf-8")
-        self.assertIn("def get_library_filtered", py)
-        self.assertIn("def get_smart_playlists", py)
-        self.assertIn("def save_smart_playlist", py)
-        self.assertIn("def delete_smart_playlist", py)
+        self.assertIn("def _get_library_filtered_impl", py)
+        self.assertIn("def _get_smart_playlists_impl", py)
+        self.assertIn("def _save_smart_playlist_impl", py)
+        self.assertIn("def _delete_smart_playlist_impl", py)
 
 
 class DashboardSmokeTests(unittest.TestCase):

@@ -295,7 +295,8 @@ class RestSetLocaleEndpointTests(unittest.TestCase):
         return resp.status, data, headers
 
     def test_set_locale_en_roundtrip(self) -> None:
-        status, payload = self._post("/api/set_locale", {"locale": "en"})
+        # Issue #84 PR 10 : set_locale est sur la SettingsFacade
+        status, payload = self._post("/api/settings/set_locale", {"locale": "en"})
         self.assertEqual(status, 200)
         self.assertTrue(payload.get("ok"))
         self.assertEqual(payload.get("locale"), "en")
@@ -303,7 +304,8 @@ class RestSetLocaleEndpointTests(unittest.TestCase):
         self.assertEqual(i18n_messages.get_locale(), "en")
 
     def test_set_locale_invalid_returns_error(self) -> None:
-        status, payload = self._post("/api/set_locale", {"locale": "zz"})
+        # Issue #84 PR 10 : set_locale est sur la SettingsFacade
+        status, payload = self._post("/api/settings/set_locale", {"locale": "zz"})
         self.assertEqual(status, 200)
         self.assertFalse(payload.get("ok"))
         self.assertIn("locale", payload)

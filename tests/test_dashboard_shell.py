@@ -189,14 +189,17 @@ class DashboardShellHttpTests(unittest.TestCase):
     # --- Login flow HTTP ---
 
     def test_login_valid_token_gets_settings(self) -> None:
-        """Un token valide permet d'appeler get_settings (flow de login)."""
-        status, data = self._post("/api/get_settings", body={}, token=self.token)
+        """Un token valide permet d'appeler get_settings (flow de login).
+
+        Issue #84 PR 10 : path facade /api/settings/get_settings.
+        """
+        status, data = self._post("/api/settings/get_settings", body={}, token=self.token)
         self.assertEqual(status, 200)
         self.assertIn("root", data)
 
     def test_login_invalid_token_returns_401(self) -> None:
         """Un mauvais token retourne 401."""
-        status, data = self._post("/api/get_settings", body={}, token="wrong-token")
+        status, data = self._post("/api/settings/get_settings", body={}, token="wrong-token")
         self.assertEqual(status, 401)
         self.assertFalse(data["ok"])
 

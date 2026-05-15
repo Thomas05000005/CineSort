@@ -509,9 +509,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(any("API_EXCEPTION endpoint=install_probe_tools" in line for line in logs.output), logs.output)
 
     def test_backend_wrapper_import_compat(self) -> None:
+        """Issue #84 PR 10 : get_settings est desormais sur api.settings (facade)."""
         self.assertTrue(hasattr(backend, "CineSortApi"))
         api = backend.CineSortApi()
-        self.assertTrue(callable(api.get_settings))
+        self.assertTrue(callable(api.settings.get_settings))
 
     def test_runstate_logs_are_capped_in_memory(self) -> None:
         self._create_file(self.root / "Cap.Logs.2001.1080p" / "Cap.Logs.2001.1080p.mkv")
@@ -927,7 +928,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
     def test_tmdb_key_is_available_after_relaunch_when_remembered(self) -> None:
         protection_ok = api_mod.protection_available()
         first_api = backend.CineSortApi()
-        saved = first_api.save_settings(
+        saved = first_api.settings.save_settings(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -940,7 +941,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         second_api = backend.CineSortApi()
         second_api._state_dir = self.state_dir  # type: ignore[attr-defined]
-        loaded = second_api.get_settings()
+        loaded = second_api.settings.get_settings()
         # SEC-H2 (v7.8.0) : get_settings() masque les cles maintenant. La cle reste
         # disponible en interne (DPAPI blob), seul le retour REST est masque.
         mask = "•" * 8
@@ -966,7 +967,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         fake_tmdb = mock.Mock()
         fake_tmdb.validate_key.return_value = (True, "TMDb OK")
         with mock.patch.object(api_mod, "TmdbClient", return_value=fake_tmdb):
-            result = second_api.test_tmdb_key(raw_tmdb_key, str(self.state_dir), 10.0)
+            result = second_api.integrations.test_tmdb_key(raw_tmdb_key, str(self.state_dir), 10.0)
 
         if protection_ok:
             self.assertTrue(result.get("ok"), result)

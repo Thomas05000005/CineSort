@@ -38,7 +38,7 @@ from cinesort.domain.perceptual.models import AudioPerceptual, VideoPerceptual
 
 def _mock_api(perceptual_enabled: bool = True):
     api = mock.MagicMock()
-    api.get_settings.return_value = {
+    api.settings.get_settings.return_value = {
         "perceptual_enabled": perceptual_enabled,
         "ffprobe_path": "/usr/bin/ffprobe",
         "perceptual_timeout_per_film_s": 120,

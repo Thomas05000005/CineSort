@@ -258,7 +258,7 @@ class CineSortApi:
     def _dispatch_plugin_hook(self, event: str, data: Dict[str, Any]) -> None:
         """Dispatch un hook plugin si plugins_enabled. Non-bloquant."""
         try:
-            settings = self.get_settings()
+            settings = self._get_settings_impl()
             if not settings.get("plugins_enabled"):
                 return
             from cinesort.app.plugin_hooks import dispatch_hook
@@ -271,7 +271,7 @@ class CineSortApi:
     def _dispatch_email(self, event: str, data: Dict[str, Any]) -> None:
         """Dispatch un rapport email si email_enabled. Non-bloquant."""
         try:
-            settings = self.get_settings()
+            settings = self._get_settings_impl()
             from cinesort.app.email_report import dispatch_email
 
             dispatch_email(settings, event, data)
@@ -678,7 +678,7 @@ class CineSortApi:
         return dashboard_support.report_to_csv_text(report)
 
     # ---------- settings ----------
-    def get_settings(self) -> Dict[str, Any]:
+    def _get_settings_impl(self) -> Dict[str, Any]:
         return settings_support.get_settings_payload(
             state_dir=self._state_dir,
             default_root=DEFAULT_ROOT,
@@ -690,7 +690,7 @@ class CineSortApi:
             debug_enabled=_env_truthy("CINESORT_DEBUG"),
         )
 
-    def save_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+    def _save_settings_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         state_dir, result = settings_support.save_settings_payload(
             settings,
             current_state_dir=self._state_dir,
@@ -736,7 +736,7 @@ class CineSortApi:
         except (ImportError, AttributeError) as exc:
             logger.debug("i18n: backend locale sync skipped: %s", exc)
 
-    def set_locale(self, locale: str) -> Dict[str, Any]:
+    def _set_locale_impl(self, locale: str) -> Dict[str, Any]:
         """Endpoint REST V6-01 : change la locale active (fr|en).
 
         Met a jour le setting `locale` ET appelle `i18n_messages.set_locale()`
@@ -767,13 +767,13 @@ class CineSortApi:
         # 2) Persistance dans settings.json (passe par save_settings_payload pour
         #    deduper toute la logique de validation/normalisation/backup).
         try:
-            current = self.get_settings()
+            current = self._get_settings_impl()
         except (OSError, ValueError, TypeError) as exc:
             logger.warning("set_locale: cannot load settings to persist locale: %s", exc)
             return {"ok": True, "locale": normalized, "persisted": False}
         current["locale"] = normalized
         try:
-            self.save_settings(current)
+            self._save_settings_impl(current)
             persisted = True
         except (OSError, ValueError, TypeError) as exc:
             logger.warning("set_locale: persistence failed: %s", exc)
@@ -854,7 +854,7 @@ class CineSortApi:
             # Fallback : construire l'URL depuis les settings
             from cinesort.infra.network_utils import build_dashboard_url, get_local_ip
 
-            settings = self.get_settings()
+            settings = self._get_settings_impl()
             ip = get_local_ip()
             port = int(settings.get("rest_api_port") or 8642)
             is_https = bool(settings.get("rest_api_https_enabled"))
@@ -885,7 +885,7 @@ class CineSortApi:
         """
         from cinesort.app import updater as _updater
 
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         repo = str(settings.get("update_github_repo") or "").strip()
         if not repo:
             return {
@@ -897,7 +897,7 @@ class CineSortApi:
         info = _updater.force_check(self._app_version, repo, cache_path=cache_path)
         try:
             settings["update_last_check_ts"] = time.time()
-            self.save_settings(settings)
+            self._save_settings_impl(settings)
         except (KeyError, OSError, TypeError, ValueError):
             pass  # ne pas bloquer le check si la persistence echoue
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
@@ -914,7 +914,7 @@ class CineSortApi:
         info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
-    def restart_api_server(self) -> Dict[str, Any]:
+    def _restart_api_server_impl(self) -> Dict[str, Any]:
         """Arrete et relance le serveur REST avec les settings actuels."""
         import logging as _logging
 
@@ -925,7 +925,7 @@ class CineSortApi:
             old_server.stop()
             self._rest_server = None
 
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("rest_api_enabled"):
             return {"ok": False, "message": "API REST desactivee dans les reglages."}
         token = str(settings.get("rest_api_token") or "").strip()
@@ -1021,7 +1021,7 @@ class CineSortApi:
         }
 
     # ---------- TMDb ----------
-    def test_tmdb_key(self, api_key: str, state_dir: str, timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _test_tmdb_key_impl(self, api_key: str, state_dir: str, timeout_s: float = 10.0) -> Dict[str, Any]:
         return settings_support.test_tmdb_key(
             api_key,
             state_dir,
@@ -1031,11 +1031,11 @@ class CineSortApi:
         )
 
     # ---------- Jellyfin ----------
-    def test_jellyfin_connection(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _test_jellyfin_connection_impl(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Jellyfin."""
         return settings_support.test_jellyfin_connection(url, api_key, timeout_s)
 
-    def get_jellyfin_libraries(self) -> Dict[str, Any]:
+    def _get_jellyfin_libraries_impl(self) -> Dict[str, Any]:
         """Retourne les bibliothèques Jellyfin configurées."""
         data = _read_settings(self._state_dir)
         url = str(data.get("jellyfin_url") or "").strip()
@@ -1065,7 +1065,7 @@ class CineSortApi:
         """Envoie un email test avec des donnees mock."""
         from cinesort.app.email_report import send_email_report
 
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("email_smtp_host") or not settings.get("email_to"):
             return {"ok": False, "message": "Configurez d'abord le serveur SMTP et le destinataire."}
         mock_data = {
@@ -1077,9 +1077,9 @@ class CineSortApi:
         return {"ok": ok, "message": "Email test envoye." if ok else "Echec de l'envoi. Verifiez les parametres SMTP."}
 
     # ---------- Jellyfin validation croisee ----------
-    def get_jellyfin_sync_report(self, run_id: str = "") -> Dict[str, Any]:
+    def _get_jellyfin_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Jellyfin. Retourne le rapport de coherence."""
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("jellyfin_enabled"):
             return {"ok": False, "message": "Jellyfin non configure."}
         jf_url = str(settings.get("jellyfin_url") or "").strip()
@@ -1173,7 +1173,7 @@ class CineSortApi:
         return {"ok": True, "source": src, **report}
 
     # ---------- Plex ----------
-    def test_plex_connection(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _test_plex_connection_impl(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Plex."""
         from cinesort.infra.plex_client import PlexClient
 
@@ -1184,14 +1184,14 @@ class CineSortApi:
         client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
-    def get_plex_libraries(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _get_plex_libraries_impl(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Retourne les sections movie du serveur Plex."""
         from cinesort.infra.plex_client import PlexClient, PlexError
 
         purl = (url or "").strip()
         ptok = (token or "").strip()
         if not purl or not ptok:
-            settings = self.get_settings()
+            settings = self._get_settings_impl()
             purl = purl or str(settings.get("plex_url") or "").strip()
             ptok = ptok or str(settings.get("plex_token") or "").strip()
         if not purl or not ptok:
@@ -1203,9 +1203,9 @@ class CineSortApi:
         except PlexError as exc:
             return {"ok": False, "message": str(exc)}
 
-    def get_plex_sync_report(self, run_id: str = "") -> Dict[str, Any]:
+    def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Plex."""
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("plex_enabled"):
             return {"ok": False, "message": "Plex non configure."}
         purl = str(settings.get("plex_url") or "").strip()
@@ -1251,7 +1251,7 @@ class CineSortApi:
         return {"ok": True, "run_id": target_run_id, **report}
 
     # ---------- Radarr ----------
-    def test_radarr_connection(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+    def _test_radarr_connection_impl(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Radarr."""
         from cinesort.infra.radarr_client import RadarrClient
 
@@ -1262,9 +1262,9 @@ class CineSortApi:
         client = RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
-    def get_radarr_status(self, run_id: str = "") -> Dict[str, Any]:
+    def _get_radarr_status_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Rapport Radarr : matching, upgrade candidates."""
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("radarr_enabled"):
             return {"ok": False, "message": "Radarr non configure."}
         rurl = str(settings.get("radarr_url") or "").strip()
@@ -1317,9 +1317,9 @@ class CineSortApi:
         candidates = get_upgrade_candidates(report, qr_map)
         return {"ok": True, "run_id": target_run_id, **report, "upgrade_candidates": candidates}
 
-    def request_radarr_upgrade(self, radarr_movie_id: int) -> Dict[str, Any]:
+    def _request_radarr_upgrade_impl(self, radarr_movie_id: int) -> Dict[str, Any]:
         """Demande a Radarr de chercher une meilleure version d'un film."""
-        settings = self.get_settings()
+        settings = self._get_settings_impl()
         if not settings.get("radarr_enabled"):
             return {"ok": False, "message": "Radarr non configure."}
         rurl = str(settings.get("radarr_url") or "").strip()
@@ -1492,22 +1492,22 @@ class CineSortApi:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run."""
         return probe_support.get_probe(self, run_id, row_id, detect_probe_tools_fn=detect_probe_tools)
 
-    def get_quality_profile(self) -> Dict[str, Any]:
+    def _get_quality_profile_impl(self) -> Dict[str, Any]:
         """Retourne le profil de scoring qualite actif (poids, seuils, toggles)."""
         return quality_profile_support.get_quality_profile(self)
 
-    def get_quality_presets(self) -> Dict[str, Any]:
+    def _get_quality_presets_impl(self) -> Dict[str, Any]:
         """Retourne le catalogue des presets de scoring (Remux strict / Equilibre / Light)."""
         return quality_profile_support.get_quality_presets(self)
 
-    def apply_quality_preset(self, preset_id: str) -> Dict[str, Any]:
+    def _apply_quality_preset_impl(self, preset_id: str) -> Dict[str, Any]:
         """Applique un preset du catalogue comme profil de scoring actif."""
         from cinesort.ui.api.quality_simulator_support import clear_cache as _sim_clear
 
         _sim_clear()
         return quality_profile_support.apply_quality_preset(self, preset_id)
 
-    def simulate_quality_preset(
+    def _simulate_quality_preset_impl(
         self,
         run_id: str = "latest",
         preset_id: str = "equilibre",
@@ -1519,19 +1519,19 @@ class CineSortApi:
 
         return run_simulation(self, run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope)
 
-    def save_custom_quality_preset(self, name: str, profile_json: Dict[str, Any]) -> Dict[str, Any]:
+    def _save_custom_quality_preset_impl(self, name: str, profile_json: Dict[str, Any]) -> Dict[str, Any]:
         """Persiste un profil qualite custom et l'active (G5)."""
         from cinesort.ui.api.quality_simulator_support import save_custom_preset
 
         return save_custom_preset(self, name, profile_json)
 
-    def get_custom_rules_templates(self) -> Dict[str, Any]:
+    def _get_custom_rules_templates_impl(self) -> Dict[str, Any]:
         """Retourne les 3 templates starter de regles custom (G6)."""
         from cinesort.domain.custom_rules_templates import list_templates
 
         return {"ok": True, "templates": list_templates()}
 
-    def get_custom_rules_catalog(self) -> Dict[str, Any]:
+    def _get_custom_rules_catalog_impl(self) -> Dict[str, Any]:
         """Retourne les fields, operators et actions disponibles pour le builder UI (G6)."""
         from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS
 
@@ -1542,14 +1542,14 @@ class CineSortApi:
             "actions": list(ACTIONS.keys()),
         }
 
-    def validate_custom_rules(self, rules: Any) -> Dict[str, Any]:
+    def _validate_custom_rules_impl(self, rules: Any) -> Dict[str, Any]:
         """Valide une liste de regles custom sans persister (G6)."""
         from cinesort.domain.custom_rules import validate_rules
 
         ok, errs, norm = validate_rules(rules or [])
         return {"ok": ok, "errors": errs, "normalized": norm}
 
-    def save_quality_profile(self, profile_json: Any) -> Dict[str, Any]:
+    def _save_quality_profile_impl(self, profile_json: Any) -> Dict[str, Any]:
         """Enregistre un profil de scoring custom (valide, persiste, active)."""
         return quality_profile_support.save_quality_profile(self, profile_json)
 
@@ -1575,23 +1575,23 @@ class CineSortApi:
         except (OSError, KeyError, TypeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
-    def reset_quality_profile(self) -> Dict[str, Any]:
+    def _reset_quality_profile_impl(self) -> Dict[str, Any]:
         """Reinitialise le profil de scoring aux valeurs par defaut."""
         return quality_profile_support.reset_quality_profile(self)
 
-    def export_quality_profile(self) -> Dict[str, Any]:
+    def _export_quality_profile_impl(self) -> Dict[str, Any]:
         """Exporte le profil de scoring actif en JSON (pour partage / backup)."""
         return quality_profile_support.export_quality_profile(self)
 
-    def import_quality_profile(self, profile_json: Any) -> Dict[str, Any]:
+    def _import_quality_profile_impl(self, profile_json: Any) -> Dict[str, Any]:
         """Importe un profil de scoring depuis JSON (valide, persiste, active)."""
         return quality_profile_support.import_quality_profile(self, profile_json)
 
-    def get_quality_report(self, run_id: str, row_id: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _get_quality_report_impl(self, run_id: str, row_id: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Retourne le rapport de scoring qualite d'un film (score, tier, reasons, metrics)."""
         return quality_report_support.get_quality_report(self, run_id, row_id, options)
 
-    def analyze_quality_batch(
+    def _analyze_quality_batch_impl(
         self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Analyse qualite batch sur plusieurs films (probe + scoring)."""
@@ -1599,13 +1599,13 @@ class CineSortApi:
 
     # ---------- analyse perceptuelle ----------
 
-    def get_perceptual_report(
+    def _get_perceptual_report_impl(
         self, run_id: str, row_id: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Analyse perceptuelle d'un film (a la demande)."""
         return perceptual_support.get_perceptual_report(self, run_id, row_id, options)
 
-    def get_perceptual_details(self, run_id: str, row_id: str) -> Dict[str, Any]:
+    def _get_perceptual_details_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne toutes les metriques perceptuelles persistees (lecture DB).
 
         Cf issue #32 : expose audio_fingerprint, ssim_self_ref,
@@ -1615,13 +1615,13 @@ class CineSortApi:
         """
         return perceptual_support.get_perceptual_details(self, run_id, row_id)
 
-    def analyze_perceptual_batch(
+    def _analyze_perceptual_batch_impl(
         self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Analyse perceptuelle batch sur plusieurs films."""
         return perceptual_support.analyze_perceptual_batch(self, run_id, row_ids, options)
 
-    def compare_perceptual(
+    def _compare_perceptual_impl(
         self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Comparaison perceptuelle profonde entre 2 fichiers."""
@@ -1640,7 +1640,7 @@ class CineSortApi:
         return {"data": dashboard_support.get_sidebar_counters(self)}
 
     # ---------- v7.6.0 Vague 3 : Library / Explorer ----------
-    def get_library_filtered(
+    def _get_library_filtered_impl(
         self,
         run_id: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
@@ -1655,11 +1655,11 @@ class CineSortApi:
         """
         return library_support.get_library_filtered(self, run_id, filters, sort, page, page_size)
 
-    def get_smart_playlists(self) -> Dict[str, Any]:
+    def _get_smart_playlists_impl(self) -> Dict[str, Any]:
         """v7.6.0 Vague 3 : liste des smart playlists (presets + custom)."""
         return library_support.get_smart_playlists(self)
 
-    def save_smart_playlist(
+    def _save_smart_playlist_impl(
         self,
         name: str,
         filters: Dict[str, Any],
@@ -1668,11 +1668,11 @@ class CineSortApi:
         """v7.6.0 Vague 3 : cree ou met a jour une smart playlist custom."""
         return library_support.save_smart_playlist(self, name, filters, playlist_id)
 
-    def delete_smart_playlist(self, playlist_id: str) -> Dict[str, Any]:
+    def _delete_smart_playlist_impl(self, playlist_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 3 : supprime une smart playlist custom."""
         return library_support.delete_smart_playlist(self, playlist_id)
 
-    def get_scoring_rollup(
+    def _get_scoring_rollup_impl(
         self,
         by: str = "franchise",
         limit: int = 20,
@@ -1712,7 +1712,7 @@ class CineSortApi:
         return {"ok": True, "count": notifications_support.get_unread_count(self)}
 
     # ---------- v7.6.0 Vague 4 : Film standalone page ----------
-    def get_film_full(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+    def _get_film_full_impl(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
         """v7.6.0 Vague 4 : toutes les infos d'un film pour la page standalone.
 
         Consolide : PlanRow, probe, perceptual V2, history, poster TMDb.
@@ -1720,32 +1720,32 @@ class CineSortApi:
         return film_support.get_film_full(self, run_id, row_id)
 
     # ---------- film history ----------
-    def get_film_history(self, film_id: str) -> Dict[str, Any]:
+    def _get_film_history_impl(self, film_id: str) -> Dict[str, Any]:
         """Timeline complete d'un film a travers tous les runs."""
         return film_history_support.get_film_history(self, film_id)
 
-    def list_films_with_history(self, limit: int = 50) -> Dict[str, Any]:
+    def _list_films_with_history_impl(self, limit: int = 50) -> Dict[str, Any]:
         """Liste des films du dernier run avec resume d'historique."""
         return film_history_support.list_films_with_history(self, limit)
 
     # ---------- planning ----------
-    def start_plan(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+    def _start_plan_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Demarre un scan+plan en thread background. Retourne {run_id, ok}."""
         return run_flow_support.start_plan(self, settings, run_state_cls=RunState)
 
-    def get_status(self, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
+    def _get_status_impl(self, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
         """Retourne l'etat courant d'un run : progression, logs incrementaux, sante."""
         return run_flow_support.get_status(self, run_id, last_log_index)
 
-    def get_plan(self, run_id: str) -> Dict[str, Any]:
+    def _get_plan_impl(self, run_id: str) -> Dict[str, Any]:
         """Retourne la liste des PlanRow persistees dans plan.jsonl pour ce run."""
         return history_support.get_plan(self, run_id, normalize_user_path=_normalize_user_path)
 
-    def export_run_report(self, run_id: str, fmt: str = "json") -> Dict[str, Any]:
+    def _export_run_report_impl(self, run_id: str, fmt: str = "json") -> Dict[str, Any]:
         """Exporte le rapport du run au format json / csv / html."""
         return dashboard_support.export_run_report(self, run_id, fmt)
 
-    def export_full_library(self) -> Dict[str, Any]:
+    def _export_full_library_impl(self) -> Dict[str, Any]:
         """RGPD Art. 20 — export portable de toute la bibliotheque (films +
         decisions + scores + settings sanitises) en JSON v1.0.
 
@@ -1812,7 +1812,7 @@ class CineSortApi:
             quarantine_corrupted=quarantine_corrupted,
         )
 
-    def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+    def _get_tmdb_posters_impl(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
         """Retourne les URLs de posters TMDb pour les IDs demandes (cache local)."""
         return tmdb_support.get_tmdb_posters(self, tmdb_ids, size)
 
@@ -1862,7 +1862,7 @@ class CineSortApi:
             atomic=atomic,
         )
 
-    def list_apply_history(self, run_id: str) -> Dict[str, Any]:
+    def _list_apply_history_impl(self, run_id: str) -> Dict[str, Any]:
         """Liste les batches apply (reels + dry-run) d'un run, plus recent en premier."""
         return apply_support.list_apply_history(self, run_id)
 
@@ -2002,7 +2002,7 @@ class CineSortApi:
             "saved_profile_id": pid,
         }
 
-    def submit_score_feedback(
+    def _submit_score_feedback_impl(
         self,
         run_id: str,
         row_id: str,
@@ -2062,7 +2062,7 @@ class CineSortApi:
             "tier_delta": tier_delta,
         }
 
-    def delete_score_feedback(self, feedback_id: int) -> Dict[str, Any]:
+    def _delete_score_feedback_impl(self, feedback_id: int) -> Dict[str, Any]:
         """P4.1 : supprime un feedback utilisateur (cleanup / correction).
 
         Retourne `{ok, deleted_count}`.
@@ -2080,7 +2080,7 @@ class CineSortApi:
             return {"ok": False, "message": "Suppression échouée."}
         return {"ok": True, "deleted_count": int(count)}
 
-    def get_calibration_report(self) -> Dict[str, Any]:
+    def _get_calibration_report_impl(self) -> Dict[str, Any]:
         """P4.1 : agrège tous les feedbacks et propose un ajustement de poids.
 
         Retourne le rapport de biais + la suggestion de poids (ou None si
@@ -2139,7 +2139,7 @@ class CineSortApi:
         """
         return apply_support.export_apply_audit(self, run_id, batch_id, as_format=as_format)
 
-    def build_apply_preview(
+    def _build_apply_preview_impl(
         self,
         run_id: str,
         decisions: Dict[str, Dict[str, Any]],
@@ -2158,18 +2158,18 @@ class CineSortApi:
             cleanup_reason_label=_cleanup_reason_label,
         )
 
-    def cancel_run(self, run_id: str) -> Dict[str, Any]:
+    def _cancel_run_impl(self, run_id: str) -> Dict[str, Any]:
         """Demande l'annulation d'un run en cours (pose cancel_requested=1)."""
         return history_support.cancel_run(self, run_id)
 
     # ---------- Reset (V3-09) ----------
-    def reset_all_user_data(self, confirmation: str = "") -> Dict[str, Any]:
+    def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
         from cinesort.ui.api import reset_support
 
         return reset_support.reset_all_user_data(self, confirmation)
 
-    def get_user_data_size(self) -> Dict[str, Any]:
+    def _get_user_data_size_impl(self) -> Dict[str, Any]:
         """V3-09 — Taille actuelle du user-data (pour affichage UI Danger Zone)."""
         from cinesort.ui.api import reset_support
 

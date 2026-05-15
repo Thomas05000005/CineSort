@@ -54,7 +54,7 @@ class TestServerInfoAndQR(unittest.TestCase):
     def test_get_dashboard_qr_fallback(self) -> None:
         # Pas de serveur → fallback settings
         self.api._rest_server = None  # type: ignore[attr-defined]
-        with patch.object(backend.CineSortApi, "get_settings") as mock_gs:
+        with patch.object(backend.CineSortApi, "_get_settings_impl") as mock_gs:
             mock_gs.return_value = {"rest_api_port": 8642, "rest_api_https_enabled": False}
             with (
                 patch("cinesort.infra.network_utils.get_local_ip", return_value="10.0.0.5"),
@@ -68,7 +68,7 @@ class TestServerInfoAndQR(unittest.TestCase):
 
     def test_get_dashboard_qr_segno_failure(self) -> None:
         self.api._rest_server = None  # type: ignore[attr-defined]
-        with patch.object(backend.CineSortApi, "get_settings") as mock_gs:
+        with patch.object(backend.CineSortApi, "_get_settings_impl") as mock_gs:
             mock_gs.return_value = {"rest_api_port": 8642}
             with (
                 patch("cinesort.infra.network_utils.get_local_ip", return_value="10.0.0.5"),
@@ -91,21 +91,21 @@ class TestRestartApiServer(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_restart_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"rest_api_enabled": False}
         result = self.api.settings.restart_api_server()
         self.assertFalse(result["ok"])
         self.assertIn("desactivee", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_restart_no_token(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"rest_api_enabled": True, "rest_api_token": ""}
         result = self.api.settings.restart_api_server()
         self.assertFalse(result["ok"])
         self.assertIn("token", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.rest_server.RestApiServer")
     def test_restart_success(self, mock_server_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
@@ -122,7 +122,7 @@ class TestRestartApiServer(unittest.TestCase):
         self.assertEqual(result["dashboard_url"], "http://x:8642/")
         server.start.assert_called_once()
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.rest_server.RestApiServer")
     def test_restart_stops_old_server(self, mock_server_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {

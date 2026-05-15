@@ -207,7 +207,7 @@ class ApplyPersistsToDbTests(_ApplyRobustnessBase):
 
         # Nouvelle session
         api2 = CineSortApi()
-        api2.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        api2.settings.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
         # L'undo doit trouver le batch via la DB persistee
         undo_result = api2.undo_last_apply(run_id)
         # Doit etre ok ou contenir un message explicatif (pas de crash)

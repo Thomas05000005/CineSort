@@ -136,28 +136,28 @@ class RestServerHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["openapi"], "3.0.3")
         self.assertIn("paths", data)
-        self.assertIn("/api/get_settings", data["paths"])
+        self.assertIn("/api/settings/get_settings", data["paths"])
 
     # --- Auth ---
 
     def test_post_without_token_returns_401(self) -> None:
-        status, data = self._request("POST", "/api/get_settings")
+        status, data = self._request("POST", "/api/settings/get_settings")
         self.assertEqual(status, 401)
         self.assertFalse(data["ok"])
 
     def test_post_with_wrong_token_returns_401(self) -> None:
-        status, data = self._request("POST", "/api/get_settings", token="wrong-token")
+        status, data = self._request("POST", "/api/settings/get_settings", token="wrong-token")
         self.assertEqual(status, 401)
 
     def test_post_with_correct_token_succeeds(self) -> None:
-        status, data = self._request("POST", "/api/get_settings", body={}, token=self.token)
+        status, data = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
         self.assertEqual(status, 200)
         self.assertIn("root", data)
 
     # --- Dispatch ---
 
     def test_get_settings(self) -> None:
-        status, data = self._request("POST", "/api/get_settings", body={}, token=self.token)
+        status, data = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
         self.assertEqual(status, 200)
         self.assertEqual(data["root"], str(self.root))
 
@@ -169,7 +169,7 @@ class RestServerHttpTests(unittest.TestCase):
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request(
             "POST",
-            "/api/get_settings",
+            "/api/settings/get_settings",
             body=b"not json",
             headers={
                 "Content-Type": "application/json",
@@ -207,13 +207,15 @@ class RestServerHttpTests(unittest.TestCase):
         status, data = self._request("POST", "/api/quality/get_quality_profile", body={}, token=self.token)
         self.assertEqual(status, 200)
 
-    def test_facade_and_direct_routes_coexist(self) -> None:
-        """Backward-compat : ancien path et nouveau path retournent meme structure."""
-        s1, d1 = self._request("POST", "/api/get_settings", body={}, token=self.token)
-        s2, d2 = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
-        self.assertEqual(s1, 200)
-        self.assertEqual(s2, 200)
-        self.assertEqual(set(d1.keys()), set(d2.keys()))
+    def test_legacy_path_returns_404_after_pr10(self) -> None:
+        """PR 10 du #84 : la voie legacy /api/get_settings est supprimee."""
+        s_legacy, _ = self._request("POST", "/api/get_settings", body={}, token=self.token)
+        s_facade, d_facade = self._request(
+            "POST", "/api/settings/get_settings", body={}, token=self.token
+        )
+        self.assertEqual(s_legacy, 404)
+        self.assertEqual(s_facade, 200)
+        self.assertIn("root", d_facade)
 
     def test_facade_attribute_alone_returns_404(self) -> None:
         """POST /api/run (sans methode) doit retourner 404."""
@@ -229,7 +231,7 @@ class RestServerHttpTests(unittest.TestCase):
 
     def test_options_returns_cors_headers(self) -> None:
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
-        conn.request("OPTIONS", "/api/get_settings")
+        conn.request("OPTIONS", "/api/settings/get_settings")
         resp = conn.getresponse()
         self.assertEqual(resp.status, 204)
         self.assertIn("Access-Control-Allow-Origin", resp.headers)
@@ -237,7 +239,7 @@ class RestServerHttpTests(unittest.TestCase):
         conn.close()
 
     def test_post_response_includes_cors(self) -> None:
-        status, _ = self._request("POST", "/api/get_settings", body={}, token=self.token)
+        status, _ = self._request("POST", "/api/settings/get_settings", body={}, token=self.token)
         # We can't easily check response headers via _request helper, but the handler always sends them.
         self.assertEqual(status, 200)
 
@@ -314,12 +316,17 @@ class RestFacadeDispatchTests(unittest.TestCase):
         ):
             self.assertIn(expected, methods, f"{expected} manquante dans api_methods")
 
-    def test_direct_methods_still_present(self) -> None:
-        """Backward-compat : les methodes directes sont toujours exposees."""
+    def test_direct_methods_removed_after_pr10(self) -> None:
+        """Apres PR 10 du #84 : les methodes directes ne sont plus exposees.
+
+        Toute methode appartenant a une facade doit etre accessible UNIQUEMENT
+        via le path facade-prefixe (run/start_plan, settings/get_settings, ...).
+        Le path direct (start_plan, get_settings, ...) doit retourner 404.
+        """
         api = backend.CineSortApi()
         methods = _get_api_methods(api)
 
-        for expected in (
+        for removed in (
             "start_plan",
             "get_status",
             "get_settings",
@@ -327,7 +334,11 @@ class RestFacadeDispatchTests(unittest.TestCase):
             "test_jellyfin_connection",
             "get_library_filtered",
         ):
-            self.assertIn(expected, methods, f"Methode directe {expected} manquante")
+            self.assertNotIn(
+                removed,
+                methods,
+                f"Methode directe {removed} encore exposee (PR 10 incomplete)",
+            )
 
     def test_facade_attributes_not_exposed_as_callable(self) -> None:
         """Les facades elles-memes ne sont pas exposees comme endpoint."""
@@ -341,17 +352,17 @@ class RestFacadeDispatchTests(unittest.TestCase):
                 f"La facade {facade_name} ne doit pas etre directement appelable",
             )
 
-    def test_facade_dispatch_returns_same_result_as_direct(self) -> None:
-        """Sanity end-to-end : api.run.get_status delegue bien vers api.get_status."""
+    def test_facade_dispatch_works(self) -> None:
+        """Sanity end-to-end : le path facade get_status fonctionne (run_id invalide)."""
         api = backend.CineSortApi()
         methods = _get_api_methods(api)
 
-        # Appel via methode directe
-        direct_result = methods["get_status"]("run_inexistant_xyz")
         # Appel via methode facade
         facade_result = methods["run/get_status"]("run_inexistant_xyz")
 
-        self.assertEqual(set(direct_result.keys()), set(facade_result.keys()))
+        # Sanity : la reponse est un dict avec la cle "ok"
+        self.assertIsInstance(facade_result, dict)
+        self.assertIn("ok", facade_result)
 
 
 class RestOpenApiSpecTests(unittest.TestCase):

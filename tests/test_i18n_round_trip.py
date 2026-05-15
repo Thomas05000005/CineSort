@@ -396,7 +396,7 @@ class RestRoundTripTests(unittest.TestCase):
         self.assertEqual(i18n_messages.get_locale(), "fr")
 
         # 2) Switch vers EN via REST
-        status, payload = self._post("/api/set_locale", {"locale": "en"})
+        status, payload = self._post("/api/settings/set_locale", {"locale": "en"})
         self.assertEqual(status, 200)
         self.assertTrue(payload.get("ok"))
         self.assertEqual(payload.get("locale"), "en")
@@ -409,7 +409,7 @@ class RestRoundTripTests(unittest.TestCase):
         self.assertEqual(en_data["common"]["cancel"], "Cancel")
 
         # 4) Retour vers FR via REST
-        status, payload = self._post("/api/set_locale", {"locale": "fr"})
+        status, payload = self._post("/api/settings/set_locale", {"locale": "fr"})
         self.assertEqual(status, 200)
         self.assertTrue(payload.get("ok"))
         self.assertEqual(payload.get("locale"), "fr")
@@ -424,7 +424,7 @@ class RestRoundTripTests(unittest.TestCase):
     def test_set_locale_persisted_in_settings_json(self) -> None:
         """Le set_locale REST doit persister la locale dans settings.json."""
         # Switch vers EN via REST
-        status, payload = self._post("/api/set_locale", {"locale": "en"})
+        status, payload = self._post("/api/settings/set_locale", {"locale": "en"})
         self.assertEqual(status, 200)
         self.assertTrue(payload.get("persisted"))
 
@@ -433,7 +433,7 @@ class RestRoundTripTests(unittest.TestCase):
         self.assertEqual(settings.get("locale"), "en")
 
         # Retour fr et verifie
-        self._post("/api/set_locale", {"locale": "fr"})
+        self._post("/api/settings/set_locale", {"locale": "fr"})
         settings = self.api.settings.get_settings()
         self.assertEqual(settings.get("locale"), "fr")
 

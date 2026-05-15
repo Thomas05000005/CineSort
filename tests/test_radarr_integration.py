@@ -260,7 +260,7 @@ class RadarrEndpointTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "test_radarr_connection"))
+        self.assertTrue(hasattr(api.integrations, "test_radarr_connection"))
 
     def test_get_radarr_status_disabled(self) -> None:
         import cinesort.ui.api.cinesort_api as backend

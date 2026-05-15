@@ -102,6 +102,22 @@ SAFE_ROOTS: List[str] = [
     r"\b_api",
     r"\bself\.cs_api",
     r"\bcs_api",
+    # PR 10 fix : variables locales courantes dans les tests
+    r"\bapi1",
+    r"\bapi2",
+    r"\bapi3",
+    r"\bapi_plan",
+    r"\bapi_dup",
+    r"\bapi_val",
+    r"\bapi_run",
+    r"\bfirst_api",
+    r"\bsecond_api",
+    r"\bother_api",
+    r"\bnew_api",
+    r"\bcinesort_api",
+    r"\bfresh_api",
+    r"\bapi_a",
+    r"\bapi_b",
 ]
 
 

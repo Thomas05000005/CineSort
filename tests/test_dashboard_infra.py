@@ -390,7 +390,8 @@ class RateLimitHttpTests(unittest.TestCase):
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.token}",
             }
-            conn.request("POST", "/api/get_settings", body=b"{}", headers=headers)
+            # Issue #84 PR 10 : path facade /api/settings/get_settings
+            conn.request("POST", "/api/settings/get_settings", body=b"{}", headers=headers)
             resp = conn.getresponse()
             self.assertEqual(resp.status, 200)
             resp.read()

@@ -32,7 +32,7 @@ from cinesort.ui.api.perceptual_support import (
 def _mock_api(perceptual_enabled: bool = True, ffprobe_path: str = "/usr/bin/ffprobe"):
     """Cree un mock API avec les methodes requises."""
     api = mock.MagicMock()
-    api.get_settings.return_value = {
+    api.settings.get_settings.return_value = {
         "perceptual_enabled": perceptual_enabled,
         "ffprobe_path": ffprobe_path,
         "perceptual_timeout_per_film_s": 120,
@@ -110,8 +110,8 @@ class EndpointsExposedTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "get_perceptual_report"))
-        self.assertTrue(hasattr(api, "analyze_perceptual_batch"))
+        self.assertTrue(hasattr(api.quality, "get_perceptual_report"))
+        self.assertTrue(hasattr(api.quality, "analyze_perceptual_batch"))
 
 
 # ---------------------------------------------------------------------------

@@ -46,17 +46,26 @@ def test_create_movie_file_default_size(tmp_state_dir, create_movie_file) -> Non
 
 
 def test_wait_run_terminal_returns_status_dict(wait_run_terminal) -> None:
-    """wait_run_terminal accepte un api-like object et un run_id, poll get_status."""
+    """wait_run_terminal accepte un api-like object et un run_id, poll get_status.
+
+    Issue #84 PR 10 : la fixture utilise maintenant api.run.get_status (facade).
+    Le FakeApi expose un faux attribut .run avec get_status pour respecter ce contrat.
+    """
+
+    class FakeRunFacade:
+        def __init__(self, parent):
+            self._parent = parent
+
+        def get_status(self, run_id, idx):
+            self._parent.calls += 1
+            if self._parent.calls < 3:
+                return {"done": False, "status": "RUNNING"}
+            return {"done": True, "status": "DONE", "run_id": run_id}
 
     class FakeApi:
         def __init__(self) -> None:
             self.calls = 0
-
-        def get_status(self, run_id, idx):
-            self.calls += 1
-            if self.calls < 3:
-                return {"done": False, "status": "RUNNING"}
-            return {"done": True, "status": "DONE", "run_id": run_id}
+            self.run = FakeRunFacade(self)
 
     api = FakeApi()
     out = wait_run_terminal(api, "test-run-id", timeout_s=2.0)
@@ -70,9 +79,13 @@ def test_wait_run_terminal_returns_status_dict(wait_run_terminal) -> None:
 def test_wait_run_terminal_raises_on_timeout(wait_run_terminal) -> None:
     """Si done ne devient jamais True, AssertionError avec dernier status."""
 
-    class StuckApi:
+    class StuckRunFacade:
         def get_status(self, run_id, idx):
             return {"done": False, "status": "STUCK"}
+
+    class StuckApi:
+        def __init__(self) -> None:
+            self.run = StuckRunFacade()
 
     import pytest
 

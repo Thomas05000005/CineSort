@@ -126,8 +126,8 @@ class WatcherLifecycleTests(unittest.TestCase):
             api = mock.MagicMock()
             api._runs = {}
             api._runs_lock = __import__("threading").Lock()
-            api.get_settings.return_value = {"roots": [str(root)]}
-            api.start_plan.return_value = {"ok": True, "run_id": "test"}
+            api.settings.get_settings.return_value = {"roots": [str(root)]}
+            api.run.start_plan.return_value = {"ok": True, "run_id": "test"}
 
             watcher = FolderWatcher(api, interval_s=0.1, roots=[root])
             watcher.start()

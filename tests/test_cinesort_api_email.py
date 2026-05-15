@@ -22,21 +22,21 @@ class TestEmailReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_smtp_host_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "", "email_to": "x@y"}
         result = self.api.test_email_report()
         self.assertFalse(result["ok"])
         self.assertIn("SMTP", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_email_to_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "smtp.example.com", "email_to": ""}
         result = self.api.test_email_report()
         self.assertFalse(result["ok"])
 
     @patch("cinesort.app.email_report.send_email_report")
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_send_success(self, mock_get_settings: MagicMock, mock_send: MagicMock) -> None:
         mock_get_settings.return_value = {
             "email_smtp_host": "smtp.example.com",
@@ -52,7 +52,7 @@ class TestEmailReport(unittest.TestCase):
         self.assertEqual(args[1], "post_scan")
 
     @patch("cinesort.app.email_report.send_email_report")
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_send_failure(self, mock_get_settings: MagicMock, mock_send: MagicMock) -> None:
         mock_get_settings.return_value = {
             "email_smtp_host": "smtp.example.com",
@@ -164,14 +164,14 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"jellyfin_enabled": False}
         result = self.api.integrations.get_jellyfin_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "jellyfin_enabled": True,
@@ -182,7 +182,7 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("manquante", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_jellyfin_no_run(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "jellyfin_enabled": True,
@@ -194,7 +194,7 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.jellyfin_client.JellyfinClient")
     def test_jellyfin_connection_error(self, mock_jf_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         from cinesort.infra.jellyfin_client import JellyfinError

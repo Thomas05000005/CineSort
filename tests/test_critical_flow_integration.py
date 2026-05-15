@@ -80,7 +80,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self._create_file(self.root / "Movie.2020.BluRay" / "movie_b.mkv")
 
         api_plan = CineSortApi()
-        start = api_plan.start_plan(
+        start = api_plan.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -94,7 +94,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         status = self._wait_done(api_plan, run_id)
         self.assertIsNone(status.get("error"), status)
 
-        plan = api_plan.get_plan(run_id)
+        plan = api_plan.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertEqual(len(rows), 2, rows)
@@ -154,7 +154,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self._create_file(source_video)
 
         api_plan = CineSortApi()
-        start = api_plan.start_plan(
+        start = api_plan.run.start_plan(
             {
                 "root": str(self.root),
                 "state_dir": str(self.state_dir),
@@ -166,7 +166,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         run_id = str(start["run_id"])
         self._wait_done(api_plan, run_id)
 
-        plan = api_plan.get_plan(run_id)
+        plan = api_plan.run.get_plan(run_id)
         self.assertTrue(plan.get("ok"), plan)
         rows = plan.get("rows", [])
         self.assertEqual(len(rows), 1, rows)

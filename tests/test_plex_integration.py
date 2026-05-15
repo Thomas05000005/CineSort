@@ -106,7 +106,7 @@ class PlexRefreshApplyTests(unittest.TestCase):
         from cinesort.ui.api.apply_support import _trigger_plex_refresh
 
         api = mock.MagicMock()
-        api.get_settings.return_value = {
+        api.settings.get_settings.return_value = {
             "plex_enabled": True,
             "plex_refresh_on_apply": True,
             "plex_url": "http://localhost:32400",
@@ -122,7 +122,7 @@ class PlexRefreshApplyTests(unittest.TestCase):
         from cinesort.ui.api.apply_support import _trigger_plex_refresh
 
         api = mock.MagicMock()
-        api.get_settings.return_value = {"plex_enabled": False}
+        api.settings.get_settings.return_value = {"plex_enabled": False}
         log = mock.MagicMock()
         _trigger_plex_refresh(api, log, dry_run=False)
         # Pas de crash
@@ -189,13 +189,13 @@ class PlexEndpointTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "test_plex_connection"))
+        self.assertTrue(hasattr(api.integrations, "test_plex_connection"))
 
     def test_get_plex_libraries_exists(self) -> None:
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "get_plex_libraries"))
+        self.assertTrue(hasattr(api.integrations, "get_plex_libraries"))
 
     def test_get_plex_sync_report_disabled(self) -> None:
         import cinesort.ui.api.cinesort_api as backend

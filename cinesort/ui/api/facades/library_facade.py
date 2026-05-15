@@ -45,7 +45,7 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.get_library_filtered pour la doc complete.
         """
-        return self._api.get_library_filtered(
+        return self._api._get_library_filtered_impl(
             run_id=run_id,
             filters=filters,
             sort=sort,
@@ -58,7 +58,7 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.get_smart_playlists pour la doc complete.
         """
-        return self._api.get_smart_playlists()
+        return self._api._get_smart_playlists_impl()
 
     def save_smart_playlist(
         self,
@@ -70,14 +70,14 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.save_smart_playlist pour la doc complete.
         """
-        return self._api.save_smart_playlist(name, filters, playlist_id)
+        return self._api._save_smart_playlist_impl(name, filters, playlist_id)
 
     def delete_smart_playlist(self, playlist_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 3 : supprime une smart playlist custom.
 
         Cf CineSortApi.delete_smart_playlist pour la doc complete.
         """
-        return self._api.delete_smart_playlist(playlist_id)
+        return self._api._delete_smart_playlist_impl(playlist_id)
 
     def get_scoring_rollup(
         self,
@@ -89,7 +89,7 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.get_scoring_rollup pour la doc complete.
         """
-        return self._api.get_scoring_rollup(by=by, limit=limit, run_id=run_id)
+        return self._api._get_scoring_rollup_impl(by=by, limit=limit, run_id=run_id)
 
     # ---------- Film standalone + history (3) ----------
 
@@ -98,21 +98,21 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.get_film_full pour la doc complete.
         """
-        return self._api.get_film_full(row_id, run_id)
+        return self._api._get_film_full_impl(row_id, run_id)
 
     def get_film_history(self, film_id: str) -> Dict[str, Any]:
         """Timeline complete d'un film a travers tous les runs.
 
         Cf CineSortApi.get_film_history pour la doc complete.
         """
-        return self._api.get_film_history(film_id)
+        return self._api._get_film_history_impl(film_id)
 
     def list_films_with_history(self, limit: int = 50) -> Dict[str, Any]:
         """Liste des films du dernier run avec resume d'historique.
 
         Cf CineSortApi.list_films_with_history pour la doc complete.
         """
-        return self._api.list_films_with_history(limit)
+        return self._api._list_films_with_history_impl(limit)
 
     # ---------- Export RGPD (1) ----------
 
@@ -121,4 +121,4 @@ class LibraryFacade(_BaseFacade):
 
         Cf CineSortApi.export_full_library pour la doc complete.
         """
-        return self._api.export_full_library()
+        return self._api._export_full_library_impl()

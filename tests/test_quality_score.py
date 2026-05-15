@@ -427,10 +427,11 @@ class QualityScoreTests(unittest.TestCase):
         self.assertEqual(str(results[0].get("status")), "ignored_existing")
 
     def test_analyze_quality_batch_rejects_concurrent_launch(self) -> None:
+        """Issue #84 PR 10 : get_quality_report est sur QualityFacade (private impl)."""
         api, run_id, row_id = self._prepare_single_run()
         entered = threading.Event()
         release = threading.Event()
-        original = api.get_quality_report
+        original = api._get_quality_report_impl
 
         def slow_get_quality_report(run_id_arg, row_id_arg, options=None):
             entered.set()
@@ -444,7 +445,7 @@ class QualityScoreTests(unittest.TestCase):
                 "cache_hit_quality": False,
             }
 
-        api.get_quality_report = slow_get_quality_report  # type: ignore[method-assign]
+        api._get_quality_report_impl = slow_get_quality_report  # type: ignore[method-assign]
         first_result: dict = {}
 
         def run_first():
@@ -460,7 +461,7 @@ class QualityScoreTests(unittest.TestCase):
         finally:
             release.set()
             t.join(2.0)
-            api.get_quality_report = original  # type: ignore[method-assign]
+            api._get_quality_report_impl = original  # type: ignore[method-assign]
 
         self.assertTrue(first_result.get("ok"), first_result)
 
@@ -468,7 +469,7 @@ class QualityScoreTests(unittest.TestCase):
         api, run_id, row_id = self._prepare_single_run()
         store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
 
-        with mock.patch.object(api, "get_quality_report", side_effect=OSError("quality batch boom")):
+        with mock.patch.object(api, "_get_quality_report_impl", side_effect=OSError("quality batch boom")):
             out = api.quality.analyze_quality_batch(run_id, [row_id], {"reuse_existing": False})
 
         self.assertFalse(out.get("ok"), out)

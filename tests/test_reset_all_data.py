@@ -111,10 +111,15 @@ class ResetBackendTests(unittest.TestCase):
 
 class ResetEndpointTests(unittest.TestCase):
     def test_endpoints_exist_on_api(self):
+        """Issue #84 PR 10 : reset_all_user_data + get_user_data_size sont sur SettingsFacade."""
         from cinesort.ui.api.cinesort_api import CineSortApi
+        from cinesort.ui.api.facades.settings_facade import SettingsFacade
 
-        self.assertTrue(callable(getattr(CineSortApi, "reset_all_user_data", None)))
-        self.assertTrue(callable(getattr(CineSortApi, "get_user_data_size", None)))
+        self.assertTrue(callable(getattr(SettingsFacade, "reset_all_user_data", None)))
+        self.assertTrue(callable(getattr(SettingsFacade, "get_user_data_size", None)))
+        # Verifier que les facades sont bien attachees
+        api = CineSortApi()
+        self.assertIsInstance(api.settings, SettingsFacade)
 
 
 class ResetFrontendTests(unittest.TestCase):

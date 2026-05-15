@@ -155,7 +155,7 @@ class CineSortApiUpdateEndpointsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             api = CineSortApi()
             api._state_dir = Path(tmp)
-            with mock.patch.object(api, "get_settings", return_value={"update_github_repo": ""}):
+            with mock.patch.object(api, "_get_settings_impl", return_value={"update_github_repo": ""}):
                 res = api.check_for_updates()
             self.assertFalse(res.get("ok"))
             self.assertIn("data", res)

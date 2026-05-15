@@ -104,7 +104,7 @@ class TestGetPlexLibraries(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("server unreachable", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.plex_client.PlexClient")
     def test_fallback_settings(self, mock_client_cls: MagicMock, mock_get_settings: MagicMock) -> None:
         # Mock settings : retourne URL/token configurés
@@ -133,14 +133,14 @@ class TestGetPlexSyncReport(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_disabled(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"plex_enabled": False}
         result = self.api.integrations.get_plex_sync_report()
         self.assertFalse(result["ok"])
         self.assertIn("Plex non configure", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_but_url_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -152,7 +152,7 @@ class TestGetPlexSyncReport(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("manquant", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_but_library_id_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -164,7 +164,7 @@ class TestGetPlexSyncReport(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("manquant", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_plex_enabled_no_run_done(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {
             "plex_enabled": True,
@@ -176,7 +176,7 @@ class TestGetPlexSyncReport(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Aucun run", result["message"])
 
-    @patch.object(backend.CineSortApi, "get_settings")
+    @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.plex_client.PlexClient")
     def test_plex_connection_error_returns_message(
         self, mock_client_cls: MagicMock, mock_get_settings: MagicMock
