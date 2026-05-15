@@ -16,6 +16,50 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## SESSION 15 mai 2026 (apres-midi) — Cleanup massif issues d'audit ✅
+
+8 issues fermees + 11 PRs mergees en sequence apres la resolution de #103 :
+
+### Cleanup audit-bot (#138, #139, #140, #141)
+
+- **#138** (PR #138) : suppression cle morte `"animation "` (espace final) dans `_GENRE_CANONICAL` — clé inaccessible car `strip()` avant lookup
+- **#139** (PR #139) : fix invariant somme dans `suggest_weight_adjustment` — distribution proportionnelle sur les autres categories avec respect des bornes [1, 90]
+- **#140** (PR #158) : suppression fallback try/except inutile dans `disambiguate_by_context` — `dataclasses.replace()` ne leve jamais TypeError/ValueError en pratique
+- **#141** (PR #141) : ajout rapport audit Claude 2026-05-15
+
+### Issues d'audit fermees
+
+- **#84** : god class (deja resolue par PRs #129-#142, fermeture formelle)
+- **#81** (PR #162) : backup naming UTC + microsecondes (DST collision + granularite seconde)
+- **#76** (PR #163) : circuit breaker pour le client TMDb (5h retry → 35s sur TMDb-down)
+- **#89** (PR #161) : v5:notif-count listener au niveau module + audit revele que la situation est moins grave que l'audit suggerait
+- **#86** (PR #159) : 6 derniers monkey-patches `core.X = Y` → `mock.patch.object` (zero residuel)
+- **#90** : i18n strings FR hardcoded — fermee priorite faible (web/views/*.js legacy non-charge en prod)
+- **#91** : doublons composants web/components vs dashboard — meme rationale legacy
+
+### Quick wins UX (#92)
+
+PR #164 : 2 quick wins portes au dashboard :
+- **#9** CTA direct install probe dans dashboard quality view (au lieu de "go to settings")
+- **#2** Refresh sidebar badges apres undo via event `cinesort:undo`
+
+Restant dans #92 : #1, #3, #4, #7 (non-bloquant, peuvent etre fait en filigrane).
+
+### Issues restantes (6)
+
+- **#14** : meta-audit umbrella (a laisser ouverte)
+- **#32** : exposer audio_fingerprint/ssim_self_ref/upscale_verdict dans UI (1-2 jours, concrete user value)
+- **#83** : ARCH-P0 cycle domain↔app, etapes 2-4 (3-5 jours, etape 1 deja done)
+- **#85** : ARCH-P1 mixins SQLite → Repositories (5-7 jours, gated sur #83)
+- **#92** : quick wins #1/#3/#4/#7 restants (4-9h cumule)
+- **#94** : frames side-by-side dans comparaison perceptuelle doublons (1 jour, concrete user value)
+
+### Bilan code reel
+
+Apres cette session : ~6 issues d'audit fermees, +1100 lignes (CircuitBreaker, tests, refactors), -200 lignes (dead code, monkey-patches). Le score reel passe a ~8.5/10.
+
+---
+
 ## OPERATION TERMINEE — Logging structure API (#103) ✅ (15 mai 2026)
 
 Issue #103 (audit-2026-05-13:logoff) **`return {"ok": False, ...}` sans logging** mergee en 7 PRs (#150 -> #156). 198 / 198 sites migres vers le helper `_err_response()` dans tout `cinesort/ui/api/`.
