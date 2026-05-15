@@ -432,9 +432,9 @@ function _renderShell(vm, container) {
   // === Actions rapides ===
   html += `<div class="card bento-card bento-card--third"><h3>Actions rapides</h3>
     <div style="display:flex;flex-direction:column;gap:var(--sp-3);margin-top:var(--sp-3)">
-      <button class="btn btn-primary" style="justify-content:flex-start" data-nav-route="/library#step-analyse">▶ Lancer un nouveau scan</button>
-      <button class="btn" style="justify-content:flex-start" data-nav-route="/library#step-doublons">⎘ Verifier les doublons</button>
-      <button class="btn" style="justify-content:flex-start" data-nav-route="/quality">▼ Voir la qualite</button>
+      <button class="btn btn-primary" style="justify-content:flex-start" data-nav-route="/processing">▶ Lancer un nouveau scan</button>
+      <button class="btn" style="justify-content:flex-start" data-nav-route="/processing">⎘ Verifier les doublons</button>
+      <button class="btn" style="justify-content:flex-start" data-nav-route="/qij">▼ Voir la qualite</button>
       <button class="btn" style="justify-content:flex-start" data-nav-route="/settings">⚙ Parametres</button>
     </div>
   </div>`;
