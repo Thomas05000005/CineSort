@@ -1580,6 +1580,68 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
         log_fn("WARN", f"Plex : echec refresh section — {exc}")
 
 
+def refresh_jellyfin_library_now(api: Any) -> Dict[str, Any]:
+    """Cf #92 quick win #1 : declenche un refresh Jellyfin a la demande.
+
+    Difference avec `_trigger_jellyfin_refresh` (interne, post-apply) :
+    - Ne respecte PAS `dry_run` (toujours execute)
+    - Ne respecte PAS le toggle `jellyfin_refresh_on_apply` (l'utilisateur
+      a explicitement clique le bouton)
+    - Verifie seulement que Jellyfin est CONFIGURE (url + api_key)
+
+    Le scenario : apres un apply, l'utilisateur veut forcer le refresh
+    Jellyfin sans attendre le tick suivant ou re-lancer un apply.
+    """
+    data = _read_jellyfin_settings(api)
+    if not data:
+        return _err_response(
+            "Jellyfin non configure ou desactive.", category="config", level="info", log_module=__name__
+        )
+    try:
+        client = _make_jellyfin_client(data)
+        client.refresh_library()
+        _log.info("api: refresh_jellyfin_library_now declenche")
+        return {"ok": True, "message": "Refresh Jellyfin declenche."}
+    except (IntegrationError, OSError, requests.RequestException) as exc:
+        _log.warning("refresh_jellyfin_library_now echoue: %s", exc)
+        return _err_response(f"Echec refresh Jellyfin : {exc}", category="resource", level="error", log_module=__name__)
+
+
+def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
+    """Cf #92 quick win #1 : declenche un refresh Plex a la demande.
+
+    Symetrique de `refresh_jellyfin_library_now`. Verifie url + token +
+    library_id (ce dernier n'est pas necessaire pour Jellyfin).
+    """
+    try:
+        settings = api.settings.get_settings()
+    except (OSError, PermissionError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(f"Echec lecture settings : {exc}", category="runtime", level="error", log_module=__name__)
+    if not _to_bool(settings.get("plex_enabled"), False):
+        return _err_response("Plex non configure ou desactive.", category="config", level="info", log_module=__name__)
+    plex_url = str(settings.get("plex_url") or "").strip()
+    plex_token = str(settings.get("plex_token") or "").strip()
+    plex_lib = str(settings.get("plex_library_id") or "").strip()
+    if not plex_url or not plex_token or not plex_lib:
+        return _err_response(
+            "Plex incomplet (URL, token ou library_id manquant).",
+            category="config",
+            level="info",
+            log_module=__name__,
+        )
+    try:
+        from cinesort.infra.plex_client import PlexClient
+
+        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        client = PlexClient(plex_url, plex_token, timeout_s=timeout_s)
+        client.refresh_library(plex_lib)
+        _log.info("api: refresh_plex_library_now declenche")
+        return {"ok": True, "message": "Refresh Plex declenche."}
+    except (IntegrationError, OSError, requests.RequestException) as exc:
+        _log.warning("refresh_plex_library_now echoue: %s", exc)
+        return _err_response(f"Echec refresh Plex : {exc}", category="resource", level="error", log_module=__name__)
+
+
 def _snapshot_jellyfin_watched(api: Any, log_fn: Callable[[str, str], None]) -> Optional[Dict[str, Any]]:
     """Capture les statuts watched Jellyfin avant apply. Retourne None si desactive."""
     data = _read_jellyfin_settings(api)

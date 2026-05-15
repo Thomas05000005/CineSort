@@ -172,8 +172,59 @@ async function _onApply() {
     // Mettre a jour la checklist
     if (dryRun) { _checklistState.dryRunDone = true; _updateChecklist(); }
 
+    // Cf #92 quick win #1 : apres un apply reel reussi, proposer des
+    // boutons de refresh manuel Jellyfin / Plex. Independant du toggle
+    // `*_refresh_on_apply` (qui automatise sans bouton). Utile quand le
+    // toggle est off et qu'on veut quand meme rafraichir.
+    if (!dryRun && applied > 0) {
+      _showRefreshLibraryButtons(resultEl || $("libApplyResult"));
+    }
+
   } catch { _showMsg("libApplyMsg", "Erreur réseau.", true); }
   finally { if (btn) btn.disabled = false; }
+}
+
+/* --- Refresh Jellyfin/Plex manuel post-apply (#92 quick win #1) -- */
+function _showRefreshLibraryButtons(host) {
+  if (!host) return;
+  // Idempotent : ne recree pas le panneau si deja la (post-double-apply).
+  if (host.querySelector("[data-refresh-pane]")) return;
+  const pane = document.createElement("div");
+  pane.setAttribute("data-refresh-pane", "1");
+  pane.style.marginTop = "0.75em";
+  pane.innerHTML = `
+    <div class="text-muted" style="margin-bottom:0.25em">Rafraichir les bibliotheques externes :</div>
+    <button type="button" class="btn btn--compact" data-action="refresh-jellyfin">Jellyfin</button>
+    <button type="button" class="btn btn--compact" data-action="refresh-plex" style="margin-left:0.5em">Plex</button>
+    <span class="text-muted" data-refresh-msg style="margin-left:0.5em"></span>`;
+  host.appendChild(pane);
+  pane.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-action]");
+    if (!btn) return;
+    const which = btn.dataset.action === "refresh-jellyfin" ? "jellyfin" : "plex";
+    const method = which === "jellyfin"
+      ? "integrations/refresh_jellyfin_library_now"
+      : "integrations/refresh_plex_library_now";
+    const msgEl = pane.querySelector("[data-refresh-msg]");
+    btn.disabled = true;
+    if (msgEl) msgEl.textContent = "Refresh en cours...";
+    try {
+      const res = await apiPost(method);
+      const d = res.data || {};
+      if (msgEl) {
+        msgEl.textContent = d.ok ? (d.message || "Refresh declenche.") : (d.message || "Echec.");
+        msgEl.style.color = d.ok ? "var(--success, #4ade80)" : "var(--danger, #f87171)";
+      }
+    } catch (err) {
+      if (msgEl) {
+        msgEl.textContent = "Erreur reseau.";
+        msgEl.style.color = "var(--danger, #f87171)";
+      }
+      console.error("[lib-apply] refresh", which, err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 /* --- Undo ----------------------------------------------------- */

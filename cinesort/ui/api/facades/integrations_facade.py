@@ -70,6 +70,13 @@ class IntegrationsFacade(_BaseFacade):
         """
         return self._api._get_jellyfin_sync_report_impl(run_id)
 
+    def refresh_jellyfin_library_now(self) -> Dict[str, Any]:
+        """Cf #92 quick win #1 : declenche un refresh Jellyfin a la demande.
+
+        Cf CineSortApi._refresh_jellyfin_library_now_impl pour la doc complete.
+        """
+        return self._api._refresh_jellyfin_library_now_impl()
+
     # ---------- Plex (3) ----------
 
     def test_plex_connection(
@@ -102,6 +109,13 @@ class IntegrationsFacade(_BaseFacade):
         Cf CineSortApi.get_plex_sync_report pour la doc complete.
         """
         return self._api._get_plex_sync_report_impl(run_id)
+
+    def refresh_plex_library_now(self) -> Dict[str, Any]:
+        """Cf #92 quick win #1 : declenche un refresh Plex a la demande.
+
+        Cf CineSortApi._refresh_plex_library_now_impl pour la doc complete.
+        """
+        return self._api._refresh_plex_library_now_impl()
 
     # ---------- Radarr (3) ----------
 
