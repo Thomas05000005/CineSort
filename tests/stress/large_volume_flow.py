@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import skipUnless
 
 import cinesort.domain.core as core
+import cinesort.app.plan_support as plan_support
 
 # Cf issue #83 : import direct au lieu de via re-export domain.core.
 # core.find_duplicate_targets reste accede via core.X (wrapper qui injecte
@@ -37,7 +38,7 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         self._make_movie_dirs(1000)
         cfg = core.Config(root=self.root).normalized()
 
-        rows, stats = core.plan_library(
+        rows, stats = plan_support.plan_library(
             cfg,
             tmdb=None,
             log=lambda *_args: None,
@@ -54,7 +55,7 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         self._make_movie_dirs(5000)
         cfg = core.Config(root=self.root).normalized()
 
-        rows, stats = core.plan_library(
+        rows, stats = plan_support.plan_library(
             cfg,
             tmdb=None,
             log=lambda *_args: None,

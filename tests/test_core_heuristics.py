@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import cinesort.domain.core as core
+import cinesort.app.plan_support as plan_support
 import cinesort.domain.scan_helpers as core_scan_helpers
 from cinesort.infra.tmdb_client import TmdbResult
 
@@ -343,7 +344,7 @@ class CoreHeuristicsTests(unittest.TestCase):
                 def should_cancel() -> bool:
                     return bool(state["cancel"])
 
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     core.Config(root=root, enable_tmdb=False),
                     tmdb=None,
                     log=log,
@@ -374,7 +375,7 @@ class CoreHeuristicsTests(unittest.TestCase):
             old_min_video_bytes = core.MIN_VIDEO_BYTES
             core.MIN_VIDEO_BYTES = 1
             try:
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     core.Config(root=root, enable_tmdb=False),
                     tmdb=None,
                     log=lambda *_args: None,
@@ -404,7 +405,7 @@ class CoreHeuristicsTests(unittest.TestCase):
             old_min_video_bytes = core.MIN_VIDEO_BYTES
             core.MIN_VIDEO_BYTES = 1
             try:
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     core.Config(root=root, enable_tmdb=False),
                     tmdb=None,
                     log=lambda *_args: None,
@@ -428,7 +429,7 @@ class CoreHeuristicsTests(unittest.TestCase):
             (noise / "poster.jpg").write_bytes(b"\x00")
             (noise / "info.nfo").write_text("<movie/>", encoding="utf-8")
 
-            rows, stats = core.plan_library(
+            rows, stats = plan_support.plan_library(
                 core.Config(root=root, enable_tmdb=False),
                 tmdb=None,
                 log=lambda *_args: None,
@@ -460,7 +461,7 @@ class CoreHeuristicsTests(unittest.TestCase):
                 self.assertEqual(len(all_targets), 60)
 
                 progress_calls = []
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda *_args: None,

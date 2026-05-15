@@ -365,7 +365,7 @@ def _build_plan_job_fn(
                     rs.running = False
                     rs.done = True
                 rs.log("WARN", "Plan annule avant le demarrage effectif.")
-                dlog("job_fn cancelled before core.plan_library")
+                dlog("job_fn cancelled before plan_support.plan_library")
                 return {"cancelled_before_plan": True}
 
             dlog(f"job_fn calling plan_multi_roots with {len(roots)} root(s)")

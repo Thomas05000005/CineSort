@@ -7,6 +7,7 @@ from pathlib import Path
 
 import cinesort.ui.api.cinesort_api as backend
 import cinesort.domain.core as core
+from cinesort.app.apply_core import build_apply_context
 
 
 class V71FeaturesTests(unittest.TestCase):
@@ -308,7 +309,9 @@ class V71FeaturesTests(unittest.TestCase):
         cfg = core.Config(root=self.root, collection_root_name="_Collection")
         row = self._single_row("S|ctx", self.root / "Source", "Film Test", 2021)
 
-        ctx = core._build_apply_context(
+        # Issue #83 : migrer vers la vraie origine (app.apply_core.build_apply_context)
+        # au lieu du re-export domain.core._build_apply_context.
+        ctx = build_apply_context(
             cfg,
             [row],
             dry_run=False,

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import cinesort.domain.core as core
+import cinesort.app.plan_support as plan_support
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 
 
@@ -41,7 +42,7 @@ class IncrementalScanTests(unittest.TestCase):
             incremental_scan_enabled=incremental,
         )
         logs = []
-        rows, stats = core.plan_library(
+        rows, stats = plan_support.plan_library(
             cfg,
             tmdb=None,
             log=lambda level, msg: logs.append((level, msg)),
