@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.infra import state
 from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -438,9 +439,9 @@ def save_smart_playlist(
     """Cree ou met a jour une smart playlist."""
     name = str(name or "").strip()
     if not name:
-        return {"ok": False, "message": "Nom requis."}
+        return _err_response("Nom requis.", category="validation", level="info", log_module=__name__)
     if not isinstance(filters, dict):
-        return {"ok": False, "message": "Filtres invalides."}
+        return _err_response("Filtres invalides.", category="validation", level="info", log_module=__name__)
 
     playlists = _get_playlists_from_settings(api)
 
@@ -456,7 +457,7 @@ def save_smart_playlist(
                 updated = True
                 break
         if not updated:
-            return {"ok": False, "message": "Playlist introuvable."}
+            return _err_response("Playlist introuvable.", category="resource", level="info", log_module=__name__)
     else:
         # Create
         new = {
@@ -470,7 +471,7 @@ def save_smart_playlist(
         playlist_id = new["id"]
 
     if not _write_playlists_to_settings(api, playlists):
-        return {"ok": False, "message": "Erreur de persistance."}
+        return _err_response("Erreur de persistance.", category="runtime", level="error", log_module=__name__)
 
     return {"ok": True, "playlist_id": playlist_id}
 
@@ -478,16 +479,16 @@ def save_smart_playlist(
 def delete_smart_playlist(api: Any, playlist_id: str) -> Dict[str, Any]:
     """Supprime une smart playlist custom (les presets ne peuvent etre supprimes)."""
     if not playlist_id or str(playlist_id).startswith("_preset_"):
-        return {"ok": False, "message": "Playlist protegee."}
+        return _err_response("Playlist protegee.", category="permission", level="warning", log_module=__name__)
 
     playlists = _get_playlists_from_settings(api)
     before = len(playlists)
     playlists = [p for p in playlists if p.get("id") != playlist_id]
     if len(playlists) == before:
-        return {"ok": False, "message": "Playlist introuvable."}
+        return _err_response("Playlist introuvable.", category="resource", level="info", log_module=__name__)
 
     if not _write_playlists_to_settings(api, playlists):
-        return {"ok": False, "message": "Erreur de persistance."}
+        return _err_response("Erreur de persistance.", category="runtime", level="error", log_module=__name__)
 
     return {"ok": True, "deleted_id": playlist_id}
 

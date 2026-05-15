@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 import cinesort.infra.state as state
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +20,22 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return {"ok": False, "message": "Plan pas pret."}
+            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
         rows = rs.rows
         if not rows:
             try:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             except (ImportError, OSError) as exc:
-                return {"ok": False, "message": str(exc)}
+                return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": "Run introuvable."}
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     row, _store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return {"ok": False, "message": "Plan pas pret."}
+        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir), run_id, ensure_exists=False
     )
@@ -42,7 +43,7 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
         rows = api._load_rows_from_plan_jsonl(run_paths)
         return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 @requires_valid_run_id
@@ -72,7 +73,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": "Run introuvable."}
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     row, _store = found
     state_dir = normalize_user_path(row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -95,7 +96,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
 def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
     rs = api._get_run(run_id)
     if not rs:
-        return {"ok": False, "run_id": run_id, "message": "Run introuvable."}
+        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id)
 
     accepted = rs.runner.request_cancel(run_id)
     snap = rs.runner.get_status(run_id)
@@ -112,11 +113,11 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
     try:
         raw_path = str(path or "").strip()
         if not raw_path:
-            return {"ok": False, "message": "Chemin vide."}
+            return _err_response("Chemin vide.", category="validation", level="info", log_module=__name__)
 
         candidate = Path(raw_path)
         if not candidate.exists():
-            return {"ok": False, "message": "Chemin introuvable."}
+            return _err_response("Chemin introuvable.", category="resource", level="warning", log_module=__name__)
 
         settings = api.settings.get_settings()
         root_raw = str(settings.get("root") or "").strip()
@@ -129,7 +130,9 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
             open_target = candidate.parent
             resolved_to_check = resolved_path.parent
         elif not resolved_path.is_dir():
-            return {"ok": False, "message": "Chemin invalide (ni fichier ni dossier)."}
+            return _err_response(
+                "Chemin invalide (ni fichier ni dossier).", category="validation", level="warning", log_module=__name__
+            )
 
         allowed = False
         allowed_bases: List[Path] = [state_dir]
@@ -144,9 +147,9 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
             except (OSError, ValueError):
                 continue
         if not allowed:
-            return {"ok": False, "message": "Chemin non autorise."}
+            return _err_response("Chemin non autorise.", category="permission", level="warning", log_module=__name__)
 
         os.startfile(str(open_target))  # type: ignore[attr-defined]
         return {"ok": True}
     except (OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
