@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import make_session_with_retry
 import contextlib
 
@@ -142,8 +143,25 @@ class TmdbClient:
             backoff_base=0.5,
         )
 
+        # Cf issue #76 : circuit breaker pour court-circuiter les appels quand
+        # TMDb est down. Sans ca, sur 5000 films, chaque echec attend 3 retries
+        # × backoff exponentiel (~3.5s perdues par film) = ~5h. Avec le
+        # breaker, apres 10 echecs consecutifs, on saute les 5 min suivantes.
+        # Seuil intentionnellement laxiste (10) pour tolerer les hiccups
+        # ponctuels de TMDb (rate-limit transitoire).
+        self._breaker = CircuitBreaker(failure_threshold=10, recovery_timeout=300.0)
+
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_cache()
+
+    def _http_get(self, url: str, *, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+        """GET HTTP protege par le circuit breaker (#76).
+
+        Leve `CircuitOpenError` si le breaker est ouvert (caller doit traiter
+        ca comme un echec reseau normal — typiquement fallback gracieux qui
+        retourne None / liste vide).
+        """
+        return self._breaker.call(lambda: self._session.get(url, params=params, timeout=self.timeout_s))
 
     def _debug(self, message: str) -> None:
         if str(os.environ.get("CINESORT_DEBUG", "")).strip().lower() not in _DEBUG_ENV_VALUES:
@@ -300,9 +318,9 @@ class TmdbClient:
         url = f"{TMDB_API_BASE}/authentication"
         _t0 = time.monotonic()
         try:
-            r = self._session.get(url, params={"api_key": self.api_key}, timeout=self.timeout_s)
+            r = self._http_get(url, params={"api_key": self.api_key})
             logger.debug("TMDb: GET /authentication -> %d (%.1fs)", r.status_code, time.monotonic() - _t0)
-        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+        except (requests.RequestException, CircuitOpenError, ConnectionError, TimeoutError) as e:
             logger.warning("TMDb: echec validate_key — %s", e)
             return False, f"Erreur reseau: {e}"
 
@@ -355,7 +373,7 @@ class TmdbClient:
 
         _t0 = time.monotonic()
         try:
-            r = self._session.get(url, params=params, timeout=self.timeout_s)
+            r = self._http_get(url, params=params)
             r.raise_for_status()
             data = r.json()
             logger.debug(
@@ -365,7 +383,7 @@ class TmdbClient:
                 len(data.get("results") or []),
                 time.monotonic() - _t0,
             )
-        except (requests.RequestException, KeyError, TypeError, ValueError, AttributeError) as exc:
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError, AttributeError) as exc:
             logger.debug("TMDb: echec search '%s' (%s) — %s", q_norm, year or "?", exc)
             self._debug(f"search_movie warning query={q_norm} year={year} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
@@ -432,11 +450,11 @@ class TmdbClient:
         }
         _t0 = time.monotonic()
         try:
-            r = self._session.get(url, params=params, timeout=self.timeout_s)
+            r = self._http_get(url, params=params)
             r.raise_for_status()
             data = r.json()
             logger.debug("TMDb: GET /movie/%d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
-        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
             logger.debug("TMDb: echec /movie/%d — %s", mid, exc)
             self._debug(f"_get_movie_detail_cached warning movie_id={mid} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
@@ -543,11 +561,11 @@ class TmdbClient:
         params = {"api_key": self.api_key, "language": "fr-FR"}
         _t0 = time.monotonic()
         try:
-            r = self._session.get(url, params=params, timeout=self.timeout_s)
+            r = self._http_get(url, params=params)
             r.raise_for_status()
             data = r.json()
             logger.debug("TMDb: find_by_tmdb_id %d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
-        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
             logger.debug("TMDb: echec find_by_tmdb_id %d — %s", mid, exc)
             self._debug(f"find_by_tmdb_id warning tmdb_id={mid} error={exc}")
             return None
@@ -596,11 +614,11 @@ class TmdbClient:
         params = {"api_key": self.api_key, "external_source": "imdb_id", "language": "fr-FR"}
         _t0 = time.monotonic()
         try:
-            r = self._session.get(url, params=params, timeout=self.timeout_s)
+            r = self._http_get(url, params=params)
             r.raise_for_status()
             data = r.json()
             logger.debug("TMDb: find_by_imdb_id %s -> %d (%.1fs)", iid, r.status_code, time.monotonic() - _t0)
-        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
             logger.debug("TMDb: echec find_by_imdb_id %s — %s", iid, exc)
             self._debug(f"find_by_imdb_id warning imdb_id={iid} error={exc}")
             return None
@@ -672,10 +690,10 @@ class TmdbClient:
             }
             if year:
                 params["first_air_date_year"] = int(year)
-            resp = self._session.get(f"{TMDB_API_BASE}/search/tv", params=params, timeout=self.timeout_s)
+            resp = self._http_get(f"{TMDB_API_BASE}/search/tv", params=params)
             resp.raise_for_status()
             data = resp.json()
-        except (requests.RequestException, ValueError):
+        except (requests.RequestException, CircuitOpenError, ValueError):
             return []
 
         results_raw = data.get("results") or []
@@ -729,10 +747,10 @@ class TmdbClient:
         try:
             params = {"api_key": self.api_key, "language": language}
             url = f"{TMDB_API_BASE}/tv/{series_id}/season/{season_number}/episode/{episode_number}"
-            resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            resp = self._http_get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
-        except (requests.RequestException, ValueError):
+        except (requests.RequestException, CircuitOpenError, ValueError):
             return None
 
         title = str(data.get("name") or "").strip() or None
