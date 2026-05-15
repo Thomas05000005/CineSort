@@ -14,7 +14,6 @@ revendiquait "49.84 MB testes" sans validation fonctionnelle.
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -23,16 +22,10 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from tests._helpers import find_free_port as _find_free_port
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXE_PATH = REPO_ROOT / "dist" / "CineSort.exe"
-
-
-def _find_free_port() -> int:
-    """Trouve un port libre pour le smoke test (eviter 8642 si deja pris)."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _wait_for_health(url: str, timeout_s: float = 10.0) -> Optional[dict]:

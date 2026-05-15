@@ -40,6 +40,7 @@ from create_test_data import (  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir  # noqa: E402
 from cinesort.infra.rest_server import RestApiServer  # noqa: E402
+from tests._helpers import find_free_port as _find_free_port
 
 
 VIEWPORTS = [
@@ -60,12 +61,6 @@ VIEWS = [
     "quality",
     "settings",
 ]
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _wait_server_ready(port: int, timeout_s: float = 10.0) -> None:

@@ -6,7 +6,6 @@ Serveur REST auto-contenu, browser Playwright, authentification.
 from __future__ import annotations
 
 import shutil
-import socket
 import tempfile
 import time
 from http.client import HTTPConnection
@@ -31,13 +30,7 @@ from create_test_data import (  # noqa: E402
     write_plan_file,
 )
 import contextlib
-
-
-def _find_free_port() -> int:
-    """Trouve un port TCP libre."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from tests._helpers import find_free_port as _find_free_port
 
 
 def _wait_server_ready(port: int, timeout_s: float = 5.0) -> None:

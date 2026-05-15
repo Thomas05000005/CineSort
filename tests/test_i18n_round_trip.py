@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Tuple
 
 from cinesort.domain import i18n_messages
 from cinesort.ui.api import settings_support
+from tests._helpers import find_free_port as _find_free_port
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,14 +61,6 @@ def _flatten(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
         else:
             out[key] = v
     return out
-
-
-def _find_free_port() -> int:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 # ---------------------------------------------------------------------------

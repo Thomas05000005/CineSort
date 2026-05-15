@@ -11,21 +11,15 @@ Couvre :
 
 from __future__ import annotations
 
-import socket
 import time
 import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any
+from tests._helpers import find_free_port as _find_free_port
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SHARED = _ROOT / "web" / "shared"
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 # ---------------------------------------------------------------------------
