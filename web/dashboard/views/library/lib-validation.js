@@ -403,14 +403,96 @@ async function _hookDetailModalActions() {
       const { showModal: showM } = await import("../../components/modal.js");
       showM({ title: "Historique", body: h });
     } else if (action === "perceptual-report") {
+      // Cf #32 : 2-step fetch.
+      // 1) D'abord get_perceptual_details (read-only) — retourne tout, y
+      //    compris audio_fingerprint, ssim_self_ref, upscale_verdict.
+      // 2) Si rien en BDD (missing), on tombe sur get_perceptual_report qui
+      //    declenche l'analyse puis on rappelle details pour les 3 champs
+      //    orphelins.
       const { apiPost } = await import("../../core/api.js");
-      const r = await apiPost("quality/get_perceptual_report", { run_id: btn.dataset.runId || "", row_id: btn.dataset.rowId || "" });
-      const d = r.data || {};
-      if (!d.ok && d.ok !== undefined) { alert(d.message || "Pas de rapport."); return; }
-      let h = `<p>Score global : <strong>${d.global_score || "—"}</strong></p>`;
-      h += `<p>Vidéo : ${d.visual_score || "—"} | Audio : ${d.audio_score || "—"}</p>`;
+      const runId = btn.dataset.runId || "";
+      const rowId = btn.dataset.rowId || "";
+      let details = null;
+      const r1 = await apiPost("quality/get_perceptual_details", { run_id: runId, row_id: rowId });
+      const d1 = r1.data || {};
+      if (d1.ok && d1.details) {
+        details = d1.details;
+      } else if (d1.missing) {
+        // Pas encore analyse : declenche l'analyse puis refetch details.
+        const r2 = await apiPost("quality/get_perceptual_report", { run_id: runId, row_id: rowId });
+        const d2 = r2.data || {};
+        if (!d2.ok && d2.ok !== undefined) {
+          alert(d2.message || "Analyse perceptuelle echouee.");
+          return;
+        }
+        const r3 = await apiPost("quality/get_perceptual_details", { run_id: runId, row_id: rowId });
+        details = r3?.data?.details || null;
+        // Fallback : si meme apres analyse on n'a pas de details, on affiche
+        // au moins le payload immediat de get_perceptual_report.
+        if (!details) details = d2;
+      } else if (d1.message) {
+        alert(d1.message);
+        return;
+      }
+      if (!details) { alert("Pas de rapport perceptuel disponible."); return; }
+      // Helpers d'affichage
+      const _fmt = (v, missing = "—") => (v === null || v === undefined || v === "") ? missing : v;
+      const _shortFp = (fp) => { const s = String(fp || ""); return s.length > 16 ? s.slice(0, 8) + "…" + s.slice(-6) : s; };
+      const _ssimLabel = (v) => {
+        if (v === null || v === undefined) return "non calcule";
+        const n = Number(v);
+        if (n >= 0.95) return `${n.toFixed(3)} (Excellent)`;
+        if (n >= 0.85) return `${n.toFixed(3)} (Bon)`;
+        if (n >= 0.70) return `${n.toFixed(3)} (Moyen)`;
+        return `${n.toFixed(3)} (Faible — upscale suspect)`;
+      };
+      const _verdictLabel = (v) => {
+        if (!v) return "non calcule";
+        const s = String(v);
+        const labels = {
+          native_4k: "Natif 4K",
+          native: "Natif (resolution authentique)",
+          upscaled_1080p: "Upscale depuis 1080p (faux 4K)",
+          upscaled: "Upscale suspect",
+          disabled: "Detection desactivee",
+        };
+        return labels[s] || s;
+      };
+      // Header : scores globaux
+      let h = `<p>Score global : <strong>${_fmt(details.global_score)}</strong>`;
+      if (details.global_tier) h += ` (${_fmt(details.global_tier)})`;
+      h += `</p>`;
+      h += `<p>Vidéo : ${_fmt(details.visual_score)} | Audio : ${_fmt(details.audio_score)}</p>`;
+      // Cf #32 : section "Empreintes et verdicts" pour les donnees orphelines.
+      h += `<hr><h4 style="margin-top:1em">Empreintes &amp; verdicts</h4>`;
+      h += `<table class="tbl detail-table">`;
+      h += `<tr><th style="text-align:left">Empreinte audio (Chromaprint)</th><td><code title="${_fmt(details.audio_fingerprint, "")}">${details.audio_fingerprint ? _shortFp(details.audio_fingerprint) : "non calculee"}</code>`;
+      if (details.audio_fingerprint) {
+        h += ` <button class="btn btn--xs" data-fp-copy="${details.audio_fingerprint}" title="Copier l'empreinte complete">Copier</button>`;
+      }
+      h += `</td></tr>`;
+      h += `<tr><th style="text-align:left">SSIM self-ref</th><td>${_ssimLabel(details.ssim_self_ref)}</td></tr>`;
+      h += `<tr><th style="text-align:left">Verdict resolution (faux 4K)</th><td>${_verdictLabel(details.upscale_verdict)}</td></tr>`;
+      if (details.lossy_verdict) {
+        h += `<tr><th style="text-align:left">Verdict audio</th><td>${_fmt(details.lossy_verdict)}</td></tr>`;
+      }
+      h += `</table>`;
       const { showModal: showM } = await import("../../components/modal.js");
       showM({ title: "Analyse perceptuelle", body: h });
+      // Bind du bouton copy de l'empreinte (apres mount de la modale).
+      setTimeout(() => {
+        const overlay = document.querySelector(".modal-overlay");
+        const copyBtn = overlay?.querySelector("[data-fp-copy]");
+        if (copyBtn) {
+          copyBtn.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(copyBtn.dataset.fpCopy);
+              copyBtn.textContent = "Copié";
+              setTimeout(() => { copyBtn.textContent = "Copier"; }, 1500);
+            } catch { /* clipboard refused : noop */ }
+          });
+        }
+      }, 0);
     }
   });
 }
