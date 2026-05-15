@@ -1304,6 +1304,24 @@ class CineSortApi:
         report = build_sync_report(local_rows, plex_movies)
         return {"ok": True, "run_id": target_run_id, **report}
 
+    # ---------- Refresh manuel Jellyfin / Plex (#92 quick win #1) ----------
+    def _refresh_jellyfin_library_now_impl(self) -> Dict[str, Any]:
+        """Cf #92 quick win #1 : declenche un refresh Jellyfin a la demande.
+
+        Endpoint accessible cote frontend pour offrir un bouton "Rafraichir
+        Jellyfin maintenant" apres un apply, sans dependre du toggle
+        `jellyfin_refresh_on_apply` (qui automatise post-apply mais ne
+        permet pas un trigger explicite hors flow apply).
+        """
+        return apply_support.refresh_jellyfin_library_now(self)
+
+    def _refresh_plex_library_now_impl(self) -> Dict[str, Any]:
+        """Cf #92 quick win #1 : declenche un refresh Plex a la demande.
+
+        Symetrique de `_refresh_jellyfin_library_now_impl`.
+        """
+        return apply_support.refresh_plex_library_now(self)
+
     # ---------- Radarr ----------
     def _test_radarr_connection_impl(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Radarr."""
