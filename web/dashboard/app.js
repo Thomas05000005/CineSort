@@ -237,17 +237,22 @@ async function _mountV5Shell() {
     topBarV5.mountHelpFab({ onClick: () => navigateTo("/help") });
   }
 
-  // Notification badge sync : ecoute l'event publie par notification-center
-  document.addEventListener("v5:notif-count", (ev) => {
-    const n = (ev && ev.detail) ? Number(ev.detail.count) || 0 : 0;
-    if (typeof topBarV5.updateNotificationBadge === "function") {
-      topBarV5.updateNotificationBadge(n);
-    }
-  });
-
   // Affichage du shell (le router le toggle ensuite selon /login vs autre)
   document.getElementById("app-shell").classList.remove("hidden");
 }
+
+// Cf issue #89 (audit-2026-05-12:m7n9) : listener attache au niveau module
+// (executable une seule fois quand app.js est charge) plutot que dans
+// _mountV5Shell qui pourrait — en cas de refactor futur — etre appele
+// plusieurs fois et accumuler des listeners doublons sur le document.
+// `topBarV5.updateNotificationBadge` est verifie avant appel : si le shell
+// n'est pas encore monte, l'event est simplement ignore.
+document.addEventListener("v5:notif-count", (ev) => {
+  const n = (ev && ev.detail) ? Number(ev.detail.count) || 0 : 0;
+  if (typeof topBarV5.updateNotificationBadge === "function") {
+    topBarV5.updateNotificationBadge(n);
+  }
+});
 
 /* === Sync sidebar/breadcrumb au changement de route ====== */
 
