@@ -791,9 +791,33 @@ FILTRE 6 - ACTIONABILITE :
 - As-tu une suggestion de fix CONCRETE (pas "ameliorer X") ?
 - Si non -> rends-la concrete ou supprime
 
+FILTRE 7 - ETAT ACTUEL (nouveau, retex 15 mai 2026) :
+- Le code montre-t-il deja une MITIGATION du probleme que tu pointes ?
+  - Ex: "memory leak addEventListener" mais le code utilise AbortController
+    via getNavSignal() -> faux positif (cf #89 audit-2026-05-12:m7n9 qui
+    surestimait drastiquement le probleme)
+  - Ex: "monkey-patch core.X = Y dangereux" mais le pattern existant
+    utilise mock.patch.object -> faux positif (cf #86 deja phase 2)
+- Verifier les guards (_xxAttached set-once, idempotency flags, manual
+  removeEventListener, try/finally, context managers) AVANT de signaler.
+- Si une mitigation est en place ET fonctionne -> supprime ou degrade
+  en "amelioration defensive" (severity 1).
+
+FILTRE 8 - PROPORTIONNALITE (nouveau, retex 15 mai 2026) :
+- Effort estime > 3 jours ? Le finding doit alors :
+  1. Lister un plan MULTI-PR explicite (chaque PR < 500 LOC + tests)
+  2. Identifier la PR PILOTE qui valide l'approche
+  3. Estimer le ROI : combien d'erreurs/bugs evites, perf gainee, etc.
+- Si pas de plan multi-PR -> ne pas creer d'issue critique, laisser
+  comme finding "amelioration architecturale" avec note "necessite
+  decoupage avant execution".
+- Eviter le "5-7 jours pour resoudre couplage X" sans plan : ces issues
+  trainent indefiniment (cf #83/#85 qui sont nettement plus difficiles
+  a executer que ce que l'audit suggerait).
+
 Documente combien de findings tu as supprimes par filtre dans
 le rapport ("Self-critique: 12 findings supprimes : 4 imagines,
-5 idiomatiques, 3 dedup").
+5 idiomatiques, 3 dedup, 2 deja mitigees, 1 sans plan multi-PR").
 
 
 ============================
@@ -1107,6 +1131,21 @@ REGLE ABSOLUE : SYNTAXE "Closes #N" correcte
     OK   : "Closes #17, Closes #18, Closes #21" (avec virgules)
     KO   : "Closes #17 #18 #21" (GitHub ne ferme que la 1re !)
     Cf incident squash merge de PR #22 ou seul #17 a ferme auto.
+
+REGLE ABSOLUE : METTRE A JOUR LES TESTS DE COMPTAGE (retex 15 mai 2026)
+    Si ta PR ajoute/supprime des methodes publiques sur :
+    - CineSortApi -> snapshot `tests/test_cinesort_api_snapshot.py`
+    - Une facade (Run/Settings/Quality/Integrations/Library) -> compteurs
+      dans `tests/test_rest_api.py:test_facade_methods_discovered` et
+      `test_each_facade_has_methods`
+    Ces tests verifient des COMPTES EXACTS. Toute methode ajoutee fait
+    casser le CI au 1er push si ces tests ne sont pas synchronises.
+    Cf PR #169 (ajout 2 methodes Integrations) qui a fail au 1er push
+    avec "AssertionError: 56 != 54".
+
+    Procedure : grep avant push :
+        `grep -nE "test_facade_methods_discovered|EXPECTED.*METHODS" tests/`
+    et update les valeurs si ta PR change le nombre.
 
 Workflow PR standard :
     ```bash

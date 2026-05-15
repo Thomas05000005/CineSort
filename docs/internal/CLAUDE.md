@@ -16,6 +16,35 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## SESSION 15 mai 2026 (soiree) — Quick wins #92 + #32 perceptual UI ✅
+
+5 PRs supplementaires apres le cleanup massif (#138-#163) :
+
+### Quick wins UX (#92, 6 wins live + 4 deja faits)
+
+- **#92 #7 (PR #166)** : lien "Voir l'aide complete →" dans la modale F1 raccourcis. Resout l'incoherence "2 portes" en gardant la modale (acces rapide) ET en exposant un lien vers /help (FAQ + glossaire complet).
+- **#92 #4 (PR #167)** : helper `glossaryTitle()` qui enrichit les `title="..."` des badges Validation avec les definitions du glossaire (1-3 phrases). 9 nouveaux termes (4K light, Non-film, Corrompu, NFO partiel, Titre ambigu, etc.). 11 badges enrichis.
+- **#92 #1 (PR #169)** : 2 nouveaux endpoints `integrations.refresh_jellyfin_library_now` et `refresh_plex_library_now` + boutons UI apres apply reussi. Independants des toggles `*_refresh_on_apply` (qui automatisent). 9 tests dedies.
+- **#92 #3 (PR #170)** : Ctrl+Z dans la vue Bibliotheque declenche l'undo preview via event `cinesort:undo-shortcut` dispatche par `core/keyboard.js`. Documente dans modale F1 et /help.
+
+### Perceptual UI fields (#32, PR #168)
+
+Modale "Analyse perceptuelle" enrichie avec section "Empreintes & verdicts" : Chromaprint hash + bouton "Copier" (usage externe fpcalc/AcoustID), SSIM self-ref + label qualitatif, verdict resolution (Natif 4K / Upscale 1080p / ...). 2-step fetch : `quality/get_perceptual_details` (read-only) puis fallback sur `quality/get_perceptual_report` si pas analyse.
+
+### Issues fermees cette sub-session
+
+- **#32** : perceptual UI fields ✅
+- **#92** : 8/10 quick wins resolus (#5 N/A dans dashboard) ✅
+
+### Restant pour sessions futures
+
+- **#14** umbrella audit (a laisser ouverte)
+- **#83** ARCH-P0 cycle domain↔app etapes 2-4 (3-5j, plan complet dans REFACTOR_PLAN_83.md, gros refactor risque-> session dediee)
+- **#85** ARCH-P1 mixins SQLite (5-7j, gated sur #83)
+- **#94** UX-MED frames side-by-side (1j, necessite test visuel)
+
+---
+
 ## SESSION 15 mai 2026 (apres-midi) — Cleanup massif issues d'audit ✅
 
 8 issues fermees + 11 PRs mergees en sequence apres la resolution de #103 :
