@@ -15,6 +15,7 @@ from pathlib import Path
 
 from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
+from unittest import mock
 
 
 class SettingsRobustnessTests(unittest.TestCase):
@@ -124,9 +125,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         (self.state_dir / "root" / "F.2020" / "F.2020.mkv").write_bytes(b"x" * 2048)
         import cinesort.domain.core as core
 
-        _orig_min = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
-        try:
+        with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
             start = api.run.start_plan(
                 {
                     "root": str(self.state_dir / "root"),
@@ -172,9 +171,6 @@ class SettingsRobustnessTests(unittest.TestCase):
             t.join(timeout=5)
 
             self.assertEqual(errors, [], f"Erreurs save pendant run : {errors}")
-        finally:
-            core.MIN_VIDEO_BYTES = _orig_min
-
     # 40
     def test_secrets_masked_in_get_settings(self) -> None:
         """H2 : secrets externes (plex, radarr, email) sont masques.

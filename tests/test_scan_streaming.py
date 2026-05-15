@@ -8,6 +8,7 @@ from pathlib import Path
 import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 import cinesort.domain.scan_helpers as core_scan_helpers
+from unittest import mock
 
 
 class ScanStreamingTests(unittest.TestCase):
@@ -20,9 +21,7 @@ class ScanStreamingTests(unittest.TestCase):
                 (folder / f"Movie.{idx:03d}.2010.1080p.mkv").write_bytes(b"x" * 4096)
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
-            old_min_video_bytes = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 stream = core_scan_helpers.stream_scan_targets(cfg, min_video_bytes=core.MIN_VIDEO_BYTES)
                 self.assertFalse(isinstance(stream, list))
                 first_batch = list(itertools.islice(stream, 5))
@@ -38,9 +37,6 @@ class ScanStreamingTests(unittest.TestCase):
                     log=lambda *_args: None,
                     progress=lambda idx, total, current: progress_calls.append((idx, total, current)),
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min_video_bytes
-
             self.assertEqual(len(rows), 60)
             self.assertEqual(int(stats.folders_scanned or 0), 60)
             self.assertEqual(len(progress_calls), 60)
@@ -88,18 +84,13 @@ class RootLevelPlanTests(unittest.TestCase):
             (root / "Matrix (1999)" / "Matrix.1999.mkv").write_bytes(b"x" * 4096)
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
-            old_min = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda *_a: None,
                     progress=lambda *_a: None,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min
-
             self.assertEqual(stats.root_level_films_seen, 1)
             root_rows = [r for r in rows if Path(r.folder).resolve() == root.resolve()]
             self.assertEqual(len(root_rows), 1)
@@ -131,18 +122,13 @@ class RootLevelPlanTests(unittest.TestCase):
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
             messages: list[tuple[str, str]] = []
-            old_min = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 _rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda level, msg: messages.append((level, msg)),
                     progress=lambda *_a: None,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min
-
             self.assertEqual(stats.root_level_films_seen, bulk_count)
             warnings = [m for lvl, m in messages if lvl == "WARN" and "Racine en vrac" in m]
             self.assertEqual(len(warnings), 1, warnings)
@@ -164,18 +150,13 @@ class RootLevelPlanTests(unittest.TestCase):
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
             messages: list[tuple[str, str]] = []
-            old_min = core.MIN_VIDEO_BYTES
-            core.MIN_VIDEO_BYTES = 1
-            try:
+            with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda level, msg: messages.append((level, msg)),
                     progress=lambda *_a: None,
                 )
-            finally:
-                core.MIN_VIDEO_BYTES = old_min
-
             warnings = [m for lvl, m in messages if lvl == "WARN" and "Racine en vrac" in m]
             self.assertEqual(len(warnings), 0)
 
