@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import cinesort.domain.core as core
@@ -19,11 +20,12 @@ class RunReportExportTests(unittest.TestCase):
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
-        self._min_video_bytes = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
+        # Issue #86 : mock.patch.object pour auto-restore safe meme si exception
+        _p_min_video = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
+        _p_min_video.start()
+        self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        core.MIN_VIDEO_BYTES = self._min_video_bytes
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _create_file(self, path: Path, size: int = 2048) -> None:

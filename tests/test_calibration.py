@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from cinesort.domain.calibration import (
@@ -175,13 +176,13 @@ class SubmitFeedbackIntegrationTests(unittest.TestCase):
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True)
         self.state_dir.mkdir(parents=True)
-        self._min_bytes = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
+        # Issue #86 : mock.patch.object pour auto-restore safe meme si exception
+        _p_min_video = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
+        _p_min_video.start()
+        self.addCleanup(_p_min_video.stop)
 
     def tearDown(self):
-        import cinesort.domain.core as core
 
-        core.MIN_VIDEO_BYTES = self._min_bytes
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_submit_feedback_without_quality_report_fails(self):
