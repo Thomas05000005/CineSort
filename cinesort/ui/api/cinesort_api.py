@@ -1020,8 +1020,25 @@ class CineSortApi:
             ),
         }
 
+    # ---------- Helper masque -> cle stockee ----------
+    def _unmask_or_stored(self, field: str, value: str) -> str:
+        """UX fix : si le frontend renvoie le masque "••••••••" parce que la cle
+        est deja chiffree DPAPI, on substitue par la cle stockee en interne.
+
+        Cas typique : utilisateur clique "Tester la connexion" sans retaper la cle.
+        Avant ce fix : test echouait avec 401 car la cle envoyee etait le masque.
+        Apres : test utilise la vraie cle stockee dans settings.json (DPAPI).
+        """
+        from cinesort.ui.api.settings_support import _SECRET_MASK
+
+        if str(value or "").strip() == _SECRET_MASK:
+            data = _read_settings(self._state_dir)
+            return str(data.get(field) or "").strip()
+        return str(value or "").strip()
+
     # ---------- TMDb ----------
     def _test_tmdb_key_impl(self, api_key: str, state_dir: str, timeout_s: float = 10.0) -> Dict[str, Any]:
+        api_key = self._unmask_or_stored("tmdb_api_key", api_key)
         return settings_support.test_tmdb_key(
             api_key,
             state_dir,
@@ -1035,6 +1052,7 @@ class CineSortApi:
         self, url: str = "", api_key: str = "", timeout_s: float = 10.0
     ) -> Dict[str, Any]:
         """Teste la connexion au serveur Jellyfin."""
+        api_key = self._unmask_or_stored("jellyfin_api_key", api_key)
         return settings_support.test_jellyfin_connection(url, api_key, timeout_s)
 
     def _get_jellyfin_libraries_impl(self) -> Dict[str, Any]:
@@ -1180,7 +1198,7 @@ class CineSortApi:
         from cinesort.infra.plex_client import PlexClient
 
         purl = (url or "").strip()
-        ptok = (token or "").strip()
+        ptok = self._unmask_or_stored("plex_token", token)
         if not purl or not ptok:
             return {"ok": False, "message": "URL et token requis."}
         client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
@@ -1258,7 +1276,7 @@ class CineSortApi:
         from cinesort.infra.radarr_client import RadarrClient
 
         rurl = (url or "").strip()
-        rkey = (api_key or "").strip()
+        rkey = self._unmask_or_stored("radarr_api_key", api_key)
         if not rurl or not rkey:
             return {"ok": False, "message": "URL et cle API requis."}
         client = RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
