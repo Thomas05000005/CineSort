@@ -51,6 +51,7 @@ def err(
     *,
     category: str = "validation",
     level: str = "warning",
+    key: str = "message",
     log_module: Optional[str] = None,
     **extra: Any,
 ) -> Dict[str, Any]:
@@ -60,6 +61,10 @@ def err(
         message: Phrase FR montree a l'utilisateur.
         category: Tag pour filtering logs (validation, state, resource, ...).
         level: debug|info|warning|error.
+        key: Cle du champ contenant le message (defaut: "message"). Quelques
+            endpoints historiques (demo, reset, log_dir) renvoient `"error"`
+            au lieu de `"message"` ; ce parametre evite de casser leur
+            contrat JSON cote frontend.
         log_module: Nom du logger (defaut: "cinesort.ui.api"). Permet d'utiliser
             le logger du module appelant pour conserver le contexte module.
         **extra: kwargs supplementaires fusionnes dans la reponse
@@ -68,12 +73,12 @@ def err(
             doit les ajouter explicitement au message si necessaire.
 
     Returns:
-        {"ok": False, "message": message, **extra}
+        {"ok": False, <key>: message, **extra}  (par defaut <key>="message")
     """
     logger = logging.getLogger(log_module or "cinesort.ui.api")
     log_level = _LEVELS.get(level.lower(), logging.WARNING)
     logger.log(log_level, "api err [%s]: %s", category, message)
-    return {"ok": False, "message": message, **extra}
+    return {"ok": False, key: message, **extra}
 
 
 def ok(**fields: Any) -> Dict[str, Any]:

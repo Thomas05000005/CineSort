@@ -1644,7 +1644,9 @@ class CineSortApi:
                 fichiers factices. Defaut 0 = pas de changement.
         """
         if os.environ.get("CINESORT_E2E") != "1":
-            return {"ok": False, "error": "E2E mode not active"}
+            return _err_response(
+                "E2E mode not active", category="permission", level="info", log_module=__name__, key="error"
+            )
         try:
             # Reset du run courant
             with self._runs_lock:
@@ -1656,7 +1658,7 @@ class CineSortApi:
                 _core.MIN_VIDEO_BYTES = int(min_video_bytes)
             return {"ok": True, "message": "Reset E2E effectue."}
         except (OSError, KeyError, TypeError, ValueError) as exc:
-            return {"ok": False, "error": str(exc)}
+            return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
 
     def _reset_quality_profile_impl(self) -> Dict[str, Any]:
         """Reinitialise le profil de scoring aux valeurs par defaut."""
@@ -2303,15 +2305,27 @@ class CineSortApi:
         from cinesort.infra.log_context import is_remote_request
 
         if is_remote_request():
-            return {
-                "ok": False,
-                "error": "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
-            }
+            return _err_response(
+                "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
+                category="permission",
+                level="info",
+                log_module=__name__,
+                key="error",
+            )
         log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CineSort", "logs")
         if not os.path.isdir(log_dir):
-            return {"ok": False, "error": "Dossier logs introuvable", "log_dir": log_dir}
+            return _err_response(
+                "Dossier logs introuvable",
+                category="state",
+                level="info",
+                log_module=__name__,
+                key="error",
+                log_dir=log_dir,
+            )
         try:
             os.startfile(log_dir)  # type: ignore[attr-defined]
             return {"ok": True, "opened": log_dir}
         except OSError as exc:
-            return {"ok": False, "error": str(exc), "log_dir": log_dir}
+            return _err_response(
+                str(exc), category="runtime", level="error", log_module=__name__, key="error", log_dir=log_dir
+            )

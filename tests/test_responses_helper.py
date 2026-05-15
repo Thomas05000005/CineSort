@@ -44,6 +44,19 @@ class ErrHelperTests(unittest.TestCase):
         self.assertIn("resource", KNOWN_CATEGORIES)
         self.assertIn("runtime", KNOWN_CATEGORIES)
 
+    def test_custom_key_replaces_message(self) -> None:
+        # Endpoints historiques (demo/reset/log_dir) renvoient "error" au lieu
+        # de "message" — le parametre `key` evite de casser leur contrat JSON.
+        r = err("boom", key="error")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], "boom")
+        self.assertNotIn("message", r)
+
+    def test_custom_key_with_extra(self) -> None:
+        r = err("not found", key="error", log_dir="/tmp/x")
+        self.assertEqual(r["error"], "not found")
+        self.assertEqual(r["log_dir"], "/tmp/x")
+
 
 class OkHelperTests(unittest.TestCase):
     def test_returns_ok_true_with_fields(self) -> None:

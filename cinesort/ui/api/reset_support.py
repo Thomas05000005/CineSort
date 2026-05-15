@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from cinesort.ui.api._responses import err as _err_response
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,11 +48,19 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
         {ok: bool, backup_path?: str, removed?: list[str], error?: str}
     """
     if confirmation_text != "RESET":
-        return {"ok": False, "error": "Confirmation invalide (attendu 'RESET')"}
+        return _err_response(
+            "Confirmation invalide (attendu 'RESET')",
+            category="validation",
+            level="info",
+            log_module=__name__,
+            key="error",
+        )
 
     state_path = _resolve_state_dir(api)
     if state_path is None or not state_path.exists():
-        return {"ok": False, "error": "Dossier user-data introuvable"}
+        return _err_response(
+            "Dossier user-data introuvable", category="state", level="info", log_module=__name__, key="error"
+        )
 
     backup_stem = state_path.parent / f"cinesort_backup_before_reset_{int(time.time())}"
     backup_path = backup_stem.with_suffix(".zip")
@@ -86,7 +96,7 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
         }
     except (OSError, shutil.Error) as exc:
         logger.exception("V3-09 : echec reset")
-        return {"ok": False, "error": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
 
 
 def get_user_data_size(api: Any) -> dict:
