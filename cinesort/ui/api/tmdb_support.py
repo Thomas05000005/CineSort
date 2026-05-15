@@ -5,11 +5,14 @@ from typing import Any, Dict, List
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api._responses import err as _err_response
 
 
 def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
     if not isinstance(tmdb_ids, list):
-        return {"ok": False, "message": t("errors.payload_tmdb_ids_invalid")}
+        return _err_response(
+            t("errors.payload_tmdb_ids_invalid"), category="validation", level="info", log_module=__name__
+        )
     try:
         ids: List[int] = []
         for item in tmdb_ids or []:
@@ -48,4 +51,4 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         tmdb.flush()
         return {"ok": True, "posters": posters}
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)

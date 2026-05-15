@@ -19,6 +19,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ def run_simulation(
         # Resolve target profile
         target = _resolve_target_profile(preset_id, overrides)
         if target is None:
-            return {"ok": False, "message": "Preset inconnu."}
+            return _err_response("Preset inconnu.", category="resource", level="info", log_module=__name__)
 
         # Baseline profile (actuellement actif)
         baseline = _get_active_profile(api)
@@ -81,7 +82,9 @@ def run_simulation(
         # Charge les reports
         reports = _load_reports_for_scope(api, run_id, scope)
         if not reports:
-            return {"ok": False, "message": "Aucun rapport qualite disponible dans ce scope."}
+            return _err_response(
+                "Aucun rapport qualite disponible dans ce scope.", category="state", level="info", log_module=__name__
+            )
 
         # Recompute en memoire
         t0 = time.time()
@@ -103,7 +106,7 @@ def run_simulation(
         return report
     except (KeyError, OSError, TypeError, ValueError) as exc:
         logger.exception("simulate_quality_preset failed")
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def save_custom_preset(api: Any, name: str, profile_json: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,10 +114,12 @@ def save_custom_preset(api: Any, name: str, profile_json: Dict[str, Any]) -> Dic
     try:
         name = str(name or "").strip()
         if not name:
-            return {"ok": False, "message": "Nom requis."}
+            return _err_response("Nom requis.", category="validation", level="info", log_module=__name__)
         ok, errs, normalized = validate_quality_profile(profile_json)
         if not ok:
-            return {"ok": False, "message": "Profil invalide.", "errors": errs}
+            return _err_response(
+                "Profil invalide.", category="validation", level="info", log_module=__name__, errors=errs
+            )
 
         slug = _slugify(name)
         normalized = copy.deepcopy(normalized)
@@ -127,7 +132,7 @@ def save_custom_preset(api: Any, name: str, profile_json: Dict[str, Any]) -> Dic
         return {"ok": True, "preset_id": normalized["id"], "label": name, **saved}
     except (OSError, TypeError, ValueError) as exc:
         logger.exception("save_custom_preset failed")
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 # ---------- helpers ----------------------------------------------------------

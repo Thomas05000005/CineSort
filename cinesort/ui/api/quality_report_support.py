@@ -10,6 +10,7 @@ from cinesort.infra.probe import ProbeService
 from cinesort.domain.conversions import to_bool
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api._responses import err as _err_response
 
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
@@ -141,13 +142,15 @@ def _probe_and_score(
 @requires_valid_run_id
 def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) -> Dict[str, Any]:
     if not run_id or not row_id:
-        return {"ok": False, "message": "Les identifiants run_id et row_id sont requis."}
+        return _err_response(
+            "Les identifiants run_id et row_id sont requis.", category="validation", level="info", log_module=__name__
+        )
     try:
         opts = options if isinstance(options, dict) else {}
         reuse_existing = to_bool(opts.get("reuse_existing"), False)
         found = api._find_run_row(run_id)
         if not found:
-            return {"ok": False, "message": "Run introuvable."}
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
         run_row, store = found
         state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -190,12 +193,16 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
         row = next((item for item in rows if str(item.row_id) == str(row_id)), None)
         if row is None:
-            return {"ok": False, "message": "Film introuvable dans ce plan (row_id)."}
+            return _err_response(
+                "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
+            )
 
         cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
         media_path = api._resolve_media_path_for_row(cfg, row)
         if media_path is None or (not media_path.exists()):
-            return {"ok": False, "message": t("errors.media_not_found_for_row")}
+            return _err_response(
+                t("errors.media_not_found_for_row"), category="validation", level="info", log_module=__name__
+            )
 
         probe_result, out = _probe_and_score(
             api,
@@ -296,4 +303,4 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         enrich_quality_report_with_perceptual(store, run_id, row_id, result, composite_score_version=score_version)
         return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
