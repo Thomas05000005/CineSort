@@ -27,6 +27,16 @@ export const GLOSSARY = {
   "Roots": "Dossiers racine ou chercher les films. Tu peux en avoir plusieurs (SSD + NAS + disque externe).",
   "TMDb": "The Movie Database. Base de donnees mondiale de films open. Source principale des metadonnees (titre, annee, posters, sagas).",
   "NFO": "Fichier XML qui accompagne un film, contient les metadonnees (titre, annee, IMDb ID). Standard Kodi/Jellyfin/Plex.",
+  // Cf #92 quick win #4 : termes additionnels pour les badges Validation.
+  "4K light": "Fichier 4K mais avec un bitrate trop bas pour la resolution (typiquement < 25 Mbps). La definition est presente mais la qualite de compression degrade le rendu.",
+  "Non-film": "Le contenu n'a pas ete reconnu comme un film (durée trop courte, structure de dossier inhabituelle, ou metadonnees suspectes). A verifier manuellement.",
+  "Corrompu": "Le header du fichier video est invalide. Le fichier peut etre tronque, corrompu, ou n'etre pas une video. Ne sera pas applique.",
+  "Langue audio manquante": "Une ou plusieurs pistes audio du fichier n'ont pas de tag de langue. Jellyfin/Plex auront du mal a afficher la bonne piste par defaut.",
+  "MKV titre incoherent": "Le champ Title du conteneur MKV ne correspond pas au nom du film detecte. Indique souvent un fichier renomme manuellement sans mise a jour du conteneur.",
+  "NFO partiel": "Le fichier NFO matche le nom du dossier mais pas du fichier video, ou inversement. Soupcon que la video a ete remplacee sans mise a jour du NFO.",
+  "Durée NFO incoherente": "La duree video reelle ne correspond pas a celle annoncee dans le NFO. Indique souvent une version differente (theatrical vs director's cut, ou edit alternatif).",
+  "Titre ambigu": "Plusieurs films de TMDb partagent ce titre (remakes, reboots, films homonymes). Verifier l'annee et le poster avant d'appliquer.",
+  "Depuis la racine": "Le fichier video est pose directement a la racine du dossier source au lieu d'etre dans un sous-dossier dedie. Sera range automatiquement dans un sous-dossier au moment de l'apply.",
 };
 
 /**
@@ -36,6 +46,27 @@ export const GLOSSARY = {
  * @param {string} [labelOverride] - Si different du terme, utilise pour l'affichage du libelle.
  * @returns {string} HTML pret a injecter (deja echappe).
  */
+/**
+ * Cf #92 quick win #4 : retourne la definition glossary d'un terme pour
+ * usage comme attribut `title="..."` (tooltip natif navigateur).
+ *
+ * Utile sur les elements ou un bouton (i) cliquable serait trop intrusif
+ * (cells de table, petits badges). Le hover natif reste discret.
+ *
+ * Si le terme n'a pas de definition, retourne la valeur de fallback fournie
+ * (ou le terme lui-meme si pas de fallback) pour preserver les title=
+ * existants. Garantit qu'on ne SUPPRIME jamais de tooltip en migrant.
+ *
+ * @param {string} term         La cle GLOSSARY.
+ * @param {string} [fallback]   Texte a utiliser si term absent du glossary.
+ * @returns {string} Texte brut pret pour attribut HTML title (deja sans HTML).
+ */
+export function glossaryTitle(term, fallback = "") {
+  const def = GLOSSARY[term];
+  if (def) return def;
+  return fallback || term;
+}
+
 export function glossaryTooltip(term, labelOverride = null) {
   const def = GLOSSARY[term];
   const label = labelOverride || term;
