@@ -50,7 +50,6 @@ _GENRE_CANONICAL: Dict[str, str] = {
     "comedy": "comedy",
     "drama": "drama",
     # Alias FR fréquents
-    "animation ": "animation",
     "épouvante-horreur": "horror",
     "horreur": "horror",
     "documentaire": "documentary",
