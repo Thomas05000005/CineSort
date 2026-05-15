@@ -17,6 +17,7 @@ from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.domain.conversions import to_bool, to_float
+from cinesort.ui.api._responses import err as _err_response
 from cinesort.app.plan_support import plan_multi_roots
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -242,14 +243,31 @@ def _validate_and_init_plan_context(
         missing_message=t("errors.root_required_scan"),
     )
     if roots_error:
-        return {"ok": False, "message": roots_error}, None
+        # Issue #103 : log structure via err() au lieu de return silencieux
+        return _err_response(roots_error, category="config", level="info", log_module=__name__), None
     assert roots is not None and len(roots) > 0
     # Verifier qu'au moins un root existe
     accessible_roots = [r for r in roots if r.exists() and r.is_dir()]
     if not accessible_roots:
         if len(roots) == 1:
-            return {"ok": False, "message": t("errors.root_not_found", root=str(roots[0]))}, None
-        return {"ok": False, "message": t("errors.no_root_accessible", count=len(roots))}, None
+            return (
+                _err_response(
+                    t("errors.root_not_found", root=str(roots[0])),
+                    category="resource",
+                    level="warning",
+                    log_module=__name__,
+                ),
+                None,
+            )
+        return (
+            _err_response(
+                t("errors.no_root_accessible", count=len(roots)),
+                category="resource",
+                level="warning",
+                log_module=__name__,
+            ),
+            None,
+        )
     root = roots[0]  # root principal pour compat (runs.root, cfg initial)
 
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -496,7 +514,9 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
 def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
     """Lance l'analyse d'une bibliotheque. Orchestre validation, init et lancement du job."""
     if not isinstance(settings, dict):
-        return {"ok": False, "message": t("errors.payload_settings_invalid")}
+        return _err_response(
+            t("errors.payload_settings_invalid"), category="validation", level="info", log_module=__name__
+        )
 
     state_dir, _ = api._resolve_payload_state_dir(settings)
     debug_enabled = api._debug_enabled(settings if isinstance(settings, dict) else None)
@@ -533,14 +553,19 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
             with api._runs_lock:
                 api._runs.pop(run_id, None)
             dlog(f"start_plan runner.start_job failed: {exc}")
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
         dlog(f"start_plan after runner.start_job started_run_id={started_run_id}")
         if started_run_id != run_id:
             with api._runs_lock:
                 api._runs.pop(run_id, None)
             dlog(f"start_plan run_id mismatch expected={run_id} got={started_run_id}")
-            return {"ok": False, "message": t("errors.internal_run_id_unexpected")}
+            return _err_response(
+                t("errors.internal_run_id_unexpected"),
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
 
         dlog("start_plan success")
         return {"ok": True, "run_id": run_id, "run_dir": str(run_paths.run_dir)}
@@ -551,7 +576,7 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
         )
         if run_paths:
             api._write_crash_file(run_paths, "start_plan failed", tb_text)
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def _compute_speed_and_eta(
@@ -590,7 +615,7 @@ def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]
     if not rs:
         found = api._find_run_row(run_id)
         if not found:
-            return {"ok": False, "message": t("errors.run_not_found")}
+            return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
         run_row, _store = found
         status_text = str(run_row.get("status") or RunStatus.FAILED.value)
         idx = int(run_row.get("idx") or 0)
@@ -669,7 +694,9 @@ def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]
 @requires_valid_run_id
 def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
-        return {"ok": False, "message": t("errors.payload_decisions_invalid")}
+        return _err_response(
+            t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
+        )
     rs = api._get_run(run_id)
     if rs:
         try:
@@ -681,11 +708,11 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
             rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
             return {"ok": True, "path": str(rs.paths.validation_json)}
         except (OSError, PermissionError, TypeError, ValueError) as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     row, _store = found
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir),
@@ -699,7 +726,7 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
         api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
         return {"ok": True, "path": str(run_paths.validation_json)}
     except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:
@@ -836,11 +863,13 @@ def _enrich_groups_with_quality_comparison(
 @requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
-        return {"ok": False, "message": t("errors.payload_decisions_invalid")}
+        return _err_response(
+            t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
+        )
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return {"ok": False, "message": t("errors.plan_not_ready")}
+            return _err_response(t("errors.plan_not_ready"), category="state", level="info", log_module=__name__)
         try:
             rows = rs.rows
             if not rows:
@@ -850,15 +879,15 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
-            return {"ok": False, "message": str(exc)}
+            return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
     found = api._find_run_row(run_id)
     if not found:
-        return {"ok": False, "message": t("errors.run_not_found")}
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     row, found_store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return {"ok": False, "message": t("errors.plan_not_ready")}
+        return _err_response(t("errors.plan_not_ready"), category="state", level="info", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir),
         run_id,
@@ -872,4 +901,4 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return {"ok": False, "message": str(exc)}
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
