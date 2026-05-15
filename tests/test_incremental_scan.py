@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import cinesort.domain.core as core
@@ -22,11 +23,12 @@ class IncrementalScanTests(unittest.TestCase):
         self.store = SQLiteStore(db_path_for_state_dir(self.state_dir))
         self.store.initialize()
 
-        self._min_video_bytes = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
+        # Issue #86 : mock.patch.object pour auto-restore safe meme si exception
+        _p_min_video = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
+        _p_min_video.start()
+        self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        core.MIN_VIDEO_BYTES = self._min_video_bytes
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _create_video(self, folder: Path, name: str, payload: bytes) -> Path:

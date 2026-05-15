@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from unittest import skipUnless
 
@@ -21,12 +22,10 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name) / "library"
         self.root.mkdir(parents=True, exist_ok=True)
-        self._original_min_video_bytes = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
-        self.addCleanup(self._restore_min_video_bytes)
-
-    def _restore_min_video_bytes(self) -> None:
-        core.MIN_VIDEO_BYTES = self._original_min_video_bytes
+        # Issue #86 : mock.patch.object pour auto-restore safe meme si exception
+        _p_min_video = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
+        _p_min_video.start()
+        self.addCleanup(_p_min_video.stop)
 
     def _make_movie_dirs(self, count: int) -> None:
         for idx in range(count):

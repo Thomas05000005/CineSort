@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import cinesort.domain.core as core
@@ -40,11 +41,12 @@ class _ConcurrencyBase(unittest.TestCase):
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self._min = core.MIN_VIDEO_BYTES
-        core.MIN_VIDEO_BYTES = 1
+        # Issue #86 : mock.patch.object pour auto-restore safe meme si exception
+        _p_min_video = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
+        _p_min_video.start()
+        self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        core.MIN_VIDEO_BYTES = self._min
         shutil.rmtree(self._tmp, ignore_errors=True)
 
 
