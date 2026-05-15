@@ -55,6 +55,13 @@ class GlossaryTooltipTests(unittest.TestCase):
     def test_tooltip_function_exported(self) -> None:
         self.assertIn("export function glossaryTooltip", self.component)
 
+    def test_title_helper_exported(self) -> None:
+        # Cf #92 quick win #4 : helper qui retourne la definition pour usage
+        # comme attribut title="..." (tooltip natif). Doit etre exportee et
+        # acceptable un fallback pour ne jamais SUPPRIMER un tooltip existant.
+        self.assertIn("export function glossaryTitle", self.component)
+        self.assertIn("fallback", self.component)
+
     def test_glossary_constant_exported(self) -> None:
         self.assertIn("export const GLOSSARY", self.component)
 

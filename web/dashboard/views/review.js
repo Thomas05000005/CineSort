@@ -7,7 +7,7 @@ import { badgeHtml } from "../components/badge.js";
 import { showModal, closeModal } from "../components/modal.js";
 import { fmtBytes as _fmtSize, formatDateTime } from "../core/format.js";
 import { skeletonLinesHtml } from "../components/skeleton.js";
-import { glossaryTooltip } from "../components/glossary-tooltip.js";
+import { glossaryTooltip, glossaryTitle } from "../components/glossary-tooltip.js";
 import { getNavSignal, isAbortError } from "../core/nav-abort.js";
 
 /* --- Etat local -------------------------------------------- */
@@ -150,20 +150,25 @@ const _COLUMNS = [
   { key: "confidence", label: "Confiance", sortable: false, render: (v) => badgeHtml("confidence", _confLabel(v)) },
   { key: "warning_flags", label: "Alertes", sortable: false, render: (v, row) => {
     const flags = _parseFlags(v);
-    const notMovie = flags.includes("not_a_movie") ? ' <span class="badge badge-not-a-movie" title="Contenu suspect">Non-film</span>' : "";
-    const integrity = flags.includes("integrity_header_invalid") ? ' <span class="badge badge-integrity" title="Header invalide">Corrompu</span>' : "";
+    // Cf #92 quick win #4 : title= enrichis avec les definitions du glossary
+    // (longueurs ~1-3 phrases) au lieu des descriptions courtes "Contenu
+    // suspect", "Header invalide", etc. Pas de changement visuel : le hover
+    // natif reste discret. Le mot-cle glossary est passe en 1er arg, le
+    // fallback (l'ancien title=) garantit qu'on ne perd rien si la cle change.
+    const notMovie = flags.includes("not_a_movie") ? ' <span class="badge badge-not-a-movie" title="' + glossaryTitle("Non-film", "Contenu suspect") + '">Non-film</span>' : "";
+    const integrity = flags.includes("integrity_header_invalid") ? ' <span class="badge badge-integrity" title="' + glossaryTitle("Corrompu", "Header invalide") + '">Corrompu</span>' : "";
     const encWarn = Array.isArray(row.encode_warnings) ? row.encode_warnings : [];
-    const upscale = encWarn.includes("upscale_suspect") ? ' <span class="badge badge-danger" title="Probable upscale">Upscale</span>' : "";
-    const light4k = encWarn.includes("4k_light") ? ' <span class="badge badge-warning" title="4K compresse">4K light</span>' : "";
-    const reencode = encWarn.includes("reencode_degraded") ? ' <span class="badge badge-danger" title="Re-encode destructif">Re-encode</span>' : "";
-    const audioLang = (flags.includes("audio_language_missing") || flags.includes("audio_language_incomplete")) ? ' <span class="badge badge-audio-lang" title="Piste(s) audio sans tag langue">Langue ?</span>' : "";
-    const mkvTitle = encWarn.includes("mkv_title_mismatch") ? ' <span class="badge badge-mkv-title" title="Titre conteneur MKV incoherent">MKV titre</span>' : "";
-    const rootLevel = flags.includes("root_level_source") ? ' <span class="badge badge-root-level" title="Film pose directement a la racine — sera range dans un sous-dossier">Depuis la racine</span>' : "";
+    const upscale = encWarn.includes("upscale_suspect") ? ' <span class="badge badge-danger" title="' + glossaryTitle("Upscale suspect", "Probable upscale") + '">Upscale</span>' : "";
+    const light4k = encWarn.includes("4k_light") ? ' <span class="badge badge-warning" title="' + glossaryTitle("4K light", "4K compresse") + '">4K light</span>' : "";
+    const reencode = encWarn.includes("reencode_degraded") ? ' <span class="badge badge-danger" title="' + glossaryTitle("Re-encode degrade", "Re-encode destructif") + '">Re-encode</span>' : "";
+    const audioLang = (flags.includes("audio_language_missing") || flags.includes("audio_language_incomplete")) ? ' <span class="badge badge-audio-lang" title="' + glossaryTitle("Langue audio manquante", "Piste(s) audio sans tag langue") + '">Langue ?</span>' : "";
+    const mkvTitle = encWarn.includes("mkv_title_mismatch") ? ' <span class="badge badge-mkv-title" title="' + glossaryTitle("MKV titre incoherent", "Titre conteneur MKV incoherent") + '">MKV titre</span>' : "";
+    const rootLevel = flags.includes("root_level_source") ? ' <span class="badge badge-root-level" title="' + glossaryTitle("Depuis la racine", "Film pose directement a la racine — sera range dans un sous-dossier") + '">Depuis la racine</span>' : "";
     // P1.1 : NFO cross-validation
-    const nfoFile = flags.includes("nfo_file_mismatch") ? ' <span class="badge badge-nfo-mismatch" title="NFO matche dossier XOR fichier — vidéo possiblement remplacée">NFO partiel</span>' : "";
-    const nfoRuntime = encWarn.includes("nfo_runtime_mismatch") ? ' <span class="badge badge-nfo-mismatch" title="Durée vidéo ne correspond pas au NFO">Durée NFO ?</span>' : "";
+    const nfoFile = flags.includes("nfo_file_mismatch") ? ' <span class="badge badge-nfo-mismatch" title="' + glossaryTitle("NFO partiel", "NFO matche dossier XOR fichier — vidéo possiblement remplacée") + '">NFO partiel</span>' : "";
+    const nfoRuntime = encWarn.includes("nfo_runtime_mismatch") ? ' <span class="badge badge-nfo-mismatch" title="' + glossaryTitle("Durée NFO incoherente", "Durée vidéo ne correspond pas au NFO") + '">Durée NFO ?</span>' : "";
     // P2.2 : deux films même titre (remake/reboot)
-    const titleAmbig = flags.includes("title_ambiguity_detected") ? ' <span class="badge badge-title-ambig" title="Plusieurs films TMDb partagent ce titre — vérifier l\'année">Titre ambigu</span>' : "";
+    const titleAmbig = flags.includes("title_ambiguity_detected") ? ' <span class="badge badge-title-ambig" title="' + glossaryTitle("Titre ambigu", "Plusieurs films TMDb partagent ce titre — vérifier l\'année") + '">Titre ambigu</span>' : "";
     return (flags.length ? `<span class="badge badge-warning">${flags.length}</span>` : "") + notMovie + integrity + upscale + light4k + reencode + audioLang + mkvTitle + rootLevel + nfoFile + nfoRuntime + titleAmbig;
   }},
   { key: "_actions", label: "Actions", sortable: false, render: (_, row) => _actionCellHtml(row) },
