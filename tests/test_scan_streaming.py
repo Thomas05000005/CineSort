@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 import cinesort.domain.scan_helpers as core_scan_helpers
 
@@ -31,7 +32,7 @@ class ScanStreamingTests(unittest.TestCase):
                 self.assertEqual(len(all_targets), 60)
 
                 progress_calls = []
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda *_args: None,
@@ -90,7 +91,7 @@ class RootLevelPlanTests(unittest.TestCase):
             old_min = core.MIN_VIDEO_BYTES
             core.MIN_VIDEO_BYTES = 1
             try:
-                rows, stats = core.plan_library(
+                rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda *_a: None,
@@ -133,7 +134,7 @@ class RootLevelPlanTests(unittest.TestCase):
             old_min = core.MIN_VIDEO_BYTES
             core.MIN_VIDEO_BYTES = 1
             try:
-                _rows, stats = core.plan_library(
+                _rows, stats = plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda level, msg: messages.append((level, msg)),
@@ -166,7 +167,7 @@ class RootLevelPlanTests(unittest.TestCase):
             old_min = core.MIN_VIDEO_BYTES
             core.MIN_VIDEO_BYTES = 1
             try:
-                core.plan_library(
+                plan_support.plan_library(
                     cfg,
                     tmdb=None,
                     log=lambda level, msg: messages.append((level, msg)),

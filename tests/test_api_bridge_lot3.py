@@ -13,6 +13,7 @@ from unittest import mock
 
 import cinesort.ui.api.cinesort_api as backend
 import cinesort.domain.core as core
+import cinesort.app.plan_support as plan_support
 from cinesort.ui.api import cinesort_api as api_mod
 
 
@@ -222,7 +223,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self._wait_terminal(api, run_id)
 
     def test_cancel_run_idempotent(self) -> None:
-        original_plan_library = core.plan_library
+        original_plan_library = plan_support.plan_library
 
         def slow_plan_library(cfg, *, tmdb, log, progress, should_cancel=None):
             progress(0, 1, "slow")
@@ -232,7 +233,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
                 time.sleep(0.01)
             return [], core.Stats(planned_rows=0)
 
-        core.plan_library = slow_plan_library
+        plan_support.plan_library = slow_plan_library
         try:
             api = backend.CineSortApi()
             start = api.run.start_plan(
@@ -253,7 +254,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             second = api.run.cancel_run(run_id)
             self.assertFalse(second["ok"], second)
         finally:
-            core.plan_library = original_plan_library
+            plan_support.plan_library = original_plan_library
 
     def test_start_plan_handles_internal_exception_without_raising(self) -> None:
         self._create_file(self.root / "ErrorCase.2000.1080p" / "ErrorCase.2000.1080p.mkv")
