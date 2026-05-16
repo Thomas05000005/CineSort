@@ -173,4 +173,4 @@ python app.py --api                                              # REST seul, sa
 - [.github/audit-prompt.md](../../.github/audit-prompt.md) — prompt audit du matin (46 categories)
 - [REFACTOR_PLAN_83.md](REFACTOR_PLAN_83.md) — plan original casser cycle (acheve)
 - [REFACTOR_PLAN_84.md](REFACTOR_PLAN_84.md) — plan facades (acheve)
-- [BILAN_CORRECTIONS.md](../../BILAN_CORRECTIONS.md) — bilan audits successifs
+- [BILAN_CORRECTIONS.md](BILAN_CORRECTIONS.md) — bilan audits successifs

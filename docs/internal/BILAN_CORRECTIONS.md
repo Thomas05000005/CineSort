@@ -1,7 +1,7 @@
 # Bilan des corrections — CineSort
 
 > **Note** : pour l'historique Round 1 + Round 2 (resolu, ~182 KB),
-> voir [`docs/internal/audits/ARCHIVE_R1_R2.md`](docs/internal/audits/ARCHIVE_R1_R2.md).
+> voir [`audits/ARCHIVE_R1_R2.md`](audits/ARCHIVE_R1_R2.md).
 >
 > Ce fichier ne conserve que les corrections **actives** (Round 3+ et Polish Total v7.7.0).
 > Source des findings : `AUDIT_TRACKING.md` et `PLAN_RESTE_A_FAIRE.md`.

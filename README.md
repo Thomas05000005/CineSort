@@ -233,7 +233,7 @@ Paramètres → API REST → activer + définir un token long (≥ 32 chars). Ac
 
 ### Quelle est la roadmap ?
 
-Voir [ROADMAP.md](ROADMAP.md). En résumé :
+Voir [ROADMAP.md](docs/internal/ROADMAP.md). En résumé :
 - **v1.0** stable — après retours beta v1.0.0-beta
 - **v1.1** — features mineures, polish UI
 - **v2.0** — port Linux/Mac, i18n EN, plugin marketplace
@@ -254,9 +254,9 @@ Voir [ROADMAP.md](ROADMAP.md). En résumé :
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code de conduite (Contributor Covenant 2.1 FR)
 - [SECURITY.md](SECURITY.md) — politique de sécurité + responsible disclosure
 - [docs/internal/CLAUDE.md](docs/internal/CLAUDE.md) — contexte pour Claude Code (Anthropic AI)
-- [ROADMAP.md](ROADMAP.md) — feuille de route v1.x / v2.0
+- [docs/internal/ROADMAP.md](docs/internal/ROADMAP.md) — feuille de route v1.x / v2.0
 - [CHANGELOG.md](CHANGELOG.md) — historique des versions
-- [BILAN_CORRECTIONS.md](BILAN_CORRECTIONS.md) — bilan des phases d'audit
+- [docs/internal/BILAN_CORRECTIONS.md](docs/internal/BILAN_CORRECTIONS.md) — bilan des phases d'audit
 
 ## 📄 Licence
 
