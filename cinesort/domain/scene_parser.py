@@ -62,8 +62,9 @@ _NOISE_RE = re.compile(
 _AFTER_YEAR_NOISE = (
     r"(?:multi|truefrench|french|english|spanish|german|italian|"
     r"vff|vfq|vfi|vof|vf|vo|vostfr|vostr|vost|subfrench|dual|dubbed|"
-    r"director'?s?|extended|theatrical|unrated|remastered|criterion|"
-    r"edition|version|cut|special|imax|final|ultimate|"
+    r"director'?s?|extended|theatrical|unrated|remastered|restored|"
+    r"criterion|edition|version|cut|special|imax|final|ultimate|"
+    r"hdlight|4klight|hdr|hdr10\+?|sdr|uhd|"
     r"web|bd|br|tv|cam|tc|repack|proper)"
 )
 
@@ -262,15 +263,28 @@ def parse_scene_title(filename: str) -> str:
     # 5. Collapse intermediaire (pour que _RELEASE_GROUP_RE matche " -GROUP" propre)
     name = re.sub(r"\s+", " ", name).strip()
 
-    # 6. Strip release group
-    name = _RELEASE_GROUP_RE.sub(" ", name)
-
-    # 7. Position-aware : strip langues + residus edition + sources ambigus
-    # UNIQUEMENT apres le token annee. Preserve les vrais titres ("The French
-    # Connection 2", "The Final Cut").
-    name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
+    # 6-7. Loop iteratif : strip release group (-GROUP) + after-year noise + dash
+    # orphelins. Necessaire car :
+    # - Certains filenames ont des "-XXX" multiples (e.g. Octopussy avec
+    #   "-HDMA" residue audio + "-AZAZE" release group).
+    # - NOISE_RE peut avoir stripe un release group court (fhd/fw/ms) qu'il
+    #   confond avec un tag standard, laissant un dash orphelin "-" qui empeche
+    #   l'after-year noise de matcher.
+    # Cap a 4 iterations par securite.
+    _orphan_sep_re = re.compile(r"\s+[-_.]+\s*$")
+    for _ in range(4):
+        prev = name
+        # Release group `-GROUP$`
+        name = _RELEASE_GROUP_RE.sub(" ", name)
+        # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
+        name = _orphan_sep_re.sub("", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        # Position-aware after-year noise tokens
+        name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        if name == prev:
+            break
 
     # 8. Final cleanup
-    name = re.sub(r"\s+", " ", name)
     name = _TRAILING_GARBAGE_RE.sub("", name)
     return name.strip(" -_.")
