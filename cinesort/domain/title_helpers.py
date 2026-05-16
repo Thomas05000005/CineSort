@@ -188,6 +188,15 @@ def _strip_accents(s: str) -> str:
 
 
 def clean_title_guess(text: str) -> str:
+    # Phase 6.3 : delegue au scene_parser (regex etendues, edition strip,
+    # release group strip, audio residue). Fallback historique conserve si
+    # le parser retourne une chaine vide.
+    from cinesort.domain.scene_parser import parse_scene_title
+
+    parsed = parse_scene_title(text)
+    if parsed:
+        return parsed
+    # Fallback : pipeline historique (cas degenere ou input vide)
     name = Path(text).stem
     name = name.replace(".", " ").replace("_", " ")
     name = re.sub(r"\(\s*(19\d{2}|20\d{2})\s*\)", "", name)
