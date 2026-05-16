@@ -4,7 +4,40 @@ niveau "<LEVEL>".
 Ouverture de PRs avec fixes : <OPEN_PRS>.
 
 
-Analyse transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Reponds en francais. (si target=transverse) ou : Modules a auditer ({0} fichiers) :
+CONTEXTE PROJET (mai 2026 - a jour) :
+- Architecture en couches verrouillee par import-linter en CI (.importlinter)
+  * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
+  * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
+  * app ne peut PAS importer ui (contract `app_no_ui`)
+- Cycle historique `domain -> app` BRISE en mai 2026 (issue #83 closed).
+  Toute regression sur ce point est bloquee par CI - ne pas reintroduire.
+- Repository pattern installe sur SQLiteStore : store.probe, store.scan,
+  store.quality, store.run, store.apply, store.perceptual, store.anomaly.
+  Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
+- Strangler Fig + Facade pattern : CineSortApi expose 5 facades
+  (api.run, api.settings, api.quality, api.integrations, api.library)
+  avec 50 methodes publiques. Les anciennes methodes directes sont
+  privatisees en `_X_impl(...)`.
+- Lazy imports residuels acceptables : seulement dans cinesort/app/cleanup.py
+  (cycle cleanup <-> apply_core, non lie a domain->app). Tout autre lazy
+  import nouveau doit etre justifie ou converti en top-level.
+- Tests : 4277 unitaires passent, coverage seuil 80% en CI.
+
+
+Analyse transverse (si target=transverse) :
+1) Liste les fonctions > 100L restantes par ROI de refactor (complexite vs gain).
+2) Liste les composants JS dupliques desktop/dashboard (web/dashboard/views/*.js
+   vs web/views/*.js post-V6 ESM migration) et propose strategie de mutualisation.
+3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
+   depuis le dernier audit (cross-check avec `lint-imports`).
+4) Audit du Repository pattern : usages residuels de la couche mixin
+   (store.<methode_legacy>) qui pourraient migrer vers store.<repo>.<methode>
+   en preparation de la phase B8 (issue #85, suppression mixins).
+5) Verifie que les modules avec classes mockees par tests utilisent bien
+   le pattern module-style (import X as _mod) et non `from X import Y`
+   (sinon le mock `patch("cinesort.X.Y")` ne fonctionnera plus).
+
+Sinon, modules a auditer ({0} fichiers) :
 
 
 <MODULE_LIST>
@@ -42,6 +75,7 @@ chaque categorie, choisis le persona le plus pertinent :
 | DB | 9, 23, 24 | SQLite, migrations, integrity |
 | RELIABILITY | 5, 14, 31, 38, 41 | Crash, idempotence, network |
 | COMPLIANCE | 25, 26, 27, 34, 43 | Legal, signing, CRA |
+| ARCHITECT | 10, 47 | Layered architecture, cycles, contracts, patterns |
 
 En basculant explicitement de role, tu evites les biais d'un
 persona unique. Indique au debut de chaque finding quel
@@ -254,7 +288,16 @@ Pour CHAQUE module, cherche TOUS ces patterns :
 - Fonctions > 100L (refactor candidat)
 - Magic numbers (chiffres en dur sans explication)
 - Duplication code (3+ blocs similaires)
-- Imports lazy (`import cinesort.X` indentes) = cycle import
+- Imports lazy (`import cinesort.X` indentes) NOUVEAUX : justifier ou refuser.
+  Les seuls acceptables sont dans `app/cleanup.py` (cycle cleanup<->apply_core).
+  Tout autre lazy import doit etre converti en top-level (le cycle
+  domain->app etant brise et verrouille par import-linter).
+- Heritage de mixin SQLite (`_XxxMixin` dans `infra/db/`) : nouveau code
+  doit utiliser le Repository pattern (`store.probe`, `store.scan`, ...).
+  Issue #85 phase B8 supprimera l'heritage MRO une fois B1-B7 valides en prod.
+- Methodes directes sur CineSortApi (au lieu des facades `api.run`, `api.settings`,
+  etc.) : ajout d'une methode directe est un regression du pattern facade,
+  prefere `api.<facade>.<method>`.
 - TODO / FIXME / XXX dans le code
 - Commentaires obsoletes (parlent de v3, code est v7)
 - Tests skipes sans raison documentee
@@ -650,6 +693,36 @@ L'app doit faire ce que l'utilisateur attend :
 - Sortie sans sauvegarder = warning ?
 Outils : manual UX walk-through avec "Que ferait Cmd+W ?"
 Action : issue "ux: <action> violates POLS, expected <X>"
+
+(47) ARCHITECTURE INVARIANTS (cycle, contracts, patterns)
+Verifications strictes contre les regressions architecturales :
+- Cycle `domain -> app` BRISE en mai 2026, NE PAS reintroduire :
+  * Aucun `from cinesort.app.X import ...` dans cinesort/domain/**
+  * Aucun `import cinesort.app.X` dans cinesort/domain/**
+  * import-linter verifie ces 3 contracts (.importlinter) ; si CI
+    echoue avec "Architecture contracts", c'est cette violation.
+- Repository pattern (infra/db/) : nouveau code SQL doit aller dans
+  un Repository (ProbeRepository, ScanRepository, QualityRepository,
+  etc.), pas dans un `_XxxMixin`. Les mixins sont en sursis (issue #85
+  phase B8). Toute methode SQL ajoutee a un mixin = regression.
+- Facade pattern (ui/api/facades.py) : toute nouvelle methode publique
+  exposee aux clients (REST ou pywebview js_api) doit etre sur une
+  facade (`api.run.X`, `api.settings.X`, etc.), pas directement sur
+  CineSortApi. Ajouter une methode publique directe = regression.
+- Module-style imports pour les modules mockes : si un fichier de test
+  contient `patch("cinesort.<chemin>.<ClassOrFunction>")`, le module
+  appelant doit importer en `import cinesort.<chemin> as _mod` puis
+  appeler `_mod.<ClassOrFunction>(...)`. Sinon le mock ne s'applique
+  pas. Pattern documente dans cinesort_api.py, apply_support.py,
+  perceptual_support.py. Cf le pattern "module-style" dans CLAUDE.md.
+- Lazy imports : seulement dans `cinesort/app/cleanup.py` (cycle
+  cleanup <-> apply_core, gere localement). Tout autre lazy import
+  ajoute doit etre soit converti en top-level, soit annote avec
+  commentaire `# Cf <reason>: cycle a casser dans <issue/PR>`.
+
+Action si violation : ouvrir issue critical-priority avec extrait du code
++ pointeur vers le contract import-linter viole et la ligne fautive.
+
 
 (46) AMELIORATIONS PROACTIVES (continuous improvement)
 Au-dela des bugs, propose des AMELIORATIONS basees sur le

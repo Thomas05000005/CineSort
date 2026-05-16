@@ -91,5 +91,41 @@ jobs:
           # problemes d'echappement avec les expressions GitHub ${{ }}.
           prompt: >-
             ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prompt
-            || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort avec Opus 4.7 + thinking max. Verifie systematiquement les 16 categories : (1) bugs latents Python, (2) bugs domaine metier, (3) performance O(n^2)/I/O loop/N+1, (4) securite (subprocess shell, SQL injection, secrets clear, XXE), (5) concurrence (race, lock), (6) UI/frontend (XSS innerHTML, memory leak listeners, fetch sans catch), (7) accessibilite a11y, (8) i18n strings hardcodes, (9) migrations DB (idempotence), (10) dette technique (fonctions >100L, magic numbers, duplications, imports lazy), (11) code mort, (12) patterns Python non-idiomatiques, (13) typing mypy, (14) error handling, (15) logging (secrets en clair, niveau errone), (16) tests (mock excessif, sans assertion). Avant action : `gh issue list --state open` et `gh pr list --state open` pour dedup. EXECUTE les actions (gh issue create / gh pr create / git push), ne les decris pas. Reponds en francais.')
+            || (github.event_name == 'schedule' && 'Audit hebdomadaire CineSort avec Opus 4.7 + thinking max.
+
+            CONTEXTE PROJET (mai 2026) :
+            - Architecture en couches verrouillee par import-linter en CI (.importlinter, 3 contracts).
+            - Cycle domain->app BRISE en mai 2026 (issue #83 closed). NE PAS REINTRODUIRE.
+            - Repository pattern installe sur SQLiteStore (store.probe, store.scan, store.quality, etc.).
+            - Facade pattern sur CineSortApi (api.run, api.settings, api.quality, api.integrations, api.library).
+            - Tests : 4277 unitaires, coverage seuil 80%.
+
+            Verifie systematiquement les 17 categories :
+            (1) bugs latents Python (None deref, race conditions, mutable defaults),
+            (2) bugs domaine metier,
+            (3) performance (O(n^2), I/O loop, N+1, DOM reflow),
+            (4) securite (subprocess shell, SQL injection, secrets clear, XSS, path traversal),
+            (5) concurrence (race, lock, thread safety),
+            (6) UI/frontend (XSS innerHTML, memory leak listeners, fetch sans catch),
+            (7) accessibilite a11y (WCAG 2.2 AA),
+            (8) i18n strings hardcodes,
+            (9) migrations DB (idempotence ALTER TABLE, foreign keys, integrity),
+            (10) dette technique (fonctions >100L, magic numbers, duplications, NOUVEAUX lazy imports a justifier),
+            (11) code mort (fonctions/imports/vars jamais utilises),
+            (12) patterns Python non-idiomatiques,
+            (13) typing (mypy errors, Optional implicites),
+            (14) error handling (silenced, missing chain, trop large),
+            (15) logging (secrets en clair, niveau errone, scrubber bypassed),
+            (16) tests (mock excessif, sans assertion, flakes),
+            (17) ARCHITECTURE INVARIANTS :
+                * Aucun import domain->app/infra/ui (verifie via `lint-imports`)
+                * Aucun import infra->app/ui
+                * Aucun import app->ui
+                * Nouveau code SQL doit utiliser Repository pattern, pas un mixin
+                * Nouvelle methode publique doit etre sur une facade, pas directement sur CineSortApi
+                * Modules avec classes mockees en test doivent utiliser pattern module-style.
+
+            Avant action : `gh issue list --state open` et `gh pr list --state open` pour dedup.
+            EXECUTE les actions (gh issue create / gh pr create / git push), ne les decris pas.
+            Reponds en francais.')
             || '' }}
