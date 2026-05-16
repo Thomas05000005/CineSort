@@ -122,3 +122,14 @@ class LibraryFacade(_BaseFacade):
         Cf CineSortApi.export_full_library pour la doc complete.
         """
         return self._api._export_full_library_impl()
+
+    # ---------- Dashboard podiums (1) ----------
+
+    def get_library_podiums(self, run_id: Optional[str] = None, limit: int = 10) -> Dict[str, Any]:
+        """Top N release groups + codecs + sources pour le run cible.
+
+        Cf cinesort.ui.api.library_podiums_support.get_library_podiums.
+        """
+        from cinesort.ui.api import library_podiums_support
+
+        return library_podiums_support.get_library_podiums(self._api, run_id=run_id, limit=limit)

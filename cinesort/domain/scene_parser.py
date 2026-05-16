@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Optional
 
 # --- Patterns -------------------------------------------------------------
 
@@ -91,6 +92,113 @@ _PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(?:19\d{2}|20\d{2})\s*[\)\]\}]")
 
 # Caracteres de garbage en fin de chaine apres nettoyage
 _TRAILING_GARBAGE_RE = re.compile(r"[\s\-_\.]+$")
+
+# Release group extraction (Phase Dashboard Podiums).
+# Validation d'un candidat (2-25 chars alphanum + underscore, au moins une lettre).
+_GROUP_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9_]{2,25}$")
+
+# Marker "scene" qui doit etre present AVANT le dernier tiret pour confirmer
+# qu'il s'agit bien d'un release group (et pas d'un tiret interne de titre
+# comme "Spider-Man" ou "X-Men").
+_SCENE_MARKER_RE = re.compile(
+    r"\b(?:19\d{2}|20\d{2}|1080p|2160p|720p|480p|x264|x265|h\.?264|h\.?265|"
+    r"hevc|avc|av1|bluray|blu[\s.-]?ray|brrip|bdrip|web[\s.-]?dl|web[\s.-]?rip|"
+    r"hdtv|hdrip|dvdrip|remux|truehd|dts|atmos|aac|ac3|10bit|hdr|uhd)\b",
+    re.IGNORECASE,
+)
+
+# Source extraction (Phase Dashboard Podiums).
+# Detecte la source scene (BluRay, WEB-DL, HDTV, Remux, DVDRip, etc.) dans
+# le filename. Retourne le label canonique normalise.
+_SOURCE_PATTERNS = [
+    # (regex, canonical_label) — ordre important : le plus specifique en premier
+    (re.compile(r"\bbd[\s.-]?remux\b", re.IGNORECASE), "BluRay Remux"),
+    (re.compile(r"\bremux\b", re.IGNORECASE), "Remux"),
+    (re.compile(r"\bblu[\s.-]?ray\b|\bbluray\b", re.IGNORECASE), "BluRay"),
+    (re.compile(r"\bbd[\s.-]?rip\b|\bbrrip\b|\bbdrip\b", re.IGNORECASE), "BDRip"),
+    (re.compile(r"\bweb[\s.-]?dl\b", re.IGNORECASE), "WEB-DL"),
+    (re.compile(r"\bweb[\s.-]?rip\b", re.IGNORECASE), "WEBRip"),
+    (re.compile(r"\bhdtv\b", re.IGNORECASE), "HDTV"),
+    (re.compile(r"\bhdrip\b", re.IGNORECASE), "HDRip"),
+    (re.compile(r"\bdvd[\s.-]?rip\b", re.IGNORECASE), "DVDRip"),
+    (re.compile(r"\b(?:cam|camrip|telesync|telecine)\b", re.IGNORECASE), "Cam/TS"),
+]
+
+
+def extract_release_group(filename: str) -> Optional[str]:
+    """Extrait le nom du release group depuis un nom de fichier scene.
+
+    Heuristique : le release group est le segment apres le DERNIER tiret du
+    stem, validee si le prefixe contient un marker scene (annee, resolution,
+    codec). Sans marker scene, le tiret est probablement interne au titre
+    ("Spider-Man", "X-Men").
+
+    Examples:
+        >>> extract_release_group("Inception.2010.1080p.BluRay.x264-RARBG.mkv")
+        'RARBG'
+        >>> extract_release_group("Mad.Max.2015.1080p.Atmos-VeXHD.mkv")
+        'VeXHD'
+        >>> extract_release_group("Spider-Man.2002.1080p.mkv")  # tiret interne
+        None
+        >>> extract_release_group("Inception.mkv")  # pas de tiret
+        None
+
+    Args:
+        filename: Nom de fichier brut, avec ou sans extension.
+
+    Returns:
+        Nom du groupe (preserve la casse originale, ex: 'VeXHD'), ou None.
+    """
+    if not filename:
+        return None
+    # Strip extension d'abord
+    p = Path(filename)
+    stem = p.stem if p.suffix else p.name
+    if not stem:
+        return None
+    # Cherche le DERNIER tiret du stem
+    last_dash = stem.rfind("-")
+    if last_dash == -1:
+        return None
+    prefix = stem[:last_dash]
+    candidate = stem[last_dash + 1 :].strip()
+    # Valide le format candidat
+    if not _GROUP_CANDIDATE_RE.match(candidate):
+        return None
+    if not any(c.isalpha() for c in candidate):
+        return None
+    # Heuristique : prefix doit contenir un marker scene (annee/resolution/codec)
+    # sinon c'est probablement un tiret interne au titre
+    if not _SCENE_MARKER_RE.search(prefix):
+        return None
+    return candidate
+
+
+def extract_source(filename: str) -> Optional[str]:
+    """Extrait le tag source (BluRay, WEB-DL, HDTV, Remux, etc.) depuis le filename.
+
+    Examples:
+        >>> extract_source("Inception.2010.1080p.BluRay.x264-RARBG.mkv")
+        'BluRay'
+        >>> extract_source("Movie.2024.WEB-DL.x265.mkv")
+        'WEB-DL'
+        >>> extract_source("Film.2020.BD-Remux.mkv")
+        'BluRay Remux'
+        >>> extract_source("Random.mkv")
+        None
+
+    Args:
+        filename: Nom de fichier brut.
+
+    Returns:
+        Label canonique de la source, ou None si non detectee.
+    """
+    if not filename:
+        return None
+    for pattern, label in _SOURCE_PATTERNS:
+        if pattern.search(filename):
+            return label
+    return None
 
 
 def parse_scene_title(filename: str) -> str:

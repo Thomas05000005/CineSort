@@ -717,6 +717,59 @@ body.is-background .login-wrap { animation-play-state: paused; }
 .space-bar-fill { height: 100%; border-radius: var(--radius-pill); transition: width var(--dur-mid) var(--ease); min-width: 2px; }
 .space-bar-value { width: 120px; text-align: right; color: var(--text-muted); font-size: var(--fs-xs); flex-shrink: 0; }
 
+/* Podiums bibliotheque (top release groups + codecs + sources) */
+.podium-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+  margin-top: var(--sp-3);
+}
+.podium-block { display: flex; flex-direction: column; gap: var(--sp-2); }
+.podium-title { font-size: var(--fs-sm); color: var(--text-secondary); margin: 0 0 var(--sp-2); }
+.podium-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.podium-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.podium-rank {
+  width: 28px;
+  text-align: center;
+  font-weight: var(--fw-semi);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.podium-name {
+  flex: 0 0 110px;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.podium-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  min-width: 40px;
+}
+.podium-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-mid) var(--ease);
+  min-width: 2px;
+}
+.podium-count {
+  width: 48px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+
 /* Suggestions bibliothecaire */
 .suggestions-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 .suggestion-card {
