@@ -10,7 +10,15 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+import cinesort.app.email_report as _email_report_mod
+import cinesort.app.plugin_hooks as _plugin_hooks_mod
+import cinesort.app.watchlist as _watchlist_mod
 import cinesort.domain.core as core
+import cinesort.infra.jellyfin_client as _jellyfin_mod
+import cinesort.infra.network_utils as _network_utils_mod
+import cinesort.infra.plex_client as _plex_mod
+import cinesort.infra.radarr_client as _radarr_mod
+import cinesort.infra.rest_server as _rest_server_mod
 import cinesort.infra.state as state
 from cinesort.app import JobRunner
 from cinesort.app import updater as _updater
@@ -296,10 +304,9 @@ class CineSortApi:
             settings = self._get_settings_impl()
             if not settings.get("plugins_enabled"):
                 return
-            from cinesort.app.plugin_hooks import dispatch_hook
-
             timeout = int(settings.get("plugins_timeout_s") or 30)
-            dispatch_hook(event, data, timeout_s=timeout)
+            # NB : module-style pour permettre patch("cinesort.app.plugin_hooks.dispatch_hook").
+            _plugin_hooks_mod.dispatch_hook(event, data, timeout_s=timeout)
         except (ImportError, KeyError, OSError, TypeError, ValueError):
             pass  # Ne jamais bloquer pour un plugin
 
@@ -307,9 +314,8 @@ class CineSortApi:
         """Dispatch un rapport email si email_enabled. Non-bloquant."""
         try:
             settings = self._get_settings_impl()
-            from cinesort.app.email_report import dispatch_email
-
-            dispatch_email(settings, event, data)
+            # NB : module-style pour permettre patch("cinesort.app.email_report.dispatch_email").
+            _email_report_mod.dispatch_email(settings, event, data)
         except (ImportError, KeyError, OSError, TypeError, ValueError):
             pass  # Ne jamais bloquer pour un email
 
@@ -857,15 +863,14 @@ class CineSortApi:
 
     def get_server_info(self) -> Dict[str, Any]:
         """Retourne les infos du serveur REST (IP, port, URL dashboard)."""
-        from cinesort.infra.network_utils import build_dashboard_url, get_local_ip
-
         server = self._rest_server
         if server is None or not getattr(server, "is_running", False):
             return _err_response("Serveur REST non demarre.", category="state", level="info", log_module=__name__)
-        ip = get_local_ip()
+        # NB : module-style pour permettre patch("cinesort.infra.network_utils.X").
+        ip = _network_utils_mod.get_local_ip()
         port = getattr(server, "_port", 8642)
         is_https = getattr(server, "_is_https", False)
-        url = build_dashboard_url(ip, port, is_https)
+        url = _network_utils_mod.build_dashboard_url(ip, port, is_https)
         return {"ok": True, "ip": ip, "port": port, "https": is_https, "dashboard_url": url}
 
     def get_dashboard_qr(self) -> Dict[str, Any]:
@@ -878,13 +883,11 @@ class CineSortApi:
         info = self.get_server_info()
         if not info.get("ok"):
             # Fallback : construire l'URL depuis les settings
-            from cinesort.infra.network_utils import build_dashboard_url, get_local_ip
-
             settings = self._get_settings_impl()
-            ip = get_local_ip()
+            ip = _network_utils_mod.get_local_ip()
             port = int(settings.get("rest_api_port") or 8642)
             is_https = bool(settings.get("rest_api_https_enabled"))
-            url = build_dashboard_url(ip, port, is_https)
+            url = _network_utils_mod.build_dashboard_url(ip, port, is_https)
         else:
             url = info["dashboard_url"]
 
@@ -958,10 +961,9 @@ class CineSortApi:
         if not token:
             return _err_response("Aucun token configure.", category="state", level="info", log_module=__name__)
 
-        from cinesort.infra.rest_server import RestApiServer
-
         port = int(settings.get("rest_api_port") or 8642)
-        server = RestApiServer(
+        # NB : module-style pour permettre patch("cinesort.infra.rest_server.RestApiServer").
+        server = _rest_server_mod.RestApiServer(
             self,
             port=port,
             token=token,
@@ -1094,10 +1096,9 @@ class CineSortApi:
         if not url or not api_key:
             return _err_response("Jellyfin non configuré.", category="state", level="info", log_module=__name__)
 
-        from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
-
         try:
-            client = JellyfinClient(url, api_key, timeout_s=timeout_s)
+            # NB : module-style pour permettre patch("cinesort.infra.jellyfin_client.JellyfinClient").
+            client = _jellyfin_mod.JellyfinClient(url, api_key, timeout_s=timeout_s)
             if not user_id:
                 info = client.validate_connection()
                 if not info.get("ok"):
@@ -1111,14 +1112,12 @@ class CineSortApi:
             libraries = client.get_libraries(user_id)
             movies_count = client.get_movies_count(user_id)
             return {"ok": True, "libraries": libraries, "movies_count": movies_count}
-        except JellyfinError as exc:
+        except _jellyfin_mod.JellyfinError as exc:
             return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     # ---------- Email ----------
     def test_email_report(self) -> Dict[str, Any]:
         """Envoie un email test avec des donnees mock."""
-        from cinesort.app.email_report import send_email_report
-
         settings = self._get_settings_impl()
         if not settings.get("email_smtp_host") or not settings.get("email_to"):
             return _err_response(
@@ -1132,7 +1131,8 @@ class CineSortApi:
             "ts": time.time(),
             "data": {"rows": 42, "folders_scanned": 42, "roots": ["D:/Films"]},
         }
-        ok = send_email_report(settings, "post_scan", mock_data)
+        # NB : module-style pour permettre patch("cinesort.app.email_report.send_email_report").
+        ok = _email_report_mod.send_email_report(settings, "post_scan", mock_data)
         return {"ok": ok, "message": "Email test envoye." if ok else "Echec de l'envoi. Verifiez les parametres SMTP."}
 
     # ---------- Jellyfin validation croisee ----------
@@ -1170,18 +1170,16 @@ class CineSortApi:
         if not local_rows:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
-        # Appeler Jellyfin
-        from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
-
         try:
             timeout_s = float(settings.get("jellyfin_timeout_s") or 10)
-            client = JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
+            # NB : module-style pour permettre patch("cinesort.infra.jellyfin_client.JellyfinClient").
+            client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
                 info = client.validate_connection()
                 jf_user_id = info.get("user_id", "")
             # BUG 2 : utiliser le scan multi-library pour eviter les tronques
             jellyfin_movies = client.get_all_movies_from_all_libraries(jf_user_id)
-        except JellyfinError as exc:
+        except _jellyfin_mod.JellyfinError as exc:
             return _err_response(
                 f"Connexion Jellyfin echouee : {exc}", category="resource", level="error", log_module=__name__
             )
@@ -1204,12 +1202,11 @@ class CineSortApi:
         if not content.strip():
             return _err_response("Contenu CSV vide.", category="state", level="info", log_module=__name__)
 
-        from cinesort.app.watchlist import parse_letterboxd_csv, parse_imdb_csv, compare_watchlist
-
+        # NB : module-style pour permettre patch("cinesort.app.watchlist.X").
         if src == "letterboxd":
-            films = parse_letterboxd_csv(content)
+            films = _watchlist_mod.parse_letterboxd_csv(content)
         else:
-            films = parse_imdb_csv(content)
+            films = _watchlist_mod.parse_imdb_csv(content)
         if not films:
             return _err_response("Aucun film trouve dans le CSV.", category="state", level="info", log_module=__name__)
 
@@ -1231,25 +1228,22 @@ class CineSortApi:
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
 
-        report = compare_watchlist(films, local_rows)
+        report = _watchlist_mod.compare_watchlist(films, local_rows)
         return {"ok": True, "source": src, **report}
 
     # ---------- Plex ----------
     def _test_plex_connection_impl(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Plex."""
-        from cinesort.infra.plex_client import PlexClient
-
         purl = (url or "").strip()
         ptok = self._unmask_or_stored("plex_token", token)
         if not purl or not ptok:
             return _err_response("URL et token requis.", category="validation", level="info", log_module=__name__)
-        client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
+        # NB : module-style pour permettre patch("cinesort.infra.plex_client.PlexClient").
+        client = _plex_mod.PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
     def _get_plex_libraries_impl(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Retourne les sections movie du serveur Plex."""
-        from cinesort.infra.plex_client import PlexClient, PlexError
-
         purl = (url or "").strip()
         ptok = (token or "").strip()
         if not purl or not ptok:
@@ -1259,10 +1253,10 @@ class CineSortApi:
         if not purl or not ptok:
             return _err_response("URL et token Plex requis.", category="validation", level="info", log_module=__name__)
         try:
-            client = PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
+            client = _plex_mod.PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
             libs = client.get_libraries("movie")
             return {"ok": True, "libraries": libs}
-        except PlexError as exc:
+        except _plex_mod.PlexError as exc:
             return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
@@ -1298,13 +1292,11 @@ class CineSortApi:
         if not local_rows:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
-        from cinesort.infra.plex_client import PlexClient, PlexError
-
         try:
             timeout_s = float(settings.get("plex_timeout_s") or 10)
-            client = PlexClient(purl, ptok, timeout_s=timeout_s)
+            client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
-        except PlexError as exc:
+        except _plex_mod.PlexError as exc:
             return _err_response(
                 f"Connexion Plex echouee : {exc}", category="resource", level="error", log_module=__name__
             )
@@ -1333,13 +1325,12 @@ class CineSortApi:
     # ---------- Radarr ----------
     def _test_radarr_connection_impl(self, url: str = "", api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la connexion au serveur Radarr."""
-        from cinesort.infra.radarr_client import RadarrClient
-
         rurl = (url or "").strip()
         rkey = self._unmask_or_stored("radarr_api_key", api_key)
         if not rurl or not rkey:
             return _err_response("URL et cle API requis.", category="validation", level="info", log_module=__name__)
-        client = RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
+        # NB : module-style pour permettre patch("cinesort.infra.radarr_client.RadarrClient").
+        client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
         return client.validate_connection()
 
     def _get_radarr_status_impl(self, run_id: str = "") -> Dict[str, Any]:
@@ -1372,14 +1363,12 @@ class CineSortApi:
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
 
-        from cinesort.infra.radarr_client import RadarrClient, RadarrError
-
         try:
             timeout_s = float(settings.get("radarr_timeout_s") or 10)
-            client = RadarrClient(rurl, rkey, timeout_s=timeout_s)
+            client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
-        except RadarrError as exc:
+        except _radarr_mod.RadarrError as exc:
             return _err_response(
                 f"Connexion Radarr echouee : {exc}", category="resource", level="error", log_module=__name__
             )
@@ -1407,14 +1396,12 @@ class CineSortApi:
         mid = int(radarr_movie_id or 0)
         if mid <= 0:
             return _err_response("radarr_movie_id invalide.", category="validation", level="info", log_module=__name__)
-        from cinesort.infra.radarr_client import RadarrClient, RadarrError
-
         try:
             timeout_s = float(settings.get("radarr_timeout_s") or 10)
-            client = RadarrClient(rurl, rkey, timeout_s=timeout_s)
+            client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
-        except RadarrError as exc:
+        except _radarr_mod.RadarrError as exc:
             return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
