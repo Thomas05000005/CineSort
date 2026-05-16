@@ -169,8 +169,8 @@ python app.py --api                                              # REST seul, sa
 ## Documents utiles
 
 - [README.md](../../README.md) — entree publique
-- [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md) — historique complet des sessions
+- [CLAUDE_HISTORY.md](./CLAUDE_HISTORY.md) — historique complet des sessions
 - [.github/audit-prompt.md](../../.github/audit-prompt.md) — prompt audit du matin (46 categories)
-- [REFACTOR_PLAN_83.md](REFACTOR_PLAN_83.md) — plan original casser cycle (acheve)
-- [REFACTOR_PLAN_84.md](REFACTOR_PLAN_84.md) — plan facades (acheve)
-- [BILAN_CORRECTIONS.md](../../BILAN_CORRECTIONS.md) — bilan audits successifs
+- [REFACTOR_PLAN_83.md](./REFACTOR_PLAN_83.md) — plan original casser cycle (acheve)
+- [REFACTOR_PLAN_84.md](./REFACTOR_PLAN_84.md) — plan facades (acheve)
+- [BILAN_CORRECTIONS.md](./BILAN_CORRECTIONS.md) — bilan audits successifs

@@ -1,7 +1,7 @@
 # Bilan des corrections — CineSort
 
 > **Note** : pour l'historique Round 1 + Round 2 (resolu, ~182 KB),
-> voir [`docs/internal/audits/ARCHIVE_R1_R2.md`](docs/internal/audits/ARCHIVE_R1_R2.md).
+> voir [`audits/ARCHIVE_R1_R2.md`](audits/ARCHIVE_R1_R2.md).
 >
 > Ce fichier ne conserve que les corrections **actives** (Round 3+ et Polish Total v7.7.0).
 > Source des findings : `AUDIT_TRACKING.md` et `PLAN_RESTE_A_FAIRE.md`.
@@ -87,7 +87,7 @@ Run `25749726912` (14 min, 130 modules, 4 personas paralleles) :
 
 ## Phase Polish Total v7.7.0 (4 mai 2026)
 
-Branche `polish_total_v7_7_0` depuis `audit_qa_v7_6_0_dev_20260428`. Plan d'execution dans [`OPERATION_POLISH_V7_7_0.md`](OPERATION_POLISH_V7_7_0.md). Tracking vivant dans `OPERATION_POLISH_V7_7_0_PROGRESS.md`. Cible note 9.2/10 -> 9.9-10/10.
+Branche `polish_total_v7_7_0` depuis `audit_qa_v7_6_0_dev_20260428`. Plan d'execution dans [`operations/v7_7_0/OPERATION_POLISH_V7_7_0.md`](operations/v7_7_0/OPERATION_POLISH_V7_7_0.md). Tracking vivant dans `operations/v7_7_0/OPERATION_POLISH_V7_7_0_PROGRESS.md`. Cible note 9.2/10 -> 9.9-10/10.
 
 ### Vague 0 — Preparation (4 mai 2026)
 
@@ -420,7 +420,7 @@ e8bbc98 fix(security): require strong token for REST LAN exposure (H-4)
 
 ## Phase Audit Remediation v7.8.0 — 10-11 mai 2026
 
-**Branche** : `polish_total_v7_7_0`. **Origine** : audit exhaustif 6 agents parallèles sur la branche post-v7.7.0 (~240 findings vérifiés). Plan complet dans [audit/REMEDIATION_PLAN_v7_8_0.md](audit/REMEDIATION_PLAN_v7_8_0.md), tracking dans [audit/TRACKING_v7_8_0.md](audit/TRACKING_v7_8_0.md).
+**Branche** : `polish_total_v7_7_0`. **Origine** : audit exhaustif 6 agents parallèles sur la branche post-v7.7.0 (~240 findings vérifiés). Plan complet dans [audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md](audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md), tracking dans [audit_v7_8_0/TRACKING_v7_8_0.md](audit_v7_8_0/TRACKING_v7_8_0.md).
 
 ### Vérité d'abord — Phase 0
 
@@ -682,7 +682,7 @@ Avant ce fix, CLAUDE.md revendiquait "49.84 MB testés" sans **aucune validation
 - Hypothèses écartées : `MIN_VIDEO_BYTES` mute (tous tests le restaurent), `_NFO_SIG_CACHE` (keyed par path string), `_resolve_path_cached` (LRU keyed pareil), `test_import_cycle_guard.py` (snapshot/restore complet).
 - Hypothèse restante : singleton dans `CineSortApi.__init__`, `JobRunner` thread daemons, ou `_RECONCILED_STATE_DIRS` qui croît sans cleanup.
 
-**Délivré** : [`audit/results/v7_8_0_inter_test_pollution.md`](audit/results/v7_8_0_inter_test_pollution.md) (rapport détaillé pour la session v7.9.0).
+**Délivré** : [`audit_v7_8_0/results/v7_8_0_inter_test_pollution.md`](audit_v7_8_0/results/v7_8_0_inter_test_pollution.md) (rapport détaillé pour la session v7.9.0).
 
 **Fix réel** = bisection complète + fix root cause = chantier 1-2 jours, reporté.
 
@@ -740,7 +740,7 @@ Avant ce fix, CLAUDE.md revendiquait "49.84 MB testés" sans **aucune validation
   - `apply_settings_defaults` 180L → **77L** (–57 %, table déclarative 100 entrées)
 - **0 vulnérabilité dépendances** (pip-audit clean)
 - **0 régression imputable** (vérifié par git stash + re-run)
-- **Chantier inter-test pollution** investigué + documenté : 26 fails pré-existants liés à un état global cross-module non-réinitialisé. Bisection + fix = session dédiée v7.9.0. Détail : [audit/results/v7_8_0_inter_test_pollution.md](audit/results/v7_8_0_inter_test_pollution.md)
+- **Chantier inter-test pollution** investigué + documenté : 26 fails pré-existants liés à un état global cross-module non-réinitialisé. Bisection + fix = session dédiée v7.9.0. Détail : [audit_v7_8_0/results/v7_8_0_inter_test_pollution.md](audit_v7_8_0/results/v7_8_0_inter_test_pollution.md)
 
 ### Vérification non-régression — méthode
 
