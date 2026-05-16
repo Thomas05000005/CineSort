@@ -47,7 +47,7 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         self.assertEqual(len(rows), 1000)
         self.assertEqual(stats.planned_rows, 1000)
         decisions = {row.row_id: {"ok": True, "title": "Shared Title", "year": 2001} for row in rows[:50]}
-        data = core.find_duplicate_targets(cfg, rows[:50], decisions)
+        data = plan_support.find_duplicate_targets(cfg, rows[:50], decisions)
         self.assertGreaterEqual(int(data.get("total_groups") or 0), 1)
 
     def test_plan_library_handles_5000_synthetic_folders_and_dry_run_apply_subset(self) -> None:
@@ -68,7 +68,7 @@ class LargeVolumeFlowStressTests(unittest.TestCase):
         decisions = {
             row.row_id: {"ok": True, "title": f"Renamed {idx:04d}", "year": 2001} for idx, row in enumerate(subset)
         }
-        dup_data = core.find_duplicate_targets(cfg, subset, decisions)
+        dup_data = plan_support.find_duplicate_targets(cfg, subset, decisions)
         self.assertEqual(int(dup_data.get("total_groups") or 0), 0)
 
         result = _apply_rows_fn(

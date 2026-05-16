@@ -875,7 +875,10 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             if not rows:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             safe = api._normalize_decisions_for_rows(rows, decisions)
-            data = core.find_duplicate_targets(rs.cfg, rows, safe)
+            # Cf #83 etape 2 PR 3 : point d'entree app/plan_support.
+            from cinesort.app.plan_support import find_duplicate_targets as _find_dups
+
+            data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -897,7 +900,10 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         rows = api._load_rows_from_plan_jsonl(run_paths)
         safe = api._normalize_decisions_for_rows(rows, decisions)
         cfg = api._cfg_from_run_row(row)
-        data = core.find_duplicate_targets(cfg, rows, safe)
+        # Cf #83 etape 2 PR 3 : point d'entree app/plan_support.
+        from cinesort.app.plan_support import find_duplicate_targets as _find_dups
+
+        data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
