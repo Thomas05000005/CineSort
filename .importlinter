@@ -1,0 +1,48 @@
+; Import Linter contracts (#83 phase A8).
+;
+; Verifie la regle d'architecture en couches : domain est la couche la plus
+; basse, ne doit JAMAIS importer app/infra/ui. Bloque les regressions futures.
+;
+; Doc : https://import-linter.readthedocs.io/
+
+[importlinter]
+root_packages =
+    cinesort
+include_external_packages = False
+
+; ---- Contract 1 : domain ne depend pas des couches superieures ----
+[importlinter:contract:domain_pure]
+name = Domain ne doit importer ni app, ni infra, ni ui
+type = forbidden
+source_modules =
+    cinesort.domain
+forbidden_modules =
+    cinesort.app
+    cinesort.infra
+    cinesort.ui
+ignore_imports =
+    ; TmdbClient importe uniquement sous `if TYPE_CHECKING:` pour annotations.
+    ; Pas une vraie dependance runtime — accepte exceptionnellement.
+    cinesort.domain.core -> cinesort.infra.tmdb_client
+
+; ---- Contract 2 : infra ne depend pas de app ni ui ----
+; infra fournit les adapters techniques (DB, HTTP, FS) — peut importer domain
+; pour les types/contracts metier, mais pas app (orchestration) ni ui (presentation).
+[importlinter:contract:infra_bounded]
+name = Infra ne doit importer ni app, ni ui
+type = forbidden
+source_modules =
+    cinesort.infra
+forbidden_modules =
+    cinesort.app
+    cinesort.ui
+
+; ---- Contract 3 : app ne depend pas de ui ----
+; app orchestre les use-cases — peut importer infra + domain, mais pas ui.
+[importlinter:contract:app_bounded]
+name = App ne doit pas importer ui
+type = forbidden
+source_modules =
+    cinesort.app
+forbidden_modules =
+    cinesort.ui
