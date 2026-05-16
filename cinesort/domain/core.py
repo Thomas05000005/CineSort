@@ -1341,8 +1341,9 @@ def _mark_skip(res: ApplyResult, reason: str) -> None:
 
 _build_apply_context = core_apply_support.build_apply_context
 _record_apply_op = core_apply_support.record_apply_op
-_is_managed_merge_file = core_apply_support.is_managed_merge_file
-_is_sidecar_metadata = core_apply_support.is_sidecar_metadata
+# Cf #83 etape 2 PR 2 : aliases _is_managed_merge_file et _is_sidecar_metadata
+# supprimes (0 caller externe, 0 usage interne). Appeler directement
+# core_apply_support.is_managed_merge_file / .is_sidecar_metadata si besoin.
 
 
 # Cf issue #83 etape 2 PR 1 (2026-05-16) : ces 3 wrappers triviaux
@@ -1358,30 +1359,17 @@ _quick_hash_cache_key = core_apply_support.quick_hash_cache_key
 
 
 _unique_path = core_apply_support.unique_path
-_unique_path_dup = core_apply_support.unique_path_dup
-
-
-def _mkdir_counted(
-    path: Path,
-    *,
-    dry_run: bool,
-    log: Callable[[str, str], None],
-    res: ApplyResult,
-    record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> None:
-    core_apply_support.mkdir_counted(path, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
-
-
-_prune_empty_dirs = core_apply_support.prune_empty_dirs
+# Cf #83 etape 2 PR 2 : 12 aliases prives supprimes (0 caller externe,
+# 0 usage interne dans domain/core.py). Ils dupliquaient sans valeur ajoutee
+# des helpers de cinesort/app/apply_core.py — appeler core_apply_support.X
+# directement OU bouger vers app/ si necessaire dans une PR future.
+# Aliases supprimes :
+#   _mkdir_counted, _prune_empty_dirs, _legacy_collection_root,
+#   _resolve_collection_folder_after_migration, _migrate_legacy_collection_root,
+#   _move_to_review_bucket, _safe_relative_context, _conflict_context,
+#   _move_file_with_collision_policy, _merge_dir_safe, _unique_path_dup,
+#   _is_managed_merge_file, _is_sidecar_metadata (cf bloc precedent).
 _is_dir_empty = core_apply_support.is_dir_empty
-_legacy_collection_root = core_apply_support.legacy_collection_root
-_resolve_collection_folder_after_migration = core_apply_support.resolve_collection_folder_after_migration
-_migrate_legacy_collection_root = core_apply_support.migrate_legacy_collection_root
-_move_to_review_bucket = core_apply_support.move_to_review_bucket
-_safe_relative_context = core_apply_support.safe_relative_context
-_conflict_context = core_apply_support.conflict_context
-_move_file_with_collision_policy = core_apply_support.move_file_with_collision_policy
-_merge_dir_safe = core_apply_support.merge_dir_safe
 move_collection_folder = core_apply_support.move_collection_folder
 
 
