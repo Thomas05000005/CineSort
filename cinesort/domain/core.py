@@ -56,21 +56,16 @@ from cinesort.domain.title_helpers import (
     title_match_score,
     tokens,
 )
-from cinesort.app.cleanup import (
-    _move_empty_top_level_dirs,
-    _move_residual_top_level_dirs,
-    preview_cleanup_residual_folders,
-)
 import cinesort.app.plan_support as core_plan_support
 
 if TYPE_CHECKING:
     from cinesort.infra.tmdb_client import TmdbClient
 
-_COMPAT_CLEANUP_EXPORTS = (
-    _move_empty_top_level_dirs,
-    _move_residual_top_level_dirs,
-    preview_cleanup_residual_folders,
-)
+# Cf #83 PR A2 : 3 cleanup re-exports backward-compat supprimes :
+#   _move_empty_top_level_dirs, _move_residual_top_level_dirs,
+#   preview_cleanup_residual_folders
+# Aucun caller externe identifie (grep cinesort/ tests/). Si besoin futur,
+# importer depuis cinesort.app.cleanup directement.
 
 _COMPAT_SCAN_EXPORTS = (
     _collect_non_video_extensions,
