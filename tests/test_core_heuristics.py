@@ -266,6 +266,12 @@ class CoreHeuristicsTests(unittest.TestCase):
         self.assertIn("consensus=+", best.note)
 
     def test_files_identical_quick_uses_hash_cache(self) -> None:
+        # Cf #83 etape 2 PR 1 : les fonctions _sha1_quick et
+        # _files_identical_quick ont ete supprimees de domain.core (etaient
+        # de simples wrappers du vrai code dans app.apply_core). Le test
+        # cible maintenant directement apply_core.sha1_quick + files_identical_quick.
+        from cinesort.app import apply_core
+
         with tempfile.TemporaryDirectory(prefix="hash_cache_") as tmp:
             src = Path(tmp) / "src.mkv"
             dst = Path(tmp) / "dst.mkv"
@@ -274,18 +280,18 @@ class CoreHeuristicsTests(unittest.TestCase):
             dst.write_bytes(data)
 
             calls = {"n": 0}
-            original = core._sha1_quick
+            original = apply_core.sha1_quick
 
             def wrapped(path: Path) -> str:
                 calls["n"] += 1
                 return original(path)
 
-            with mock.patch.object(core, "_sha1_quick", wrapped):
-                cache = {}
-                self.assertTrue(core._files_identical_quick(src, dst, hash_cache=cache))
+            with mock.patch.object(apply_core, "sha1_quick", wrapped):
+                cache: dict = {}
+                self.assertTrue(apply_core.files_identical_quick(src, dst, hash_cache=cache))
                 first_calls = calls["n"]
                 self.assertEqual(first_calls, 2)
-                self.assertTrue(core._files_identical_quick(src, dst, hash_cache=cache))
+                self.assertTrue(apply_core.files_identical_quick(src, dst, hash_cache=cache))
                 self.assertEqual(calls["n"], first_calls)
 
     def test_find_duplicate_targets_marks_existing_folder_as_mergeable(self) -> None:
