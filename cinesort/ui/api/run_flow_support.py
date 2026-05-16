@@ -13,18 +13,23 @@ _logger = logging.getLogger(__name__)
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
-from cinesort.infra.tmdb_client import TmdbClient
-from cinesort.domain.i18n_messages import t
-from cinesort.domain.run_models import RunStatus
-from cinesort.domain.conversions import to_bool, to_float
-from cinesort.ui.api._responses import err as _err_response
+from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
+from cinesort.app.plan_support import find_duplicate_targets as _find_dups
 from cinesort.app.plan_support import plan_multi_roots
+from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
+from cinesort.domain.conversions import to_bool, to_float
+from cinesort.domain.duplicate_compare import compare_duplicates
+from cinesort.domain.i18n_messages import t
+from cinesort.domain.librarian import generate_suggestions
+from cinesort.domain.run_models import RunStatus
+from cinesort.infra.omdb_client import OmdbClient
+from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 
-# Seuil duplique dans plan_support._ROOT_BULK_WARNING_THRESHOLD. Non importe
-# pour garder ce module decouple de plan_support (eviter cycle import au boot).
+# Seuil duplique dans plan_support._ROOT_BULK_WARNING_THRESHOLD.
 _ROOT_BULK_THRESHOLD = 20
 
 
@@ -426,8 +431,6 @@ def _build_plan_job_fn(
             # et eviter un appel OMDb inutile.
             try:
                 if tmdb is not None:
-                    from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
-
                     n_probe = cross_check_rows_with_probe(
                         rows,
                         store,
@@ -446,9 +449,6 @@ def _build_plan_job_fn(
             # basse. N'echoue jamais le run en cas de probleme.
             try:
                 if settings.get("omdb_enabled") and settings.get("omdb_api_key"):
-                    from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
-                    from cinesort.infra.omdb_client import OmdbClient
-
                     omdb_cache_path = state_dir / "omdb_cache.json"
                     omdb_client = OmdbClient(
                         api_key=str(settings.get("omdb_api_key") or ""),
@@ -492,8 +492,6 @@ def _build_plan_job_fn(
 
             # Capturer le snapshot sante bibliotheque dans les stats
             try:
-                from cinesort.domain.librarian import generate_suggestions
-
                 lib_result = generate_suggestions(rows, [], settings)
                 stats_dict = dict(stats.__dict__)
                 stats_dict["health_snapshot"] = {
@@ -884,8 +882,6 @@ def _build_comparison_payload(
 
 
 def _enrich_one_group(group: Dict[str, Any], run_id: str, store: Any) -> None:
-    from cinesort.domain.duplicate_compare import compare_duplicates
-
     rows = group.get("rows") or []
     if len(rows) < 2:
         return
@@ -924,9 +920,6 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             if not rows:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             safe = api._normalize_decisions_for_rows(rows, decisions)
-            # Cf #83 etape 2 PR 3 : point d'entree app/plan_support.
-            from cinesort.app.plan_support import find_duplicate_targets as _find_dups
-
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             return {"ok": True, **data}
@@ -949,9 +942,6 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         rows = api._load_rows_from_plan_jsonl(run_paths)
         safe = api._normalize_decisions_for_rows(rows, decisions)
         cfg = api._cfg_from_run_row(row)
-        # Cf #83 etape 2 PR 3 : point d'entree app/plan_support.
-        from cinesort.app.plan_support import find_duplicate_targets as _find_dups
-
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
         return {"ok": True, **data}
