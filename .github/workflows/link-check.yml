@@ -59,17 +59,39 @@ jobs:
           # --exclude 'github\.com/Thomas05000005/CineSort/issues/\d+' :
           #   pas verifier les liens vers issues internes (peuvent ne pas
           #   encore exister au moment du check)
+          # Exclusions :
+          # - github.com issues internes : peuvent ne pas exister au moment du check
+          # - localhost / 127.0.0.1 / 192.168 / duckdns : adresses locales test
+          # - ^/shared/ ^/views/ ^/locales/ ^/dashboard/ : paths root-relative servis
+          #   par le REST server (cinesort/infra/rest_server.py) en runtime ; ils
+          #   ne resolvent pas en fichiers statiques locaux mais existent en prod.
+          # Path exclusions :
+          # - web/ : contient des HTML avec paths root-relative `/shared/*` qui
+          #   ne resolvent pas en local mais sont servis par REST runtime
+          # - docs/internal/audits/, audit_v7_8_0/, operations/ : snapshots
+          #   historiques avec liens vers du code qui a bouge depuis. Archives,
+          #   pas a maintenir
+          # - docs/internal/CLAUDE_HISTORY.md : archive sessions, contient des
+          #   refs a anciens fichiers supprimes
+          # - .release_notes_*.md : artefacts release temporaires (uploades sur
+          #   GitHub Release puis supprimes)
           args: >-
             --no-progress
             --cache
             --max-cache-age 7d
             --verbose
             --accept 200,206,429
+            --base .
             --exclude 'github\.com/Thomas05000005/CineSort/issues/\d+'
             --exclude 'localhost'
             --exclude '127\.0\.0\.1'
             --exclude '192\.168\.'
             --exclude 'duckdns'
+            --exclude-path 'web'
+            --exclude-path 'docs/internal/audits'
+            --exclude-path 'docs/internal/audit_v7_8_0'
+            --exclude-path 'docs/internal/operations'
+            --exclude-path 'docs/internal/CLAUDE_HISTORY.md'
             --
             './**/*.md'
             './**/*.html'

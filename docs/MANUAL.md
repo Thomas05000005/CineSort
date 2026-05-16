@@ -737,7 +737,7 @@ Vue **Aide** dans l'app (icône `?` dans la sidebar) — FAQ + glossaire + racco
 | [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Dépannage détaillé par catégorie |
 | [docs/api/ENDPOINTS.md](api/ENDPOINTS.md) | Référence des 98 endpoints API REST |
 | [CHANGELOG.md](../CHANGELOG.md) | Historique des versions |
-| [CLAUDE.md](../CLAUDE.md) | Architecture (lecture dev) |
+| [docs/internal/CLAUDE.md](internal/CLAUDE.md) | Architecture (lecture dev) |
 
 ### Communauté
 

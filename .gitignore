@@ -85,3 +85,6 @@ preview_*.html
 test_output.txt
 *.test_output
 ci_log.txt
+
+# Release notes temporaires (uploadees sur GitHub Release puis supprimees)
+.release_notes_*.md
