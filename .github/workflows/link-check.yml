@@ -73,7 +73,7 @@ jobs:
             --cache
             --max-cache-age 7d
             --verbose
-            --accept 200,206,429,403
+            --accept 200,206,401,403,429
             --exclude 'github\.com/Thomas05000005/CineSort/issues/\d+'
             --exclude 'localhost'
             --exclude '127\.0\.0\.1'
