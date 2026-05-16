@@ -1420,6 +1420,28 @@ def _build_resolved_row(
     if is_already_conform and confidence < 85:
         confidence = 90
         label = "high"
+    # Phase 6.1 : runtime cross-check NFO vs TMDb, edition-aware.
+    # Source duree = nfo.runtime (deja parse, zero cout scan). Phase 6.1.b
+    # branchera probe.duration_s en complement quand cache probe dispo.
+    runtime_warning: Optional[str] = None
+    if nfo is not None and getattr(nfo, "runtime", None) and tmdb is not None and chosen.tmdb_id:
+        from cinesort.domain.runtime_matching import score_runtime_delta
+
+        try:
+            tmdb_runtime = tmdb.get_movie_runtime(int(chosen.tmdb_id))
+        except (AttributeError, TypeError, ValueError):
+            tmdb_runtime = None
+        if tmdb_runtime:
+            bonus, runtime_warning = score_runtime_delta(
+                file_runtime_min=float(nfo.runtime),
+                tmdb_runtime_min=tmdb_runtime,
+                edition_label=detected_edition,
+            )
+            confidence = max(0, min(100, confidence + bonus))
+            if bonus >= 10:
+                label = "high" if confidence >= 85 else label
+            elif bonus < 0:
+                label = "low" if confidence < 60 else label
     note = core_mod.build_plan_note(
         confidence=confidence,
         label=label,
@@ -1443,6 +1465,8 @@ def _build_resolved_row(
         nfo_partial_match=nfo_state["nfo_partial_match"],
         title_ambiguity=title_ambiguous,
     )
+    if runtime_warning and runtime_warning not in warning_flags:
+        warning_flags.append(runtime_warning)
     coll_id, coll_name = _resolve_tmdb_collection(cfg, chosen, folder_name, tmdb=tmdb, log=log)
     return core_mod.PlanRow(
         row_id=row_id,
