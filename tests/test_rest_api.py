@@ -261,15 +261,16 @@ class RestFacadeDispatchTests(unittest.TestCase):
         facade_methods = [name for name in methods if "/" in name]
 
         # 5 facades * leurs methodes respectives :
-        # Run 7 + Settings 6 + Quality 22 + Integrations 13 + Library 11 = 59
+        # Run 7 + Settings 6 + Quality 22 + Integrations 14 + Library 11 = 60
         # (#92 #1 : +2 Integrations - refresh_jellyfin/plex_library_now)
         # (#94 : +1 Quality - get_perceptual_compare_frames)
         # (Dashboard Podiums : +1 Library - get_library_podiums)
         # (Dashboard Timeline : +1 Library - get_library_timeline)
+        # (Phase 6.2 OMDb : +1 Integrations - test_omdb_connection)
         self.assertEqual(
             len(facade_methods),
-            59,
-            f"Attendu 59 methodes facade, trouve {len(facade_methods)}",
+            60,
+            f"Attendu 60 methodes facade, trouve {len(facade_methods)}",
         )
 
     def test_each_facade_has_methods(self) -> None:
@@ -282,8 +283,8 @@ class RestFacadeDispatchTests(unittest.TestCase):
             ("settings", 6),
             # Quality : 21 d'origine + 1 (#94 get_perceptual_compare_frames) = 22
             ("quality", 22),
-            # Integrations : 11 d'origine + 2 (#92 #1 refresh_jellyfin/plex_library_now) = 13
-            ("integrations", 13),
+            # Integrations : 11 d'origine + 2 (#92 #1 refresh_jellyfin/plex_library_now) + 1 (Phase 6.2 OMDb) = 14
+            ("integrations", 14),
             # Library : 9 d'origine + 1 (Dashboard Podiums) + 1 (Dashboard Timeline) = 11
             ("library", 11),
         ):

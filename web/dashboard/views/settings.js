@@ -154,6 +154,16 @@ export const SETTINGS_GROUPS = [
         { key: "radarr_api_key", label: "Clé API", type: "api-key",
           testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
       ]},
+      // Phase 6.2 : OMDb (cross-check IMDb pour identification)
+      { id: "omdb", label: "OMDb", labelKey: "settings.sections.omdb", fields: [
+        { key: "omdb_enabled", label: "Activer le cross-check IMDb", type: "toggle",
+          hint: "Quand la confiance TMDb est basse, OMDb valide ou conteste le match. -25 confidence + warning si désaccord, +20 si convergence." },
+        { key: "omdb_api_key", label: "Clé API OMDb", type: "api-key",
+          testMethod: "integrations/test_omdb_connection", testParams: { api_key: "$value" },
+          hint: "Gratuit 1000 req/jour sur omdbapi.com/apikey.aspx" },
+        { key: "omdb_min_confidence_for_call", label: "Seuil d'appel OMDb (confiance)", type: "number",
+          min: 0, max: 100, hint: "Appeler OMDb seulement si la confiance TMDb est < ce seuil (défaut: 90)" },
+      ]},
     ],
   },
   {

@@ -1413,6 +1413,23 @@ class CineSortApi:
         except RadarrError as exc:
             return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
+    # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
+    def _test_omdb_connection_impl(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+        """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption)."""
+        from cinesort.infra.omdb_client import OmdbClient
+
+        okey = self._unmask_or_stored("omdb_api_key", api_key)
+        if not okey:
+            return _err_response("Cle OMDb requise.", category="validation", level="info", log_module=__name__)
+        # Cache temporaire pour le test : pas de pollution du cache prod
+        cache_path = Path(self._state_dir) / "omdb_cache_test.json"
+        try:
+            client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=max(1.0, min(30.0, float(timeout_s))))
+            result = client.test_connection()
+            return result
+        except (OSError, ValueError, KeyError) as exc:
+            return _err_response(f"Erreur test OMDb: {exc}", category="resource", level="error", log_module=__name__)
+
     def get_naming_presets(self) -> Dict[str, Any]:
         """Retourne la liste des presets de renommage disponibles."""
         from cinesort.domain.naming import PRESETS

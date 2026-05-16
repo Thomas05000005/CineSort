@@ -144,3 +144,12 @@ class IntegrationsFacade(_BaseFacade):
         Cf CineSortApi.request_radarr_upgrade pour la doc complete.
         """
         return self._api._request_radarr_upgrade_impl(radarr_movie_id)
+
+    # ---------- OMDb (1) — Phase 6.2 cross-check IMDb ----------
+
+    def test_omdb_connection(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
+        """Teste la cle OMDb (cross-check IMDb pour identification).
+
+        Cf CineSortApi._test_omdb_connection_impl pour la doc complete.
+        """
+        return self._api._test_omdb_connection_impl(api_key=api_key, timeout_s=timeout_s)

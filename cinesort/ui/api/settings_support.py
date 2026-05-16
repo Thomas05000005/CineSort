@@ -43,6 +43,10 @@ RADARR_KEY_PURPOSE = "radarr_api_key"
 SMTP_PASSWORD_SECRET_FIELD = "email_smtp_password_secret"
 SMTP_PASSWORD_PURPOSE = "email_smtp_password"
 
+# Phase 6.2 : OMDb API key (cross-check IMDb pour identification).
+OMDB_KEY_SECRET_FIELD = "omdb_api_key_secret"
+OMDB_KEY_PURPOSE = "omdb_api_key"
+
 # Audit ID-J-001 : backup auto + rotation 5 sur settings.json (V1-M10).
 # Chaque write_settings cree un .bak.YYYYMMDD-HHMMSS prealable, puis purge
 # au-dela des 5 plus recents. Protection contre erreurs utilisateur (vidage
@@ -334,6 +338,7 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
             data.pop("jellyfin_key_warning", None)
 
         # S4 audit : Plex / Radarr / SMTP password — lecture DPAPI avec fallback legacy
+        # Phase 6.2 : OMDb API key — meme pattern DPAPI
         for legacy_field, secret_field, purpose, protection_key, warning_key in (
             ("plex_token", PLEX_TOKEN_SECRET_FIELD, PLEX_TOKEN_PURPOSE, "plex_token_protection", "plex_token_warning"),
             (
@@ -349,6 +354,13 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
                 SMTP_PASSWORD_PURPOSE,
                 "email_smtp_password_protection",
                 "email_smtp_password_warning",
+            ),
+            (
+                "omdb_api_key",
+                OMDB_KEY_SECRET_FIELD,
+                OMDB_KEY_PURPOSE,
+                "omdb_key_protection",
+                "omdb_key_warning",
             ),
         ):
             value, scheme, warning = _extract_protected_secret(
@@ -544,6 +556,16 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     payload.pop("email_smtp_password_protection", None)
     payload.pop("email_smtp_password_warning", None)
 
+    # Phase 6.2 : OMDb API key (DPAPI)
+    omdb_persisted, omdb_warning = _persist_protected_secret(
+        payload,
+        legacy_field="omdb_api_key",
+        secret_field=OMDB_KEY_SECRET_FIELD,
+        purpose=OMDB_KEY_PURPOSE,
+    )
+    payload.pop("omdb_key_protection", None)
+    payload.pop("omdb_key_warning", None)
+
     # Audit ID-J-001 (V1-M10) : backup auto + rotation avant ecriture.
     target_path = settings_path(state_dir)
     _backup_settings_before_write(target_path)
@@ -562,6 +584,8 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         "radarr_key_warning": radarr_warning,
         "email_smtp_password_persisted": smtp_persisted,
         "email_smtp_password_warning": smtp_warning,
+        "omdb_key_persisted": omdb_persisted,
+        "omdb_key_warning": omdb_warning,
     }
 
 
@@ -706,6 +730,11 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     ("effect_speed", 50),
     ("glow_intensity", 30),
     ("light_intensity", 20),
+    # --- Phase 6.2 : OMDb cross-check ---
+    ("omdb_enabled", False),
+    ("omdb_api_key", ""),
+    # Seuil : appel OMDb seulement si confidence TMDb < ce seuil (default 90)
+    ("omdb_min_confidence_for_call", 90),
 )
 
 
@@ -947,6 +976,8 @@ _SECRET_FIELDS = (
     "plex_token",
     "radarr_api_key",
     "email_smtp_password",
+    # Phase 6.2 : OMDb API key (cross-check IMDb)
+    "omdb_api_key",
 )
 
 

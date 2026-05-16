@@ -418,6 +418,33 @@ def _build_plan_job_fn(
             dlog(
                 f"job_fn plan returned rows={len(rows)} folders_scanned={stats.folders_scanned} planned_rows={stats.planned_rows}"
             )
+
+            # Phase 6.2 : OMDb cross-check post-plan (echec gracieux total).
+            # Lit settings, instancie OmdbClient, parcourt les rows confidence
+            # basse. N'echoue jamais le run en cas de probleme.
+            try:
+                if settings.get("omdb_enabled") and settings.get("omdb_api_key"):
+                    from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
+                    from cinesort.infra.omdb_client import OmdbClient
+
+                    omdb_cache_path = state_dir / "omdb_cache.json"
+                    omdb_client = OmdbClient(
+                        api_key=str(settings.get("omdb_api_key") or ""),
+                        cache_path=omdb_cache_path,
+                        timeout_s=10.0,
+                    )
+                    threshold = int(settings.get("omdb_min_confidence_for_call") or 90)
+                    n_checked = cross_check_rows_with_omdb(
+                        rows,
+                        omdb_client,
+                        min_confidence_for_call=threshold,
+                        log=rs.log,
+                        should_cancel=should_cancel,
+                    )
+                    dlog(f"job_fn omdb cross-check : {n_checked} films verifies")
+            except (OSError, ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
+                # Echec gracieux : on ne casse pas le run pour un probleme OMDb
+                dlog(f"job_fn omdb cross-check skipped: {exc}")
             with rs.lock:
                 rs.rows = rows
                 rs.stats = stats
