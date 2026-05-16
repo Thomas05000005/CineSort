@@ -1472,6 +1472,7 @@ def find_duplicate_targets(
 
 
 apply_rows = _apply_rows_support
-_apply_single = core_apply_support.apply_single
-_apply_collection_item = core_apply_support.apply_collection_item
-_quarantine_row = core_apply_support.quarantine_row
+# Cf #83 etape 2 PR 4a : 3 aliases prives supprimes (0 caller externe,
+# 0 usage interne dans domain/core.py). Aliases supprimes :
+#   _apply_single, _apply_collection_item, _quarantine_row.
+# Appeler directement core_apply_support.X si besoin a l'avenir.
