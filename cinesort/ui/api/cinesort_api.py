@@ -12,19 +12,49 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
-from cinesort.domain.i18n_messages import t
-from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.app import JobRunner
-from cinesort.infra.db import SQLiteStore
-from cinesort.infra.local_secret_store import protection_available as _protection_available
-from cinesort.infra.probe import detect_probe_tools, manage_probe_tools, validate_tool_path
+from cinesort.app import updater as _updater
+from cinesort.app.export_support import export_nfo_for_run
+from cinesort.app.jellyfin_validation import build_sync_report
 from cinesort.app.notify_service import NotifyService
+from cinesort.app.plan_support import plan_row_from_jsonable
+from cinesort.app.radarr_sync import build_radarr_report, get_upgrade_candidates
+from cinesort.app.watcher import FolderWatcher
+from cinesort.domain import i18n_messages as _i18n_messages_mod
+from cinesort.domain.calibration import analyze_feedback_bias, compute_tier_delta, suggest_weight_adjustment
+from cinesort.domain.conversions import to_bool as _to_bool
+from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS, validate_rules
+from cinesort.domain.custom_rules_templates import list_templates
+from cinesort.domain.film_history import _load_plan_rows_from_jsonl
+from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_locale, t
+from cinesort.domain.naming import (
+    PRESETS,
+    PREVIEW_MOCK_CONTEXT,
+    build_naming_context,
+    format_movie_folder,
+    validate_template,
+)
+from cinesort.domain.profile_exchange import (
+    extract_import_metadata,
+    parse_and_validate_import,
+    serialize_profile_export,
+    wrap_profile_for_export,
+)
+from cinesort.domain.quality_score import default_quality_profile
+from cinesort.infra.db import SQLiteStore
+from cinesort.infra.fs_safety import safe_path_exists
+from cinesort.infra.local_secret_store import protection_available as _protection_available
+from cinesort.infra.log_context import is_remote_request
+from cinesort.infra.omdb_client import OmdbClient
+from cinesort.infra.probe import detect_probe_tools, manage_probe_tools, validate_tool_path
+from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api import (
     apply_support,
-    diagnostics_support,
     dashboard_cache_support,
     dashboard_support,
     demo_support,
+    diagnostics_support,
+    export_support,
     film_history_support,
     film_support,
     history_support,
@@ -32,20 +62,33 @@ from cinesort.ui.api import (
     notifications_support,
     perceptual_support,
     probe_support,
-    run_data_support,
     quality_internal_support,
     quality_profile_support,
     quality_report_support,
     quality_support,
+    reset_support,
+    run_data_support,
     run_flow_support,
-    runtime_support,
     run_read_support,
+    runtime_support,
     settings_support,
     tmdb_support,
 )
-from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.facades import (
+    IntegrationsFacade,
+    LibraryFacade,
+    QualityFacade,
+    RunFacade,
+    SettingsFacade,
+)
+from cinesort.ui.api.quality_simulator_support import (
+    clear_cache as _sim_clear,
+    run_simulation,
+    save_custom_preset,
+)
 from cinesort.ui.api.settings_support import (
+    _SECRET_MASK,
     build_cfg_from_run_row as _build_cfg_from_run_row,
     build_cfg_from_settings as _build_cfg_from_settings_payload,
     normalize_user_path as _normalize_user_path,
@@ -237,15 +280,6 @@ class CineSortApi:
         # Strategie Strangler Fig - les anciennes methodes directes coexistent
         # avec les facades pendant la migration (backward-compat 100%).
         # Cf docs/internal/REFACTOR_PLAN_84.md.
-        # Import tardif pour eviter cycle (facades importent CineSortApi en TYPE_CHECKING).
-        from cinesort.ui.api.facades import (
-            IntegrationsFacade,
-            LibraryFacade,
-            QualityFacade,
-            RunFacade,
-            SettingsFacade,
-        )
-
         self.run = RunFacade(self)
         self.settings = SettingsFacade(self)
         self.quality = QualityFacade(self)
@@ -731,9 +765,7 @@ class CineSortApi:
         if locale is None or (isinstance(locale, str) and not locale.strip()):
             return
         try:
-            from cinesort.domain import i18n_messages
-
-            i18n_messages.set_locale(str(locale))
+            _i18n_messages_mod.set_locale(str(locale))
         except (ImportError, AttributeError) as exc:
             logger.debug("i18n: backend locale sync skipped: %s", exc)
 
@@ -749,24 +781,17 @@ class CineSortApi:
             { "ok": True, "locale": "fr" } en cas de succes
             { "ok": False, "message": "...", "locale": <current> } sinon
         """
-        from cinesort.domain.i18n_messages import (
-            SUPPORTED_LOCALES as _I18N_SUPPORTED,
-            get_locale as _i18n_get_locale,
-            set_locale as _i18n_set_locale,
-            t as _i18n_t,
-        )
-
         normalized = str(locale or "").strip().lower()
-        if normalized not in _I18N_SUPPORTED:
+        if normalized not in SUPPORTED_LOCALES:
             return _err_response(
-                _i18n_t("errors.invalid_locale", locale=locale),
+                t("errors.invalid_locale", locale=locale),
                 category="validation",
                 level="info",
                 log_module=__name__,
-                locale=_i18n_get_locale(),
+                locale=get_locale(),
             )
         # 1) Activation immediate cote backend
-        _i18n_set_locale(normalized)
+        set_locale(normalized)
         # 2) Persistance dans settings.json (passe par save_settings_payload pour
         #    deduper toute la logique de validation/normalisation/backup).
         try:
@@ -804,8 +829,6 @@ class CineSortApi:
 
     def _sync_watcher(self, settings: Dict[str, Any]) -> None:
         """Demarre ou arrete le watcher selon les settings."""
-        from cinesort.app.watcher import FolderWatcher
-
         want = bool(settings.get("watch_enabled"))
         if want and (self._watcher is None or not self._watcher.is_alive()):
             # Demarrer
@@ -886,8 +909,6 @@ class CineSortApi:
         resultat dans le cache local pour les appels ``get_update_info``
         suivants. Retourne un dict toujours non vide avec le statut courant.
         """
-        from cinesort.app import updater as _updater
-
         settings = self._get_settings_impl()
         repo = str(settings.get("update_github_repo") or "").strip()
         if not repo:
@@ -913,8 +934,6 @@ class CineSortApi:
         Sert l'info instantanement apres le check au boot. Si le cache est
         absent ou expire, ``data.update_available`` vaut False.
         """
-        from cinesort.app import updater as _updater
-
         cache_path = _updater.default_cache_path(self._state_dir)
         info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
@@ -1040,7 +1059,6 @@ class CineSortApi:
         Avant ce fix : test echouait avec 401 car la cle envoyee etait le masque.
         Apres : test utilise la vraie cle stockee dans settings.json (DPAPI).
         """
-        from cinesort.ui.api.settings_support import _SECRET_MASK
 
         if str(value or "").strip() == _SECRET_MASK:
             data = _read_settings(self._state_dir)
@@ -1134,8 +1152,6 @@ class CineSortApi:
         # Charger les PlanRows du dernier run
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
-        from cinesort.domain.film_history import _load_plan_rows_from_jsonl
-        from cinesort.app.plan_support import plan_row_from_jsonable
 
         runs = store.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
@@ -1170,8 +1186,6 @@ class CineSortApi:
                 f"Connexion Jellyfin echouee : {exc}", category="resource", level="error", log_module=__name__
             )
 
-        from cinesort.app.jellyfin_validation import build_sync_report
-
         report = build_sync_report(local_rows, jellyfin_movies)
         return {"ok": True, "run_id": target_run_id, **report}
 
@@ -1202,8 +1216,6 @@ class CineSortApi:
         # Charger les PlanRows du dernier run
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
-        from cinesort.domain.film_history import _load_plan_rows_from_jsonl
-        from cinesort.app.plan_support import plan_row_from_jsonable
 
         runs = store.get_runs_summary(limit=5)
         target_run_id = ""
@@ -1268,8 +1280,6 @@ class CineSortApi:
 
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
-        from cinesort.domain.film_history import _load_plan_rows_from_jsonl
-        from cinesort.app.plan_support import plan_row_from_jsonable
 
         runs = store.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
@@ -1298,8 +1308,6 @@ class CineSortApi:
             return _err_response(
                 f"Connexion Plex echouee : {exc}", category="resource", level="error", log_module=__name__
             )
-
-        from cinesort.app.jellyfin_validation import build_sync_report
 
         report = build_sync_report(local_rows, plex_movies)
         return {"ok": True, "run_id": target_run_id, **report}
@@ -1348,8 +1356,6 @@ class CineSortApi:
 
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
-        from cinesort.domain.film_history import _load_plan_rows_from_jsonl
-        from cinesort.app.plan_support import plan_row_from_jsonable
 
         runs = store.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
@@ -1387,8 +1393,6 @@ class CineSortApi:
                 if qr:
                     qr_map[rid] = qr
 
-        from cinesort.app.radarr_sync import build_radarr_report, get_upgrade_candidates
-
         report = build_radarr_report(local_rows, radarr_movies, qr_map, profiles)
         candidates = get_upgrade_candidates(report, qr_map)
         return {"ok": True, "run_id": target_run_id, **report, "upgrade_candidates": candidates}
@@ -1416,7 +1420,6 @@ class CineSortApi:
     # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
     def _test_omdb_connection_impl(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
         """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption)."""
-        from cinesort.infra.omdb_client import OmdbClient
 
         okey = self._unmask_or_stored("omdb_api_key", api_key)
         if not okey:
@@ -1432,7 +1435,6 @@ class CineSortApi:
 
     def get_naming_presets(self) -> Dict[str, Any]:
         """Retourne la liste des presets de renommage disponibles."""
-        from cinesort.domain.naming import PRESETS
 
         presets = []
         for _pid, p in PRESETS.items():
@@ -1448,12 +1450,6 @@ class CineSortApi:
 
     def preview_naming_template(self, template: str = "", sample_row_id: str = "") -> Dict[str, Any]:
         """Preview du resultat d'un template de renommage sur un film exemple."""
-        from cinesort.domain.naming import (
-            PREVIEW_MOCK_CONTEXT,
-            build_naming_context,
-            format_movie_folder,
-            validate_template,
-        )
 
         tpl = str(template or "{title} ({year})").strip()
         ok, errors = validate_template(tpl)
@@ -1519,7 +1515,6 @@ class CineSortApi:
         p = Path(raw)
 
         # M-7 : verifier accessibilite avec timeout (NAS debranche)
-        from cinesort.infra.fs_safety import safe_path_exists
 
         exists = safe_path_exists(p, timeout_s=5.0)
         if exists is None:
@@ -1620,7 +1615,6 @@ class CineSortApi:
 
     def _apply_quality_preset_impl(self, preset_id: str) -> Dict[str, Any]:
         """Applique un preset du catalogue comme profil de scoring actif."""
-        from cinesort.ui.api.quality_simulator_support import clear_cache as _sim_clear
 
         _sim_clear()
         return quality_profile_support.apply_quality_preset(self, preset_id)
@@ -1633,25 +1627,21 @@ class CineSortApi:
         scope: str = "run",
     ) -> Dict[str, Any]:
         """Simule l'application d'un preset qualite sans persister (G5)."""
-        from cinesort.ui.api.quality_simulator_support import run_simulation
 
         return run_simulation(self, run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope)
 
     def _save_custom_quality_preset_impl(self, name: str, profile_json: Dict[str, Any]) -> Dict[str, Any]:
         """Persiste un profil qualite custom et l'active (G5)."""
-        from cinesort.ui.api.quality_simulator_support import save_custom_preset
 
         return save_custom_preset(self, name, profile_json)
 
     def _get_custom_rules_templates_impl(self) -> Dict[str, Any]:
         """Retourne les 3 templates starter de regles custom (G6)."""
-        from cinesort.domain.custom_rules_templates import list_templates
 
         return {"ok": True, "templates": list_templates()}
 
     def _get_custom_rules_catalog_impl(self) -> Dict[str, Any]:
         """Retourne les fields, operators et actions disponibles pour le builder UI (G6)."""
-        from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS
 
         return {
             "ok": True,
@@ -1662,7 +1652,6 @@ class CineSortApi:
 
     def _validate_custom_rules_impl(self, rules: Any) -> Dict[str, Any]:
         """Valide une liste de regles custom sans persister (G6)."""
-        from cinesort.domain.custom_rules import validate_rules
 
         ok, errs, norm = validate_rules(rules or [])
         return {"ok": ok, "errors": errs, "normalized": norm}
@@ -1688,9 +1677,7 @@ class CineSortApi:
                 self._runs.clear()
             # Abaisser le seuil de taille video si demande (fichiers factices E2E)
             if min_video_bytes > 0:
-                import cinesort.domain.core as _core
-
-                _core.MIN_VIDEO_BYTES = int(min_video_bytes)
+                core.MIN_VIDEO_BYTES = int(min_video_bytes)
             return {"ok": True, "message": "Reset E2E effectue."}
         except (OSError, KeyError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
@@ -1885,7 +1872,6 @@ class CineSortApi:
         Cf issue #95. Format documente dans docs/EXPORT_FORMAT.md.
         Le caller frontend serialise la reponse en JSON et offre le download.
         """
-        from cinesort.ui.api import export_support
 
         return export_support.export_full_library(self)
 
@@ -1900,8 +1886,6 @@ class CineSortApi:
         rows = report.get("rows") or []
         if not rows:
             return _err_response("Aucune ligne dans le run.", category="state", level="info", log_module=__name__)
-
-        from cinesort.app.export_support import export_nfo_for_run
 
         return export_nfo_for_run(rows, overwrite=bool(overwrite), dry_run=bool(dry_run))
 
@@ -2035,11 +2019,6 @@ class CineSortApi:
         Distinct de `export_quality_profile` (historique) qui renvoie le JSON
         brut du profil sans wrap.
         """
-        from cinesort.domain.profile_exchange import (
-            serialize_profile_export,
-            wrap_profile_for_export,
-        )
-        from cinesort.domain.quality_score import default_quality_profile
 
         try:
             store, _runner = self._get_or_create_infra(self._state_dir)
@@ -2084,10 +2063,6 @@ class CineSortApi:
         Distinct de `import_quality_profile` (historique) qui accepte un profil
         brut sans wrapping schema.
         """
-        from cinesort.domain.profile_exchange import (
-            extract_import_metadata,
-            parse_and_validate_import,
-        )
 
         ok, profile, msg = parse_and_validate_import(content or "")
         meta = extract_import_metadata(content or "")
@@ -2153,7 +2128,6 @@ class CineSortApi:
         category_focus : 'video'|'audio'|'extras' si l'utilisateur pointe une catégorie.
         comment : texte libre optionnel.
         """
-        from cinesort.domain.calibration import compute_tier_delta
 
         if not self._is_valid_run_id(run_id):
             return _err_response("run_id invalide.", category="validation", level="info", log_module=__name__)
@@ -2229,8 +2203,6 @@ class CineSortApi:
         Retourne le rapport de biais + la suggestion de poids (ou None si
         pas de biais significatif).
         """
-        from cinesort.domain.calibration import analyze_feedback_bias, suggest_weight_adjustment
-        from cinesort.domain.quality_score import default_quality_profile
 
         try:
             store, _runner = self._get_or_create_infra(self._state_dir)
@@ -2308,13 +2280,11 @@ class CineSortApi:
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
-        from cinesort.ui.api import reset_support
 
         return reset_support.reset_all_user_data(self, confirmation)
 
     def _get_user_data_size_impl(self) -> Dict[str, Any]:
         """V3-09 — Taille actuelle du user-data (pour affichage UI Danger Zone)."""
-        from cinesort.ui.api import reset_support
 
         return {"data": reset_support.get_user_data_size(self)}
 
@@ -2348,7 +2318,6 @@ class CineSortApi:
         fenetres Explorer en chaine sur le PC server). Operation autorisee
         uniquement depuis le caller local (desktop natif ou 127.0.0.1).
         """
-        from cinesort.infra.log_context import is_remote_request
 
         if is_remote_request():
             return _err_response(
