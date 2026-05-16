@@ -136,9 +136,12 @@ class V7FoundationsTests(unittest.TestCase):
         self.store.initialize()
         run_id = "20260218_120000_124"
 
+        # Cf #85 phase B6 : code metier dans RunRepository, le wrapper SQLiteStore
+        # delegue a self.run.insert_run_pending qui appelle self._insert_pending_run_row
+        # sur le repo. On mock store.run._insert_pending_run_row (pas store.X).
         with (
             mock.patch.object(
-                self.store,
+                self.store.run,
                 "_insert_pending_run_row",
                 side_effect=[sqlite3.OperationalError("no such table: runs"), None],
             ) as mocked_insert,
