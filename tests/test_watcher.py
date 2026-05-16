@@ -151,6 +151,59 @@ class WatcherLifecycleTests(unittest.TestCase):
         watcher = FolderWatcher(api, interval_s=10, roots=[])
         self.assertTrue(watcher._is_scan_running())
 
+    def test_change_kept_when_scan_running(self) -> None:
+        """Audit 2026-05-16 : un changement detecte pendant un scan en cours
+        NE DOIT PAS etre perdu.
+
+        Avant le fix, `_previous_snapshot` etait remplace avant le check
+        `_is_scan_running()`. Si scan en cours, on continuait sans declencher
+        de scan ET le snapshot etait deja remplace : le changement initial
+        n'avait JAMAIS de scan auto associe.
+
+        On verifie que apres un poll skip "scan running", le snapshot baseline
+        contient toujours l'ancien etat (pour permettre le re-trigger au
+        prochain poll quand le scan en cours sera termine).
+        """
+        tmp = tempfile.mkdtemp(prefix="cinesort_watch_keep_")
+        try:
+            root = Path(tmp)
+            (root / "Film A").mkdir()
+
+            api = mock.MagicMock()
+            # Simuler un scan en cours
+            running_rs = mock.MagicMock()
+            running_rs.running = True
+            running_rs.done = False
+            api._runs = {"run1": running_rs}
+            api._runs_lock = __import__("threading").Lock()
+            api.settings.get_settings.return_value = {"roots": [str(root)]}
+
+            watcher = FolderWatcher(api, interval_s=0.1, roots=[root])
+            watcher.start()
+            time.sleep(0.3)  # snapshot initial
+
+            initial_snapshot = dict(watcher._previous_snapshot)
+
+            # Ajouter un nouveau dossier — changement detecte au prochain poll
+            (root / "Film B").mkdir()
+            time.sleep(0.3)  # laisser le poll suivant detecter + skip
+
+            # Le snapshot baseline ne doit PAS contenir "Film B" :
+            # le poll a detecte le changement mais l'a saute (scan running),
+            # donc le snapshot reste a l'etat pre-changement pour pouvoir
+            # re-declencher au prochain poll une fois le scan termine.
+            watcher.stop()
+
+            self.assertEqual(
+                initial_snapshot,
+                watcher._previous_snapshot,
+                "Le snapshot baseline ne doit pas etre remplace tant que le scan n'a pas ete declenche",
+            )
+            # Aucun scan auto declenche (scan deja en cours)
+            api.run.start_plan.assert_not_called()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 # ---------------------------------------------------------------------------
 # Settings (2 tests)
