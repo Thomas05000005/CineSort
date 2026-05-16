@@ -2042,14 +2042,13 @@ def plan_multi_roots(
 
 
 # ---------------------------------------------------------------------------
-# Cf #83 etape 2 PR 3 : point d'entree publique de find_duplicate_targets
-# desormais cote app (orchestration). Le wrapper delegue a la fonction
-# historique dans cinesort.domain.core qui pre-remplit les 7 helpers DI.
+# Cf #83 etape 2 PR 4b : find_duplicate_targets COTE APP avec DI complete.
 #
-# Cette indirection permet aux callers (apply_support, run_flow_support, tests)
-# d'utiliser app.plan_support comme module canonique sans passer par
-# domain.core. PR future pourra bouger la VRAIE logique cote app et supprimer
-# le wrapper domain.core sans avoir a re-migrer les callers.
+# Phase precedente (PR 3) : ce wrapper deleguait a domain.core. Phase
+# actuelle : le wrapper pre-remplit lui-meme les 7 helpers DI vers
+# `cinesort.domain.duplicate_support`, ce qui permet de supprimer la
+# fonction de domain/core.py (et avec elle, 6 helpers prives DI qui
+# n'avaient pas d'autre usage). Aucun cycle : app->domain est legitime.
 # ---------------------------------------------------------------------------
 
 
@@ -2060,15 +2059,82 @@ def find_duplicate_targets(
     *,
     max_groups: int = 120,
 ) -> Dict[str, object]:
-    """Detecte les groupes de doublons sur les destinations planifiees (#83 PR 3).
+    """Detecte les groupes de doublons sur les destinations planifiees (#83 PR 4b).
 
-    Point d'entree publique cote app. Delegue a `cinesort.domain.core.
-    find_duplicate_targets` qui pre-remplit les 7 helpers DI vers
-    `cinesort.domain.duplicate_support`.
+    Pre-remplit les 7 helpers DI vers `domain.duplicate_support.find_duplicate_targets`.
+    Tous les helpers viennent de :
+    - `cinesort.app.apply_core` (is_managed_merge_file, files_identical_quick)
+    - `cinesort.domain.duplicate_support` (movie_dir_title_year, movie_key,
+      existing_movie_folder_index, planned_target_folder, is_under_collection_root,
+      can_merge_single/collection_item_without_blocking, find_video_case_insensitive)
+    - `cinesort.domain.core` (windows_safe, _norm_win_path, classify_sidecars
+      pour le sub-helper)
+    - `cinesort.domain.title_helpers` (_norm_for_tokens)
     """
-    # Import lazy : domain.core fait deja le top-level import de apply_core
-    # (le cycle qu'on essaie de casser justement), donc on attend l'appel
-    # runtime pour eviter de l'aggraver au boot.
-    from cinesort.domain.core import find_duplicate_targets as _core_impl
+    # Imports lazy pour eviter d'aggraver le cycle au boot tant que les imports
+    # top-level de domain.core ne sont pas tous casses.
+    from cinesort.app import apply_core as _apply_core
+    from cinesort.domain import duplicate_support as _dup
+    from cinesort.domain.core import _norm_win_path, classify_sidecars, windows_safe
+    from cinesort.domain.title_helpers import _norm_for_tokens
 
-    return _core_impl(cfg, rows, decisions, max_groups=max_groups)
+    def _movie_key(title: str, year: int, edition: Optional[str] = None) -> str:
+        return _dup.movie_key(title, year, norm_for_tokens=_norm_for_tokens, edition=edition)
+
+    def _existing_movie_folder_index(cfg_: Any) -> Dict[str, List[str]]:
+        return _dup.existing_movie_folder_index(
+            cfg_,
+            movie_dir_title_year=_dup.movie_dir_title_year,
+            movie_key=_movie_key,
+        )
+
+    def _is_under_collection_root(cfg_: Any, folder: Path) -> bool:
+        return _dup.is_under_collection_root(cfg_, folder, norm_win_path=_norm_win_path)
+
+    def _planned_target_folder(cfg_: Any, row: Any, title: str, year: int) -> Path:
+        return _dup.planned_target_folder(
+            cfg_,
+            row,
+            title,
+            year,
+            is_under_collection_root=_is_under_collection_root,
+            windows_safe=windows_safe,
+        )
+
+    def _can_merge_single(cfg_: Any, src_dir: Path, dst_dir: Path) -> Tuple[bool, str]:
+        return _dup.can_merge_single_without_blocking(
+            cfg_,
+            src_dir,
+            dst_dir,
+            is_managed_merge_file=_apply_core.is_managed_merge_file,
+            files_identical_quick=_apply_core.files_identical_quick,
+        )
+
+    def _can_merge_collection_item(cfg_: Any, row: Any, target_dir: Path) -> Tuple[bool, str]:
+        # Note : la signature reelle dans domain.duplicate_support attend
+        # find_video_case_insensitive + classify_sidecars (PAS is_managed_merge_file
+        # comme on aurait pu croire — c'est specifique aux items de collection).
+        return _dup.can_merge_collection_item_without_blocking(
+            cfg_,
+            row,
+            target_dir,
+            find_video_case_insensitive=_dup.find_video_case_insensitive,
+            classify_sidecars=lambda cfg_arg, folder_arg, video_arg: classify_sidecars(
+                cfg_arg, folder_arg, video_arg, is_collection=True
+            ),
+            files_identical_quick=_apply_core.files_identical_quick,
+        )
+
+    return _dup.find_duplicate_targets(
+        cfg.normalized() if hasattr(cfg, "normalized") else cfg,
+        rows,
+        decisions,
+        max_groups=max_groups,
+        existing_movie_folder_index=_existing_movie_folder_index,
+        movie_key=_movie_key,
+        planned_target_folder=_planned_target_folder,
+        norm_win_path=_norm_win_path,
+        can_merge_single_without_blocking=_can_merge_single,
+        can_merge_collection_item_without_blocking=_can_merge_collection_item,
+        windows_safe=windows_safe,
+    )

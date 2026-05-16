@@ -62,7 +62,6 @@ from cinesort.app.cleanup import (
     _move_residual_top_level_dirs,
     preview_cleanup_residual_folders,
 )
-from cinesort.domain.duplicate_support import find_duplicate_targets as _find_duplicate_targets_support
 import cinesort.app.plan_support as core_plan_support
 
 if TYPE_CHECKING:
@@ -1381,15 +1380,8 @@ def is_under_collection_root(cfg: Config, folder: Path) -> bool:
     )
 
 
-def _movie_dir_title_year(name: str) -> Optional[Tuple[str, int]]:
-    return core_duplicate_support.movie_dir_title_year(name)
-
-
-def _movie_key(title: str, year: int, edition: Optional[str] = None) -> str:
-    return core_duplicate_support.movie_key(title, year, norm_for_tokens=_norm_for_tokens, edition=edition)
-
-
 def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_template: str = "") -> bool:
+    """Wrapper conserve : 5 callers externes (plan_support, cleanup, tests)."""
     return core_duplicate_support.single_folder_is_conform(
         folder_name,
         title,
@@ -1401,74 +1393,21 @@ def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_te
     )
 
 
-def _planned_target_folder(cfg: Config, row: PlanRow, title: str, year: int) -> Path:
-    return core_duplicate_support.planned_target_folder(
-        cfg,
-        row,
-        title,
-        year,
-        is_under_collection_root=is_under_collection_root,
-        windows_safe=windows_safe,
-    )
-
-
-def _existing_movie_folder_index(cfg: Config) -> Dict[str, List[str]]:
-    return core_duplicate_support.existing_movie_folder_index(
-        cfg,
-        movie_dir_title_year=_movie_dir_title_year,
-        movie_key=_movie_key,
-    )
-
-
 _find_video_case_insensitive = core_duplicate_support.find_video_case_insensitive
 
 
-def _can_merge_single_without_blocking(cfg: Config, src_dir: Path, dst_dir: Path) -> Tuple[bool, str]:
-    return core_duplicate_support.can_merge_single_without_blocking(
-        cfg,
-        src_dir,
-        dst_dir,
-        is_managed_merge_file=core_apply_support.is_managed_merge_file,
-        files_identical_quick=core_apply_support.files_identical_quick,
-    )
-
-
-def _can_merge_collection_item_without_blocking(cfg: Config, row: PlanRow, target_dir: Path) -> Tuple[bool, str]:
-    return core_duplicate_support.can_merge_collection_item_without_blocking(
-        cfg,
-        row,
-        target_dir,
-        find_video_case_insensitive=core_duplicate_support.find_video_case_insensitive,
-        classify_sidecars=lambda cfg_arg, folder_arg, video_arg: classify_sidecars(
-            cfg_arg,
-            folder_arg,
-            video_arg,
-            is_collection=True,
-        ),
-        files_identical_quick=core_apply_support.files_identical_quick,
-    )
-
-
-def find_duplicate_targets(
-    cfg: Config,
-    rows: List[PlanRow],
-    decisions: Dict[str, Dict[str, object]],
-    *,
-    max_groups: int = 120,
-) -> Dict[str, object]:
-    return _find_duplicate_targets_support(
-        cfg.normalized(),
-        rows,
-        decisions,
-        max_groups=max_groups,
-        existing_movie_folder_index=_existing_movie_folder_index,
-        movie_key=_movie_key,
-        planned_target_folder=_planned_target_folder,
-        norm_win_path=_norm_win_path,
-        can_merge_single_without_blocking=_can_merge_single_without_blocking,
-        can_merge_collection_item_without_blocking=_can_merge_collection_item_without_blocking,
-        windows_safe=windows_safe,
-    )
+# Cf #83 etape 2 PR 4b : `find_duplicate_targets` et ses 6 helpers DI prives
+# (`_movie_dir_title_year`, `_movie_key`, `_planned_target_folder`,
+# `_existing_movie_folder_index`, `_can_merge_single_without_blocking`,
+# `_can_merge_collection_item_without_blocking`) supprimes. La vraie logique
+# est desormais cote `cinesort.app.plan_support.find_duplicate_targets`
+# (orchestration, droit d'utiliser apply_core directement).
+#
+# Backward-compat : pour eviter de migrer en force les 4 sites tests qui
+# mockent ou appellent encore `core.find_duplicate_targets`, on re-expose
+# ici en re-export simple. Ce re-export disparaitra dans une PR finale
+# quand on cassera les 4 imports top-level vers app/.
+from cinesort.app.plan_support import find_duplicate_targets  # noqa: E402, F401
 
 
 apply_rows = _apply_rows_support
