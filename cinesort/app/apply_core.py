@@ -5,12 +5,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
 
+import cinesort.domain.core as core_mod
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
     preview_cleanup_residual_folders,
 )
 from cinesort.app.move_journal import atomic_move
+from cinesort.domain.naming import build_naming_context, format_movie_folder, format_tv_series_folder
 
 _logger = logging.getLogger(__name__)
 
@@ -32,8 +34,6 @@ def build_apply_context(
     Crée à la volée les sous-dossiers `_review/_conflicts`, `_conflicts_sidecars`,
     `_duplicates_identical` et `_leftovers` (sauf en dry_run).
     """
-    import cinesort.domain.core as core_mod
-
     cfg = cfg.normalized()
     res = core_mod.ApplyResult()
     res.total_rows = len(rows)
@@ -118,8 +118,6 @@ def is_managed_merge_file(cfg: "Config", path: Path) -> bool:
 
 def is_sidecar_metadata(cfg: "Config", path: Path) -> bool:
     """Indique si `path` est un sidecar de métadonnées (nfo/srt/jpg/...) plutôt qu'une vidéo."""
-    import cinesort.domain.core as core_mod
-
     ext = path.suffix.lower()
     if ext in cfg.video_exts or ext in core_mod.VIDEO_EXTS_ALL:
         return False
@@ -134,8 +132,6 @@ def find_main_video_in_folder(folder: Path, cfg: "Config") -> Optional[Path]:
     Utilise pour identifier le film principal a hasher lors d'un MOVE_DIR —
     les sidecars (nfo, srt, images) sont ignores. Retourne None si aucun video.
     """
-    import cinesort.domain.core as core_mod
-
     if not folder.is_dir():
         return None
     # Phase 6 v7.8.0 : utilise constante unifiee VIDEO_EXTS_ALL
@@ -359,8 +355,6 @@ def migrate_legacy_collection_root(
     No-op si désactivé, si l'ancien dossier n'existe pas ou si les noms coïncident.
     En cas de cible existante, fusionne via `merge_dir_safe` plutôt que d'écraser.
     """
-    import cinesort.domain.core as core_mod
-
     if not cfg.enable_collection_folder:
         return
     target_root = cfg.root / cfg.collection_root_name
@@ -427,8 +421,6 @@ def move_to_review_bucket(
     Calcule le chemin destination en préservant la hiérarchie relative à `src_anchor`,
     applique le suffixe `_2` ou `__DUP1` si collision, journalise et retourne le path final.
     """
-    import cinesort.domain.core as core_mod
-
     if rel_override is not None:
         rel = rel_override
     else:
@@ -461,8 +453,6 @@ def move_to_review_bucket(
 
 def safe_relative_context(cfg: "Config", path: Path) -> Path:
     """Construit un chemin relatif sûr (Windows-safe) à partir de la racine config."""
-    import cinesort.domain.core as core_mod
-
     try:
         rel = path.relative_to(cfg.root)
     except (ValueError, TypeError):
@@ -499,8 +489,6 @@ def move_file_with_collision_policy(
     `sidecar_conflict`. Calcule sha1+size avant le move pour les vidéos (P1.2/P1.3),
     journalise l'opération même en dry_run pour la preview UI.
     """
-    import cinesort.domain.core as core_mod
-
     core_mod.ensure_inside_root(cfg, dst_file)
     if dst_file.exists():
         ctx = conflict_context(cfg, src_anchor, dst_file)
@@ -655,8 +643,6 @@ def merge_dir_safe(
     fichiers non gérés (non-vidéo/non-sidecar) dans `_review/_leftovers` et tente
     de purger l'arborescence source vidée.
     """
-    import cinesort.domain.core as core_mod
-
     if not src_dir.exists():
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
         log("WARN", f"MERGE source missing, skip: {src_dir}")
@@ -749,8 +735,6 @@ def move_collection_folder(
     Collection ou si la cible existe déjà. Renvoie le nouveau chemin (ou le
     même si pas déplacé).
     """
-    import cinesort.domain.core as core_mod
-
     if not cfg.enable_collection_folder:
         return folder
     if core_mod.is_under_collection_root(cfg, folder):
@@ -793,8 +777,6 @@ def apply_rows(
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> "ApplyResult":
     """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup."""
-    import cinesort.domain.core as core_mod
-
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
         cfg,
@@ -1084,14 +1066,10 @@ def apply_single(
     que d'écraser. Si TMDb renvoie une collection (saga) et `enable_collection_folder`,
     place sous `<root>/<collection_root_name>/<saga>/`.
     """
-    import cinesort.domain.core as core_mod
-
     if not folder.exists():
         log("WARN", f"Single folder missing, skip: {folder}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
-    from cinesort.domain.naming import format_movie_folder, build_naming_context
-
     _naming_ctx = build_naming_context(title=title, year=year, edition=edition or "")
     new_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
 
@@ -1219,8 +1197,6 @@ def apply_collection_item(
     appliquant la politique de collision. Le set `dedup_seen_ops` évite de
     refaire le même move au sein d'un batch.
     """
-    import cinesort.domain.core as core_mod
-
     if not folder.exists():
         log("WARN", f"Collection folder missing, skip: {folder}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
@@ -1242,8 +1218,6 @@ def apply_collection_item(
         log("WARN", f"Video missing, skip: {folder}/{video_name}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED if merged_video else core_mod.SKIP_REASON_AUTRE)
         return
-
-    from cinesort.domain.naming import format_movie_folder, build_naming_context
 
     _naming_ctx = build_naming_context(title=title, year=year, edition=edition or "")
     sub_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
@@ -1320,8 +1294,6 @@ def apply_tv_episode(
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     """Rename/move a TV episode into Série (année)/Saison NN/S01E01 - Titre.ext structure."""
-    import cinesort.domain.core as core_mod
-
     video = folder / row.video
     if not video.exists():
         try:
@@ -1340,8 +1312,6 @@ def apply_tv_episode(
     ep_title = str(row.tv_episode_title or "").strip()
 
     # Build target path: root / Série (année) / Saison NN / S01E01 - Titre.ext
-    from cinesort.domain.naming import format_tv_series_folder, build_naming_context
-
     _naming_ctx = build_naming_context(
         title=str(row.proposed_title or ""),
         year=year,
@@ -1414,8 +1384,6 @@ def quarantine_row(
     déplace la vidéo + ses sidecars dans un sous-dossier dédié. No-op si la
     cible existe déjà ou si la source a disparu.
     """
-    import cinesort.domain.core as core_mod
-
     if not folder.exists():
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
