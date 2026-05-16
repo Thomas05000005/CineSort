@@ -12,3 +12,7 @@ pytest>=9.0.3,<10
 # Cf issue #87 : property-based testing pour les modules domain purs
 # (naming, conversions, fuzzy_matching, etc.). MIT, pure Python, ~2 MB.
 hypothesis>=6.0,<7
+# Cf issue #83 phase A8 : valide les contracts d'architecture en couches
+# (domain ne doit pas importer app/infra/ui). Configuration dans .importlinter.
+# Lance en CI via `python -m importlinter`.
+import-linter>=2.0,<3

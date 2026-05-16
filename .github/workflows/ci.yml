@@ -45,7 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
-          python -m pip install pytest pytest-playwright
+          python -m pip install pytest pytest-playwright import-linter
 
       # 5. Verification du lint (regles E9, F — bloquant)
       - name: Lint (ruff check)
@@ -56,6 +56,14 @@ jobs:
       - name: Format check (ruff format)
         shell: pwsh
         run: python -m ruff format --check .
+
+      # 6b. Issue #83 phase A8 : verifier les contracts d'architecture en couches
+      # (domain ne doit pas importer app/infra/ui, etc.) via import-linter.
+      # Configuration : .importlinter a la racine. Si une regression rajoute un
+      # import inter-couches interdit, ce check echoue.
+      - name: Architecture contracts (import-linter)
+        shell: pwsh
+        run: lint-imports
 
       # 7. Execution des tests avec mesure de couverture (unitaires
       # uniquement — les E2E dashboard/desktop necessitent des navigateurs
