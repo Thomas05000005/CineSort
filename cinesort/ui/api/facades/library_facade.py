@@ -123,7 +123,7 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._export_full_library_impl()
 
-    # ---------- Dashboard podiums (1) ----------
+    # ---------- Dashboard podiums + timeline (2) ----------
 
     def get_library_podiums(self, run_id: Optional[str] = None, limit: int = 10) -> Dict[str, Any]:
         """Top N release groups + codecs + sources pour le run cible.
@@ -133,3 +133,12 @@ class LibraryFacade(_BaseFacade):
         from cinesort.ui.api import library_podiums_support
 
         return library_podiums_support.get_library_podiums(self._api, run_id=run_id, limit=limit)
+
+    def get_library_timeline(self, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """Films ajoutes par mois (timeline N mois) via Jellyfin DateCreated + fallback mtime.
+
+        Cf cinesort.ui.api.library_timeline_support.get_library_timeline.
+        """
+        from cinesort.ui.api import library_timeline_support
+
+        return library_timeline_support.get_library_timeline(self._api, months=months, run_id=run_id)

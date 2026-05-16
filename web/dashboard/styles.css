@@ -770,6 +770,29 @@ body.is-background .login-wrap { animation-play-state: paused; }
   flex-shrink: 0;
 }
 
+/* Timeline films ajoutes par mois (histogramme bar chart) */
+.timeline-bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(36px, 1fr);
+  gap: var(--sp-2);
+  height: 160px;
+  align-items: end;
+  margin-top: var(--sp-3);
+  padding: 0 var(--sp-2);
+}
+.timeline-bar-col { display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 0; }
+.timeline-bar-value { height: 16px; font-size: var(--fs-xs); color: var(--text-muted); font-weight: var(--fw-semi); text-align: center; }
+.timeline-bar-track { flex: 1; width: 100%; display: flex; align-items: flex-end; min-height: 0; }
+.timeline-bar-fill {
+  width: 100%;
+  background: linear-gradient(to top, var(--accent), var(--accent-soft));
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: height var(--dur-mid) var(--ease);
+  min-height: 1px;
+}
+.timeline-bar-label { height: 18px; font-size: var(--fs-xs); color: var(--text-muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; margin-top: var(--sp-1); }
+
 /* Suggestions bibliothecaire */
 .suggestions-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 .suggestion-card {

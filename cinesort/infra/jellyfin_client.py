@@ -291,7 +291,8 @@ class JellyfinClient:
             params: dict = {
                 "IncludeItemTypes": "Movie",
                 "Recursive": "true",
-                "Fields": "Path,MediaSources,ProviderIds",
+                # DateCreated ajoute pour la timeline "films ajoutes par mois"
+                "Fields": "Path,MediaSources,ProviderIds,DateCreated",
                 "StartIndex": str(start_index),
                 "Limit": str(page_size),
                 "SortBy": "SortName",
@@ -336,6 +337,9 @@ class JellyfinClient:
                         "played": user_data.get("Played", False),
                         "play_count": user_data.get("PlayCount", 0),
                         "last_played_date": user_data.get("LastPlayedDate", ""),
+                        # Date d'ajout a la biblio Jellyfin (ISO 8601)
+                        # Format typique : "2024-03-15T18:30:00.0000000Z"
+                        "date_created": item.get("DateCreated", ""),
                     }
                 )
 
