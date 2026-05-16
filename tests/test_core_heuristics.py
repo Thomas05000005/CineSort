@@ -316,7 +316,8 @@ class CoreHeuristicsTests(unittest.TestCase):
                 candidates=[core.Candidate(title="Inception", year=2010, source="name", score=0.7)],
             )
             decisions = {"S|test": {"ok": True, "title": "Inception", "year": 2010}}
-            dup = core.find_duplicate_targets(cfg, [row], decisions)
+            # Cf #83 PR 4b : find_duplicate_targets vit cote app maintenant.
+            dup = plan_support.find_duplicate_targets(cfg, [row], decisions)
             self.assertEqual(dup["checked_rows"], 1)
             self.assertIn("mergeables", dup)
             self.assertIn("mergeable_count", dup)

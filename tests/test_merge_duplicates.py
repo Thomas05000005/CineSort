@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 
 
@@ -324,7 +325,8 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|5", src, "Movie", 2020)
         decisions = {"S|5": {"ok": True, "title": "Movie", "year": 2020}}
 
-        dup = core.find_duplicate_targets(self._cfg(), [row], decisions)
+        # Cf #83 PR 4b : find_duplicate_targets vit cote app maintenant.
+        dup = plan_support.find_duplicate_targets(self._cfg(), [row], decisions)
         self.assertEqual(dup["checked_rows"], 1)
         self.assertEqual(dup["total_groups"], 0)
         self.assertGreaterEqual(dup.get("mergeable_count", 0), 1)

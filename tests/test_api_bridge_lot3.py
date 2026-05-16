@@ -400,7 +400,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         def boom(*args, **kwargs):
             raise OSError("dup-check boom")
 
-        with mock.patch.object(core, "find_duplicate_targets", side_effect=boom):
+        # Cf #83 PR 4b : find_duplicate_targets vit cote app maintenant.
+        import cinesort.app.plan_support as plan_support
+
+        with mock.patch.object(plan_support, "find_duplicate_targets", side_effect=boom):
             res = api.apply(run_id, decisions, True, False)
 
         self.assertFalse(res.get("ok"), res)
@@ -448,7 +451,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         import cinesort.ui.api.apply_support as _apply_support_mod
 
         with mock.patch.object(api, "_run_context_for_apply", return_value=ctx):
-            with mock.patch.object(core, "find_duplicate_targets", return_value=[]):
+            # Cf #83 PR 4b : find_duplicate_targets vit cote app maintenant.
+            import cinesort.app.plan_support as plan_support
+
+            with mock.patch.object(plan_support, "find_duplicate_targets", return_value=[]):
                 with mock.patch.object(_apply_support_mod, "_apply_rows_fn", side_effect=OSError("primary apply boom")):
                     res = api.apply(run_id, {}, False, False)
 
