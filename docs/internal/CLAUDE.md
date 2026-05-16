@@ -16,6 +16,43 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
+## SESSION 16 mai 2026 — Cleanup audit-bot + #94 + #83 etape 2 (PRs 1-2) ✅
+
+9 PRs mergees (#172/#175/#176/#177/#178/#179/#180) + 5 issues fermees (#94, #173, #174) + premieres etapes #83 etape 2.
+
+### Audit-bot 2026-05-16 traite (3 issues + 2 PRs)
+
+- **PR #172** : fix watcher — un changement detecte pendant un scan en cours etait perdu (snapshot baseline mis a jour AVANT check `_is_scan_running()`). 1 nouveau test E2E qui simule un scan running + changement concurrent.
+- **PR #175** : rapport audit Claude 2026-05-16 (docs/internal/audits/claude/).
+- **Issue #173 → PR #176** : `CircuitBreaker.call` utilisait `except BaseException` → capturait `KeyboardInterrupt`/`SystemExit`/`GeneratorExit`. Apres 10 Ctrl+C consecutifs, le circuit s'ouvrait et bloquait les appels TMDb legitimes 5 min. Fix : `except Exception`. 4 nouveaux tests.
+- **Issue #174 → PR #177** : 4 handlers `_serve_*_file` dans `rest_server.py` repetaient le meme squelette (~150 LOC dupliques). Extrait 2 helpers `_resolve_static_path` + `_read_static_bytes`. **-58 LOC nets**.
+
+### Issue #94 (PR #178) — Frames cote-a-cote dans comparaison doublons
+
+Nouveau endpoint `quality/get_perceptual_compare_frames` qui retourne 2-3 paires de frames PNG base64, classees par `mean_diff` decroissant (showcase ce qui distingue visuellement les 2 fichiers). UI lazy-load (bouton "Voir les frames" dans la modale comparaison) car extraction PNG ~10-30s.
+
+Backend reutilise `extract_aligned_frames` deja appele par `compare_perceptual` mais qui jetait les frames apres calcul des metriques. Encodage via Pillow (mode "L" pour luminance Y plane). 6 tests dedies (validation + encodage base64 + cap max_frames).
+
+### #83 etape 2 PRs 1+2 (PR #179, #180) — Cycle domain↔app
+
+**PR #179** (`#83 etape 2 PR 1`) : supprime 3 wrappers triviaux `_sha1_quick`, `_sha1_quick_cached`, `_files_identical_quick` dans `domain/core.py` qui dupliquaient `app/apply_core.py:163-225`. 2 call-sites externes migres (plan_support.py + test_core_heuristics.py).
+
+**PR #180** (`#83 etape 2 PR 2`) : supprime 12 aliases dead code prives `_mkdir_counted`, `_prune_empty_dirs`, `_legacy_collection_root`, `_resolve_collection_folder_after_migration`, `_migrate_legacy_collection_root`, `_move_to_review_bucket`, `_safe_relative_context`, `_conflict_context`, `_move_file_with_collision_policy`, `_merge_dir_safe`, `_unique_path_dup`, `_is_managed_merge_file`, `_is_sidecar_metadata`. **0 caller externe, 0 usage interne dans domain/core.py** confirme par grep exhaustif. -25 LOC.
+
+### #83 etape 2 — Reste a faire (PRs 3-4)
+
+Decision architecturale necessaire : bouger les fonctions logiques (`_can_merge_single_without_blocking`, `_can_merge_collection_item_without_blocking`, `_existing_movie_folder_index`, `is_under_collection_root`, `_planned_target_folder`, `_movie_dir_title_year`, `_movie_key`, `_single_folder_is_conform`) vers `app/plan_support.py` OU les refactor en injection de dependances.
+
+**Statut** : differe pour session dediee (max 3-5j d'audit + refactor). Le plan est dans `docs/internal/REFACTOR_PLAN_83.md`. Apres #83 PRs 3+4, supprimer les 4 imports top-level et les 38 re-exports. Puis #85 mixins SQLite (gated).
+
+### Restant pour sessions futures
+
+- **#14** umbrella audit (a laisser ouverte)
+- **#83 PRs 3-4** : 2-3 jours, decision archi puis execution
+- **#85** : 5-7 jours, gated sur #83 termine
+
+---
+
 ## SESSION 15 mai 2026 (soiree) — Quick wins #92 + #32 perceptual UI ✅
 
 5 PRs supplementaires apres le cleanup massif (#138-#163) :
