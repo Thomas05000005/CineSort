@@ -53,9 +53,7 @@ class StripAudioResidueTests(unittest.TestCase):
 
     def test_truehd_71_atmos_stripped(self):
         self.assertEqual(
-            parse_scene_title(
-                "Mad.Max.Fury.Road.2015.MULTi.UHD.BluRay.2160p.HDR.HEVC.TrueHD.7.1.Atmos-VeXHD.mkv"
-            ),
+            parse_scene_title("Mad.Max.Fury.Road.2015.MULTi.UHD.BluRay.2160p.HDR.HEVC.TrueHD.7.1.Atmos-VeXHD.mkv"),
             "Mad Max Fury Road 2015",
         )
 
@@ -161,9 +159,7 @@ class FilmsNamedAfterYearTests(unittest.TestCase):
 
     def test_dune_2024_year_after_title(self):
         self.assertEqual(
-            parse_scene_title(
-                "Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR.DTS-HD.MA.7.1-SWTYBLZ.mkv"
-            ),
+            parse_scene_title("Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR.DTS-HD.MA.7.1-SWTYBLZ.mkv"),
             "Dune Part Two 2024",
         )
 
