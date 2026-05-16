@@ -483,6 +483,11 @@ class TmdbClient:
         cache_entry["production_companies"] = [
             str(c.get("name", "")) for c in (data.get("production_companies") or []) if isinstance(c, dict)
         ]
+        # Phase 6.1 : runtime pour cross-check duree fichier vs TMDb
+        try:
+            cache_entry["runtime"] = int(data.get("runtime") or 0) or None
+        except (TypeError, ValueError):
+            cache_entry["runtime"] = None
 
         self._cache_set(cache_key, cache_entry)
         try:
@@ -518,6 +523,21 @@ class TmdbClient:
             "budget": int(detail.get("budget") or 0),
             "production_companies": list(detail.get("production_companies") or []),
         }
+
+    def get_movie_runtime(self, movie_id: int) -> Optional[int]:
+        """Retourne le runtime TMDb en minutes (cache local). None si indispo.
+
+        Utilise par Phase 6.1 (cross-check duree fichier vs TMDb).
+        """
+        detail = self._get_movie_detail_cached(movie_id)
+        if not detail:
+            return None
+        runtime = detail.get("runtime")
+        try:
+            value = int(runtime or 0)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
 
     def get_movie_poster_thumb_url(self, movie_id: int, size: str = "w92") -> Optional[str]:
         poster = self.get_movie_poster_path(movie_id)
