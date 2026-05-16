@@ -419,6 +419,28 @@ def _build_plan_job_fn(
                 f"job_fn plan returned rows={len(rows)} folders_scanned={stats.folders_scanned} planned_rows={stats.planned_rows}"
             )
 
+            # Phase 6.1.b : probe runtime cross-check (extension de Phase 6.1).
+            # Pour les ~60-70% de films sans NFO, on utilise probe.duration_s pour
+            # cross-checker contre le runtime TMDb. Couvre le gap de Phase 6.1.
+            # Doit s'executer AVANT OMDb car peut deja booster confidence > seuil
+            # et eviter un appel OMDb inutile.
+            try:
+                if tmdb is not None:
+                    from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
+
+                    n_probe = cross_check_rows_with_probe(
+                        rows,
+                        store,
+                        settings,
+                        tmdb,
+                        log=rs.log,
+                        should_cancel=should_cancel,
+                    )
+                    dlog(f"job_fn probe runtime cross-check : {n_probe} films verifies")
+            except (OSError, ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
+                # Echec gracieux : on ne casse pas le run pour un probleme probe
+                dlog(f"job_fn probe runtime cross-check skipped: {exc}")
+
             # Phase 6.2 : OMDb cross-check post-plan (echec gracieux total).
             # Lit settings, instancie OmdbClient, parcourt les rows confidence
             # basse. N'echoue jamais le run en cas de probleme.
