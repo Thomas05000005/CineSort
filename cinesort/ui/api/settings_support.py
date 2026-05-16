@@ -10,10 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
-from cinesort.domain.i18n_messages import t
-from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.domain.conversions import to_bool, to_float, to_int
-from cinesort.ui.api._responses import err
+from cinesort.domain.i18n_messages import t
+from cinesort.domain.naming import PRESETS, validate_template
+from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.infra.local_secret_store import (
     SECRET_PROTECTION_NONE,
     SECRET_PROTECTION_UNAVAILABLE,
@@ -21,6 +21,9 @@ from cinesort.infra.local_secret_store import (
     protect_secret,
     unprotect_secret,
 )
+from cinesort.infra.log_context import is_remote_request, normalize_log_level_setting
+from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api._responses import err
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +192,6 @@ def normalize_user_path(value: Any, default: Path) -> Path:
     reste actif (~ → home directory) car non-amplifiant. Pour le caller local
     (desktop natif), comportement inchange.
     """
-    from cinesort.infra.log_context import is_remote_request
-
     raw = str(value or "").strip().strip('"').strip("'")
     if not raw:
         return Path(default)
@@ -800,8 +801,6 @@ def apply_settings_defaults(
     payload["composite_score_version"] = _normalize_composite_score_version(payload.get("composite_score_version"))
 
     # V3-04 (R4-LOG-3) : log_level normalise (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-    from cinesort.infra.log_context import normalize_log_level_setting
-
     payload["log_level"] = normalize_log_level_setting(payload.get("log_level"))
 
     payload.setdefault("debug_enabled", debug_enabled)
@@ -1032,8 +1031,6 @@ _VALID_NAMING_PRESETS = {"default", "plex", "jellyfin", "quality", "custom"}
 
 def _apply_naming_preset(to_save: Dict[str, Any], raw_settings: Dict[str, Any]) -> None:
     """Normalise le preset de renommage et applique les templates correspondants."""
-    from cinesort.domain.naming import PRESETS, validate_template
-
     preset = str(raw_settings.get("naming_preset") or "default").strip().lower()
     if preset not in _VALID_NAMING_PRESETS:
         preset = "default"
@@ -1322,8 +1319,6 @@ def _coerce_appearance_int(payload: Dict[str, Any], key: str, default: int) -> i
 
 def _save_section_appearance(payload: Dict[str, Any], *, debug_enabled: bool) -> Dict[str, Any]:
     # V3-04 polish v7.7.0 : persiste log_level normalise (DEBUG/INFO/...).
-    from cinesort.infra.log_context import normalize_log_level_setting
-
     return {
         "theme": _normalize_enum(payload.get("theme"), ("cinema", "studio", "luxe", "neon"), "luxe"),
         "animation_level": _normalize_enum(
@@ -1496,10 +1491,7 @@ def test_jellyfin_connection(
     jellyfin_client_cls: Any = None,
 ) -> Dict[str, Any]:
     """Teste la connexion Jellyfin et retourne les infos serveur/utilisateur/bibliothèques."""
-    # Import tardif pour éviter les imports circulaires au chargement du module
     if jellyfin_client_cls is None:
-        from cinesort.infra.jellyfin_client import JellyfinClient
-
         jellyfin_client_cls = JellyfinClient
 
     url = _normalize_jellyfin_url(url)

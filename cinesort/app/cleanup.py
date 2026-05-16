@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
 
 from cinesort.app.move_journal import atomic_move
+from cinesort.domain.core import (
+    RESIDUAL_IMAGE_EXTS,
+    RESIDUAL_NFO_EXTS,
+    RESIDUAL_SUBTITLE_EXTS,
+    RESIDUAL_TEXT_EXTS,
+    ensure_inside_root,
+    windows_safe,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -29,8 +37,6 @@ def _collect_root_all_empty_dirs(cfg: "Config") -> List[Path]:
 
 
 def _residual_allowed_exts(cfg: "Config") -> Set[str]:
-    from cinesort.domain.core import RESIDUAL_IMAGE_EXTS, RESIDUAL_NFO_EXTS, RESIDUAL_SUBTITLE_EXTS, RESIDUAL_TEXT_EXTS
-
     allowed: Set[str] = set()
     if cfg.cleanup_residual_include_nfo:
         allowed.update(RESIDUAL_NFO_EXTS)
@@ -273,11 +279,10 @@ def _move_dirs_to_bucket(
 
     Renvoie le nombre de dossiers réellement déplacés (0 si dry_run ou aucun éligible).
     """
-    # Cf issue #83 phase 2 : imports directs depuis les origines pour casser
-    # le cycle domain.core -> app. windows_safe reste dans domain (logique
-    # de naming pur), record_apply_op et unique_path sont dans app.apply_core.
-    from cinesort.app.apply_core import record_apply_op as _record_apply_op, unique_path as _unique_path
-    from cinesort.domain.core import windows_safe
+    # Cycle app.cleanup <-> app.apply_core : apply_core importe cleanup en
+    # top-level donc on garde apply_core en import tardif ici.
+    from cinesort.app.apply_core import record_apply_op as _record_apply_op
+    from cinesort.app.apply_core import unique_path as _unique_path
 
     moved = 0
     for src in candidates:
@@ -313,8 +318,6 @@ def _move_residual_top_level_dirs(
 
     No-op si le nettoyage résiduel est désactivé. Met à jour `res.cleanup_residual_folders_moved_count`.
     """
-    from cinesort.domain.core import ensure_inside_root
-
     if not cfg.cleanup_residual_folders_enabled:
         return
 
@@ -347,11 +350,8 @@ def _move_empty_top_level_dirs(
     No-op si l'option `move_empty_folders_enabled` est désactivée. Met à jour
     `res.empty_folders_moved_count`.
     """
-    # Cf issue #83 phase 2 : imports directs depuis origines. is_dir_empty
-    # vient d'app.apply_core, ensure_inside_root reste dans domain.core
-    # (logique de validation path-traversal pure).
+    # Cycle app.cleanup <-> app.apply_core : import tardif requis.
     from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
-    from cinesort.domain.core import ensure_inside_root
 
     if not cfg.move_empty_folders_enabled:
         return

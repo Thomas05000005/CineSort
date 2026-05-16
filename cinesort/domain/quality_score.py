@@ -6,6 +6,13 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.conversions import to_bool as _to_bool, to_float as _to_float, to_int as _to_int
+from cinesort.domain.custom_rules import apply_custom_rules as _apply_rules
+from cinesort.domain.explain_score import build_rich_explanation
+from cinesort.domain.genre_rules import (
+    adjust_bitrate_threshold as _adj_th,
+    compute_genre_adjustments,
+    detect_primary_genre as _detect_pg,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -523,8 +530,6 @@ def _score_video(
     # action exige plus). Applique le multiplicateur bitrate_leniency.
     if threshold_kbps > 0 and primary_genre:
         try:
-            from cinesort.domain.genre_rules import adjust_bitrate_threshold as _adj_th
-
             adjusted = _adj_th(threshold_kbps, primary_genre)
             if adjusted != threshold_kbps:
                 reasons.append(
@@ -874,8 +879,6 @@ def _detect_primary_genre_safe(tmdb_genres: Optional[List[str]]) -> Optional[str
     if not tmdb_genres:
         return None
     try:
-        from cinesort.domain.genre_rules import detect_primary_genre as _detect_pg
-
         return _detect_pg(tmdb_genres)
     except ImportError:
         return None
@@ -992,9 +995,7 @@ def _apply_genre_adjustments_helper(
     primary_genre: Optional[str] = None
     if not tmdb_genres:
         return video_sub, audio_sub, extras_sub, None
-    from cinesort.domain.genre_rules import compute_genre_adjustments, detect_primary_genre
-
-    primary_genre = detect_primary_genre(tmdb_genres)
+    primary_genre = _detect_pg(tmdb_genres)
     if not primary_genre:
         return video_sub, audio_sub, extras_sub, primary_genre
     height_g = _to_int(video.get("height"), 0)
@@ -1051,8 +1052,6 @@ def _apply_custom_rules_helper(
     if not custom_rules:
         return score, tier, custom_flags_added, applied_rule_ids
     try:
-        from cinesort.domain.custom_rules import apply_custom_rules as _apply_rules
-
         resolution_rank_map = {"2160p": 3, "1080p": 2, "720p": 1, "SD": 0, "480p": 0}
         file_size_bytes = _estimate_file_size(normalized_probe, vr["bitrate_kbps"])
         rule_context = {
@@ -1408,8 +1407,6 @@ def compute_quality_score(
     )
 
     # P2.1 : explanation enrichie — narrative + weighted_delta + categories + suggestions.
-    from cinesort.domain.explain_score import build_rich_explanation
-
     rich = build_rich_explanation(
         score=int(score),
         tier=tier,

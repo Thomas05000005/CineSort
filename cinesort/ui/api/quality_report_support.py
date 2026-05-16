@@ -5,12 +5,16 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from cinesort.domain import compute_quality_score, default_quality_profile
-from cinesort.domain.i18n_messages import t
-from cinesort.infra.probe import ProbeService
+from cinesort.domain.audio_analysis import analyze_audio
 from cinesort.domain.conversions import to_bool
-from cinesort.ui.api._validators import requires_valid_run_id
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.domain.encode_analysis import analyze_encode_quality
+from cinesort.domain.i18n_messages import t
+from cinesort.domain.mkv_title_check import check_container_title
+from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
+from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
@@ -239,15 +243,11 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         if pq == "FAILED":
             result["integrity_probe_failed"] = True
         # Analyse d'encodage (upscale, 4K light, re-encode degrade)
-        from cinesort.domain.encode_analysis import analyze_encode_quality
-
         detected_for_encode = metrics_obj.get("detected") or {}
         encode_flags = analyze_encode_quality(detected_for_encode)
         if encode_flags:
             result["encode_warnings"] = encode_flags
         # Analyse audio approfondie
-        from cinesort.domain.audio_analysis import analyze_audio
-
         audio_tracks = normalized.get("audio_tracks") or []
         audio_report = analyze_audio(audio_tracks)
         result["audio_analysis"] = audio_report
@@ -279,8 +279,6 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         container_title = normalized.get("container_title")
         if container_title:
             result["container_title"] = container_title
-            from cinesort.domain.mkv_title_check import check_container_title
-
             title_flags = check_container_title(container_title, str(row.proposed_title or ""))
             if title_flags:
                 result.setdefault("encode_warnings", [])
@@ -290,9 +288,6 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         # Enrichir avec les donnees perceptuelles si disponibles
         # V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : propage le toggle
         # `composite_score_version` (V1 par defaut, V2 opt-in via reglages).
-        from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
-        from cinesort.ui.api.settings_support import _normalize_composite_score_version
-
         try:
             settings = api.settings.get_settings() if api else {}
         except (AttributeError, KeyError, OSError, TypeError, ValueError):

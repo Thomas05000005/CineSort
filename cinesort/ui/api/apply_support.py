@@ -19,15 +19,20 @@ from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 # cycle domain -> app). NB : find_duplicate_targets reste accede via core.X car
 # c'est un wrapper qui injecte 7 helpers internes de domain/core.py — pas un
 # simple re-export.
+import cinesort.app.plan_support as _plan_support_mod
+import cinesort.infra.plex_client as _plex_mod
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
+from cinesort.app.apply_core import sha1_quick_cached
 from cinesort.app.disk_space_check import check_disk_space_for_apply
+from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
+from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
-from cinesort.domain.conversions import to_bool as _to_bool
-from cinesort.ui.api.settings_support import normalize_user_path, read_settings
+from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 import contextlib
 
 _log = logging.getLogger(__name__)
@@ -89,8 +94,6 @@ def preverify_undo_operations(
     verifie son sha1. Les sidecars (nfo/srt/image) ne sont pas hashées à l'apply
     donc finissent toujours dans "legacy_no_hash".
     """
-    from cinesort.app.apply_core import sha1_quick_cached
-
     report: Dict[str, List[Dict[str, Any]]] = {
         "safe": [],
         "hash_mismatch": [],
@@ -1065,10 +1068,8 @@ def _execute_apply(
     toucher au filesystem. Ne change rien quand le caller ne la fournit pas.
     """
     try:
-        # Cf #83 etape 2 PR 3 : point d'entree desormais sur app/plan_support.
-        from cinesort.app.plan_support import find_duplicate_targets
-
-        find_duplicate_targets(cfg, rows, safe_decisions)
+        # NB : accede via module pour permettre le mocking par patch.object(plan_support, ...).
+        _plan_support_mod.find_duplicate_targets(cfg, rows, safe_decisions)
     except (OSError, PermissionError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         msg = t("errors.duplicate_check_failed", detail=str(exc))
         log_fn("ERROR", msg)
@@ -1525,8 +1526,6 @@ def _read_jellyfin_settings(api: Any) -> Dict[str, Any]:
 
 def _make_jellyfin_client(data: Dict[str, Any]) -> Any:
     """Cree un JellyfinClient depuis les settings. Retourne None si impossible."""
-    from cinesort.infra.jellyfin_client import JellyfinClient
-
     url = str(data.get("jellyfin_url") or "").strip()
     api_key = str(data.get("jellyfin_api_key") or "").strip()
     timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
@@ -1571,10 +1570,9 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if not plex_url or not plex_token or not plex_lib:
         return
     try:
-        from cinesort.infra.plex_client import PlexClient
-
         timeout_s = float(settings.get("plex_timeout_s") or 10)
-        client = PlexClient(plex_url, plex_token, timeout_s=timeout_s)
+        # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
+        client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
         log_fn("INFO", "Plex : refresh section declenche avec succes.")
     # BUG-1 (v7.8.0) : IntegrationError remplace except Exception annote intentionnel.
@@ -1633,10 +1631,9 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
             log_module=__name__,
         )
     try:
-        from cinesort.infra.plex_client import PlexClient
-
         timeout_s = float(settings.get("plex_timeout_s") or 10)
-        client = PlexClient(plex_url, plex_token, timeout_s=timeout_s)
+        # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
+        client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
         _log.info("api: refresh_plex_library_now declenche")
         return {"ok": True, "message": "Refresh Plex declenche."}
@@ -1653,8 +1650,6 @@ def _snapshot_jellyfin_watched(api: Any, log_fn: Callable[[str, str], None]) -> 
     if not _to_bool(data.get("jellyfin_sync_watched"), True):
         return None
     try:
-        from cinesort.app.jellyfin_sync import snapshot_watched
-
         client = _make_jellyfin_client(data)
         user_id = str(data.get("jellyfin_user_id") or "").strip()
         if not user_id:
@@ -1692,8 +1687,6 @@ def _restore_jellyfin_watched(
         return
 
     try:
-        from cinesort.app.jellyfin_sync import restore_watched
-
         client = _make_jellyfin_client(data)
         operations = store.list_apply_operations(batch_id=apply_batch_id)
         result = restore_watched(client, user_id, snapshot, operations)
