@@ -56,7 +56,6 @@ from cinesort.domain.title_helpers import (
     title_match_score,
     tokens,
 )
-import cinesort.app.plan_support as core_plan_support
 
 if TYPE_CHECKING:
     from cinesort.infra.tmdb_client import TmdbClient
@@ -1221,29 +1220,16 @@ def compute_confidence(
     return score, label
 
 
-# =========================================================
-# INCREMENTAL HELPERS
-# =========================================================
-
-
-_cfg_signature_for_incremental = core_plan_support.cfg_signature_for_incremental
-_stats_snapshot_for_cache = core_plan_support.stats_snapshot_for_cache
-_stats_delta_for_cache = core_plan_support.stats_delta_for_cache
-_stats_apply_cached_delta = core_plan_support.stats_apply_cached_delta
-_plan_row_to_jsonable = core_plan_support.plan_row_to_jsonable
-_plan_row_from_jsonable = core_plan_support.plan_row_from_jsonable
-_resolve_incremental_quick_hash = core_plan_support.resolve_incremental_quick_hash
-_folder_signature = core_plan_support.folder_signature
-
-
-# =========================================================
-# PLANNER
-# =========================================================
-
-
-plan_library = core_plan_support.plan_library
-_plan_single = core_plan_support._plan_single
-_plan_collection_item = core_plan_support._plan_collection_item
+# Cf #83 phase A3 : 11 aliases backward-compat plan_support supprimes
+# (0 caller externe, 0 usage interne dans domain/core.py).
+# Aliases supprimes :
+#   _cfg_signature_for_incremental, _stats_snapshot_for_cache,
+#   _stats_delta_for_cache, _stats_apply_cached_delta,
+#   _plan_row_to_jsonable, _plan_row_from_jsonable,
+#   _resolve_incremental_quick_hash, _folder_signature,
+#   plan_library, _plan_single, _plan_collection_item
+# Appeler directement core_plan_support.X (alias module-level reste) ou
+# importer depuis cinesort.app.plan_support en top-level.
 
 
 # =========================================================

@@ -414,8 +414,8 @@ class _PlanLibraryContext:
         if not hasattr(self.scan_index, "upsert_incremental_folder_cache"):
             return
         folder_rows = self.rows[rows_before:]
-        stats_after = core_mod._stats_snapshot_for_cache(self.stats)
-        stats_delta = core_mod._stats_delta_for_cache(stats_before, stats_after)
+        stats_after = stats_snapshot_for_cache(self.stats)
+        stats_delta = stats_delta_for_cache(stats_before, stats_after)
         rows_json = [plan_row_to_jsonable(row) for row in folder_rows]
         try:
             self.scan_index.upsert_incremental_folder_cache(
@@ -438,7 +438,6 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     root_key, v2_kwargs, ...). Retourne True si le scan doit continuer, False
     si annulation prematuree.
     """
-    import cinesort.domain.core as core_mod
 
     if ctx.check_cancel():
         ctx.stats.planned_rows = 0
@@ -446,7 +445,7 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
 
     ctx.cfg = ctx.cfg.normalized()
     ctx.incremental_enabled = bool(ctx.cfg.incremental_scan_enabled and ctx.scan_index is not None)
-    ctx.cfg_sig = core_mod._cfg_signature_for_incremental(ctx.cfg) if ctx.incremental_enabled else ""
+    ctx.cfg_sig = cfg_signature_for_incremental(ctx.cfg) if ctx.incremental_enabled else ""
     ctx.root_key = str(ctx.cfg.root)
     if ctx.incremental_enabled:
         ctx.v2_kwargs = {
@@ -502,13 +501,12 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
     et retourne (folder_sig, True) — l'appelant doit `continue`.
     Sinon : incremente cache_misses, retourne (folder_sig, False).
     """
-    import cinesort.domain.core as core_mod
 
     folder_sig: Optional[str] = None
     if not (ctx.incremental_enabled and ctx.scan_index is not None):
         return folder_sig, False
 
-    folder_sig = core_mod._folder_signature(
+    folder_sig = folder_signature(
         ctx.cfg,
         folder,
         scan_index=ctx.scan_index,
@@ -537,7 +535,7 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
                     cached_rows.append(row_obj)
         if isinstance(cached_stats_delta, dict):
             ctx.rows.extend(cached_rows)
-            core_mod._stats_apply_cached_delta(ctx.stats, cached_stats_delta)
+            stats_apply_cached_delta(ctx.stats, cached_stats_delta)
             ctx.stats.incremental_cache_hits += 1
             ctx.stats.incremental_cache_rows_reused += len(cached_rows)
             return folder_sig, True
@@ -672,7 +670,7 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
         ctx.folders_seen_for_prune.append(str(folder))
 
         rows_before = len(ctx.rows)
-        stats_before = core_mod._stats_snapshot_for_cache(ctx.stats)
+        stats_before = stats_snapshot_for_cache(ctx.stats)
 
         folder_sig, cache_hit = _try_apply_folder_cache(ctx, folder)
         if cache_hit:
