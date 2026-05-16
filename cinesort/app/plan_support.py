@@ -218,7 +218,11 @@ def resolve_incremental_quick_hash(
         except (OSError, TypeError, ValueError):
             pass
     try:
-        quick_hash = core_mod._sha1_quick(path)
+        # Cf #83 etape 2 PR 1 : appelle apply_core directement plutot que de
+        # transiter par le wrapper domain.core._sha1_quick (supprime).
+        from cinesort.app.apply_core import sha1_quick
+
+        quick_hash = sha1_quick(path)
     except (OSError, PermissionError, FileNotFoundError):
         quick_hash = ""
     if quick_hash and scan_index is not None and hasattr(scan_index, "upsert_incremental_file_hash"):

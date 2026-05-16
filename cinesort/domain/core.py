@@ -1345,39 +1345,16 @@ _is_managed_merge_file = core_apply_support.is_managed_merge_file
 _is_sidecar_metadata = core_apply_support.is_sidecar_metadata
 
 
-def _sha1_quick(p: Path) -> str:
-    return core_apply_support.sha1_quick(p)
-
+# Cf issue #83 etape 2 PR 1 (2026-05-16) : ces 3 wrappers triviaux
+# (_sha1_quick, _sha1_quick_cached, _files_identical_quick) etaient des
+# duplications de cinesort/app/apply_core.py:163-225 (sha1_quick,
+# sha1_quick_cached, files_identical_quick). Supprimes pour casser le cycle
+# domain -> app : appeler ces helpers depuis app/apply_core (orchestration
+# filesystem) directement, pas via le re-export domain. Callers migres :
+# - cinesort/app/plan_support.py:221 -> apply_core.sha1_quick(path)
+# - tests/test_core_heuristics.py:268-291 -> mock apply_core.sha1_quick
 
 _quick_hash_cache_key = core_apply_support.quick_hash_cache_key
-
-
-def _sha1_quick_cached(p: Path, cache: Optional[Dict[Tuple[str, int, int], str]]) -> str:
-    if cache is None:
-        return _sha1_quick(p)
-    key = _quick_hash_cache_key(p)
-    if key is None:
-        return _sha1_quick(p)
-    existing = cache.get(key)
-    if existing:
-        return existing
-    value = _sha1_quick(p)
-    cache[key] = value
-    return value
-
-
-def _files_identical_quick(
-    src: Path,
-    dst: Path,
-    *,
-    hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
-) -> bool:
-    try:
-        if src.stat().st_size != dst.stat().st_size:
-            return False
-        return _sha1_quick_cached(src, hash_cache) == _sha1_quick_cached(dst, hash_cache)
-    except (OSError, PermissionError):
-        return False
 
 
 _unique_path = core_apply_support.unique_path
