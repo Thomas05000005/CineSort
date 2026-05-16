@@ -21,6 +21,7 @@ import { glossaryTooltip } from "../components/glossary-tooltip.js";
 // V7-fusion Phase 1 : section "Apercu V2" injectee depuis composants v5 partages.
 // Ces composants existent deja (Vague 2 v7.6.0) et sont sans dependance externe.
 import { renderKpiGrid as _renderV2Kpis, renderInsights as _renderV2Insights } from "../components/home-widgets.js";
+import { renderLibraryPodiums } from "../components/library-podiums.js";
 import { renderDonut as _renderV2Donut, renderLine as _renderV2Line } from "../components/home-charts.js";
 
 /* --- Etat local de la vue ---------------------------------- */
@@ -76,6 +77,7 @@ async function _fetchAll() {
     apiPost("get_global_stats", { limit_runs: 10 }, { signal: navSig }),
     apiPost("settings/get_settings", {}, { signal: navSig }),
     apiPost("get_probe_tools_status", {}, { signal: navSig }),
+    apiPost("library/get_library_podiums", { limit: 10 }, { signal: navSig }),
   ];
   // Si on sait qu'un run est actif (pre-tick), on ajoute get_status pour
   // avoir le vrai progres (idx/total/eta) sans attendre la fin.
@@ -90,9 +92,10 @@ async function _fetchAll() {
     global: _val(results[1]),
     settings: _val(results[2]),
     probe: _val(results[3]),
-    runStatus: wantStatus ? _val(results[4]) : null,
+    podiums: _val(results[4]),
+    runStatus: wantStatus ? _val(results[5]) : null,
   };
-  const failed = ["/api/health", "get_global_stats", "get_settings", "get_probe_tools_status", "get_status"]
+  const failed = ["/api/health", "get_global_stats", "get_settings", "get_probe_tools_status", "library/get_library_podiums", "get_status"]
     .filter((_, i) => i < calls.length && results[i].status !== "fulfilled");
   if (failed.length > 0) console.warn("[status] endpoints en echec (rendu partiel):", failed);
   return out;
@@ -101,7 +104,7 @@ async function _fetchAll() {
 /* --- ViewModel -------------------------------------------- */
 
 function _buildVm(data) {
-  const { health, global, settings, probe, runStatus } = data;
+  const { health, global, settings, probe, podiums, runStatus } = data;
   const isRunActive = !!health.active_run_id;
   const runs = global.runs_summary || [];
   const lastRun = runs[0] || null;
@@ -308,6 +311,8 @@ function _buildVm(data) {
     space, showSpace,
     suggestions, hs, showSuggestions,
     timelinePoints, ht, showTrend,
+    podiums: podiums || {},
+    showPodiums: !!(podiums && podiums.total_films > 0),
     signals,
     progressPct, progressText,
     showRemoteAccess: !!settings.rest_api_enabled,
@@ -455,6 +460,11 @@ function _renderShell(vm, container) {
   }
 
   html += "</div>"; // /bento
+
+  // === Podiums bibliothèque ===
+  if (vm.showPodiums) {
+    html += renderLibraryPodiums(vm.podiums);
+  }
 
   // Banners hors bento
   if (vm.showProbeBanner) {

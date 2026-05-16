@@ -261,13 +261,14 @@ class RestFacadeDispatchTests(unittest.TestCase):
         facade_methods = [name for name in methods if "/" in name]
 
         # 5 facades * leurs methodes respectives :
-        # Run 7 + Settings 6 + Quality 22 + Integrations 13 + Library 9 = 57
+        # Run 7 + Settings 6 + Quality 22 + Integrations 13 + Library 10 = 58
         # (#92 #1 : +2 Integrations - refresh_jellyfin/plex_library_now)
         # (#94 : +1 Quality - get_perceptual_compare_frames)
+        # (Dashboard Podiums : +1 Library - get_library_podiums)
         self.assertEqual(
             len(facade_methods),
-            57,
-            f"Attendu 57 methodes facade, trouve {len(facade_methods)}",
+            58,
+            f"Attendu 58 methodes facade, trouve {len(facade_methods)}",
         )
 
     def test_each_facade_has_methods(self) -> None:
@@ -282,7 +283,8 @@ class RestFacadeDispatchTests(unittest.TestCase):
             ("quality", 22),
             # Integrations : 11 d'origine + 2 (#92 #1 refresh_jellyfin/plex_library_now) = 13
             ("integrations", 13),
-            ("library", 9),
+            # Library : 9 d'origine + 1 (Dashboard Podiums get_library_podiums) = 10
+            ("library", 10),
         ):
             count = sum(1 for n in methods if n.startswith(f"{facade_name}/"))
             self.assertEqual(
