@@ -37,9 +37,7 @@ class _ScanMixin:
         quick_hash: str,
         ts: Optional[float] = None,
     ) -> None:
-        self.scan.upsert_incremental_file_hash(
-            path=path, size=size, mtime_ns=mtime_ns, quick_hash=quick_hash, ts=ts
-        )
+        self.scan.upsert_incremental_file_hash(path=path, size=size, mtime_ns=mtime_ns, quick_hash=quick_hash, ts=ts)
 
     def get_incremental_folder_cache(
         self,
@@ -48,9 +46,7 @@ class _ScanMixin:
         folder_path: str,
         cfg_sig: str,
     ) -> Optional[Dict[str, Any]]:
-        return self.scan.get_incremental_folder_cache(
-            root_path=root_path, folder_path=folder_path, cfg_sig=cfg_sig
-        )
+        return self.scan.get_incremental_folder_cache(root_path=root_path, folder_path=folder_path, cfg_sig=cfg_sig)
 
     def upsert_incremental_folder_cache(
         self,
@@ -85,9 +81,7 @@ class _ScanMixin:
         video_path: str,
         cfg_sig: str,
     ) -> Optional[Dict[str, Any]]:
-        return self.scan.get_incremental_row_cache(
-            root_path=root_path, video_path=video_path, cfg_sig=cfg_sig
-        )
+        return self.scan.get_incremental_row_cache(root_path=root_path, video_path=video_path, cfg_sig=cfg_sig)
 
     def upsert_incremental_row_cache(
         self,
@@ -121,6 +115,4 @@ class _ScanMixin:
         )
 
     def prune_incremental_row_cache(self, *, root_path: str, keep_video_paths: List[str]) -> int:
-        return self.scan.prune_incremental_row_cache(
-            root_path=root_path, keep_video_paths=keep_video_paths
-        )
+        return self.scan.prune_incremental_row_cache(root_path=root_path, keep_video_paths=keep_video_paths)
