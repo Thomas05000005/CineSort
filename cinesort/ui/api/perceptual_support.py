@@ -705,6 +705,159 @@ def compare_perceptual(
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
+def get_perceptual_compare_frames(
+    api: Any,
+    run_id: str,
+    row_id_a: str,
+    row_id_b: str,
+    options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Cf #94 (audit-2026-05-12:s3t5) : extrait N paires de frames cote-a-cote.
+
+    Les frames perceptuelles sont calculees pendant `compare_perceptual` mais
+    JAMAIS exposees au frontend, alors qu'elles sont la cle pour valider
+    visuellement une decision destructrice (supprimer un doublon).
+
+    Strategie :
+    1. Reuse `extract_aligned_frames` (greyscale Y plane).
+    2. Picker les N frames avec la plus grosse difference (`compute_pixel_diff`)
+       pour montrer ce qui distingue les fichiers.
+    3. Encoder en PNG base64 via Pillow (mode "L" pour luminance).
+
+    Cap a 3 frames par defaut (response ~1.5 MB max pour 1080p luminance).
+
+    Returns: `{ok, frames: [{timestamp, frame_a_b64, frame_b_b64, mean_diff,
+              max_diff}], width, height}` ou err.
+    """
+    max_frames = 3
+    if isinstance(options, dict):
+        try:
+            max_frames = int(options.get("max_frames", 3))
+        except (TypeError, ValueError):
+            max_frames = 3
+        max_frames = max(1, min(5, max_frames))
+
+    if not run_id or not row_id_a or not row_id_b:
+        return _err_response(
+            "run_id, row_id_a et row_id_b requis", category="validation", level="info", log_module=__name__
+        )
+
+    try:
+        settings = api.settings.get_settings()
+        if not settings.get("perceptual_enabled"):
+            return _err_response(
+                "Analyse perceptuelle desactivee dans les reglages.",
+                category="state",
+                level="info",
+                log_module=__name__,
+            )
+
+        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
+        if not ffmpeg_path:
+            return _err_response(
+                "ffmpeg introuvable.", category="config", level="info", log_module=__name__, missing_tool="ffmpeg"
+            )
+
+        found = api._find_run_row(run_id)
+        if not found:
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
+        run_row, store = found
+        state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+        rs = api._get_run(run_id)
+        rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
+        cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
+
+        row_a = next((r for r in rows if str(r.row_id) == str(row_id_a)), None)
+        row_b = next((r for r in rows if str(r.row_id) == str(row_id_b)), None)
+        if not row_a or not row_b:
+            return _err_response(
+                "Film introuvable dans le plan.", category="resource", level="info", log_module=__name__
+            )
+
+        media_a = api._resolve_media_path_for_row(cfg, row_a)
+        media_b = api._resolve_media_path_for_row(cfg, row_b)
+        if not media_a or not media_b:
+            return _err_response(
+                "Fichier media introuvable.", category="resource", level="warning", log_module=__name__
+            )
+
+        probe_a = _load_probe(api, store, run_row, media_a)
+        probe_b = _load_probe(api, store, run_row, media_b)
+        na = probe_a.get("normalized") or {}
+        nb = probe_b.get("normalized") or {}
+        va = na.get("video") or {}
+        vb = nb.get("video") or {}
+
+        from cinesort.domain.perceptual.comparison import compute_pixel_diff, extract_aligned_frames
+
+        p_settings = _build_settings_dict(settings)
+        aligned = extract_aligned_frames(
+            ffmpeg_path,
+            str(media_a),
+            str(media_b),
+            float(na.get("duration_s") or 0),
+            float(nb.get("duration_s") or 0),
+            int(va.get("width") or 0),
+            int(va.get("height") or 0),
+            int(vb.get("width") or 0),
+            int(vb.get("height") or 0),
+            frames_count=p_settings["comparison_frames"],
+            skip_percent=p_settings["skip_percent"],
+            timeout_s=p_settings["comparison_timeout_s"],
+        )
+        if not aligned:
+            return _err_response("Aucune frame alignee extraite.", category="state", level="info", log_module=__name__)
+
+        # Rank par mean_diff descendant et prend les top N.
+        ranked = []
+        for frame in aligned:
+            diff = compute_pixel_diff(frame["pixels_a"], frame["pixels_b"])
+            if diff is None:
+                continue
+            ranked.append((diff["mean_diff"], diff, frame))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        top = ranked[:max_frames]
+
+        # Encode en PNG base64 (greyscale, mode "L").
+        import base64
+        import io
+
+        from PIL import Image
+
+        frames_out: List[Dict[str, Any]] = []
+        width = aligned[0]["width"]
+        height = aligned[0]["height"]
+        for mean_diff, diff, frame in top:
+            img_a = Image.frombytes("L", (width, height), bytes(frame["pixels_a"]))
+            img_b = Image.frombytes("L", (width, height), bytes(frame["pixels_b"]))
+            buf_a = io.BytesIO()
+            buf_b = io.BytesIO()
+            img_a.save(buf_a, format="PNG", optimize=True)
+            img_b.save(buf_b, format="PNG", optimize=True)
+            frames_out.append(
+                {
+                    "timestamp": frame["timestamp"],
+                    "frame_a_b64": base64.b64encode(buf_a.getvalue()).decode("ascii"),
+                    "frame_b_b64": base64.b64encode(buf_b.getvalue()).decode("ascii"),
+                    "mean_diff": diff["mean_diff"],
+                    "max_diff": diff["max_diff"],
+                }
+            )
+
+        return {
+            "ok": True,
+            "width": width,
+            "height": height,
+            "frame_count": len(frames_out),
+            "frames": frames_out,
+        }
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("get_perceptual_compare_frames error: %s", exc)
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+
 def enrich_quality_report_with_perceptual(
     store: Any,
     run_id: str,

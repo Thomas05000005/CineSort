@@ -261,13 +261,13 @@ class RestFacadeDispatchTests(unittest.TestCase):
         facade_methods = [name for name in methods if "/" in name]
 
         # 5 facades * leurs methodes respectives :
-        # Run 7 + Settings 6 + Quality 21 + Integrations 13 + Library 9 = 56
-        # (#92 #1 a ajoute 2 methodes a Integrations :
-        #  refresh_jellyfin_library_now + refresh_plex_library_now)
+        # Run 7 + Settings 6 + Quality 22 + Integrations 13 + Library 9 = 57
+        # (#92 #1 : +2 Integrations - refresh_jellyfin/plex_library_now)
+        # (#94 : +1 Quality - get_perceptual_compare_frames)
         self.assertEqual(
             len(facade_methods),
-            56,
-            f"Attendu 56 methodes facade, trouve {len(facade_methods)}",
+            57,
+            f"Attendu 57 methodes facade, trouve {len(facade_methods)}",
         )
 
     def test_each_facade_has_methods(self) -> None:
@@ -278,7 +278,8 @@ class RestFacadeDispatchTests(unittest.TestCase):
         for facade_name, min_count in (
             ("run", 7),
             ("settings", 6),
-            ("quality", 21),
+            # Quality : 21 d'origine + 1 (#94 get_perceptual_compare_frames) = 22
+            ("quality", 22),
             # Integrations : 11 d'origine + 2 (#92 #1 refresh_jellyfin/plex_library_now) = 13
             ("integrations", 13),
             ("library", 9),
