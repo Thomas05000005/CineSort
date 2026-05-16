@@ -1732,6 +1732,17 @@ class CineSortApi:
         """Comparaison perceptuelle profonde entre 2 fichiers."""
         return perceptual_support.compare_perceptual(self, run_id, row_id_a, row_id_b, options)
 
+    def _get_perceptual_compare_frames_impl(
+        self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Cf #94 : N paires de frames cote-a-cote en PNG base64.
+
+        Frames extraites pendant compare_perceptual mais jamais exposees au
+        frontend ; cet endpoint les rend visibles pour validation visuelle
+        des decisions destructrices (supprimer un doublon).
+        """
+        return perceptual_support.get_perceptual_compare_frames(self, run_id, row_id_a, row_id_b, options)
+
     def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)

@@ -181,6 +181,15 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._compare_perceptual_impl(run_id, row_id_a, row_id_b, options)
 
+    def get_perceptual_compare_frames(
+        self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Cf #94 : N paires de frames cote-a-cote en PNG base64.
+
+        Cf CineSortApi._get_perceptual_compare_frames_impl pour la doc.
+        """
+        return self._api._get_perceptual_compare_frames_impl(run_id, row_id_a, row_id_b, options)
+
     # ---------- Feedback / Calibration (3) ----------
 
     def submit_score_feedback(
