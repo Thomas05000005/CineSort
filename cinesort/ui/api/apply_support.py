@@ -1065,7 +1065,10 @@ def _execute_apply(
     toucher au filesystem. Ne change rien quand le caller ne la fournit pas.
     """
     try:
-        core.find_duplicate_targets(cfg, rows, safe_decisions)
+        # Cf #83 etape 2 PR 3 : point d'entree desormais sur app/plan_support.
+        from cinesort.app.plan_support import find_duplicate_targets
+
+        find_duplicate_targets(cfg, rows, safe_decisions)
     except (OSError, PermissionError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         msg = t("errors.duplicate_check_failed", detail=str(exc))
         log_fn("ERROR", msg)

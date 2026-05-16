@@ -2039,3 +2039,36 @@ def plan_multi_roots(
         log("INFO", f"Multi-root : {accessible_count}/{len(roots)} root(s) scannes, {len(all_rows)} film(s) total")
 
     return all_rows, all_stats
+
+
+# ---------------------------------------------------------------------------
+# Cf #83 etape 2 PR 3 : point d'entree publique de find_duplicate_targets
+# desormais cote app (orchestration). Le wrapper delegue a la fonction
+# historique dans cinesort.domain.core qui pre-remplit les 7 helpers DI.
+#
+# Cette indirection permet aux callers (apply_support, run_flow_support, tests)
+# d'utiliser app.plan_support comme module canonique sans passer par
+# domain.core. PR future pourra bouger la VRAIE logique cote app et supprimer
+# le wrapper domain.core sans avoir a re-migrer les callers.
+# ---------------------------------------------------------------------------
+
+
+def find_duplicate_targets(
+    cfg: "Config",
+    rows: List["PlanRow"],
+    decisions: Dict[str, Dict[str, object]],
+    *,
+    max_groups: int = 120,
+) -> Dict[str, object]:
+    """Detecte les groupes de doublons sur les destinations planifiees (#83 PR 3).
+
+    Point d'entree publique cote app. Delegue a `cinesort.domain.core.
+    find_duplicate_targets` qui pre-remplit les 7 helpers DI vers
+    `cinesort.domain.duplicate_support`.
+    """
+    # Import lazy : domain.core fait deja le top-level import de apply_core
+    # (le cycle qu'on essaie de casser justement), donc on attend l'appel
+    # runtime pour eviter de l'aggraver au boot.
+    from cinesort.domain.core import find_duplicate_targets as _core_impl
+
+    return _core_impl(cfg, rows, decisions, max_groups=max_groups)
