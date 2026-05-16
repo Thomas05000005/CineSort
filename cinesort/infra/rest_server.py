@@ -499,7 +499,10 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
         if not resolved.is_file():
             # S7 : reponse generique — ne pas refleter l'entree utilisateur dans les 404.
-            logger.debug("Static miss (%s): %s", prefix, relative)
+            # CodeQL py/log-injection : sanitize newlines/control chars du path
+            # utilisateur avant log (sinon possibilite forger lignes de log fakes).
+            safe_relative = str(relative).replace("\r", "").replace("\n", "")[:200]
+            logger.debug("Static miss (%s): %s", prefix, safe_relative)
             self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
             return None
 
