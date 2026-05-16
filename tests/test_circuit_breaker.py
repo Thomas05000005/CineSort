@@ -98,6 +98,47 @@ class CircuitBreakerThreadSafetyTests(unittest.TestCase):
         self.assertEqual(b.failures, n)
 
 
+class CircuitBreakerBaseExceptionTests(unittest.TestCase):
+    """Cf audit-bot 2026-05-16 issue #173 : BaseException non-Exception
+    (KeyboardInterrupt, SystemExit, GeneratorExit) ne doit PAS incrementer
+    le compteur d'echecs.
+    """
+
+    def test_keyboardinterrupt_does_not_increment_failures(self) -> None:
+        b = CircuitBreaker(failure_threshold=3, recovery_timeout=10.0)
+        with self.assertRaises(KeyboardInterrupt):
+            b.call(lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
+        self.assertEqual(b.failures, 0)
+        self.assertFalse(b.is_open)
+
+    def test_systemexit_does_not_increment_failures(self) -> None:
+        b = CircuitBreaker(failure_threshold=3, recovery_timeout=10.0)
+        with self.assertRaises(SystemExit):
+            b.call(lambda: (_ for _ in ()).throw(SystemExit(0)))
+        self.assertEqual(b.failures, 0)
+        self.assertFalse(b.is_open)
+
+    def test_keyboardinterrupt_does_not_open_breaker_after_threshold_hits(self) -> None:
+        # Meme si on declenche N KeyboardInterrupt consecutifs (cas pratique :
+        # utilisateur fait Ctrl+C plusieurs fois pour annuler), le breaker
+        # ne doit pas s'ouvrir : ce sont des arrets administres, pas des
+        # echecs du service distant.
+        b = CircuitBreaker(failure_threshold=2, recovery_timeout=10.0)
+        for _ in range(5):
+            with self.assertRaises(KeyboardInterrupt):
+                b.call(lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
+        self.assertFalse(b.is_open)
+        self.assertEqual(b.failures, 0)
+
+    def test_regular_exception_still_increments(self) -> None:
+        # Verif non-regression : une vraie exception fonctionne toujours.
+        b = CircuitBreaker(failure_threshold=2, recovery_timeout=10.0)
+        for _ in range(2):
+            with self.assertRaises(_Boom):
+                b.call(lambda: (_ for _ in ()).throw(_Boom("down")))
+        self.assertTrue(b.is_open)
+
+
 class CircuitBreakerControlTests(unittest.TestCase):
     def test_reset_clears_failures_and_closes(self) -> None:
         b = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)

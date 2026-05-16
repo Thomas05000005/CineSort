@@ -79,8 +79,15 @@ class CircuitBreaker:
 
         - Si circuit ouvert : leve `CircuitOpenError` sans appeler `fn`.
         - Si `fn` reussit : reset `_failures` a 0 et retourne le resultat.
-        - Si `fn` echoue : incremente `_failures`, ouvre le circuit si
-          le seuil est atteint, puis re-leve l'exception originale.
+        - Si `fn` leve `Exception` : incremente `_failures`, ouvre le
+          circuit si le seuil est atteint, puis re-leve l'exception
+          originale.
+        - Si `fn` leve `BaseException` non-`Exception` (`KeyboardInterrupt`,
+          `SystemExit`, `GeneratorExit`) : remonte tel quel SANS toucher
+          au compteur. Ces exceptions signalent un arret administre du
+          processus, pas un echec du service distant — incrementer
+          `_failures` ouvrirait le circuit a tort apres un Ctrl+C
+          repete (cf audit-bot 2026-05-16, issue #173).
         """
         with self._lock:
             now = time.time()
@@ -89,7 +96,7 @@ class CircuitBreaker:
                 raise CircuitOpenError(f"Circuit ouvert ({self._failures} echecs), retry dans {remaining:.0f}s")
         try:
             result = fn()
-        except BaseException:
+        except Exception:
             with self._lock:
                 self._failures += 1
                 if self._failures >= self._failure_threshold:
