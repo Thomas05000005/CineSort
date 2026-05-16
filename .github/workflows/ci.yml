@@ -63,7 +63,7 @@ jobs:
       # import inter-couches interdit, ce check echoue.
       - name: Architecture contracts (import-linter)
         shell: pwsh
-        run: python -m importlinter
+        run: lint-imports
 
       # 7. Execution des tests avec mesure de couverture (unitaires
       # uniquement — les E2E dashboard/desktop necessitent des navigateurs
