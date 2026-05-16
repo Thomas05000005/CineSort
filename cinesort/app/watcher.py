@@ -131,12 +131,18 @@ class FolderWatcher(threading.Thread):
                 continue
 
             logger.info("[watcher] change detected: %s", detail)
-            self._previous_snapshot = current
 
-            # Verifier qu'aucun scan n'est en cours
+            # Verifier qu'aucun scan n'est en cours AVANT de remplacer le
+            # snapshot baseline. Sinon le changement detecte ici (A -> B)
+            # serait perdu : on aurait deja remplace par B, et au prochain
+            # poll _has_changed(B, B) renverrait False alors qu'aucun scan
+            # n'a ete declenche pour ce changement.
             if self._is_scan_running():
-                logger.info("[watcher] scan skipped (already running)")
+                logger.info("[watcher] scan skipped (already running), change kept for next poll")
                 continue
+
+            # Le scan va etre declenche : on peut maintenant graver le snapshot.
+            self._previous_snapshot = current
 
             # Declencher le scan
             self._trigger_scan(detail)
