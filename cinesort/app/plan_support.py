@@ -9,6 +9,23 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
+import cinesort.app.apply_core as _apply_core_mod
+import cinesort.domain.core as core_mod
+from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
+from cinesort.domain import duplicate_support as _dup
+from cinesort.domain.edition_helpers import extract_edition, strip_edition
+from cinesort.domain.integrity_check import check_header
+from cinesort.domain.runtime_matching import score_runtime_delta
+from cinesort.domain.scan_helpers import (
+    _NOT_A_MOVIE_THRESHOLD,
+    discover_candidate_folders,
+    not_a_movie_score,
+)
+from cinesort.domain.subtitle_helpers import build_subtitle_report
+from cinesort.domain.title_ambiguity import disambiguate_by_context
+from cinesort.domain.title_helpers import _norm_for_tokens
+from cinesort.domain.tv_helpers import parse_tv_info
+from cinesort.infra.fs_safety import is_dir_accessible, safe_path_exists
 from cinesort.infra.tmdb_client import TmdbClient
 import contextlib
 
@@ -41,7 +58,6 @@ def plan_row_to_jsonable(row: "PlanRow") -> Dict[str, Any]:
 
 
 def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
-    import cinesort.domain.core as core_mod
 
     if not isinstance(data, dict):
         return None
@@ -197,7 +213,6 @@ def resolve_incremental_quick_hash(
 ) -> str:
     # Cf #83 phase A4 : utilise apply_core.quick_hash_cache_key directement
     # au lieu de l'alias backward-compat core._quick_hash_cache_key (supprime).
-    from cinesort.app.apply_core import quick_hash_cache_key
 
     try:
         stat_result = path.stat()
@@ -222,7 +237,6 @@ def resolve_incremental_quick_hash(
     try:
         # Cf #83 etape 2 PR 1 : appelle apply_core directement plutot que de
         # transiter par le wrapper domain.core._sha1_quick (supprime).
-        from cinesort.app.apply_core import sha1_quick
 
         quick_hash = sha1_quick(path)
     except (OSError, PermissionError, FileNotFoundError):
@@ -340,7 +354,6 @@ def folder_signature(
 # Le contexte mutable (cfg, stats, rows, scan_index, ...) est porte par
 # _PlanLibraryContext (dataclass) pour limiter le nombre de parametres.
 
-
 from dataclasses import dataclass, field
 
 
@@ -389,7 +402,6 @@ class _PlanLibraryContext:
 
     def check_cancel(self) -> bool:
         """Centralise la detection d'annulation + log unique."""
-        import cinesort.domain.core as core_mod
 
         if not core_mod._is_cancel_requested(self.should_cancel):
             return False
@@ -407,7 +419,6 @@ class _PlanLibraryContext:
         stats_before: Dict[str, Any],
     ) -> None:
         """Persiste le cache incremental pour un dossier traite (no-op si desactive)."""
-        import cinesort.domain.core as core_mod
 
         if not self.incremental_enabled or folder_sig is None or self.scan_index is None:
             return
@@ -463,7 +474,6 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     # M-1 audit QA 20260429 : check accessibilite avec timeout (10s) pour
     # detecter les NAS debranches avant que le scan hang indefiniment sur
     # un syscall stat SMB/CIFS bloque.
-    from cinesort.infra.fs_safety import safe_path_exists
 
     exists = safe_path_exists(ctx.cfg.root, timeout_s=10.0)
     if exists is None:
@@ -484,8 +494,6 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
 
     _discover_t0 = _time.monotonic()
     try:
-        from cinesort.domain.scan_helpers import discover_candidate_folders
-
         ctx.candidate_folders = discover_candidate_folders(ctx.cfg)
     except (OSError, PermissionError, FileNotFoundError) as exc:
         raise RuntimeError(f"Impossible de lister ROOT: {exc}")
@@ -554,7 +562,6 @@ def _classify_and_plan_folder(
 
     Retourne True si le scan global doit s'arreter (cancel detecte), False sinon.
     """
-    import cinesort.domain.core as core_mod
 
     if core_mod.looks_tv_like(folder, videos):
         if ctx.cfg.enable_tv_detection:
@@ -658,7 +665,6 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
     Met a jour ctx.rows, ctx.stats, ctx.folders_seen_for_prune, ctx.video_paths_seen,
     ctx.scanned_total en place.
     """
-    import cinesort.domain.core as core_mod
 
     # Phase 2 — analyse : total fixe, la barre de progression est maintenant deterministe.
     discover_total = len(ctx.candidate_folders)
@@ -709,7 +715,6 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
     les dossiers/videos disparus depuis la derniere passe, propage les compteurs
     cache row v2 et emet les logs finaux.
     """
-    import cinesort.domain.core as core_mod
 
     ctx.stats.planned_rows = len(ctx.rows)
     if (
@@ -767,7 +772,6 @@ def plan_library(
       2. _filter_dossiers_phase     : iteration principale (cache, classification, plan_*)
       3. _dedup_and_finalize_phase  : purge cache incremental + finalisation stats
     """
-    import cinesort.domain.core as core_mod
 
     ctx = _PlanLibraryContext(
         cfg=cfg,
@@ -814,8 +818,6 @@ def _try_lookup_row_cache(
     """
     if not (cfg_sig and scan_index is not None and hasattr(scan_index, "get_incremental_row_cache")):
         return None
-
-    import cinesort.domain.core as core_mod
 
     try:
         video_stat = video.stat()
@@ -898,7 +900,6 @@ def _resolve_folder_context(
     log_ctx = f"(collection): {folder_name}/{video.name}" if is_collection else f"({folder_name})"
 
     # Detection edition (Director's Cut, Extended, IMAX, etc.)
-    from cinesort.domain.edition_helpers import extract_edition
 
     detected_edition = extract_edition(folder_name) or extract_edition(video.name)
     return folder_name, log_ctx, detected_edition
@@ -920,7 +921,6 @@ def _build_nfo_candidates(
     Retourne (nfo_cands, nfo_state) ou nfo_state contient :
         nfo_ok, nfo_cov, nfo_seq, nfo_reject_reason, year_delta_reject, nfo_partial_match.
     """
-    import cinesort.domain.core as core_mod
 
     state = {
         "nfo_ok": False,
@@ -1006,8 +1006,6 @@ def _augment_candidates_from_nfo_imdb(
     """
     if not (nfo and getattr(nfo, "imdbid", None) and tmdb and cfg.enable_tmdb):
         return
-
-    import cinesort.domain.core as core_mod
 
     try:
         imdb_result = tmdb.find_by_imdb_id(nfo.imdbid)
@@ -1097,8 +1095,6 @@ def _augment_candidates_from_nfo_tmdb_id(
     if not (nfo and getattr(nfo, "tmdbid", None) and tmdb and cfg.enable_tmdb):
         return
 
-    import cinesort.domain.core as core_mod
-
     try:
         tmdb_result = tmdb.find_by_tmdb_id(nfo.tmdbid)
         if not (tmdb_result and tmdb_result.id):
@@ -1185,7 +1181,6 @@ def _build_tmdb_fallback_candidates(
     should_cancel: Optional[Callable[[], bool]],
 ) -> Tuple[List[Any], bool]:
     """Lance le TMDb fallback si necessaire. Retourne (tmdb_cands, tmdb_used)."""
-    import cinesort.domain.core as core_mod
 
     if not (tmdb and cfg.enable_tmdb):
         return [], False
@@ -1196,8 +1191,6 @@ def _build_tmdb_fallback_candidates(
 
     if core_mod._is_cancel_requested(should_cancel):
         return [], False
-
-    from cinesort.domain.edition_helpers import strip_edition
 
     # Collection: prefer video name first; single: prefer folder name first.
     # Retirer l'edition avant le clean pour eviter la pollution du matching TMDb
@@ -1234,7 +1227,6 @@ def _disambiguate_candidates(
     Retourne (cands_ajustes, title_ambiguous). Modifie les scores uniquement si
     ambiguïté détectée (ex : Dune 1984 vs 2021).
     """
-    from cinesort.domain.title_ambiguity import disambiguate_by_context
 
     ambig_context = {
         "name_year": name_year,
@@ -1274,7 +1266,6 @@ def _build_unresolved_row(
     log: Callable[[str, str], None],
 ) -> "PlanRow":
     """Construit une PlanRow pour le cas ou aucun candidat fiable n'a ete trouve."""
-    import cinesort.domain.core as core_mod
 
     if not is_collection:
         log("WARN", f"Cannot resolve single: {folder_name}")
@@ -1339,7 +1330,6 @@ def _resolve_tmdb_collection(
     nom du dossier source OU avec le titre du candidat. Sinon le collection
     boost est toxique (ex: 'Ca' → Pirates des Caraibes).
     """
-    import cinesort.domain.core as core_mod
 
     if not (tmdb is not None and chosen.tmdb_id):
         return None, None
@@ -1391,7 +1381,6 @@ def _build_resolved_row(
     log: Callable[[str, str], None],
 ) -> "PlanRow":
     """Construit une PlanRow pour le cas ou un candidat fiable a ete choisi."""
-    import cinesort.domain.core as core_mod
 
     confidence, label = core_mod.compute_confidence(
         cfg,
@@ -1425,8 +1414,6 @@ def _build_resolved_row(
     # branchera probe.duration_s en complement quand cache probe dispo.
     runtime_warning: Optional[str] = None
     if nfo is not None and getattr(nfo, "runtime", None) and tmdb is not None and chosen.tmdb_id:
-        from cinesort.domain.runtime_matching import score_runtime_delta
-
         try:
             tmdb_runtime = tmdb.get_movie_runtime(int(chosen.tmdb_id))
         except (AttributeError, TypeError, ValueError):
@@ -1503,8 +1490,6 @@ def _apply_subtitle_detection(
     if subtitle_expected_languages is None:
         return
 
-    from cinesort.domain.subtitle_helpers import build_subtitle_report
-
     sub_report = build_subtitle_report(folder, video, subtitle_expected_languages)
     result_row.subtitle_count = sub_report.count
     result_row.subtitle_languages = list(sub_report.languages)
@@ -1523,7 +1508,6 @@ def _apply_subtitle_detection(
 
 def _apply_not_a_movie_detection(video: Path, result_row: "PlanRow") -> None:
     """Pose le flag 'not_a_movie' si l'heuristique depasse le seuil."""
-    from cinesort.domain.scan_helpers import not_a_movie_score, _NOT_A_MOVIE_THRESHOLD
 
     try:
         video_size = video.stat().st_size if video.exists() else 0
@@ -1545,7 +1529,6 @@ def _apply_integrity_check(video: Path, result_row: "PlanRow") -> None:
 
     Ne jamais bloquer le scan pour un check d'integrite (try/except large).
     """
-    from cinesort.domain.integrity_check import check_header
 
     try:
         hdr_valid, _hdr_detail = check_header(video)
@@ -1620,7 +1603,6 @@ def _plan_item(
     IMDb/TMDb -> TMDb fallback -> disambiguation -> PlanRow -> enrichissements
     (sous-titres, non-film, integrite) -> cache store.
     """
-    import cinesort.domain.core as core_mod
 
     is_collection = kind == "collection"
     row_id_prefix = "C" if is_collection else "S"
@@ -1851,8 +1833,6 @@ def _plan_tv_episode(
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> List["PlanRow"]:
     """Build a PlanRow for a TV episode (kind='tv_episode')."""
-    import cinesort.domain.core as core_mod
-    from cinesort.domain.tv_helpers import parse_tv_info
 
     tv = parse_tv_info(folder, video)
     if tv is None:
@@ -1999,7 +1979,6 @@ def plan_multi_roots(
     - Les doublons cross-root sont detectes (warning_flag)
     - Un root inaccessible est skip avec un warning (pas d'erreur fatale)
     """
-    import cinesort.domain.core as core_mod
 
     all_rows: List[core_mod.PlanRow] = []
     all_stats = core_mod.Stats()
@@ -2013,7 +1992,6 @@ def plan_multi_roots(
 
         root_label = f"Root {i + 1}/{len(roots)}"
         # M-1 audit QA 20260429 : detection NAS debranche via timeout 10s.
-        from cinesort.infra.fs_safety import safe_path_exists, is_dir_accessible
 
         exists = safe_path_exists(root, timeout_s=10.0)
         if exists is None:
@@ -2095,12 +2073,10 @@ def find_duplicate_targets(
       pour le sub-helper)
     - `cinesort.domain.title_helpers` (_norm_for_tokens)
     """
-    # Imports lazy pour eviter d'aggraver le cycle au boot tant que les imports
-    # top-level de domain.core ne sont pas tous casses.
-    from cinesort.app import apply_core as _apply_core
-    from cinesort.domain import duplicate_support as _dup
-    from cinesort.domain.core import _norm_win_path, classify_sidecars, windows_safe
-    from cinesort.domain.title_helpers import _norm_for_tokens
+    _apply_core = _apply_core_mod
+    _norm_win_path = core_mod._norm_win_path
+    classify_sidecars = core_mod.classify_sidecars
+    windows_safe = core_mod.windows_safe
 
     def _movie_key(title: str, year: int, edition: Optional[str] = None) -> str:
         return _dup.movie_key(title, year, norm_for_tokens=_norm_for_tokens, edition=edition)
