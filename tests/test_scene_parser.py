@@ -249,5 +249,89 @@ class IntegrationWithCleanTitleGuessTests(unittest.TestCase):
         self.assertEqual(result, "The French Connection 2")
 
 
+class FrenchScenePatternsTests(unittest.TestCase):
+    """Tests pour les patterns FR specifiques (Phase 6.3 improvement).
+
+    Couvre tags scene FR rares (FHD, MS, BULiTT, AZAZE, FW, LOST, BONBON)
+    et editions RESTORED/EXTENDED REMASTERED + multi-tags post-year.
+    """
+
+    def test_french_connection_ii_fhd_release_group(self):
+        # FHD est un release group mais aussi dans NOISE_RE comme tag resolution
+        # -> apres NOISE_RE strippe, dash orphelin reste, loop nettoie
+        self.assertEqual(
+            parse_scene_title("French.Connection.II.1975.MULTi.1080p.BluRay.x264-FHD.mkv"),
+            "French Connection II 1975",
+        )
+
+    def test_goldfinger_restored_multi_web_chain(self):
+        # 3 tokens noise apres l'annee (RESTORED MULTi WEB)
+        self.assertEqual(
+            parse_scene_title("Goldfinger.1964.RESTORED.MULTi.SDR.2160p.WEB.H265-FW.mkv"),
+            "Goldfinger 1964",
+        )
+
+    def test_lotr_extended_remastered_multi_chain(self):
+        self.assertEqual(
+            parse_scene_title(
+                "The.Lord.of.the.Rings.The.Two.Towers.2002.EXTENDED.REMASTERED.MULTi.SDR.2160p.WEB.x265-FW.mkv"
+            ),
+            "The Lord of the Rings The Two Towers 2002",
+        )
+
+    def test_octopussy_dts_hdma_audio_residue(self):
+        # DTS-HDMA contient un dash interne, NOISE_RE strippe DTS-HD, laisse "MA"
+        # qui est dans AUDIO_RESIDUE_RE. AZAZE release group strippe.
+        self.assertEqual(
+            parse_scene_title("Octopussy.1983.MULTi.2160p.WEBDL.DTS-HDMA.5.1.H265-AZAZE.mkv"),
+            "Octopussy 1983",
+        )
+
+    def test_sonic_2_lost_release_group(self):
+        self.assertEqual(
+            parse_scene_title("Sonic.the.Hedgehog.2.2022.MULTI.HDR.2160p.WEB.H265-LOST.mkv"),
+            "Sonic the Hedgehog 2 2022",
+        )
+
+    def test_unholy_trinity_2025_recent(self):
+        # Annee 2025 doit etre detectee par notre regex (NOISE_RE 20[0-9][0-9])
+        self.assertEqual(
+            parse_scene_title("The.Unholy.Trinity.2025.MULTi.SDR.2160p.WEB.H265-BULiTT.mkv"),
+            "The Unholy Trinity 2025",
+        )
+
+    def test_asterix_paren_year_with_vof_hdlight(self):
+        # Annee parenthesee + VOF + HDLight (tags FR)
+        self.assertEqual(
+            parse_scene_title("Asterix et le domaine des dieux (2014) VOF HDLight DTS HD-MA 5.1 x265-MS.mkv"),
+            "Asterix et le domaine des dieux",
+        )
+
+    def test_restored_alone_after_year_stripped(self):
+        self.assertEqual(
+            parse_scene_title("Movie.1990.RESTORED.1080p.BluRay.x264-NoTag.mkv"),
+            "Movie 1990",
+        )
+
+    def test_hdr_sdr_uhd_after_year_stripped(self):
+        # Ces tags peuvent rester apres NOISE_RE si separes par autre chose
+        # mais doivent etre stripes par after-year-noise loop
+        self.assertEqual(
+            parse_scene_title("Film.2020.MULTi.UHD.SDR.x265-NoTag.mkv"),
+            "Film 2020",
+        )
+
+    def test_hdlight_4klight_french_quality_tags(self):
+        # Tags FR specifiques pour les release "light"
+        self.assertEqual(
+            parse_scene_title("Movie.2015.HDLight.x265-Group.mkv"),
+            "Movie 2015",
+        )
+        self.assertEqual(
+            parse_scene_title("Movie.2018.4KLight.HEVC-Group.mkv"),
+            "Movie 2018",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
