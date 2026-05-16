@@ -855,7 +855,10 @@ def apply_rows(
                     ctx.folder_map[str(original_folder)] = str(old_folder)
                     core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
             else:
-                new_folder = core_mod.move_collection_folder(
+                # Appel local (fonction definie dans ce meme module) au lieu
+                # de passer par core_mod.move_collection_folder qui etait un
+                # re-export backward-compat — cf #83 phase A4.
+                new_folder = move_collection_folder(
                     cfg,
                     old_folder,
                     dry_run=dry_run,
