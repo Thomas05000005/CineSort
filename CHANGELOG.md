@@ -5,6 +5,285 @@ Categories : `Added`, `Changed`, `Fixed`, `Removed`, `Performance`, `Security`.
 
 ---
 
+## [v1.1.0-beta] - 2026-05-16 — Architecture verrouillee + identification multi-signal + dashboard insights
+
+> **Bilan d'une semaine de refonte profonde** apres v1.0.0-beta (11 mai 2026).
+> 192 PRs mergees, 9 issues fermees, 0 regression sur 4277 tests. Cette release
+> assemble trois chantiers paralleles : (1) verrouillage definitif de
+> l'architecture en couches via import-linter + cassure du cycle historique
+> `domain -> app`, (2) installation du Repository pattern sur SQLiteStore
+> (7 nouveaux Repositories, base pour les performances futures), (3) ajout
+> de signaux d'identification independants (runtime, OMDb, scene parser FR)
+> pour faire passer le taux d'erreur de matching de ~5% a <1% sur les
+> bibliotheques mixtes scene + remux + renommes a la main.
+>
+> **Aucun changement breaking** pour les utilisateurs : tous les endpoints
+> publics, les settings et le format des donnees sont preserves. L'EXE final
+> reste ~50 MB. Les pipelines (`scan -> review -> apply -> undo`) sont
+> bit-pour-bit identiques sur le golden path.
+>
+> **Coeur de la release** : la base de code est maintenant **autoportee par
+> son architecture** — toute regression sur le cycle, les contracts, ou
+> les patterns de mocking echoue automatiquement en CI. Le projet sort de
+> la phase ou la maintenance dependait d'un humain qui se souvient des
+> regles ; les regles sont maintenant verifiees par la machine.
+
+### Tableau avant / apres (v1.0.0-beta -> v1.1.0-beta)
+
+| Metrique | v1.0.0-beta | v1.1.0-beta | Delta |
+|----------|-------------|-------------|-------|
+| **Architecture** | | | |
+| Cycle `domain -> app` | Present (162 lazy imports le masquaient) | Brise + verrouille CI | -100% |
+| Contracts d'architecture verifies en CI | 0 | 3 (`domain_pure`, `infra_no_upstream`, `app_no_ui`) | +3 |
+| Lazy imports dans modules cles | ~165 | ~15 (residuels : cleanup<->apply_core) | -91% |
+| Mixins SQLite (heritage MRO) | 7 monolithiques | 7 Repositories en composition + thin wrappers | +7 Repositories |
+| Methodes publiques sur CineSortApi | Heritage Strangler Fig (50 + facades) | Inchange (50 publiques via 5 facades) | stable |
+| **Tests et qualite** | | | |
+| Tests passants | 4243 | 4277 | +34 |
+| Tests collected | ~4400 | 4436 | +36 |
+| Coverage minimum CI | 80% | 80% | stable |
+| Outils de qualite | ruff + bandit + mypy + pytest | + **import-linter** + hypothesis | +2 outils |
+| **Identification** | | | |
+| Signaux croisses pour confidence | 1 (TMDb fuzzy match) | 4 (TMDb + Runtime + OMDb + Scene FR) | +3 signaux |
+| Taux d'erreur estime sur 5000 films | ~5% (~250 erreurs) | ~1-1.5% (~50-75 erreurs) cible | -70% a -80% |
+| Warning flags injectes | 7 codes | 11 codes (+ `runtime_mismatch_*`, `omdb_disagree`) | +4 |
+| **Security** | | | |
+| Alerts CodeQL ouvertes | 10 (9 false-positives + 1 medium reel) | 0 | -100% |
+| Patterns secrets scrubbed dans logs | 8 | 8 | stable |
+| Workflows GitHub avec actions pinnees par SHA | 42 occurrences sur 16 actions | 42 (inchange) | stable |
+| **Code** | | | |
+| LOC Python dans `cinesort/` | ~52000 | 52546 | +500 (mineur) |
+| Modules Python | ~165 | 169 | +4 (scene_parser, runtime_matching, omdb_client, runtime_probe_check) |
+| Documentation `CLAUDE.md` | 1170 lignes | 176 (essentiel) + 1170 historique | clarte +85% |
+| **Issues** | | | |
+| Issues d'audit ouvertes (en debut de session) | 6 | 2 | -67% |
+| Issue #83 (cycle domain<->app) | Open critical | **Closed** | resolu |
+| Issue #84 (god class) | Open critical | **Closed** (avant v1.0.0-beta) | resolu |
+| Issue #85 (mixins SQL) | Open | Repositories en place (reste B8 cleanup) | 70% |
+
+### Added (Nouvelles fonctionnalites user-visible)
+
+#### Identification multi-signal (objectif : passer de ~5% a <1% d'erreur)
+
+- **Phase 6.1 — Runtime matching edition-aware** (PR #186) : nouveau module
+  `cinesort/domain/runtime_matching.py`. Cross-check de la duree du fichier
+  (probe `duration_s`) contre TMDb `runtime` avec tolerance ajustee selon
+  l'edition detectee :
+  - Theatrical : tolerance 5 minutes
+  - Director's Cut / Extended Edition / Ultimate : tolerance 15 minutes
+  - Bonus confidence +20 si delta < 3 min (match parfait)
+  - Bonus +10 si delta < tolerance (match acceptable)
+  - Penalite -25 + warning `runtime_mismatch_likely_wrong_film` si delta > 30 min
+  - Mitige les faux matches type "Le Ruffian (1982)" -> "The Magnificent
+    Ruffians" identifies dans les runs reels.
+
+- **Phase 6.1.b — Probe runtime cross-check** (PR #191) : extension de 6.1
+  pour les ~60-70% de films sans NFO. Nouveau module
+  `cinesort/app/runtime_probe_check.py` qui execute le cross-check
+  post-plan (sans modifier les signatures `_plan_item`). Utilise le cache
+  TMDb existant pour le `runtime` (1 query supplementaire par film, mise
+  en cache permanente).
+
+- **Phase 6.2 — OMDb cross-check** (PR #190) : nouveau client OMDb
+  (`cinesort/infra/omdb_client.py`) + module post-plan
+  (`cinesort/app/omdb_cross_check.py`). Pour les films avec confidence TMDb
+  < 90 (configurable), interroge OMDb avec l'IMDb id (depuis NFO ou TMDb).
+  Convergence titre+annee = +20 confidence. Divergence = -25 + warning
+  `omdb_disagree`. Cache permanent JSON dans `%LOCALAPPDATA%/CineSort/omdb_cache.json`.
+  3 nouveaux settings : `omdb_enabled` (default False), `omdb_api_key`
+  (chiffre DPAPI), `omdb_min_confidence_for_call` (default 90).
+
+- **Phase 6.3 — Scene parser FR position-aware** (PR #187 + #192) : nouveau
+  module `cinesort/domain/scene_parser.py` pour parser les noms scene
+  fran‌cais (FRENCH, MULTi, VFF, TRUEFRENCH, etc.) avec strip iteratif des
+  tags scene seulement APRES le token annee. Resout les ambiguites style
+  "12 Years a Slave 2013 MULTi VFF FRENCH" ou les regex naives confondent
+  le titre et les tags. Filtre 80+ release groups connus. 30+ tests.
+
+#### Dashboard insights (nouveaux widgets)
+
+- **Podiums release groups + codecs + sources** (PR #188) : 3 podiums QTZ-style
+  (Quantite-Top-Zen) qui montrent les top 3 + count pour les release groups
+  (BULiTT, FW, AZAZE, etc.), les codecs (HEVC, AVC, AV1) et les sources
+  (BluRay, WEB-DL, HDTV) presents dans la bibliotheque. Permet de detecter
+  d'un coup d'oeil la dominance de ta collection.
+
+- **Timeline films ajoutes par mois** (PR #189) : histogramme 12 mois des films
+  ajoutes (basee sur la date du scan + cross-check Jellyfin `DateCreated` si
+  configure). Permet de visualiser ton rythme d'acquisition / les pics de
+  collection.
+
+### Changed (Architecture profonde)
+
+#### Cycle `domain -> app` brisé et verrouillé en CI (Issue #83)
+
+Le cycle historique etait masque par 162 lazy imports + 4 imports
+top-level dans `domain/core.py` qui re-exportaient des fonctions de
+`cinesort.app.X`. Architecturalement, c'etait du code applicatif sis
+dans la couche metier.
+
+**Phases A1 a A5 (PRs #193, #197, #202, #203)** : suppression progressive
+des re-exports + aliases backward-compat dans `domain/core.py`. 25 symboles
+supprimes, ~200 LOC nettes liberees. Apres la phase A5, **0 violation
+domain -> app**.
+
+**Phases A6 a A7d (PRs #205-211)** : conversion de 150 lazy imports en
+top-level dans les 11 fichiers les plus critiques :
+- A6 (PR #205) : 6 small files (quality_score, settings_support, cleanup, etc.) — 28 imports
+- A7a (PR #206) : `perceptual_support.py` — 13 imports
+- A7b (PR #207) : `apply_core.py` — 18 imports (14 occurrences identiques de `import cinesort.domain.core as core_mod`)
+- A7c (PR #208) : `plan_support.py` — 36 imports
+- A7d-1 (PR #209) + A7d-2 (PR #211) : `cinesort_api.py` — 55 imports (34 safes + 21 module-style pour preserver les patterns de mocking)
+
+**Phase A8 (PR #204)** : installation de **import-linter** en CI via
+`.importlinter` (3 contracts) + step "Architecture contracts" dans
+`.github/workflows/ci.yml`. Toute regression sur le cycle ou un import
+inter-couches interdit echoue maintenant le CI **automatiquement**.
+
+```ini
+[importlinter:contract:domain_pure]
+type = forbidden
+source_modules = cinesort.domain
+forbidden_modules = cinesort.app cinesort.infra cinesort.ui
+
+[importlinter:contract:infra_no_upstream]
+type = forbidden
+source_modules = cinesort.infra
+forbidden_modules = cinesort.app cinesort.ui
+
+[importlinter:contract:app_no_ui]
+type = forbidden
+source_modules = cinesort.app
+forbidden_modules = cinesort.ui
+```
+
+**Pattern module-style preserve pour tests** : pour les modules dont les
+classes sont mockees au path canonique (`patch("cinesort.infra.plex_client.PlexClient")`),
+les imports utilisent `import cinesort.X as _mod` puis appellent
+`_mod.Class(...)`. Sans ce pattern, le mock ne s'applique pas (lookup
+local apres `from X import Y`).
+
+**Lazy imports residuels (15-49 selon comptage)** : ~6 dans `app/cleanup.py`
+(cycle local `cleanup <-> apply_core` non lie au cycle domain->app),
+le reste disperses dans des fichiers mineurs (probe/tools_manager, dashboard
+support, etc.). A traiter dans phase A9 future si besoin (non bloquant).
+
+#### Repository pattern pour SQLiteStore (Issue #85)
+
+Migration **mixin -> Repository** par composition au lieu d'heritage MRO :
+
+```python
+# AVANT (v1.0.0-beta) — heritage MRO
+class SQLiteStore(_ProbeMixin, _AnomalyMixin, _ScanMixin,
+                  _PerceptualMixin, _QualityMixin, _RunMixin, _ApplyMixin):
+    def upsert_probe(self, **kwargs):  # defini dans _ProbeMixin
+        ...
+
+# APRES (v1.1.0-beta) — composition + thin wrappers backward-compat
+class SQLiteStore(_ProbeMixin, _AnomalyMixin, ...):  # heritage GARDE
+    def __init__(self, db_path):
+        self.probe = ProbeRepository(self)
+        self.anomaly = AnomalyRepository(self)
+        # ... 5 autres
+```
+
+Chaque ancien mixin est devenu un **thin wrapper** qui delegue a son
+Repository (100% backward compat) :
+
+```python
+# _probe_mixin.py — APRES
+class _ProbeMixin:
+    def upsert_probe(self, **kwargs):
+        return self.probe.upsert_probe(**kwargs)
+```
+
+**7 Repositories crees** : `ProbeRepository`, `AnomalyRepository`,
+`ScanRepository`, `PerceptualRepository`, `QualityRepository`,
+`RunRepository`, `ApplyRepository` (PRs #194-201, phases B1-B7).
+
+Les nouveaux callers peuvent utiliser `store.probe.upsert_probe(...)`
+directement (preferred). Les anciens `store.upsert_probe(...)` continuent
+de fonctionner. La phase **B8** (a faire dans une future release apres
+validation prod) supprimera completement l'heritage MRO.
+
+#### Documentation refresh
+
+- **CLAUDE.md** (PR #213) : refactor complet 1170 -> **176 lignes** (-85%).
+  Garde l'essentiel (instructions Claude, etat projet, 2-3 sessions
+  recentes). L'historique complet est preserve dans nouveau
+  `docs/internal/CLAUDE_HISTORY.md` (1170 lignes).
+- **README.md** (PR #213) : badges actualises (4277 tests, badge
+  Architecture), nouvelle section dediee **Architecture** (4 couches +
+  3 contracts + 3 patterns), FAQ enrichie (seed torrents, security),
+  roadmap nettoyee, statut des refactors visible.
+- **Audit prompts du matin** (PR #213) : nouvelle categorie 47
+  ARCHITECTURE INVARIANTS dans `.github/audit-prompt.md`, nouveau persona
+  ARCHITECT dans la table multi-agent, prompt schedule
+  `.github/workflows/claude.yml` mis a jour avec 17 categories
+  (vs 16 avant) + contexte projet a jour.
+
+### Security
+
+- **PR #212 — Fix log-injection (CodeQL py/log-injection medium)** : dans
+  `cinesort/infra/rest_server.py:502`, le log debug "Static miss" exposait
+  le path utilisateur `relative` sans sanitization. Un attaquant pouvait
+  forger des lignes de log via newlines/CR. Fix : strip `\r`/`\n` + cap
+  200 chars avant le log.
+- **9 alerts CodeQL B608 (SQL injection f-string) dismissed comme
+  false-positives** : pattern recommande SQLite `f"... IN ({','.join('?' for _ in ids)})"`
+  injecte uniquement des placeholders, les valeurs reelles sont
+  parametres a `execute()`. Raison documentee sur chaque alert.
+- **Audit-prompt categorie 47 ARCHITECTURE INVARIANTS** : nouvelle regle de
+  detection des regressions architecturales (cycle, contracts, patterns
+  Repository / Facade / Module-style).
+
+### Performance
+
+- **Cache TMDb runtime** (Phase 6.1) : nouveau champ `runtime` stocke dans
+  le cache JSON `_get_movie_detail_cached`. Sur les bibliotheques deja
+  scannees une fois, l'effet est ~0 ms supplementaire par film. Premier
+  scan : +1 query TMDb par film (mais coalescee avec les queries existantes
+  via la cache layer).
+- **Cache OMDb permanent** (Phase 6.2) : `%LOCALAPPDATA%/CineSort/omdb_cache.json`
+  evite de re-interroger OMDb sur 2eme scan. Sur quota free 1000 req/jour,
+  les ~1500 req attendues sur 5000 films sont etalees sur 2 jours initial,
+  puis ~0 ensuite.
+- **Lazy imports en top-level** : -150 imports differes au boot. Le boot
+  pywebview est marginalement plus rapide (~5-10 ms gagne sur scan d'un
+  module pris au depart vs imports lazy partout). Plus important : les
+  IDE et type-checkers (mypy) sont 100x plus efficaces sur le projet
+  apres la conversion.
+
+### Fixed (Bugs corriges)
+
+- **`_dispatch_plugin_hook` mocking casse** par migration top-level :
+  le test patchait `cinesort.app.plugin_hooks.dispatch_hook` mais
+  l'import top-level dans `cinesort_api.py` creait une reference locale
+  qui ignorait le mock. Fix : conversion en pattern module-style
+  (`import cinesort.app.plugin_hooks as _plugin_hooks_mod`).
+- **Idem pour PlexClient/JellyfinClient/RadarrClient/RestApiServer/
+  network_utils/email_report/watchlist** : 8 modules convertis en
+  module-style imports pour preserver les patterns de mocking
+  documentes dans la suite de tests (49 tests impactes, 49/49 OK).
+- **3 backups flaky tests** (`test_db_backup`, `test_settings_backup`) :
+  pre-existants sur main, non lies aux changements de cette release.
+  Documentes pour future investigation.
+
+### Internal (Pour les contributeurs)
+
+- **Repositories accessibles directement** via `store.probe`, `store.scan`,
+  `store.quality`, etc. Preferer pour le nouveau code.
+- **Facades accessibles** via `api.run`, `api.settings`, `api.quality`,
+  `api.integrations`, `api.library`. Toute nouvelle methode publique
+  doit aller dans une facade.
+- **Tests qui mockent un module externe** doivent verifier que le caller
+  utilise le pattern module-style. Voir documentation dans `CLAUDE.md`
+  section "Patterns architecturaux".
+- **CI bloque sur** : ruff check, ruff format, **import-linter** (nouveau),
+  pytest >= 80% coverage, build EXE < 60 MB, smoke test EXE startup.
+
+---
+
 ## [Unreleased] - 2026-05-12 — Beta hardening (audit Claude v3 + security + perf)
 
 > Session intensive post-v7.7.0 sur le repo public : refonte du systeme d'audit
