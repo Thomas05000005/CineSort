@@ -461,45 +461,68 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         guessed, _ = mimetypes.guess_type(filepath)
         return guessed or "application/octet-stream"
 
-    def _serve_dashboard_file(self, url_path: str) -> None:
-        """Sert un fichier statique depuis web/dashboard/ avec garde anti path-traversal."""
-        if self.dashboard_root is None or not self.dashboard_root.is_dir():
-            self._respond_json(404, {"ok": False, "message": "Dashboard non disponible."})
-            return
+    def _resolve_static_path(self, url_path: str, prefix: str, root, default_relative: str = "") -> Any:
+        """Helper #174 : resolution + path-traversal pour les statics.
 
-        # Normaliser le chemin demande (retirer le prefixe /dashboard)
-        relative = url_path[len(_DASHBOARD_PREFIX) :]
-        if not relative or relative == "/":
-            relative = "/index.html"
-        # Retirer le leading slash pour construire le chemin
+        Retourne le `Path` resolu si OK, ou `None` apres avoir deja repondu
+        (404 root absente, 400 chemin invalide, 403 traversal, 404 file).
+        Le caller peut donc faire `resolved = self._resolve_static_path(...)`
+        puis `if resolved is None: return`.
+
+        Mutualise les 4 verifications dupliquees entre les 4 handlers
+        `_serve_*_file` (cf audit-bot 2026-05-16 issue #174).
+        """
+        if root is None or not root.is_dir():
+            label = prefix.strip("/") or "static"
+            self._respond_json(404, {"ok": False, "message": f"{label.capitalize()} non disponible."})
+            return None
+
+        relative = url_path[len(prefix) :]
+        if (not relative or relative == "/") and default_relative:
+            relative = default_relative
         relative = relative.lstrip("/")
+        if not relative:
+            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
+            return None
 
-        # Resoudre et verifier que le chemin reste sous dashboard_root
         try:
-            resolved = (self.dashboard_root / relative).resolve()
+            resolved = (root / relative).resolve()
         except (OSError, ValueError):
             self._respond_json(400, {"ok": False, "message": "Chemin invalide."})
-            return
+            return None
 
-        # Garde anti path-traversal : le chemin resolu doit etre un descendant de dashboard_root
         try:
-            resolved.relative_to(self.dashboard_root)
+            resolved.relative_to(root)
         except ValueError:
             self._respond_json(403, {"ok": False, "message": "Acces interdit."})
-            return
+            return None
 
         if not resolved.is_file():
             # S7 : reponse generique — ne pas refleter l'entree utilisateur dans les 404.
-            logger.debug("Dashboard static miss: %s", relative)
+            logger.debug("Static miss (%s): %s", prefix, relative)
             self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
+            return None
 
-        # Lire et servir le fichier
+        return resolved
+
+    def _read_static_bytes(self, resolved, scope: str) -> Any:
+        """Helper #174 : lit le fichier resolu, gere les erreurs IO uniformement."""
         try:
-            content = resolved.read_bytes()
+            return resolved.read_bytes()
         except (OSError, PermissionError) as exc:
-            logger.warning("Dashboard static read error: %s", exc)
+            logger.warning("%s static read error: %s", scope, exc)
             self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
+            return None
+
+    def _serve_dashboard_file(self, url_path: str) -> None:
+        """Sert un fichier statique depuis web/dashboard/ avec garde anti path-traversal."""
+        resolved = self._resolve_static_path(
+            url_path, _DASHBOARD_PREFIX, self.dashboard_root, default_relative="/index.html"
+        )
+        if resolved is None:
+            return
+        content = self._read_static_bytes(resolved, "Dashboard")
+        if content is None:
             return
 
         mime = self._guess_mime(str(resolved))
@@ -567,38 +590,11 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         `utilities.css` avec le desktop. Meme garde anti path-traversal que
         _serve_dashboard_file.
         """
-        shared_root = getattr(self, "shared_root", None)
-        if shared_root is None or not shared_root.is_dir():
-            self._respond_json(404, {"ok": False, "message": "Shared non disponible."})
+        resolved = self._resolve_static_path(url_path, _SHARED_PREFIX, getattr(self, "shared_root", None))
+        if resolved is None:
             return
-
-        relative = url_path[len(_SHARED_PREFIX) :].lstrip("/")
-        if not relative:
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            resolved = (shared_root / relative).resolve()
-        except (OSError, ValueError):
-            self._respond_json(400, {"ok": False, "message": "Chemin invalide."})
-            return
-
-        try:
-            resolved.relative_to(shared_root)
-        except ValueError:
-            self._respond_json(403, {"ok": False, "message": "Acces interdit."})
-            return
-
-        if not resolved.is_file():
-            logger.debug("Shared static miss: %s", relative)
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            content = resolved.read_bytes()
-        except (OSError, PermissionError) as exc:
-            logger.warning("Shared static read error: %s", exc)
-            self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
+        content = self._read_static_bytes(resolved, "Shared")
+        if content is None:
             return
 
         mime = self._guess_mime(str(resolved))
@@ -619,38 +615,11 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         ce qui resout en /views/home.js cote serveur. Meme garde anti
         path-traversal que _serve_shared_file.
         """
-        views_root = getattr(self, "views_root", None)
-        if views_root is None or not views_root.is_dir():
-            self._respond_json(404, {"ok": False, "message": "Views non disponibles."})
+        resolved = self._resolve_static_path(url_path, _VIEWS_PREFIX, getattr(self, "views_root", None))
+        if resolved is None:
             return
-
-        relative = url_path[len(_VIEWS_PREFIX) :].lstrip("/")
-        if not relative:
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            resolved = (views_root / relative).resolve()
-        except (OSError, ValueError):
-            self._respond_json(400, {"ok": False, "message": "Chemin invalide."})
-            return
-
-        try:
-            resolved.relative_to(views_root)
-        except ValueError:
-            self._respond_json(403, {"ok": False, "message": "Acces interdit."})
-            return
-
-        if not resolved.is_file():
-            logger.debug("Views static miss: %s", relative)
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            content = resolved.read_bytes()
-        except (OSError, PermissionError) as exc:
-            logger.warning("Views static read error: %s", exc)
-            self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
+        content = self._read_static_bytes(resolved, "Views")
+        if content is None:
             return
 
         mime = self._guess_mime(str(resolved))
@@ -671,38 +640,11 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         Cache-Control 5 min (les locales bougent rarement, mais on autorise un
         rechargement raisonnable apres edition manuelle des JSON).
         """
-        locales_root = getattr(self, "locales_root", None)
-        if locales_root is None or not locales_root.is_dir():
-            self._respond_json(404, {"ok": False, "message": "Locales non disponibles."})
+        resolved = self._resolve_static_path(url_path, _LOCALES_PREFIX, getattr(self, "locales_root", None))
+        if resolved is None:
             return
-
-        relative = url_path[len(_LOCALES_PREFIX) :].lstrip("/")
-        if not relative:
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            resolved = (locales_root / relative).resolve()
-        except (OSError, ValueError):
-            self._respond_json(400, {"ok": False, "message": "Chemin invalide."})
-            return
-
-        try:
-            resolved.relative_to(locales_root)
-        except ValueError:
-            self._respond_json(403, {"ok": False, "message": "Acces interdit."})
-            return
-
-        if not resolved.is_file():
-            logger.debug("Locales static miss: %s", relative)
-            self._respond_json(404, {"ok": False, "message": "Fichier introuvable."})
-            return
-
-        try:
-            content = resolved.read_bytes()
-        except (OSError, PermissionError) as exc:
-            logger.warning("Locales static read error: %s", exc)
-            self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
+        content = self._read_static_bytes(resolved, "Locales")
+        if content is None:
             return
 
         # Force application/json (les fichiers .json sont les seuls servis ici,
