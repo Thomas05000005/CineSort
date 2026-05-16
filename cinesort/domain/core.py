@@ -56,7 +56,6 @@ from cinesort.domain.title_helpers import (
     title_match_score,
     tokens,
 )
-from cinesort.app.apply_core import apply_rows as _apply_rows_support
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
@@ -1397,21 +1396,11 @@ _find_video_case_insensitive = core_duplicate_support.find_video_case_insensitiv
 
 
 # Cf #83 etape 2 PR 4b : `find_duplicate_targets` et ses 6 helpers DI prives
-# (`_movie_dir_title_year`, `_movie_key`, `_planned_target_folder`,
-# `_existing_movie_folder_index`, `_can_merge_single_without_blocking`,
-# `_can_merge_collection_item_without_blocking`) supprimes. La vraie logique
-# est desormais cote `cinesort.app.plan_support.find_duplicate_targets`
-# (orchestration, droit d'utiliser apply_core directement).
+# supprimes. La vraie logique est cote `cinesort.app.plan_support.find_duplicate_targets`.
+# Cf #83 PR A1 : re-export `from cinesort.app.plan_support import find_duplicate_targets`
+# supprime apres migration des 4 sites tests vers plan_support.find_duplicate_targets.
 #
-# Backward-compat : pour eviter de migrer en force les 4 sites tests qui
-# mockent ou appellent encore `core.find_duplicate_targets`, on re-expose
-# ici en re-export simple. Ce re-export disparaitra dans une PR finale
-# quand on cassera les 4 imports top-level vers app/.
-from cinesort.app.plan_support import find_duplicate_targets  # noqa: E402, F401
-
-
-apply_rows = _apply_rows_support
-# Cf #83 etape 2 PR 4a : 3 aliases prives supprimes (0 caller externe,
-# 0 usage interne dans domain/core.py). Aliases supprimes :
-#   _apply_single, _apply_collection_item, _quarantine_row.
-# Appeler directement core_apply_support.X si besoin a l'avenir.
+# Cf #83 PR A1 : alias `apply_rows = _apply_rows_support` supprime apres
+# migration des 16 sites tests (test_merge_duplicates + test_v7_1_features)
+# vers `apply_core.apply_rows`. Import top-level `_apply_rows_support`
+# egalement supprime (ligne 59).

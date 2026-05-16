@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import cinesort.app.plan_support as plan_support
+import cinesort.app.apply_core as apply_core
 import cinesort.domain.core as core
 
 
@@ -84,7 +85,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|1", src, "Movie", 2020)
         decisions = {"S|1": {"ok": True, "title": "Movie", "year": 2020}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -110,7 +111,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|2", src, "Movie", 2020)
         decisions = {"S|2": {"ok": True, "title": "Movie", "year": 2020}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -144,7 +145,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|3", src, "Movie", 2020)
         decisions = {"S|3": {"ok": True, "title": "Movie", "year": 2020}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -171,7 +172,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|4", src, "Movie", 2020)
         decisions = {"S|4": {"ok": True, "title": "Movie", "year": 2020}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -198,7 +199,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._collection_row("C|1", src_collection, "MovieA.2001.mkv", "Movie A", 2001)
         decisions = {"C|1": {"ok": True, "title": "Movie A", "year": 2001}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -226,7 +227,7 @@ class MergeDuplicatesTests(unittest.TestCase):
             "C|dedup2": {"ok": True, "title": "Movie", "year": 2020},
         }
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row1, row2],
             decisions,
@@ -256,7 +257,7 @@ class MergeDuplicatesTests(unittest.TestCase):
         row = self._single_row("S|6", src, "Movie", 2020)
         decisions = {"S|6": {"ok": True, "title": "Movie", "year": 2020}}
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row],
             decisions,
@@ -297,7 +298,7 @@ class MergeDuplicatesTests(unittest.TestCase):
             "S|8": {"ok": True, "title": "Movie", "year": 2020},
         }
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             self._cfg(),
             [row1, row2],
             decisions,
