@@ -7,20 +7,44 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+import cinesort.domain.perceptual.comparison as _comparison_mod
+from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual
+from cinesort.domain.perceptual.av1_grain_metadata import extract_av1_film_grain_params
+from cinesort.domain.perceptual.comparison import build_comparison_report, compare_per_frame
+from cinesort.domain.perceptual.composite_score import build_perceptual_result
+from cinesort.domain.perceptual.composite_score_v2 import compute_global_score_v2
 from cinesort.domain.perceptual.ffmpeg_runner import resolve_ffmpeg_path
 from cinesort.domain.perceptual.frame_extraction import extract_representative_frames
-from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
-from cinesort.domain.perceptual.grain_analysis import analyze_grain
-from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual
-from cinesort.domain.perceptual.composite_score import build_perceptual_result
+from cinesort.domain.perceptual.grain_analysis import (
+    analyze_grain,
+    analyze_grain_v2,
+    classify_film_era,
+)
+from cinesort.domain.perceptual.hdr_analysis import detect_hdr10_plus_multi_frame
+from cinesort.domain.perceptual.lpips_compare import compute_lpips_comparison
+from cinesort.domain.perceptual.metadata_analysis import (
+    classify_crop,
+    classify_imax,
+    detect_crop_multi_segments,
+    detect_interlacing,
+    detect_judder,
+)
 from cinesort.domain.perceptual.parallelism import (
     resolve_batch_workers,
     resolve_max_workers,
     run_batch_parallel,
     run_parallel_tasks,
 )
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.domain.perceptual.ssim_self_ref import compute_ssim_self_ref
+from cinesort.domain.perceptual.upscale_detection import (
+    classify_fake_4k_fft,
+    combine_fake_4k_verdicts,
+    compute_fft_hf_ratio_median,
+)
+from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
+from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +222,6 @@ def _execute_perceptual_analysis(
 
     # §9 v7.5.0 : film_era calcule une fois en amont, utilise par _audio_task
     # (spectral cutoff contextualise) et disponible pour _video_task si besoin.
-    from cinesort.domain.perceptual.grain_analysis import classify_film_era
-
     film_era = classify_film_era(int(getattr(row, "proposed_year", 0) or 0))
 
     def _video_task() -> tuple:
@@ -228,11 +250,6 @@ def _execute_perceptual_analysis(
         tmdb_meta = _load_tmdb_metadata(api, row)
         # §15 v7.5.0 : utilise analyze_grain_v2 si Grain Intelligence active
         if p_settings.get("grain_intelligence_enabled"):
-            from cinesort.domain.perceptual.av1_grain_metadata import (
-                extract_av1_film_grain_params,
-            )
-            from cinesort.domain.perceptual.grain_analysis import analyze_grain_v2
-
             # Extraction AV1 film grain parameters (opt-in, uniquement si codec av1)
             codec = str(video_info.get("codec") or "").lower()
             av1_info = None
@@ -258,8 +275,6 @@ def _execute_perceptual_analysis(
             )
         # §13 v7.5.0 : SSIM self-referential (detection fake 4K)
         if p_settings["ssim_self_ref_enabled"]:
-            from cinesort.domain.perceptual.ssim_self_ref import compute_ssim_self_ref
-
             ssim_result = compute_ssim_self_ref(
                 ffmpeg_path,
                 str(media_path),
@@ -276,22 +291,12 @@ def _execute_perceptual_analysis(
         if p_settings["hdr10_plus_detection_enabled"]:
             hdr_type = str(video_info.get("hdr_type") or "")
             if hdr_type == "hdr10":
-                from cinesort.domain.perceptual.hdr_analysis import (
-                    detect_hdr10_plus_multi_frame,
-                )
-
                 ffprobe_path_local = str(settings.get("ffprobe_path") or "") or "ffprobe"
                 video_local.has_hdr10_plus_detected = detect_hdr10_plus_multi_frame(
                     ffprobe_path_local,
                     str(media_path),
                 )
         # §7 v7.5.0 : Fake 4K detection FFT 2D + combinaison avec §13 SSIM
-        from cinesort.domain.perceptual.upscale_detection import (
-            classify_fake_4k_fft,
-            combine_fake_4k_verdicts,
-            compute_fft_hf_ratio_median,
-        )
-
         fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height)
         video_local.fft_hf_ratio_median = fft_ratio
         verdict_fft, _conf_fft = classify_fake_4k_fft(
@@ -304,14 +309,6 @@ def _execute_perceptual_analysis(
         video_local.fake_4k_verdict_combined = combined
         video_local.fake_4k_combined_confidence = conf_combined
         # §8 v7.5.0 : Interlacing + Crop + Judder + IMAX (parallele via §1)
-        from cinesort.domain.perceptual.metadata_analysis import (
-            classify_crop,
-            classify_imax,
-            detect_crop_multi_segments,
-            detect_interlacing,
-            detect_judder,
-        )
-
         meta_tasks: Dict[str, Any] = {}
         if p_settings["interlacing_detection_enabled"]:
             meta_tasks["interlace"] = lambda: detect_interlacing(ffmpeg_path, str(media_path), duration_s)
@@ -422,8 +419,6 @@ def _execute_perceptual_analysis(
     gv2_tier: Optional[str] = None
     gv2_payload: Optional[Dict[str, Any]] = None
     try:
-        from cinesort.domain.perceptual.composite_score_v2 import compute_global_score_v2
-
         gv2_result = compute_global_score_v2(
             video_perceptual=video_result,
             audio_perceptual=audio_result,
@@ -646,13 +641,8 @@ def compare_perceptual(
         va = na.get("video") or {}
         vb = nb.get("video") or {}
 
-        from cinesort.domain.perceptual.comparison import (
-            build_comparison_report,
-            compare_per_frame,
-            extract_aligned_frames,
-        )
-
-        aligned = extract_aligned_frames(
+        # NB : accede via module pour permettre patch("cinesort.domain.perceptual.comparison.extract_aligned_frames").
+        aligned = _comparison_mod.extract_aligned_frames(
             ffmpeg_path,
             str(media_a),
             str(media_b),
@@ -673,10 +663,6 @@ def compare_perceptual(
         lpips_result = None
         if p_settings.get("lpips_enabled", True):
             try:
-                from cinesort.domain.perceptual.lpips_compare import (
-                    compute_lpips_comparison,
-                )
-
                 lpips_result = compute_lpips_comparison(aligned)
             except ImportError:
                 logger.debug("LPIPS module indisponible")
@@ -790,10 +776,9 @@ def get_perceptual_compare_frames(
         va = na.get("video") or {}
         vb = nb.get("video") or {}
 
-        from cinesort.domain.perceptual.comparison import compute_pixel_diff, extract_aligned_frames
-
         p_settings = _build_settings_dict(settings)
-        aligned = extract_aligned_frames(
+        # NB : accede via module pour permettre patch("cinesort.domain.perceptual.comparison.extract_aligned_frames").
+        aligned = _comparison_mod.extract_aligned_frames(
             ffmpeg_path,
             str(media_a),
             str(media_b),
@@ -813,7 +798,7 @@ def get_perceptual_compare_frames(
         # Rank par mean_diff descendant et prend les top N.
         ranked = []
         for frame in aligned:
-            diff = compute_pixel_diff(frame["pixels_a"], frame["pixels_b"])
+            diff = _comparison_mod.compute_pixel_diff(frame["pixels_a"], frame["pixels_b"])
             if diff is None:
                 continue
             ranked.append((diff["mean_diff"], diff, frame))
@@ -905,9 +890,6 @@ def enrich_quality_report_with_perceptual(
 
 def _build_settings_dict(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Extrait les parametres perceptuels depuis les settings."""
-    # V4-05 (Polish Total v7.7.0) : import tardif pour eviter cycle.
-    from cinesort.ui.api.settings_support import _normalize_composite_score_version
-
     return {
         "enabled": bool(settings.get("perceptual_enabled")),
         "auto_on_scan": bool(settings.get("perceptual_auto_on_scan")),
@@ -943,8 +925,6 @@ def _build_settings_dict(settings: Dict[str, Any]) -> Dict[str, Any]:
 
 def _load_probe(api: Any, store: Any, run_row: Any, media_path: Any) -> Dict[str, Any]:
     """Charge la probe existante pour un fichier media."""
-    from cinesort.infra.probe import ProbeService
-
     probe_settings = api._effective_probe_settings_for_runtime(run_row)
     probe = ProbeService(store)
     return probe.probe_file(media_path=media_path, settings=probe_settings)
