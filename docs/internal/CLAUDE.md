@@ -16,7 +16,42 @@ Prefere les refactors incrementaux. Preserve le comportement existant sauf deman
 
 ---
 
-## SESSION 16 mai 2026 — Cleanup audit-bot + #94 + #83 etape 2 (PRs 1-2) ✅
+## SESSION 16 mai 2026 (soir) — #83 etape 2 COMPLETE (PRs 3, 4a, 4b) ✅
+
+3 PRs supplementaires apres le cleanup matinal (#182, #183, #184). **#83 etape 2 est desormais terminee** en 5 PRs cumulees (#179, #180, #182, #183, #184).
+
+### Bilan #83 etape 2 (5 PRs)
+
+| PR | Sujet | Suppressions |
+|---|---|---|
+| #179 | wrappers triviaux `_sha1_quick*` | 3 fonctions |
+| #180 | aliases dead code | 12 aliases |
+| #182 | point d'entree `find_duplicate_targets` cote app | 0 (architecturale) |
+| #183 | aliases dead code post-apply | 3 aliases |
+| #184 | find_duplicate_targets full migration cote app | 6 helpers DI + 1 alias |
+
+**Total : 25 symboles supprimes dans `domain/core.py`, ~200 LOC nettes liberees.**
+
+### Pourquoi c'est important
+
+Avant : `domain/core.py` contenait ~25 wrappers triviaux et helpers DI qui re-exportaient ou pre-remplissaient des fonctions de `cinesort.app.apply_core`. Architecturalement, c'etait du code applicatif (orchestration) sis dans une couche metier (domain). Le cycle `domain → app` etait masque par ces wrappers.
+
+Apres : `find_duplicate_targets` vit cote `app/plan_support.py` avec pre-remplissage local des 7 helpers DI vers `domain.duplicate_support`. La logique applicative est dans la couche app, le metier reste dans la couche domain. Le cycle apparent est reduit.
+
+### Reste #83 (etapes 3-4, deferred)
+
+- **Etape 3** : convertir les 179 lazy imports vers top-level apres avoir casse les 4 imports `cinesort.app.X` dans `domain/core.py`. Demande encore un audit fonction par fonction. ~1-2 j.
+- **Etape 4** : installer `import-linter` en CI avec contracts `domain ne peut PAS importer app`. ~2 h.
+
+### Restant total (3 issues)
+
+- **#14** umbrella audit (a laisser ouverte)
+- **#83 etapes 3-4** : ~2 j (multi-PR, pas urgent)
+- **#85** mixins SQLite : 5-7 j (gated sur #83 complet)
+
+---
+
+## SESSION 16 mai 2026 (matin) — Cleanup audit-bot + #94 + #83 etape 2 (PRs 1-2) ✅
 
 9 PRs mergees (#172/#175/#176/#177/#178/#179/#180) + 5 issues fermees (#94, #173, #174) + premieres etapes #83 etape 2.
 
