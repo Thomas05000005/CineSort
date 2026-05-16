@@ -2,12 +2,11 @@
 
 > **Statut au 10 mai 2026** : ce document couvre l'historique V1 → V4 (avril 2026).
 > Les versions ulterieures (**V5, V5B, V5C, V6, V7.5, V7.6, V7.7**) sont documentees
-> dans [`CHANGELOG.md`](CHANGELOG.md) et la section "Historique des audits" de
-> [`CLAUDE.md`](CLAUDE.md).
+> dans [`../../CHANGELOG.md`](../../CHANGELOG.md) et [`CLAUDE.md`](./CLAUDE.md).
 >
 > Pour le **plan de remediation v7.8.0** (suite a l'audit exhaustif du 10 mai 2026),
-> voir [`audit/REMEDIATION_PLAN_v7_8_0.md`](audit/REMEDIATION_PLAN_v7_8_0.md) et
-> son tracking [`audit/TRACKING_v7_8_0.md`](audit/TRACKING_v7_8_0.md).
+> voir [`audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md`](audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md) et
+> son tracking [`audit_v7_8_0/TRACKING_v7_8_0.md`](audit_v7_8_0/TRACKING_v7_8_0.md).
 
 Derniere mise a jour : 10 mai 2026 (header) — contenu historique V1-V4 conserve pour reference.
 

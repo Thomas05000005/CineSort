@@ -87,7 +87,7 @@ Run `25749726912` (14 min, 130 modules, 4 personas paralleles) :
 
 ## Phase Polish Total v7.7.0 (4 mai 2026)
 
-Branche `polish_total_v7_7_0` depuis `audit_qa_v7_6_0_dev_20260428`. Plan d'execution dans [`OPERATION_POLISH_V7_7_0.md`](OPERATION_POLISH_V7_7_0.md). Tracking vivant dans `OPERATION_POLISH_V7_7_0_PROGRESS.md`. Cible note 9.2/10 -> 9.9-10/10.
+Branche `polish_total_v7_7_0` depuis `audit_qa_v7_6_0_dev_20260428`. Plan d'execution dans [`operations/v7_7_0/OPERATION_POLISH_V7_7_0.md`](operations/v7_7_0/OPERATION_POLISH_V7_7_0.md). Tracking vivant dans `operations/v7_7_0/OPERATION_POLISH_V7_7_0_PROGRESS.md`. Cible note 9.2/10 -> 9.9-10/10.
 
 ### Vague 0 — Preparation (4 mai 2026)
 
@@ -420,7 +420,7 @@ e8bbc98 fix(security): require strong token for REST LAN exposure (H-4)
 
 ## Phase Audit Remediation v7.8.0 — 10-11 mai 2026
 
-**Branche** : `polish_total_v7_7_0`. **Origine** : audit exhaustif 6 agents parallèles sur la branche post-v7.7.0 (~240 findings vérifiés). Plan complet dans [audit/REMEDIATION_PLAN_v7_8_0.md](audit/REMEDIATION_PLAN_v7_8_0.md), tracking dans [audit/TRACKING_v7_8_0.md](audit/TRACKING_v7_8_0.md).
+**Branche** : `polish_total_v7_7_0`. **Origine** : audit exhaustif 6 agents parallèles sur la branche post-v7.7.0 (~240 findings vérifiés). Plan complet dans [audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md](audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md), tracking dans [audit_v7_8_0/TRACKING_v7_8_0.md](audit_v7_8_0/TRACKING_v7_8_0.md).
 
 ### Vérité d'abord — Phase 0
 
