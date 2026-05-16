@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 # manuelle de chaque deplacement.
 #
 # TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation.
-import cinesort.app.apply_core as core_apply_support
 import cinesort.domain.duplicate_support as core_duplicate_support
 from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
@@ -1318,38 +1317,15 @@ def _mark_skip(res: ApplyResult, reason: str) -> None:
     res.skip_reasons[key] = int(res.skip_reasons.get(key, 0)) + 1
 
 
-_build_apply_context = core_apply_support.build_apply_context
-_record_apply_op = core_apply_support.record_apply_op
-# Cf #83 etape 2 PR 2 : aliases _is_managed_merge_file et _is_sidecar_metadata
-# supprimes (0 caller externe, 0 usage interne). Appeler directement
-# core_apply_support.is_managed_merge_file / .is_sidecar_metadata si besoin.
-
-
-# Cf issue #83 etape 2 PR 1 (2026-05-16) : ces 3 wrappers triviaux
-# (_sha1_quick, _sha1_quick_cached, _files_identical_quick) etaient des
-# duplications de cinesort/app/apply_core.py:163-225 (sha1_quick,
-# sha1_quick_cached, files_identical_quick). Supprimes pour casser le cycle
-# domain -> app : appeler ces helpers depuis app/apply_core (orchestration
-# filesystem) directement, pas via le re-export domain. Callers migres :
-# - cinesort/app/plan_support.py:221 -> apply_core.sha1_quick(path)
-# - tests/test_core_heuristics.py:268-291 -> mock apply_core.sha1_quick
-
-_quick_hash_cache_key = core_apply_support.quick_hash_cache_key
-
-
-_unique_path = core_apply_support.unique_path
-# Cf #83 etape 2 PR 2 : 12 aliases prives supprimes (0 caller externe,
-# 0 usage interne dans domain/core.py). Ils dupliquaient sans valeur ajoutee
-# des helpers de cinesort/app/apply_core.py — appeler core_apply_support.X
-# directement OU bouger vers app/ si necessaire dans une PR future.
-# Aliases supprimes :
-#   _mkdir_counted, _prune_empty_dirs, _legacy_collection_root,
-#   _resolve_collection_folder_after_migration, _migrate_legacy_collection_root,
-#   _move_to_review_bucket, _safe_relative_context, _conflict_context,
-#   _move_file_with_collision_policy, _merge_dir_safe, _unique_path_dup,
-#   _is_managed_merge_file, _is_sidecar_metadata (cf bloc precedent).
-_is_dir_empty = core_apply_support.is_dir_empty
-move_collection_folder = core_apply_support.move_collection_folder
+# Cf #83 phase A4 : 6 aliases backward-compat apply_core supprimes :
+#   _build_apply_context, _record_apply_op, _quick_hash_cache_key,
+#   _unique_path, _is_dir_empty, move_collection_folder
+# 1 caller externe migre (tests/test_v7_1_features deja utilise apply_core
+# direct depuis A1). 2 usages internes migres :
+# - cinesort/app/apply_core.py:858 core_mod.move_collection_folder -> local
+# - cinesort/app/plan_support.py:204 core_mod._quick_hash_cache_key -> apply_core.quick_hash_cache_key
+# Si besoin futur : appeler core_apply_support.X (alias module qui reste) ou
+# importer depuis cinesort.app.apply_core en top-level.
 
 
 def is_under_collection_root(cfg: Config, folder: Path) -> bool:

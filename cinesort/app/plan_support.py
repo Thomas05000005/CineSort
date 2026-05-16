@@ -195,13 +195,15 @@ def resolve_incremental_quick_hash(
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
 ) -> str:
-    import cinesort.domain.core as core_mod
+    # Cf #83 phase A4 : utilise apply_core.quick_hash_cache_key directement
+    # au lieu de l'alias backward-compat core._quick_hash_cache_key (supprime).
+    from cinesort.app.apply_core import quick_hash_cache_key
 
     try:
         stat_result = path.stat()
     except (OSError, PermissionError, FileNotFoundError):
         return ""
-    cache_key = core_mod._quick_hash_cache_key(path)
+    cache_key = quick_hash_cache_key(path)
     if cache_key and run_hash_cache is not None and cache_key in run_hash_cache:
         return str(run_hash_cache.get(cache_key) or "")
     if scan_index is not None and hasattr(scan_index, "get_incremental_file_hash"):
