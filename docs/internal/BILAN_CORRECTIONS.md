@@ -682,7 +682,7 @@ Avant ce fix, CLAUDE.md revendiquait "49.84 MB testés" sans **aucune validation
 - Hypothèses écartées : `MIN_VIDEO_BYTES` mute (tous tests le restaurent), `_NFO_SIG_CACHE` (keyed par path string), `_resolve_path_cached` (LRU keyed pareil), `test_import_cycle_guard.py` (snapshot/restore complet).
 - Hypothèse restante : singleton dans `CineSortApi.__init__`, `JobRunner` thread daemons, ou `_RECONCILED_STATE_DIRS` qui croît sans cleanup.
 
-**Délivré** : [`audit/results/v7_8_0_inter_test_pollution.md`](audit/results/v7_8_0_inter_test_pollution.md) (rapport détaillé pour la session v7.9.0).
+**Délivré** : [`audit_v7_8_0/results/v7_8_0_inter_test_pollution.md`](audit_v7_8_0/results/v7_8_0_inter_test_pollution.md) (rapport détaillé pour la session v7.9.0).
 
 **Fix réel** = bisection complète + fix root cause = chantier 1-2 jours, reporté.
 
@@ -740,7 +740,7 @@ Avant ce fix, CLAUDE.md revendiquait "49.84 MB testés" sans **aucune validation
   - `apply_settings_defaults` 180L → **77L** (–57 %, table déclarative 100 entrées)
 - **0 vulnérabilité dépendances** (pip-audit clean)
 - **0 régression imputable** (vérifié par git stash + re-run)
-- **Chantier inter-test pollution** investigué + documenté : 26 fails pré-existants liés à un état global cross-module non-réinitialisé. Bisection + fix = session dédiée v7.9.0. Détail : [audit/results/v7_8_0_inter_test_pollution.md](audit/results/v7_8_0_inter_test_pollution.md)
+- **Chantier inter-test pollution** investigué + documenté : 26 fails pré-existants liés à un état global cross-module non-réinitialisé. Bisection + fix = session dédiée v7.9.0. Détail : [audit_v7_8_0/results/v7_8_0_inter_test_pollution.md](audit_v7_8_0/results/v7_8_0_inter_test_pollution.md)
 
 ### Vérification non-régression — méthode
 

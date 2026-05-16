@@ -96,7 +96,7 @@ Si une release contient un bug critique decouvert apres publication :
 ## Versions historiques
 
 Historique complet : voir [`CHANGELOG.md`](../CHANGELOG.md).
-Audits et bilans : voir [`BILAN_CORRECTIONS.md`](../BILAN_CORRECTIONS.md) et `docs/internal/audits/`.
+Audits et bilans : voir [`internal/BILAN_CORRECTIONS.md`](internal/BILAN_CORRECTIONS.md) et `internal/audits/`.
 
 ## Checklist release express
 
