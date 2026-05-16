@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import cinesort.ui.api.cinesort_api as backend
+import cinesort.app.apply_core as apply_core
 import cinesort.domain.core as core
 from cinesort.app.apply_core import build_apply_context
 
@@ -89,7 +90,7 @@ class V71FeaturesTests(unittest.TestCase):
             collection_root_name="_Collection",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [row],
             decisions,
@@ -117,7 +118,7 @@ class V71FeaturesTests(unittest.TestCase):
             empty_folders_scope="root_all",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [],
             {},
@@ -150,7 +151,7 @@ class V71FeaturesTests(unittest.TestCase):
             empty_folders_scope="touched_only",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [row],
             decisions,
@@ -180,7 +181,7 @@ class V71FeaturesTests(unittest.TestCase):
             cleanup_residual_folders_scope="root_all",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [],
             {},
@@ -208,7 +209,7 @@ class V71FeaturesTests(unittest.TestCase):
             cleanup_residual_folders_scope="root_all",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [],
             {},
@@ -235,7 +236,7 @@ class V71FeaturesTests(unittest.TestCase):
             cleanup_residual_folders_scope="root_all",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [],
             {},
@@ -267,7 +268,7 @@ class V71FeaturesTests(unittest.TestCase):
             cleanup_residual_folders_scope="touched_only",
         ).normalized()
 
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [row],
             decisions,
@@ -290,7 +291,7 @@ class V71FeaturesTests(unittest.TestCase):
         decisions = {"S|gravity": {"ok": True, "title": "Gravity", "year": 2013}}
 
         cfg = core.Config(root=self.root, collection_root_name="_Collection").normalized()
-        result = core.apply_rows(
+        result = apply_core.apply_rows(
             cfg,
             [row],
             decisions,
