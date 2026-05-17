@@ -6,6 +6,8 @@ import unicodedata
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
+from cinesort.domain.scene_parser import parse_scene_title
+
 logger = logging.getLogger(__name__)
 
 
@@ -191,8 +193,6 @@ def clean_title_guess(text: str) -> str:
     # Phase 6.3 : delegue au scene_parser (regex etendues, edition strip,
     # release group strip, audio residue). Fallback historique conserve si
     # le parser retourne une chaine vide.
-    from cinesort.domain.scene_parser import parse_scene_title
-
     parsed = parse_scene_title(text)
     if parsed:
         return parsed

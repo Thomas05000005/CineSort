@@ -4,6 +4,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.perceptual.hdr_analysis import (
+    analyze_dv_from_frame_data,
+    analyze_hdr_from_frame_data,
+)
 from cinesort.domain.probe_models import (
     PROBE_QUALITY_FAILED,
     PROBE_QUALITY_FULL,
@@ -300,11 +304,6 @@ def _ffprobe_video_dict(
 
     # §5 v7.5.0 : HDR metadata classification + validation (Pass 1)
     # §6 v7.5.0 : Dolby Vision profile classification (meme side_data_list)
-    from cinesort.domain.perceptual.hdr_analysis import (
-        analyze_dv_from_frame_data,
-        analyze_hdr_from_frame_data,
-    )
-
     hdr_info = analyze_hdr_from_frame_data(video_stream, first_frame)
     dv_info = analyze_dv_from_frame_data(video_stream, first_frame)
 
