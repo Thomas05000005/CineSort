@@ -20,6 +20,8 @@ import traceback
 from pathlib import Path
 from typing import Iterable, List, Optional, Pattern
 
+from cinesort.infra.log_context import attach_filter_to_handler
+
 # Patterns ordonnes par specificite. Utilisent un capture group pour
 # preserver la prefixe et n'effacer que la valeur.
 #
@@ -220,13 +222,8 @@ def install_rotating_log(
     handler.addFilter(SecretsScrubFilter())
     # V3-04 polish v7.7.0 : injecter run_id + request_id dans chaque record
     # ecrit dans le fichier (le filter sur le root logger ne suffit pas pour
-    # les records propages vers ce handler). Import local pour eviter cycle.
-    try:
-        from cinesort.infra.log_context import attach_filter_to_handler
-
-        attach_filter_to_handler(handler)
-    except ImportError:  # pragma: no cover — defensive
-        pass
+    # les records propages vers ce handler).
+    attach_filter_to_handler(handler)
 
     root = logging.getLogger()
     root.addHandler(handler)

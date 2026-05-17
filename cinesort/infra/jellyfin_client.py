@@ -9,6 +9,7 @@ from typing import Any, Optional
 import requests
 
 from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra.network_utils import is_safe_external_url
 
 _JELLYFIN_CLIENT_NAME = "CineSort"
 _JELLYFIN_CLIENT_VERSION = "1.0"
@@ -37,8 +38,6 @@ def _normalize_url(url: str) -> str:
     distant reconfigure jellyfin_url via REST API. Leve JellyfinError si
     invalide pour que le caller affiche un message clair a l'utilisateur.
     """
-    from cinesort.infra.network_utils import is_safe_external_url
-
     url = (url or "").strip().rstrip("/")
     # Cf issue #70 : ne forcer http:// QUE si l'URL n'a pas du tout de scheme.
     # Si l'URL contient deja un scheme suspect (file:, ftp:, gopher:), on le

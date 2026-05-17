@@ -23,10 +23,12 @@ from typing import Any, Dict, List, Optional, Set
 
 from cinesort.infra.log_context import (
     clear_request_id,
+    get_request_id,
     reset_remote_request,
     set_remote_request,
     set_request_id,
 )
+from cinesort.infra.network_utils import build_dashboard_url, get_local_ip
 
 # Cf issues #72 + #73 : IPs considerees locales (loopback IPv4 + IPv6). Toute
 # autre IP declenche le flag remote_request via ContextVar pour que les handlers
@@ -429,8 +431,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         do_GET/do_POST), on emet quand meme un id genere a la volee pour ne
         jamais omettre le header.
         """
-        from cinesort.infra.log_context import get_request_id
-
         rid = get_request_id() or uuid.uuid4().hex[:8]
         with contextlib.suppress(AttributeError, OSError):
             self.send_header("X-Request-ID", rid)
@@ -1035,8 +1035,6 @@ class RestApiServer:
         logger.info("REST API started on %s://%s:%d (%d endpoints)", protocol, self._host, self._port, len(methods))
 
         # Detecter l'IP locale et construire l'URL du dashboard
-        from cinesort.infra.network_utils import build_dashboard_url, get_local_ip
-
         local_ip = get_local_ip()
         self.dashboard_url = build_dashboard_url(local_ip, self._port, self._is_https)
         logger.info("REST: dashboard accessible a %s", self.dashboard_url)

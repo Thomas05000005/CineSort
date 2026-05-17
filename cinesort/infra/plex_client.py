@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
 
@@ -40,8 +41,6 @@ def _normalize_url(url: str) -> str:
     Cf issue #70 : valide aussi que l'URL ne pointe pas vers un endpoint
     cloud metadata. Leve PlexError si invalide.
     """
-    from cinesort.infra.network_utils import is_safe_external_url
-
     url = (url or "").strip().rstrip("/")
     if url and "://" not in url:
         url = f"http://{url}"
