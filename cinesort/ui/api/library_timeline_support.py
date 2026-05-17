@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra import state
+from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -112,8 +113,6 @@ def _get_jellyfin_date_map(api: Any, settings: Dict[str, Any]) -> Dict[str, str]
     if not settings.get("jellyfin_enabled"):
         return {}
     try:
-        from cinesort.infra.jellyfin_client import JellyfinClient
-
         client = JellyfinClient(
             base_url=settings.get("jellyfin_url", ""),
             api_key=settings.get("jellyfin_api_key", ""),

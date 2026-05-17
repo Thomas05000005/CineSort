@@ -7,9 +7,10 @@ from typing import Any, Callable, Dict, Optional
 
 import cinesort.infra.state as state
 from cinesort.infra.probe import ProbeService
+from cinesort.infra.probe.auto_install import install_all
+from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_probe_backend, normalize_user_path
-from cinesort.ui.api._responses import err as _err_response
 
 
 def probe_settings_from_dict(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -333,8 +334,6 @@ def auto_install_probe_tools(
 ) -> Dict[str, Any]:
     """Telecharge ffprobe + MediaInfo via HTTP et les installe dans tools/."""
     import logging as _logging
-
-    from cinesort.infra.probe.auto_install import install_all
 
     _logger = _logging.getLogger(__name__)
     try:

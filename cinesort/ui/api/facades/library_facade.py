@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from cinesort.ui.api import library_podiums_support, library_timeline_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -130,8 +131,6 @@ class LibraryFacade(_BaseFacade):
 
         Cf cinesort.ui.api.library_podiums_support.get_library_podiums.
         """
-        from cinesort.ui.api import library_podiums_support
-
         return library_podiums_support.get_library_podiums(self._api, run_id=run_id, limit=limit)
 
     def get_library_timeline(self, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
@@ -139,6 +138,4 @@ class LibraryFacade(_BaseFacade):
 
         Cf cinesort.ui.api.library_timeline_support.get_library_timeline.
         """
-        from cinesort.ui.api import library_timeline_support
-
         return library_timeline_support.get_library_timeline(self._api, months=months, run_id=run_id)

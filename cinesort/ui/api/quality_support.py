@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.conversions import to_bool
 from cinesort.domain.i18n_messages import t
+from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +149,6 @@ def _prewarm_probe_cache(api: Any, run_id: str, row_ids: List[str]) -> int:
     Echec silencieux : si quelque chose plante, on continue en mono-thread.
     """
     try:
-        from cinesort.infra.probe import ProbeService
-
         if len(row_ids) <= 1:
             return 0  # mono-thread plus rapide pour un seul element
         found = api._find_run_row(run_id)
@@ -159,8 +159,6 @@ def _prewarm_probe_cache(api: Any, run_id: str, row_ids: List[str]) -> int:
         if rs and rs.rows:
             rows = rs.rows
         else:
-            from cinesort.ui.api.settings_support import normalize_user_path
-
             state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
             run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
             rows = api._load_rows_from_plan_jsonl(run_paths)
