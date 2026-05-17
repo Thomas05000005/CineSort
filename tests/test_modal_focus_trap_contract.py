@@ -70,9 +70,7 @@ class DashboardModalFocusTrapContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         root = Path(__file__).resolve().parents[1]
-        cls.modal_js = (
-            root / "web" / "dashboard" / "components" / "modal.js"
-        ).read_text(encoding="utf-8")
+        cls.modal_js = (root / "web" / "dashboard" / "components" / "modal.js").read_text(encoding="utf-8")
 
     def test_dashboard_modal_exports_trap_focus(self) -> None:
         # Export ESM nomme : trapFocus(modalEl).
@@ -80,7 +78,7 @@ class DashboardModalFocusTrapContractTests(unittest.TestCase):
         # Couvre tous les selecteurs focusables WCAG-compliant.
         self.assertIn("'a[href]'", self.modal_js)
         self.assertIn("'button:not([disabled])'", self.modal_js)
-        self.assertIn('\'input:not([disabled]):not([type="hidden"])\'', self.modal_js)
+        self.assertIn("'input:not([disabled]):not([type=\"hidden\"])'", self.modal_js)
         self.assertIn("'select:not([disabled])'", self.modal_js)
         self.assertIn("'textarea:not([disabled])'", self.modal_js)
         self.assertIn("'[tabindex]:not([tabindex=\"-1\"])'", self.modal_js)
