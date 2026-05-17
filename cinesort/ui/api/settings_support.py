@@ -73,8 +73,16 @@ def _backup_settings_before_write(settings_path: Path) -> Optional[Path]:
         return None
     # Microsecondes pour rester unique meme si plusieurs writes dans la meme
     # seconde (sinon les backups s'ecrasent et la rotation perd des fichiers).
+    # Sur Windows, la granularite du timer systeme est ~15 ms, donc plusieurs
+    # `datetime.now()` rapproches peuvent retourner les memes microsecondes :
+    # on resout les collisions de nom en ajoutant un suffixe `-N`.
     ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    backup_path = settings_path.parent / f"{settings_path.name}{SETTINGS_BACKUP_PREFIX}{ts}"
+    base_name = f"{settings_path.name}{SETTINGS_BACKUP_PREFIX}{ts}"
+    backup_path = settings_path.parent / base_name
+    counter = 1
+    while backup_path.exists():
+        backup_path = settings_path.parent / f"{base_name}-{counter}"
+        counter += 1
     try:
         shutil.copy2(settings_path, backup_path)
         return backup_path
@@ -88,9 +96,15 @@ def _rotate_settings_backups(settings_path: Path, keep: int = DEFAULT_SETTINGS_B
     Retourne le nombre de backups supprimes.
     """
     pattern = f"{settings_path.name}{SETTINGS_BACKUP_PREFIX}*"
+    # Cle secondaire `p.name` : sur Windows, st_mtime peut etre identique pour
+    # plusieurs fichiers crees a < 15 ms d'intervalle. Le nom contient le
+    # timestamp formate (et l'eventuel suffixe `-N`), donc l'ordre lexico
+    # decroissant des noms correspond a l'ordre temporel quand les mtimes
+    # collisionnent. Sans cette cle, la rotation pouvait supprimer le mauvais
+    # fichier (ordre non-deterministe).
     backups = sorted(
         settings_path.parent.glob(pattern),
-        key=lambda p: p.stat().st_mtime,
+        key=lambda p: (p.stat().st_mtime, p.name),
         reverse=True,
     )
     deleted = 0
@@ -1542,7 +1556,9 @@ def list_settings_backups(state_dir: Path) -> List[Dict[str, Any]]:
     target_path = settings_path(state_dir)
     pattern = f"{target_path.name}{SETTINGS_BACKUP_PREFIX}*"
     out: List[Dict[str, Any]] = []
-    for p in sorted(target_path.parent.glob(pattern), key=lambda x: x.stat().st_mtime, reverse=True):
+    # Cle secondaire `p.name` : voir `_rotate_settings_backups` pour la
+    # justification (collisions de mtimes a < 15 ms sur Windows).
+    for p in sorted(target_path.parent.glob(pattern), key=lambda x: (x.stat().st_mtime, x.name), reverse=True):
         st = p.stat()
         out.append({"path": str(p), "name": p.name, "mtime": st.st_mtime, "size": st.st_size})
     return out

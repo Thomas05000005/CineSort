@@ -91,8 +91,14 @@ def list_backups(backup_dir: Path, *, stem_filter: Optional[str] = None) -> List
     if stem_filter:
         prefix = f"{stem_filter}."
         candidates = [p for p in candidates if p.name.startswith(prefix)]
-    # Tri par mtime decroissant (plus recent d'abord)
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Tri par mtime decroissant (plus recent d'abord), avec le nom de fichier
+    # en cle secondaire (decroissante elle aussi : le nom contient le timestamp
+    # formate donc l'ordre alphabetique des noms correspond a l'ordre temporel).
+    # Pourquoi la cle secondaire : sur Windows, st_mtime peut etre identique
+    # entre plusieurs backups crees a < 15 ms d'intervalle (granularite du
+    # timer systeme), ce qui rendait l'ordre non-deterministe et faisait
+    # supprimer/retourner le mauvais fichier en rotation.
+    candidates.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
     return candidates
 
 
@@ -123,6 +129,37 @@ def rotate_backups(
     return len(backups) - len(deleted), deleted
 
 
+def _resolve_unique_backup_path(backup_dir: Path, base_name: str) -> Path:
+    """Retourne un chemin unique dans `backup_dir` derive de `base_name`.
+
+    Si `base_name` n'existe pas, retourne `backup_dir/base_name`. Sinon insere
+    un suffixe `-N` (1, 2, ...) avant le `.bak` final jusqu'a trouver un nom
+    libre.
+
+    Pourquoi : sur Windows, `time.time()` a une granularite du timer systeme
+    d'environ 15 ms (et `time.time_ns()` aussi). Plusieurs backups declenches
+    dans la meme tranche de 15 ms partagent les memes microsecondes formatees
+    et donc le meme nom — la seconde ecriture ecrase silencieusement la
+    premiere, ce qui fait perdre un backup. Ce helper garantit qu'aucun
+    backup precedent ne sera ecrase, meme en rafale.
+    """
+    candidate = Path(backup_dir) / base_name
+    if not candidate.exists():
+        return candidate
+    # Insere `-N` avant le suffixe .bak (preserve l'extension et le tri par nom)
+    if base_name.endswith(BACKUP_SUFFIX):
+        stem_part = base_name[: -len(BACKUP_SUFFIX)]
+    else:
+        stem_part = base_name
+    counter = 1
+    while True:
+        alt_name = f"{stem_part}-{counter}{BACKUP_SUFFIX}"
+        alt = Path(backup_dir) / alt_name
+        if not alt.exists():
+            return alt
+        counter += 1
+
+
 def backup_db_with_rotation(
     src_path: Path,
     backup_dir: Path,
@@ -147,7 +184,9 @@ def backup_db_with_rotation(
 
     stem = src.stem  # ex: "cinesort" pour cinesort.sqlite
     backup_name = _format_backup_name(stem, trigger)
-    backup_path = Path(backup_dir) / backup_name
+    backup_dir = Path(backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = _resolve_unique_backup_path(backup_dir, backup_name)
 
     try:
         backup_db(src, backup_path)
