@@ -93,7 +93,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         line_count = sum(1 for line in plan_jsonl.read_text(encoding="utf-8").splitlines() if line.strip())
         self.assertEqual(line_count, len(rows))
 
-        run_row = self._store().get_run(run_id)
+        run_row = self._store().run.get_run(run_id)
         self.assertIsNotNone(run_row, run_id)
         self.assertEqual(str(run_row.get("status") or ""), "DONE")
 
