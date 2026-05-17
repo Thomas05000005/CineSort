@@ -236,7 +236,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         summary_after_undo = summary_txt.read_text(encoding="utf-8")
         self.assertIn("=== RESUME UNDO ===", summary_after_undo)
 
-        ops_after = self._store().list_apply_operations(batch_id=apply_batch_id)
+        ops_after = self._store().apply.list_apply_operations(batch_id=apply_batch_id)
         self.assertTrue(ops_after, apply_batch_id)
         self.assertTrue(all(str(op.get("undo_status") or "") == "DONE" for op in ops_after), ops_after)
 

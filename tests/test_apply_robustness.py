@@ -28,14 +28,25 @@ from tests._helpers import wait_run_done as _wait_done
 # ---------------------------------------------------------------------------
 
 
-class _FakeStore:
-    """Store minimal pour _execute_undo_ops (mocks les marks)."""
+class _FakeApplyRepo:
+    """Fake apply Repository (cf #85 phase B8g)."""
 
     def __init__(self) -> None:
         self.marks: list = []
 
     def mark_apply_operation_undo_status(self, *, op_id: int, undo_status: str, error_message) -> None:
         self.marks.append({"op_id": op_id, "status": undo_status, "error": error_message})
+
+
+class _FakeStore:
+    """Store minimal pour _execute_undo_ops (mocks les marks)."""
+
+    def __init__(self) -> None:
+        self.apply = _FakeApplyRepo()
+
+    @property
+    def marks(self):
+        return self.apply.marks
 
 
 class _FakeApi:
