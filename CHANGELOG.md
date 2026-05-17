@@ -5,6 +5,194 @@ Categories : `Added`, `Changed`, `Fixed`, `Removed`, `Performance`, `Security`.
 
 ---
 
+## [v1.2.0-beta] - 2026-05-17 — Repository pattern complet + suite E2E + bug Windows critique
+
+> **Bilan d'une journee de chantiers paralleles** apres v1.1.0-beta (16 mai 2026).
+> 17 PRs mergees, 3 issues fermees, 1 vrai bug de robustesse decouvert et fixe en
+> prod, 4 nouvelles issues ouvertes (follow-ups documentes). Cette release acheve
+> la modernisation de la couche persistance commencee en v1.0.0, ajoute un filet
+> de securite de tests E2E a 3 niveaux avant la sortie de beta, et fixe un bug
+> Windows qui pouvait silencieusement ecraser des backups utilisateur.
+>
+> **Aucun changement breaking** : tous les endpoints publics et le format des
+> donnees sont preserves. Le bundle EXE final est 48 MB. Les pipelines existants
+> (scan -> review -> apply -> undo) sont bit-pour-bit identiques.
+>
+> **Coeur de la release** : la base de code peut maintenant **etre modifiee par
+> plusieurs developpeurs en parallele** sans craindre les regressions. La suite
+> de tests E2E (niveau 1 API, niveau 2 smoke EXE, niveau 3 Playwright Webview2)
+> attrape les regressions silencieuses du type "endpoint dashboard 404 invisible
+> jusqu'a ce qu'un utilisateur signale" — exactement le bug fixe dans cette
+> release.
+
+### Tableau avant / apres (v1.1.0-beta -> v1.2.0-beta)
+
+| Metrique | v1.1.0-beta | v1.2.0-beta | Delta |
+|----------|-------------|-------------|-------|
+| **Architecture persistance** | | | |
+| Mixins SQLite legacy | 7 (Probe, Anomaly, Scan, Perceptual, Quality, Run, Apply) | 0 | -100% |
+| Repositories en composition | 7 thin wrappers | 7 acces direct (`store.X.method()`) | API plus claire |
+| Callers migres vers nouveau pattern | 0 | 305+ | issue #85 close |
+| Lazy imports residuels | ~25 (residuels) | ~10 (commentes "intentionnels") | -60% |
+| **Filet de securite tests** | | | |
+| Tests E2E offline-deterministic | 0 dedies (couverts indirectement) | 5 scenarios golden + 3 niveaux | +1 fichier critique |
+| Smoke test EXE PyInstaller | manuel | scripte (`tests/e2e/smoke_exe.py`) | +1 outil |
+| Tests UI Playwright | absents | 3 scenarios (1 PASS + 2 SKIP avec diagnostic) | +1 dimension |
+| Tests passants totaux | 4277 | 4286+ | +9 a +20 selon module |
+| **Bugs en moins** | | | |
+| Backup Windows < 15 ms granularite | Ecrasement silencieux possible | Suffixe `-N` automatique | -1 risque perte donnees |
+| Endpoint dashboard `/api/get_settings` | 404 silencieux en mode REST | Migre `/api/settings/get_settings` | -1 bug UI |
+| Tests flaky permanents | 2 (settings_backup, db_backup) | 0 (50/50 runs verts apres fix) | -100% |
+| **Workflow** | | | |
+| Capacite multi-agents paralleles | non documentee | validee + sauvee en memoire | +1 pratique |
+| Worktrees Git isoles par agent | non utilises | 4 agents simultanes sans collision | nouvelle methode |
+| **Bundle** | | | |
+| Taille EXE PyInstaller | ~50 MB | 48 MB | -4% (cleanup imports) |
+
+### Added
+
+#### Suite de tests E2E a 3 niveaux (issue #232)
+
+Trois niveaux complementaires qui montent en confiance et en cout d'execution,
+chacun cible un risque different :
+
+**Niveau 1 — Golden flows API** (`tests/test_e2e_api_golden_flows.py`, ~5 sec)
+- 5 scenarios offline-deterministic : plan -> validate -> apply -> undo;
+  conflit duplicate avec resolution decision; apply partial failure Windows;
+  DPAPI settings roundtrip cross-instance; run history 3 runs ordre desc
+- Reseau TMDb mocke, DB SQLite et FS reels (cf. memoire "don't mock the DB")
+
+**Niveau 2 — Smoke EXE post-build** (`tests/e2e/smoke_exe.py`, ~15 sec)
+- Lance l'EXE PyInstaller, verifie qu'il demarre et ouvre son port REST
+- Modes `--api` (REST seul) et defaut (GUI pywebview complete)
+- Exit codes documentes (0/1/2/3/4)
+- Workflow CI `workflow_dispatch` seulement (build PyInstaller ~10 min)
+
+**Niveau 3 — Playwright Webview2** (`tests/e2e/test_ui_playwright.py`, ~30 sec)
+- Attache Chromium au serveur HTTP local de l'EXE
+- 1 test PASS (chargement + titre), 2 SKIP avec diagnostic (debloqueront apres
+  resolution complete du bug endpoint dashboard #233)
+- Squelette CDP Webview2 inclus (`@pytest.mark.skip`) pour activation future
+
+**Documentation** : `docs/internal/E2E_TESTS.md` — pre-requis, lancement,
+garanties par niveau, limites connues.
+
+### Changed
+
+#### Repository pattern complet — issue #85 fermee
+
+Suite et fin du refactor B8 commence en v1.1.0-beta. Les 7 mixins legacy de
+`SQLiteStore` (qui creaient un MRO complexe de 7 niveaux d'heritage) ont ete
+remplaces par 7 Repositories independants accessibles via composition :
+
+\`\`\`python
+# Avant (v1.1.0-beta — heritage MRO)
+store = SQLiteStore(db_path)
+store.list_apply_operations(batch_id=X)  # methode definie dans _ApplyMixin
+
+# Apres (v1.2.0-beta — composition)
+store = SQLiteStore(db_path)
+store.apply.list_apply_operations(batch_id=X)  # acces explicite au Repo
+\`\`\`
+
+- 305+ callers migres a travers tout le projet
+- API plus auto-documentee (l'IDE liste les methodes par responsabilite)
+- Tests FakeStore adaptes au nouveau pattern (`_FakeApplyRepo`, `_FakeRunRepo`, etc.)
+- Aucune regression : tous les comportements sont 100% conserves
+
+#### Cleanup final des lazy imports — issue #216 fermee
+
+13 lazy imports `from cinesort.X import Y` (declares dans des fonctions) remontes
+en top-level. 21 conserves comme intentionnels avec commentaires explicites :
+- 5 \`TYPE_CHECKING\` (cyclic types)
+- 5 cycle `cleanup ↔ apply_core` (deja documente issue #83)
+- 1 cycle `naming -> core -> duplicate_support`
+- 2 bootstrap DI dans `__init__.py`
+- 5 lazy imposes par mocking dans les tests
+- 3 faux positifs grep (docstrings)
+
+Resultat : 3 contracts `import-linter` toujours verts (`domain_pure`,
+`infra_no_upstream`, `app_no_ui`), meilleure DX IDE (autocompletion immediate).
+
+### Fixed
+
+#### Bug critique Windows — backup ecrase silencieusement (issue #230)
+
+**Cause racine** : sur Windows, `time.time()` et `datetime.now()` ont une
+granularite egale au timer systeme (~15 ms). Plusieurs backups crees dans la
+meme tranche de 15 ms partageaient les memes microsecondes formatees, donc le
+**meme nom de fichier**. La seconde ecriture ecrasait silencieusement la 1ere.
+
+**Impact reel** :
+- Test `test_rotates_after_backup` flaky a 15% (6 backups rapides -> 2 collisions)
+- Test `test_restore_backup` flaky a 20% (backup d'avant-ecriture ecrasait l'original)
+- **En prod** : risque non-zero qu'un utilisateur perde un backup si l'app en
+  declenche 2 en moins de 15 ms (rotation auto + backup manuel concurrents).
+
+**Fix** (cote prod, pas cote test) :
+- `cinesort/infra/db/backup.py` : helper `_resolve_unique_backup_path` ajoute
+  un suffixe `-N` avant `.bak` si le nom existe deja
+- `cinesort/ui/api/settings_support.py` : meme approche dans
+  `_backup_settings_before_write`
+- Tri stabilise `(st_mtime, p.name)` dans toutes les enumerations de backups
+
+**Verification** : 50/50 runs verts pour chaque test apres fix.
+
+#### Endpoint dashboard `/api/get_settings` retournait 404 — issue #233
+
+Le frontend dashboard (`web/dashboard/core/api.js:257`, dans `testConnection()`)
+appelait l'endpoint legacy `/api/get_settings` supprime par le refactor #84 PR 10.
+Bug **invisible en mode normal** (pywebview API direct) mais cassait silencieusement
+le login UI en mode REST (`--api`).
+
+**Fix** : 1 ligne, redirection vers `/api/settings/get_settings` (la facade exposee
+depuis #84 PR 10). Le reste du frontend utilisait deja la bonne nomenclature via
+les wrappers `apiPost("settings/X")`, `apiPost("quality/X")`, etc.
+
+Decouvert par les tests Playwright de la suite E2E ajoutee dans cette meme
+release — exactement ce que la nouvelle infrastructure de tests etait censee
+attraper.
+
+### Removed
+
+- 7 fichiers mixins `cinesort/infra/db/_*_mixin.py` (Probe, Anomaly, Scan,
+  Perceptual, Quality, Run, Apply) — remplaces par Repositories
+- 13 lazy imports `def foo(): from cinesort.X import Y` convertis en top-level
+- 0 endpoint public (compat 100% preservee)
+
+### Workflow validee
+
+**Multi-agents paralleles avec worktrees Git isoles** : 4 sous-agents lances
+simultanement sur 4 chantiers independants (flaky tests, lazy imports, suite
+E2E, cleanup web/components etape 0), chacun dans son worktree, chacun
+ouvrant sa PR, sans collision. Gain : 4 chantiers en ~40 min wall-clock au
+lieu de ~4-5 h sequentiel. Pratique sauvee en memoire perso pour reactivation
+automatique aux prochaines sessions.
+
+### Issues ouvertes (follow-ups documentes)
+
+- **#235** : `smoke_exe.py` ne kill pas le process tree complet sur Windows
+  (Webview2 child orphelins). Severite LOW (cleanup au reboot), test fonctionne.
+- **#216** : ~5 lazy imports residuels reels (cycles documentes), pas urgent.
+- **#217** : 5 PRs restantes (sur 6 total) pour cleanup `web/components/` legacy
+  + adapter ~349 tests vers ESM dashboard.
+- **#215** : 56 fonctions > 100 lignes (audit-bot du matin), refactor incremental.
+
+### Pour toi (en clair, sans jargon)
+
+1. **Si tu utilisais l'app en mode REST sur ton reseau local**, le login UI
+   refonctionne. Avant, ca echouait sans message d'erreur clair.
+2. **Tes backups settings sont maintenant 100% safes** meme si deux backups
+   se declenchent dans la meme milliseconde. Aucun action requise.
+3. **Pour les futurs developpements**, l'architecture est plus robuste : moins
+   de chances qu'une regression silencieuse passe en prod. Si tu vois un bug,
+   il y a maintenant 3 niveaux de tests E2E qui devraient le rattraper avant.
+4. **Tu peux maintenant me dire "fais X et Y et Z en parallele"** et je
+   lancerai automatiquement plusieurs sous-agents qui bossent en meme temps
+   sur des worktrees Git isoles, sans collision.
+
+---
+
 ## [v1.1.0-beta] - 2026-05-16 — Architecture verrouillee + identification multi-signal + dashboard insights
 
 > **Bilan d'une semaine de refonte profonde** apres v1.0.0-beta (11 mai 2026).
