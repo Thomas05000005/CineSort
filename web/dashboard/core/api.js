@@ -253,8 +253,11 @@ export async function testConnection(token) {
     "Authorization": `Bearer ${token}`,
   };
 
-  // On valide le token via un POST authentifie (get_settings)
-  const resp = await fetch(`${baseUrl()}/api/get_settings`, {
+  // On valide le token via un POST authentifie sur la facade settings.
+  // Issue #233 : avant le refactor #84 PR 10, l'endpoint etait /api/get_settings.
+  // Il a ete deplace sous /api/settings/get_settings (split en 5 facades).
+  // L'ancien path retourne 404, ce qui cassait silencieusement le flow de login.
+  const resp = await fetch(`${baseUrl()}/api/settings/get_settings`, {
     method: "POST",
     headers,
     body: "{}",
