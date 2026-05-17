@@ -37,6 +37,8 @@ import json
 import time
 from typing import Any, Dict, Optional, Tuple
 
+from cinesort.domain.quality_score import validate_quality_profile
+
 
 SCHEMA_NAME = "cinesort.quality_profile"
 SCHEMA_VERSION_MAX = 1
@@ -137,8 +139,6 @@ def parse_and_validate_import(
     # Validation supplémentaire via le validateur de quality_score (poids
     # normalisés, tiers cohérents, etc.).
     try:
-        from cinesort.domain.quality_score import validate_quality_profile
-
         ok, errors, _normalized = validate_quality_profile(profile)
         if not ok:
             msg = "Profil invalide : " + "; ".join(str(e) for e in (errors or []))
