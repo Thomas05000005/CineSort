@@ -16,6 +16,7 @@ import cinesort.infra.state as state
 from cinesort.app import JobRunner
 from cinesort.app.move_reconciliation import reconcile_at_boot
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+from cinesort.ui.api.notifications_support import add_notification
 
 _logger = logging.getLogger(__name__)
 
@@ -73,12 +74,6 @@ def _publish_integrity_notification_if_any(api: Any, store: SQLiteStore) -> None
     status = str(event.get("status") or "")
     if not status:
         return
-    try:
-        from cinesort.ui.api.notifications_support import add_notification
-    except ImportError as exc:
-        _logger.warning("V2-11: import notifications_support echoue: %s", exc)
-        return
-
     raw = str(event.get("raw") or "")
     backup_used = event.get("backup_used")
     if status == "restored":

@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cinesort.domain.core as core
-from cinesort.ui.api._validators import requires_valid_run_id
 import cinesort.infra.state as state
-from cinesort.infra.db import SQLiteStore
+from cinesort.app.export_support import export_html_report
 from cinesort.domain.conversions import to_bool, to_int
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.domain.librarian import generate_suggestions
+from cinesort.infra.db import SQLiteStore
+from cinesort.ui.api import notifications_support
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -769,8 +772,6 @@ def write_run_report_file(
         return out_path
 
     if export_format == "html":
-        from cinesort.app.export_support import export_html_report
-
         out_path = run_paths.run_dir / f"{report_stem}.html"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(export_html_report(report), encoding="utf-8")
@@ -879,8 +880,6 @@ def _compute_librarian_suggestions(
     settings: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Calcule les suggestions bibliothecaire depuis les rows + quality reports du dernier run."""
-    from cinesort.domain.librarian import generate_suggestions
-
     empty = {"suggestions": [], "health_score": 100}
     if not latest_run_id:
         return empty
@@ -1307,12 +1306,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
 
         # v7.6.0 Vague 9 : miroir des insights actifs dans le notification
         # center (deduplique par (code, source) pour la session).
-        try:
-            from cinesort.ui.api import notifications_support
-
-            notifications_support.emit_from_insights(api, insights, source="dashboard")
-        except ImportError:
-            pass
+        notifications_support.emit_from_insights(api, insights, source="dashboard")
 
         return {
             "ok": True,

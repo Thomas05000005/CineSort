@@ -9,6 +9,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.custom_rules import validate_rules as _validate_custom_rules
 from cinesort.ui.api._responses import err
 
 
@@ -72,8 +73,6 @@ def save_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
         # Custom rules (G6) : validation stricte si presentes
         raw_rules = normalized.get("custom_rules")
         if raw_rules:
-            from cinesort.domain.custom_rules import validate_rules as _validate_custom_rules
-
             rules_ok, rules_errs, rules_norm = _validate_custom_rules(raw_rules)
             if not rules_ok:
                 return err(
