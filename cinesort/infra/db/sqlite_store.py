@@ -14,9 +14,7 @@ from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, 
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
 from ._run_mixin import _RunMixin
-from ._scan_mixin import _ScanMixin
 from ._quality_mixin import _QualityMixin
-from ._anomaly_mixin import _AnomalyMixin
 from ._apply_mixin import _ApplyMixin
 from ._perceptual_mixin import _PerceptualMixin
 
@@ -539,10 +537,12 @@ class _StoreBase:
 class SQLiteStore(
     _StoreBase,
     _RunMixin,
-    # _ProbeMixin retire issue #85 phase B8 : ProbeRepository accessible via store.probe.
-    _ScanMixin,
+    # Mixins retires (issue #85 phase B8) : Repositories accessibles via store.X
+    # - _ProbeMixin (B8a) -> store.probe
+    # - _AnomalyMixin (B8b) -> store.anomaly
+    # - _ScanMixin (B8c) -> store.scan
+    # Reste a migrer en sessions futures (run/apply/quality/perceptual ont 60-120 callers chacun).
     _QualityMixin,
-    _AnomalyMixin,
     _ApplyMixin,
     _PerceptualMixin,
 ):

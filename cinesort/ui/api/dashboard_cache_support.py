@@ -36,7 +36,7 @@ def dashboard_cache_signature(
         "stats_json": str(run_row.get("stats_json") or ""),
         "plan_jsonl": api._path_cache_signature(run_paths.plan_jsonl),
         "quality_reports": store.get_quality_report_stats(run_id=run_id),
-        "anomalies": store.get_anomaly_stats(run_id=run_id),
+        "anomalies": store.anomaly.get_anomaly_stats(run_id=run_id),
     }
 
 

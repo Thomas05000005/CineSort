@@ -346,7 +346,7 @@ def _build_dashboard_section(
                 action="Activer les deux outils probe pour plus de precision.",
             )
 
-    anomalies_db = store.list_anomalies_for_run(run_id=run_id, limit=50)
+    anomalies_db = store.anomaly.list_anomalies_for_run(run_id=run_id, limit=50)
     if anomalies_db:
         anomalies_top = [
             {
@@ -453,7 +453,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         run_ids = [str(item.get("run_id") or "") for item in runs if str(item.get("run_id") or "")]
         error_counts = store.get_error_counts_for_runs(run_ids)
         quality_counts = store.get_quality_counts_for_runs(run_ids)
-        anomaly_counts = store.get_anomaly_counts_for_runs(run_ids)
+        anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
         runs_history = _runs_history_payload(
             api,
             runs=runs,
@@ -1128,7 +1128,7 @@ def _compute_active_insights(
     # 3. Doublons a trancher (sur le dernier run)
     if run_ids:
         try:
-            anomaly_counts = store.get_anomaly_counts_for_runs([run_ids[0]])
+            anomaly_counts = store.anomaly.get_anomaly_counts_for_runs([run_ids[0]])
             dup_count = int(anomaly_counts.get(run_ids[0], 0) or 0)
             # Filtre approximatif : compte total d'anomalies, ajustable si besoin
             if dup_count > 3:
@@ -1220,13 +1220,13 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # 2. Quality counts per run (batch)
         quality_counts = store.get_quality_counts_for_runs(run_ids)
         error_counts = store.get_error_counts_for_runs(run_ids)
-        anomaly_counts = store.get_anomaly_counts_for_runs(run_ids)
+        anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
         # 3. Global tier distribution
         tier_data = store.get_global_tier_distribution(limit_runs=lim)
 
         # 4. Top anomaly codes
-        top_anomalies = store.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
+        top_anomalies = store.anomaly.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
 
         # 5. Aggregated summary
         total_films = sum(r.get("total_rows", 0) for r in runs_summary)

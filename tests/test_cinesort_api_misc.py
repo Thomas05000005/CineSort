@@ -154,7 +154,7 @@ class TestResetIncrementalCache(unittest.TestCase):
     def test_reset_success(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.clear_all_incremental_caches.return_value = {
+            store.scan.clear_all_incremental_caches.return_value = {
                 "folder_cache": 5,
                 "row_cache": 10,
                 "file_hashes": 20,
@@ -174,7 +174,7 @@ class TestResetIncrementalCache(unittest.TestCase):
     def test_reset_clear_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.clear_all_incremental_caches.side_effect = ValueError("sql error")
+            store.scan.clear_all_incremental_caches.side_effect = ValueError("sql error")
             mock_infra.return_value = (store, MagicMock())
             result = self.api.reset_incremental_cache()
             self.assertFalse(result["ok"])

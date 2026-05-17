@@ -399,7 +399,8 @@ def _build_plan_job_fn(
                 "should_cancel": should_cancel,
             }
             if bool(getattr(cfg, "incremental_scan_enabled", False)):
-                plan_kwargs["scan_index"] = store
+                # #85 phase B8c : Repository pattern (store.scan au lieu de store).
+                plan_kwargs["scan_index"] = store.scan
                 plan_kwargs["run_id"] = run_id
 
             # Sous-titres : langues attendues depuis les settings
