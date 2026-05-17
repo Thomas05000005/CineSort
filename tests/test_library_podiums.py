@@ -136,7 +136,7 @@ class GetLibraryPodiumsTests(unittest.TestCase):
         # Mock store
         self.mock_store = MagicMock()
         self.mock_api._get_or_create_infra.return_value = (self.mock_store, None)
-        self.mock_store.get_runs_summary.return_value = [{"run_id": "run-test-1"}]
+        self.mock_store.run.get_runs_summary.return_value = [{"run_id": "run-test-1"}]
 
     @patch("cinesort.ui.api.library_podiums_support._build_library_rows")
     @patch("cinesort.ui.api.library_podiums_support.normalize_user_path")
@@ -186,7 +186,7 @@ class GetLibraryPodiumsTests(unittest.TestCase):
 
     def test_no_run_returns_empty_payload(self):
         # Aucun run dans store
-        self.mock_store.get_runs_summary.return_value = []
+        self.mock_store.run.get_runs_summary.return_value = []
         result = get_library_podiums(self.mock_api, run_id=None, limit=10)
         self.assertTrue(result["ok"])
         self.assertIsNone(result["run_id"])

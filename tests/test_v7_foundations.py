@@ -147,7 +147,7 @@ class V7FoundationsTests(unittest.TestCase):
             ) as mocked_insert,
             mock.patch.object(self.store, "initialize", wraps=self.store.initialize) as mocked_initialize,
         ):
-            self.store.insert_run_pending(
+            self.store.run.insert_run_pending(
                 run_id=run_id,
                 root=r"D:\Films",
                 state_dir=str(self.state_dir),
@@ -161,18 +161,18 @@ class V7FoundationsTests(unittest.TestCase):
         self.store.initialize()
         run_id = "20260218_120000_123"
 
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=r"D:\Films",
             state_dir=str(self.state_dir),
             config={"tmdb_enabled": False},
         )
-        self.store.mark_run_running(run_id)
-        self.store.update_run_progress(run_id, idx=13, total=99, current_folder="FolderA")
-        self.store.mark_cancel_requested(run_id)
-        self.store.mark_run_cancelled(run_id, stats={"planned_rows": 42})
+        self.store.run.mark_run_running(run_id)
+        self.store.run.update_run_progress(run_id, idx=13, total=99, current_folder="FolderA")
+        self.store.run.mark_cancel_requested(run_id)
+        self.store.run.mark_run_cancelled(run_id, stats={"planned_rows": 42})
 
-        row = self.store.get_run(run_id)
+        row = self.store.run.get_run(run_id)
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row["status"], "CANCELLED")
@@ -185,21 +185,21 @@ class V7FoundationsTests(unittest.TestCase):
     def test_insert_and_list_errors(self) -> None:
         self.store.initialize()
         run_id = "20260218_130000_777"
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=r"D:\Films",
             state_dir=str(self.state_dir),
             config={"tmdb_enabled": True},
         )
 
-        self.store.insert_error(
+        self.store.run.insert_error(
             run_id=run_id,
             step="scan",
             code="E_ROOT",
             message="ROOT missing",
             context={"root": r"D:\missing"},
         )
-        self.store.insert_error(
+        self.store.run.insert_error(
             run_id=run_id,
             step="tmdb",
             code="E_TIMEOUT",
@@ -207,7 +207,7 @@ class V7FoundationsTests(unittest.TestCase):
             context={"timeout_s": 10},
         )
 
-        errs = self.store.list_errors(run_id)
+        errs = self.store.run.list_errors(run_id)
         self.assertEqual(len(errs), 2)
         self.assertEqual(errs[0]["code"], "E_ROOT")
         self.assertEqual(errs[1]["code"], "E_TIMEOUT")
@@ -215,7 +215,7 @@ class V7FoundationsTests(unittest.TestCase):
     def test_threaded_writes_do_not_raise_sqlite_thread_affinity_errors(self) -> None:
         self.store.initialize()
         run_id = "20260218_140000_555"
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=r"D:\Films",
             state_dir=str(self.state_dir),
@@ -226,7 +226,7 @@ class V7FoundationsTests(unittest.TestCase):
 
         def worker(i: int) -> None:
             try:
-                self.store.insert_error(
+                self.store.run.insert_error(
                     run_id=run_id,
                     step="thread",
                     code=f"E{i}",
@@ -243,7 +243,7 @@ class V7FoundationsTests(unittest.TestCase):
             t.join()
 
         self.assertEqual(failures, [])
-        errs = self.store.list_errors(run_id)
+        errs = self.store.run.list_errors(run_id)
         self.assertEqual(len(errs), 12)
 
     def test_run_id_normalization_or_uuid_fallback(self) -> None:
@@ -258,7 +258,7 @@ class V7FoundationsTests(unittest.TestCase):
     def test_apply_journal_insert_append_close_and_query(self) -> None:
         self.store.initialize()
         run_id = "20260219_101010_101"
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=r"D:\Films",
             state_dir=str(self.state_dir),

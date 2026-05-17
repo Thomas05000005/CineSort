@@ -27,9 +27,12 @@ class SidebarCountersBackendTests(unittest.TestCase):
         """Issue #84 PR 10 : dashboard_support appelle api.settings.get_settings()."""
         from cinesort.ui.api.dashboard_support import get_sidebar_counters
 
-        class FakeStore:
+        class FakeRunRepo:
             def get_latest_run(self):
                 return None
+
+        class FakeStore:
+            run = FakeRunRepo()
 
         class FakeSettingsFacade:
             def get_settings(self):

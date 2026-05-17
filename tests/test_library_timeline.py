@@ -73,7 +73,7 @@ class GetLibraryTimelineTests(unittest.TestCase):
         }
         self.mock_store = MagicMock()
         self.mock_api._get_or_create_infra.return_value = (self.mock_store, None)
-        self.mock_store.get_runs_summary.return_value = [{"run_id": "run-test"}]
+        self.mock_store.run.get_runs_summary.return_value = [{"run_id": "run-test"}]
 
     @patch("cinesort.ui.api.library_timeline_support._file_mtime_to_month")
     @patch("cinesort.ui.api.library_timeline_support._build_library_rows")
@@ -161,7 +161,7 @@ class GetLibraryTimelineTests(unittest.TestCase):
         self.assertEqual(result["total_films"], 2)
 
     def test_no_run_returns_empty(self):
-        self.mock_store.get_runs_summary.return_value = []
+        self.mock_store.run.get_runs_summary.return_value = []
         result = get_library_timeline(self.mock_api, months=12, run_id=None)
         self.assertTrue(result["ok"])
         self.assertIsNone(result["run_id"])

@@ -116,7 +116,7 @@ def _make_mock_api_with_rows():
             },
         },
     ]
-    store.list_runs.return_value = [{"run_id": "r1"}]
+    store.run.list_runs.return_value = [{"run_id": "r1"}]
     api._get_or_create_infra.return_value = (store, None)
     return api
 

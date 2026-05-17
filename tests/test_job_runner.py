@@ -62,7 +62,7 @@ class JobRunnerTests(unittest.TestCase):
         self.assertTrue(snap.done)
         self.assertFalse(snap.running)
 
-        row = self.store.get_run(run_id)
+        row = self.store.run.get_run(run_id)
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row["status"], "DONE")
@@ -93,7 +93,7 @@ class JobRunnerTests(unittest.TestCase):
         self.assertEqual(snap.status, RunStatus.CANCELLED)
         self.assertTrue(snap.cancel_requested)
 
-        row = self.store.get_run(run_id)
+        row = self.store.run.get_run(run_id)
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row["status"], "CANCELLED")
@@ -158,13 +158,13 @@ class JobRunnerTests(unittest.TestCase):
         self.assertEqual(snap.status, RunStatus.FAILED)
         self.assertIn("boom", snap.error or "")
 
-        row = self.store.get_run(run_id)
+        row = self.store.run.get_run(run_id)
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row["status"], "FAILED")
         self.assertIn("boom", row["error_message"] or "")
 
-        errs = self.store.list_errors(run_id)
+        errs = self.store.run.list_errors(run_id)
         self.assertGreaterEqual(len(errs), 1)
         self.assertEqual(errs[0]["code"], "ValueError")
         self.assertEqual(errs[0]["step"], "job_runner")

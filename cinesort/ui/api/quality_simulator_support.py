@@ -204,7 +204,7 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
 
     if scope == "library":
         # Agrege sur tous les runs recents, dedup par row_id (garde le plus recent).
-        runs = store.list_runs(limit=100) or []
+        runs = store.run.list_runs(limit=100) or []
         seen: Dict[str, Dict[str, Any]] = {}
         for r in runs:
             rid = r.get("run_id") or ""
@@ -227,7 +227,7 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
     try:
-        latest = api._store.get_latest_run()
+        latest = api._store.run.get_latest_run()
         return latest.get("run_id") if isinstance(latest, dict) else None
     except (AttributeError, KeyError):
         return None

@@ -39,7 +39,7 @@ def _make_mock_api():
         ],
     }
     store = MagicMock()
-    store.list_runs.return_value = [{"run_id": "run_1"}]
+    store.run.list_runs.return_value = [{"run_id": "run_1"}]
     store.perceptual.get_perceptual_report.return_value = {
         "run_id": "run_1",
         "row_id": "r1",
@@ -129,7 +129,7 @@ class FilmSupportBackendTests(unittest.TestCase):
         api = MagicMock()
         api.settings.get_settings.return_value = {"state_dir": None}
         store = MagicMock()
-        store.list_runs.return_value = []
+        store.run.list_runs.return_value = []
         api._get_or_create_infra.return_value = (store, None)
         result = film_support.get_film_full(api, None, "r1")
         self.assertFalse(result["ok"])

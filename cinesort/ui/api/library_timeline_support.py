@@ -198,7 +198,7 @@ def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = Non
 
     if run_id is None:
         try:
-            runs = store.get_runs_summary(limit=1)
+            runs = store.run.get_runs_summary(limit=1)
         except (OSError, AttributeError, KeyError, TypeError, ValueError):
             runs = []
         run_id = str(runs[0]["run_id"]) if runs else None

@@ -474,7 +474,7 @@ class QualityScoreTests(unittest.TestCase):
         self.assertEqual(str(out.get("message") or ""), "Impossible de terminer l'analyse qualite.")
         self.assertNotIn("quality batch boom", str(out.get("message") or ""))
 
-        errs = store.list_errors(run_id)
+        errs = store.run.list_errors(run_id)
         self.assertTrue(errs, errs)
         last = errs[-1]
         self.assertEqual(str(last.get("step") or ""), "analyze_quality_batch")

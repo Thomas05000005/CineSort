@@ -197,7 +197,7 @@ class TestGetPlexSyncReport(unittest.TestCase):
         # Crée une fausse runs_summary entry → on patch le store
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
+            store.run.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
 
             # Crée un fichier plan.jsonl factice (vide → renverra "Aucun film")

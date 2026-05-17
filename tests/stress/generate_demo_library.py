@@ -113,14 +113,14 @@ def generate_films(n: int, db_path: Path) -> Dict:
     run_id = f"stress_{int(time.time())}"
     state_dir = str(Path(db_path).parent)
 
-    store.insert_run_pending(
+    store.run.insert_run_pending(
         run_id=run_id,
         root="C:/StressMovies",
         state_dir=state_dir,
         config={"is_stress": True, "stress_count": n},
         created_ts=time.time(),
     )
-    store.mark_run_running(run_id, started_ts=time.time())
+    store.run.mark_run_running(run_id, started_ts=time.time())
 
     profile_id = "stress_profile"
     profile_version = 1
@@ -169,7 +169,7 @@ def generate_films(n: int, db_path: Path) -> Dict:
         if i and (i % 1000 == 0):
             logger.info("Insere %d/%d films... (%.1fs)", i, n, time.perf_counter() - t0)
 
-    store.mark_run_done(
+    store.run.mark_run_done(
         run_id,
         stats={
             "planned_rows": n,

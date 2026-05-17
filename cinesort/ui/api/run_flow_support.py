@@ -371,7 +371,7 @@ def _build_plan_job_fn(
     def progress_with_persistence(idx: int, total: int, current: str) -> None:
         rs.progress(idx, total, current)
         try:
-            store.update_run_progress(run_id, idx=idx, total=total, current_folder=current)
+            store.run.update_run_progress(run_id, idx=idx, total=total, current_folder=current)
         except (KeyError, OSError, TypeError, ValueError) as exc:
             dlog(f"progress persistence warning idx={idx}/{total}: {exc}")
 
@@ -517,7 +517,7 @@ def _build_plan_job_fn(
             api._notify.notify("error", t("notifications.title_scan_error"), str(exc), level="error")
             api._write_crash_file(rs.paths, "job_fn failed", tb_text)
             try:
-                store.insert_error(
+                store.run.insert_error(
                     run_id=run_id,
                     step="tri_api_job_fn",
                     code=exc.__class__.__name__,

@@ -62,7 +62,7 @@ class JobRunner:
 
     def _write_crash_for_run(self, run_id: str, header: str, tb_text: str) -> None:
         try:
-            row = self._store.get_run(run_id)
+            row = self._store.run.get_run(run_id)
             if not row:
                 return
             state_dir = Path(str(row.get("state_dir") or ""))
@@ -141,11 +141,11 @@ class JobRunner:
                 raise RuntimeError("Un run est deja en cours")
 
             # If same run_id already exists in DB or memory, fallback to uuid-style id.
-            if run_id in self._runs or self._store.get_run(run_id) is not None:
+            if run_id in self._runs or self._store.run.get_run(run_id) is not None:
                 self._debug(f"start_job run_id collision for {run_id}, generating fallback id", run_debug)
                 run_id = normalize_or_generate_run_id(None)
 
-            self._store.insert_run_pending(
+            self._store.run.insert_run_pending(
                 run_id=run_id,
                 root=str(root),
                 state_dir=str(state_dir),
@@ -212,7 +212,7 @@ class JobRunner:
             if cancelled_before_run:
                 self._debug(f"worker cancel before run run_id={run_id}", run_debug)
                 ended_ts = time.time()
-                self._store.mark_run_cancelled(run_id, ended_ts=ended_ts)
+                self._store.run.mark_run_cancelled(run_id, ended_ts=ended_ts)
                 with self._lock:
                     self._set_snapshot(
                         run_id,
@@ -226,7 +226,7 @@ class JobRunner:
                     )
                 return
 
-            self._store.mark_run_running(run_id, started_ts=started_ts)
+            self._store.run.mark_run_running(run_id, started_ts=started_ts)
             self._debug(f"worker mark_run_running OK run_id={run_id}", run_debug)
             with self._lock:
                 self._set_snapshot(
@@ -245,7 +245,7 @@ class JobRunner:
 
             ended_ts = time.time()
             if should_cancel():
-                self._store.mark_run_cancelled(run_id, stats=stats, ended_ts=ended_ts)
+                self._store.run.mark_run_cancelled(run_id, stats=stats, ended_ts=ended_ts)
                 self._debug(f"worker mark_run_cancelled OK run_id={run_id}", run_debug)
                 with self._lock:
                     self._set_snapshot(
@@ -258,7 +258,7 @@ class JobRunner:
                         error=None,
                     )
             else:
-                self._store.mark_run_done(run_id, stats=stats, ended_ts=ended_ts)
+                self._store.run.mark_run_done(run_id, stats=stats, ended_ts=ended_ts)
                 _logger.info("job: termine run_id=%s en %.1fs", run_id, ended_ts - started_ts)
                 self._debug(f"worker mark_run_done OK run_id={run_id}", run_debug)
                 with self._lock:
@@ -279,8 +279,8 @@ class JobRunner:
             self._debug(f"worker exception run_id={run_id}: {error_message}\n{tb_text}", run_debug)
             ended_ts = time.time()
             self._write_crash_for_run(run_id, "job_runner worker failed", tb_text)
-            self._store.mark_run_failed(run_id, error_message=error_message, ended_ts=ended_ts)
-            self._store.insert_error(
+            self._store.run.mark_run_failed(run_id, error_message=error_message, ended_ts=ended_ts)
+            self._store.run.insert_error(
                 run_id=run_id,
                 step="job_runner",
                 code=exc.__class__.__name__,
@@ -346,7 +346,7 @@ class JobRunner:
             self._set_snapshot(run_id, cancel_requested=True)
             self._debug(f"request_cancel set cancel flag run_id={run_id}", run_debug)
 
-        self._store.mark_cancel_requested(run_id)
+        self._store.run.mark_cancel_requested(run_id)
         self._debug(f"request_cancel persisted cancel_requested run_id={run_id}", run_debug)
         return True
 
@@ -357,7 +357,7 @@ class JobRunner:
             if rt:
                 return rt.snapshot
 
-        row = self._store.get_run(run_id)
+        row = self._store.run.get_run(run_id)
         if not row:
             return None
 

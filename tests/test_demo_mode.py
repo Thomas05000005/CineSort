@@ -108,7 +108,7 @@ class DemoModeBackendCycleTests(unittest.TestCase):
             self.assertIn("proposed_title", row)
 
         # Run marqué DONE avec is_demo dans config_json
-        run_row = store.get_run(run_id)
+        run_row = store.run.get_run(run_id)
         self.assertIsNotNone(run_row)
         self.assertEqual(run_row.get("status"), "DONE")
         cfg = json.loads(run_row.get("config_json") or "{}")
@@ -138,7 +138,7 @@ class DemoModeBackendCycleTests(unittest.TestCase):
         store, _ = self.api._get_or_create_infra(self.state_dir)
         self.assertEqual(len(store.quality.list_quality_reports(run_id=run_id)), 0)
         # Run supprimé
-        self.assertIsNone(store.get_run(run_id))
+        self.assertIsNone(store.run.get_run(run_id))
         # Dossier run_dir supprimé
         self.assertFalse(run_dir.exists())
 

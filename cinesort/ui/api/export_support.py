@@ -122,7 +122,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
         last_done_run_id: str = ""
         try:
             store, _runner = api._get_or_create_infra(state_dir)
-            runs_summary = store.get_runs_summary(limit=100)
+            runs_summary = store.run.get_runs_summary(limit=100)
             for r in runs_summary:
                 runs.append(
                     {
