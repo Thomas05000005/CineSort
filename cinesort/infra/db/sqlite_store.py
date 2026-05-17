@@ -14,7 +14,6 @@ from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, 
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
 from ._run_mixin import _RunMixin
-from ._probe_mixin import _ProbeMixin
 from ._scan_mixin import _ScanMixin
 from ._quality_mixin import _QualityMixin
 from ._anomaly_mixin import _AnomalyMixin
@@ -540,7 +539,7 @@ class _StoreBase:
 class SQLiteStore(
     _StoreBase,
     _RunMixin,
-    _ProbeMixin,
+    # _ProbeMixin retire issue #85 phase B8 : ProbeRepository accessible via store.probe.
     _ScanMixin,
     _QualityMixin,
     _AnomalyMixin,
