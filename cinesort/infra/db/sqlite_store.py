@@ -16,7 +16,6 @@ from .migration_manager import MigrationManager, _split_sql_statements
 from ._run_mixin import _RunMixin
 from ._quality_mixin import _QualityMixin
 from ._apply_mixin import _ApplyMixin
-from ._perceptual_mixin import _PerceptualMixin
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
 REQUIRED_SCHEMA_TABLES = (
@@ -541,10 +540,10 @@ class SQLiteStore(
     # - _ProbeMixin (B8a) -> store.probe
     # - _AnomalyMixin (B8b) -> store.anomaly
     # - _ScanMixin (B8c) -> store.scan
-    # Reste a migrer en sessions futures (run/apply/quality/perceptual ont 60-120 callers chacun).
+    # - _PerceptualMixin (B8d) -> store.perceptual
+    # Reste a migrer en sessions futures (run/apply/quality ont 64-121 callers chacun).
     _QualityMixin,
     _ApplyMixin,
-    _PerceptualMixin,
 ):
     """
     SQLite persistence for v7 foundations.

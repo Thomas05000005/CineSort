@@ -35,7 +35,7 @@ def _make_mock_api_with_rows():
 
     # Mock store + _get_or_create_infra
     store = MagicMock()
-    store.list_perceptual_reports.return_value = [
+    store.perceptual.list_perceptual_reports.return_value = [
         {
             "row_id": "f1",
             "global_tier_v2": "platinum",

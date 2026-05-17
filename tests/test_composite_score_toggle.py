@@ -217,7 +217,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
 
     def _store_with_v1_and_v2(self) -> Any:
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "global_score": 72,
             "global_tier": "bon",
             "visual_score": 70,
@@ -256,7 +256,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
     def test_v2_fallback_to_v1_when_v2_missing(self) -> None:
         """V2 active mais cache historique sans V2 -> fallback V1 (pas d'erreur)."""
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "global_score": 72,
             "global_tier": "bon",
             "visual_score": 70,
@@ -272,7 +272,7 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
     def test_no_perceptual_report(self) -> None:
         """Pas de cache perceptuel -> pas d'enrichissement (silencieux)."""
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = None
+        store.perceptual.get_perceptual_report.return_value = None
         result: Dict[str, Any] = {}
         enrich_quality_report_with_perceptual(store, "run1", "row1", result, composite_score_version=2)
         self.assertNotIn("perceptual", result)
@@ -290,7 +290,7 @@ class TestCoexistence(unittest.TestCase):
         """Toggle V2 doit lire `global_score_v2` SANS supprimer `global_score`
         du cache (le store retourne les deux, on choisit lequel exposer)."""
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "global_score": 72,
             "global_tier": "bon",
             "visual_score": 70,
@@ -309,7 +309,7 @@ class TestCoexistence(unittest.TestCase):
         self.assertEqual(result_v2["perceptual"]["global_score"], 88)
         # Le cache n'a pas ete touche (3 lectures = 2 appels enrich -> 2 calls,
         # plus rien si le getter retourne meme dict)
-        self.assertGreaterEqual(store.get_perceptual_report.call_count, 2)
+        self.assertGreaterEqual(store.perceptual.get_perceptual_report.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ def _mock_api(perceptual_enabled: bool = True, ffprobe_path: str = "/usr/bin/ffp
 def _mock_store_with_run(run_id: str = "run1"):
     """Mock store avec perceptual report vide."""
     store = mock.MagicMock()
-    store.get_perceptual_report.return_value = None
+    store.perceptual.get_perceptual_report.return_value = None
     return store
 
 
@@ -151,7 +151,7 @@ class GetPerceptualReportTests(unittest.TestCase):
         """Rapport deja en DB → retourne le cache sans ré-analyser."""
         api = _mock_api()
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "run_id": "run1",
             "row_id": "r1",
             "global_score": 80,
@@ -172,7 +172,7 @@ class GetPerceptualReportTests(unittest.TestCase):
         """force=True → ignore le cache et ré-analyse."""
         api = _mock_api()
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "run_id": "run1",
             "row_id": "r1",
             "global_score": 80,
@@ -272,7 +272,7 @@ class EnrichQualityReportTests(unittest.TestCase):
     def test_enriched_when_available(self) -> None:
         """Perceptual disponible → cle 'perceptual' ajoutee."""
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = {
+        store.perceptual.get_perceptual_report.return_value = {
             "global_score": 80,
             "global_tier": "excellent",
             "visual_score": 78,
@@ -286,7 +286,7 @@ class EnrichQualityReportTests(unittest.TestCase):
     def test_not_enriched_when_absent(self) -> None:
         """Perceptual absent → pas de cle 'perceptual'."""
         store = mock.MagicMock()
-        store.get_perceptual_report.return_value = None
+        store.perceptual.get_perceptual_report.return_value = None
         result: dict = {"ok": True, "score": 85}
         enrich_quality_report_with_perceptual(store, "run1", "r1", result)
         self.assertNotIn("perceptual", result)
@@ -310,7 +310,7 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStore(db_path)
             store.initialize()
 
-            store.upsert_perceptual_report(
+            store.perceptual.upsert_perceptual_report(
                 run_id="run1",
                 row_id="r1",
                 visual_score=78,
@@ -320,7 +320,7 @@ class PersistenceTests(unittest.TestCase):
                 metrics={"global_score": 80, "visual_score": 78},
                 settings_used={"frames_count": 10},
             )
-            result = store.get_perceptual_report(run_id="run1", row_id="r1")
+            result = store.perceptual.get_perceptual_report(run_id="run1", row_id="r1")
             self.assertIsNotNone(result)
             self.assertEqual(result["global_score"], 80)
         finally:

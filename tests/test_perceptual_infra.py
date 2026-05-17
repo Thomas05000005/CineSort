@@ -133,7 +133,7 @@ class PerceptualDbTests(unittest.TestCase):
         """Upsert + get retourne les memes donnees."""
         metrics = {"visual_score": 78, "audio_score": 82}
         settings_used = {"frames_count": 10}
-        self.store.upsert_perceptual_report(
+        self.store.perceptual.upsert_perceptual_report(
             run_id="run1",
             row_id="row1",
             visual_score=78,
@@ -143,7 +143,7 @@ class PerceptualDbTests(unittest.TestCase):
             metrics=metrics,
             settings_used=settings_used,
         )
-        result = self.store.get_perceptual_report(run_id="run1", row_id="row1")
+        result = self.store.perceptual.get_perceptual_report(run_id="run1", row_id="row1")
         self.assertIsNotNone(result)
         self.assertEqual(result["visual_score"], 78)
         self.assertEqual(result["audio_score"], 82)
@@ -154,12 +154,12 @@ class PerceptualDbTests(unittest.TestCase):
 
     def test_get_nonexistent_returns_none(self) -> None:
         """Get d'un rapport inexistant retourne None."""
-        result = self.store.get_perceptual_report(run_id="nope", row_id="nope")
+        result = self.store.perceptual.get_perceptual_report(run_id="nope", row_id="nope")
         self.assertIsNone(result)
 
     def test_list_reports(self) -> None:
         """List retourne tous les rapports d'un run tries par score."""
-        self.store.upsert_perceptual_report(
+        self.store.perceptual.upsert_perceptual_report(
             run_id="run1",
             row_id="r1",
             visual_score=90,
@@ -169,7 +169,7 @@ class PerceptualDbTests(unittest.TestCase):
             metrics={},
             settings_used={},
         )
-        self.store.upsert_perceptual_report(
+        self.store.perceptual.upsert_perceptual_report(
             run_id="run1",
             row_id="r2",
             visual_score=50,
@@ -179,7 +179,7 @@ class PerceptualDbTests(unittest.TestCase):
             metrics={},
             settings_used={},
         )
-        reports = self.store.list_perceptual_reports(run_id="run1")
+        reports = self.store.perceptual.list_perceptual_reports(run_id="run1")
         self.assertEqual(len(reports), 2)
         # Tries par score ASC
         self.assertEqual(reports[0]["row_id"], "r2")
@@ -187,7 +187,7 @@ class PerceptualDbTests(unittest.TestCase):
 
     def test_upsert_update_existing(self) -> None:
         """Upsert met a jour un rapport existant."""
-        self.store.upsert_perceptual_report(
+        self.store.perceptual.upsert_perceptual_report(
             run_id="run1",
             row_id="r1",
             visual_score=50,
@@ -197,7 +197,7 @@ class PerceptualDbTests(unittest.TestCase):
             metrics={},
             settings_used={},
         )
-        self.store.upsert_perceptual_report(
+        self.store.perceptual.upsert_perceptual_report(
             run_id="run1",
             row_id="r1",
             visual_score=90,
@@ -207,7 +207,7 @@ class PerceptualDbTests(unittest.TestCase):
             metrics={},
             settings_used={},
         )
-        result = self.store.get_perceptual_report(run_id="run1", row_id="r1")
+        result = self.store.perceptual.get_perceptual_report(run_id="run1", row_id="r1")
         self.assertEqual(result["global_score"], 88)
 
 

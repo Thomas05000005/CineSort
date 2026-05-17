@@ -200,7 +200,7 @@ class TestStoreRoundtrip(unittest.TestCase):
             db_path = Path(tmp) / "db" / "test.sqlite"
             store = SQLiteStore(db_path)
             store.initialize()
-            store.upsert_perceptual_report(
+            store.perceptual.upsert_perceptual_report(
                 run_id="run1",
                 row_id="row1",
                 visual_score=80,
@@ -212,7 +212,7 @@ class TestStoreRoundtrip(unittest.TestCase):
                 ssim_self_ref=0.973,
                 upscale_verdict="upscale_fake",
             )
-            got = store.get_perceptual_report(run_id="run1", row_id="row1")
+            got = store.perceptual.get_perceptual_report(run_id="run1", row_id="row1")
             self.assertIsNotNone(got)
             self.assertAlmostEqual(got.get("ssim_self_ref"), 0.973, places=3)
             self.assertEqual(got.get("upscale_verdict"), "upscale_fake")

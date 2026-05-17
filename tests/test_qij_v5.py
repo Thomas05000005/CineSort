@@ -42,7 +42,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
         }
         store = MagicMock()
         store.list_runs.return_value = [{"run_id": "r1"}]
-        store.list_perceptual_reports.return_value = [
+        store.perceptual.list_perceptual_reports.return_value = [
             {
                 "row_id": "f1",
                 "global_tier_v2": "platinum",

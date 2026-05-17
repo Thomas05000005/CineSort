@@ -210,7 +210,7 @@ def populate_database(
         ("row-015", 52, 48, 50, "mediocre"),
     ]
     for row_id, vs, aus, gs, tier in _perceptual:
-        store.upsert_perceptual_report(
+        store.perceptual.upsert_perceptual_report(
             run_id=run_id,
             row_id=row_id,
             visual_score=vs,

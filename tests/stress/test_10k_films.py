@@ -130,7 +130,7 @@ class Stress10kTests(unittest.TestCase):
     def test_list_perceptual_reports_under_budget(self) -> None:
         m = self._record(
             "list_perceptual_reports",
-            lambda: type(self).store.list_perceptual_reports(run_id=type(self).run_id),
+            lambda: type(self).store.perceptual.list_perceptual_reports(run_id=type(self).run_id),
         )
         self.assertEqual(m["size"], _STRESS_FILMS)
         self.assertLess(
@@ -149,7 +149,7 @@ class Stress10kTests(unittest.TestCase):
         )
         m2 = self._record(
             "get_global_tier_v2_distribution",
-            lambda: store.get_global_tier_v2_distribution(run_ids=run_ids),
+            lambda: store.perceptual.get_global_tier_v2_distribution(run_ids=run_ids),
         )
         m3 = self._record(
             "get_quality_counts_for_runs",
@@ -165,7 +165,7 @@ class Stress10kTests(unittest.TestCase):
         )
         m6 = self._record(
             "get_global_score_v2_trend",
-            lambda: store.get_global_score_v2_trend(since_ts=0.0),
+            lambda: store.perceptual.get_global_score_v2_trend(since_ts=0.0),
         )
 
         for m in (m1, m2, m3, m4, m5, m6):
@@ -210,7 +210,7 @@ class Stress10kTests(unittest.TestCase):
         try:
             for _ in range(5):
                 _ = store.list_quality_reports(run_id=run_id)
-                _ = store.list_perceptual_reports(run_id=run_id)
+                _ = store.perceptual.list_perceptual_reports(run_id=run_id)
             _, peak_bytes = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
