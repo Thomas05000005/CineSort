@@ -91,20 +91,27 @@ class FilmIdentityKeyTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class _FakeQualityRepo:
+    """Fake quality Repository (cf #85 phase B8e Repository pattern)."""
+
+    def __init__(self, qr):
+        self._qr = qr
+
+    def get_quality_report(self, *, run_id, row_id):
+        return self._qr.get((run_id, row_id))
+
+
 class _FakeStore:
     """Fake store minimaliste pour les tests de timeline."""
 
     def __init__(self, runs=None, quality_reports=None, batches=None, ops_by_row=None):
         self._runs = runs or []
-        self._qr = quality_reports or {}
         self._batches = batches or {}
         self._ops = ops_by_row or {}
+        self.quality = _FakeQualityRepo(quality_reports or {})
 
     def get_runs_summary(self, *, limit=20):
         return list(self._runs)
-
-    def get_quality_report(self, *, run_id, row_id):
-        return self._qr.get((run_id, row_id))
 
     def list_apply_batches_for_run(self, *, run_id, limit=10):
         return self._batches.get(run_id, [])

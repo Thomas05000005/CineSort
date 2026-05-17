@@ -312,14 +312,14 @@ class UnscoredFilmCountTests(unittest.TestCase):
             conn.commit()
 
         # Appel : total=10 films → 10 - 3 = 7 unscored
-        unscored = self.store.get_unscored_film_count(run_id=run_id, total_rows=10)
+        unscored = self.store.quality.get_unscored_film_count(run_id=run_id, total_rows=10)
         self.assertEqual(unscored, 7)
 
         # Cas limite : total=3 (= scored)
-        self.assertEqual(self.store.get_unscored_film_count(run_id=run_id, total_rows=3), 0)
+        self.assertEqual(self.store.quality.get_unscored_film_count(run_id=run_id, total_rows=3), 0)
 
         # Cas limite : total=0
-        self.assertEqual(self.store.get_unscored_film_count(run_id=run_id, total_rows=0), 0)
+        self.assertEqual(self.store.quality.get_unscored_film_count(run_id=run_id, total_rows=0), 0)
 
 
 if __name__ == "__main__":

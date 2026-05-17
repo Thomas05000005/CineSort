@@ -118,7 +118,7 @@ class Stress10kTests(unittest.TestCase):
     def test_list_quality_reports_under_budget(self) -> None:
         m = self._record(
             "list_quality_reports",
-            lambda: type(self).store.list_quality_reports(run_id=type(self).run_id),
+            lambda: type(self).store.quality.list_quality_reports(run_id=type(self).run_id),
         )
         self.assertEqual(m["size"], _STRESS_FILMS)
         self.assertLess(
@@ -145,7 +145,7 @@ class Stress10kTests(unittest.TestCase):
 
         m1 = self._record(
             "get_global_tier_distribution",
-            lambda: store.get_global_tier_distribution(limit_runs=20),
+            lambda: store.quality.get_global_tier_distribution(limit_runs=20),
         )
         m2 = self._record(
             "get_global_tier_v2_distribution",
@@ -153,7 +153,7 @@ class Stress10kTests(unittest.TestCase):
         )
         m3 = self._record(
             "get_quality_counts_for_runs",
-            lambda: store.get_quality_counts_for_runs(run_ids),
+            lambda: store.quality.get_quality_counts_for_runs(run_ids),
         )
         m4 = self._record(
             "get_anomaly_counts_for_runs",
@@ -209,7 +209,7 @@ class Stress10kTests(unittest.TestCase):
         tracemalloc.start()
         try:
             for _ in range(5):
-                _ = store.list_quality_reports(run_id=run_id)
+                _ = store.quality.list_quality_reports(run_id=run_id)
                 _ = store.perceptual.list_perceptual_reports(run_id=run_id)
             _, peak_bytes = tracemalloc.get_traced_memory()
         finally:

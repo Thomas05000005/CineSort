@@ -113,7 +113,7 @@ def _probe_and_score(
         release_name=str(row.video or ""),
         tmdb_genres=tmdb_genres or None,
     )
-    store.upsert_quality_report(
+    store.quality.upsert_quality_report(
         run_id=run_id,
         row_id=row_id,
         score=int(report.get("score") or 0),
@@ -124,7 +124,7 @@ def _probe_and_score(
         profile_version=active_profile_version,
     )
 
-    persisted = store.get_quality_report(run_id=run_id, row_id=row_id)
+    persisted = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
     out = (
         persisted
         if persisted
@@ -168,7 +168,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         active_engine_version = str(profile_json.get("engine_version") or "CinemaLux_v1")
 
         if reuse_existing:
-            existing = store.get_quality_report(run_id=run_id, row_id=row_id)
+            existing = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
             if existing:
                 existing_metrics = existing.get("metrics") if isinstance(existing.get("metrics"), dict) else {}
                 existing_engine = str(existing_metrics.get("engine_version") or "")

@@ -803,7 +803,7 @@ def _load_probe_for_row(store: Any, run_id: str, item: Dict[str, Any]) -> Option
     if not rid or store is None:
         return None
     try:
-        qr = store.get_quality_report(run_id=run_id, row_id=rid)
+        qr = store.quality.get_quality_report(run_id=run_id, row_id=rid)
     except (OSError, KeyError, TypeError, ValueError):
         return None
     if not qr or not isinstance(qr.get("metrics"), dict):
@@ -829,7 +829,7 @@ def _quality_info_for_row(store: Any, run_id: str, r: Any) -> Dict[str, Any]:
     qr: Optional[Dict[str, Any]] = None
     if store and rid:
         try:
-            qr = store.get_quality_report(run_id=run_id, row_id=rid)
+            qr = store.quality.get_quality_report(run_id=run_id, row_id=rid)
         except (OSError, KeyError, TypeError, ValueError):
             qr = None
     if qr and isinstance(qr, dict):

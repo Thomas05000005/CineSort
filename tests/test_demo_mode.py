@@ -92,7 +92,7 @@ class DemoModeBackendCycleTests(unittest.TestCase):
 
         # 15 quality_reports persistés
         store, _ = self.api._get_or_create_infra(self.state_dir)
-        reports = store.list_quality_reports(run_id=run_id)
+        reports = store.quality.list_quality_reports(run_id=run_id)
         self.assertEqual(len(reports), 15)
         tiers_in_db = {r["tier"] for r in reports}
         self.assertEqual(tiers_in_db, {"Premium", "Bon", "Moyen", "Mauvais"})
@@ -136,7 +136,7 @@ class DemoModeBackendCycleTests(unittest.TestCase):
 
         # Quality reports supprimés
         store, _ = self.api._get_or_create_infra(self.state_dir)
-        self.assertEqual(len(store.list_quality_reports(run_id=run_id)), 0)
+        self.assertEqual(len(store.quality.list_quality_reports(run_id=run_id)), 0)
         # Run supprimé
         self.assertIsNone(store.get_run(run_id))
         # Dossier run_dir supprimé

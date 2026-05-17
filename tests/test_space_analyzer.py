@@ -56,12 +56,16 @@ class SpaceAnalysisTests(unittest.TestCase):
     def _make_store_with_reports(self, reports):
         """Cree un mock store avec des quality reports."""
 
-        class MockStore:
+        class MockQualityRepo:
             def __init__(self, reports):
                 self._reports = reports
 
             def list_quality_reports(self, *, run_id):
                 return self._reports
+
+        class MockStore:
+            def __init__(self, reports):
+                self.quality = MockQualityRepo(reports)
 
         return MockStore(reports)
 

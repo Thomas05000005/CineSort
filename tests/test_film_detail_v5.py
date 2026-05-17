@@ -53,7 +53,7 @@ def _make_mock_api():
             "warnings": ["Dolby Vision Profile 5"],
         },
     }
-    store.get_quality_report.return_value = {
+    store.quality.get_quality_report.return_value = {
         "run_id": "run_1",
         "row_id": "r1",
         "metrics": {

@@ -351,7 +351,7 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
                 fp.write(json.dumps(row, ensure_ascii=False) + "\n")
 
         for film in DEMO_FILMS:
-            store.upsert_quality_report(
+            store.quality.upsert_quality_report(
                 run_id=run_id,
                 row_id=_row_id_for(run_id, film),
                 score=int(film["score"]),

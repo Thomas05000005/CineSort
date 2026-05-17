@@ -35,7 +35,7 @@ def active_quality_profile_payload(api: Any) -> Dict[str, Any]:
 
 def save_active_quality_profile(api: Any, profile_json: Dict[str, Any]) -> Dict[str, Any]:
     _state_dir, store = quality_store(api)
-    store.save_quality_profile(
+    store.quality.save_quality_profile(
         profile_id=str(profile_json["id"]),
         version=int(profile_json["version"]),
         profile_json=profile_json,
@@ -49,7 +49,7 @@ def save_active_quality_profile(api: Any, profile_json: Dict[str, Any]) -> Dict[
 
 
 def ensure_quality_profile(_api: Any, store: SQLiteStore) -> Dict[str, Any]:
-    active = store.get_active_quality_profile()
+    active = store.quality.get_active_quality_profile()
     if active and isinstance(active.get("profile_json"), dict):
         ok, _errs, normalized = validate_quality_profile(active.get("profile_json"))
         if ok:
@@ -58,35 +58,35 @@ def ensure_quality_profile(_api: Any, store: SQLiteStore) -> Dict[str, Any]:
             ):
                 normalized["id"] = str(active.get("id") or normalized.get("id") or "CinemaLux_v1")
                 normalized["version"] = int(active.get("version") or normalized.get("version") or 1)
-                store.save_quality_profile(
+                store.quality.save_quality_profile(
                     profile_id=str(normalized["id"]),
                     version=int(normalized["version"]),
                     profile_json=normalized,
                     is_active=True,
                 )
-                active = store.get_active_quality_profile()
+                active = store.quality.get_active_quality_profile()
             if active:
                 return active
         else:
             default_profile = default_quality_profile()
-            store.save_quality_profile(
+            store.quality.save_quality_profile(
                 profile_id=str(default_profile["id"]),
                 version=int(default_profile["version"]),
                 profile_json=default_profile,
                 is_active=True,
             )
-            active = store.get_active_quality_profile()
+            active = store.quality.get_active_quality_profile()
             if active:
                 return active
 
     default_profile = default_quality_profile()
-    store.save_quality_profile(
+    store.quality.save_quality_profile(
         profile_id=str(default_profile["id"]),
         version=int(default_profile["version"]),
         profile_json=default_profile,
         is_active=True,
     )
-    active_profile = store.get_active_quality_profile()
+    active_profile = store.quality.get_active_quality_profile()
     if active_profile:
         return active_profile
     return {

@@ -80,7 +80,7 @@ class RepositoryDelegationTests(unittest.TestCase):
     def test_backward_compat_methods_still_work(self) -> None:
         """Les anciennes methodes store.X() restent fonctionnelles (heritage mixin)."""
         # get_quality_report retourne None pour un run/row inconnu
-        self.assertIsNone(self.store.get_quality_report(run_id="nope", row_id="nope"))
+        self.assertIsNone(self.store.quality.get_quality_report(run_id="nope", row_id="nope"))
         # list_runs retourne une liste vide pour DB neuve
         self.assertEqual(self.store.list_runs(), [])
 
@@ -89,7 +89,7 @@ class RepositoryDelegationTests(unittest.TestCase):
         # Ce sont les MEMES methodes (heritage MRO via mixin), donc meme function ID
         self.assertEqual(
             self.store.quality.get_quality_report(run_id="x", row_id="y"),
-            self.store.get_quality_report(run_id="x", row_id="y"),
+            self.store.quality.get_quality_report(run_id="x", row_id="y"),
         )
 
 

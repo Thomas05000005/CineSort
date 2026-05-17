@@ -143,7 +143,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
 
     # Quality reports
     try:
-        quality_list = store.list_quality_reports(run_id=run_id)
+        quality_list = store.quality.list_quality_reports(run_id=run_id)
     except (AttributeError, OSError, TypeError, ValueError):
         quality_list = []
     quality_by_row = {str(q.get("row_id", "")): q for q in quality_list}

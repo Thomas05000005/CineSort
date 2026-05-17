@@ -1378,7 +1378,7 @@ class CineSortApi:
         for row in local_rows:
             rid = str(getattr(row, "row_id", "") or "")
             if rid:
-                qr = store.get_quality_report(run_id=target_run_id, row_id=rid)
+                qr = store.quality.get_quality_report(run_id=target_run_id, row_id=rid)
                 if qr:
                     qr_map[rid] = qr
 
@@ -1459,7 +1459,7 @@ class CineSortApi:
                 store, _ = self._get_or_create_infra(state_dir, settings)
                 # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
                 probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
-                quality_data = store.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
+                quality_data = store.quality.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
                 context = build_naming_context(
                     title="Film",
                     year=2020,
@@ -2012,7 +2012,7 @@ class CineSortApi:
         except (OSError, TypeError, ValueError):
             store = None
         try:
-            active = store.get_active_quality_profile() if store else None
+            active = store.quality.get_active_quality_profile() if store else None
         except (OSError, TypeError, ValueError):
             active = None
         if active and isinstance(active.get("profile_json"), str):
@@ -2083,7 +2083,7 @@ class CineSortApi:
             version = 1
 
         try:
-            store.save_quality_profile(
+            store.quality.save_quality_profile(
                 profile_id=pid,
                 version=version,
                 profile_json=profile,
@@ -2129,7 +2129,7 @@ class CineSortApi:
         _row, store = found
 
         try:
-            qr = store.get_quality_report(run_id=run_id, row_id=str(row_id))
+            qr = store.quality.get_quality_report(run_id=run_id, row_id=str(row_id))
         except (KeyError, TypeError, ValueError, OSError):
             qr = None
         if not qr:
@@ -2141,7 +2141,7 @@ class CineSortApi:
         computed_tier = str(qr.get("tier") or "")
         tier_delta = compute_tier_delta(computed_tier, str(user_tier))
         try:
-            fb_id = store.insert_user_quality_feedback(
+            fb_id = store.quality.insert_user_quality_feedback(
                 run_id=str(run_id),
                 row_id=str(row_id),
                 computed_score=computed_score,
@@ -2178,7 +2178,7 @@ class CineSortApi:
         if not store:
             return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
-            count = store.delete_user_quality_feedback(feedback_id=int(feedback_id))
+            count = store.quality.delete_user_quality_feedback(feedback_id=int(feedback_id))
         except (OSError, TypeError, ValueError, AttributeError) as exc:
             self.log_api_exception("delete_score_feedback", exc)
             return _err_response("Suppression échouée.", category="runtime", level="error", log_module=__name__)
@@ -2198,7 +2198,7 @@ class CineSortApi:
         if store is None:
             return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
-            feedbacks = store.list_user_quality_feedback(limit=10_000)
+            feedbacks = store.quality.list_user_quality_feedback(limit=10_000)
         except (OSError, TypeError, ValueError) as exc:
             self.log_api_exception("get_calibration_report", exc)
             return _err_response("Lecture feedbacks échouée.", category="runtime", level="error", log_module=__name__)
@@ -2206,7 +2206,7 @@ class CineSortApi:
         bias = analyze_feedback_bias(feedbacks)
         # Profil actif pour calculer la suggestion
         try:
-            prof = store.get_active_quality_profile()
+            prof = store.quality.get_active_quality_profile()
         except (OSError, TypeError, ValueError):
             prof = None
         if prof and isinstance(prof.get("profile_json"), str):

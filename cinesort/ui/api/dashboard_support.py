@@ -200,7 +200,7 @@ def _build_dashboard_section(
             "video": str(row.video or ""),
         }
 
-    reports = store.list_quality_reports(run_id=run_id)
+    reports = store.quality.list_quality_reports(run_id=run_id)
     scores = [int(item.get("score") or 0) for item in reports]
     scored_movies = len(scores)
     score_avg = round(sum(scores) / scored_movies, 1) if scored_movies else 0.0
@@ -452,7 +452,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         runs = store.list_runs(limit=20)
         run_ids = [str(item.get("run_id") or "") for item in runs if str(item.get("run_id") or "")]
         error_counts = store.get_error_counts_for_runs(run_ids)
-        quality_counts = store.get_quality_counts_for_runs(run_ids)
+        quality_counts = store.quality.get_quality_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
         runs_history = _runs_history_payload(
             api,
@@ -647,7 +647,7 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
     quality_by_row: Dict[str, Dict[str, Any]] = {}
     if store:
         try:
-            reports = store.list_quality_reports(run_id=run_id)
+            reports = store.quality.list_quality_reports(run_id=run_id)
         except (OSError, TypeError, ValueError):
             reports = []
         for report in reports:
@@ -890,7 +890,7 @@ def _compute_librarian_suggestions(
             ensure_exists=False,
         )
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        reports = store.list_quality_reports(run_id=latest_run_id)
+        reports = store.quality.list_quality_reports(run_id=latest_run_id)
         return generate_suggestions(rows, reports, settings)
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         logger.debug("librarian suggestions error: %s", exc)
@@ -913,7 +913,7 @@ def _compute_space_analysis(store: Any, latest_run_id: str) -> Dict[str, Any]:
     if not latest_run_id:
         return empty
     try:
-        reports = store.list_quality_reports(run_id=latest_run_id)
+        reports = store.quality.list_quality_reports(run_id=latest_run_id)
     except (OSError, TypeError, ValueError):
         return empty
     if not reports:
@@ -1218,12 +1218,12 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             }
 
         # 2. Quality counts per run (batch)
-        quality_counts = store.get_quality_counts_for_runs(run_ids)
+        quality_counts = store.quality.get_quality_counts_for_runs(run_ids)
         error_counts = store.get_error_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
         # 3. Global tier distribution
-        tier_data = store.get_global_tier_distribution(limit_runs=lim)
+        tier_data = store.quality.get_global_tier_distribution(limit_runs=lim)
 
         # 4. Top anomaly codes
         top_anomalies = store.anomaly.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
