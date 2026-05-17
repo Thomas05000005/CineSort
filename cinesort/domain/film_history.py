@@ -189,14 +189,14 @@ def get_film_timeline(
 
         # Evenements apply (operations sur ce row_id)
         if matched_row_id:
-            batches = store.list_apply_batches_for_run(run_id=run_id)
+            batches = store.apply.list_apply_batches_for_run(run_id=run_id)
             for batch in batches:
                 if batch.get("dry_run"):
                     continue
                 batch_id = str(batch.get("batch_id") or "")
                 if not batch_id:
                     continue
-                ops = store.list_apply_operations_by_row(batch_id=batch_id, row_id=matched_row_id)
+                ops = store.apply.list_apply_operations_by_row(batch_id=batch_id, row_id=matched_row_id)
                 if ops:
                     apply_count += 1
                     op_list = [

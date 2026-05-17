@@ -66,7 +66,7 @@ def journaled_move(
     pending_id: Optional[int] = None
     if store is not None:
         try:
-            pending_id = store.insert_pending_move(
+            pending_id = store.apply.insert_pending_move(
                 op_type=op_type,
                 src_path=str(src),
                 dst_path=str(dst),
@@ -90,7 +90,7 @@ def journaled_move(
     # On peut nettoyer le journal.
     if pending_id is not None:
         try:
-            store.delete_pending_move(pending_id)
+            store.apply.delete_pending_move(pending_id)
         except Exception as exc:
             _logger.warning(
                 "journaled_move: delete_pending_move(id=%d) failed: %s",

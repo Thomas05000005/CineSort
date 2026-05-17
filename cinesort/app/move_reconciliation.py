@@ -82,7 +82,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         return report
 
     try:
-        pending = store.list_pending_moves()
+        pending = store.apply.list_pending_moves()
     except Exception:
         _logger.exception("reconcile_pending_moves: list_pending_moves echoue")
         return report
@@ -140,7 +140,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         # Cleanup l'entree dans tous les cas — elle ne sert plus a rien
         # une fois examinee (ou serait re-examinee a chaque boot).
         try:
-            store.delete_pending_move(int(entry.get("id", 0)))
+            store.apply.delete_pending_move(int(entry.get("id", 0)))
         except Exception:
             _logger.exception(
                 "reconcile: delete_pending_move(id=%s) echoue",

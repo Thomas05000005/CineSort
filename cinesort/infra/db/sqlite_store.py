@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
-from ._apply_mixin import _ApplyMixin
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
 REQUIRED_SCHEMA_TABLES = (
@@ -531,18 +530,15 @@ class _StoreBase:
             return int(row[0]) if row else 0
 
 
-class SQLiteStore(
-    _StoreBase,
-    # Mixins retires (issue #85 phase B8) : Repositories accessibles via store.X
-    # - _ProbeMixin (B8a) -> store.probe
-    # - _AnomalyMixin (B8b) -> store.anomaly
-    # - _ScanMixin (B8c) -> store.scan
-    # - _PerceptualMixin (B8d) -> store.perceptual
-    # - _QualityMixin (B8e) -> store.quality
-    # - _RunMixin (B8f) -> store.run
-    # Reste a migrer : _ApplyMixin (64 callers).
-    _ApplyMixin,
-):
+class SQLiteStore(_StoreBase):
+    # Issue #85 phase B8 COMPLETE (B8a -> B8g) : tous les mixins legacy ont
+    # ete supprimes. Les Repositories sont accessibles via composition :
+    #   - store.probe (B8a)       - store.quality (B8e)
+    #   - store.anomaly (B8b)     - store.run (B8f)
+    #   - store.scan (B8c)        - store.apply (B8g)
+    #   - store.perceptual (B8d)
+    # SQLiteStore n'herite plus que de _StoreBase (gestion connection +
+    # initialisation). Le code metier vit dans les 7 Repositories.
     """
     SQLite persistence for v7 foundations.
 

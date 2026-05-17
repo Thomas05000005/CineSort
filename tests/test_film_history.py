@@ -111,20 +111,27 @@ class _FakeRunRepo:
         return list(self._runs)
 
 
-class _FakeStore:
-    """Fake store minimaliste pour les tests de timeline."""
+class _FakeApplyRepo:
+    """Fake apply Repository (cf #85 phase B8g Repository pattern)."""
 
-    def __init__(self, runs=None, quality_reports=None, batches=None, ops_by_row=None):
-        self._batches = batches or {}
-        self._ops = ops_by_row or {}
-        self.quality = _FakeQualityRepo(quality_reports or {})
-        self.run = _FakeRunRepo(runs or [])
+    def __init__(self, batches, ops):
+        self._batches = batches
+        self._ops = ops
 
     def list_apply_batches_for_run(self, *, run_id, limit=10):
         return self._batches.get(run_id, [])
 
     def list_apply_operations_by_row(self, *, batch_id, row_id):
         return self._ops.get((batch_id, row_id), [])
+
+
+class _FakeStore:
+    """Fake store minimaliste pour les tests de timeline."""
+
+    def __init__(self, runs=None, quality_reports=None, batches=None, ops_by_row=None):
+        self.quality = _FakeQualityRepo(quality_reports or {})
+        self.run = _FakeRunRepo(runs or [])
+        self.apply = _FakeApplyRepo(batches or {}, ops_by_row or {})
 
 
 class TimelineReconstructionTests(unittest.TestCase):

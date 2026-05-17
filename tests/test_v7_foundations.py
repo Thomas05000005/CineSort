@@ -264,13 +264,13 @@ class V7FoundationsTests(unittest.TestCase):
             state_dir=str(self.state_dir),
             config={},
         )
-        batch_id = self.store.insert_apply_batch(
+        batch_id = self.store.apply.insert_apply_batch(
             run_id=run_id,
             dry_run=False,
             quarantine_unapproved=True,
             app_version="7.2.0-A",
         )
-        self.store.append_apply_operation(
+        self.store.apply.append_apply_operation(
             batch_id=batch_id,
             op_index=1,
             op_type="MOVE_FILE",
@@ -278,19 +278,19 @@ class V7FoundationsTests(unittest.TestCase):
             dst_path=r"D:\Films\B.mkv",
             reversible=True,
         )
-        self.store.close_apply_batch(
+        self.store.apply.close_apply_batch(
             batch_id=batch_id,
             status="DONE",
             summary={"ops_count": 1},
         )
 
-        last = self.store.get_last_reversible_apply_batch(run_id)
+        last = self.store.apply.get_last_reversible_apply_batch(run_id)
         self.assertIsNotNone(last)
         assert last is not None
         self.assertEqual(last["batch_id"], batch_id)
         self.assertEqual(last["status"], "DONE")
 
-        ops = self.store.list_apply_operations(batch_id=batch_id)
+        ops = self.store.apply.list_apply_operations(batch_id=batch_id)
         self.assertEqual(len(ops), 1)
         self.assertEqual(ops[0]["op_type"], "MOVE_FILE")
 

@@ -58,12 +58,12 @@ class JournaledMoveTests(unittest.TestCase):
         ) as pending_id:
             self.assertIsNotNone(pending_id)
             # Pendant le with, l'entree existe
-            pending = self.store.list_pending_moves()
+            pending = self.store.apply.list_pending_moves()
             self.assertEqual(len(pending), 1)
             self.assertEqual(pending[0]["op_type"], "MOVE_FILE")
 
         # Apres le with sans exception : l'entree est supprimee
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
 
     def test_journaled_move_with_exception_leaves_entry(self) -> None:
         """Exception dans le with → entree reste pour reconciliation."""
@@ -79,7 +79,7 @@ class JournaledMoveTests(unittest.TestCase):
             raise RuntimeError("simulated crash mid-move")
 
         # L'entree pending est restee (sera traitee par reconciliation au boot)
-        pending = self.store.list_pending_moves()
+        pending = self.store.apply.list_pending_moves()
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0]["src_path"], "C:/src.mkv")
 
@@ -117,7 +117,7 @@ class JournaledMoveTests(unittest.TestCase):
             src_size=999,
             row_id="row_008",
         ):
-            pending = self.store.list_pending_moves()
+            pending = self.store.apply.list_pending_moves()
             self.assertEqual(len(pending), 1)
             self.assertEqual(pending[0]["src_sha1"], "cafebabe")
             self.assertEqual(pending[0]["src_size"], 999)
@@ -128,13 +128,13 @@ class JournaledMoveTests(unittest.TestCase):
         """list_pending_moves(batch_id=...) filtre correctement."""
         # Inserer 2 entrees dans 2 batches differents — manuellement, sans
         # cleanup automatique (on simule des entrees orphelines).
-        self.store.insert_pending_move(op_type="MOVE_FILE", src_path="a", dst_path="b", batch_id="b1")
-        self.store.insert_pending_move(op_type="MOVE_FILE", src_path="c", dst_path="d", batch_id="b2")
+        self.store.apply.insert_pending_move(op_type="MOVE_FILE", src_path="a", dst_path="b", batch_id="b1")
+        self.store.apply.insert_pending_move(op_type="MOVE_FILE", src_path="c", dst_path="d", batch_id="b2")
 
-        all_pending = self.store.list_pending_moves()
+        all_pending = self.store.apply.list_pending_moves()
         self.assertEqual(len(all_pending), 2)
 
-        b1_pending = self.store.list_pending_moves(batch_id="b1")
+        b1_pending = self.store.apply.list_pending_moves(batch_id="b1")
         self.assertEqual(len(b1_pending), 1)
         self.assertEqual(b1_pending[0]["src_path"], "a")
 
@@ -164,7 +164,7 @@ class AtomicMoveTests(unittest.TestCase):
         self.assertFalse(self.src.exists())
         self.assertTrue(self.dst.exists())
         # Journal pending vide (DELETE apres succes)
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
 
     def test_atomic_move_with_plain_record_op_falls_back(self) -> None:
         """record_op simple (function) → atomic_move fait shutil.move direct."""
@@ -175,7 +175,7 @@ class AtomicMoveTests(unittest.TestCase):
 
         self.assertFalse(self.src.exists())
         self.assertTrue(self.dst.exists())
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
 
     def test_atomic_move_with_none_record_op(self) -> None:
         """record_op=None → atomic_move fait shutil.move direct."""
@@ -255,7 +255,7 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         """completed → entree supprimee, pas de message warning."""
         # Move termine : src absent, dst present
         self.dst.write_bytes(b"dst data")
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(self.src),
             dst_path=str(self.dst),
@@ -263,7 +263,7 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         report = reconcile_pending_moves(self.store)
         self.assertEqual(report["examined"], 1)
         self.assertEqual(report["completed"], 1)
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
         # Pas de warning critique
         self.assertEqual(report["duplicated"], [])
         self.assertEqual(report["lost"], [])
@@ -272,7 +272,7 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         """duplicated → message warning + entree supprimee."""
         self.src.write_bytes(b"src")
         self.dst.write_bytes(b"dst")
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(self.src),
             dst_path=str(self.dst),
@@ -281,11 +281,11 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         self.assertEqual(len(report["duplicated"]), 1)
         # Au moins un message warning + un message d'entete
         self.assertTrue(any("CONFLIT" in m for m in report["messages"]))
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
 
     def test_reconcile_lost_warning(self) -> None:
         """lost → message critique + entree supprimee."""
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(self.src),
             dst_path=str(self.dst),
@@ -293,7 +293,7 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         report = reconcile_pending_moves(self.store)
         self.assertEqual(len(report["lost"]), 1)
         self.assertTrue(any("FICHIER PERDU" in m for m in report["messages"]))
-        self.assertEqual(self.store.count_pending_moves(), 0)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
 
     def test_reconcile_with_none_store_returns_empty(self) -> None:
         """store=None → no-op, rapport vide, pas d'erreur."""
@@ -317,7 +317,7 @@ class ReconcileAtBootTests(unittest.TestCase):
         # Une entree completed (sans warning)
         dst = self._tmp / "ok.mkv"
         dst.write_bytes(b"data")
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(self._tmp / "missing.mkv"),
             dst_path=str(dst),
@@ -335,7 +335,7 @@ class ReconcileAtBootTests(unittest.TestCase):
         dst = self._tmp / "dst.mkv"
         src.write_bytes(b"a")
         dst.write_bytes(b"b")
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(src),
             dst_path=str(dst),
@@ -351,7 +351,7 @@ class ReconcileAtBootTests(unittest.TestCase):
         notify = MagicMock()
         notify.notify = MagicMock(side_effect=RuntimeError("notify down"))
         # Entree lost
-        self.store.insert_pending_move(
+        self.store.apply.insert_pending_move(
             op_type="MOVE_FILE",
             src_path=str(self._tmp / "ghost1.mkv"),
             dst_path=str(self._tmp / "ghost2.mkv"),

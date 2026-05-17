@@ -210,7 +210,7 @@ def build_undo_preview_payload(
     state_dir = normalize_user_path(row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
 
-    batch = store.get_last_reversible_apply_batch(run_id)
+    batch = store.apply.get_last_reversible_apply_batch(run_id)
     if not batch:
         return (
             {
@@ -233,7 +233,7 @@ def build_undo_preview_payload(
         )
 
     batch_id = str(batch.get("batch_id") or "")
-    ops = store.list_apply_operations(batch_id=batch_id) if batch_id else []
+    ops = store.apply.list_apply_operations(batch_id=batch_id) if batch_id else []
     reversible_ops = [op for op in ops if int(op.get("reversible") or 0) == 1]
     conflicts_predicted = 0
     for op in reversible_ops:
@@ -376,7 +376,7 @@ def _execute_undo_ops(
         op_id_for_check = int(op.get("id") or 0)
         if op_id_for_check in mismatch_ids:
             skipped += 1
-            store.mark_apply_operation_undo_status(
+            store.apply.mark_apply_operation_undo_status(
                 op_id=op_id_for_check,
                 undo_status="SKIPPED",
                 error_message=f"Empreinte modifiee depuis apply: {mismatch_reasons.get(op_id_for_check) or ''}",
@@ -393,7 +393,7 @@ def _execute_undo_ops(
         try:
             if not current_path.exists():
                 skipped += 1
-                store.mark_apply_operation_undo_status(
+                store.apply.mark_apply_operation_undo_status(
                     op_id=op_id,
                     undo_status="SKIPPED",
                     error_message=f"Source inverse introuvable: {current_path}",
@@ -412,7 +412,7 @@ def _execute_undo_ops(
                 except FileNotFoundError:
                     _log.warning("undo: fichier disparu entre check et move (conflict): %s", current_path)
                     skipped += 1
-                    store.mark_apply_operation_undo_status(
+                    store.apply.mark_apply_operation_undo_status(
                         op_id=op_id,
                         undo_status="SKIPPED",
                         error_message=f"Fichier disparu entre check et move: {current_path}",
@@ -421,7 +421,7 @@ def _execute_undo_ops(
                 except PermissionError as perm_err:
                     _log.error("undo: permission refusee: %s -> %s: %s", current_path, conflict_dst, perm_err)
                     failed += 1
-                    store.mark_apply_operation_undo_status(
+                    store.apply.mark_apply_operation_undo_status(
                         op_id=op_id,
                         undo_status="FAILED",
                         error_message=str(perm_err),
@@ -429,7 +429,7 @@ def _execute_undo_ops(
                     continue
                 conflict_moves += 1
                 failed += 1
-                store.mark_apply_operation_undo_status(
+                store.apply.mark_apply_operation_undo_status(
                     op_id=op_id,
                     undo_status="FAILED",
                     error_message=f"Conflit cible existante, deplace vers {conflict_dst}",
@@ -449,7 +449,7 @@ def _execute_undo_ops(
             except FileNotFoundError:
                 _log.warning("undo: fichier disparu entre check et move: %s", current_path)
                 skipped += 1
-                store.mark_apply_operation_undo_status(
+                store.apply.mark_apply_operation_undo_status(
                     op_id=op_id,
                     undo_status="SKIPPED",
                     error_message=f"Fichier disparu entre check et move: {current_path}",
@@ -458,7 +458,7 @@ def _execute_undo_ops(
             except PermissionError as perm_err:
                 _log.error("undo: permission refusee: %s -> %s: %s", current_path, target_path, perm_err)
                 failed += 1
-                store.mark_apply_operation_undo_status(
+                store.apply.mark_apply_operation_undo_status(
                     op_id=op_id,
                     undo_status="FAILED",
                     error_message=str(perm_err),
@@ -477,11 +477,11 @@ def _execute_undo_ops(
                     cleanup_residual_dirs_reversed += 1
                 except ValueError:
                     pass
-            store.mark_apply_operation_undo_status(op_id=op_id, undo_status="DONE", error_message=None)
+            store.apply.mark_apply_operation_undo_status(op_id=op_id, undo_status="DONE", error_message=None)
             log_fn("INFO", f"UNDO {idx}/{len(reversible_ops)}: {current_path} -> {target_path}")
         except (OSError, FileExistsError, ValueError, TypeError) as exc:
             failed += 1
-            store.mark_apply_operation_undo_status(
+            store.apply.mark_apply_operation_undo_status(
                 op_id=op_id,
                 undo_status="FAILED",
                 error_message=str(exc),
@@ -552,15 +552,15 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     _row, store = found
 
     if batch_id:
-        batches = store.list_apply_batches_for_run(run_id=run_id, limit=50)
+        batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=50)
         batch = next((b for b in batches if b["batch_id"] == batch_id), None)
     else:
-        batch = store.get_last_reversible_apply_batch(run_id)
+        batch = store.apply.get_last_reversible_apply_batch(run_id)
     if not batch:
         return {"ok": True, "batch_id": None, "can_undo": False, "rows": [], "message": t("errors.no_reversible_batch")}
 
     bid = str(batch["batch_id"])
-    rows_summary = store.get_batch_rows_summary(batch_id=bid)
+    rows_summary = store.apply.get_batch_rows_summary(batch_id=bid)
 
     # Load plan rows for titles.
     rs = api._get_run(run_id)
@@ -576,7 +576,7 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     rows_out: List[Dict[str, Any]] = []
     for summary in rows_summary:
         rid = str(summary["row_id"])
-        ops = store.list_apply_operations_by_row(batch_id=bid, row_id=rid)
+        ops = store.apply.list_apply_operations_by_row(batch_id=bid, row_id=rid)
         reversible_pending = [
             op for op in ops if int(op.get("reversible") or 0) == 1 and str(op.get("undo_status")) == "PENDING"
         ]
@@ -657,10 +657,10 @@ def undo_selected_rows(
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
 
     if batch_id:
-        batches = store.list_apply_batches_for_run(run_id=run_id, limit=50)
+        batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=50)
         batch = next((b for b in batches if b["batch_id"] == batch_id), None)
     else:
-        batch = store.get_last_reversible_apply_batch(run_id)
+        batch = store.apply.get_last_reversible_apply_batch(run_id)
     if not batch:
         return _err_response(t("errors.no_reversible_batch"), category="state", level="info", log_module=__name__)
 
@@ -679,7 +679,7 @@ def undo_selected_rows(
 
     # Collect all reversible PENDING ops for the selected row_ids.
     target_row_ids = set(str(r) for r in row_ids)
-    all_ops = store.list_apply_operations(batch_id=bid)
+    all_ops = store.apply.list_apply_operations(batch_id=bid)
     selected_ops = [
         op
         for op in all_ops
@@ -729,7 +729,7 @@ def undo_selected_rows(
         }
 
     # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
-    remaining = store.list_apply_operations(batch_id=bid)
+    remaining = store.apply.list_apply_operations(batch_id=bid)
     all_resolved = all(
         str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
     )
@@ -737,7 +737,7 @@ def undo_selected_rows(
         batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
     else:
         batch_status = "UNDONE_PARTIAL"
-    store.mark_apply_batch_undo_status(
+    store.apply.mark_apply_batch_undo_status(
         batch_id=bid,
         status=batch_status,
         summary={
@@ -776,7 +776,7 @@ def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     if not found:
         return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _row, store = found
-    batches = store.list_apply_batches_for_run(run_id=run_id, limit=20)
+    batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=20)
     return {"ok": True, "run_id": run_id, "batches": batches}
 
 
@@ -845,7 +845,7 @@ def _execute_and_finalize_undo(
     residual_reversed = undo_counts["cleanup_residual_dirs_reversed"]
 
     status = "UNDONE_DONE" if failed == 0 else "UNDONE_PARTIAL"
-    store.mark_apply_batch_undo_status(
+    store.apply.mark_apply_batch_undo_status(
         batch_id=batch_id,
         status=status,
         summary={
@@ -1114,7 +1114,7 @@ def _execute_apply(
             return
         try:
             op_index_holder[0] += 1
-            store.append_apply_operation(
+            store.apply.append_apply_operation(
                 batch_id=apply_batch_id,
                 op_index=op_index_holder[0],
                 op_type=str(payload.get("op_type") or "MOVE"),
@@ -1131,7 +1131,7 @@ def _execute_apply(
 
     if not bool(dry_run):
         try:
-            apply_batch_id = store.insert_apply_batch(
+            apply_batch_id = store.apply.insert_apply_batch(
                 run_id=run_id,
                 dry_run=False,
                 quarantine_unapproved=bool(quarantine_unapproved),
@@ -1300,7 +1300,7 @@ def _cleanup_apply(
     total_rows = int(result.considered_rows or len(rows))
     if apply_batch_id is not None:
         try:
-            store.close_apply_batch(
+            store.apply.close_apply_batch(
                 batch_id=apply_batch_id,
                 status="DONE",
                 summary={
@@ -1688,7 +1688,7 @@ def _restore_jellyfin_watched(
 
     try:
         client = _make_jellyfin_client(data)
-        operations = store.list_apply_operations(batch_id=apply_batch_id)
+        operations = store.apply.list_apply_operations(batch_id=apply_batch_id)
         result = restore_watched(client, user_id, snapshot, operations)
         if result.restored > 0:
             log_fn("INFO", f"Jellyfin sync : {result.restored} statut(s) vu restauré(s).")
@@ -1824,7 +1824,7 @@ def apply_changes(
         op_index = batch_state[1]
         if apply_batch_id is not None:
             try:
-                store.close_apply_batch(
+                store.apply.close_apply_batch(
                     batch_id=apply_batch_id,
                     status="FAILED",
                     summary={
