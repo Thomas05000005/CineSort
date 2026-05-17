@@ -157,11 +157,11 @@ class Stress10kTests(unittest.TestCase):
         )
         m4 = self._record(
             "get_anomaly_counts_for_runs",
-            lambda: store.get_anomaly_counts_for_runs(run_ids),
+            lambda: store.anomaly.get_anomaly_counts_for_runs(run_ids),
         )
         m5 = self._record(
             "get_top_anomaly_codes",
-            lambda: store.get_top_anomaly_codes(limit_runs=20, limit_codes=10),
+            lambda: store.anomaly.get_top_anomaly_codes(limit_runs=20, limit_codes=10),
         )
         m6 = self._record(
             "get_global_score_v2_trend",

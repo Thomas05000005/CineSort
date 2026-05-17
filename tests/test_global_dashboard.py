@@ -58,7 +58,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         )
 
     def _insert_anomaly(self, run_id: str, code: str) -> None:
-        self.store._ensure_anomalies_table()
+        self.store.anomaly._ensure_anomalies_table()
         with self.store._managed_conn() as conn:
             conn.execute(
                 "INSERT INTO anomalies(run_id, row_id, severity, code, message, path, recommended_action, context_json, ts) "
@@ -86,7 +86,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         self.assertEqual(result["tiers"]["Mauvais"], 1)
 
     def test_get_top_anomaly_codes_empty(self) -> None:
-        result = self.store.get_top_anomaly_codes(limit_runs=10, limit_codes=5)
+        result = self.store.anomaly.get_top_anomaly_codes(limit_runs=10, limit_codes=5)
         self.assertEqual(result, [])
 
     def test_get_top_anomaly_codes_with_data(self) -> None:
@@ -96,7 +96,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         self._insert_anomaly("run_a", "low_bitrate")
         self._insert_anomaly("run_b", "low_bitrate")
         self._insert_anomaly("run_b", "missing_audio")
-        result = self.store.get_top_anomaly_codes(limit_runs=10, limit_codes=5)
+        result = self.store.anomaly.get_top_anomaly_codes(limit_runs=10, limit_codes=5)
         self.assertGreaterEqual(len(result), 1)
         self.assertEqual(result[0]["code"], "low_bitrate")
         self.assertEqual(result[0]["count"], 3)

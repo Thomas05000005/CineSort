@@ -49,7 +49,7 @@ class IncrementalScanTests(unittest.TestCase):
             tmdb=None,
             log=lambda level, msg: logs.append((level, msg)),
             progress=lambda _idx, _total, _cur: None,
-            scan_index=self.store if incremental else None,
+            scan_index=self.store.scan if incremental else None,
             run_id=run_id,
         )
         return rows, stats, logs

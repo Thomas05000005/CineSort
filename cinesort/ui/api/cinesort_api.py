@@ -1016,7 +1016,7 @@ class CineSortApi:
             )
 
         try:
-            counts = store.clear_all_incremental_caches()
+            counts = store.scan.clear_all_incremental_caches()
         except Exception as exc:
             # Toutes les erreurs possibles (sqlite3.Error, OSError, AttributeError,
             # bug inattendu) sont remontees a l'utilisateur sous forme de message
