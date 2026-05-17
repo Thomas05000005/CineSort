@@ -308,6 +308,31 @@ Pour CHAQUE module, cherche TOUS ces patterns :
 - Imports inutilises
 - Conditions impossibles (always-true / always-false)
 - Branches if/elif/else jamais atteignables
+- AVANT toute proposition de SUPPRESSION (fichiers, modules, composants JS,
+  endpoints) : verifier que les TESTS n'en dependent pas. Une suite de tests
+  qui charge / importe / patche le code "mort" empeche la suppression atomique
+  et transforme un "win rapide" en chantier multi-PR (audit tests + portage
+  vers le format moderne + suppression).
+  Cross-checks obligatoires avant de proposer la suppression :
+  * `grep -rn '<chemin/fichier>' tests/` (refs directes par chemin)
+  * `grep -rn '<NomComposant>\|<window.GlobalName>' tests/` (refs par symbole/global)
+  * Pour le frontend : verifier les patterns IIFE vs ESM. Un test qui assert
+    `window.X = ...` ou `DOMContentLoaded` auto-start est probablement couple
+    au format IIFE legacy ET ne sera PAS satisfait par l'equivalent ESM
+    (exports nommes, init explicite). Une simple substitution de chemin
+    `legacy/ -> moderne/` echouera.
+  Si la suite de tests depend du code candidat -> NE PAS proposer suppression
+  atomique. Proposer a la place un plan multi-PR : (1) identifier tests
+  fondamentalement legacy, (2) verifier equivalent existe cote moderne,
+  (3) sous-issue "porter test X vers <format moderne>" si manquant,
+  (4) suppression finale UNE FOIS 0 test ne reference plus le code.
+  Estim a annoncer dans l'issue : 1-2 jours minimum (pas un quick win).
+  Lecon issue #217 (audit transverse 2026-05-17) : suppression de
+  `web/components/*` + `web/index.html` proposee comme "1 jour, 3 PRs",
+  reelle ~112 tests v5 (test_nav_v5, test_accessibility_v5, test_home_v5,
+  test_virtual_table, test_score_v2_frontend, test_notifications_v5,
+  test_library_v5, test_polish_v5, test_legacy_wiring_v5, test_custom_rules_ui)
+  ont casse car couples au format IIFE -> revert.
 
 (12) PATTERNS STANDARDS PYTHON
 - Iteration manuelle au lieu de for-each
