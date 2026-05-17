@@ -101,9 +101,27 @@ AVANT toute action, recense ce qui existe deja :
 
 - `gh issue list --state open --limit 300 --json number,title,body,labels`
 - `gh pr list --state open --limit 100 --json number,title,headRefName,files,body`
-- `gh issue list --state closed --limit 100 --json number,title` (les fermees recentes pour eviter recreer)
+- `gh issue list --state closed --limit 100 --json number,title,closedAt` (les fermees recentes pour eviter recreer)
 
 Stocke ces listes en memoire pour la suite.
+
+**REGLE CRITIQUE — issue fermee = priorite faible documentee, ne PAS reouvrir**
+
+Si tu trouves un sujet pour lequel il existe deja une issue **fermee**,
+relis le commentaire de cloture AVANT de proposer une nouvelle issue :
+- Si la cloture dit "priorite faible / non urgent / legacy" -> respect.
+  Ne propose pas la meme suppression sous un autre angle.
+- Si la cloture dit "duplicate of #X" -> commente sur #X au lieu de
+  recreer.
+- Si la cloture dit "resolved" et que le probleme est revenu -> reopen
+  avec contexte explicite "regression depuis cloture le YYYY-MM-DD",
+  ne creer une nouvelle issue qu'en dernier recours.
+
+Incident 2026-05-17 (#91 -> #217) : audit a recree une issue de
+suppression web/components/ alors que #91 etait fermee 2 jours avant
+avec "priorite faible / legacy non charge en prod". L'angle "suppression"
+plutot que "dedup" etait nouveau et legitime, mais le commentaire de
+cloture #91 indiquait deja que le sujet etait non urgent.
 
 STRATEGIE HASH FINGERPRINT pour dedup robuste :
 Pour chaque finding, calcule un hash stable des elements stables :
@@ -308,6 +326,46 @@ Pour CHAQUE module, cherche TOUS ces patterns :
 - Imports inutilises
 - Conditions impossibles (always-true / always-false)
 - Branches if/elif/else jamais atteignables
+
+**REGLE CRITIQUE — VERIFICATION TESTS AVANT TOUTE SUGGESTION DE SUPPRESSION** :
+
+Quand tu proposes la suppression d'un fichier, dossier, fonction ou symbole
+comme "non utilise en prod" ou "code mort", tu DOIS verifier 3 choses
+AVANT de creer l'issue / la PR :
+
+1. **Suite de tests** : `grep -rln '<file-or-symbol>' tests/` doit retourner 0.
+   Si des tests le referencent (par path direct, import, ou string),
+   listes-les explicitement dans l'issue. Ils sont du SCOPE de la suppression :
+   soit ils doivent etre supprimes aussi, soit adaptes vers la version active.
+
+   Exemple concret (incident 2026-05-17 sur #217) : audit a propose suppression
+   de `web/components/*.js` comme "non charge en prod" — vrai pour app.py +
+   rest_server.py, MAIS 112 tests (test_nav_v5, test_accessibility_v5, etc.)
+   chargeaient ces fichiers pour valider patterns IIFE. La suppression aurait
+   casse la CI. Le scope reel n'etait pas "supprimer 24 fichiers" mais
+   "supprimer 24 fichiers + adapter/supprimer ~50 tests legacy".
+
+2. **Bundling PyInstaller / bundlers JS** : si le fichier est colecte par
+   glob (e.g., `CineSort.spec:178 Path("web").rglob("*")`), la suppression
+   reduit automatiquement le bundle. Pas d'action additionnelle requise.
+   Si reference explicite par nom, c'est dans le scope de la suppression.
+
+3. **Imports dynamiques / strings de chemin** : `grep -rn '"<name>"' .` et
+   `grep -rn "'<name>'" .` pour attraper les import dynamiques (`importlib`,
+   `__import__`, runtime `from X import` build at startup, etc.) ou les
+   strings de chemin (e.g., `Path(__file__) / "X.js"`).
+
+Format requis dans l'issue :
+```
+## Verification "code mort"
+- grep tests/ : 0 reference (ou liste des tests dans le scope)
+- grep code prod : 0 reference active (verifie pour app.py, rest_server.py, etc.)
+- grep imports dynamiques + strings : 0 (ou liste)
+- PyInstaller bundle : reduit automatiquement / a editer dans CineSort.spec
+```
+
+Si tu ne peux pas faire ces 3 verifications, ne propose PAS la suppression.
+Propose plutot "audit dependances avant suppression" comme premiere etape.
 
 (12) PATTERNS STANDARDS PYTHON
 - Iteration manuelle au lieu de for-each
@@ -722,6 +780,17 @@ Verifications strictes contre les regressions architecturales :
 
 Action si violation : ouvrir issue critical-priority avec extrait du code
 + pointeur vers le contract import-linter viole et la ligne fautive.
+
+**INVARIANT META : suppression -> verifier dependances tests d'abord**
+(cf categorie 11 pour le detail complet). Ne JAMAIS proposer la
+suppression d'un fichier/symbole sans avoir verifie en amont :
+1. `grep -rln '<symbol>' tests/` (suite de tests)
+2. `grep -rn '<symbol>' cinesort/ web/ app.py` (code prod)
+3. Imports dynamiques + strings de chemin
+
+L'audit transverse du 17 mai 2026 (#217) a manque ce check : 24 fichiers
+proposes en suppression -> 112 tests legacy auraient casse. Scope reel :
+24 fichiers + ~50 tests legacy + adaptation des contrats v5 dashboard.
 
 
 (46) AMELIORATIONS PROACTIVES (continuous improvement)

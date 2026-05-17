@@ -111,7 +111,7 @@ jobs:
             (8) i18n strings hardcodes,
             (9) migrations DB (idempotence ALTER TABLE, foreign keys, integrity),
             (10) dette technique (fonctions >100L, magic numbers, duplications, NOUVEAUX lazy imports a justifier),
-            (11) code mort (fonctions/imports/vars jamais utilises),
+            (11) code mort (fonctions/imports/vars jamais utilises). **REGLE CRITIQUE** : avant de PROPOSER la suppression d un fichier/dossier/symbole comme code mort, tu DOIS verifier 3 choses et lister le scope dans l issue : (a) grep -rln dans tests/ (si tests le referencent ils sont dans le scope = soit supprimes soit adaptes), (b) grep -rn dans code prod (app.py, cinesort/, web/, rest_server.py), (c) imports dynamiques + strings de chemin. Incident 2026-05-17 #217 : audit a propose -24 fichiers web/components/ comme non charges en prod -> vrai pour app.py mais 112 tests v5 chargent ces fichiers pour valider format IIFE. Scope reel = 24 fichiers + ~50 tests a adapter, pas un win rapide.
             (12) patterns Python non-idiomatiques,
             (13) typing (mypy errors, Optional implicites),
             (14) error handling (silenced, missing chain, trop large),
