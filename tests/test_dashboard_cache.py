@@ -145,7 +145,9 @@ class DashboardCacheTests(unittest.TestCase):
         cache_path = self.state_dir / "runs" / f"tri_films_{run_id}" / "dashboard_cache.json"
         self.assertTrue(cache_path.exists(), str(cache_path))
 
-        with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("should not hit reports")):
+        with mock.patch.object(
+            self.store.quality, "list_quality_reports", side_effect=OSError("should not hit reports")
+        ):
             second = self.api.get_dashboard(run_id)
 
         self.assertTrue(second.get("ok"), second)
