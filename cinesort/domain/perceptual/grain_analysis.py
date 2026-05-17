@@ -14,12 +14,19 @@ from .constants import (
     ERA_CLASSIC_FILM,
     ERA_TRANSITION,
     BUDGET_HIGH,
+    GRAIN_AV1_AFGS1_BONUS,
     GRAIN_LIGHT,
     GRAIN_MODERATE,
     GRAIN_NONE,
     GRAIN_UNIFORMITY_ARTIFICIAL,
     GRAIN_UNIFORMITY_NATURAL,
     MAJOR_STUDIOS,
+)
+from .grain_classifier import classify_grain_nature, detect_partial_dnr
+from .grain_signatures import (
+    classify_film_era_v2,
+    detect_film_format_hint,
+    get_expected_grain_signature,
 )
 from .models import GrainAnalysis
 
@@ -432,15 +439,6 @@ def analyze_grain_v2(
     Returns:
         GrainAnalysis enrichi (18 nouveaux champs).
     """
-    import numpy as np
-
-    from .grain_classifier import classify_grain_nature, detect_partial_dnr
-    from .grain_signatures import (
-        classify_film_era_v2,
-        detect_film_format_hint,
-        get_expected_grain_signature,
-    )
-
     # 1. Analyse existante v1 (conservee pour backward compat)
     result = analyze_grain(frames_data, video_blur_mean, tmdb_metadata, bit_depth, tmdb_year)
 
@@ -510,8 +508,6 @@ def analyze_grain_v2(
     # 7. Bonus AV1 AFGS1 : score visuel +15 si encodage grain-respectueux
     if av1_grain_info is not None and getattr(av1_grain_info, "present", False):
         result.av1_afgs1_present = True
-        from .constants import GRAIN_AV1_AFGS1_BONUS
-
         result.score = min(100, int(result.score) + GRAIN_AV1_AFGS1_BONUS)
 
     # 8. Contexte historique FR pour l'UI

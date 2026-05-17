@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
+from .repositories import (
+    AnomalyRepository,
+    ApplyRepository,
+    PerceptualRepository,
+    ProbeRepository,
+    QualityRepository,
+    RunRepository,
+    ScanRepository,
+)
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
 REQUIRED_SCHEMA_TABLES = (
@@ -561,18 +570,8 @@ class SQLiteStore(_StoreBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Cf issue #85 : 7 Repository en composition (transitoire avec mixins).
-        # Import lazy pour eviter cycle (repositories importent les mixins).
-        from cinesort.infra.db.repositories import (
-            AnomalyRepository,
-            ApplyRepository,
-            PerceptualRepository,
-            ProbeRepository,
-            QualityRepository,
-            RunRepository,
-            ScanRepository,
-        )
-
+        # Cf issue #85 : 7 Repository en composition. Les mixins ont ete
+        # supprimes (phase B8 CLOSED), donc plus de cycle -> import top-level.
         self.apply = ApplyRepository(self)
         self.anomaly = AnomalyRepository(self)
         self.perceptual = PerceptualRepository(self)

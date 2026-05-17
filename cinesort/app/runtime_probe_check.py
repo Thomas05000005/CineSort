@@ -95,6 +95,9 @@ def cross_check_rows_with_probe(
     if not rows or not store or not tmdb:
         return 0
 
+    # Lazy intentionnel : tests patchent `cinesort.infra.probe.ProbeService`
+    # au niveau du module source (pas du re-import client). Top-level
+    # casserait 4 tests CrossCheckRowsWithProbeTests dans test_runtime_probe_check.py.
     try:
         from cinesort.infra.probe import ProbeService
     except ImportError as exc:

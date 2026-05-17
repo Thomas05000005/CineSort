@@ -13,6 +13,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
+from cinesort.infra.fs_safety import is_dir_accessible
+
 logger = logging.getLogger("cinesort.watcher")
 
 
@@ -167,26 +169,20 @@ class FolderWatcher(threading.Thread):
         detecte = scan auto declenche pour rien (faux positif).
         """
         # R5-CRIT-6 : pre-validation accessibility roots
-        try:
-            from cinesort.infra.fs_safety import is_dir_accessible
-
-            inaccessible: List[str] = []
-            for root in self._roots:
-                try:
-                    if not is_dir_accessible(root, timeout_s=5.0):
-                        inaccessible.append(str(root))
-                except (OSError, ValueError):
+        inaccessible: List[str] = []
+        for root in self._roots:
+            try:
+                if not is_dir_accessible(root, timeout_s=5.0):
                     inaccessible.append(str(root))
-            if inaccessible:
-                logger.warning(
-                    "[watcher] scan annule, %d root(s) inaccessible(s): %s",
-                    len(inaccessible),
-                    ", ".join(inaccessible[:3]),
-                )
-                return
-        except ImportError:
-            # fs_safety pas dispo, on continue (fallback comportement original)
-            pass
+            except (OSError, ValueError):
+                inaccessible.append(str(root))
+        if inaccessible:
+            logger.warning(
+                "[watcher] scan annule, %d root(s) inaccessible(s): %s",
+                len(inaccessible),
+                ", ".join(inaccessible[:3]),
+            )
+            return
 
         try:
             settings = self._api.settings.get_settings()

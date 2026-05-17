@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from cinesort.domain.probe_models import NormalizedProbe
 from cinesort.infra.db import SQLiteStore
 
-from .constants import PROBE_WORKERS_AUTO_CAP, PROBE_WORKERS_MAX
+from .constants import FILE_PROBE_TIMEOUT_S, PROBE_WORKERS_AUTO_CAP, PROBE_WORKERS_MAX
 from .ffprobe_backend import run_ffprobe_json
 from .mediainfo_backend import run_mediainfo_json
 from .normalize import normalize_probe
@@ -51,8 +51,6 @@ def _normalize_probe_settings(settings: Optional[Dict[str, Any]]) -> Dict[str, A
     except (TypeError, ValueError):
         timeout = None
     if timeout is None or timeout <= 0:
-        from .constants import FILE_PROBE_TIMEOUT_S
-
         timeout = float(FILE_PROBE_TIMEOUT_S)
     timeout = max(5.0, min(300.0, timeout))
     # V5-04 : parallelisation probe batch — opt-in via settings.
