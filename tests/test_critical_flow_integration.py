@@ -206,12 +206,12 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(run_row, run_id)
         self.assertEqual(str(run_row.get("status") or ""), "DONE")
 
-        reversible_batch = store.get_last_reversible_apply_batch(run_id)
+        reversible_batch = store.apply.get_last_reversible_apply_batch(run_id)
         self.assertIsNotNone(reversible_batch, run_id)
         self.assertEqual(str(reversible_batch.get("batch_id") or ""), apply_batch_id)
         self.assertEqual(str(reversible_batch.get("status") or ""), "DONE")
 
-        ops_before = store.list_apply_operations(batch_id=apply_batch_id)
+        ops_before = store.apply.list_apply_operations(batch_id=apply_batch_id)
         self.assertTrue(ops_before, apply_batch_id)
         self.assertTrue(all(str(op.get("undo_status") or "") == "PENDING" for op in ops_before), ops_before)
 

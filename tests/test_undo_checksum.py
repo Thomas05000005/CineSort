@@ -168,9 +168,9 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         found = api._find_run_row(run_id)
         self.assertIsNotNone(found)
         _, store = found
-        batch = store.get_last_reversible_apply_batch(run_id)
+        batch = store.apply.get_last_reversible_apply_batch(run_id)
         self.assertIsNotNone(batch)
-        ops = store.list_apply_operations(batch_id=batch["batch_id"])
+        ops = store.apply.list_apply_operations(batch_id=batch["batch_id"])
         video_op = next(
             (op for op in ops if op["op_type"] in ("MOVE_FILE", "MOVE_DIR") and op.get("src_sha1")),
             None,

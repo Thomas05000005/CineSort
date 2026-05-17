@@ -1396,7 +1396,7 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
 
         last_batch = None
         try:
-            last_batch = store.get_last_reversible_apply_batch(run_id)
+            last_batch = store.apply.get_last_reversible_apply_batch(run_id)
         except (OSError, AttributeError, TypeError, ValueError):
             last_batch = None
 

@@ -442,8 +442,8 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             log_entries.append((str(level), str(msg)))
 
         store = mock.Mock()
-        store.insert_apply_batch.return_value = "batch-apply-1"
-        store.close_apply_batch.side_effect = OSError("close failed boom")
+        store.apply.insert_apply_batch.return_value = "batch-apply-1"
+        store.apply.close_apply_batch.side_effect = OSError("close failed boom")
         ctx = (core.Config(root=self.root).normalized(), run_paths, rows, log_fn, store)
 
         # Cf issue #83 : apply_support importe apply_rows directement (pas via
