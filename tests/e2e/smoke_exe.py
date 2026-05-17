@@ -101,19 +101,29 @@ def _check_stderr_for_fatal(stderr_text: str) -> Optional[str]:
 
 
 def _terminate(proc: subprocess.Popen, *, grace_s: float = 3.0) -> None:
-    """Kill propre : SIGTERM -> wait grace_s -> SIGKILL."""
+    """Kill propre : terminate -> communicate(timeout) -> kill -> communicate.
+
+    Sur Windows, proc.terminate() == TerminateProcess (force). On utilise
+    communicate() au lieu de wait() pour drainer les pipes stdout/stderr en
+    parallele, ce qui evite un deadlock si l'OS remplit le buffer de pipe
+    avant qu'on lise (taille typique 4-64 KB sous Windows).
+    """
     if proc.poll() is not None:
         return
     try:
         proc.terminate()
-        proc.wait(timeout=grace_s)
+    except OSError as exc:
+        _log(f"terminate() failed: {exc}")
+    try:
+        proc.communicate(timeout=grace_s)
+        return
     except subprocess.TimeoutExpired:
         _log(f"Process pas termine en {grace_s}s, kill force")
-        proc.kill()
-        try:
-            proc.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            _log("kill() n'a pas pu nettoyer le process")
+    proc.kill()
+    try:
+        proc.communicate(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        _log("kill() n'a pas pu nettoyer le process")
 
 
 def run_smoke(*, use_api: bool, wait_s: float = 10.0) -> int:

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Generator
 
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -212,7 +213,7 @@ def authenticated_page(page, exe_server: dict):
     page.click("#loginBtn")
     try:
         page.wait_for_selector("#app-shell:not(.hidden)", timeout=10000)
-    except Exception as exc:
+    except PlaywrightTimeoutError as exc:
         # Verifier explicitement si c'est le bug get_settings 404
         try:
             import urllib.error
@@ -277,14 +278,15 @@ class TestUIPlaywright:
 
         clicked = False
         for selector in candidates:
-            locator = page.locator(selector).first
-            if locator.count() > 0:
-                try:
-                    locator.click(timeout=2000)
-                    clicked = True
-                    break
-                except Exception:
-                    continue
+            # Click direct avec timeout : Playwright auto-attend que l'element
+            # soit attache + visible + activable, et leve PlaywrightTimeoutError
+            # sinon. Plus fiable que locator.count() qui n'auto-attend pas.
+            try:
+                page.locator(selector).first.click(timeout=2000)
+                clicked = True
+                break
+            except PlaywrightTimeoutError:
+                continue
 
         if not clicked:
             pytest.skip(
@@ -306,7 +308,7 @@ class TestUIPlaywright:
                 page.wait_for_selector(selector, timeout=3000)
                 found = True
                 break
-            except Exception:
+            except PlaywrightTimeoutError:
                 continue
         assert found, (
             "Aucun champ TMDb API key visible dans la vue Settings "
@@ -332,14 +334,12 @@ class TestUIPlaywright:
         ]
         navigated = False
         for selector in candidates:
-            locator = page.locator(selector).first
-            if locator.count() > 0:
-                try:
-                    locator.click(timeout=2000)
-                    navigated = True
-                    break
-                except Exception:
-                    continue
+            try:
+                page.locator(selector).first.click(timeout=2000)
+                navigated = True
+                break
+            except PlaywrightTimeoutError:
+                continue
 
         if not navigated:
             pytest.skip("Aucun lien Runs detecte (selecteurs essayes : " + ", ".join(candidates) + ")")
