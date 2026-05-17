@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
+from cinesort.infra.probe.constants import VERSION_PROBE_TIMEOUT_S
 from cinesort.infra.subprocess_safety import tracked_run
 
 RunnerFn = Callable[[List[str], float], Tuple[int, str, str]]
@@ -82,8 +83,6 @@ def _probe_version(
     if not path:
         return ""
     try:
-        from cinesort.infra.probe.constants import VERSION_PROBE_TIMEOUT_S
-
         if tool_name == "mediainfo":
             rc, out, err = runner([path, "--Version"], VERSION_PROBE_TIMEOUT_S)
         else:
@@ -91,7 +90,7 @@ def _probe_version(
         if rc == 0:
             return _extract_first_non_empty_line(out)
         return _extract_first_non_empty_line(err)
-    except (ImportError, OSError):
+    except OSError:
         return ""
 
 

@@ -391,6 +391,9 @@ def analyze_audio_perceptual(
 
     # --- Fingerprint Chromaprint (§3 v7.5.0) ---
     if enable_fingerprint:
+        # Lazy intentionnel : tests patchent les symboles au niveau du module source
+        # (audio_fingerprint.resolve_fpcalc_path). Top-level casserait
+        # test_audio_fingerprint.py::test_fingerprint_populated_when_fpcalc_available.
         from .audio_fingerprint import compute_audio_fingerprint, resolve_fpcalc_path
 
         fpcalc = resolve_fpcalc_path()
@@ -412,6 +415,9 @@ def analyze_audio_perceptual(
 
     # --- Spectral cutoff lossy detection (§9 v7.5.0) ---
     if enable_spectral:
+        # Lazy intentionnel : tests patchent les symboles au niveau du module source
+        # (spectral_analysis.analyze_spectral). Top-level casserait les tests
+        # audio perceptuels qui mockent ce module.
         from .spectral_analysis import analyze_spectral
 
         sample_rate = int(best.get("sample_rate") or 48000)
@@ -434,6 +440,9 @@ def analyze_audio_perceptual(
     # --- Mel spectrogram (§12 v7.5.0) ---
     mel_result = None
     if enable_mel:
+        # Lazy intentionnel : tests patchent les symboles au niveau du module source
+        # (mel_analysis.analyze_mel). Top-level casserait les tests audio
+        # perceptuels qui mockent ce module.
         from .mel_analysis import analyze_mel
         from .spectral_analysis import SPECTRAL_SAMPLE_RATE, extract_audio_segment
 

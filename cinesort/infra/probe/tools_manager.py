@@ -7,6 +7,12 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.infra.log_context import is_remote_request
+from cinesort.infra.probe.constants import (
+    VERSION_PROBE_DETAILED_TIMEOUT_S,
+    WINGET_INSTALL_TIMEOUT_S,
+)
+
 from .tooling import RunnerFn, default_runner
 
 
@@ -113,8 +119,6 @@ def _resolve_explicit_path(value: Any) -> str:
     """Cf issue #73 : si la requete vient via REST distant, pas d'expandvars
     sur le chemin de l'outil — empeche path manipulation via env vars serveur.
     """
-    from cinesort.infra.log_context import is_remote_request
-
     raw = str(value or "").strip().strip('"').strip("'")
     if not raw:
         return ""
@@ -195,10 +199,8 @@ def _probe_version_line(*, tool_name: str, tool_path: str, runner: RunnerFn) -> 
         return False, "", ""
     cmd = [tool_path, "--Version"] if tool_name == "mediainfo" else [tool_path, "-version"]
     try:
-        from cinesort.infra.probe.constants import VERSION_PROBE_DETAILED_TIMEOUT_S
-
         rc, out, err = runner(cmd, VERSION_PROBE_DETAILED_TIMEOUT_S)
-    except (ImportError, OSError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         return False, "", str(exc)
     text = str(out or "").strip() or str(err or "").strip()
     if rc != 0:
@@ -412,10 +414,8 @@ def _run_winget_for_tool(
     for pkg in ids:
         cmd = _build_winget_command(winget_path=winget_path, action=action, package_id=pkg, scope=scope)
         try:
-            from cinesort.infra.probe.constants import WINGET_INSTALL_TIMEOUT_S
-
             rc, out, err = runner(cmd, WINGET_INSTALL_TIMEOUT_S)
-        except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             last_error = str(exc)
             continue
         if int(rc) == 0:

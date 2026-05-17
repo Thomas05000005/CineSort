@@ -61,6 +61,8 @@ def single_folder_is_conform(
 ) -> bool:
     # Check 1 : template actif (si fourni)
     if naming_template:
+        # Lazy intentionnel : cycle reel detecte. duplicate_support -> naming
+        # -> domain.core -> duplicate_support (cf core.py:1352 _find_video_case_insensitive).
         from cinesort.domain.naming import folder_matches_template
 
         if folder_matches_template(folder_name, naming_template, title, year):

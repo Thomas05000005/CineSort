@@ -19,6 +19,7 @@ _UPGRADE_SCORE_THRESHOLD = 54
 _UPGRADE_ENCODE_FLAGS = frozenset({"upscale_suspect", "reencode_degraded"})
 
 
+from cinesort.app._fuzzy_utils import normalize_for_fuzzy
 from cinesort.app._path_utils import normalize_path as _normalize_path
 
 
@@ -38,8 +39,6 @@ def build_radarr_report(
     profiles: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Compare films locaux avec Radarr. Retourne le rapport enrichi."""
-    from cinesort.app._fuzzy_utils import normalize_for_fuzzy
-
     # Index Radarr par tmdb_id
     radarr_by_tmdb: Dict[int, Dict[str, Any]] = {}
     radarr_by_path: Dict[str, Dict[str, Any]] = {}

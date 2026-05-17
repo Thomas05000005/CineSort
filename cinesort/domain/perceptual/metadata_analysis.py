@@ -39,6 +39,7 @@ from .constants import (
 from cinesort.domain._runners import tracked_run
 
 from .ffmpeg_runner import _runner_platform_kwargs
+from .parallelism import resolve_max_workers, run_parallel_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +309,6 @@ def detect_crop_multi_segments(
         f"crop_{i:02d}": _make_task(starts[i])
         for i in range(n)
     }
-
-    # Import local pour eviter cycle (parallelism importe constants)
-    from .parallelism import resolve_max_workers, run_parallel_tasks
 
     # intent="single_film" cap a 2 workers (suffit pour 3 segments rapides).
     # Le pool fait min(workers, n_tasks) donc on n'over-provisionne pas.

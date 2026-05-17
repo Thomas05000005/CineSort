@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Set
 
+from cinesort.app._fuzzy_utils import normalize_for_fuzzy
 from cinesort.app._path_utils import normalize_path as _normalize_path
 
 
@@ -37,8 +38,6 @@ def build_sync_report(
     """
     # Index Jellyfin par chemin normalise
     jf_by_path: Dict[str, Dict[str, Any]] = {}
-    from cinesort.app._fuzzy_utils import normalize_for_fuzzy
-
     jf_by_tmdb: Dict[str, Dict[str, Any]] = {}
     jf_by_title_year: Dict[str, Dict[str, Any]] = {}
     # Cf issue #29 : pre-index Jellyfin par annee avec titres normalises
