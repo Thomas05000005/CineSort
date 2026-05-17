@@ -5,6 +5,8 @@ Verifie que :
 - `validation.js` utilise le helper pour les listes >500 films.
 - Le helper est inclus dans `index.html` apres les autres composants.
 - La syntaxe JS est valide (via `node --check`).
+- Le mirror ESM `web/dashboard/components/virtual-table.js` expose la meme
+  surface (preparation suppression legacy IIFE — issue #217).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "web" / "components" / "virtual-table.js"
+DASHBOARD_HELPER = ROOT / "web" / "dashboard" / "components" / "virtual-table.js"
 VALIDATION = ROOT / "web" / "views" / "validation.js"
 INDEX_HTML = ROOT / "web" / "index.html"
 
@@ -119,6 +122,52 @@ class JsSyntaxTests(unittest.TestCase):
 
     def test_validation_syntax_valid(self) -> None:
         self._node_check(VALIDATION)
+
+
+class DashboardVirtualTableHelperTests(unittest.TestCase):
+    """Mirror ESM dashboard (#217 — preparation suppression legacy IIFE).
+
+    L'API ESM dashboard exporte `virtualizeTbody` directement (pas via
+    `window.VirtualTable`). Les autres invariants (threshold 500, overscan,
+    spacers, RAF, destroy/scrollToIndex) doivent rester identiques pour
+    permettre la migration ulterieure du test desktop vers cette implementation.
+    """
+
+    def test_dashboard_helper_file_exists(self) -> None:
+        self.assertTrue(
+            DASHBOARD_HELPER.exists(),
+            f"Mirror ESM manquant : {DASHBOARD_HELPER}",
+        )
+
+    def test_dashboard_helper_exports_virtualize_tbody(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        # Export ESM nomme, pas de window global.
+        self.assertIn("export function virtualizeTbody(", src)
+
+    def test_dashboard_helper_threshold_default(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_THRESHOLD = 500", src)
+
+    def test_dashboard_helper_uses_overscan_and_spacers(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_OVERSCAN", src)
+        self.assertIn("virt-spacer", src)
+        self.assertIn('data-virt="top"', src)
+        self.assertIn('data-virt="bottom"', src)
+
+    def test_dashboard_helper_uses_raf_for_scroll(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        self.assertIn("requestAnimationFrame", src)
+        self.assertIn("{ passive: true }", src)
+
+    def test_dashboard_helper_below_threshold_falls_through(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        self.assertIn("rows.length <= threshold", src)
+
+    def test_dashboard_helper_returns_destroy_handle(self) -> None:
+        src = DASHBOARD_HELPER.read_text(encoding="utf-8")
+        self.assertIn("destroy", src)
+        self.assertIn("scrollToIndex", src)
 
 
 if __name__ == "__main__":
