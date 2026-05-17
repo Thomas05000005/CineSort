@@ -175,15 +175,15 @@ class UndoApplyTests(unittest.TestCase):
 
         store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
         run_id = "20260309_120000_undo"
-        store.insert_run_pending(
+        store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(self.state_dir),
             config={"tmdb_enabled": False},
             created_ts=time.time() - 2.0,
         )
-        store.mark_run_running(run_id, started_ts=time.time() - 1.0)
-        store.mark_run_done(run_id, stats={"planned_rows": 0}, ended_ts=time.time())
+        store.run.mark_run_running(run_id, started_ts=time.time() - 1.0)
+        store.run.mark_run_done(run_id, stats={"planned_rows": 0}, ended_ts=time.time())
 
         with mock.patch.object(api, "_build_undo_preview_payload", side_effect=OSError("undo preview boom")):
             out = api.undo_last_apply_preview(run_id)
@@ -196,7 +196,7 @@ class UndoApplyTests(unittest.TestCase):
         self.assertEqual(str(out_real.get("message") or ""), "Impossible d'annuler le dernier apply.")
         self.assertNotIn("undo preview boom", str(out_real.get("message") or ""))
 
-        errs = store.list_errors(run_id)
+        errs = store.run.list_errors(run_id)
         self.assertTrue(errs, errs)
         steps = [str(x.get("step") or "") for x in errs]
         self.assertIn("undo_last_apply_preview", steps)

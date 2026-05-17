@@ -64,7 +64,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
         # Mock store with no runs
         store = MagicMock()
-        store.get_runs_summary.return_value = []
+        store.run.get_runs_summary.return_value = []
         api._get_or_create_infra.return_value = (store, MagicMock())
 
         out = export_full_library(api)
@@ -87,7 +87,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
             }
         }
         store = MagicMock()
-        store.get_runs_summary.return_value = []
+        store.run.get_runs_summary.return_value = []
         api._get_or_create_infra.return_value = (store, MagicMock())
 
         out = export_full_library(api)
@@ -128,7 +128,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         )
 
         store = MagicMock()
-        store.get_runs_summary.return_value = [
+        store.run.get_runs_summary.return_value = [
             {
                 "run_id": run_id,
                 "status": "DONE",
@@ -157,7 +157,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         api._state_dir = self.state_dir
         api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
         store = MagicMock()
-        store.get_runs_summary.return_value = []
+        store.run.get_runs_summary.return_value = []
         api._get_or_create_infra.return_value = (store, MagicMock())
 
         out = export_full_library(api)
@@ -181,7 +181,7 @@ class ExportFullLibraryEdgeCasesTests(unittest.TestCase):
             api._state_dir = Path(tmp)
             api.settings.get_settings.side_effect = TypeError("settings broken")
             store = MagicMock()
-            store.get_runs_summary.return_value = []
+            store.run.get_runs_summary.return_value = []
             api._get_or_create_infra.return_value = (store, MagicMock())
 
             out = export_full_library(api)

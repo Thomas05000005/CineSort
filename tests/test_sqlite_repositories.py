@@ -82,7 +82,7 @@ class RepositoryDelegationTests(unittest.TestCase):
         # get_quality_report retourne None pour un run/row inconnu
         self.assertIsNone(self.store.quality.get_quality_report(run_id="nope", row_id="nope"))
         # list_runs retourne une liste vide pour DB neuve
-        self.assertEqual(self.store.list_runs(), [])
+        self.assertEqual(self.store.run.list_runs(), [])
 
     def test_repository_method_matches_store_method(self) -> None:
         """store.quality.get_quality_report et store.get_quality_report sont identiques."""

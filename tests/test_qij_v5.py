@@ -41,7 +41,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
             ],
         }
         store = MagicMock()
-        store.list_runs.return_value = [{"run_id": "r1"}]
+        store.run.list_runs.return_value = [{"run_id": "r1"}]
         store.perceptual.list_perceptual_reports.return_value = [
             {
                 "row_id": "f1",
@@ -143,7 +143,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
 
         api = MagicMock()
         store = MagicMock()
-        store.list_runs.return_value = []
+        store.run.list_runs.return_value = []
         api.settings.get_settings.return_value = {"state_dir": None}
         api._get_or_create_infra.return_value = (store, None)
         result = library_support.get_scoring_rollup(api, by="franchise")

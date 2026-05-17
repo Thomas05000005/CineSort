@@ -259,7 +259,7 @@ def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
         with api._runs_lock:
             if run_id in api._runs:
                 continue
-        if store.get_run(run_id) is not None:
+        if store.run.get_run(run_id) is not None:
             continue
         return run_id
 
@@ -268,12 +268,12 @@ def find_run_row(api: Any, run_id: str) -> Optional[Tuple[Dict[str, Any], SQLite
     with api._runs_lock:
         stores = [store for store, _runner in api._infra_by_state_dir.values()]
     for store in stores:
-        row = store.get_run(run_id)
+        row = store.run.get_run(run_id)
         if row:
             return row, store
 
     default_store, _runner = api._get_or_create_infra(api._state_dir)
-    row = default_store.get_run(run_id)
+    row = default_store.run.get_run(run_id)
     if row:
         return row, default_store
     return None

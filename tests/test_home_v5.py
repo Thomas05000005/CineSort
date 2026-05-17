@@ -32,7 +32,7 @@ def _make_store_with_data():
     store = SQLiteStore(db)
 
     run_id = "r1"
-    store.insert_run_pending(run_id=run_id, state_dir=str(td), root="X:/", config={})
+    store.run.insert_run_pending(run_id=run_id, state_dir=str(td), root="X:/", config={})
 
     fixtures = [
         ("film1", "platinum", 92.0, []),

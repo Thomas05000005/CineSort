@@ -248,7 +248,7 @@ def _is_demo_run(run_row: Dict[str, Any]) -> bool:
 
 
 def _list_demo_run_ids(store: Any) -> List[str]:
-    runs = store.list_runs(limit=500)
+    runs = store.run.list_runs(limit=500)
     return [str(r.get("run_id") or "") for r in runs if _is_demo_run(r) and r.get("run_id")]
 
 
@@ -336,14 +336,14 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
 
     try:
         run_paths = state.new_run(state_dir, run_id)
-        store.insert_run_pending(
+        store.run.insert_run_pending(
             run_id=run_id,
             root=DEMO_ROOT,
             state_dir=str(state_dir),
             config=config,
             created_ts=started,
         )
-        store.mark_run_running(run_id, started_ts=started)
+        store.run.mark_run_running(run_id, started_ts=started)
 
         with run_paths.plan_jsonl.open("w", encoding="utf-8") as fp:
             for film in DEMO_FILMS:
@@ -363,7 +363,7 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
                 ts=started,
             )
 
-        store.mark_run_done(
+        store.run.mark_run_done(
             run_id,
             stats={
                 "planned_rows": len(DEMO_FILMS),

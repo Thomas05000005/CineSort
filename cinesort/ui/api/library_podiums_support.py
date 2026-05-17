@@ -41,7 +41,7 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
-        runs = store.get_runs_summary(limit=1)
+        runs = store.run.get_runs_summary(limit=1)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("library_podiums cannot resolve latest run: %s", exc)
         return None

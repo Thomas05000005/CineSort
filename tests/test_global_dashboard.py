@@ -35,15 +35,15 @@ class GlobalDashboardDbTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _insert_run(self, run_id: str, ts: float, total: int = 5) -> None:
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(self.state_dir),
             config={},
             created_ts=ts - 1,
         )
-        self.store.mark_run_running(run_id, started_ts=ts)
-        self.store.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
+        self.store.run.mark_run_running(run_id, started_ts=ts)
+        self.store.run.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
 
     def _insert_quality(self, run_id: str, row_id: str, score: int, tier: str) -> None:
         self.store.quality.upsert_quality_report(
@@ -104,7 +104,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
     def test_get_runs_summary(self) -> None:
         self._insert_run("run_a", 1000.0, total=10)
         self._insert_run("run_b", 2000.0, total=20)
-        result = self.store.get_runs_summary(limit=10)
+        result = self.store.run.get_runs_summary(limit=10)
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["run_id"], "run_b")  # most recent first
         self.assertEqual(result[0]["total_rows"], 20)
@@ -134,15 +134,15 @@ class GlobalDashboardApiTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _insert_run(self, run_id: str, ts: float, total: int = 5) -> None:
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(self.state_dir),
             config={},
             created_ts=ts - 1,
         )
-        self.store.mark_run_running(run_id, started_ts=ts)
-        self.store.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
+        self.store.run.mark_run_running(run_id, started_ts=ts)
+        self.store.run.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
 
     def _insert_quality(self, run_id: str, row_id: str, score: int, tier: str) -> None:
         self.store.quality.upsert_quality_report(

@@ -476,8 +476,8 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             any(level == "ERROR" and "Echec application : primary apply boom" in msg for level, msg in log_entries),
             log_entries,
         )
-        store.insert_error.assert_called_once()
-        payload = store.insert_error.call_args.kwargs
+        store.run.insert_error.assert_called_once()
+        payload = store.run.insert_error.call_args.kwargs
         self.assertEqual(payload.get("run_id"), run_id)
         self.assertEqual(payload.get("step"), "apply")
         self.assertEqual(payload.get("code"), "OSError")
@@ -587,7 +587,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         store, _runner = api._get_or_create_infra(other_state_dir)  # type: ignore[attr-defined]
 
         run_id = "20260319_lookup_state_001"
-        store.insert_run_pending(
+        store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(other_state_dir),

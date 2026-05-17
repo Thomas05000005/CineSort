@@ -149,8 +149,8 @@ class RunSimulationIntegrationTests(unittest.TestCase):
         api = MagicMock()
         store = MagicMock()
         store.quality.list_quality_reports.return_value = reports
-        store.get_latest_run.return_value = {"run_id": "RUN123"}
-        store.list_runs.return_value = [{"run_id": "RUN123"}]
+        store.run.get_latest_run.return_value = {"run_id": "RUN123"}
+        store.run.list_runs.return_value = [{"run_id": "RUN123"}]
         api._store = store
         api._active_quality_profile_payload.return_value = {
             "profile_json": active_profile

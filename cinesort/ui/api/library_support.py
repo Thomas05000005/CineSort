@@ -294,7 +294,7 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
-        runs = store.list_runs(limit=1)
+        runs = store.run.list_runs(limit=1)
         if runs:
             return str(runs[0].get("run_id") or "")
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:

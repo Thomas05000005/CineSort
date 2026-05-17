@@ -117,7 +117,7 @@ def get_film_timeline(
     Retourne un dict avec film_id, title, year, events[], current_score, scan_count, apply_count.
     """
     # Recuperer tous les runs tries par date
-    runs = store.get_runs_summary(limit=100)
+    runs = store.run.get_runs_summary(limit=100)
     runs.sort(key=lambda r: float(r.get("start_ts") or r.get("created_ts") or 0))
 
     events: List[Dict[str, Any]] = []
@@ -247,7 +247,7 @@ def list_films_overview(
     Pour chaque film : film_id, title, year, score, scan_count estimatif.
     """
     # Dernier run termine
-    runs = store.get_runs_summary(limit=5)
+    runs = store.run.get_runs_summary(limit=5)
     last_run = None
     for r in runs:
         if str(r.get("status") or "") == "DONE":

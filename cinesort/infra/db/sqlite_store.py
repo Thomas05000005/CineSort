@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
-from ._run_mixin import _RunMixin
 from ._apply_mixin import _ApplyMixin
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
@@ -534,14 +533,14 @@ class _StoreBase:
 
 class SQLiteStore(
     _StoreBase,
-    _RunMixin,
     # Mixins retires (issue #85 phase B8) : Repositories accessibles via store.X
     # - _ProbeMixin (B8a) -> store.probe
     # - _AnomalyMixin (B8b) -> store.anomaly
     # - _ScanMixin (B8c) -> store.scan
     # - _PerceptualMixin (B8d) -> store.perceptual
     # - _QualityMixin (B8e) -> store.quality
-    # Reste a migrer en sessions futures (run/apply : 64-121 callers chacun).
+    # - _RunMixin (B8f) -> store.run
+    # Reste a migrer : _ApplyMixin (64 callers).
     _ApplyMixin,
 ):
     """

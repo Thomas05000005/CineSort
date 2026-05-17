@@ -444,14 +444,14 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
 
         mode = "latest"
         if target_run.lower() in {"", "latest", "dernier"}:
-            run_row = store.get_latest_run()
+            run_row = store.run.get_latest_run()
         else:
-            run_row = store.get_run(target_run)
+            run_row = store.run.get_run(target_run)
             mode = "explicit"
 
-        runs = store.list_runs(limit=20)
+        runs = store.run.list_runs(limit=20)
         run_ids = [str(item.get("run_id") or "") for item in runs if str(item.get("run_id") or "")]
-        error_counts = store.get_error_counts_for_runs(run_ids)
+        error_counts = store.run.get_error_counts_for_runs(run_ids)
         quality_counts = store.quality.get_quality_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
         runs_history = _runs_history_payload(
@@ -1089,7 +1089,7 @@ def _compute_active_insights(
 
     # 1. Run actif en cours
     try:
-        for r in store.list_runs(limit=1):
+        for r in store.run.list_runs(limit=1):
             if r.get("status") == "running":
                 insights.append(
                     {
@@ -1197,7 +1197,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         store, _runner = api._get_or_create_infra(state_dir)
 
         # 1. Runs timeline
-        runs_summary = store.get_runs_summary(limit=lim)
+        runs_summary = store.run.get_runs_summary(limit=lim)
         run_ids = [r["run_id"] for r in runs_summary]
         if not run_ids:
             return {
@@ -1219,7 +1219,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
 
         # 2. Quality counts per run (batch)
         quality_counts = store.quality.get_quality_counts_for_runs(run_ids)
-        error_counts = store.get_error_counts_for_runs(run_ids)
+        error_counts = store.run.get_error_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
         # 3. Global tier distribution
@@ -1371,7 +1371,7 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _runner = api._get_or_create_infra(state_dir)
 
-        run_row = store.get_latest_run()
+        run_row = store.run.get_latest_run()
         if not run_row:
             return empty
 

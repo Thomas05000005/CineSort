@@ -202,7 +202,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.assertIn("=== RESUME APPLICATION ===", summary_after_apply)
 
         store = self._store()
-        run_row = store.get_run(run_id)
+        run_row = store.run.get_run(run_id)
         self.assertIsNotNone(run_row, run_id)
         self.assertEqual(str(run_row.get("status") or ""), "DONE")
 

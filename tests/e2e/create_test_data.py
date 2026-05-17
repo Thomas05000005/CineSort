@@ -156,26 +156,26 @@ def populate_database(
     rows = build_plan_rows()
 
     # Run ancien (plus vieux)
-    store.insert_run_pending(
+    store.run.insert_run_pending(
         run_id=old_run_id,
         root=str(root),
         state_dir=str(state_dir),
         config={"root": str(root), "enable_collection_folder": True},
         created_ts=_BASE_TS - 86400 * 4,
     )
-    store.mark_run_done(
+    store.run.mark_run_done(
         old_run_id, stats={"planned_rows": 10, "folders_scanned": 10}, ended_ts=_BASE_TS - 86400 * 4 + 300
     )
 
     # Run principal
-    store.insert_run_pending(
+    store.run.insert_run_pending(
         run_id=run_id,
         root=str(root),
         state_dir=str(state_dir),
         config={"root": str(root), "enable_collection_folder": True},
         created_ts=_BASE_TS,
     )
-    store.mark_run_done(run_id, stats={"planned_rows": 15, "folders_scanned": 15}, ended_ts=_BASE_TS + 600)
+    store.run.mark_run_done(run_id, stats={"planned_rows": 15, "folders_scanned": 15}, ended_ts=_BASE_TS + 600)
 
     # Quality reports pour chaque film
     for r in rows:

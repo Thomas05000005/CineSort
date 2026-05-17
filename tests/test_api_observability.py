@@ -44,15 +44,15 @@ class ApiObservabilityTests(unittest.TestCase):
         plan.write_text(payload, encoding="utf-8")
 
     def _insert_run_done(self, run_id: str, *, started_ts: float, stats: dict) -> None:
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(self.state_dir),
             config={"tmdb_enabled": False},
             created_ts=started_ts - 2.0,
         )
-        self.store.mark_run_running(run_id, started_ts=started_ts)
-        self.store.mark_run_done(run_id, stats=stats, ended_ts=started_ts + 10.0)
+        self.store.run.mark_run_running(run_id, started_ts=started_ts)
+        self.store.run.mark_run_done(run_id, stats=stats, ended_ts=started_ts + 10.0)
 
     def test_get_dashboard_logs_structured_error_and_returns_clean_message(self) -> None:
         run_id = "20260309_120000_001"
@@ -85,7 +85,7 @@ class ApiObservabilityTests(unittest.TestCase):
         self.assertEqual(str(out.get("message") or ""), "Impossible de charger la synthese du run.")
         self.assertNotIn("dashboard boom", str(out.get("message") or ""))
 
-        errs = self.store.list_errors(run_id)
+        errs = self.store.run.list_errors(run_id)
         self.assertTrue(errs, errs)
         last = errs[-1]
         self.assertEqual(str(last.get("step") or ""), "get_dashboard")

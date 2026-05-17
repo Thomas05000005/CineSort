@@ -42,15 +42,15 @@ class DashboardCacheTests(unittest.TestCase):
         plan.write_text(payload, encoding="utf-8")
 
     def _insert_run_done(self, run_id: str, *, started_ts: float, stats: dict) -> None:
-        self.store.insert_run_pending(
+        self.store.run.insert_run_pending(
             run_id=run_id,
             root=str(self.root),
             state_dir=str(self.state_dir),
             config={"tmdb_enabled": False},
             created_ts=started_ts - 2.0,
         )
-        self.store.mark_run_running(run_id, started_ts=started_ts)
-        self.store.mark_run_done(run_id, stats=stats, ended_ts=started_ts + 10.0)
+        self.store.run.mark_run_running(run_id, started_ts=started_ts)
+        self.store.run.mark_run_done(run_id, stats=stats, ended_ts=started_ts + 10.0)
 
     def _sample_rows(self) -> list[dict]:
         return [

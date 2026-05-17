@@ -493,7 +493,7 @@ class CineSortApi:
             if trace_text:
                 context_payload["traceback"] = trace_text
             try:
-                resolved_store.insert_error(
+                resolved_store.run.insert_error(
                     run_id=rid,
                     step=endpoint,
                     code=type(exc).__name__,
@@ -1153,7 +1153,7 @@ class CineSortApi:
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
 
-        runs = store.get_runs_summary(limit=5)
+        runs = store.run.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
         if not target_run_id:
             for r in runs:
@@ -1214,7 +1214,7 @@ class CineSortApi:
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
 
-        runs = store.get_runs_summary(limit=5)
+        runs = store.run.get_runs_summary(limit=5)
         target_run_id = ""
         for r in runs:
             if str(r.get("status") or "") == "DONE":
@@ -1275,7 +1275,7 @@ class CineSortApi:
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
 
-        runs = store.get_runs_summary(limit=5)
+        runs = store.run.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
         if not target_run_id:
             for r in runs:
@@ -1348,7 +1348,7 @@ class CineSortApi:
         state_dir = Path(self._state_dir)
         store, _runner = self._get_or_create_infra(state_dir)
 
-        runs = store.get_runs_summary(limit=5)
+        runs = store.run.get_runs_summary(limit=5)
         target_run_id = run_id.strip() if run_id else ""
         if not target_run_id:
             for r in runs:

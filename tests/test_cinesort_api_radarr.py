@@ -111,7 +111,7 @@ class TestGetRadarrStatus(unittest.TestCase):
 
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
+            store.run.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
             (self.state_dir / "runs" / "r1").mkdir(parents=True)
             (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
