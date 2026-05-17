@@ -367,7 +367,7 @@ class TestStoreRoundtrip(unittest.TestCase):
             store = SQLiteStore(db_path)
             store.initialize()
             fp = _encode_fingerprint([1, 2, 3, 4])
-            store.upsert_perceptual_report(
+            store.perceptual.upsert_perceptual_report(
                 run_id="run1",
                 row_id="row1",
                 visual_score=80,
@@ -378,7 +378,7 @@ class TestStoreRoundtrip(unittest.TestCase):
                 settings_used={"parallelism_mode": "auto"},
                 audio_fingerprint=fp,
             )
-            got = store.get_perceptual_report(run_id="run1", row_id="row1")
+            got = store.perceptual.get_perceptual_report(run_id="run1", row_id="row1")
             self.assertIsNotNone(got)
             self.assertEqual(got.get("audio_fingerprint"), fp)
         finally:

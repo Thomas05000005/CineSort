@@ -91,7 +91,7 @@ def get_perceptual_details(
         # pas attache directement sur self.store (cf commentaire BUG dans
         # cinesort_api.py:955).
         store, _runner = api._get_or_create_infra(api._state_dir)
-        report = store.get_perceptual_report(run_id=str(run_id), row_id=str(row_id))
+        report = store.perceptual.get_perceptual_report(run_id=str(run_id), row_id=str(row_id))
         if not report:
             return {
                 "ok": False,
@@ -141,7 +141,7 @@ def _validate_and_load_context(
 
     opts = options if isinstance(options, dict) else {}
     if not bool(opts.get("force")):
-        existing = store.get_perceptual_report(run_id=run_id, row_id=row_id)
+        existing = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
         if existing:
             return {"ok": True, "cache_hit": True, "perceptual": existing.get("metrics", {})}
 
@@ -434,7 +434,7 @@ def _execute_perceptual_analysis(
     except (ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("compute_global_score_v2 skipped: %s", exc)
 
-    store.upsert_perceptual_report(
+    store.perceptual.upsert_perceptual_report(
         run_id=run_id,
         row_id=row_id,
         visual_score=result.visual_score,
@@ -859,7 +859,7 @@ def enrich_quality_report_with_perceptual(
     sans calcul V2, ou setting V2 active mais cache V1 historique).
     """
     try:
-        perc = store.get_perceptual_report(run_id=run_id, row_id=row_id)
+        perc = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
         if not perc:
             return
         global_score = perc.get("global_score", 0)

@@ -149,7 +149,7 @@ def generate_films(n: int, db_path: Path) -> Dict:
             warnings.append("dnr_partial")
         if rng.random() < 0.05:
             warnings.append("HDR10 sans MaxCLL")
-        store.upsert_perceptual_report(
+        store.perceptual.upsert_perceptual_report(
             run_id=run_id,
             row_id=row_id,
             visual_score=rng.randint(30, 100),

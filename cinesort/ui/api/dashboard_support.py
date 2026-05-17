@@ -1001,7 +1001,7 @@ def _compute_v2_tier_distribution(store: Any, run_ids: List[str]) -> Dict[str, A
     Les rows pre-v7.5 sans global_tier_v2 sont comptees comme "unknown".
     """
     try:
-        dist = store.get_global_tier_v2_distribution(run_ids=run_ids) if run_ids else {}
+        dist = store.perceptual.get_global_tier_v2_distribution(run_ids=run_ids) if run_ids else {}
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("tier_v2_distribution error: %s", exc)
         dist = {}
@@ -1046,7 +1046,7 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     since = now - 30 * 86400.0
 
     try:
-        raw = store.get_global_score_v2_trend(since_ts=since, until_ts=now)
+        raw = store.perceptual.get_global_score_v2_trend(since_ts=since, until_ts=now)
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("trend_30days error: %s", exc)
         raw = []
@@ -1109,7 +1109,7 @@ def _compute_active_insights(
     if run_ids:
         latest_rid = run_ids[0]
         try:
-            reports = store.list_perceptual_reports(run_id=latest_rid)
+            reports = store.perceptual.list_perceptual_reports(run_id=latest_rid)
             reject_count = sum(1 for r in reports if str(r.get("global_tier_v2") or "").lower() == "reject")
             if reject_count > 0:
                 insights.append(
@@ -1147,7 +1147,7 @@ def _compute_active_insights(
 
     # 4. DNR partiel (nouveau insight §15)
     try:
-        dnr_count = store.count_v2_warnings_flag(flag="dnr_partial", run_ids=run_ids)
+        dnr_count = store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=run_ids)
         if dnr_count > 0:
             insights.append(
                 {
@@ -1165,7 +1165,7 @@ def _compute_active_insights(
     # 5. Nouveaux Platinum ce mois
     try:
         month_ago = _time.time() - 30 * 86400.0
-        plat_count = store.count_v2_tier_since(tier="platinum", since_ts=month_ago)
+        plat_count = store.perceptual.count_v2_tier_since(tier="platinum", since_ts=month_ago)
         if plat_count > 0:
             insights.append(
                 {

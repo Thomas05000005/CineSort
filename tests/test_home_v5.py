@@ -43,7 +43,7 @@ def _make_store_with_data():
     ]
     for rid, tier, score, warns in fixtures:
         payload = {"warnings": warns}
-        store.upsert_perceptual_report(
+        store.perceptual.upsert_perceptual_report(
             run_id=run_id,
             row_id=rid,
             visual_score=50,
@@ -67,7 +67,7 @@ def _make_store_with_data():
 class PerceptualMixinV2AggregatesTests(unittest.TestCase):
     def test_tier_v2_distribution_counts(self) -> None:
         store, run_id, _ = _make_store_with_data()
-        dist = store.get_global_tier_v2_distribution(run_ids=[run_id])
+        dist = store.perceptual.get_global_tier_v2_distribution(run_ids=[run_id])
         self.assertEqual(dist.get("platinum"), 2)
         self.assertEqual(dist.get("gold"), 1)
         self.assertEqual(dist.get("silver"), 1)
@@ -76,25 +76,25 @@ class PerceptualMixinV2AggregatesTests(unittest.TestCase):
 
     def test_tier_v2_distribution_empty(self) -> None:
         store, _, _ = _make_store_with_data()
-        dist = store.get_global_tier_v2_distribution(run_ids=[])
+        dist = store.perceptual.get_global_tier_v2_distribution(run_ids=[])
         self.assertEqual(dist, {})
 
     def test_count_v2_tier_since(self) -> None:
         store, _, _ = _make_store_with_data()
-        self.assertEqual(store.count_v2_tier_since(tier="platinum", since_ts=0), 2)
-        self.assertEqual(store.count_v2_tier_since(tier="reject", since_ts=0), 1)
+        self.assertEqual(store.perceptual.count_v2_tier_since(tier="platinum", since_ts=0), 2)
+        self.assertEqual(store.perceptual.count_v2_tier_since(tier="reject", since_ts=0), 1)
         # Tier inexistant -> 0
-        self.assertEqual(store.count_v2_tier_since(tier="nonexistent", since_ts=0), 0)
+        self.assertEqual(store.perceptual.count_v2_tier_since(tier="nonexistent", since_ts=0), 0)
 
     def test_count_v2_warnings_flag(self) -> None:
         store, run_id, _ = _make_store_with_data()
-        self.assertEqual(store.count_v2_warnings_flag(flag="dnr_partial", run_ids=[run_id]), 1)
-        self.assertEqual(store.count_v2_warnings_flag(flag="nonexistent", run_ids=[run_id]), 0)
+        self.assertEqual(store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=[run_id]), 1)
+        self.assertEqual(store.perceptual.count_v2_warnings_flag(flag="nonexistent", run_ids=[run_id]), 0)
 
     def test_get_global_score_v2_trend_groups_by_day(self) -> None:
         store, _, _ = _make_store_with_data()
         # Les 5 films ont ts=now, donc 1 point pour aujourd'hui
-        trend = store.get_global_score_v2_trend(since_ts=time.time() - 86400)
+        trend = store.perceptual.get_global_score_v2_trend(since_ts=time.time() - 86400)
         self.assertGreaterEqual(len(trend), 1)
         point = trend[-1]
         self.assertIn("date", point)

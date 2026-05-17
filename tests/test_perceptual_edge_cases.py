@@ -56,7 +56,7 @@ def _mock_api(perceptual_enabled: bool = True):
 def _setup_api_with_probe(api, probe_normalized, row=None):
     """Configure le mock API avec probe et row."""
     store = mock.MagicMock()
-    store.get_perceptual_report.return_value = None
+    store.perceptual.get_perceptual_report.return_value = None
     api._find_run_row.return_value = ({"state_dir": "/tmp"}, store)
     rs = mock.MagicMock()
     r = row or SimpleNamespace(
@@ -249,7 +249,7 @@ class PersistenceRoundtripTests(unittest.TestCase):
 
             store = SQLiteStore(Path(tmp) / "db" / "cinesort.sqlite")
             store.initialize()
-            store.upsert_perceptual_report(
+            store.perceptual.upsert_perceptual_report(
                 run_id="run1",
                 row_id="r1",
                 visual_score=78,
@@ -259,7 +259,7 @@ class PersistenceRoundtripTests(unittest.TestCase):
                 metrics={"global_score": 80, "version": "1.0"},
                 settings_used={"frames_count": 10, "dark_weight": 1.5},
             )
-            loaded = store.get_perceptual_report(run_id="run1", row_id="r1")
+            loaded = store.perceptual.get_perceptual_report(run_id="run1", row_id="r1")
             self.assertEqual(loaded["visual_score"], 78)
             self.assertEqual(loaded["audio_score"], 82)
             self.assertEqual(loaded["global_score"], 80)

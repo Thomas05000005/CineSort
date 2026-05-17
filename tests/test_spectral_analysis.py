@@ -355,7 +355,7 @@ class TestStoreRoundtrip(unittest.TestCase):
             db_path = Path(tmp) / "db" / "test.sqlite"
             store = SQLiteStore(db_path)
             store.initialize()
-            store.upsert_perceptual_report(
+            store.perceptual.upsert_perceptual_report(
                 run_id="run1",
                 row_id="row1",
                 visual_score=80,
@@ -367,7 +367,7 @@ class TestStoreRoundtrip(unittest.TestCase):
                 spectral_cutoff_hz=20500.5,
                 lossy_verdict="lossy_high",
             )
-            got = store.get_perceptual_report(run_id="run1", row_id="row1")
+            got = store.perceptual.get_perceptual_report(run_id="run1", row_id="row1")
             self.assertIsNotNone(got)
             self.assertAlmostEqual(got.get("spectral_cutoff_hz"), 20500.5, places=1)
             self.assertEqual(got.get("lossy_verdict"), "lossy_high")

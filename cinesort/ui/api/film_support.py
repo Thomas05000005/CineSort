@@ -113,7 +113,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
 
         # Perceptual
         try:
-            perc = store.get_perceptual_report(run_id=resolved_rid, row_id=str(row_id))
+            perc = store.perceptual.get_perceptual_report(run_id=resolved_rid, row_id=str(row_id))
             if perc:
                 perceptual_dict = perc
                 # Attach global_score_v2 payload pour le frontend

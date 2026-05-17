@@ -136,7 +136,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
 
     # Perceptual reports indexes par row_id
     try:
-        perc_list = store.list_perceptual_reports(run_id=run_id)
+        perc_list = store.perceptual.list_perceptual_reports(run_id=run_id)
     except (OSError, AttributeError, TypeError, ValueError):
         perc_list = []
     perc_by_row = {str(p.get("row_id", "")): p for p in perc_list}

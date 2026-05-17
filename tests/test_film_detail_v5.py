@@ -40,7 +40,7 @@ def _make_mock_api():
     }
     store = MagicMock()
     store.list_runs.return_value = [{"run_id": "run_1"}]
-    store.get_perceptual_report.return_value = {
+    store.perceptual.get_perceptual_report.return_value = {
         "run_id": "run_1",
         "row_id": "r1",
         "global_score": 92,
