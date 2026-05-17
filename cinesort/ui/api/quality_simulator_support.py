@@ -210,7 +210,7 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
             rid = r.get("run_id") or ""
             if not rid:
                 continue
-            for rep in store.list_quality_reports(run_id=rid) or []:
+            for rep in store.quality.list_quality_reports(run_id=rid) or []:
                 key = rep.get("row_id") or ""
                 if not key:
                     continue
@@ -222,7 +222,7 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
     rid = run_id if run_id and run_id != "latest" else _resolve_latest_run_id(api)
     if not rid:
         return []
-    return store.list_quality_reports(run_id=rid) or []
+    return store.quality.list_quality_reports(run_id=rid) or []
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:

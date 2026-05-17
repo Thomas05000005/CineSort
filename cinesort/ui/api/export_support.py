@@ -155,7 +155,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
                 qr_score: int | None = None
                 qr_tier: str = ""
                 try:
-                    qr = store.get_quality_report(run_id=last_done_run_id, row_id=row_id)
+                    qr = store.quality.get_quality_report(run_id=last_done_run_id, row_id=row_id)
                     if qr:
                         qr_score = int(qr.get("score") or 0)
                         qr_tier = str(qr.get("tier") or "")

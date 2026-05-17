@@ -14,7 +14,6 @@ from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, 
 from .connection import connect_sqlite
 from .migration_manager import MigrationManager, _split_sql_statements
 from ._run_mixin import _RunMixin
-from ._quality_mixin import _QualityMixin
 from ._apply_mixin import _ApplyMixin
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
@@ -541,8 +540,8 @@ class SQLiteStore(
     # - _AnomalyMixin (B8b) -> store.anomaly
     # - _ScanMixin (B8c) -> store.scan
     # - _PerceptualMixin (B8d) -> store.perceptual
-    # Reste a migrer en sessions futures (run/apply/quality ont 64-121 callers chacun).
-    _QualityMixin,
+    # - _QualityMixin (B8e) -> store.quality
+    # Reste a migrer en sessions futures (run/apply : 64-121 callers chacun).
     _ApplyMixin,
 ):
     """

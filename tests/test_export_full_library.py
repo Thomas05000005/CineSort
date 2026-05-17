@@ -137,7 +137,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
                 "total_rows": 1,
             }
         ]
-        store.get_quality_report.return_value = {"score": 92, "tier": "premium"}
+        store.quality.get_quality_report.return_value = {"score": 92, "tier": "premium"}
         api._get_or_create_infra.return_value = (store, MagicMock())
 
         out = export_full_library(api)

@@ -180,7 +180,7 @@ def populate_database(
     # Quality reports pour chaque film
     for r in rows:
         score = r["_score"]
-        store.upsert_quality_report(
+        store.quality.upsert_quality_report(
             run_id=run_id,
             row_id=r["row_id"],
             score=score,

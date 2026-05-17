@@ -67,7 +67,7 @@ def _make_mock_api_with_rows():
             "global_score_v2_payload": {"warnings": [], "adjustments_applied": []},
         },
     ]
-    store.list_quality_reports.return_value = [
+    store.quality.list_quality_reports.return_value = [
         {
             "row_id": "f1",
             "metrics": {

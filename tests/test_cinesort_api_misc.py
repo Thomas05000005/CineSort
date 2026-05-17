@@ -321,7 +321,7 @@ class TestExportShareableProfile(unittest.TestCase):
     def test_export_no_active_profile_uses_default(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_active_quality_profile.return_value = None
+            store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
             result = self.api.export_shareable_profile(name="my profile")
             self.assertTrue(result["ok"])
@@ -337,7 +337,7 @@ class TestExportShareableProfile(unittest.TestCase):
         active_profile = default_quality_profile()
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_active_quality_profile.return_value = {
+            store.quality.get_active_quality_profile.return_value = {
                 "profile_json": json.dumps(active_profile),
             }
             mock_infra.return_value = (store, MagicMock())
@@ -355,7 +355,7 @@ class TestExportShareableProfile(unittest.TestCase):
     def test_export_corrupt_profile_json(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_active_quality_profile.return_value = {"profile_json": "not_json"}
+            store.quality.get_active_quality_profile.return_value = {"profile_json": "not_json"}
             mock_infra.return_value = (store, MagicMock())
             result = self.api.export_shareable_profile()
             self.assertTrue(result["ok"])  # fallback default
@@ -385,7 +385,7 @@ class TestImportShareableProfile(unittest.TestCase):
         # Fabrique un export valide d'abord
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_active_quality_profile.return_value = None
+            store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
             export_result = self.api.export_shareable_profile(name="test_imp")
             content = export_result["content"]
@@ -393,17 +393,17 @@ class TestImportShareableProfile(unittest.TestCase):
         # Import avec activation
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.save_quality_profile.return_value = None
+            store.quality.save_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
             result = self.api.import_shareable_profile(content=content, activate=True)
             self.assertTrue(result["ok"])
             self.assertTrue(result["activated"])
-            store.save_quality_profile.assert_called_once()
+            store.quality.save_quality_profile.assert_called_once()
 
     def test_import_store_init_fails(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.get_active_quality_profile.return_value = None
+            store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
             export_result = self.api.export_shareable_profile(name="x")
             content = export_result["content"]
@@ -452,7 +452,7 @@ class TestSubmitScoreFeedback(unittest.TestCase):
 
     def test_no_quality_report(self) -> None:
         store = MagicMock()
-        store.get_quality_report.return_value = None
+        store.quality.get_quality_report.return_value = None
         with (
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
@@ -463,8 +463,8 @@ class TestSubmitScoreFeedback(unittest.TestCase):
 
     def test_success(self) -> None:
         store = MagicMock()
-        store.get_quality_report.return_value = {"score": 80, "tier": "Gold"}
-        store.insert_user_quality_feedback.return_value = 42
+        store.quality.get_quality_report.return_value = {"score": 80, "tier": "Gold"}
+        store.quality.insert_user_quality_feedback.return_value = 42
         with (
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
@@ -478,8 +478,8 @@ class TestSubmitScoreFeedback(unittest.TestCase):
 
     def test_insert_failure(self) -> None:
         store = MagicMock()
-        store.get_quality_report.return_value = {"score": 80, "tier": "Gold"}
-        store.insert_user_quality_feedback.side_effect = OSError("disk")
+        store.quality.get_quality_report.return_value = {"score": 80, "tier": "Gold"}
+        store.quality.insert_user_quality_feedback.side_effect = OSError("disk")
         with (
             patch.object(self.api, "_is_valid_run_id", return_value=True),
             patch.object(self.api, "_find_run_row", return_value=({}, store)),
@@ -503,7 +503,7 @@ class TestDeleteScoreFeedback(unittest.TestCase):
     def test_success(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.delete_user_quality_feedback.return_value = 1
+            store.quality.delete_user_quality_feedback.return_value = 1
             mock_infra.return_value = (store, MagicMock())
             result = self.api.quality.delete_score_feedback(feedback_id=42)
             self.assertTrue(result["ok"])
@@ -517,7 +517,7 @@ class TestDeleteScoreFeedback(unittest.TestCase):
     def test_delete_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.delete_user_quality_feedback.side_effect = OSError("sql")
+            store.quality.delete_user_quality_feedback.side_effect = OSError("sql")
             mock_infra.return_value = (store, MagicMock())
             with patch.object(self.api, "log_api_exception"):
                 result = self.api.quality.delete_score_feedback(feedback_id=1)
@@ -543,8 +543,8 @@ class TestGetCalibrationReport(unittest.TestCase):
     def test_no_feedbacks_no_active_profile(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.list_user_quality_feedback.return_value = []
-            store.get_active_quality_profile.return_value = None
+            store.quality.list_user_quality_feedback.return_value = []
+            store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
             result = self.api.quality.get_calibration_report()
             self.assertTrue(result["ok"])
@@ -554,8 +554,8 @@ class TestGetCalibrationReport(unittest.TestCase):
     def test_with_corrupt_profile_json(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.list_user_quality_feedback.return_value = []
-            store.get_active_quality_profile.return_value = {"profile_json": "not_json"}
+            store.quality.list_user_quality_feedback.return_value = []
+            store.quality.get_active_quality_profile.return_value = {"profile_json": "not_json"}
             mock_infra.return_value = (store, MagicMock())
             result = self.api.quality.get_calibration_report()
             self.assertTrue(result["ok"])
@@ -563,7 +563,7 @@ class TestGetCalibrationReport(unittest.TestCase):
     def test_list_feedbacks_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.list_user_quality_feedback.side_effect = OSError("read fail")
+            store.quality.list_user_quality_feedback.side_effect = OSError("read fail")
             mock_infra.return_value = (store, MagicMock())
             with patch.object(self.api, "log_api_exception"):
                 result = self.api.quality.get_calibration_report()

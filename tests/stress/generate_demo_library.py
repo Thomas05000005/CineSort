@@ -131,7 +131,7 @@ def generate_films(n: int, db_path: Path) -> Dict:
         score_v1 = rng.randint(*_TIER_V1_SCORE_RANGE[tier_v1])
         metrics = _sample_metrics(rng)
 
-        store.upsert_quality_report(
+        store.quality.upsert_quality_report(
             run_id=run_id,
             row_id=row_id,
             score=score_v1,

@@ -78,7 +78,7 @@ class ApiObservabilityTests(unittest.TestCase):
             ],
         )
 
-        with mock.patch.object(self.store, "list_quality_reports", side_effect=OSError("dashboard boom")):
+        with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("dashboard boom")):
             out = self.api.get_dashboard(run_id)
 
         self.assertFalse(out.get("ok"), out)

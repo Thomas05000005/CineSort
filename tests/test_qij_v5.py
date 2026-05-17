@@ -68,7 +68,7 @@ class ScoringRollupBackendTests(unittest.TestCase):
                 "global_score_v2_payload": {"warnings": [], "adjustments_applied": []},
             },
         ]
-        store.list_quality_reports.return_value = [
+        store.quality.list_quality_reports.return_value = [
             {
                 "row_id": "f1",
                 "metrics": {"video": {"codec": "hevc", "width": 3840, "height": 2160}, "audio": [], "duration_s": 9000},

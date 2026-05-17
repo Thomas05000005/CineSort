@@ -85,7 +85,7 @@ class DashboardApiTests(unittest.TestCase):
         ]
 
     def _insert_reports_for_run(self, run_id: str) -> None:
-        self.store.upsert_quality_report(
+        self.store.quality.upsert_quality_report(
             run_id=run_id,
             row_id="row_1",
             score=52,
@@ -110,7 +110,7 @@ class DashboardApiTests(unittest.TestCase):
             profile_version=1,
             ts=time.time(),
         )
-        self.store.upsert_quality_report(
+        self.store.quality.upsert_quality_report(
             run_id=run_id,
             row_id="row_2",
             score=91,
@@ -223,7 +223,7 @@ class DashboardApiTests(unittest.TestCase):
         self._insert_run_done(run_id, started_ts=started, stats={"planned_rows": 1, "applied_count": 0})
         self._write_plan_rows(run_id, self._sample_rows())
 
-        with mock.patch.object(self.store, "list_quality_reports", side_effect=OSError("dashboard boom")):
+        with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("dashboard boom")):
             out = self.api.get_dashboard(run_id)
 
         self.assertFalse(out.get("ok"), out)
@@ -253,7 +253,9 @@ class DashboardApiTests(unittest.TestCase):
         cache_path = self.state_dir / "runs" / f"tri_films_{run_id}" / "dashboard_cache.json"
         self.assertTrue(cache_path.exists(), str(cache_path))
 
-        with mock.patch.object(self.store, "list_quality_reports", side_effect=OSError("should not hit reports")):
+        with mock.patch.object(
+            self.store.quality, "list_quality_reports", side_effect=OSError("should not hit reports")
+        ):
             second = self.api.get_dashboard(run_id)
 
         self.assertTrue(second.get("ok"), second)
@@ -277,7 +279,7 @@ class DashboardApiTests(unittest.TestCase):
         original = plan_path.read_text(encoding="utf-8")
         plan_path.write_text(original + "\n", encoding="utf-8")
 
-        with mock.patch.object(self.store, "list_quality_reports", side_effect=OSError("cache invalidated")):
+        with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("cache invalidated")):
             second = self.api.get_dashboard(run_id)
 
         self.assertFalse(second.get("ok"), second)

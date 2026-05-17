@@ -46,7 +46,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         self.store.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
 
     def _insert_quality(self, run_id: str, row_id: str, score: int, tier: str) -> None:
-        self.store.upsert_quality_report(
+        self.store.quality.upsert_quality_report(
             run_id=run_id,
             row_id=row_id,
             score=score,
@@ -67,7 +67,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
             )
 
     def test_get_global_tier_distribution_empty(self) -> None:
-        result = self.store.get_global_tier_distribution(limit_runs=10)
+        result = self.store.quality.get_global_tier_distribution(limit_runs=10)
         self.assertEqual(result["tiers"], {})
         self.assertEqual(result["total_scored"], 0)
 
@@ -78,7 +78,7 @@ class GlobalDashboardDbTests(unittest.TestCase):
         self._insert_quality("run_a", "r2", 75, "Bon")
         self._insert_quality("run_b", "r3", 50, "Mauvais")
         self._insert_quality("run_b", "r4", 60, "Moyen")
-        result = self.store.get_global_tier_distribution(limit_runs=10)
+        result = self.store.quality.get_global_tier_distribution(limit_runs=10)
         self.assertEqual(result["total_scored"], 4)
         self.assertEqual(result["tiers"]["Premium"], 1)
         self.assertEqual(result["tiers"]["Bon"], 1)
@@ -145,7 +145,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
         self.store.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10)
 
     def _insert_quality(self, run_id: str, row_id: str, score: int, tier: str) -> None:
-        self.store.upsert_quality_report(
+        self.store.quality.upsert_quality_report(
             run_id=run_id,
             row_id=row_id,
             score=score,

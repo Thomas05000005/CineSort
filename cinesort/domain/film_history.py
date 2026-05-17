@@ -170,7 +170,7 @@ def get_film_timeline(
 
         # Evenement score (quality report)
         if matched_row_id:
-            qr = store.get_quality_report(run_id=run_id, row_id=matched_row_id)
+            qr = store.quality.get_quality_report(run_id=run_id, row_id=matched_row_id)
             if qr:
                 score = int(qr.get("score") or 0)
                 delta = (score - previous_score) if previous_score is not None else 0
@@ -268,7 +268,7 @@ def list_films_overview(
         score: Optional[int] = None
         tier = ""
         if row_id:
-            qr = store.get_quality_report(run_id=run_id, row_id=row_id)
+            qr = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
             if qr:
                 score = int(qr.get("score") or 0)
                 tier = str(qr.get("tier") or "")

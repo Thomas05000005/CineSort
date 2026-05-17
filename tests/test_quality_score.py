@@ -373,7 +373,7 @@ class QualityScoreTests(unittest.TestCase):
         self.assertIn("tier", rep)
 
         store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
-        db_row = store.get_quality_report(run_id=run_id, row_id=row_id)
+        db_row = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
         self.assertIsNotNone(db_row)
         assert db_row is not None
         self.assertEqual(int(db_row["score"]), int(rep["score"]))

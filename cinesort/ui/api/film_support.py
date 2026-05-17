@@ -125,7 +125,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
 
         # Probe via quality_reports (metrics)
         try:
-            quality = store.get_quality_report(run_id=resolved_rid, row_id=str(row_id))
+            quality = store.quality.get_quality_report(run_id=resolved_rid, row_id=str(row_id))
             if quality and quality.get("metrics"):
                 probe_dict = quality.get("metrics")
         except (AttributeError, OSError, TypeError, ValueError):
