@@ -152,7 +152,7 @@ class ProbeService:
 
         cache_key = self._cache_key(media_path, backend)
         if cache_key is not None and backend != "none":
-            cached = self.store.get_probe_cache(**cache_key)
+            cached = self.store.probe.get_probe_cache(**cache_key)
             if cached:
                 normalized_cached = (
                     cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}
@@ -243,7 +243,7 @@ class ProbeService:
         }
         if cache_key is not None and backend != "none":
             try:
-                self.store.upsert_probe_cache(
+                self.store.probe.upsert_probe_cache(
                     **cache_key,
                     raw_json=raw_json,
                     normalized_json=normalized_dict,
@@ -274,7 +274,7 @@ class ProbeService:
         cache_key = self._cache_key(media_path, backend)
         if cache_key is None:
             return None
-        cached = self.store.get_probe_cache(**cache_key)
+        cached = self.store.probe.get_probe_cache(**cache_key)
         if not cached:
             return None
         normalized_cached = cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}

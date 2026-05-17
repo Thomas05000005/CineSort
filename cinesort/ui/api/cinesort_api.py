@@ -1457,8 +1457,8 @@ class CineSortApi:
                 settings = _read_settings(self._state_dir)
                 state_dir = self._state_dir
                 store, _ = self._get_or_create_infra(state_dir, settings)
-                # Chercher la probe en cache
-                probe_data = store.get_probe_cache(rid) if hasattr(store, "get_probe_cache") else None
+                # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
+                probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
                 quality_data = store.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
                 context = build_naming_context(
                     title="Film",
