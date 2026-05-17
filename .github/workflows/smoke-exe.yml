@@ -1,0 +1,64 @@
+name: smoke-exe
+
+# Tests E2E niveau 2 : build PyInstaller + smoke EXE.
+# Triggerable manuellement (workflow_dispatch) car le build PyInstaller
+# dure ~10 minutes. NE PAS lancer sur chaque push.
+#
+# Voir docs/internal/E2E_TESTS.md et tests/e2e/smoke_exe.py.
+
+on:
+  workflow_dispatch:
+  # Optionnel : decommenter pour activer sur les tags v* (release pipeline)
+  # push:
+  #   tags:
+  #     - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build PyInstaller EXE
+        shell: pwsh
+        run: |
+          pyinstaller CineSort.spec --clean --noconfirm
+
+      - name: Verify EXE artifact
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\CineSort.exe")) {
+            Write-Error "dist\CineSort.exe absent apres build"
+            exit 1
+          }
+          $size = (Get-Item "dist\CineSort.exe").Length / 1MB
+          Write-Host "EXE size: $size MB"
+
+      - name: Run smoke EXE test (mode --api)
+        shell: pwsh
+        run: |
+          python tests/e2e/smoke_exe.py --api --wait 20
+
+      - name: Upload EXE artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cinesort-exe-failure
+          path: dist/CineSort.exe
+          retention-days: 3
