@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 import requests
 
 from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
 
@@ -31,8 +32,6 @@ def _normalize_url(url: str) -> str:
     """Cf issue #70 : valide qu'on ne cible pas un endpoint cloud metadata
     (169.254.169.254 etc.). Leve RadarrError si invalide.
     """
-    from cinesort.infra.network_utils import is_safe_external_url
-
     url = (url or "").strip().rstrip("/")
     if url and "://" not in url:
         url = f"http://{url}"
