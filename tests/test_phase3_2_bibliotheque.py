@@ -1,4 +1,4 @@
-"""Tests Phase 3.2 : Bibliothèque squelette (spec 07)."""
+"""Tests Phase 3.2 : Bibliothèque grille complète (spec 07)."""
 
 from __future__ import annotations
 
@@ -28,18 +28,91 @@ class EsModuleApiTests(unittest.TestCase):
         self.assertIn("export function unmountBibliotheque(", self.js)
 
 
-class StructureTests(unittest.TestCase):
+class ToolbarTests(unittest.TestCase):
+    """Spec 07 §1 : recherche, tri, toggle vue."""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
 
-    def test_toolbar_and_search(self) -> None:
+    def test_search_input(self) -> None:
         self.assertIn("data-bibliotheque-search", self.js)
+
+    def test_sort_dropdown(self) -> None:
+        self.assertIn("data-bibliotheque-sort", self.js)
+
+    def test_view_toggle_grid_table(self) -> None:
+        self.assertIn('data-bibliotheque-view="grid"', self.js)
+        self.assertIn('data-bibliotheque-view="table"', self.js)
+
+    def test_filters_button(self) -> None:
         self.assertIn('data-bibliotheque-action="filters"', self.js)
 
-    def test_legacy_link_present(self) -> None:
-        # Squelette : on redirige vers la vue legacy en attendant le portage complet.
-        self.assertIn('href="#/library"', self.js)
+
+class TierChipsTests(unittest.TestCase):
+    """Spec 07 §2 : chips de filtres tier (5 tiers + Tous)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
+
+    def test_tier_attribute(self) -> None:
+        self.assertIn("data-bibliotheque-tier", self.js)
+
+    def test_tier_order_contains_main_tiers(self) -> None:
+        for tier in ("platinum", "gold", "silver", "bronze", "reject", "unknown"):
+            self.assertIn(f'"{tier}"', self.js, f"tier {tier} manquant")
+
+
+class GridAndSelectionTests(unittest.TestCase):
+    """Spec 07 §5 : sélection multi + toolbar bulk."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
+
+    def test_select_checkbox(self) -> None:
+        self.assertIn("data-bibliotheque-select", self.js)
+
+    def test_bulk_actions_present(self) -> None:
+        for action in ("perceptual", "rescan", "export", "delete", "clear"):
+            self.assertIn(f'data-bibliotheque-bulk="{action}"', self.js)
+
+    def test_film_card_renders(self) -> None:
+        self.assertIn("function _renderFilmCard(row)", self.js)
+
+    def test_navigates_to_film_detail(self) -> None:
+        self.assertIn("/film/", self.js)
+        self.assertIn("navigateTo", self.js)
+
+
+class PaginationTests(unittest.TestCase):
+    """Spec 07 §8 : pagination prev/next (substitute scroll infini pour v1)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
+
+    def test_pagination_buttons(self) -> None:
+        self.assertIn('data-bibliotheque-page="prev"', self.js)
+        self.assertIn('data-bibliotheque-page="next"', self.js)
+
+    def test_page_size_constant(self) -> None:
+        self.assertIn("PAGE_SIZE = 60", self.js)
+
+
+class DataFetchTests(unittest.TestCase):
+    """Spec 07 §7 : utilise library/get_library_filtered."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
+
+    def test_endpoint(self) -> None:
+        self.assertIn("library/get_library_filtered", self.js)
+
+    def test_filters_payload(self) -> None:
+        self.assertIn("tier_v2", self.js)
 
 
 class AppJsWiringTests(unittest.TestCase):
@@ -63,9 +136,20 @@ class CssTests(unittest.TestCase):
             ".bibliotheque-header",
             ".bibliotheque-toolbar",
             ".bibliotheque-search",
-            ".bibliotheque-coming-soon",
+            ".bibliotheque-grid",
+            ".bibliotheque-card",
+            ".bibliotheque-card-poster",
+            ".bibliotheque-chips",
+            ".bibliotheque-chip",
+            ".bibliotheque-bulk-toolbar",
+            ".bibliotheque-pagination",
+            ".bibliotheque-tier-badge",
         ):
             self.assertIn(cls, self.css)
+
+    def test_tier_badge_variants(self) -> None:
+        for tier in ("platinum", "gold", "silver", "bronze", "reject", "unknown"):
+            self.assertIn(f".bibliotheque-tier-badge--{tier}", self.css)
 
 
 if __name__ == "__main__":
