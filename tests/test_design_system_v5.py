@@ -193,19 +193,6 @@ class UtilitiesCssTests(unittest.TestCase):
 
 
 class IndexHtmlIntegrationTests(unittest.TestCase):
-    def test_desktop_loads_shared_before_legacy(self) -> None:
-        html = (_ROOT / "web" / "index.html").read_text(encoding="utf-8")
-        shared_pos = html.find("shared/tokens.css")
-        legacy_pos = html.find('href="./styles.css"')
-        self.assertGreater(shared_pos, 0, "shared/tokens.css pas charge dans desktop")
-        self.assertGreater(legacy_pos, 0, "styles.css legacy absent")
-        self.assertLess(shared_pos, legacy_pos, "shared doit etre charge AVANT legacy")
-
-    def test_desktop_loads_all_5_shared(self) -> None:
-        html = (_ROOT / "web" / "index.html").read_text(encoding="utf-8")
-        for name in ("tokens", "themes", "animations", "components", "utilities"):
-            self.assertIn(f"shared/{name}.css", html)
-
     def test_dashboard_loads_shared_before_legacy(self) -> None:
         html = (_ROOT / "web" / "dashboard" / "index.html").read_text(encoding="utf-8")
         shared_pos = html.find("/shared/tokens.css")

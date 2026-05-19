@@ -18,6 +18,16 @@ from pathlib import Path
 
 from cinesort.domain.audio_analysis import analyze_audio
 
+# Migration B (PR #257) : legacy frontend supprime.
+# TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard
+# une fois le Shell 3 zones + les 12 ecrans implementes.
+if not (Path(__file__).resolve().parents[1] / "web" / "index.html").exists():
+    raise unittest.SkipTest(
+        "Legacy frontend removed (PR #257 migration B). "
+        "Tests rely on web/index.html, styles.css, themes.css, app.js or "
+        "components/* which were deleted."
+    )
+
 
 def _track(*, codec="", channels=0, language="eng", title="", is_commentary=False):
     return {

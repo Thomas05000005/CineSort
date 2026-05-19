@@ -27,18 +27,18 @@ class HelpViewFilesExistTests(unittest.TestCase):
         self.assertTrue(self.desktop_js.is_file(), f"manquant: {self.desktop_js}")
 
 
-class HelpViewDesktopContentTests(unittest.TestCase):
-    """Vue Aide desktop v5 : ES module exporte initHelp (V5bis-07).
+class HelpViewLegacyJsContentTests(unittest.TestCase):
+    """Vue Aide legacy (web/views/help.js) : ES module exporte initHelp.
 
-    Les anciennes assertions IIFE (`(function ()` + `window.HelpView`) ont ete
-    remplacees par `tests/test_help_v5_ported.py` qui valide le port ES module.
+    Le shell desktop (web/index.html) a ete supprime (migration B 2026-05-19),
+    mais web/views/help.js reste sur disque tant que le dashboard ne porte pas
+    sa propre vue Aide complete.
     """
 
     @classmethod
     def setUpClass(cls):
         cls.root = Path(__file__).resolve().parents[1]
         cls.js = (cls.root / "web" / "views" / "help.js").read_text(encoding="utf-8")
-        cls.html = (cls.root / "web" / "index.html").read_text(encoding="utf-8")
 
     def test_faq_count_at_least_15(self):
         items = re.findall(r"\bq:\s*\"", self.js)
@@ -67,18 +67,6 @@ class HelpViewDesktopContentTests(unittest.TestCase):
 
     def test_search_input_id(self):
         self.assertIn("helpSearchInput", self.js)
-
-    def test_html_view_section_present(self):
-        self.assertIn('id="view-help"', self.html)
-        self.assertIn('aria-labelledby="tab-help"', self.html)
-
-    def test_html_sidebar_button_present(self):
-        self.assertIn('data-view="help"', self.html)
-        self.assertIn('id="tab-help"', self.html)
-        self.assertIn('data-testid="nav-help"', self.html)
-
-    def test_html_help_script_loaded(self):
-        self.assertIn('"./views/help.js"', self.html)
 
 
 @unittest.skip(

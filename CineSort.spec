@@ -168,20 +168,16 @@ hiddenimports += [
 hiddenimports += collect_submodules("cinesort.domain.perceptual")
 
 # ---------------------------------------------------------------------------
-# Data files: web/ (sans preview/), migrations SQL, deps dynamiques
+# Data files: web/, migrations SQL, deps dynamiques
 # ---------------------------------------------------------------------------
 
-# Collect web/ files excluding the dev-only preview/ subdirectory
+# Collect web/ files recursively (dashboard ESM + shared design tokens + splash).
 web_datas = []
 _web_root = Path("web")
 for p in sorted(_web_root.rglob("*")):
     if not p.is_file():
         continue
     rel = p.relative_to(_web_root)
-    # Skip preview/ directory (dev-only) and backup files.
-    # Note: web/dashboard/ est inclus pour le dashboard distant.
-    if rel.parts[0] == "preview":
-        continue
     if p.suffix in (".bak", ".tmp", ".pyc"):
         continue
     web_datas.append((str(p), str(Path("web") / rel.parent)))

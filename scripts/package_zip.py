@@ -68,9 +68,6 @@ SOURCE_EXCLUDE_FILE_PATTERNS = [
     "ui_log.txt",
 ]
 
-PREVIEW_BASELINE_ROOT = "tests/ui_preview_baselines"
-CANONICAL_PREVIEW_BASELINE_DIR = f"{PREVIEW_BASELINE_ROOT}/critical"
-
 
 def read_version(repo_root: Path) -> str:
     version_file = repo_root / "VERSION"
@@ -102,8 +99,6 @@ def is_source_excluded(rel: Path) -> bool:
         return True
     rel_posix = rel.as_posix()
     base = rel.name
-    if rel_posix.startswith(f"{PREVIEW_BASELINE_ROOT}/"):
-        return not rel_posix.startswith(f"{CANONICAL_PREVIEW_BASELINE_DIR}/")
     if _matches_any(rel_posix, SOURCE_EXCLUDE_PATH_PATTERNS):
         return True
     if _matches_any(base, SOURCE_EXCLUDE_FILE_PATTERNS):

@@ -27,22 +27,15 @@ class PackageZipTests(unittest.TestCase):
             "docs/releases/V7_1_NOTES_FR.md": "notes",
             "docs/design/UNDO_7_2_0_A_DESIGN_FR.md": "undo design",
             "docs/design/APPLY_ROWS_7E_DESIGN_FR.md": "apply design",
-            "web/index.html": "<!doctype html>",
-            "web/app.js": "console.log('app');",
-            "web/styles.css": "body {}",
+            "web/dashboard/index.html": "<!doctype html>",
+            "web/dashboard/app.js": "console.log('app');",
+            "web/dashboard/styles.css": "body {}",
             "cinesort/__init__.py": "__all__ = []",
             "scripts/package_zip.py": "print('zip')",
             "tests/test_keep.py": "print('keep')",
-            "tests/ui_preview_baselines/critical/manifest.json": "{}",
         }
         for rel, content in essential_files.items():
             self._write_text(root / rel, content)
-
-        critical_binary_files = {
-            "tests/ui_preview_baselines/critical/accueil.png": b"png",
-        }
-        for rel, content in critical_binary_files.items():
-            self._write_bytes(root / rel, content)
 
         noise_files = {
             ".venv313/Scripts/python.exe": b"x",
@@ -56,8 +49,6 @@ class PackageZipTests(unittest.TestCase):
             ".ui_backups/index.before_ui_redesign.html": "backup",
             "archive_ui_next_20260308/web_next_current/app_next.js": "next",
             "web_next_zero/index.html": "next zero",
-            "tests/ui_preview_baselines/premium_sober/manifest.json": "{}",
-            "tests/ui_preview_baselines/synthese_quality/02-dashboard.png": b"png",
             "docs/internal/worklogs/CODEX_WORKLOG.md": "internal",
             "docs/internal/audits/AUDIT_CORRECTIFS_PROJET_FR.txt": "internal",
             "STATE_DIR/runs/tri_films_20260308_113501_172/ui_log.txt": "runtime",
@@ -135,14 +126,12 @@ class PackageZipTests(unittest.TestCase):
             self.assertIn("docs/releases/V7_1_NOTES_FR.md", rels)
             self.assertIn("docs/design/UNDO_7_2_0_A_DESIGN_FR.md", rels)
             self.assertIn("docs/design/APPLY_ROWS_7E_DESIGN_FR.md", rels)
-            self.assertIn("web/index.html", rels)
-            self.assertIn("web/app.js", rels)
-            self.assertIn("web/styles.css", rels)
+            self.assertIn("web/dashboard/index.html", rels)
+            self.assertIn("web/dashboard/app.js", rels)
+            self.assertIn("web/dashboard/styles.css", rels)
             self.assertIn("cinesort/__init__.py", rels)
             self.assertIn("scripts/package_zip.py", rels)
             self.assertIn("tests/test_keep.py", rels)
-            self.assertIn("tests/ui_preview_baselines/critical/manifest.json", rels)
-            self.assertIn("tests/ui_preview_baselines/critical/accueil.png", rels)
 
             excluded = {
                 ".venv313/Scripts/python.exe",
@@ -155,8 +144,6 @@ class PackageZipTests(unittest.TestCase):
                 ".ui_backups/index.before_ui_redesign.html",
                 "archive_ui_next_20260308/web_next_current/app_next.js",
                 "web_next_zero/index.html",
-                "tests/ui_preview_baselines/premium_sober/manifest.json",
-                "tests/ui_preview_baselines/synthese_quality/02-dashboard.png",
                 "docs/internal/worklogs/CODEX_WORKLOG.md",
                 "docs/internal/audits/AUDIT_CORRECTIFS_PROJET_FR.txt",
                 "STATE_DIR/runs/tri_films_20260308_113501_172/ui_log.txt",
@@ -186,9 +173,9 @@ class PackageZipTests(unittest.TestCase):
             with ZipFile(output_zip) as zf:
                 names = {name.replace("\\", "/") for name in zf.namelist()}
 
-            self.assertIn("web/index.html", names)
-            self.assertIn("web/app.js", names)
-            self.assertIn("web/styles.css", names)
+            self.assertIn("web/dashboard/index.html", names)
+            self.assertIn("web/dashboard/app.js", names)
+            self.assertIn("web/dashboard/styles.css", names)
             self.assertIn("cinesort/__init__.py", names)
             self.assertIn("scripts/package_zip.py", names)
             self.assertIn("README_FR.txt", names)
@@ -199,8 +186,6 @@ class PackageZipTests(unittest.TestCase):
             self.assertIn("docs/releases/V7_1_NOTES_FR.md", names)
             self.assertIn("docs/design/UNDO_7_2_0_A_DESIGN_FR.md", names)
             self.assertIn("docs/design/APPLY_ROWS_7E_DESIGN_FR.md", names)
-            self.assertIn("tests/ui_preview_baselines/critical/manifest.json", names)
-            self.assertIn("tests/ui_preview_baselines/critical/accueil.png", names)
 
             for prefix in (
                 ".venv",
@@ -215,28 +200,15 @@ class PackageZipTests(unittest.TestCase):
                 "db/",
             ):
                 self.assertFalse(any(name.startswith(prefix) for name in names), prefix)
-            self.assertFalse(
-                any(
-                    name.startswith("tests/ui_preview_baselines/")
-                    and not name.startswith("tests/ui_preview_baselines/critical/")
-                    for name in names
-                )
-            )
 
             manifest = manifest_path.read_text(encoding="utf-8")
-            self.assertIn("web/index.html <- web/index.html", manifest)
+            self.assertIn("web/dashboard/index.html <- web/dashboard/index.html", manifest)
             self.assertIn(
                 "docs/design/UNDO_7_2_0_A_DESIGN_FR.md <- docs/design/UNDO_7_2_0_A_DESIGN_FR.md",
                 manifest,
             )
-            self.assertIn(
-                "tests/ui_preview_baselines/critical/manifest.json <- tests/ui_preview_baselines/critical/manifest.json",
-                manifest,
-            )
             self.assertNotIn(".venv313/", manifest)
             self.assertNotIn(".tmp_test/", manifest)
-            self.assertNotIn("tests/ui_preview_baselines/premium_sober/", manifest)
-            self.assertNotIn("tests/ui_preview_baselines/synthese_quality/", manifest)
             self.assertNotIn("docs/internal/", manifest)
             self.assertNotIn("STATE_DIR/", manifest)
             self.assertNotIn("CineSort/", manifest)

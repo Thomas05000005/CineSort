@@ -1,6 +1,6 @@
 # Documentation dev CineSort
 
-Point d'entree court pour le travail dev, le preview UI et les documents de chantier.
+Point d'entree court pour le travail dev et les documents de chantier.
 
 ## Build et verification
 - Installation dev: `python -m pip install -r requirements-dev.txt`
@@ -20,7 +20,7 @@ Point d'entree court pour le travail dev, le preview UI et les documents de chan
 - ZIP release: `packages/CineSort_<version>_win64.zip`
 - `build_windows.bat` verifie et package les artefacts QA + release.
 - CI Windows: `.github/workflows/windows-ci.yml`
-- La CI rejoue `check_project.bat`, les captures/visual check preview, puis `build_windows.bat`.
+- La CI rejoue `check_project.bat`, puis `build_windows.bat`.
 - La signature code est optionnelle en CI: si `WINDOWS_CODESIGN_CERT_BASE64` et `WINDOWS_CODESIGN_CERT_PASSWORD` sont absents, l'etape annonce un `SKIP` explicite et continue sans faux-semblant.
 - Si la signature est activee, la CI resigne `dist/CineSort.exe` et `dist/CineSort_QA/CineSort.exe`, puis regenere les ZIP QA/release.
 - Le workflow CI supporte aussi `workflow_dispatch` pour relancer un build Windows sans nouveau commit.
@@ -32,12 +32,8 @@ Point d'entree court pour le travail dev, le preview UI et les documents de chan
 - Si la protection Windows n'est pas disponible, CineSort n'enregistre pas la cle et le signale.
 - Une ancienne cle legacy en clair reste lisible pour compatibilite, puis est migree vers le stockage protege au prochain enregistrement des parametres.
 
-## Preview UI et captures
-- Lancement preview: `python scripts/run_ui_preview.py --dev`
-- Captures: `python scripts/capture_ui_preview.py --dev --recommended`
-- Controle visuel leger: `python scripts/visual_check_ui_preview.py --dev`
-- Refresh baseline critique: `python scripts/visual_check_ui_preview.py --dev --refresh-baseline`
-- Guide detaille: `web/preview/README.md`
+## Frontend
+- L'application charge `web/dashboard/` (ESM moderne) via pywebview. Le shell legacy (`web/index.html`, `web/components/`, `web/app.js`, `web/styles.css`, `web/themes.css`) et le mode preview ont ete supprimes (PR #217 / migration B 2026-05-19).
 - L'ancien prototype UI Next est archive dans `docs/internal/archive/ui_next_20260319/` et ne fait plus partie du runtime actif.
 
 ## Preuves live opt-in
