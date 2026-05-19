@@ -50,7 +50,7 @@ class HealthBargraphTests(unittest.TestCase):
 
     def test_renders_progressbar_aria(self) -> None:
         self.assertIn('role="progressbar"', self.js)
-        self.assertIn('aria-valuenow=', self.js)
+        self.assertIn("aria-valuenow=", self.js)
 
     def test_empty_state_message(self) -> None:
         # Spec : "Lance ton premier scan pour voir la distribution."
