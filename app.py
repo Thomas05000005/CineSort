@@ -11,7 +11,6 @@ import contextlib
 
 DEV_MODE_ENV_VAR = "DEV_MODE"
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
-DEV_ONLY_UI_VARIANTS = {"preview"}
 
 
 def resource_path(rel: str) -> str:
@@ -58,45 +57,30 @@ def requested_ui_variant(argv: list[str] | None = None, env: dict[str, str] | No
     else:
         requested = str(environ.get("CINESORT_UI", "")).strip().lower() or "stable"
 
-    if requested in {"next", "preview"}:
+    if requested == "next":
         return requested
     return "stable"
 
 
 def resolve_ui_variant(argv: list[str] | None = None, env: dict[str, str] | None = None) -> str:
-    requested = requested_ui_variant(argv, env)
-    if requested == "next":
+    if requested_ui_variant(argv, env) == "next":
         return "stable"
-    if requested in DEV_ONLY_UI_VARIANTS and not is_dev_mode(argv, env):
-        return "stable"
-    return requested
+    return "stable"
 
 
 def resolve_ui_policy_notice(argv: list[str] | None = None, env: dict[str, str] | None = None) -> str | None:
-    requested = requested_ui_variant(argv, env)
-    if requested == "next":
+    if requested_ui_variant(argv, env) == "next":
         return "UI 'next' archivee. Repli automatique vers l'UI stable."
-    if requested in DEV_ONLY_UI_VARIANTS and not is_dev_mode(argv, env):
-        return (
-            f"UI '{requested}' reservee au mode dev. "
-            f"Repli automatique vers l'UI stable. Activez --dev ou {DEV_MODE_ENV_VAR}=1 pour y acceder."
-        )
     return None
 
 
 def resolve_ui_entrypoint(ui_variant: str) -> tuple[str, str]:
     """Retourne (chemin_local_fallback, titre).
 
-    Note : en mode normal, pywebview charge en fait l'URL du dashboard servi par
-    le serveur REST local (http://127.0.0.1:PORT/dashboard/). Le chemin local
-    retourne ici n'est utilise qu'en fallback (mode preview ou si le serveur
-    REST ne demarre pas).
+    Note : en mode normal, pywebview charge l'URL du dashboard servi par le
+    serveur REST local (http://127.0.0.1:PORT/dashboard/). Le chemin local
+    retourne ici n'est utilise qu'en fallback si le serveur REST ne demarre pas.
     """
-    if str(ui_variant or "").strip().lower() == "preview":
-        return (
-            "web/index_preview.html",
-            "CineSort [UI Preview] - Tri & normalisation de bibliotheque films",
-        )
     return (
         "web/dashboard/index.html",
         "CineSort - Tri & normalisation de bibliotheque films",

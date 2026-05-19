@@ -21,24 +21,16 @@ class RuntimeUiPolicyTests(unittest.TestCase):
         self.assertEqual(self.app_module.resolve_ui_variant([], {}), "stable")
         self.assertIsNone(self.app_module.resolve_ui_policy_notice([], {}))
 
-    def test_next_and_preview_fallback_to_stable_without_dev_mode(self) -> None:
+    def test_next_falls_back_to_stable(self) -> None:
         self.assertEqual(self.app_module.requested_ui_variant(["--ui", "next"], {}), "next")
-        self.assertEqual(self.app_module.requested_ui_variant(["--ui=preview"], {}), "preview")
         self.assertEqual(self.app_module.requested_ui_variant([], {"CINESORT_UI": "next"}), "next")
-        self.assertEqual(self.app_module.requested_ui_variant([], {"CINESORT_UI": "preview"}), "preview")
 
         self.assertEqual(self.app_module.resolve_ui_variant(["--ui", "next"], {}), "stable")
-        self.assertEqual(self.app_module.resolve_ui_variant(["--ui=preview"], {}), "stable")
         self.assertEqual(self.app_module.resolve_ui_variant([], {"CINESORT_UI": "next"}), "stable")
-        self.assertEqual(self.app_module.resolve_ui_variant([], {"CINESORT_UI": "preview"}), "stable")
 
         self.assertIn(
             "Repli automatique vers l'UI stable",
             self.app_module.resolve_ui_policy_notice(["--ui", "next"], {}) or "",
-        )
-        self.assertIn(
-            "UI 'preview' reservee au mode dev",
-            self.app_module.resolve_ui_policy_notice(["--ui=preview"], {}) or "",
         )
 
     def test_next_is_archived_even_in_explicit_dev_mode(self) -> None:
@@ -52,29 +44,16 @@ class RuntimeUiPolicyTests(unittest.TestCase):
             self.app_module.resolve_ui_policy_notice([], {"CINESORT_UI": "next", "DEV_MODE": "1"}) or "",
         )
 
-    def test_preview_remains_the_only_dev_variant(self) -> None:
-        self.assertEqual(self.app_module.resolve_ui_variant(["--ui=preview", "--dev"], {}), "preview")
-        self.assertEqual(
-            self.app_module.resolve_ui_variant([], {"CINESORT_UI": "preview", "DEV_MODE": "1"}),
-            "preview",
-        )
-        self.assertIsNone(self.app_module.resolve_ui_policy_notice([], {"CINESORT_UI": "preview", "DEV_MODE": "1"}))
+    def test_unknown_variant_falls_back_to_stable(self) -> None:
+        self.assertEqual(self.app_module.requested_ui_variant(["--ui=preview"], {}), "stable")
+        self.assertEqual(self.app_module.resolve_ui_variant(["--ui=preview"], {}), "stable")
+        self.assertIsNone(self.app_module.resolve_ui_policy_notice(["--ui=preview"], {}))
 
-    def test_entrypoint_titles_follow_resolved_variant(self) -> None:
-        # UI unifiee : le mode stable pointe desormais vers web/dashboard/index.html
-        # (chemin fallback uniquement ; en realite pywebview charge http://127.0.0.1:PORT/dashboard/).
-        self.assertEqual(
-            self.app_module.resolve_ui_entrypoint("stable"),
-            ("web/dashboard/index.html", "CineSort - Tri & normalisation de bibliotheque films"),
-        )
-        self.assertEqual(
-            self.app_module.resolve_ui_entrypoint("next"),
-            ("web/dashboard/index.html", "CineSort - Tri & normalisation de bibliotheque films"),
-        )
-        self.assertEqual(
-            self.app_module.resolve_ui_entrypoint("preview"),
-            ("web/index_preview.html", "CineSort [UI Preview] - Tri & normalisation de bibliotheque films"),
-        )
+    def test_entrypoint_always_points_to_dashboard(self) -> None:
+        expected = ("web/dashboard/index.html", "CineSort - Tri & normalisation de bibliotheque films")
+        self.assertEqual(self.app_module.resolve_ui_entrypoint("stable"), expected)
+        self.assertEqual(self.app_module.resolve_ui_entrypoint("next"), expected)
+        self.assertEqual(self.app_module.resolve_ui_entrypoint("preview"), expected)
 
 
 if __name__ == "__main__":

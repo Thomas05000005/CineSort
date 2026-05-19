@@ -28,9 +28,6 @@ archive_ui_next_*/
 docs/internal/archive/
 web_next_zero/
 audit_screenshots/
-tests/ui_preview_baselines/*
-!tests/ui_preview_baselines/critical/
-!tests/ui_preview_baselines/critical/**
 
 # MCP et outils locaux (logs verbeux, binaires lourds teleсharges par auto_install)
 .playwright-mcp/

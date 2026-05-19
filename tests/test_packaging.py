@@ -77,21 +77,15 @@ class DependenciesImportTests(unittest.TestCase):
 
 class CineSortSpecTests(unittest.TestCase):
     # 44
-    def test_themes_css_in_spec_datas(self) -> None:
-        """web/themes.css doit etre collecte par CineSort.spec."""
-        # web/themes.css doit exister physiquement
-        themes_path = PROJECT_ROOT / "web" / "themes.css"
-        self.assertTrue(themes_path.exists(), "web/themes.css manquant")
+    def test_shared_tokens_css_in_spec_datas(self) -> None:
+        """web/shared/tokens.css doit etre collecte par CineSort.spec."""
+        tokens_path = PROJECT_ROOT / "web" / "shared" / "tokens.css"
+        self.assertTrue(tokens_path.exists(), "web/shared/tokens.css manquant")
 
-        # CineSort.spec doit collecter tous les fichiers de web/ recursivement
         spec_path = PROJECT_ROOT / "CineSort.spec"
         content = spec_path.read_text(encoding="utf-8")
-        # La boucle web_datas fait rglob("*") sur web/, ce qui inclut themes.css
         self.assertIn("web_datas", content)
-        self.assertTrue(
-            "rglob" in content or "themes.css" in content,
-            "CineSort.spec doit collecter web/ recursivement",
-        )
+        self.assertIn("rglob", content)
 
     def test_version_in_spec_datas(self) -> None:
         """VERSION doit etre inclus dans les datas (L5d Lot 3)."""

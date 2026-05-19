@@ -20,7 +20,6 @@ class DevToolingContractsTests(unittest.TestCase):
 
     def test_requirements_dev_pins_quality_toolchain(self) -> None:
         self.assertIn("-r requirements.txt", self.requirements_dev)
-        self.assertIn("-r requirements-preview.txt", self.requirements_dev)
         self.assertIn("ruff>=", self.requirements_dev)
         self.assertIn("coverage>=", self.requirements_dev)
         self.assertIn("pre-commit>=", self.requirements_dev)
@@ -94,8 +93,6 @@ class DevToolingContractsTests(unittest.TestCase):
         self.assertIn("workflow_dispatch", self.ci_workflow)
         self.assertIn("check_project.bat", self.ci_workflow)
         self.assertIn("build_windows.bat", self.ci_workflow)
-        self.assertIn("scripts/capture_ui_preview.py --dev --recommended", self.ci_workflow)
-        self.assertIn("scripts/visual_check_ui_preview.py --dev", self.ci_workflow)
         # v1.0.0-beta : tolere n'importe quelle version >= v4 (Dependabot
         # bumps periodiques) ET SHA-pinning (OpenSSF Scorecard). On verifie
         # juste que l'action est utilisee.
