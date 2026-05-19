@@ -40,7 +40,15 @@ class FrenchRouteListTests(unittest.TestCase):
 
     def test_alt_navigation_targets_french_routes(self) -> None:
         # Spec 04 §2.3 : 7 entrees FR canoniques pour Alt+1..7.
-        expected_routes = ["/accueil", "/traitement", "/bibliotheque", "/qualite", "/historique", "/parametres", "/aide"]
+        expected_routes = [
+            "/accueil",
+            "/traitement",
+            "/bibliotheque",
+            "/qualite",
+            "/historique",
+            "/parametres",
+            "/aide",
+        ]
         # Trouve la liste _ROUTES
         start = self.js.find("_ROUTES = [")
         end = self.js.find("];", start)
@@ -63,19 +71,19 @@ class NewShortcutsTests(unittest.TestCase):
         # On cherche le bloc Ctrl+B qui appelle toggleSidebar().
         ctrl_b_idx = self.js.find('e.key.toLowerCase() === "b"')
         self.assertNotEqual(ctrl_b_idx, -1, "raccourci Ctrl+B introuvable")
-        snippet = self.js[ctrl_b_idx:ctrl_b_idx + 250]
+        snippet = self.js[ctrl_b_idx : ctrl_b_idx + 250]
         self.assertIn("toggleSidebar()", snippet)
 
     def test_ctrl_i_toggles_right_panel(self) -> None:
         ctrl_i_idx = self.js.find('e.key.toLowerCase() === "i"')
         self.assertNotEqual(ctrl_i_idx, -1, "raccourci Ctrl+I introuvable")
-        snippet = self.js[ctrl_i_idx:ctrl_i_idx + 300]
+        snippet = self.js[ctrl_i_idx : ctrl_i_idx + 300]
         self.assertIn("setRightPanelExpanded(!isRightPanelExpanded())", snippet)
 
     def test_ctrl_comma_goes_to_parametres(self) -> None:
         ctrl_comma_idx = self.js.find('e.key === ","')
         self.assertNotEqual(ctrl_comma_idx, -1, "raccourci Ctrl+, introuvable")
-        snippet = self.js[ctrl_comma_idx:ctrl_comma_idx + 200]
+        snippet = self.js[ctrl_comma_idx : ctrl_comma_idx + 200]
         self.assertIn('navigateTo("/parametres")', snippet)
 
 
