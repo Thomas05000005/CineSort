@@ -5803,3 +5803,19 @@ body.v5-notif-lock {
 .bibliotheque-empty { text-align: center; padding: var(--sp-8); color: var(--text-2); }
 .bibliotheque-loading { text-align: center; padding: var(--sp-6); color: var(--text-2); font-style: italic; }
 .bibliotheque-error { text-align: center; padding: var(--sp-6); color: var(--danger, #b91c1c); }
+/* Historique inspector — onglets 4 vues (Films/Apply/Doublons/Log) — spec 09 §3 */
+.historique-inspector-tabs {
+  display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--border-1);
+  margin-bottom: var(--sp-2); flex-wrap: wrap;
+}
+.historique-inspector-tab {
+  background: transparent; border: none; cursor: pointer;
+  padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm);
+  color: var(--text-2); border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.historique-inspector-tab:hover { color: var(--text-1); }
+.historique-inspector-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+.historique-inspector-tab-content { padding: var(--sp-2) 0; font-size: var(--fs-sm); }
+.historique-tab-stat { margin: var(--sp-1) 0; color: var(--text-1); }
+.historique-tab-stat strong { color: var(--accent); }
