@@ -4850,6 +4850,13 @@ body.v5-notif-lock {
 .aide-title {
 .historique-title {
 .qualite-title {
+ * TRAITEMENT — Phase 3.3 (spec 08-traitement.md) — squelette
+ * =========================================================== */
+.traitement-view { display: flex; flex-direction: column; gap: var(--sp-5); max-width: 1080px; margin: 0 auto; padding: var(--sp-4) 0; }
+
+.traitement-header { padding-bottom: var(--sp-3); border-bottom: 1px solid var(--border-1); }
+
+.traitement-title {
   font-family: var(--font-family-display, var(--font-family-base));
   font-size: var(--fs-2xl);
   font-weight: var(--fw-semibold);
@@ -4882,6 +4889,65 @@ body.v5-notif-lock {
 .qualite-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 
 .qualite-section {
+  margin: 0 0 var(--sp-2);
+}
+
+.traitement-subtitle { font-size: var(--fs-sm); color: var(--text-2); margin: 0; }
+
+.traitement-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+}
+
+.traitement-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out);
+  color: var(--text-2);
+}
+
+.traitement-step:not(:disabled):hover { background: var(--surface-2); }
+
+.traitement-step:disabled { cursor: not-allowed; opacity: 0.4; }
+
+.traitement-step.is-current { background: var(--surface-2); border-color: var(--accent); color: var(--text-1); }
+.traitement-step.is-past { color: var(--sev-success-solid, #10B981); }
+
+.traitement-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  flex-shrink: 0;
+}
+
+.traitement-step.is-current .traitement-step-num { background: var(--accent); color: var(--text-on-accent, white); }
+.traitement-step.is-past .traitement-step-num { background: var(--sev-success-solid, #10B981); color: white; }
+
+.traitement-step-content { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.traitement-step-label { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.traitement-step-desc { font-size: var(--fs-xs); color: var(--text-3); }
+
+.traitement-step-sep { color: var(--text-3); font-size: var(--fs-lg); }
+
+.traitement-panel {
   padding: var(--sp-5);
   background: var(--surface-1);
   border: 1px solid var(--border-1);
@@ -5220,6 +5286,16 @@ body.v5-notif-lock {
 .qualite-empty-msg { font-size: var(--fs-sm); color: var(--text-3); font-style: italic; margin: 0; }
 
 .qualite-placeholder {
+.traitement-panel-title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0 0 var(--sp-2);
+}
+
+.traitement-panel-desc { font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 var(--sp-4); }
+
+.traitement-placeholder {
   padding: var(--sp-3);
   background: var(--surface-2);
   border-radius: var(--radius-md);
@@ -5345,3 +5421,7 @@ body.v5-notif-lock {
 }
 
 .qualite-inspector-dl dd { font-size: var(--fs-sm); color: var(--text-1); margin: 0; }
+  margin: 0 0 var(--sp-3);
+}
+
+.traitement-placeholder a { font-style: normal; }
