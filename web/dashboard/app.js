@@ -112,7 +112,10 @@ import { initSettings, unmountSettings } from "./views/settings.js"; // /setting
 // Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
 // 10 categories. Active sur /parametres ; /settings garde l'ancienne pour retrocompat.
 import { initParametres, unmountParametres } from "./views/parametres.js"; // /parametres (nouvelle UI)
-import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4)
+import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4, legacy)
+// Phase 3.5 (spec 12-aide.md) : nouvelle vue Aide refondue (5 sections + recherche).
+// Active sur /aide ; /help garde la FAQ v4 pour retrocompat.
+import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
@@ -197,7 +200,8 @@ registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opt
 registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
-registerRoute("/aide", { view: "view-help", guard: requireAuth, init: initHelpV4 });
+// Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
+registerRoute("/aide", { view: "view-help", guard: requireAuth, init: (el, opts) => { initAide(el, opts); return unmountAide; } });
 
 /* === Mapping ID sidebar v5 -> route URL ==================== */
 
