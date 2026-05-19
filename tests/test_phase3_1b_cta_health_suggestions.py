@@ -20,7 +20,8 @@ class CtaScanSectionTests(unittest.TestCase):
         cls.js = _ACCUEIL_JS.read_text(encoding="utf-8")
 
     def test_cta_scan_section_function_present(self) -> None:
-        self.assertIn("function _renderCtaScan(roots)", self.js)
+        # Signature etendue en Phase 3.1-C avec parametre scanProgress.
+        self.assertIn("function _renderCtaScan(roots, scanProgress)", self.js)
 
     def test_cta_scan_title(self) -> None:
         self.assertIn("Lancer un nouveau scan", self.js)
