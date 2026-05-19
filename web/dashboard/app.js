@@ -122,6 +122,10 @@ import { initHistorique, unmountHistorique } from "./views/historique.js"; // /h
 // Phase 3.4 (spec 10-qualite.md) : nouvelle vue Qualité audit transverse
 // (6 sections + filtres + re-calcul scores).
 import { initQualite, unmountQualite } from "./views/qualite.js"; // /qualite (nouvelle UI)
+// Phase 3.3 (spec 08-traitement.md) : nouvelle vue Traitement workflow 5 etapes
+// (Analyse / Verification / Validation / Doublons / Apply). PR squelette : le
+// contenu detaille de chaque etape reutilise temporairement la vue legacy.
+import { initTraitement, unmountTraitement } from "./views/traitement.js"; // /traitement
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
@@ -197,7 +201,8 @@ registerRoute("/status", { view: "view-status", guard: requireAuth, init: initSt
 // Phase 3.1 : /accueil cable la nouvelle vue refondue (spec 05-accueil.md).
 registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initAccueil });
 registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
-registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: initProcessing });
+// Phase 3.3 : /traitement cable la nouvelle vue refondue (spec 08, squelette).
+registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: (el, opts) => { initTraitement(el, opts); return unmountTraitement; } });
 // /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
 // vue QIJ avec tab=quality jusqu'a ce que la Phase 3.4 porte la vue dediee.
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
