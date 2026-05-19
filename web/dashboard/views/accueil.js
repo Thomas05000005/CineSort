@@ -1,19 +1,14 @@
 /* views/accueil.js — Phase 3.1 (spec 05-accueil.md) — Accueil refondu.
  *
- * Vue de synthese editoriale. PR 3.1-A : Hero + Dernier run + Activite.
- * PR 3.1-B (ce fichier) : ajoute CTA Scan + Sante biblio + Suggestions.
+ * Vue de synthese editoriale. 3 PRs incrementales :
+ * - PR 3.1-A : Hero + Dernier run + Activite recente (sections 2 + 6).
+ * - PR 3.1-B : CTA Scan + Sante biblio + Suggestions (sections 3 + 4 + 5).
+ * - PR 3.1-C (cette version) : Environment bar (section 1) + Inspecteur
+ *   droit content (rappels operateur + raccourcis) + etat "scan en cours".
  *
- * Sections actuellement couvertes :
- * - Section 2 : Hero ("Bonjour Thomas") + resume dynamique + carte Dernier run
- * - Section 3 : CTA "Lancer un nouveau scan" (sur les roots configures)
- * - Section 4 : Points a traiter (suggestions issues de get_global_stats.insights)
- * - Section 5 : Sante bibliotheque (bargraph 5 tiers)
- * - Section 6 : Activite recente (3 derniers runs)
+ * Toutes les sections de la spec 05 sont desormais couvertes.
  *
- * Restent en PR 3.1-C : Section 1 (Environment bar) + Inspecteur droit
- * + etats dynamiques avances (premier lancement, run actif polling, etc).
- *
- * Source backend : get_dashboard("latest") + get_global_stats() (existants).
+ * Source backend : get_dashboard("latest") + get_global_stats() + settings.
  * Route cible : /accueil (Phase 2-B PR #261).
  */
 
@@ -21,6 +16,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import * as rightPanel from "../components/right-panel.js";
 
 /* --- Format dates relatives -------------------------------------------- */
 
@@ -154,7 +150,80 @@ function _renderLastRunCard(latestRun) {
   `;
 }
 
-function _renderCtaScan(roots) {
+/* Phase 3.1-C : Environment bar (section 1 spec 05).
+ * Slim 32px, affiche les roots actifs (max 3) + 5 pastilles integrations.
+ * Une integration peut etre : configuree+OK ☑, non configuree ☐, ou
+ * configuree mais hors ligne ⚠.
+ */
+const _INTEGRATIONS = [
+  { key: "tmdb", label: "TMDb", settingKey: "tmdb_api_key" },
+  { key: "jellyfin", label: "Jellyfin", settingKey: "jellyfin_enabled" },
+  { key: "plex", label: "Plex", settingKey: "plex_enabled" },
+  { key: "radarr", label: "Radarr", settingKey: "radarr_enabled" },
+  { key: "omdb", label: "OMDb", settingKey: "omdb_enabled" },
+];
+
+function _integrationState(integration, settings) {
+  const settingsObj = settings || {};
+  const val = settingsObj[integration.settingKey];
+  const configured = (typeof val === "string" && val.trim() !== "") || val === true;
+  // Pour la PR 3.1-C, on ne ping pas les services : on indique juste configure
+  // ou non. La detection hors-ligne (etat "warn") sera Phase 3.1-D ou plus tard.
+  return configured ? "ok" : "off";
+}
+
+function _renderEnvironmentBar(roots, settings) {
+  const rootsList = Array.isArray(roots) ? roots : [];
+  const rootsTxt = rootsList.length === 0
+    ? "<em class=\"accueil-env-empty\">Aucun root configuré</em>"
+    : rootsList.slice(0, 2).map((r) => escapeHtml(String(r))).join(", ") + (rootsList.length > 2 ? `, <span class="accueil-env-more">+${rootsList.length - 2}</span>` : "");
+  const pastilles = _INTEGRATIONS.map((it) => {
+    const state = _integrationState(it, settings);
+    const symbol = state === "ok" ? "☑" : "☐";
+    const stateClass = state === "ok" ? "is-ok" : "is-off";
+    const title = state === "ok" ? `${it.label} configuré` : `${it.label} non configuré — clique pour le configurer`;
+    return `<button type="button" class="accueil-env-pill ${stateClass}" data-integration="${escapeHtml(it.key)}" title="${escapeHtml(title)}">
+      <span class="accueil-env-pill-sym" aria-hidden="true">${symbol}</span>${escapeHtml(it.label)}
+    </button>`;
+  }).join("");
+  return `
+    <div class="accueil-env-bar" role="status" aria-label="Environment et integrations">
+      <span class="accueil-env-roots" aria-label="Dossiers racines actifs">📂 ${rootsTxt}</span>
+      <span class="accueil-env-pills">${pastilles}</span>
+    </div>
+  `;
+}
+
+/* Phase 3.1-C : Etat "scan en cours" — section CTA Scan transformee en
+ * compteur de progression. Le polling de mise a jour sera dans initAccueil.
+ */
+function _renderScanInProgress(progress) {
+  const total = progress.total != null ? Number(progress.total) : 0;
+  const current = progress.current != null ? Number(progress.current) : 0;
+  const phase = String(progress.phase || "");
+  const phaseLabel = progress.phase_label || phase || "Scan en cours";
+  const etaMin = progress.eta_min;
+  const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+  const etaTxt = etaMin != null ? `~${etaMin} min restant` : "";
+  return `
+    <section class="accueil-section accueil-cta-scan accueil-cta-scan--running" aria-labelledby="accueil-cta-title">
+      <h2 id="accueil-cta-title" class="accueil-cta-scan-title">🔄 Scan en cours sur ${escapeHtml(String(total))} films</h2>
+      <p class="accueil-cta-scan-phase">${escapeHtml(phaseLabel)} (${escapeHtml(String(current))}/${escapeHtml(String(total))})</p>
+      <div class="accueil-cta-scan-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+        <span class="accueil-cta-scan-fill" style="width: ${pct}%"></span>
+      </div>
+      ${etaTxt ? `<p class="accueil-cta-scan-eta">${escapeHtml(etaTxt)}</p>` : ""}
+      <div class="accueil-actions">
+        <button type="button" class="v5-btn v5-btn--secondary" data-accueil-action="open-traitement">→ Voir le détail</button>
+      </div>
+    </section>
+  `;
+}
+
+function _renderCtaScan(roots, scanProgress) {
+  if (scanProgress && scanProgress.active) {
+    return _renderScanInProgress(scanProgress);
+  }
   const rootsList = Array.isArray(roots) ? roots : [];
   const rootsLabel = rootsList.length > 0
     ? rootsList.slice(0, 3).map((r) => escapeHtml(String(r))).join(" + ")
@@ -309,6 +378,25 @@ function _renderRecentActivity(runs) {
   `;
 }
 
+function _extractScanProgress(payload) {
+  // Le backend get_dashboard retourne active_run_id si un scan est en cours.
+  // Pour cette PR 3.1-C, on se contente d'un check basique. Le polling
+  // complet (re-fetch /run/get_status toutes les 2s) viendra Phase 3.1-D.
+  if (!payload) return { active: false };
+  const activeRunId = payload.active_run_id || (payload.run_info && payload.run_info.status === "running" ? payload.run_info.run_id : null);
+  if (!activeRunId) return { active: false };
+  const ri = payload.run_info || {};
+  return {
+    active: true,
+    run_id: activeRunId,
+    total: ri.total_rows || ri.total || 0,
+    current: ri.current_index || 0,
+    phase: ri.phase || "running",
+    phase_label: ri.phase_label || null,
+    eta_min: ri.eta_min != null ? ri.eta_min : null,
+  };
+}
+
 function _renderAccueil(payload, stats, settings) {
   const latestRun = payload.run_info || payload.latest_run || null;
   const recentRuns = Array.isArray(payload.runs_history) ? payload.runs_history : [];
@@ -316,8 +404,11 @@ function _renderAccueil(payload, stats, settings) {
   const alertCount = insights.length;
   const alertSeverity = insights.some((i) => i.severity === "danger") ? "danger" : "info";
   const roots = settings && Array.isArray(settings.roots) ? settings.roots : [];
+  const scanProgress = _extractScanProgress(payload);
   const heroState = {
-    active_run_id: payload.active_run_id || null,
+    active_run_id: scanProgress.active ? scanProgress.run_id : null,
+    active_total: scanProgress.total,
+    active_eta_min: scanProgress.eta_min,
     latest_run: latestRun,
     error_critical: payload.error_critical || false,
     alert_count: alertCount,
@@ -325,14 +416,66 @@ function _renderAccueil(payload, stats, settings) {
   };
   return `
     <section class="accueil-view">
+      ${_renderEnvironmentBar(roots, settings)}
       ${_renderHero(heroState)}
       ${_renderLastRunCard(latestRun)}
-      ${_renderCtaScan(roots)}
+      ${_renderCtaScan(roots, scanProgress)}
       ${_renderSuggestions(stats || {})}
       ${_renderHealth(stats || {})}
       ${_renderRecentActivity(recentRuns)}
     </section>
   `;
+}
+
+/* Phase 3.1-C : alimente l'Inspecteur droit avec 3 sections : Contexte,
+ * Rappels operateur, Raccourcis (spec 05 §3 Inspecteur droit sur Accueil).
+ */
+function _buildInspectorSections(payload, stats, settings) {
+  const total = (stats && stats.summary && stats.summary.total_films) || (stats && stats.total_scored) || null;
+  const activeRun = payload && payload.active_run_id;
+  const latestRun = payload && (payload.run_info || payload.latest_run);
+  const lastScanLabel = latestRun && latestRun.started_at ? formatRelativeTime(latestRun.started_at) : "—";
+  const omdbEnabled = settings && (settings.omdb_enabled === true || (typeof settings.omdb_api_key === "string" && settings.omdb_api_key.trim() !== ""));
+  const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
+  const reminders = [];
+  if (latestRun && String(latestRun.status || "").toUpperCase() === "AWAITING_VALIDATION") {
+    reminders.push("Pense à valider la run de ce matin");
+  }
+  if (!omdbEnabled) {
+    reminders.push("OMDb non configuré — pas de validation croisée sur les matchs douteux");
+  }
+  insights.slice(0, 3).forEach((i) => {
+    if (i.label && i.severity === "warning") reminders.push(`${i.count || ""} ${i.label}`.trim());
+  });
+  return [
+    {
+      title: "Contexte",
+      html: `
+        <dl class="accueil-inspector-dl">
+          <div><dt>Bibliothèque</dt><dd>${escapeHtml(total != null ? String(total) : "—")}</dd></div>
+          <div><dt>Run actif</dt><dd>${escapeHtml(activeRun || "aucun")}</dd></div>
+          <div><dt>Dernier scan</dt><dd>${escapeHtml(lastScanLabel)}</dd></div>
+        </dl>
+      `,
+    },
+    {
+      title: "Rappels opérateur",
+      html: reminders.length === 0
+        ? `<p class="accueil-empty-msg">Rien à signaler.</p>`
+        : `<ul class="accueil-inspector-list">${reminders.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`,
+    },
+    {
+      title: "Raccourcis",
+      html: `
+        <dl class="accueil-inspector-shortcuts">
+          <div><dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Nouveau scan</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Recherche / palette</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>,</kbd></dt><dd>Paramètres</dd></div>
+          <div><dt><kbd>?</kbd></dt><dd>Aide</dd></div>
+        </dl>
+      `,
+    },
+  ];
 }
 
 /* --- Event binding ----------------------------------------------------- */
@@ -367,12 +510,26 @@ function _bindEvents(container) {
           if (targetRoute) navigateTo(targetRoute);
           break;
         case "open-scan-options":
-          // Spec 3.1-C : ouvrira un drawer. En attendant : naviguer vers Traitement.
+          // Spec : ouvrira un drawer (Phase 3.3 ou plus tard). En attendant : Traitement.
+          navigateTo("/traitement");
+          break;
+        case "open-traitement":
           navigateTo("/traitement");
           break;
         default:
           break;
       }
+      ev.preventDefault();
+    });
+  });
+
+  // Phase 3.1-C : pastilles integrations cliquables -> Parametres > Integrations.
+  container.querySelectorAll("[data-integration]").forEach((pill) => {
+    pill.addEventListener("click", (ev) => {
+      const key = pill.dataset.integration || "";
+      // Section "integrations" dans la sub-sidebar Parametres (Phase 3.1-D).
+      // En attendant : fragment pour pre-selection.
+      navigateTo(`/parametres#integrations-${encodeURIComponent(key)}`);
       ev.preventDefault();
     });
   });
@@ -437,4 +594,12 @@ export async function initAccueil(container) {
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings);
   _bindEvents(container);
+
+  // Phase 3.1-C : alimente l'Inspecteur droit avec contexte + rappels + raccourcis.
+  try {
+    rightPanel.setSections(_buildInspectorSections(dashboardData, stats, settings));
+  } catch (err) {
+    // Defensive : l'inspecteur n'est pas critique pour l'Accueil.
+    console.warn("[accueil] setSections inspector failed:", err);
+  }
 }

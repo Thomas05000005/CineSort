@@ -4422,6 +4422,177 @@ body.v5-notif-lock {
   padding: 0;
 }
 
+/* Environment bar — Phase 3.1-C (spec 05 §2.1) ------------------------- */
+.accueil-env-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+  height: 32px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.accueil-env-roots {
+  font-family: var(--font-family-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.accueil-env-empty {
+  font-style: italic;
+  color: var(--text-3);
+  font-family: var(--font-family-base);
+}
+
+.accueil-env-more {
+  color: var(--text-3);
+  font-weight: var(--fw-semibold);
+}
+
+.accueil-env-pills {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.accueil-env-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  height: 20px;
+  font-size: 11px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out);
+}
+
+.accueil-env-pill:hover {
+  background: var(--surface-3, var(--surface-1));
+}
+
+.accueil-env-pill.is-ok {
+  color: var(--sev-success-solid, #10B981);
+  border-color: var(--sev-success-solid, #10B981);
+}
+
+.accueil-env-pill.is-off {
+  color: var(--text-3);
+}
+
+.accueil-env-pill-sym {
+  font-size: 12px;
+}
+
+/* CTA Scan — etat "en cours" ----------------------------------------- */
+.accueil-cta-scan--running {
+  border-left-color: var(--sev-info-solid, #3B82F6);
+}
+
+.accueil-cta-scan-phase {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: var(--sp-1) 0 var(--sp-3);
+}
+
+.accueil-cta-scan-bar {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  height: 8px;
+  overflow: hidden;
+  margin-bottom: var(--sp-2);
+}
+
+.accueil-cta-scan-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.accueil-cta-scan-eta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin: 0 0 var(--sp-3);
+}
+
+/* Inspecteur droit Accueil — Phase 3.1-C ----------------------------- */
+.accueil-inspector-dl,
+.accueil-inspector-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.accueil-inspector-dl > div,
+.accueil-inspector-shortcuts > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+
+.accueil-inspector-dl dt,
+.accueil-inspector-shortcuts dt {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accueil-inspector-dl dd,
+.accueil-inspector-shortcuts dd {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.accueil-inspector-shortcuts dt {
+  text-transform: none;
+  letter-spacing: normal;
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+
+.accueil-inspector-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.accueil-inspector-list li {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  padding-left: var(--sp-3);
+  position: relative;
+}
+
+.accueil-inspector-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--text-3);
+}
+
 /* Erreur -------------------------------------------------------------- */
 .accueil-error-title {
   font-size: var(--fs-xl);
