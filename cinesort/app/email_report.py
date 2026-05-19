@@ -91,12 +91,20 @@ def send_email_report(
             smtp = smtplib.SMTP_SSL(host, port, timeout=15, context=ssl_ctx)
         else:
             smtp = smtplib.SMTP(host, port, timeout=15)
-            if use_tls:
+        try:
+            if port != 465 and use_tls:
                 smtp.starttls(context=ssl_ctx)
-        if user and password:
-            smtp.login(user, password)
-        smtp.sendmail(from_addr, [to_addr], msg.as_string())
-        smtp.quit()
+            if user and password:
+                smtp.login(user, password)
+            smtp.sendmail(from_addr, [to_addr], msg.as_string())
+        finally:
+            # Garantit quit() meme si starttls/login/sendmail leve : sinon la
+            # socket TCP restait ouverte sur erreur d'auth et fuyait des
+            # connexions vers le serveur SMTP a chaque retry.
+            try:
+                smtp.quit()
+            except smtplib.SMTPException:
+                pass
         logger.info("[email] rapport envoye a %s (%s)", to_addr, event)
         return True
     except (smtplib.SMTPException, OSError, TimeoutError) as exc:
