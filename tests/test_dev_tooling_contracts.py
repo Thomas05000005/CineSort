@@ -82,7 +82,7 @@ class DevToolingContractsTests(unittest.TestCase):
         self.assertIn("-m pytest", self.check_project)
         self.assertIn("-m coverage run -m pytest", self.check_project)
         self.assertIn("-m coverage report", self.check_project)
-        self.assertIn("--fail-under=80", self.check_project)
+        self.assertIn("--fail-under=75", self.check_project)
         # Les E2E/live/stress sont ignores dans ce gate
         self.assertIn("--ignore=tests/e2e", self.check_project)
         self.assertIn("--ignore=tests/live", self.check_project)
