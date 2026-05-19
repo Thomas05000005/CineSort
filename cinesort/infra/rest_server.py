@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 #
 # V2-09 (4 mai 2026, polish v7.7.0) : `open_logs_folder` a ete RETIREE de cette
 # liste pour fixer H18. Le bouton "Ouvrir les logs" de la vue Aide en mode
-# supervision web (web/dashboard/views/help.js, web/views/help.js) ecouait sur
-# "Endpoint inconnu" car le dispatch REST refusait la methode.
+# supervision web (web/dashboard/views/help.js) ecouait sur "Endpoint inconnu"
+# car le dispatch REST refusait la methode.
 #
 # Implication securite : `open_logs_folder` invoque `os.startfile(...)` cote
 # SERVEUR (machine ou tourne CineSort). Si le navigateur supervision est sur une
@@ -85,7 +85,8 @@ _DASHBOARD_PREFIX = "/dashboard"
 # §16b / Vague 0 v7.6.0 : shared design system servi par le REST pour le dashboard distant.
 _SHARED_PREFIX = "/shared"
 # V5B-01 : vues v5 ESM (web/views/*.js) importees par le dashboard via "../views/...".
-# Servi pour rendre /dashboard/?native=1 fonctionnel.
+# Apres migration B (PR #257 + #258), seuls processing.js, film-detail.js et
+# _v5_helpers.js sont conserves. Servi pour rendre /dashboard/?native=1 fonctionnel.
 _VIEWS_PREFIX = "/views"
 # V6-01 Polish Total v7.7.0 : fichiers de traduction servis via /locales/<locale>.json.
 # Lus par web/dashboard/core/i18n.js au boot et a chaque setLocale().
@@ -538,8 +539,9 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         #
         # V2-08 (4 mai 2026, polish v7.7.0) — finding H17 :
         # `style-src 'unsafe-inline'` est conserve a dessein. Le frontend CineSort
-        # utilise ~391 attributs `style="..."` inline statiques (web/dashboard/* +
-        # web/views/*) plus ~81 mutations `.style.` programmatiques. Migrer vers
+        # utilise des attributs `style="..."` inline statiques (web/dashboard/* +
+        # processing.js + film-detail.js residuels) plus des mutations `.style.`
+        # programmatiques. Migrer vers
         # nonce/hash demanderait un refactor massif (rendu serveur des nonces +
         # remplacement de tous les style inline par des classes CSS) avec un
         # risque de regression visuelle eleve, totalement disproportionne pour la
@@ -613,9 +615,10 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     def _serve_views_file(self, url_path: str) -> None:
         """Sert un fichier statique depuis web/views/ (vues v5 ESM portees).
 
-        V5B-01 : le dashboard /dashboard/app.js fait
-            import { initHome } from "../views/home.js";
-        ce qui resout en /views/home.js cote serveur. Meme garde anti
+        V5B-01 / Migration B : le dashboard /dashboard/app.js fait
+            import { initProcessing } from "../views/processing.js";
+            import { initFilmDetail } from "../views/film-detail.js";
+        ce qui resout en /views/<name>.js cote serveur. Meme garde anti
         path-traversal que _serve_shared_file.
         """
         resolved = self._resolve_static_path(url_path, _VIEWS_PREFIX, getattr(self, "views_root", None))
@@ -729,22 +732,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         if clean == _LOCALES_PREFIX or path.startswith(_LOCALES_PREFIX + "/"):
             self._serve_locale_file(path.split("?")[0])
             return
-
-        # Fichiers partages web/ (themes.css charge via ../themes.css depuis le dashboard)
-        if clean == "/themes.css" and self.dashboard_root:
-            shared = self.dashboard_root.parent / "themes.css"
-            if shared.is_file():
-                try:
-                    content = shared.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/css; charset=utf-8")
-                    self.send_header("Content-Length", str(len(content)))
-                    self.send_header("Cache-Control", "no-cache, must-revalidate")
-                    self.end_headers()
-                    self.wfile.write(content)
-                    return
-                except OSError:
-                    pass
 
         # M9 : ne pas refleter le path dans la reponse (eviter les reflexions d'entree)
         self._respond_json(404, {"ok": False, "message": "Endpoint inconnu"})
