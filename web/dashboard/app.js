@@ -108,7 +108,10 @@ import { initProcessing } from "../views/processing.js"; // /processing
 // (quality + logs + jellyfin + plex + radarr). Routes legacy gardees en alias.
 // V2-C R4-MEM-4 : import des unmount* exposes pour cleanup au navigate.
 import { initQij, unmountQij } from "./views/qij.js"; // /qij + alias /quality /logs /jellyfin /plex /radarr
-import { initSettings, unmountSettings } from "./views/settings.js"; // /settings (dashboard v4 complet, 15 sections)
+import { initSettings, unmountSettings } from "./views/settings.js"; // /settings (dashboard v4 complet, 15 sections, legacy)
+// Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
+// 10 categories. Active sur /parametres ; /settings garde l'ancienne pour retrocompat.
+import { initParametres, unmountParametres } from "./views/parametres.js"; // /parametres (nouvelle UI)
 import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4)
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
@@ -186,7 +189,8 @@ registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opt
 // /historique : journal des runs seul. Reutilise la vue QIJ avec tab=journal
 // jusqu'a ce que la Phase 3.4 porte la vue dediee.
 registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
-registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initSettings(el, opts); return unmountSettings; } });
+// Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
+registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 registerRoute("/aide", { view: "view-help", guard: requireAuth, init: initHelpV4 });
 
 /* === Mapping ID sidebar v5 -> route URL ==================== */

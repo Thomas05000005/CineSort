@@ -4604,3 +4604,205 @@ body.v5-notif-lock {
   color: var(--text-2);
   margin: 0 0 var(--sp-4);
 }
+
+/* ===========================================================
+ * PARAMETRES — Phase 3.1-D (spec 11-parametres.md)
+ * ===========================================================
+ * Vue avec sub-sidebar 10 categories + panneau central + mode expert.
+ */
+.parametres-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  height: 100%;
+  padding: var(--sp-4) 0;
+}
+
+.parametres-view--error {
+  text-align: center;
+  padding: var(--sp-8) var(--sp-4);
+}
+
+.parametres-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-2);
+  flex-shrink: 0;
+}
+
+.parametres-title {
+  font-family: var(--font-family-display, var(--font-family-base));
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+
+.parametres-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.parametres-expert-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.parametres-expert-toggle input {
+  cursor: pointer;
+}
+
+.parametres-search-input {
+  width: 280px;
+}
+
+/* Grille sub-sidebar + main ------------------------------------------- */
+.parametres-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--sp-4);
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 1024px) {
+  .parametres-grid {
+    grid-template-columns: 180px 1fr;
+  }
+}
+
+.parametres-sub-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+}
+
+.parametres-sub-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1;
+}
+
+.parametres-sub-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--text-2);
+  font-family: var(--font-family-base);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out), color var(--dur-quick) var(--ease-out);
+}
+
+.parametres-sub-item:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.parametres-sub-item.is-active {
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-weight: var(--fw-semibold);
+  position: relative;
+}
+
+.parametres-sub-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: var(--sp-2);
+  bottom: var(--sp-2);
+  width: 3px;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.parametres-sub-item:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent, #60A5FA));
+  outline-offset: -2px;
+}
+
+.parametres-sub-icon {
+  font-size: var(--fs-base);
+}
+
+.parametres-sub-label {
+  flex: 1;
+}
+
+.parametres-sub-footer {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-1);
+}
+
+.parametres-reset-btn {
+  width: 100%;
+  color: var(--sev-danger-solid, #EF4444);
+}
+
+/* Panneau central ----------------------------------------------------- */
+.parametres-main {
+  padding: var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  overflow-y: auto;
+}
+
+.parametres-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0 0 var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.parametres-panel-icon {
+  font-size: var(--fs-2xl);
+}
+
+.parametres-section-intro {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: 0 0 var(--sp-4);
+}
+
+.parametres-placeholder {
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-style: italic;
+}
+
+.parametres-placeholder a {
+  font-style: normal;
+}
+
+/* Mode expert : masque les champs marques advanced. La PR 3.1-D ne contient
+ * pas encore de tels champs ; on prepare le selecteur pour les PRs futures. */
+.parametres-view:not(.is-expert) [data-advanced="true"] {
+  display: none;
+}
