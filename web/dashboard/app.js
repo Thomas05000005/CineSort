@@ -170,32 +170,71 @@ registerRoute("/logs",     { view: "view-qij", guard: requireAuth, init: (el, op
 // Alias compat /status -> /home (anciens liens, scripts externes)
 registerRoute("/status", { view: "view-status", guard: requireAuth, init: initStatus });
 
+// Phase 2-B (spec 04 Shell 3 zones) : routes francaises canoniques.
+// Les anciennes URLs (/home /library /processing /settings /help) restent en
+// alias rétrocompat pour les bookmarks et les liens externes deja partages.
+registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initStatus });
+registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
+registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: initProcessing });
+// /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
+// vue QIJ avec tab=quality jusqu'a ce que la Phase 3.4 porte la vue dediee.
+registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
+// /historique : journal des runs seul. Reutilise la vue QIJ avec tab=journal
+// jusqu'a ce que la Phase 3.4 porte la vue dediee.
+registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
+registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initSettings(el, opts); return unmountSettings; } });
+registerRoute("/aide", { view: "view-help", guard: requireAuth, init: initHelpV4 });
+
 /* === Mapping ID sidebar v5 -> route URL ==================== */
 
-// V7-fusion Phase 3 : alias sidebar id -> route URL.
-// "qij" sidebar -> /qij (vue consolidee Quality + Integrations + Journal).
-// Items ancestraux (journal/jellyfin/plex/radarr) supprimes de la sidebar
-// mais leurs ROUTES restent (pour ne pas casser les liens externes / data-nav-route legacy).
+// V7-fusion Phase 3 puis Phase 2-B (refonte 2026-05-17) :
+// - sidebar id "home"        -> route /accueil (alias /home /status)
+// - sidebar id "processing"  -> route /traitement (alias /processing)
+// - sidebar id "library"     -> route /bibliotheque (alias /library)
+// - sidebar id "quality"     -> route /qualite (alias /quality, ex tab QIJ)
+// - sidebar id "history"     -> route /historique (alias /qij, ex tab QIJ)
+// - sidebar id "settings"    -> route /parametres (alias /settings)
+// - sidebar id "help"        -> route /aide (alias /help)
 const SIDEBAR_ROUTE_ALIAS = {
-  qij: "/qij",
+  home: "/accueil",
+  processing: "/traitement",
+  library: "/bibliotheque",
+  quality: "/qualite",
+  history: "/historique",
+  settings: "/parametres",
+  help: "/aide",
+  // Compat ascendante : si la sidebar utilise encore l'id "qij" (v7-fusion),
+  // on route vers /qualite par defaut (entree principale post-split).
+  qij: "/qualite",
 };
 
 function _routeFromSidebarId(routeId) {
   return SIDEBAR_ROUTE_ALIAS[routeId] || ("/" + routeId);
 }
 
+// Mapping inverse : route URL -> id sidebar pour highlight l'entree active.
+// Couvre les routes francaises (canoniques) ET les anciennes routes (rétrocompat).
+const _ROUTE_TO_SIDEBAR_ID = {
+  accueil: "home", home: "home", status: "home",
+  traitement: "processing", processing: "processing",
+  bibliotheque: "library", library: "library",
+  qualite: "quality", quality: "quality",
+  historique: "history", logs: "history",
+  parametres: "settings", settings: "settings",
+  aide: "help", help: "help",
+  // Routes integrations legacy : pas d'entree dediee dans la nouvelle sidebar,
+  // on highlight Paramètres (où les integrations vivent en spec 11).
+  jellyfin: "settings", plex: "settings", radarr: "settings",
+  // /qij legacy : highlight Qualité (entree principale post-split).
+  qij: "quality",
+};
+
 function _currentRouteId() {
   // Extrait l'id pour la sidebar (ex: "#/library" -> "library", "#/film/42" -> "film")
-  const hash = (window.location.hash || "#/home").replace(/^#\//, "");
+  const hash = (window.location.hash || "#/accueil").replace(/^#\//, "");
   const base = hash.split("?")[0].split("#")[0];
   const first = base.split("/")[0];
-  // V7-fusion Phase 3 : routes legacy mapent vers "qij" (item sidebar consolide).
-  if (["quality", "logs", "jellyfin", "plex", "radarr"].includes(first)) return "qij";
-  // Inverse-mapping pour la sidebar (ex: "/qij?tab=xxx" -> "qij")
-  for (const [sidebarId, route] of Object.entries(SIDEBAR_ROUTE_ALIAS)) {
-    if (route === "/" + first || route.startsWith("/" + first + "?")) return sidebarId;
-  }
-  return first || "home";
+  return _ROUTE_TO_SIDEBAR_ID[first] || first || "home";
 }
 
 /* === Mount shell v5 ====================================== */

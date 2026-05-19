@@ -157,16 +157,29 @@ function resolve() {
 
   _currentRoute = hash;
 
-  // Topbar : mettre a jour le titre et le sous-titre
+  // Topbar : mettre a jour le titre et le sous-titre.
+  // Phase 2-B (spec 04) : routes francaises canoniques. Anciennes routes
+  // conservees comme alias pour les liens externes et les bookmarks.
   const titles = {
-    "/status": { t: "Accueil", s: "Vue d'ensemble — état du serveur, KPIs et actions rapides" },
-    "/library": { t: "Bibliothèque", s: "Workflow complet : analyse → validation → application" },
-    "/quality": { t: "Qualité", s: "Scoring CinemaLux, distribution et règles personnalisées" },
+    "/accueil": { t: "Accueil", s: "Vue d'ensemble — santé bibliothèque et actions rapides" },
+    "/traitement": { t: "Traitement", s: "Workflow scan → validation → apply" },
+    "/bibliotheque": { t: "Bibliothèque", s: "Collection complète de films, doublons et stats" },
+    "/qualite": { t: "Qualité", s: "Audit transverse — distribution tiers, films à remplacer, sagas" },
+    "/historique": { t: "Historique", s: "Journal des runs passés" },
+    "/parametres": { t: "Paramètres", s: "Configuration complète + intégrations TMDb/Jellyfin/Plex/Radarr/OMDb" },
+    "/aide": { t: "Aide", s: "Documentation utilisateur et raccourcis clavier" },
+    // Alias rétrocompat (anciennes routes — affichent les mêmes titres)
+    "/status": { t: "Accueil", s: "Vue d'ensemble — santé bibliothèque et actions rapides" },
+    "/home": { t: "Accueil", s: "Vue d'ensemble — santé bibliothèque et actions rapides" },
+    "/library": { t: "Bibliothèque", s: "Collection complète de films, doublons et stats" },
+    "/processing": { t: "Traitement", s: "Workflow scan → validation → apply" },
+    "/quality": { t: "Qualité", s: "Audit transverse — distribution tiers, films à remplacer, sagas" },
     "/jellyfin": { t: "Jellyfin", s: "Intégration serveur média Jellyfin" },
     "/plex": { t: "Plex", s: "Intégration serveur média Plex" },
     "/radarr": { t: "Radarr", s: "Candidats d'upgrade et synchronisation" },
-    "/logs": { t: "Journaux", s: "Logs live + historique des runs" },
-    "/settings": { t: "Paramètres", s: "Configuration complète de CineSort" },
+    "/logs": { t: "Historique", s: "Journal des runs passés" },
+    "/settings": { t: "Paramètres", s: "Configuration complète + intégrations" },
+    "/help": { t: "Aide", s: "Documentation utilisateur et raccourcis clavier" },
   };
   const info = titles[hashBase] || { t: hashBase, s: "" };
   const titleEl = $("topbarTitle");

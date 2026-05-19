@@ -16,8 +16,9 @@ import { t, onLocaleChange } from "../core/i18n.js";
 const STORAGE_KEY = "cinesort.sidebar.collapsed";
 
 // V6-02 : labels resolus dynamiquement via t() pour reactivite locale.
-// On expose les ids stables; les labels sont calcules au render et
-// re-render sur onLocaleChange.
+// Phase 2-B (spec 04 Shell 3 zones) : QIJ splitté en Qualité + Historique +
+// Intégrations(dans Paramètres). Ordre : 5 vues principales -> séparateur ->
+// Paramètres + Aide.
 export const NAV_ITEMS = [
   { id: "home",         labelKey: "sidebar.nav.home",        shortcut: "Alt+1",
     svg: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' },
@@ -25,14 +26,14 @@ export const NAV_ITEMS = [
     svg: '<polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' },
   { id: "library",      labelKey: "sidebar.nav.library",     shortcut: "Alt+3", badgeKey: "validation",
     svg: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>' },
-  // V7-fusion Phase 3 : QIJ remplace 5 items distincts (Quality, Journal,
-  // Jellyfin, Plex, Radarr). Acces aux 3 sous-vues via tabs internes.
-  { id: "qij",          labelKey: "sidebar.nav.qij",         shortcut: "Alt+4", badgeKey: "quality",
-    svg: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>' },
-  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+5",
+  { id: "quality",      labelKey: "sidebar.nav.quality",     shortcut: "Alt+4", badgeKey: "quality",
+    svg: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>' },
+  { id: "history",      labelKey: "sidebar.nav.history",     shortcut: "Alt+5",
+    svg: '<polyline points="3 12 3 4 21 4 21 20 3 20 3 12"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="20"/>' },
+  { id: "_separator" },
+  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+,",
     svg: '<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/>' },
-  // V1-14 : entree Aide.
-  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "Alt+6",
+  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "?",
     svg: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
 ];
 
@@ -54,6 +55,10 @@ function setCollapsedState(collapsed) {
 }
 
 function _buildItemHtml(item, active) {
+  // Phase 2-B : un item avec id=_separator est un divider visuel (spec 04).
+  if (item.id === "_separator") {
+    return `<div class="v5-sidebar-separator" role="separator" aria-orientation="horizontal"></div>`;
+  }
   // V4-09 : aria-current="page" pour navigation (pas role=tab/aria-selected qui releve de listbox/tablist).
   const ariaCurrent = active ? 'aria-current="page"' : '';
   const label = _navItemLabel(item);
