@@ -26,7 +26,7 @@
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="../themes.css">
   <link rel="stylesheet" href="./depth-effects.css">
-  <!-- V5B-01 : layout shell v5 minimal (sidebar mount + main flex) -->
+  <!-- V5B-01 : layout shell v5 minimal (sidebar mount + main flex + right panel) -->
   <style>
     .v5-shell { display: flex; min-height: 100vh; align-items: stretch; }
     .v5-sidebar-mount { flex-shrink: 0; }
@@ -36,6 +36,8 @@
     .v5-content { flex: 1; min-width: 0; padding: var(--sp-4); overflow-y: auto; }
     .v5-content > .view { display: none; }
     .v5-content > .view.active { display: block; }
+    /* Phase 2 : inspecteur droit (right panel) — spec 04 Shell 3 zones */
+    .v5-right-panel-mount { flex-shrink: 0; }
   </style>
 </head>
 <body data-theme="luxe">
@@ -129,10 +131,12 @@
         </section>
       </main>
     </div>
+
+    <!-- Phase 2 (spec 04 Shell 3 zones) : inspecteur droit, monte dynamiquement
+         via right-panel.js. Contenu adaptatif par vue (slot mechanism). -->
+    <aside id="v5RightPanelMount" class="v5-right-panel-mount" role="complementary" aria-label="Inspecteur"></aside>
   </div>
 
-  <!-- V6 : shim global supprime, remplace par module ESM
-       (cf web/views/_legacy_compat.js importe par home.js). -->
   <!-- Bootstrap JS (ES modules) -->
   <script type="module" src="./app.js"></script>
   <!-- Modale "A propos" (V1-12) — auto-init via DOMContentLoaded -->

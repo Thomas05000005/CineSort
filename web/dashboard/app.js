@@ -89,6 +89,8 @@ import * as sidebarV5 from "./components/sidebar-v5.js";
 import * as topBarV5 from "./components/top-bar-v5.js";
 import * as breadcrumb from "./components/breadcrumb.js";
 import * as notifCenter from "./components/notification-center.js";
+// Phase 2 (spec 04 Shell 3 zones) : inspecteur droit persistant.
+import * as rightPanel from "./components/right-panel.js";
 
 // === Vues v4 RESTAUREES (post-fix : la v5 perdait trop de fonctionnalites) ===
 import { initLogin } from "./views/login.js";
@@ -202,6 +204,7 @@ async function _mountV5Shell() {
   const sidebarMount = document.getElementById("v5SidebarMount");
   const topBarMount = document.getElementById("v5TopBarMount");
   const breadcrumbMount = document.getElementById("v5BreadcrumbMount");
+  const rightPanelMount = document.getElementById("v5RightPanelMount");
 
   // Sidebar v5 (8 entrees + integrations + footer About)
   sidebarV5.render(sidebarMount, {
@@ -230,6 +233,17 @@ async function _mountV5Shell() {
   // Breadcrumb (initialement vide, mis a jour par le router via syncShell)
   if (breadcrumbMount && typeof breadcrumb.render === "function") {
     breadcrumb.render(breadcrumbMount, []);
+  }
+
+  // Phase 2 (spec 04) : inspecteur droit. Etat adaptatif par route au hashchange.
+  if (rightPanelMount) {
+    rightPanel.render(rightPanelMount);
+    const _syncRightPanelToRoute = () => {
+      const hash = (window.location.hash || "#/home").replace(/^#/, "");
+      rightPanel.adaptToRoute(hash.split("#")[0]);
+    };
+    window.addEventListener("hashchange", _syncRightPanelToRoute);
+    _syncRightPanelToRoute();
   }
 
   // FAB Aide V3-08 (bouton flottant ?)
