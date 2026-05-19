@@ -631,6 +631,14 @@
   overflow-y: auto;
 }
 
+/* Phase 2-B (spec 04) : separateur entre les 5 vues principales et Parametres/Aide. */
+.v5-sidebar-separator {
+  height: 1px;
+  background: var(--border-1);
+  margin: var(--sp-3) var(--sp-2);
+  flex-shrink: 0;
+}
+
 .v5-sidebar-item {
   display: flex;
   align-items: center;
