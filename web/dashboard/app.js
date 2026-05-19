@@ -116,6 +116,9 @@ import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4, lega
 // Phase 3.5 (spec 12-aide.md) : nouvelle vue Aide refondue (5 sections + recherche).
 // Active sur /aide ; /help garde la FAQ v4 pour retrocompat.
 import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
+// Phase 3.4 (spec 09-historique.md) : nouvelle vue Historique refondue
+// (timeline groupee par jour + filtres + inspecteur 5 onglets).
+import { initHistorique, unmountHistorique } from "./views/historique.js"; // /historique (nouvelle UI)
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
@@ -195,9 +198,11 @@ registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init
 // /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
 // vue QIJ avec tab=quality jusqu'a ce que la Phase 3.4 porte la vue dediee.
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
-// /historique : journal des runs seul. Reutilise la vue QIJ avec tab=journal
-// jusqu'a ce que la Phase 3.4 porte la vue dediee.
-registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
+// Phase 3.4 : /historique cable la nouvelle vue Historique refondue (spec 09).
+// La vue cherche un mount point #view-historique ; on garde view-qij comme
+// container car le view-historique n'existe pas dans le DOM, et initHistorique
+// remplit le container avec son propre HTML.
+registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initHistorique(el, opts); return unmountHistorique; } });
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 // Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
