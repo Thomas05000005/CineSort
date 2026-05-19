@@ -163,19 +163,78 @@ const _CATEGORY_PLACEHOLDERS = {
     <p class="parametres-section-intro">Thème Studio / Cinéma / Luxe / Neon + effets visuels (mode expert).</p>
     <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
   `,
-  "profils-qualite": `
-    <p class="parametres-section-intro">Édition des seuils de tier (Platinum/Gold/Silver/Bronze/Reject) et des poids des composantes du Score V2.</p>
-    <p class="parametres-placeholder">À implémenter en Phase 3.4 (spec 11 §2.9). Pour l'instant, les seuils par défaut s'appliquent.</p>
-  `,
+  "profils-qualite": "__SPECIAL_PROFILS_QUALITE__",
   avance: `
     <p class="parametres-section-intro">Parallélisme + onboarding + MAJ + rétention historique + log level.</p>
     <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
   `,
 };
 
+/* --- Panneau spécifique Profils Qualité (Phase 3.1-D, spec 11 §2.9) ----- */
+
+let _profilDraft = null;  // { platinum, gold, silver, bronze }
+let _profilSaving = false;
+let _profilMessage = null;
+
+const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
+
+function _renderProfilsQualitePanel() {
+  const t = _profilDraft || _DEFAULT_TIERS;
+  return `
+    <p class="parametres-section-intro">
+      Seuils des tiers Score V2 : un film est classé selon son score global (0-100).
+      L'ordre logique est <strong>Platinum &gt; Gold &gt; Silver &gt; Bronze &gt; Reject</strong>
+      (en-dessous du seuil Bronze = Reject).
+    </p>
+    <form class="parametres-profils-form" data-parametres-profils-form>
+      <div class="parametres-tier-row">
+        <label for="tier-platinum">
+          <span class="parametres-tier-badge parametres-tier-badge--platinum">⬤ Platinum</span>
+          score ≥
+        </label>
+        <input type="number" id="tier-platinum" name="platinum" min="0" max="100" value="${t.platinum}" data-tier-input="platinum">
+      </div>
+      <div class="parametres-tier-row">
+        <label for="tier-gold">
+          <span class="parametres-tier-badge parametres-tier-badge--gold">⬤ Gold</span>
+          score ≥
+        </label>
+        <input type="number" id="tier-gold" name="gold" min="0" max="100" value="${t.gold}" data-tier-input="gold">
+      </div>
+      <div class="parametres-tier-row">
+        <label for="tier-silver">
+          <span class="parametres-tier-badge parametres-tier-badge--silver">⬤ Silver</span>
+          score ≥
+        </label>
+        <input type="number" id="tier-silver" name="silver" min="0" max="100" value="${t.silver}" data-tier-input="silver">
+      </div>
+      <div class="parametres-tier-row">
+        <label for="tier-bronze">
+          <span class="parametres-tier-badge parametres-tier-badge--bronze">⬤ Bronze</span>
+          score ≥
+        </label>
+        <input type="number" id="tier-bronze" name="bronze" min="0" max="100" value="${t.bronze}" data-tier-input="bronze">
+      </div>
+      ${_profilMessage ? `<p class="parametres-profils-message">${escapeHtml(_profilMessage)}</p>` : ""}
+      <div class="parametres-profils-actions">
+        <button type="button" class="v5-btn v5-btn--primary" data-parametres-profils-action="save" ${_profilSaving ? "disabled" : ""}>
+          ${_profilSaving ? "Sauvegarde…" : "💾 Sauvegarder"}
+        </button>
+        <button type="button" class="v5-btn v5-btn--ghost" data-parametres-profils-action="reset">↺ Restaurer les défauts</button>
+      </div>
+    </form>
+    <p class="parametres-placeholder">
+      L'édition fine des poids (vidéo/audio/extras) et des bonus codec/HDR/audio
+      reste disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.
+      Cette édition Phase 3.1-D ne couvre que les <strong>seuils de tier</strong>.
+    </p>
+  `;
+}
+
 function _renderCategoryPanel(categoryId) {
   const cat = PARAMETRES_CATEGORIES.find((c) => c.id === categoryId) || PARAMETRES_CATEGORIES[0];
-  const placeholder = _CATEGORY_PLACEHOLDERS[cat.id] || "<p>Catégorie inconnue.</p>";
+  const raw = _CATEGORY_PLACEHOLDERS[cat.id] || "<p>Catégorie inconnue.</p>";
+  const body = raw === "__SPECIAL_PROFILS_QUALITE__" ? _renderProfilsQualitePanel() : raw;
   return `
     <section class="parametres-panel" aria-labelledby="parametres-panel-title">
       <h2 id="parametres-panel-title" class="parametres-panel-title">
@@ -183,7 +242,7 @@ function _renderCategoryPanel(categoryId) {
         ${escapeHtml(cat.label)}
       </h2>
       <div class="parametres-panel-body">
-        ${placeholder}
+        ${body}
       </div>
     </section>
   `;
@@ -271,6 +330,66 @@ function _bindEvents(container) {
   if (retryBtn) {
     retryBtn.addEventListener("click", () => initParametres(container));
   }
+
+  // Profils Qualité — inputs + actions
+  container.querySelectorAll("[data-tier-input]").forEach((input) => {
+    input.addEventListener("input", (ev) => {
+      const key = ev.target.dataset.tierInput;
+      if (!_profilDraft) _profilDraft = { ..._DEFAULT_TIERS };
+      _profilDraft[key] = Math.max(0, Math.min(100, parseInt(ev.target.value, 10) || 0));
+    });
+  });
+
+  container.querySelectorAll("[data-parametres-profils-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.parametresProfilsAction;
+      if (action === "save") {
+        _saveProfilsQualite(container);
+      } else if (action === "reset") {
+        _profilDraft = { ..._DEFAULT_TIERS };
+        _profilMessage = "Seuils restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour appliquer.";
+        _rerenderPanel(container);
+      }
+    });
+  });
+}
+
+function _rerenderPanel(container) {
+  const main = container.querySelector("#parametres-main-content");
+  if (main) main.innerHTML = _renderCategoryPanel(_activeCategoryId);
+  _bindEvents(container);
+}
+
+async function _saveProfilsQualite(container) {
+  if (_profilSaving) return;
+  const t = _profilDraft || _DEFAULT_TIERS;
+  // Validation ordre logique (Platinum > Gold > Silver > Bronze)
+  if (!(t.platinum > t.gold && t.gold > t.silver && t.silver > t.bronze)) {
+    _profilMessage = "Erreur : les seuils doivent être strictement décroissants (Platinum > Gold > Silver > Bronze).";
+    _rerenderPanel(container);
+    return;
+  }
+  _profilSaving = true;
+  _profilMessage = "Sauvegarde en cours…";
+  _rerenderPanel(container);
+  try {
+    const cur = await apiPost("settings/get_settings", {});
+    if (!cur || cur.ok === false) throw new Error("Lecture des paramètres impossible");
+    const settings = cur.data || cur;
+    const profile = (settings.quality_profile && typeof settings.quality_profile === "object")
+      ? { ...settings.quality_profile }
+      : {};
+    profile.tiers = { ...t };
+    settings.quality_profile = profile;
+    const res = await apiPost("settings/save_settings", { settings });
+    if (!res || res.ok === false) throw new Error((res && (res.message || res.error)) || "Sauvegarde refusée");
+    _profilMessage = "✓ Seuils sauvegardés. Effet immédiat sur les futurs scans.";
+  } catch (err) {
+    _profilMessage = `Erreur : ${err && err.message ? err.message : String(err)}`;
+  } finally {
+    _profilSaving = false;
+    _rerenderPanel(container);
+  }
 }
 
 /* --- Entrypoint -------------------------------------------------------- */
@@ -282,13 +401,30 @@ export async function initParametres(container) {
   if (PARAMETRES_CATEGORIES.some((c) => c.id === lastCat)) _activeCategoryId = lastCat;
   _expertMode = _readBool(STORAGE_KEY_EXPERT, false);
 
-  // Pour la PR skeleton, on ne fetch rien : pas de backend cable encore.
-  // En PR future on chargera apiPost("settings/get_settings") + ses derivés.
-  void apiPost; // garde l'import pour usage futur (suppression de l'avertissement linter).
-
   container.innerHTML = _renderParametres();
   container.classList.toggle("is-expert", _expertMode);
   _bindEvents(container);
+
+  // Charge les seuils tier depuis settings backend
+  try {
+    const cur = await apiPost("settings/get_settings", {});
+    if (cur && cur.ok !== false) {
+      const settings = cur.data || cur;
+      const profile = settings.quality_profile && typeof settings.quality_profile === "object" ? settings.quality_profile : null;
+      const tiers = profile && profile.tiers && typeof profile.tiers === "object" ? profile.tiers : null;
+      if (tiers) {
+        _profilDraft = {
+          platinum: Number(tiers.platinum) || _DEFAULT_TIERS.platinum,
+          gold: Number(tiers.gold) || _DEFAULT_TIERS.gold,
+          silver: Number(tiers.silver) || _DEFAULT_TIERS.silver,
+          bronze: Number(tiers.bronze) || _DEFAULT_TIERS.bronze,
+        };
+        if (_activeCategoryId === "profils-qualite") _rerenderPanel(container);
+      }
+    }
+  } catch (_e) {
+    /* silencieux : fallback sur les defaults */
+  }
 }
 
 export function unmountParametres() {
