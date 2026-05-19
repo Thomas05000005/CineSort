@@ -119,6 +119,9 @@ import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
 // Phase 3.4 (spec 09-historique.md) : nouvelle vue Historique refondue
 // (timeline groupee par jour + filtres + inspecteur 5 onglets).
 import { initHistorique, unmountHistorique } from "./views/historique.js"; // /historique (nouvelle UI)
+// Phase 3.4 (spec 10-qualite.md) : nouvelle vue Qualité audit transverse
+// (6 sections + filtres + re-calcul scores).
+import { initQualite, unmountQualite } from "./views/qualite.js"; // /qualite (nouvelle UI)
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
@@ -203,6 +206,11 @@ registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opt
 // container car le view-historique n'existe pas dans le DOM, et initHistorique
 // remplit le container avec son propre HTML.
 registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initHistorique(el, opts); return unmountHistorique; } });
+// Phase 3.4 : /qualite cable la nouvelle vue Qualité refondue (spec 10).
+registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQualite(el, opts); return unmountQualite; } });
+// /historique : journal des runs seul. Reutilise la vue QIJ avec tab=journal
+// jusqu'a ce que la Phase 3.4 porte la vue dediee.
+registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 // Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
