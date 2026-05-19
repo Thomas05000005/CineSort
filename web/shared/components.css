@@ -4806,3 +4806,234 @@ body.v5-notif-lock {
 .parametres-view:not(.is-expert) [data-advanced="true"] {
   display: none;
 }
+
+/* ===========================================================
+ * AIDE — Phase 3.5 (spec 12-aide.md)
+ * ===========================================================
+ * Vue Aide refondue : 5 sections (Doc / Raccourcis / Diagnostic / Logs /
+ * A propos) + recherche. Pas d'inspecteur droit. Layout vertical.
+ */
+.aide-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--sp-4) 0;
+}
+
+.aide-view--loading {
+  gap: var(--sp-4);
+}
+
+.aide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.aide-title {
+  font-family: var(--font-family-display, var(--font-family-base));
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+
+.aide-search-input {
+  width: 320px;
+}
+
+.aide-section {
+  padding: var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+}
+
+.aide-section-skel {
+  min-height: 200px;
+  width: 100%;
+}
+
+.aide-section-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0 0 var(--sp-3);
+}
+
+.aide-section-intro {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: 0 0 var(--sp-4);
+}
+
+.aide-empty-msg {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-style: italic;
+  margin: 0;
+}
+
+.aide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.aide-action-status {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: var(--sp-2) 0 0;
+  min-height: 1.4em;
+}
+
+/* Documentation -------------------------------------------------------- */
+.aide-doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.aide-doc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out);
+}
+
+.aide-doc-item:hover {
+  background: var(--surface-3, var(--surface-1));
+}
+
+.aide-doc-item:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent, #60A5FA));
+  outline-offset: -2px;
+}
+
+.aide-doc-bullet {
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+
+.aide-doc-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.aide-doc-text strong {
+  font-weight: var(--fw-semibold);
+}
+
+.aide-doc-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* Raccourcis ----------------------------------------------------------- */
+.aide-shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.aide-shortcuts-table td {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.aide-shortcuts-table tr:last-child td {
+  border-bottom: none;
+}
+
+.aide-shortcut-keys {
+  white-space: nowrap;
+  width: 160px;
+}
+
+.aide-shortcut-keys kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  margin: 0 1px;
+  border: 1px solid var(--border-2, var(--border-1));
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--font-family-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.aide-shortcut-label {
+  color: var(--text-2);
+}
+
+/* Diagnostic ----------------------------------------------------------- */
+.aide-diag-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2);
+}
+
+.aide-diag-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.aide-diag-row:last-child {
+  border-bottom: none;
+}
+
+.aide-diag-row dt {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: var(--fw-semibold);
+}
+
+.aide-diag-row dd {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  margin: 0;
+  font-family: var(--font-family-mono, monospace);
+  word-break: break-all;
+}
+
+/* A propos ------------------------------------------------------------- */
+.aide-about-tagline {
+  font-size: var(--fs-base);
+  color: var(--text-1);
+  margin: 0 0 var(--sp-1);
+}
+
+.aide-about-version {
+  font-family: var(--font-family-mono, monospace);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.aide-about-license {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  margin: 0 0 var(--sp-3);
+}
