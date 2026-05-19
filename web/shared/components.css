@@ -4096,3 +4096,210 @@ body.v5-notif-lock {
   color: var(--text-1);
   line-height: 1.5;
 }
+
+/* ===========================================================
+ * ACCUEIL — Phase 3.1 (spec 05-accueil.md)
+ * ===========================================================
+ * Vue de synthese editoriale : Hero + Dernier run + Activite recente.
+ * Layout vertical avec sections espacees ; tres lisible, prefere les
+ * grands titres aux petits widgets.
+ */
+.accueil-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  max-width: 980px;
+  margin: 0 auto;
+  padding: var(--sp-4) 0;
+}
+
+.accueil-view--loading,
+.accueil-view--error {
+  gap: var(--sp-4);
+}
+
+.accueil-hero {
+  padding: var(--sp-6) 0 var(--sp-2);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.accueil-hero-greeting {
+  font-family: var(--font-family-display, var(--font-family-base));
+  font-size: var(--fs-3xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-tight, -0.01em);
+  color: var(--text-1);
+  margin: 0;
+  line-height: 1.15;
+}
+
+.accueil-hero-summary {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-lg);
+  color: var(--text-2);
+  margin: var(--sp-3) 0 var(--sp-2);
+  line-height: 1.4;
+}
+
+.accueil-hero-greeting-skel {
+  height: 36px;
+  width: 280px;
+  border-radius: var(--radius-md);
+}
+
+.accueil-hero-summary-skel {
+  height: 22px;
+  width: 360px;
+  border-radius: var(--radius-md);
+  margin-top: var(--sp-3);
+}
+
+.accueil-section {
+  padding: var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+}
+
+.accueil-section-skel {
+  min-height: 160px;
+  width: 100%;
+}
+
+.accueil-section-title {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: 0 0 var(--sp-4);
+}
+
+.accueil-empty-msg {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  margin: 0 0 var(--sp-4);
+  font-style: italic;
+}
+
+.accueil-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+/* Dernier run --------------------------------------------------------- */
+.accueil-last-run-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-bottom: var(--sp-4);
+}
+
+.accueil-last-run-id {
+  font-family: var(--font-family-mono, monospace);
+  color: var(--text-1);
+}
+
+.accueil-last-run-sep {
+  color: var(--text-3);
+}
+
+.accueil-last-run-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-4);
+  margin: 0;
+}
+
+.accueil-last-run-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.accueil-last-run-stats dt {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  font-weight: var(--fw-semibold);
+}
+
+.accueil-last-run-stats dd {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Activite recente ---------------------------------------------------- */
+.accueil-activity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.accueil-activity-row {
+  display: grid;
+  grid-template-columns: 180px 1fr auto auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-out);
+}
+
+.accueil-activity-row:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent, #60A5FA));
+  outline-offset: -2px;
+}
+
+.accueil-activity-date {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.accueil-activity-id {
+  font-family: var(--font-family-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.accueil-activity-total {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.accueil-activity-status {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accueil-activity-status.is-done { color: var(--sev-success-solid, #10B981); }
+.accueil-activity-status.is-partial { color: var(--sev-warning-solid, #F59E0B); }
+.accueil-activity-status.is-error { color: var(--sev-danger-solid, #EF4444); }
+
+/* Erreur -------------------------------------------------------------- */
+.accueil-error-title {
+  font-size: var(--fs-xl);
+  color: var(--text-1);
+  margin: 0 0 var(--sp-2);
+}
+
+.accueil-error-message {
+  color: var(--text-2);
+  margin: 0 0 var(--sp-4);
+}

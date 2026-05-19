@@ -94,7 +94,10 @@ import * as rightPanel from "./components/right-panel.js";
 
 // === Vues v4 RESTAUREES (post-fix : la v5 perdait trop de fonctionnalites) ===
 import { initLogin } from "./views/login.js";
-import { initStatus } from "./views/status.js";          // /home + /status (dashboard complet)
+import { initStatus } from "./views/status.js";          // /home + /status (dashboard complet, legacy)
+// Phase 3.1 (spec 05-accueil.md) : nouvelle vue Accueil refondue. Active sur
+// /accueil ; les anciennes routes /home /status gardent status.js (rétrocompat).
+import { initAccueil } from "./views/accueil.js";        // /accueil (nouvelle UI)
 import { initLibraryWorkflow, unmountLibrary } from "./views/library/library.js";  // /library
 import { initQuality } from "./views/quality.js";        // /quality
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
@@ -173,7 +176,8 @@ registerRoute("/status", { view: "view-status", guard: requireAuth, init: initSt
 // Phase 2-B (spec 04 Shell 3 zones) : routes francaises canoniques.
 // Les anciennes URLs (/home /library /processing /settings /help) restent en
 // alias rétrocompat pour les bookmarks et les liens externes deja partages.
-registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initStatus });
+// Phase 3.1 : /accueil cable la nouvelle vue refondue (spec 05-accueil.md).
+registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initAccueil });
 registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
 registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: initProcessing });
 // /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
