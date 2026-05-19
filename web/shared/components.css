@@ -4292,6 +4292,136 @@ body.v5-notif-lock {
 .accueil-activity-status.is-partial { color: var(--sev-warning-solid, #F59E0B); }
 .accueil-activity-status.is-error { color: var(--sev-danger-solid, #EF4444); }
 
+/* CTA Scan ------------------------------------------------------------ */
+.accueil-cta-scan {
+  border-left: 4px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.accueil-cta-scan-title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+
+.accueil-cta-scan-targets {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: 0;
+  font-family: var(--font-family-mono, monospace);
+}
+
+/* Santé bibliothèque -------------------------------------------------- */
+.accueil-health-total {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-2);
+  margin-left: var(--sp-2);
+}
+
+.accueil-health-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.accueil-health-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 60px 50px;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.accueil-health-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+}
+
+.accueil-health-bar {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  height: 22px;
+  overflow: hidden;
+}
+
+.accueil-health-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.accueil-health-fill--platinum { background: var(--tier-platinum-solid, #A78BFA); }
+.accueil-health-fill--gold { background: var(--tier-gold-solid, #FBBF24); }
+.accueil-health-fill--silver { background: var(--tier-silver-solid, #9CA3AF); }
+.accueil-health-fill--bronze { background: var(--tier-bronze-solid, #FB923C); }
+.accueil-health-fill--reject { background: var(--tier-reject-solid, #EF4444); }
+
+.accueil-health-count,
+.accueil-health-pct {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  text-align: right;
+}
+
+/* Suggestions / Points à traiter -------------------------------------- */
+.accueil-suggestion-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.accueil-suggestion-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border-left: 3px solid transparent;
+}
+
+.accueil-suggestion-row.is-danger { border-left-color: var(--sev-danger-solid, #EF4444); }
+.accueil-suggestion-row.is-warning { border-left-color: var(--sev-warning-solid, #F59E0B); }
+.accueil-suggestion-row.is-info { border-left-color: var(--sev-info-solid, #3B82F6); }
+
+.accueil-suggestion-dot {
+  font-size: var(--fs-base);
+}
+
+.accueil-suggestion-text {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.accueil-suggestion-text strong {
+  font-weight: var(--fw-semibold);
+}
+
+.accueil-suggestion-hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-top: var(--sp-1);
+}
+
+.accueil-suggestion-action {
+  width: 36px;
+  height: 32px;
+  padding: 0;
+}
+
 /* Erreur -------------------------------------------------------------- */
 .accueil-error-title {
   font-size: var(--fs-xl);
