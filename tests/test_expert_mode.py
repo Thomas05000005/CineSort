@@ -16,6 +16,16 @@ from pathlib import Path
 from cinesort.ui.api.settings_support import _save_section_scan_flags
 from cinesort.ui.api.cinesort_api import CineSortApi
 
+# Migration B (PR1 #257 + PR2) : legacy frontend supprime.
+# TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard
+# une fois le Shell 3 zones + les 12 ecrans implementes.
+if not (Path(__file__).resolve().parents[1] / "web" / "views" / "home.js").exists():
+    raise unittest.SkipTest(
+        "Legacy frontend removed (PR #257 + PR2 migration B). "
+        "Tests rely on web/views/*.js files which were deleted "
+        "(home.js, help.js, quality.js, settings.js, validation.js, etc.)."
+    )
+
 
 class ExpertModeBackendTests(unittest.TestCase):
     def test_expert_mode_default_false(self):

@@ -21,6 +21,16 @@ import subprocess
 import unittest
 from pathlib import Path
 
+# Migration B (PR1 #257 + PR2) : legacy frontend supprime.
+# TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard
+# une fois le Shell 3 zones + les 12 ecrans implementes.
+if not (Path(__file__).resolve().parents[1] / "web" / "views" / "home.js").exists():
+    raise unittest.SkipTest(
+        "Legacy frontend removed (PR #257 + PR2 migration B). "
+        "Tests rely on web/views/*.js files which were deleted "
+        "(home.js, help.js, quality.js, settings.js, validation.js, etc.)."
+    )
+
 ROOT = Path(__file__).resolve().parent.parent
 DASH_HELPER = ROOT / "web" / "dashboard" / "components" / "virtual-table.js"
 DASH_LIBRARY = ROOT / "web" / "dashboard" / "views" / "library.js"
