@@ -109,7 +109,7 @@ function _renderHero(heroState) {
   `;
 }
 
-function _renderLastRunCard(latestRun) {
+function _renderLastRunCard(latestRun, kpis) {
   if (!latestRun || !latestRun.run_id) {
     return `
       <section class="accueil-section accueil-last-run accueil-last-run--empty" aria-label="Dernier run">
@@ -121,11 +121,16 @@ function _renderLastRunCard(latestRun) {
       </section>
     `;
   }
-  const date = formatRelativeTime(latestRun.started_at);
+  // Source backend get_dashboard : runs_history[i] expose started_ts (float epoch),
+  // total_rows, applied_rows, errors_count, anomalies_count. Pas de avg_score
+  // par run dans runs_history -> on lit le score moyen du run actif via payload.kpis.
+  const startedTs = latestRun.started_ts || latestRun.started_at;
+  const startedDate = typeof startedTs === "number" ? new Date(startedTs * 1000) : startedTs;
+  const date = formatRelativeTime(startedDate);
   const total = latestRun.total_rows != null ? Number(latestRun.total_rows) : null;
-  const avgScore = latestRun.avg_score_v2;
+  const avgScore = kpis && kpis.score_avg != null ? Number(kpis.score_avg) : (latestRun.avg_score_v2 != null ? Number(latestRun.avg_score_v2) : null);
   const avgConfidence = latestRun.avg_confidence_pct;
-  const scoreTxt = avgScore != null ? `${Math.round(avgScore)}/100` : "— (pas calculé)";
+  const scoreTxt = avgScore != null && avgScore > 0 ? `${Math.round(avgScore)}/100` : "— (pas calculé)";
   const confTxt = avgConfidence != null ? `${Math.round(avgConfidence)}%` : "—";
   const totalTxt = total != null ? `${total} films analysés` : "— films";
   const showResume = String(latestRun.status || "").toUpperCase() === "AWAITING_VALIDATION";
@@ -135,7 +140,7 @@ function _renderLastRunCard(latestRun) {
       <div class="accueil-last-run-meta">
         <span class="accueil-last-run-id">${escapeHtml(latestRun.run_id)}</span>
         <span class="accueil-last-run-sep">·</span>
-        <time class="accueil-last-run-date" datetime="${escapeHtml(String(latestRun.started_at || ""))}">${escapeHtml(date)}</time>
+        <time class="accueil-last-run-date" datetime="${escapeHtml(String(startedTs || ""))}">${escapeHtml(date)}</time>
       </div>
       <dl class="accueil-last-run-stats">
         <div><dt>Films</dt><dd>${escapeHtml(totalTxt)}</dd></div>
@@ -266,9 +271,28 @@ function _renderTierBar(tier, count, total) {
   `;
 }
 
+function _normalizeTierDist(rawDist) {
+  // Le backend peut renvoyer des keys Capitalisees (legacy : "Bronze", "Gold", ...)
+  // ou lowercase (v2_tier_distribution.counts). On normalise tout en lowercase.
+  const out = {};
+  for (const [k, v] of Object.entries(rawDist || {})) {
+    out[String(k).toLowerCase()] = Number(v) || 0;
+  }
+  return out;
+}
+
 function _renderHealth(stats) {
-  const dist = stats && stats.tier_distribution ? stats.tier_distribution : {};
-  const total = Number(stats && stats.total_scored) || _TIER_ORDER.reduce((sum, t) => sum + (Number(dist[t]) || 0), 0);
+  // Priorite a v2_tier_distribution.counts (lowercase garantis, structure v7.6.0).
+  // Fallback sur tier_distribution legacy (keys potentiellement Capitalisees).
+  let dist = {};
+  if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
+    dist = _normalizeTierDist(stats.v2_tier_distribution.counts);
+  } else if (stats && stats.tier_distribution) {
+    dist = _normalizeTierDist(stats.tier_distribution);
+  }
+  // Total des films effectivement classes (somme des 5 tiers, sans "unknown").
+  const sumTiers = _TIER_ORDER.reduce((sum, t) => sum + (Number(dist[t]) || 0), 0);
+  const total = sumTiers;
   if (total === 0) {
     return `
       <section class="accueil-section accueil-health accueil-health--empty" aria-labelledby="accueil-health-title">
@@ -354,15 +378,23 @@ function _renderRecentActivity(runs) {
     `;
   }
   const rows = list.map((r) => {
-    const status = String(r.status || "").toUpperCase();
+    // get_dashboard fournit errors_count + applied_rows mais pas status.
+    // On derive le statut : ERROR si errors_count > 0, PARTIAL si applied < total, DONE sinon.
+    const errors = Number(r.errors_count || 0);
+    const applied = Number(r.applied_rows || 0);
+    const total = Number(r.total_rows || 0);
+    const derivedStatus = errors > 0 ? "ERROR" : (applied < total && total > 0 ? "PARTIAL" : "DONE");
+    const status = String(r.status || derivedStatus).toUpperCase();
     const statusClass = status === "ERROR" ? "is-error" : status === "PARTIAL" ? "is-partial" : "is-done";
-    const date = formatRelativeTime(r.started_at);
-    const total = r.total_rows != null ? `${Number(r.total_rows)} films` : "—";
+    // started_ts est un epoch float (secondes) ; started_at est un fallback ISO si dispo.
+    const tsSrc = r.started_ts != null ? new Date(Number(r.started_ts) * 1000) : r.started_at;
+    const date = formatRelativeTime(tsSrc);
+    const totalLabel = total > 0 ? `${total} films` : "—";
     return `
       <li class="accueil-activity-row clickable-row" tabindex="0" data-run-id="${escapeHtml(r.run_id)}">
         <time class="accueil-activity-date">${escapeHtml(date)}</time>
         <span class="accueil-activity-id">${escapeHtml(r.run_id)}</span>
-        <span class="accueil-activity-total">${escapeHtml(total)}</span>
+        <span class="accueil-activity-total">${escapeHtml(totalLabel)}</span>
         <span class="accueil-activity-status ${statusClass}">● ${escapeHtml(status || "—")}</span>
       </li>
     `;
@@ -397,9 +429,22 @@ function _extractScanProgress(payload) {
   };
 }
 
+function _resolveLatestRun(payload) {
+  // get_dashboard ne retourne PAS un champ run_info dedie. Le dernier run est
+  // identifie par payload.run_id (id du run resolu en mode "latest") et ses
+  // donnees se trouvent dans payload.runs_history[]. On cherche d'abord par
+  // run_id ; fallback sur runs_history[0].
+  const runs = Array.isArray(payload && payload.runs_history) ? payload.runs_history : [];
+  if (payload && payload.run_id) {
+    const match = runs.find((r) => r && r.run_id === payload.run_id);
+    if (match) return match;
+  }
+  return runs.length > 0 ? runs[0] : null;
+}
+
 function _renderAccueil(payload, stats, settings) {
-  const latestRun = payload.run_info || payload.latest_run || null;
-  const recentRuns = Array.isArray(payload.runs_history) ? payload.runs_history : [];
+  const latestRun = _resolveLatestRun(payload);
+  const recentRuns = Array.isArray(payload && payload.runs_history) ? payload.runs_history : [];
   const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
   const alertCount = insights.length;
   const alertSeverity = insights.some((i) => i.severity === "danger") ? "danger" : "info";
@@ -418,7 +463,7 @@ function _renderAccueil(payload, stats, settings) {
     <section class="accueil-view">
       ${_renderEnvironmentBar(roots, settings)}
       ${_renderHero(heroState)}
-      ${_renderLastRunCard(latestRun)}
+      ${_renderLastRunCard(latestRun, payload && payload.kpis)}
       ${_renderCtaScan(roots, scanProgress)}
       ${_renderSuggestions(stats || {})}
       ${_renderHealth(stats || {})}
@@ -431,10 +476,16 @@ function _renderAccueil(payload, stats, settings) {
  * Rappels operateur, Raccourcis (spec 05 §3 Inspecteur droit sur Accueil).
  */
 function _buildInspectorSections(payload, stats, settings) {
-  const total = (stats && stats.summary && stats.summary.total_films) || (stats && stats.total_scored) || null;
+  const total = (stats && stats.summary && stats.summary.total_films)
+    || (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.total)
+    || (stats && stats.total_scored)
+    || null;
   const activeRun = payload && payload.active_run_id;
-  const latestRun = payload && (payload.run_info || payload.latest_run);
-  const lastScanLabel = latestRun && latestRun.started_at ? formatRelativeTime(latestRun.started_at) : "—";
+  const latestRun = _resolveLatestRun(payload);
+  const lastScanTs = latestRun && latestRun.started_ts != null
+    ? new Date(Number(latestRun.started_ts) * 1000)
+    : (latestRun && latestRun.started_at) || null;
+  const lastScanLabel = lastScanTs ? formatRelativeTime(lastScanTs) : "—";
   const omdbEnabled = settings && (settings.omdb_enabled === true || (typeof settings.omdb_api_key === "string" && settings.omdb_api_key.trim() !== ""));
   const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
   const reminders = [];
