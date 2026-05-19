@@ -1,15 +1,19 @@
 /* views/accueil.js — Phase 3.1 (spec 05-accueil.md) — Accueil refondu.
  *
- * Vue de synthese editoriale : Hero + Card Dernier run + Activite recente.
- * Pour la PR initiale (3.1-A), on couvre les sections 2 et 6 de la spec :
- * - Section 2 : Hero ("Bonjour Thomas") + resume dynamique selon etat + carte Dernier run
+ * Vue de synthese editoriale. PR 3.1-A : Hero + Dernier run + Activite.
+ * PR 3.1-B (ce fichier) : ajoute CTA Scan + Sante biblio + Suggestions.
+ *
+ * Sections actuellement couvertes :
+ * - Section 2 : Hero ("Bonjour Thomas") + resume dynamique + carte Dernier run
+ * - Section 3 : CTA "Lancer un nouveau scan" (sur les roots configures)
+ * - Section 4 : Points a traiter (suggestions issues de get_global_stats.insights)
+ * - Section 5 : Sante bibliotheque (bargraph 5 tiers)
  * - Section 6 : Activite recente (3 derniers runs)
  *
- * Les sections 1 (Environment bar), 3 (CTA Scan), 4 (Points a traiter),
- * 5 (Sante bibliotheque) et l'inspecteur droit sont implementes dans les
- * PRs suivantes (3.1-B, 3.1-C).
+ * Restent en PR 3.1-C : Section 1 (Environment bar) + Inspecteur droit
+ * + etats dynamiques avances (premier lancement, run actif polling, etc).
  *
- * Source backend : api.get_dashboard("latest") (existant).
+ * Source backend : get_dashboard("latest") + get_global_stats() (existants).
  * Route cible : /accueil (Phase 2-B PR #261).
  */
 
@@ -150,6 +154,126 @@ function _renderLastRunCard(latestRun) {
   `;
 }
 
+function _renderCtaScan(roots) {
+  const rootsList = Array.isArray(roots) ? roots : [];
+  const rootsLabel = rootsList.length > 0
+    ? rootsList.slice(0, 3).map((r) => escapeHtml(String(r))).join(" + ")
+    : "<em class=\"text-muted\">Aucun root configuré. Va dans Paramètres > Sources.</em>";
+  return `
+    <section class="accueil-section accueil-cta-scan" aria-labelledby="accueil-cta-title">
+      <div class="accueil-cta-scan-content">
+        <h2 id="accueil-cta-title" class="accueil-cta-scan-title">🚀 Lancer un nouveau scan</h2>
+        <p class="accueil-cta-scan-targets">Sur ${rootsLabel}</p>
+      </div>
+      <div class="accueil-actions">
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan">▶ Démarrer</button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-accueil-action="open-scan-options">⚙ Options…</button>
+      </div>
+    </section>
+  `;
+}
+
+const _TIER_ORDER = ["platinum", "gold", "silver", "bronze", "reject"];
+const _TIER_LABELS = {
+  platinum: "Platinum",
+  gold: "Gold",
+  silver: "Silver",
+  bronze: "Bronze",
+  reject: "Reject",
+};
+
+function _renderTierBar(tier, count, total) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  // Spec : barre proportionnelle. On garde la largeur en % CSS.
+  return `
+    <div class="accueil-health-row" data-tier="${escapeHtml(tier)}">
+      <span class="accueil-health-label">${escapeHtml(_TIER_LABELS[tier] || tier)}</span>
+      <div class="accueil-health-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(_TIER_LABELS[tier])} : ${count} films (${pct}%)">
+        <span class="accueil-health-fill accueil-health-fill--${escapeHtml(tier)}" style="width: ${pct}%"></span>
+      </div>
+      <span class="accueil-health-count">${escapeHtml(String(count))}</span>
+      <span class="accueil-health-pct">${pct}%</span>
+    </div>
+  `;
+}
+
+function _renderHealth(stats) {
+  const dist = stats && stats.tier_distribution ? stats.tier_distribution : {};
+  const total = Number(stats && stats.total_scored) || _TIER_ORDER.reduce((sum, t) => sum + (Number(dist[t]) || 0), 0);
+  if (total === 0) {
+    return `
+      <section class="accueil-section accueil-health accueil-health--empty" aria-labelledby="accueil-health-title">
+        <h2 id="accueil-health-title" class="accueil-section-title">Santé bibliothèque</h2>
+        <p class="accueil-empty-msg">Lance ton premier scan pour voir la distribution qualité.</p>
+      </section>
+    `;
+  }
+  const rows = _TIER_ORDER.map((t) => _renderTierBar(t, Number(dist[t]) || 0, total)).join("");
+  return `
+    <section class="accueil-section accueil-health" aria-labelledby="accueil-health-title">
+      <h2 id="accueil-health-title" class="accueil-section-title">Santé bibliothèque <span class="accueil-health-total">(${escapeHtml(String(total))} films classés)</span></h2>
+      <div class="accueil-health-bars">${rows}</div>
+      <div class="accueil-actions">
+        <button type="button" class="v5-btn v5-btn--ghost" data-accueil-action="view-qualite">→ Audit qualité complet</button>
+      </div>
+    </section>
+  `;
+}
+
+const _INSIGHT_ROUTE_BY_TYPE = {
+  duplicates_probable: "/bibliotheque?filter=duplicates",
+  films_not_identified: "/bibliotheque?filter=not_identified",
+  films_low_confidence: "/bibliotheque?filter=low_confidence",
+  subs_missing_fr: "/bibliotheque?filter=subs_missing_fr",
+  omdb_disagreements: "/bibliotheque?filter=omdb_disagree",
+  quality_reject: "/qualite",
+  health_low: "/qualite",
+  sagas_incomplete: "/bibliotheque?filter=sagas_incomplete",
+};
+
+function _routeFromInsight(insight) {
+  if (!insight) return "/accueil";
+  if (insight.action_url && typeof insight.action_url === "string") {
+    // L'URL backend peut etre un hash (#doublons) — on normalise.
+    return insight.action_url.replace(/^#/, "/").replace(/^\/?/, "/");
+  }
+  return _INSIGHT_ROUTE_BY_TYPE[insight.type || insight.code] || "/bibliotheque";
+}
+
+function _renderSuggestions(stats) {
+  const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
+  if (insights.length === 0) {
+    return `
+      <section class="accueil-section accueil-suggestions accueil-suggestions--empty" aria-labelledby="accueil-suggestions-title">
+        <h2 id="accueil-suggestions-title" class="accueil-section-title">Points à traiter</h2>
+        <p class="accueil-empty-msg">✅ Aucun point à traiter. Tout va bien.</p>
+      </section>
+    `;
+  }
+  const items = insights.slice(0, 5).map((it) => {
+    const sev = String(it.severity || "info");
+    const sevClass = sev === "danger" ? "is-danger" : sev === "warning" ? "is-warning" : "is-info";
+    const sevDot = sev === "danger" ? "🔴" : sev === "warning" ? "🟡" : "🔵";
+    const label = String(it.label || it.title || "Point à traiter");
+    const count = it.count != null ? `${Number(it.count)} ` : "";
+    const route = _routeFromInsight(it);
+    const filterHint = it.filter_hint ? `<span class="accueil-suggestion-hint">${escapeHtml(String(it.filter_hint))}</span>` : "";
+    return `
+      <li class="accueil-suggestion-row ${sevClass}" data-target-route="${escapeHtml(route)}">
+        <span class="accueil-suggestion-dot" aria-hidden="true">${sevDot}</span>
+        <span class="accueil-suggestion-text"><strong>${escapeHtml(count + label)}</strong>${filterHint}</span>
+        <button type="button" class="v5-btn v5-btn--ghost accueil-suggestion-action" data-accueil-action="open-insight" data-target-route="${escapeHtml(route)}">→</button>
+      </li>
+    `;
+  }).join("");
+  return `
+    <section class="accueil-section accueil-suggestions" aria-labelledby="accueil-suggestions-title">
+      <h2 id="accueil-suggestions-title" class="accueil-section-title">⚠️ ${insights.length} Points à traiter</h2>
+      <ul class="accueil-suggestion-list">${items}</ul>
+    </section>
+  `;
+}
+
 function _renderRecentActivity(runs) {
   const list = Array.isArray(runs) ? runs.slice(0, 3) : [];
   if (list.length === 0) {
@@ -185,20 +309,27 @@ function _renderRecentActivity(runs) {
   `;
 }
 
-function _renderAccueil(payload) {
+function _renderAccueil(payload, stats, settings) {
   const latestRun = payload.run_info || payload.latest_run || null;
   const recentRuns = Array.isArray(payload.runs_history) ? payload.runs_history : [];
+  const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
+  const alertCount = insights.length;
+  const alertSeverity = insights.some((i) => i.severity === "danger") ? "danger" : "info";
+  const roots = settings && Array.isArray(settings.roots) ? settings.roots : [];
   const heroState = {
     active_run_id: payload.active_run_id || null,
     latest_run: latestRun,
     error_critical: payload.error_critical || false,
-    alert_count: payload.alert_count || 0,
-    alert_severity: payload.alert_severity || "info",
+    alert_count: alertCount,
+    alert_severity: alertSeverity,
   };
   return `
     <section class="accueil-view">
       ${_renderHero(heroState)}
       ${_renderLastRunCard(latestRun)}
+      ${_renderCtaScan(roots)}
+      ${_renderSuggestions(stats || {})}
+      ${_renderHealth(stats || {})}
       ${_renderRecentActivity(recentRuns)}
     </section>
   `;
@@ -207,11 +338,13 @@ function _renderAccueil(payload) {
 /* --- Event binding ----------------------------------------------------- */
 
 function _bindEvents(container) {
-  // Boutons d'action principaux (start scan / resume / view detail / view history)
+  // Boutons d'action principaux (start scan / resume / view detail / view history /
+  // open-insight / view-qualite / open-scan-options)
   container.querySelectorAll("[data-accueil-action]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       const action = btn.dataset.accueilAction;
       const runId = btn.dataset.runId;
+      const targetRoute = btn.dataset.targetRoute;
       switch (action) {
         case "start-scan":
           navigateTo("/traitement");
@@ -226,6 +359,16 @@ function _bindEvents(container) {
           break;
         case "view-history":
           navigateTo("/historique");
+          break;
+        case "view-qualite":
+          navigateTo("/qualite");
+          break;
+        case "open-insight":
+          if (targetRoute) navigateTo(targetRoute);
+          break;
+        case "open-scan-options":
+          // Spec 3.1-C : ouvrira un drawer. En attendant : naviguer vers Traitement.
+          navigateTo("/traitement");
           break;
         default:
           break;
@@ -263,9 +406,17 @@ export async function initAccueil(container) {
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
 
-  let res = null;
+  // Phase 3.1-B : on charge en parallele les 3 sources (dashboard latest +
+  // global stats + settings) pour avoir les donnees des 5 sections en un boot.
+  let dashRes = null;
+  let statsRes = null;
+  let settingsRes = null;
   try {
-    res = await apiPost("get_dashboard", { run_id: "latest" }, { signal });
+    [dashRes, statsRes, settingsRes] = await Promise.all([
+      apiPost("get_dashboard", { run_id: "latest" }, { signal }),
+      apiPost("get_global_stats", {}, { signal }).catch(() => null),
+      apiPost("settings/get_settings", {}, { signal }).catch(() => null),
+    ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;
     container.innerHTML = _renderError(err ? String(err.message || err) : "Erreur réseau");
@@ -273,16 +424,17 @@ export async function initAccueil(container) {
     return;
   }
 
-  if (!res || res.ok === false) {
-    const msg = (res && (res.message || res.error)) || "Erreur de chargement du dashboard.";
+  if (!dashRes || dashRes.ok === false) {
+    const msg = (dashRes && (dashRes.message || dashRes.error)) || "Erreur de chargement du dashboard.";
     container.innerHTML = _renderError(msg);
     _bindEvents(container);
     return;
   }
 
-  // Le backend renvoie { ok, mode, run_id, ..., runs_history: [...], + cached_payload }
-  // On normalise pour ne dépendre que de quelques champs.
-  const data = res.data || res;
-  container.innerHTML = _renderAccueil(data);
+  const dashboardData = dashRes.data || dashRes;
+  const stats = (statsRes && statsRes.ok !== false) ? (statsRes.data || statsRes) : {};
+  const settings = (settingsRes && settingsRes.ok !== false) ? (settingsRes.data || settingsRes) : {};
+
+  container.innerHTML = _renderAccueil(dashboardData, stats, settings);
   _bindEvents(container);
 }
