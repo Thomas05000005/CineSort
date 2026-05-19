@@ -5425,6 +5425,28 @@ body.v5-notif-lock {
 }
 
 .traitement-placeholder a { font-style: normal; }
+.traitement-header-row { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
+.traitement-runchip {
+  display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill, 999px);
+  background: var(--surface-2); color: var(--text-2); font-family: monospace;
+  font-size: var(--fs-xs);
+}
+.traitement-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3); margin: var(--sp-3) 0;
+}
+.traitement-stat {
+  padding: var(--sp-3); background: var(--surface-2);
+  border-radius: var(--radius-md); border: 1px solid var(--border-1);
+  text-align: center;
+}
+.traitement-stat-value { font-size: var(--fs-xl); font-weight: var(--fw-bold); color: var(--text-1); }
+.traitement-stat-suffix { font-size: var(--fs-sm); color: var(--text-2); font-weight: var(--fw-regular); }
+.traitement-stat-label { font-size: var(--fs-sm); color: var(--text-2); margin-top: var(--sp-1); }
+.traitement-actions {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
  * BIBLIOTHEQUE — Phase 3.2 (spec 07-bibliotheque.md) — squelette
  * =========================================================== */
 .bibliotheque-view { display: flex; flex-direction: column; gap: var(--sp-5); max-width: 1280px; margin: 0 auto; padding: var(--sp-4) 0; }
