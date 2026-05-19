@@ -116,6 +116,8 @@ import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4, lega
 // Phase 3.5 (spec 12-aide.md) : nouvelle vue Aide refondue (5 sections + recherche).
 // Active sur /aide ; /help garde la FAQ v4 pour retrocompat.
 import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
+// Phase 3.3 (spec 01-doublons.md) : vue Doublons refondue. Active sur /doublons.
+import { initDoublons, unmountDoublons } from "./views/doublons.js"; // /doublons (nouvelle UI)
 // Phase 3.4 (spec 09-historique.md) : nouvelle vue Historique refondue
 // (timeline groupee par jour + filtres + inspecteur 5 onglets).
 import { initHistorique, unmountHistorique } from "./views/historique.js"; // /historique (nouvelle UI)
@@ -227,6 +229,8 @@ registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, 
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 // Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
 registerRoute("/aide", { view: "view-help", guard: requireAuth, init: (el, opts) => { initAide(el, opts); return unmountAide; } });
+// Phase 3.3 : /doublons cable la nouvelle vue refondue (spec 01-doublons.md).
+registerRoute("/doublons", { view: "view-library", guard: requireAuth, init: (el, opts) => { initDoublons(el, opts); return unmountDoublons; } });
 
 /* === Mapping ID sidebar v5 -> route URL ==================== */
 
