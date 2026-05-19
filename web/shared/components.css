@@ -5819,3 +5819,15 @@ body.v5-notif-lock {
 .historique-inspector-tab-content { padding: var(--sp-2) 0; font-size: var(--fs-sm); }
 .historique-tab-stat { margin: var(--sp-1) 0; color: var(--text-1); }
 .historique-tab-stat strong { color: var(--accent); }
+/* Qualité — section Décennies (spec 10 §5) */
+.qualite-decades-list { display: flex; flex-direction: column; gap: var(--sp-1); }
+.qualite-decade-row {
+  display: grid; grid-template-columns: 60px 1fr 50px; gap: var(--sp-2);
+  align-items: center; padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm); text-decoration: none; color: var(--text-1);
+}
+.qualite-decade-row:hover { background: var(--surface-2); }
+.qualite-decade-label { color: var(--text-2); font-size: var(--fs-sm); }
+.qualite-decade-bar { background: var(--surface-2); height: 10px; border-radius: 5px; overflow: hidden; }
+.qualite-decade-fill { display: block; height: 100%; background: var(--accent); }
+.qualite-decade-count { text-align: right; font-weight: var(--fw-semibold); }
