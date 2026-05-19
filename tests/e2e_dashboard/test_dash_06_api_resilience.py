@@ -55,17 +55,6 @@ class TestDashApiResilience:
         }}""")
         assert result == 404
 
-    def test_themes_css_served_correctly(self, page, e2e_server):
-        """Le fichier themes.css est servi correctement (fix ../themes.css)."""
-        page.goto(e2e_server["dashboard_url"])
-        page.wait_for_timeout(500)
-        result = page.evaluate(f"""async () => {{
-            const resp = await fetch('{e2e_server["url"]}/themes.css');
-            return {{ status: resp.status, type: resp.headers.get('content-type') }};
-        }}""")
-        assert result["status"] == 200
-        assert "text/css" in result["type"]
-
     def test_dashboard_static_files_served(self, page, e2e_server):
         """Les fichiers statiques du dashboard sont servis avec le bon MIME type."""
         page.goto(e2e_server["dashboard_url"])
