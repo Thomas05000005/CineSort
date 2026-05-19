@@ -145,7 +145,11 @@ registerRoute("/login", { view: "view-login", init: initLogin });
 // Toutes les routes principales pointent vers les vues v4 RESTAUREES (post-fix V5).
 // La v5 reste disponible (web/views/*) mais n'est plus active : elle perdait trop
 // de fonctionnalites par rapport aux vues v4 originales (cf incident dashboard).
-registerRoute("/home", { view: "view-status", guard: requireAuth, init: initStatus });
+// Phase 3.1-fix : /home pointe desormais vers la NOUVELLE vue Accueil (initAccueil)
+// et plus l'ancienne vue de synthese (initStatus). Les bookmarks utilisateur
+// pointant vers /home obtiennent ainsi la nouvelle UI directement. initStatus
+// reste utilisable via /status pour retrocompat dev/debug.
+registerRoute("/home", { view: "view-status", guard: requireAuth, init: initAccueil });
 registerRoute("/library", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
 // V7-fix : /processing utilise la vraie vue v5 (stepper scan -> review -> apply)
 // au lieu d'aliaser /library. Mount dedie #view-processing (vide dans index.html,
@@ -173,7 +177,9 @@ registerRoute("/plex",     { view: "view-qij", guard: requireAuth, init: (el, op
 registerRoute("/radarr",   { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
 registerRoute("/logs",     { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
 
-// Alias compat /status -> /home (anciens liens, scripts externes)
+// Alias compat /status : conserve l'ANCIENNE vue de synthese (initStatus) pour
+// permettre comparaison cote a cote pendant la refonte. Sera supprime quand
+// la nouvelle UI sera consideree comme complete (Phase 3.4+).
 registerRoute("/status", { view: "view-status", guard: requireAuth, init: initStatus });
 
 // Phase 2-B (spec 04 Shell 3 zones) : routes francaises canoniques.

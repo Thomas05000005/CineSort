@@ -283,10 +283,18 @@ function _normalizeTierDist(rawDist) {
 
 function _renderHealth(stats) {
   // Priorite a v2_tier_distribution.counts (lowercase garantis, structure v7.6.0).
-  // Fallback sur tier_distribution legacy (keys potentiellement Capitalisees).
+  // Fallback sur tier_distribution legacy si v2 vide (cas frequent : films
+  // anciens sans global_tier_v2 calcule -> counts tous a 0).
   let dist = {};
   if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
-    dist = _normalizeTierDist(stats.v2_tier_distribution.counts);
+    const v2 = _normalizeTierDist(stats.v2_tier_distribution.counts);
+    const v2sum = _TIER_ORDER.reduce((s, t) => s + (v2[t] || 0), 0);
+    if (v2sum > 0) {
+      dist = v2;
+    } else if (stats.tier_distribution) {
+      // v2 vide -> on retombe sur le tier classique (legacy quality_reports).
+      dist = _normalizeTierDist(stats.tier_distribution);
+    }
   } else if (stats && stats.tier_distribution) {
     dist = _normalizeTierDist(stats.tier_distribution);
   }
@@ -333,9 +341,72 @@ function _routeFromInsight(insight) {
   return _INSIGHT_ROUTE_BY_TYPE[insight.type || insight.code] || "/bibliotheque";
 }
 
-function _renderSuggestions(stats) {
+function _librarianPriorityToSeverity(prio) {
+  // Mapping priority librarian (1=Haute / 2=Moyenne / 3=Basse / 4=Info) -> severity.
+  const p = Number(prio);
+  if (p === 1) return "danger";
+  if (p === 2) return "warning";
+  return "info";
+}
+
+function _librarianIdToRoute(id) {
+  // Maps id librarian (codec_obsolete, duplicates, subs_missing, etc.) vers routes FR.
+  switch (String(id || "")) {
+    case "duplicates":
+    case "doublons":
+      return "/bibliotheque?filter=duplicates";
+    case "subs_missing":
+    case "subs_missing_fr":
+      return "/bibliotheque?filter=subs_missing_fr";
+    case "not_identified":
+    case "films_not_identified":
+      return "/bibliotheque?filter=not_identified";
+    case "codec_obsolete":
+      return "/bibliotheque?filter=codec_obsolete";
+    case "low_confidence":
+      return "/bibliotheque?filter=low_confidence";
+    case "sagas_incomplete":
+    case "sagas":
+      return "/bibliotheque?filter=sagas_incomplete";
+    case "quality_reject":
+      return "/qualite";
+    default:
+      return "/bibliotheque";
+  }
+}
+
+function _extractAccueilSuggestions(stats) {
+  // Priorite 1 : insights v7.6.0 Vague 2 (format { type, severity, count, label, ... }).
   const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
-  if (insights.length === 0) {
+  if (insights.length > 0) {
+    return insights.map((it) => ({
+      code: String(it.type || it.code || "info"),
+      severity: String(it.severity || "info"),
+      label: String(it.label || it.title || "Point à traiter"),
+      count: it.count != null ? Number(it.count) : null,
+      route: _routeFromInsight(it),
+      filter_hint: it.filter_hint || null,
+    }));
+  }
+  // Priorite 2 : librarian.suggestions (format legacy { id, priority, message, count, details }).
+  const librarian = stats && stats.librarian;
+  const lsugs = Array.isArray(librarian && librarian.suggestions) ? librarian.suggestions : [];
+  if (lsugs.length > 0) {
+    return lsugs.map((s) => ({
+      code: String(s.id || "info"),
+      severity: _librarianPriorityToSeverity(s.priority),
+      label: String(s.message || "Point à traiter"),
+      count: s.count != null ? Number(s.count) : null,
+      route: _librarianIdToRoute(s.id),
+      filter_hint: null,
+    }));
+  }
+  return [];
+}
+
+function _renderSuggestions(stats) {
+  const items = _extractAccueilSuggestions(stats);
+  if (items.length === 0) {
     return `
       <section class="accueil-section accueil-suggestions accueil-suggestions--empty" aria-labelledby="accueil-suggestions-title">
         <h2 id="accueil-suggestions-title" class="accueil-section-title">Points à traiter</h2>
@@ -343,26 +414,27 @@ function _renderSuggestions(stats) {
       </section>
     `;
   }
-  const items = insights.slice(0, 5).map((it) => {
-    const sev = String(it.severity || "info");
+  const rows = items.slice(0, 5).map((it) => {
+    const sev = it.severity;
     const sevClass = sev === "danger" ? "is-danger" : sev === "warning" ? "is-warning" : "is-info";
     const sevDot = sev === "danger" ? "🔴" : sev === "warning" ? "🟡" : "🔵";
-    const label = String(it.label || it.title || "Point à traiter");
-    const count = it.count != null ? `${Number(it.count)} ` : "";
-    const route = _routeFromInsight(it);
+    // Si le message contient deja le count en prefixe ("22 film(s) ..."), on ne l'ajoute pas.
+    const labelStr = it.label;
+    const messageStartsWithCount = it.count != null && /^\d/.test(labelStr.trim());
+    const prefix = it.count != null && !messageStartsWithCount ? `${it.count} ` : "";
     const filterHint = it.filter_hint ? `<span class="accueil-suggestion-hint">${escapeHtml(String(it.filter_hint))}</span>` : "";
     return `
-      <li class="accueil-suggestion-row ${sevClass}" data-target-route="${escapeHtml(route)}">
+      <li class="accueil-suggestion-row ${sevClass}" data-target-route="${escapeHtml(it.route)}">
         <span class="accueil-suggestion-dot" aria-hidden="true">${sevDot}</span>
-        <span class="accueil-suggestion-text"><strong>${escapeHtml(count + label)}</strong>${filterHint}</span>
-        <button type="button" class="v5-btn v5-btn--ghost accueil-suggestion-action" data-accueil-action="open-insight" data-target-route="${escapeHtml(route)}">→</button>
+        <span class="accueil-suggestion-text"><strong>${escapeHtml(prefix + labelStr)}</strong>${filterHint}</span>
+        <button type="button" class="v5-btn v5-btn--ghost accueil-suggestion-action" data-accueil-action="open-insight" data-target-route="${escapeHtml(it.route)}" aria-label="Ouvrir cette suggestion">→</button>
       </li>
     `;
   }).join("");
   return `
     <section class="accueil-section accueil-suggestions" aria-labelledby="accueil-suggestions-title">
-      <h2 id="accueil-suggestions-title" class="accueil-section-title">⚠️ ${insights.length} Points à traiter</h2>
-      <ul class="accueil-suggestion-list">${items}</ul>
+      <h2 id="accueil-suggestions-title" class="accueil-section-title">⚠️ ${items.length} Points à traiter</h2>
+      <ul class="accueil-suggestion-list">${rows}</ul>
     </section>
   `;
 }
