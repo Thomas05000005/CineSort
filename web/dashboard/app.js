@@ -126,6 +126,10 @@ import { initQualite, unmountQualite } from "./views/qualite.js"; // /qualite (n
 // (Analyse / Verification / Validation / Doublons / Apply). PR squelette : le
 // contenu detaille de chaque etape reutilise temporairement la vue legacy.
 import { initTraitement, unmountTraitement } from "./views/traitement.js"; // /traitement
+// Phase 3.2 (spec 07-bibliotheque.md) : nouvelle Bibliothèque (squelette).
+// La grille de posters + scroll infini + bulk actions seront portes en PRs
+// incrementales 3.2-A/B/C. La vue legacy /library reste accessible.
+import { initBibliotheque, unmountBibliotheque } from "./views/bibliotheque.js"; // /bibliotheque
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
@@ -203,6 +207,9 @@ registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initA
 registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
 // Phase 3.3 : /traitement cable la nouvelle vue refondue (spec 08, squelette).
 registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: (el, opts) => { initTraitement(el, opts); return unmountTraitement; } });
+// Phase 3.2 : /bibliotheque cable la nouvelle vue (squelette pour cette PR).
+registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initBibliotheque(el, opts); return unmountBibliotheque; } });
+registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: initProcessing });
 // /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
 // vue QIJ avec tab=quality jusqu'a ce que la Phase 3.4 porte la vue dediee.
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
