@@ -21,6 +21,7 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 import { openPerceptualModal } from "../components/perceptual-modal.js";
+import { renderFilmDetail } from "../components/film-detail.js";
 import { openDuplicateComparatorModal } from "../components/duplicate-comparator-modal.js";
 import { showToast } from "../components/toast.js";
 import { setSections as setRightPanelSections } from "../components/right-panel.js";
@@ -346,6 +347,11 @@ function _renderGroupCard(group) {
             Comparer en détail
           </button>
           ${(group.rows && group.rows[0] && group.rows[0].row_id) ? `
+          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-doublons-card-action="perceptual" data-row-id="${escapeHtml(group.rows[0].row_id)}" data-row-title="${escapeHtml(title)}">
+            ▶ Analyser perceptuel
+          </button>
+          <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-doublons-card-action="detail" data-row-id="${escapeHtml(group.rows[0].row_id)}">
+            Voir fiche détaillée
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm"
                   data-doublons-card-action="perceptual"
                   data-row-id="${escapeHtml(group.rows[0].row_id)}"
@@ -832,6 +838,10 @@ function _bindEvents() {
         const rowId = btn.dataset.rowId;
         const rowTitle = btn.dataset.rowTitle;
         if (rowId) openPerceptualModal({ rowId, runId: _state.runId, rowTitle });
+      } else if (action === "detail") {
+        // Spec 06 : depuis Modal Comparateur / vue Doublons -> mode C overlay.
+        const rowId = btn.dataset.rowId;
+        if (rowId) renderFilmDetail({ mode: "C", rowId, runId: _state.runId });
       } else if (action === "keep") {
         const side = btn.dataset.side;
         const rowId = btn.dataset.rowId;

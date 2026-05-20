@@ -52,9 +52,11 @@ class RightPanelApiTests(unittest.TestCase):
     def test_exports_adapt_to_route(self) -> None:
         self.assertIn("export function adaptToRoute(", self.js)
 
-    def test_width_bounds_280_to_480(self) -> None:
+    def test_width_bounds_280_to_600(self) -> None:
+        # Spec 06 Modal Detail Film : mode A peut aller jusqu'a 600px (au lieu
+        # de 480 initialement) pour afficher hero + candidats TMDb confortablement.
         self.assertIn("MIN_WIDTH = 280", self.js)
-        self.assertIn("MAX_WIDTH = 480", self.js)
+        self.assertIn("MAX_WIDTH = 600", self.js)
         self.assertIn("DEFAULT_WIDTH = 360", self.js)
 
     def test_route_defaults_collapsed_on_synthese_views(self) -> None:
@@ -141,9 +143,10 @@ class RightPanelCssTests(unittest.TestCase):
         self.assertIn("width: 360px", block)
 
     def test_bounds_match_js_constants(self) -> None:
-        # min-width: 280px, max-width: 480px doivent correspondre aux constantes JS.
+        # min-width: 280px, max-width: 600px doivent correspondre aux constantes JS.
+        # Spec 06 Modal Detail Film : MAX_WIDTH eleve de 480 a 600 pour mode A.
         self.assertIn("min-width: 280px", self.css)
-        self.assertIn("max-width: 480px", self.css)
+        self.assertIn("max-width: 600px", self.css)
 
     def test_section_title_uppercase_label(self) -> None:
         # Convention design v5 : section title en uppercase pour la hierarchie visuelle.

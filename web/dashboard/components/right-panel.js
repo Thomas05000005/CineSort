@@ -20,7 +20,9 @@ const STORAGE_KEY_EXPANDED = "cinesort.rightpanel.expanded";
 const STORAGE_KEY_WIDTH = "cinesort.rightpanel.width";
 
 const MIN_WIDTH = 280;
-const MAX_WIDTH = 480;
+// Spec 06 Modal Detail Film : mode A inspecteur elargi peut aller jusqu'a 600px
+// pour afficher le hero + candidats TMDb confortablement. Avant : 480.
+const MAX_WIDTH = 600;
 const DEFAULT_WIDTH = 360;
 
 // Spec 04 §4 : inspecteur par defaut par route.

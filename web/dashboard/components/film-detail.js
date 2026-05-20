@@ -1,0 +1,902 @@
+/* components/film-detail.js — Modal Detail Film tri-mode (spec 06).
+ *
+ * Composant reutilisable consomme par 3 modes d'affichage :
+ *
+ *   Mode A — Inspecteur elargi  : injecte dans right-panel.setSections + setWidth(600)
+ *   Mode B — Page standalone    : route /film/:id, mount dans un container plein-ecran
+ *   Mode C — Modal overlay      : overlay 80vw cree dynamiquement + Esc/clic-backdrop
+ *
+ * Layout interne identique dans les 3 modes :
+ *   Hero (poster + meta + score V2 + chemin)
+ *   Synopsis repliable
+ *   Alertes humanisees (alert-labels.js)
+ *   Candidats TMDb avec mini-posters + bouton "Choisir"
+ *   Onglets : Apercu / Analyse V2 / Historique / Renommage propose
+ *   Actions principales (Valider, Analyser perceptuel, Ouvrir, Re-scan, Marquer suppression)
+ *
+ * Endpoints consommes (PR #303) :
+ *   library/get_film_full(row_id)
+ *   library/set_film_tmdb_candidate(run_id, row_id, tmdb_id)
+ *   library/mark_for_deletion(run_id, row_id)
+ *   library/mark_alert_ignored(row_id, alert_code)
+ *   run/rescan_row(run_id, row_id)
+ *   open_path(path)
+ *   save_validation(run_id, decisions)
+ *   analyze_perceptual_single(run_id, row_id) (relais perceptuel)
+ *
+ * API publique :
+ *   renderFilmDetail({ mode, rowId, runId, container?, onClose? })
+ *     -> Promise<void>
+ *   closeFilmDetail()       ferme le mode C (overlay) actif
+ */
+
+import { escapeHtml } from "../core/dom.js";
+import { apiPost } from "../core/api.js";
+import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
+import { dangerConfirmModal } from "./modal.js";
+import { showToast } from "./toast.js";
+import { openPerceptualModal } from "./perceptual-modal.js";
+import * as rightPanel from "./right-panel.js";
+
+const OVERLAY_ID = "filmDetailOverlay";
+
+/* --- Module state (un seul film visible a la fois) --------------------- */
+
+const _state = {
+  mode: null,         // "A" | "B" | "C"
+  rowId: null,
+  runId: null,
+  data: null,
+  activeTab: "overview",
+  containerEl: null,  // DOM cible (interieur)
+  overlayEl: null,    // pour mode C
+  onClose: null,
+  showAllCandidates: false,
+  loading: false,
+};
+
+/* ===========================================================
+ * Formatters
+ * =========================================================== */
+
+function _formatDuration(min) {
+  const m = Number(min) || 0;
+  if (m <= 0) return "—";
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return h > 0 ? `${h}h${String(rest).padStart(2, "0")}` : `${rest} min`;
+}
+
+function _formatBytes(bytes) {
+  const b = Number(bytes) || 0;
+  if (b <= 0) return "—";
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} Ko`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+}
+
+/** Transforme une URL TMDb w92/w185/w342/w500 vers une autre taille. */
+function _resizePosterUrl(url, targetSize) {
+  if (!url) return null;
+  const s = String(url);
+  return s.replace(/\/t\/p\/w\d+\//, `/t/p/${targetSize}/`);
+}
+
+/* ===========================================================
+ * Loader
+ * =========================================================== */
+
+async function _loadFilmFull(rowId, runId) {
+  const params = { row_id: rowId };
+  if (runId) params.run_id = runId;
+  const res = await apiPost("library/get_film_full", params);
+  const data = res && res.data ? res.data : res;
+  if (!data || data.ok === false) {
+    const err = (data && (data.message || data.error)) || "Film introuvable.";
+    throw new Error(err);
+  }
+  return data;
+}
+
+/* ===========================================================
+ * Skeleton + Error
+ * =========================================================== */
+
+function _renderSkeleton() {
+  return `
+    <div class="film-detail film-detail--loading" aria-busy="true">
+      <div class="film-detail-hero film-detail-hero--skel">
+        <div class="film-detail-poster v5-skeleton"></div>
+        <div class="film-detail-meta">
+          <div class="v5-skeleton" style="height:24px;width:60%;margin-bottom:8px;"></div>
+          <div class="v5-skeleton" style="height:16px;width:40%;margin-bottom:8px;"></div>
+          <div class="v5-skeleton" style="height:16px;width:80%;"></div>
+        </div>
+      </div>
+      <div class="v5-skeleton" style="height:80px;margin-top:16px;"></div>
+      <div class="v5-skeleton" style="height:120px;margin-top:16px;"></div>
+    </div>
+  `;
+}
+
+function _renderErrorState(msg) {
+  return `
+    <div class="film-detail film-detail--error" role="alert">
+      <p class="film-detail-error-title">Impossible de charger le film.</p>
+      <p class="film-detail-error-msg">${escapeHtml(msg || "Erreur inconnue")}</p>
+      <button type="button" class="v5-btn v5-btn--secondary" data-film-retry>Reessayer</button>
+    </div>
+  `;
+}
+
+/* ===========================================================
+ * Hero
+ * =========================================================== */
+
+function _renderHero(data) {
+  const row = data.row || {};
+  const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+  const topCand = candidates[0] || {};
+  const title = row.proposed_title || row.nfo_title || row.source_folder || topCand.title || "Film sans titre";
+  const year = row.proposed_year || topCand.year || "";
+  const runtime = data.runtime || topCand.runtime || null;
+  const director = data.director || topCand.director || "";
+  const genre = topCand.genre || (Array.isArray(topCand.genres) ? topCand.genres.join(", ") : "") || "";
+
+  // Score V2
+  const perc = data.perceptual || {};
+  const gv2 = perc.global_score_v2 || {};
+  const score = gv2.global_score != null ? Math.round(Number(gv2.global_score)) : null;
+  const tier = String(gv2.global_tier || "unknown").toLowerCase();
+
+  // Confidence
+  const confidence = topCand.confidence != null
+    ? Math.round(Number(topCand.confidence))
+    : (row.confidence != null ? Math.round(Number(row.confidence)) : null);
+
+  // Source (NFO / Probe / etc.)
+  const source = row.match_source || row.identification_source || "—";
+
+  // Poster
+  const posterUrl = data.poster_url || topCand.poster_url || null;
+  const posterHtml = posterUrl
+    ? `<img class="film-detail-poster" src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)}" loading="eager">`
+    : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
+
+  // Chemin + fichier
+  const sourcePath = row.source_path || row.source_folder || "";
+  const videoFilename = row.video_filename || "";
+  const sizeStr = _formatBytes(row.size_bytes);
+
+  // Score circle
+  const scoreCircle = (typeof window !== "undefined" && window.ScoreV2 && typeof window.ScoreV2.scoreCircleHtml === "function" && score != null)
+    ? window.ScoreV2.scoreCircleHtml({ score, tier })
+    : (score != null ? `<div class="film-detail-score-fallback film-detail-tier-${escapeHtml(tier)}">${score}/100</div>` : "");
+
+  const metaParts = [];
+  if (year) metaParts.push(escapeHtml(String(year)));
+  if (genre) metaParts.push(escapeHtml(genre));
+  if (runtime) metaParts.push(_formatDuration(runtime));
+  if (director) metaParts.push(`Réalisé par ${escapeHtml(director)}`);
+  const metaLine = metaParts.join(" · ");
+
+  const videoBlock = videoFilename
+    ? `<div class="film-detail-file">📦 <span class="film-detail-file-name">${escapeHtml(videoFilename)}</span>${sizeStr !== "—" ? ` <span class="film-detail-file-size">(${escapeHtml(sizeStr)})</span>` : ""}</div>`
+    : `<div class="film-detail-file film-detail-file--missing">⚠ Fichier vidéo non détecté
+         <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-film-action="rescan">↻ Re-scanner</button>
+       </div>`;
+
+  return `
+    <header class="film-detail-hero">
+      ${posterHtml}
+      <div class="film-detail-meta">
+        <h2 class="film-detail-title">
+          ${escapeHtml(title)}${year ? ` <span class="film-detail-year">(${escapeHtml(String(year))})</span>` : ""}
+        </h2>
+        ${metaLine ? `<div class="film-detail-meta-line">${metaLine}</div>` : ""}
+        <div class="film-detail-meta-stats">
+          ${score != null ? `<div class="film-detail-score" data-film-action="open-analysis" title="Voir détail Score V2">${scoreCircle}</div>` : ""}
+          ${confidence != null ? `<div class="film-detail-stat"><span class="film-detail-stat-label">Confiance match</span><span class="film-detail-stat-value">${confidence}%</span></div>` : ""}
+          <div class="film-detail-stat"><span class="film-detail-stat-label">Source</span><span class="film-detail-stat-value">${escapeHtml(source)}</span></div>
+        </div>
+        ${sourcePath ? `<div class="film-detail-path">📁 <span class="film-detail-path-text" title="${escapeHtml(sourcePath)}">${escapeHtml(sourcePath)}</span></div>` : ""}
+        ${videoBlock}
+      </div>
+    </header>
+  `;
+}
+
+/* ===========================================================
+ * Synopsis (repliable)
+ * =========================================================== */
+
+function _renderSynopsis(data) {
+  const overview = data.overview || (data.row && data.row.candidates && data.row.candidates[0] && data.row.candidates[0].overview) || "";
+  if (!overview) return "";
+  const long = String(overview).length > 200;
+  const open = long ? "" : " open";
+  return `
+    <details class="film-detail-synopsis"${open}>
+      <summary class="film-detail-synopsis-summary">Synopsis</summary>
+      <p class="film-detail-synopsis-text">${escapeHtml(overview)}</p>
+    </details>
+  `;
+}
+
+/* ===========================================================
+ * Alertes
+ * =========================================================== */
+
+function _renderAlerts(data) {
+  const row = data.row || {};
+  const perc = data.perceptual || {};
+  const gv2 = perc.global_score_v2 || {};
+  const rawFlags = [];
+  if (Array.isArray(row.warning_flags)) rawFlags.push(...row.warning_flags);
+  if (Array.isArray(gv2.warnings)) rawFlags.push(...gv2.warnings);
+  const alerts = labelsForFlags(rawFlags);
+  if (alerts.length === 0) return "";
+  const counts = countBySeverity(rawFlags);
+  const headIcon = counts.critical > 0 ? "🛑" : (counts.warning > 0 ? "⚠️" : "ℹ️");
+
+  return `
+    <section class="film-detail-alerts">
+      <h3 class="film-detail-section-title">
+        ${headIcon} ${alerts.length} alerte${alerts.length > 1 ? "s" : ""}
+      </h3>
+      <ul class="film-detail-alerts-list">
+        ${alerts.map((a) => `
+          <li class="film-detail-alert film-detail-alert--${escapeHtml(a.severity)}" data-alert-code="${escapeHtml(a.code)}">
+            <div class="film-detail-alert-head">
+              <span class="film-detail-alert-icon" aria-hidden="true">${escapeHtml(a.icon)}</span>
+              <span class="film-detail-alert-label">${escapeHtml(a.label)}</span>
+            </div>
+            <div class="film-detail-alert-desc">${escapeHtml(a.description)}</div>
+            ${a.action ? `
+              <div class="film-detail-alert-action">
+                <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost"
+                        data-film-alert-action="${escapeHtml(a.action.kind)}"
+                        data-film-alert-code="${escapeHtml(a.code)}">${escapeHtml(a.action.label)}</button>
+              </div>` : ""}
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+/* ===========================================================
+ * Candidats TMDb
+ * =========================================================== */
+
+function _renderCandidate(candidate, isChosen) {
+  const tid = candidate.tmdb_id ? String(candidate.tmdb_id) : "";
+  const tit = candidate.title || candidate.original_title || "—";
+  const year = candidate.year || candidate.release_year || "";
+  const genre = candidate.genre || (Array.isArray(candidate.genres) ? candidate.genres.join(", ") : "") || "";
+  const conf = candidate.confidence != null
+    ? Math.round(Number(candidate.confidence))
+    : (candidate.score != null ? Math.round(Number(candidate.score) * 100) : null);
+  const director = candidate.director || "";
+  const overview = candidate.overview ? String(candidate.overview).slice(0, 120) : "";
+  // Posters : on essaie w185 (taille spec), sinon le poster_url w92 de la facade.
+  const rawPoster = candidate.poster_url || (candidate.poster_path ? `https://image.tmdb.org/t/p/w92${candidate.poster_path.startsWith("/") ? "" : "/"}${candidate.poster_path}` : null);
+  const poster = _resizePosterUrl(rawPoster, "w185") || rawPoster;
+  const posterHtml = poster
+    ? `<img class="film-detail-candidate-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(tit)}" loading="lazy">`
+    : `<div class="film-detail-candidate-poster film-detail-candidate-poster--placeholder" aria-hidden="true">🎬</div>`;
+
+  const metaParts = [];
+  if (genre) metaParts.push(escapeHtml(genre));
+  if (director) metaParts.push(escapeHtml(director));
+  const metaStr = metaParts.join(" · ");
+
+  return `
+    <article class="film-detail-candidate${isChosen ? " film-detail-candidate--chosen" : ""}" data-tmdb-id="${escapeHtml(tid)}">
+      ${posterHtml}
+      <div class="film-detail-candidate-info">
+        <div class="film-detail-candidate-title">
+          ${escapeHtml(tit)}${year ? ` <span class="film-detail-candidate-year">(${escapeHtml(String(year))})</span>` : ""}
+        </div>
+        ${metaStr ? `<div class="film-detail-candidate-meta">${metaStr}</div>` : ""}
+        ${overview ? `<div class="film-detail-candidate-overview">${escapeHtml(overview)}${candidate.overview && candidate.overview.length > 120 ? "…" : ""}</div>` : ""}
+      </div>
+      <div class="film-detail-candidate-side">
+        ${conf != null ? `<div class="film-detail-candidate-confidence">${conf}%</div>` : ""}
+        ${isChosen
+          ? `<span class="film-detail-candidate-chosen-badge">✓ Choisi</span>`
+          : `<button type="button" class="v5-btn v5-btn--sm v5-btn--primary"
+                     data-film-action="choose-candidate" data-tmdb-id="${escapeHtml(tid)}">Choisir</button>`}
+      </div>
+    </article>
+  `;
+}
+
+function _renderCandidates(data) {
+  const row = data.row || {};
+  const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+  if (candidates.length === 0) return "";
+
+  // Le premier candidat est par convention le "chosen" (top score).
+  // Si row.chosen_tmdb_id est defini, on l'utilise pour determiner le choisi.
+  const chosenId = row.chosen_tmdb_id || row.tmdb_id || (candidates[0] && candidates[0].tmdb_id);
+
+  const visibleCount = _state.showAllCandidates ? candidates.length : Math.min(3, candidates.length);
+  const visible = candidates.slice(0, visibleCount);
+  const more = candidates.length - visibleCount;
+
+  return `
+    <section class="film-detail-candidates">
+      <h3 class="film-detail-section-title">🏷 Candidats TMDb (${candidates.length})</h3>
+      <div class="film-detail-candidates-list">
+        ${visible.map((c) => _renderCandidate(c, String(c.tmdb_id) === String(chosenId))).join("")}
+      </div>
+      ${more > 0
+        ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-film-action="expand-candidates">▾ Voir ${more} autre${more > 1 ? "s" : ""} candidat${more > 1 ? "s" : ""}</button>`
+        : (_state.showAllCandidates && candidates.length > 3
+          ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-film-action="collapse-candidates">▴ Réduire</button>`
+          : "")}
+      <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-film-action="search-tmdb">🔍 Rechercher manuellement sur TMDb</button>
+    </section>
+  `;
+}
+
+/* ===========================================================
+ * Onglets
+ * =========================================================== */
+
+const TABS = [
+  { id: "overview", label: "Aperçu" },
+  { id: "analysis", label: "Analyse V2" },
+  { id: "history", label: "Historique" },
+  { id: "rename", label: "Renommage proposé" },
+];
+
+function _renderTabsBar() {
+  return `
+    <div class="film-detail-tabs" role="tablist" aria-label="Onglets detail film">
+      ${TABS.map((t) => `
+        <button type="button"
+                class="film-detail-tab${t.id === _state.activeTab ? " is-active" : ""}"
+                data-film-tab="${escapeHtml(t.id)}"
+                role="tab"
+                aria-selected="${t.id === _state.activeTab ? "true" : "false"}">
+          ${escapeHtml(t.label)}
+        </button>
+      `).join("")}
+    </div>
+    <div class="film-detail-tab-panel" data-film-tab-panel></div>
+  `;
+}
+
+function _renderOverviewTab(data) {
+  const probe = data.probe || {};
+  const video = probe.video || {};
+  const audioTracks = Array.isArray(probe.audio) ? probe.audio : [];
+  const subs = Array.isArray(probe.subtitles) ? probe.subtitles : [];
+  return `
+    <div class="film-detail-overview">
+      <dl class="film-detail-data-list">
+        ${video.width && video.height ? `<dt>Résolution</dt><dd>${escapeHtml(video.width)}×${escapeHtml(video.height)}</dd>` : ""}
+        ${video.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(video.codec).toUpperCase())}</dd>` : ""}
+        ${video.bitrate_kbps ? `<dt>Bitrate</dt><dd>${escapeHtml(String(video.bitrate_kbps))} kbps</dd>` : ""}
+        <dt>Pistes audio</dt><dd>${audioTracks.length}</dd>
+        <dt>Sous-titres</dt><dd>${subs.length}</dd>
+      </dl>
+    </div>
+  `;
+}
+
+function _renderAnalysisTab(data) {
+  const perc = data.perceptual || {};
+  const gv2 = perc.global_score_v2;
+  if (!gv2) {
+    return `
+      <div class="film-detail-analysis-empty">
+        <p>Aucune analyse perceptuelle pour ce film.</p>
+        <button type="button" class="v5-btn v5-btn--primary v5-btn--sm" data-film-action="analyze-perceptual">
+          ▶ Analyser perceptuel
+        </button>
+      </div>
+    `;
+  }
+  const score = gv2.global_score != null ? Math.round(Number(gv2.global_score)) : null;
+  const tier = String(gv2.global_tier || "unknown");
+  return `
+    <div class="film-detail-analysis">
+      <p>Score V2 : <strong>${score != null ? score + "/100" : "—"}</strong> · Tier : <strong>${escapeHtml(tier)}</strong></p>
+      <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-film-action="open-perceptual-modal">
+        Voir l'analyse complète
+      </button>
+    </div>
+  `;
+}
+
+function _renderHistoryTab(data) {
+  const events = Array.isArray(data.history) ? data.history : [];
+  if (events.length === 0) {
+    return `<div class="film-detail-history-empty">Aucun historique pour ce film.</div>`;
+  }
+  return `
+    <ul class="film-detail-history-list">
+      ${events.slice(0, 30).map((ev) => {
+        const date = ev.date || ev.ts || "";
+        const type = String(ev.type || "event");
+        const label = ev.label || ev.description || type;
+        return `
+          <li class="film-detail-history-event">
+            <span class="film-detail-history-type">${escapeHtml(type)}</span>
+            <span class="film-detail-history-label">${escapeHtml(label)}</span>
+            <span class="film-detail-history-date">${escapeHtml(String(date))}</span>
+          </li>
+        `;
+      }).join("")}
+    </ul>
+  `;
+}
+
+function _renderRenameTab(data) {
+  const row = data.row || {};
+  const current = row.source_path || row.source_folder || row.current_path || "";
+  const proposed = row.proposed_path || row.proposed_folder || "";
+  if (!proposed) {
+    return `<div class="film-detail-rename-empty">Aucun renommage proposé pour ce film.</div>`;
+  }
+  if (current === proposed) {
+    return `<div class="film-detail-rename-empty">Le chemin actuel correspond déjà au renommage proposé.</div>`;
+  }
+  const reason = row.rename_reason || (row.warning_flags && row.warning_flags.length > 0 ? "Normalisation selon le template configuré" : "Renommage standard");
+  return `
+    <div class="film-detail-rename-diff">
+      <div class="film-detail-rename-row film-detail-rename-row--before">
+        <span class="film-detail-rename-label">Avant</span>
+        <code class="film-detail-rename-path">${escapeHtml(current || "—")}</code>
+      </div>
+      <div class="film-detail-rename-arrow" aria-hidden="true">→</div>
+      <div class="film-detail-rename-row film-detail-rename-row--after">
+        <span class="film-detail-rename-label">Après</span>
+        <code class="film-detail-rename-path">${escapeHtml(proposed)}</code>
+      </div>
+      <div class="film-detail-rename-reason">
+        <strong>Raison :</strong> ${escapeHtml(reason)}
+      </div>
+    </div>
+  `;
+}
+
+function _renderTabPanel() {
+  const panel = _state.containerEl && _state.containerEl.querySelector("[data-film-tab-panel]");
+  if (!panel || !_state.data) return;
+  switch (_state.activeTab) {
+    case "overview": panel.innerHTML = _renderOverviewTab(_state.data); break;
+    case "analysis": panel.innerHTML = _renderAnalysisTab(_state.data); break;
+    case "history":  panel.innerHTML = _renderHistoryTab(_state.data); break;
+    case "rename":   panel.innerHTML = _renderRenameTab(_state.data); break;
+    default:         panel.innerHTML = "";
+  }
+}
+
+/* ===========================================================
+ * Actions principales
+ * =========================================================== */
+
+function _renderActions() {
+  return `
+    <footer class="film-detail-actions">
+      <button type="button" class="v5-btn v5-btn--primary" data-film-action="validate">✓ Valider</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-film-action="analyze-perceptual">▶ Analyser perceptuel</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-film-action="rescan">↻ Re-scanner</button>
+      <button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>
+    </footer>
+  `;
+}
+
+/* ===========================================================
+ * Render principal
+ * =========================================================== */
+
+function _renderAll() {
+  if (!_state.containerEl || !_state.data) return;
+  const data = _state.data;
+  _state.containerEl.innerHTML = `
+    <article class="film-detail film-detail--mode-${escapeHtml(_state.mode || "B")}">
+      ${_renderHero(data)}
+      ${_renderSynopsis(data)}
+      ${_renderAlerts(data)}
+      ${_renderCandidates(data)}
+      ${_renderTabsBar()}
+      ${_renderActions()}
+    </article>
+  `;
+  _bindEvents();
+  _renderTabPanel();
+}
+
+/* ===========================================================
+ * Event handlers
+ * =========================================================== */
+
+function _bindEvents() {
+  const root = _state.containerEl;
+  if (!root) return;
+
+  // Onglets
+  root.querySelectorAll("[data-film-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      _state.activeTab = btn.dataset.filmTab;
+      // Re-render seulement la barre + panel
+      root.querySelectorAll("[data-film-tab]").forEach((b) => {
+        const isActive = b.dataset.filmTab === _state.activeTab;
+        b.classList.toggle("is-active", isActive);
+        b.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+      _renderTabPanel();
+    });
+  });
+
+  // Actions principales
+  root.querySelectorAll("[data-film-action]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      _handleAction(btn.dataset.filmAction, btn);
+    });
+  });
+
+  // Actions sur alertes
+  root.querySelectorAll("[data-film-alert-action]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      _handleAlertAction(btn.dataset.filmAlertAction, btn.dataset.filmAlertCode);
+    });
+  });
+
+  // Retry chargement
+  const retry = root.querySelector("[data-film-retry]");
+  if (retry) retry.addEventListener("click", () => _reload());
+}
+
+async function _handleAction(action, btn) {
+  if (!_state.data) return;
+  const row = _state.data.row || {};
+  const runId = _state.runId || _state.data.run_id;
+  const rowId = _state.rowId || _state.data.row_id;
+
+  switch (action) {
+    case "open-analysis":
+      _state.activeTab = "analysis";
+      _renderAll();
+      break;
+
+    case "expand-candidates":
+      _state.showAllCandidates = true;
+      _renderAll();
+      break;
+
+    case "collapse-candidates":
+      _state.showAllCandidates = false;
+      _renderAll();
+      break;
+
+    case "choose-candidate": {
+      const tid = btn.dataset.tmdbId;
+      if (!tid) return;
+      await _chooseCandidate(tid, btn);
+      break;
+    }
+
+    case "validate":
+      await _validateFilm(btn, runId, rowId);
+      break;
+
+    case "analyze-perceptual":
+    case "open-perceptual-modal":
+      openPerceptualModal({ rowId, runId, rowTitle: row.proposed_title || row.nfo_title || "" });
+      break;
+
+    case "open-folder":
+      await _openFolder(row);
+      break;
+
+    case "rescan":
+      await _rescanRow(btn, runId, rowId);
+      break;
+
+    case "mark-delete":
+      _markForDeletionWithConfirm(row, runId, rowId);
+      break;
+
+    case "search-tmdb":
+      showToast({ type: "info", text: "Recherche manuelle TMDb : feature à venir." });
+      break;
+
+    default:
+      console.warn("[film-detail] action inconnue :", action);
+  }
+}
+
+async function _chooseCandidate(tmdbId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "..."; }
+  try {
+    const runId = _state.runId || (_state.data && _state.data.run_id);
+    const rowId = _state.rowId || (_state.data && _state.data.row_id);
+    const res = await apiPost("library/set_film_tmdb_candidate", {
+      run_id: runId,
+      row_id: rowId,
+      tmdb_id: parseInt(tmdbId, 10),
+    });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec changement candidat.");
+    }
+    showToast({ type: "success", text: "Candidat changé. Renommage mis à jour." });
+    await _reload();
+  } catch (e) {
+    console.error("[film-detail] choose-candidate:", e);
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    if (btn) { btn.disabled = false; btn.textContent = "Choisir"; }
+  }
+}
+
+async function _validateFilm(btn, runId, rowId) {
+  if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
+  try {
+    const decisions = { [rowId]: { ok: true } };
+    const res = await apiPost("save_validation", { run_id: runId, decisions });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec validation.");
+    }
+    showToast({ type: "success", text: "Film validé pour le prochain apply." });
+  } catch (e) {
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "✓ Valider"; }
+  }
+}
+
+async function _openFolder(row) {
+  const path = row.source_path || row.source_folder || row.current_path || "";
+  if (!path) {
+    showToast({ type: "warn", text: "Aucun chemin de dossier disponible." });
+    return;
+  }
+  try {
+    const res = await apiPost("open_path", { path });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Ouverture refusée.");
+    }
+    showToast({ type: "success", text: "Dossier ouvert dans l'explorateur." });
+  } catch (e) {
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+  }
+}
+
+async function _rescanRow(btn, runId, rowId) {
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.originalText = btn.textContent;
+    btn.textContent = "↻ Analyse en cours...";
+  }
+  try {
+    const res = await apiPost("run/rescan_row", { run_id: runId, row_id: rowId });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec rescan.");
+    }
+    showToast({ type: "success", text: "Re-scan terminé. Mise à jour de la fiche..." });
+    await _reload();
+  } catch (e) {
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText || "↻ Re-scanner";
+    }
+  }
+}
+
+function _markForDeletionWithConfirm(row, runId, rowId) {
+  const title = row.proposed_title || row.nfo_title || row.source_folder || "Ce film";
+  const year = row.proposed_year || "";
+  const path = row.source_path || row.source_folder || "";
+  dangerConfirmModal({
+    title: "Confirmer le marquage suppression ?",
+    items: [`${title}${year ? ` (${year})` : ""}`, path].filter(Boolean),
+    consequence: "Le dossier sera déplacé vers _user_marked_for_deletion/ au prochain apply. Réversible via Undo.",
+    countdownSeconds: 0,
+    confirmLabel: "✗ Confirmer le marquage",
+    onConfirm: async () => {
+      try {
+        const res = await apiPost("library/mark_for_deletion", { run_id: runId, row_id: rowId });
+        const data = res && res.data ? res.data : res;
+        if (!data || data.ok === false) {
+          throw new Error((data && (data.message || data.error)) || "Echec marquage.");
+        }
+        showToast({ type: "success", text: "Film marqué pour suppression." });
+      } catch (e) {
+        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+      }
+    },
+  });
+}
+
+async function _handleAlertAction(kind, code) {
+  const row = (_state.data && _state.data.row) || {};
+  const rowId = _state.rowId || (_state.data && _state.data.row_id);
+  switch (kind) {
+    case "ignore": {
+      try {
+        const res = await apiPost("library/mark_alert_ignored", { row_id: rowId, alert_code: code });
+        const data = res && res.data ? res.data : res;
+        if (!data || data.ok === false) {
+          throw new Error((data && (data.message || data.error)) || "Echec ignore.");
+        }
+        showToast({ type: "success", text: "Alerte ignorée." });
+        // Retire l'alerte du DOM
+        const li = _state.containerEl.querySelector(`[data-alert-code="${code}"]`);
+        if (li) li.remove();
+      } catch (e) {
+        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+      }
+      break;
+    }
+    case "rescan": {
+      const runId = _state.runId || (_state.data && _state.data.run_id);
+      await _rescanRow(null, runId, rowId);
+      break;
+    }
+    case "config_subs":
+      window.location.hash = "#/parametres";
+      break;
+    case "open_duplicates":
+      window.location.hash = "#/doublons";
+      break;
+    case "open_film":
+      // Deja sur le film -> no-op
+      break;
+    default:
+      console.warn("[film-detail] alert action inconnue :", kind, code);
+  }
+  void row;  // unused for now
+}
+
+/* ===========================================================
+ * Mount / Modes
+ * =========================================================== */
+
+function _renderInto(html) {
+  if (_state.containerEl) {
+    _state.containerEl.innerHTML = html;
+    const retry = _state.containerEl.querySelector("[data-film-retry]");
+    if (retry) retry.addEventListener("click", () => _reload());
+  }
+}
+
+async function _reload() {
+  if (!_state.rowId) return;
+  _state.loading = true;
+  _renderInto(_renderSkeleton());
+  try {
+    _state.data = await _loadFilmFull(_state.rowId, _state.runId);
+    _state.loading = false;
+    _renderAll();
+  } catch (e) {
+    _state.loading = false;
+    _state.data = null;
+    _renderInto(_renderErrorState(e && (e.message || String(e))));
+  }
+}
+
+function _ensureModeAContainer() {
+  rightPanel.setWidth(600);
+  rightPanel.setExpanded(true);
+  // On utilise setSections pour creer une seule section avec notre HTML.
+  // _state.containerEl pointe vers le body de la section apres setSections.
+  rightPanel.setSections([{ title: "Détail film", html: '<div data-film-detail-mount></div>' }]);
+  // Recuperer le node injecte.
+  const mount = document.querySelector("[data-film-detail-mount]");
+  return mount;
+}
+
+function _ensureModeCOverlay() {
+  // Ferme overlay precedent s'il existe
+  const existing = document.getElementById(OVERLAY_ID);
+  if (existing) existing.remove();
+  const overlay = document.createElement("div");
+  overlay.id = OVERLAY_ID;
+  overlay.className = "film-detail-modal-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Détail film");
+  overlay.innerHTML = `
+    <div class="film-detail-modal" role="document">
+      <button type="button" class="film-detail-modal-close" data-film-modal-close aria-label="Fermer">✕</button>
+      <div class="film-detail-modal-body" data-film-detail-mount></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay._previouslyFocused = document.activeElement;
+
+  // Esc + clic backdrop ferment
+  overlay._escHandler = (ev) => {
+    if (ev.key === "Escape") {
+      ev.stopPropagation();
+      closeFilmDetail();
+    }
+  };
+  document.addEventListener("keydown", overlay._escHandler);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) closeFilmDetail();
+  });
+  const closeBtn = overlay.querySelector("[data-film-modal-close]");
+  if (closeBtn) closeBtn.addEventListener("click", closeFilmDetail);
+
+  _state.overlayEl = overlay;
+  return overlay.querySelector("[data-film-detail-mount]");
+}
+
+/**
+ * Point d'entree unique du composant.
+ *
+ * @param {object} opts
+ * @param {"A"|"B"|"C"} opts.mode - mode d'affichage
+ * @param {string} opts.rowId - id du row
+ * @param {string} [opts.runId] - id du run (optionnel pour mode B legacy)
+ * @param {HTMLElement} [opts.container] - DOM cible (mode B uniquement)
+ * @param {Function} [opts.onClose] - callback de fermeture (mode C)
+ */
+export async function renderFilmDetail(opts) {
+  const { mode, rowId, runId, container, onClose } = opts || {};
+  if (!mode || !rowId) {
+    console.warn("[film-detail] mode + rowId requis", opts);
+    return;
+  }
+  _state.mode = mode;
+  _state.rowId = String(rowId);
+  _state.runId = runId || null;
+  _state.activeTab = "overview";
+  _state.showAllCandidates = false;
+  _state.onClose = onClose || null;
+
+  if (mode === "A") {
+    _state.containerEl = _ensureModeAContainer();
+  } else if (mode === "C") {
+    _state.containerEl = _ensureModeCOverlay();
+  } else if (mode === "B") {
+    _state.containerEl = container || null;
+  }
+
+  if (!_state.containerEl) {
+    console.warn("[film-detail] container manquant pour mode", mode);
+    return;
+  }
+
+  await _reload();
+}
+
+/** Ferme le mode C overlay (no-op pour A et B). */
+export function closeFilmDetail() {
+  if (_state.overlayEl) {
+    if (_state.overlayEl._escHandler) {
+      document.removeEventListener("keydown", _state.overlayEl._escHandler);
+    }
+    const prev = _state.overlayEl._previouslyFocused;
+    _state.overlayEl.remove();
+    _state.overlayEl = null;
+    if (prev && typeof prev.focus === "function") {
+      try { prev.focus(); } catch (_e) { /* noop */ }
+    }
+  }
+  if (typeof _state.onClose === "function") {
+    try { _state.onClose(); } catch (_e) { /* noop */ }
+  }
+  _state.mode = null;
+  _state.containerEl = null;
+  _state.data = null;
+  _state.rowId = null;
+  _state.runId = null;
+}
+
+/* Expose pour tests structuraux. */
+export const __testing = { _state, TABS };

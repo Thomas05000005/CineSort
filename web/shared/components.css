@@ -3984,7 +3984,7 @@ body.v5-notif-lock {
   flex-direction: column;
   width: 360px;
   min-width: 280px;
-  max-width: 480px;
+  max-width: 600px;
   height: 100%;
   border-left: 1px solid var(--border-1);
   background: var(--surface-1);
@@ -7022,6 +7022,532 @@ body.v5-notif-lock {
   opacity: 0.85;
 }
 
+/* ============================================================
+ * Modal Detail Film tri-mode (spec 06, refonte 2026-05-17).
+ * Composant : web/dashboard/components/film-detail.js
+ *
+ * Layout interne IDENTIQUE pour modes A (inspecteur), B (page),
+ * C (overlay). Seul le conteneur change.
+ * =========================================================== */
+
+.film-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  color: var(--text-1, #fff);
+}
+
+.film-detail--loading,
+.film-detail--error {
+  padding: var(--sp-4);
+}
+
+.film-detail-error-title {
+  font-weight: var(--fw-semibold, 600);
+  margin: 0 0 var(--sp-2) 0;
+}
+
+.film-detail-error-msg {
+  margin: 0 0 var(--sp-3) 0;
+  color: var(--text-2, #bbb);
+}
+
+/* --- Hero --- */
+
+.film-detail-hero {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.film-detail-poster {
+  width: 140px;
+  height: 210px;
+  object-fit: cover;
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-2, #222);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.film-detail-poster--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  color: var(--text-3, #666);
+}
+
+.film-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.film-detail-title {
+  margin: 0;
+  font-size: var(--fs-xl, 1.35rem);
+  font-weight: var(--fw-semibold, 600);
+  line-height: 1.2;
+}
+
+.film-detail-year {
+  color: var(--text-2, #bbb);
+  font-weight: var(--fw-regular, 400);
+}
+
+.film-detail-meta-line {
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.film-detail-meta-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.film-detail-score {
+  cursor: pointer;
+}
+
+.film-detail-score-fallback {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: var(--fw-semibold, 600);
+  background: var(--bg-2, #222);
+}
+
+.film-detail-tier-platinum { color: #e5e4e2; }
+.film-detail-tier-gold { color: #ffd700; }
+.film-detail-tier-silver { color: #c0c0c0; }
+.film-detail-tier-bronze { color: #cd7f32; }
+.film-detail-tier-reject { color: #e25555; }
+
+.film-detail-stat {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fs-sm, 0.85rem);
+}
+
+.film-detail-stat-label {
+  color: var(--text-3, #888);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.film-detail-stat-value {
+  font-weight: var(--fw-medium, 500);
+}
+
+.film-detail-path,
+.film-detail-file {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--text-2, #bbb);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.film-detail-file--missing {
+  color: var(--warning, #f5b840);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.film-detail-file-size {
+  color: var(--text-3, #888);
+}
+
+/* --- Synopsis --- */
+
+.film-detail-synopsis {
+  background: var(--bg-2, #1f1f1f);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--sp-3);
+}
+
+.film-detail-synopsis-summary {
+  cursor: pointer;
+  font-weight: var(--fw-semibold, 600);
+  user-select: none;
+}
+
+.film-detail-synopsis-text {
+  margin: var(--sp-2) 0 0 0;
+  line-height: 1.5;
+  color: var(--text-2, #ddd);
+}
+
+/* --- Sections titles --- */
+
+.film-detail-section-title {
+  margin: 0 0 var(--sp-2) 0;
+  font-size: var(--fs-md, 1rem);
+  font-weight: var(--fw-semibold, 600);
+}
+
+/* --- Alertes --- */
+
+.film-detail-alerts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.film-detail-alert {
+  background: var(--bg-2, #1f1f1f);
+  border-left: 3px solid var(--text-3, #666);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.film-detail-alert--critical {
+  border-left-color: var(--danger, #e25555);
+}
+
+.film-detail-alert--warning {
+  border-left-color: var(--warning, #f5b840);
+}
+
+.film-detail-alert--info {
+  border-left-color: var(--info, #4a9eff);
+}
+
+.film-detail-alert-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: var(--fw-medium, 500);
+}
+
+.film-detail-alert-desc {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--text-2, #bbb);
+  line-height: 1.4;
+}
+
+.film-detail-alert-action {
+  margin-top: var(--sp-2);
+}
+
+/* --- Candidats TMDb --- */
+
+.film-detail-candidates-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.film-detail-candidate {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-2);
+  background: var(--bg-2, #1f1f1f);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid transparent;
+}
+
+.film-detail-candidate--chosen {
+  border-color: var(--success, #4caf50);
+  background: rgba(76, 175, 80, 0.07);
+}
+
+.film-detail-candidate-poster {
+  width: 80px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-3, #333);
+}
+
+.film-detail-candidate-poster--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  color: var(--text-3, #666);
+}
+
+.film-detail-candidate-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.film-detail-candidate-title {
+  font-weight: var(--fw-medium, 500);
+}
+
+.film-detail-candidate-year {
+  color: var(--text-3, #888);
+}
+
+.film-detail-candidate-meta {
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--text-2, #bbb);
+}
+
+.film-detail-candidate-overview {
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--text-3, #aaa);
+  line-height: 1.4;
+}
+
+.film-detail-candidate-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.film-detail-candidate-confidence {
+  font-weight: var(--fw-semibold, 600);
+  font-variant-numeric: tabular-nums;
+}
+
+.film-detail-candidate-chosen-badge {
+  color: var(--success, #4caf50);
+  font-size: var(--fs-sm, 0.85rem);
+  font-weight: var(--fw-medium, 500);
+}
+
+/* --- Onglets --- */
+
+.film-detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-1, rgba(255, 255, 255, 0.1));
+}
+
+.film-detail-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-2, #bbb);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.film-detail-tab:hover {
+  color: var(--text-1, #fff);
+}
+
+.film-detail-tab.is-active {
+  color: var(--text-1, #fff);
+  border-bottom-color: var(--accent, #4a9eff);
+  font-weight: var(--fw-medium, 500);
+}
+
+.film-detail-tab-panel {
+  padding-top: var(--sp-3);
+}
+
+.film-detail-data-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+}
+
+.film-detail-data-list dt {
+  color: var(--text-3, #888);
+  font-size: var(--fs-sm, 0.85rem);
+}
+
+.film-detail-data-list dd {
+  margin: 0;
+  font-size: var(--fs-sm, 0.85rem);
+}
+
+.film-detail-analysis-empty,
+.film-detail-history-empty,
+.film-detail-rename-empty {
+  color: var(--text-3, #888);
+  text-align: center;
+  padding: var(--sp-4);
+}
+
+.film-detail-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.film-detail-history-event {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm, 0.85rem);
+  background: var(--bg-2, #1f1f1f);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.film-detail-history-type {
+  color: var(--text-3, #888);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.film-detail-history-date {
+  color: var(--text-3, #888);
+}
+
+/* --- Onglet Renommage --- */
+
+.film-detail-rename-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--bg-2, #1f1f1f);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md, 8px);
+}
+
+.film-detail-rename-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.film-detail-rename-row--before .film-detail-rename-path {
+  background: rgba(226, 85, 85, 0.08);
+  border-left: 3px solid var(--danger, #e25555);
+}
+
+.film-detail-rename-row--after .film-detail-rename-path {
+  background: rgba(76, 175, 80, 0.08);
+  border-left: 3px solid var(--success, #4caf50);
+}
+
+.film-detail-rename-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-3, #888);
+}
+
+.film-detail-rename-path {
+  display: block;
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm, 4px);
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-sm, 0.85rem);
+}
+
+.film-detail-rename-arrow {
+  text-align: center;
+  font-size: 1.2rem;
+  color: var(--text-3, #888);
+}
+
+.film-detail-rename-reason {
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--text-2, #bbb);
+}
+
+/* --- Actions principales --- */
+
+.film-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-1, rgba(255, 255, 255, 0.08));
+}
+
+/* --- Mode C : overlay 80vw --- */
+
+.film-detail-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: fade-in 120ms ease-out;
+}
+
+.film-detail-modal {
+  position: relative;
+  width: 80vw;
+  max-width: 1100px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--sp-5);
+  background: var(--bg-1, #1a1a1a);
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+.film-detail-modal-close {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-2, #bbb);
+  font-size: 1.2rem;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.film-detail-modal-close:hover {
+  background: var(--bg-2, #222);
+  color: var(--text-1, #fff);
+}
+
+.film-detail-modal-body {
+  margin-top: var(--sp-2);
+}
+
+/* --- Mode A : inspecteur droit, layout vertical compact --- */
+
+.film-detail--mode-A .film-detail-hero {
+  grid-template-columns: 100px 1fr;
+  gap: var(--sp-3);
+}
+
+.film-detail--mode-A .film-detail-poster {
+  width: 100px;
+  height: 150px;
+}
+
+.film-detail--mode-A .film-detail-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.film-detail--mode-A .film-detail-actions .v5-btn {
+  width: 100%;
+  justify-content: flex-start;
 /* ============================================================================
  * Doublons — refonte v1 (spec 01-doublons.md)
  *   Poster TMDb sur cartes, inspecteur droit, modal Comparateur 3 onglets
