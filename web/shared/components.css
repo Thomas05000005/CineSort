@@ -5171,6 +5171,356 @@ body.v5-notif-lock {
 .traitement-stat-label { font-size: var(--fs-sm); color: var(--text-2); margin-top: var(--sp-1); }
 .traitement-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0; }
 
+/* --- Phase 5 (spec 08) : Header run actif + workflow natif --- */
+.traitement-header-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+}
+.traitement-header-run.is-running { border-left-color: var(--success, #16a34a); }
+.traitement-header-run.is-paused { border-left-color: var(--warning, #f59e0b); }
+.traitement-header-run.is-done { border-left-color: var(--text-3); }
+.traitement-header-run.is-error { border-left-color: var(--danger, #e25555); }
+.traitement-header-run-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.traitement-header-run-id .traitement-runchip {
+  border: none;
+  cursor: pointer;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: monospace;
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+}
+.traitement-header-run-id .traitement-runchip:hover { background: var(--surface-3); color: var(--text-1); }
+.traitement-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.traitement-run-status.is-running { background: rgba(22, 163, 74, 0.15); color: var(--success, #16a34a); }
+.traitement-run-status.is-paused { background: rgba(245, 158, 11, 0.15); color: var(--warning, #f59e0b); }
+.traitement-run-status.is-done { background: var(--surface-2); color: var(--text-3); }
+.traitement-run-status.is-error { background: rgba(226, 85, 85, 0.15); color: var(--danger, #e25555); }
+.traitement-run-status-dot { font-size: var(--fs-md); line-height: 1; }
+.traitement-run-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-left: auto;
+}
+.traitement-run-eta { color: var(--text-1); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.traitement-header-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.traitement-header-run--empty {
+  border-left-color: var(--text-3);
+  align-items: center;
+  text-align: center;
+}
+.traitement-header-empty {
+  margin: 0;
+  color: var(--text-2);
+  font-style: italic;
+}
+
+/* --- Scan drawer (etape Analyse) --- */
+.traitement-scan-drawer {
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+.traitement-scan-drawer > summary {
+  cursor: pointer;
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) 0;
+  user-select: none;
+}
+.traitement-scan-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.traitement-scan-options .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.traitement-scan-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.traitement-scan-slider { flex: 1; max-width: 240px; }
+
+.traitement-scan-progress {
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.traitement-scan-progress-bar {
+  width: 100%;
+  height: 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+  border: 1px solid var(--border-1);
+}
+.traitement-scan-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
+  transition: width 0.4s ease-out;
+}
+.traitement-scan-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.traitement-scan-current {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: var(--sp-2);
+}
+.traitement-scan-current code {
+  font-family: monospace;
+  background: var(--surface-2);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+.traitement-scan-live-log {
+  margin-top: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+}
+.traitement-scan-live-log-title {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin-bottom: var(--sp-2);
+}
+.traitement-scan-live-log-pre {
+  font-family: monospace;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* --- Tables denses verif + validation --- */
+.traitement-verif-table,
+.traitement-validation-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-3) 0;
+  font-size: var(--fs-sm);
+}
+.traitement-verif-table thead th,
+.traitement-validation-table thead th {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-1);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.traitement-verif-table tbody td,
+.traitement-validation-table tbody td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  color: var(--text-1);
+  vertical-align: middle;
+}
+.traitement-verif-table tbody tr:hover,
+.traitement-validation-table tbody tr:hover {
+  background: var(--surface-2);
+}
+.traitement-verif-alert {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning, #f59e0b);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  margin-right: 2px;
+}
+.traitement-verif-alert-more {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.traitement-validation-confidence.is-high { color: var(--success, #16a34a); font-weight: var(--fw-semibold); }
+.traitement-validation-confidence.is-mid { color: var(--warning, #f59e0b); }
+.traitement-validation-confidence.is-low { color: var(--danger, #e25555); }
+.traitement-validation-year-input {
+  width: 80px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+.traitement-validation-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+}
+
+/* --- Filtres verif --- */
+.traitement-verif-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+.traitement-verif-filter {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-1);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  transition: all 0.15s;
+}
+.traitement-verif-filter:hover { background: var(--surface-2); }
+.traitement-verif-filter.is-active {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: var(--fw-semibold);
+}
+
+/* --- Doublons inline mount --- */
+.traitement-panel--doublons { padding: 0; background: transparent; border: none; }
+.traitement-panel--doublons > .traitement-panel-title { padding: var(--sp-5) var(--sp-5) 0; }
+.traitement-panel--doublons > .traitement-panel-desc { padding: 0 var(--sp-5); }
+.traitement-panel--doublons > .traitement-actions { padding: 0 var(--sp-5) var(--sp-5); }
+.traitement-doublons-mount {
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  margin: var(--sp-3) 0;
+}
+
+/* --- Apply summary + preview --- */
+.traitement-apply-summary {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-1);
+}
+.traitement-apply-summary h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+.traitement-apply-summary ul {
+  list-style: disc;
+  margin: 0;
+  padding-left: var(--sp-5);
+  color: var(--text-2);
+}
+.traitement-apply-summary strong {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.traitement-apply-preview {
+  margin: var(--sp-3) 0;
+}
+.traitement-apply-preview h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.traitement-apply-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.traitement-apply-preview-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-family: monospace;
+  font-size: var(--fs-xs);
+}
+.traitement-apply-before { color: var(--text-3); text-decoration: line-through; }
+.traitement-apply-arrow { color: var(--text-3); font-weight: var(--fw-bold); }
+.traitement-apply-after { color: var(--success, #16a34a); font-weight: var(--fw-semibold); }
+.traitement-apply-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+}
+.traitement-apply-options .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
 /* ===========================================================
  * BIBLIOTHEQUE — Phase 3.2 (spec 07-bibliotheque.md)
  * =========================================================== */
