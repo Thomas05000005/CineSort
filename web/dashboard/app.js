@@ -312,58 +312,78 @@ function _currentRouteId() {
 /* === Mount shell v5 ====================================== */
 
 async function _mountV5Shell() {
+  // Robustesse : afficher le shell EN PREMIER. Sans cela, si un render
+  // plante en cours de route (sidebar, topbar, rightPanel), app-shell reste
+  // .hidden -> fenetre noire vide. Mieux vaut un shell incomplet visible
+  // qu'un noir total.
+  const appShell = document.getElementById("app-shell");
+  if (appShell) appShell.classList.remove("hidden");
+
   const sidebarMount = document.getElementById("v5SidebarMount");
   const topBarMount = document.getElementById("v5TopBarMount");
   const breadcrumbMount = document.getElementById("v5BreadcrumbMount");
   const rightPanelMount = document.getElementById("v5RightPanelMount");
 
+  // Chaque render est isole dans try/catch : un crash dans un composant
+  // ne doit pas empecher l'instanciation des autres ni du router/views.
+
   // Sidebar v5 (8 entrees + integrations + footer About)
-  sidebarV5.render(sidebarMount, {
-    activeRoute: _currentRouteId(),
-    onNavigate: (routeId) => navigateTo(_routeFromSidebarId(routeId)),
-    onAboutClick: _openAboutModal,
-  });
+  try {
+    sidebarV5.render(sidebarMount, {
+      activeRoute: _currentRouteId(),
+      onNavigate: (routeId) => navigateTo(_routeFromSidebarId(routeId)),
+      onAboutClick: _openAboutModal,
+    });
+  } catch (e) { console.warn("[shell] sidebarV5.render", e); }
 
   // Theme initial depuis settings (fallback "luxe")
   // V2-B : cachedGetSettings dedup les 4+ appels paralleles au boot.
-  const settingsRes = await cachedGetSettings().catch(() => ({ data: {} }));
-  const settings = settingsRes && settingsRes.data ? settingsRes.data : {};
-  const theme = settings.theme || "luxe";
+  let theme = "luxe";
+  try {
+    const settingsRes = await cachedGetSettings().catch(() => ({ data: {} }));
+    const settings = settingsRes && settingsRes.data ? settingsRes.data : {};
+    theme = settings.theme || "luxe";
+  } catch (e) { console.warn("[shell] cachedGetSettings", e); }
 
   // Top-bar v5 (search + notif + theme switcher)
-  topBarV5.render(topBarMount, {
-    title: "CineSort",
-    subtitle: "",
-    theme,
-    notificationCount: 0,
-    onSearchClick: () => window.dispatchEvent(new CustomEvent("cinesort:command-palette")),
-    onNotifClick: () => notifCenter.toggleNotifications(),
-    onThemeChange: _applyTheme,
-  });
+  try {
+    topBarV5.render(topBarMount, {
+      title: "CineSort",
+      subtitle: "",
+      theme,
+      notificationCount: 0,
+      onSearchClick: () => window.dispatchEvent(new CustomEvent("cinesort:command-palette")),
+      onNotifClick: () => notifCenter.toggleNotifications(),
+      onThemeChange: _applyTheme,
+    });
+  } catch (e) { console.warn("[shell] topBarV5.render", e); }
 
   // Breadcrumb (initialement vide, mis a jour par le router via syncShell)
-  if (breadcrumbMount && typeof breadcrumb.render === "function") {
-    breadcrumb.render(breadcrumbMount, []);
-  }
+  try {
+    if (breadcrumbMount && typeof breadcrumb.render === "function") {
+      breadcrumb.render(breadcrumbMount, []);
+    }
+  } catch (e) { console.warn("[shell] breadcrumb.render", e); }
 
   // Phase 2 (spec 04) : inspecteur droit. Etat adaptatif par route au hashchange.
-  if (rightPanelMount) {
-    rightPanel.render(rightPanelMount);
-    const _syncRightPanelToRoute = () => {
-      const hash = (window.location.hash || "#/accueil").replace(/^#/, "");
-      rightPanel.adaptToRoute(hash.split("#")[0]);
-    };
-    window.addEventListener("hashchange", _syncRightPanelToRoute);
-    _syncRightPanelToRoute();
-  }
+  try {
+    if (rightPanelMount) {
+      rightPanel.render(rightPanelMount);
+      const _syncRightPanelToRoute = () => {
+        const hash = (window.location.hash || "#/accueil").replace(/^#/, "");
+        rightPanel.adaptToRoute(hash.split("#")[0]);
+      };
+      window.addEventListener("hashchange", _syncRightPanelToRoute);
+      _syncRightPanelToRoute();
+    }
+  } catch (e) { console.warn("[shell] rightPanel.render", e); }
 
   // FAB Aide V3-08 (bouton flottant ?)
-  if (typeof topBarV5.mountHelpFab === "function") {
-    topBarV5.mountHelpFab({ onClick: () => navigateTo("/aide") });
-  }
-
-  // Affichage du shell (le router le toggle ensuite selon /login vs autre)
-  document.getElementById("app-shell").classList.remove("hidden");
+  try {
+    if (typeof topBarV5.mountHelpFab === "function") {
+      topBarV5.mountHelpFab({ onClick: () => navigateTo("/aide") });
+    }
+  } catch (e) { console.warn("[shell] mountHelpFab", e); }
 }
 
 // Cf issue #89 (audit-2026-05-12:m7n9) : listener attache au niveau module
