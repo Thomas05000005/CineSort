@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from cinesort.infra import state
 from cinesort.ui.api import film_history_support
@@ -194,6 +194,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
     # Probe (via quality_reports store)
     probe_dict = None
     perceptual_dict = None
+    store: Any = None
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
@@ -230,6 +231,21 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
             history = h_res.get("history") or []
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("history fetch error: %s", exc)
+
+    # Spec 06 §3.3 : filtre des warning_flags par alertes ignorees persistees.
+    # Persistance via film_modal.ignored_alerts (cf endpoint library/mark_alert_ignored).
+    ignored_codes: List[str] = []
+    try:
+        if store is not None and hasattr(store, "film_modal"):
+            ignored_codes = list(store.film_modal.list_ignored_alerts(str(row_id)))
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("ignored_alerts fetch error: %s", exc)
+    if ignored_codes and isinstance(row, dict):
+        flags = row.get("warning_flags") or []
+        if isinstance(flags, list):
+            row = dict(row)
+            row["warning_flags"] = [f for f in flags if str(f) not in ignored_codes]
+            row["_ignored_alerts"] = list(ignored_codes)
 
     # TMDb poster (taille w500 selon spec 06 §3.1)
     tmdb_id = 0
