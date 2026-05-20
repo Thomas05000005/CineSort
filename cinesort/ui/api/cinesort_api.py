@@ -2338,6 +2338,19 @@ class CineSortApi:
         """Demande l'annulation d'un run en cours (pose cancel_requested=1)."""
         return history_support.cancel_run(self, run_id)
 
+    # ---------- Historique (spec 09) ----------
+    def _get_history_stats_impl(self, run_id: str) -> Dict[str, Any]:
+        """Detail complet d'un run pour l'inspecteur Historique (spec 09)."""
+        return history_support.get_history_stats(self, run_id)
+
+    def _delete_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Supprime un run de l'historique (DB seulement)."""
+        return history_support.delete_run(self, run_id)
+
+    def _cleanup_old_runs_impl(self, retention_days: int = 90) -> Dict[str, Any]:
+        """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
+        return history_support.cleanup_old_runs(self, retention_days=retention_days)
+
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
