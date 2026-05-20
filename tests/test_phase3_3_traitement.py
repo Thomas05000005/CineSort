@@ -22,7 +22,7 @@ class EsModuleApiTests(unittest.TestCase):
         cls.js = _TRAITEMENT_JS.read_text(encoding="utf-8")
 
     def test_exports_init(self) -> None:
-        self.assertIn("export function initTraitement(", self.js)
+        self.assertIn("export async function initTraitement(", self.js)
 
     def test_exports_unmount(self) -> None:
         self.assertIn("export function unmountTraitement(", self.js)
@@ -79,6 +79,26 @@ class AppJsWiringTests(unittest.TestCase):
         self.assertIn("unmountTraitement", self.js)
 
 
+class StatsTests(unittest.TestCase):
+    """Phase 3.3 enrichi : compteurs reels par etape issus de get_dashboard."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = _TRAITEMENT_JS.read_text(encoding="utf-8")
+
+    def test_uses_get_dashboard(self) -> None:
+        self.assertIn("get_dashboard", self.js)
+
+    def test_renders_stats_per_step(self) -> None:
+        self.assertIn("_renderStepStats", self.js)
+
+    def test_actions_to_legacy(self) -> None:
+        self.assertIn("#/library#step-", self.js)
+
+    def test_doublons_step_links_to_new_doublons_view(self) -> None:
+        self.assertIn("#/doublons", self.js)
+
+
 class CssTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -92,6 +112,10 @@ class CssTests(unittest.TestCase):
             ".traitement-step.is-current",
             ".traitement-step.is-past",
             ".traitement-panel",
+            ".traitement-stats",
+            ".traitement-stat",
+            ".traitement-stat-value",
+            ".traitement-actions",
         ):
             self.assertIn(cls, self.css)
 
