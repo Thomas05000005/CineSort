@@ -1823,6 +1823,55 @@ def _plan_collection_item(
     )
 
 
+def replan_single_row(
+    cfg: "Config",
+    folder: Path,
+    video: Path,
+    *,
+    tmdb: Optional[TmdbClient] = None,
+    kind: str = "single",
+    log: Optional[Callable[[str, str], None]] = None,
+    subtitle_expected_languages: Optional[List[str]] = None,
+) -> Optional["PlanRow"]:
+    """Spec 06 §3.6 : reconstruit une PlanRow pour 1 seul fichier video.
+
+    Helper public reutilisant le pipeline `_plan_item` (NFO + cross-checks
+    IMDb/TMDb -> TMDb fallback -> disambiguation -> resolved/unresolved row
+    -> enrichissements sous-titres/integrite/not-a-movie). Aucune mise en
+    cache (cfg_sig/scan_index volontairement vides) : on force un rescan
+    a froid pour ce row.
+
+    Returns:
+        La nouvelle PlanRow (jamais cachee), ou None si le pipeline n'a
+        rien produit (cas degenere : video inexistante, etc.).
+    """
+    if log is None:
+        def log(level: str, msg: str) -> None:  # noqa: ARG001
+            _log.debug("replan_single_row[%s] %s", level, msg)
+
+    if kind not in ("single", "collection"):
+        kind = "single"
+
+    rows = _plan_item(
+        cfg,
+        folder,
+        video,
+        tmdb,
+        log,
+        kind=kind,
+        should_cancel=None,
+        scan_index=None,
+        cfg_sig="",
+        run_id="",
+        run_hash_cache=None,
+        row_cache_stats=None,
+        subtitle_expected_languages=subtitle_expected_languages,
+    )
+    if not rows:
+        return None
+    return rows[0]
+
+
 def _plan_tv_episode(
     cfg: "Config",
     folder: Path,
