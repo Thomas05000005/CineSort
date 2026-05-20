@@ -88,6 +88,7 @@ from cinesort.ui.api.facades import (
     LibraryFacade,
     QualityFacade,
     RunFacade,
+    RuntimeFacade,
     SettingsFacade,
 )
 from cinesort.ui.api.quality_simulator_support import (
@@ -293,6 +294,8 @@ class CineSortApi:
         self.quality = QualityFacade(self)
         self.integrations = IntegrationsFacade(self)
         self.library = LibraryFacade(self)
+        # Spec 12-aide.md (Phase 4 — ecran Aide) : 4 endpoints diag/logs/docs.
+        self.runtime = RuntimeFacade(self)
 
     def _touch_event(self) -> None:
         """Met a jour le timestamp du dernier evenement significatif (scan, apply, settings)."""
@@ -2401,3 +2404,30 @@ class CineSortApi:
             return _err_response(
                 str(exc), category="runtime", level="error", log_module=__name__, key="error", log_dir=log_dir
             )
+
+    # ---------- Spec 12-aide.md (Phase 4 — ecran Aide) ----------
+    # 4 endpoints exposes via la facade api.runtime.X(). Les methodes _impl
+    # delegent au module runtime_support pour garder cinesort_api.py mince.
+
+    def _get_diagnostic_impl(self) -> Dict[str, Any]:
+        """Retourne le diagnostic complet pour le bouton "Copier diagnostic".
+
+        Cf docs/internal/design/refonte_2026_05_17/screens/12-aide.md section 4.
+        """
+        return runtime_support.get_diagnostic(self)
+
+    def _get_recent_logs_impl(self, limit: int = 100) -> Dict[str, Any]:
+        """Lit les N dernieres lignes du log courant (cap a 1000)."""
+        return runtime_support.get_recent_logs(self, limit)
+
+    def _get_doc_impl(self, file: str) -> Dict[str, Any]:
+        """Retourne le contenu markdown brut d'un document whiteliste.
+
+        Securite : refuse tout chemin contenant `..` ou doc_id inconnu
+        (category="validation").
+        """
+        return runtime_support.get_doc(self, file)
+
+    def _search_docs_impl(self, query: str) -> Dict[str, Any]:
+        """Recherche full-text dans tous les documents whitelistes."""
+        return runtime_support.search_docs(self, query)
