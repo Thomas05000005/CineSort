@@ -82,9 +82,14 @@ export function setNotFound(fn) {
  */
 function currentHash() {
   const h = window.location.hash.replace(/^#/, "");
+  // Mode natif desktop : jamais de fallback ni de routage explicite vers /login.
+  // Si le hash est vide OU pointe sur /login (cas WebView2 cache restore, ou
+  // un module qui a force window.location.hash="#/login" avant nos fixes),
+  // on bascule vers /accueil. Pas de login en mode local.
+  if (_isNativeMode() && (!h || h === "/login" || h.startsWith("/login#") || h.startsWith("/login?"))) {
+    return "/accueil";
+  }
   if (h) return h;
-  // Mode natif desktop : jamais de fallback /login, on va sur /accueil.
-  if (_isNativeMode()) return "/accueil";
   return hasToken() ? "/accueil" : "/login";
 }
 
