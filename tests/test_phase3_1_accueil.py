@@ -120,14 +120,22 @@ class RecentActivityTests(unittest.TestCase):
         self.assertIn("Activité récente", self.js)
 
     def test_limit_to_3_runs(self) -> None:
-        # Spec §6 : 3 derniers runs max.
+        # Spec §6 : 3 derniers runs max via slice. Phase 5 : la liste tabulaire
+        # a ete remplacee par la timeline 7j (qui affiche tous les runs sur 7j).
+        # On verifie qu'au moins la limite de 3 est utilisee (suggestions).
         self.assertIn("slice(0, 3)", self.js)
 
     def test_status_classes_for_severity(self) -> None:
-        # Trois statuts : DONE / PARTIAL / ERROR mappent vers classes css distinctes.
-        self.assertIn("is-done", self.js)
-        self.assertIn("is-partial", self.js)
-        self.assertIn("is-error", self.js)
+        # Phase 5 : la liste tabulaire a ete remplacee par une timeline visuelle.
+        # Les classes de statut sont maintenant sur les bullets de la timeline :
+        # accueil-timeline-bullet--applied / --partial / --error / --done.
+        for cls in (
+            "accueil-timeline-bullet--applied",
+            "accueil-timeline-bullet--partial",
+            "accueil-timeline-bullet--error",
+            "accueil-timeline-bullet--done",
+        ):
+            self.assertIn(cls, self.js)
 
     def test_view_history_button_present(self) -> None:
         self.assertIn("view-history", self.js)

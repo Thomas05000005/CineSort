@@ -57,6 +57,7 @@ let _currentStep = "analyse";
 let _runInfo = null;
 let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
 let _loading = false;
+let _targetRunId = null; // Phase 5 spec §2 : fragment #run-XXX = run cible à afficher.
 let _pollTimer = null;
 let _logsState = { items: [], nextIndex: 0 };
 let _scanOptions = {
@@ -81,6 +82,20 @@ function _readStep() {
   return "analyse";
 }
 
+/** Phase 5 (spec 05 §2 "Reprendre la validation") : extrait le run_id si
+ *  fragment "/traitement#run-XXXX" présent. Stocké dans _targetRunId pour
+ *  forcer le focus sur ce run au lieu du dernier en date.
+ */
+function _readTargetRunId() {
+  const hash = window.location.hash || "";
+  const m = hash.match(/#run-([^#&?\s]+)/);
+  if (m) {
+    try { return decodeURIComponent(m[1]); }
+    catch (_e) { return m[1]; }
+  }
+  return null;
+}
+
 function _writeStep(stepId) {
   if (window.location.hash.includes(`#step-${stepId}`)) return;
   window.location.hash = `#/traitement#step-${stepId}`;
@@ -91,6 +106,11 @@ function _writeStep(stepId) {
 async function _loadRunInfo() {
   _loading = true;
   try {
+    // Phase 5 : si fragment #run-XXX présent, charge ce run précis.
+    const targetId = _targetRunId;
+    const params = targetId ? { run_id: targetId } : { run_id_or: "latest" };
+    const res = await apiPost("get_dashboard", params);
+    if (!res || res.ok === false) {
     const res = await apiPost("get_dashboard", { run_id_or: "latest" });
     if (!res || res.data?.ok === false) {
       _runInfo = null;
@@ -1049,8 +1069,25 @@ async function _handleSaveValidation() {
 
 function _onHashChange() {
   const next = _readStep();
-  if (next !== _currentStep && _activeContainer) {
+  const nextRun = _readTargetRunId();
+  let changed = false;
+  if (next !== _currentStep) {
     _currentStep = next;
+    changed = true;
+  }
+  if (nextRun !== _targetRunId) {
+    _targetRunId = nextRun;
+    changed = true;
+    // Recharge les données du nouveau run cible.
+    if (_activeContainer) {
+      _loadRunInfo().then(() => {
+        if (_activeContainer) _rerender(_activeContainer);
+      });
+      return;
+    }
+  }
+  if (changed && _activeContainer) {
+    _rerender(_activeContainer);
     _renderInPlace();
   }
 }
@@ -1061,6 +1098,11 @@ export async function initTraitement(container) {
   if (!container) return;
   _activeContainer = container;
   _currentStep = _readStep();
+  _targetRunId = _readTargetRunId();
+  // Phase 5 : si fragment #run-XXX présent sans step, aller direct à "validation".
+  if (_targetRunId && _currentStep === "analyse") {
+    _currentStep = "validation";
+  }
   _logsState = { items: [], nextIndex: 0 };
   container.innerHTML = _renderTraitement();
   window.addEventListener("hashchange", _onHashChange);
@@ -1083,6 +1125,7 @@ export function unmountTraitement() {
   window.removeEventListener("hashchange", _onHashChange);
   _currentStep = "analyse";
   _runInfo = null;
+  _targetRunId = null;
   _runStatus = null;
   _activeContainer = null;
   _validationPlan = null;

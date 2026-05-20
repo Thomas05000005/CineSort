@@ -168,35 +168,149 @@ const _INTEGRATIONS = [
   { key: "omdb", label: "OMDb", settingKey: "omdb_enabled" },
 ];
 
-function _integrationState(integration, settings) {
+/** Etat de chaque integration : "ok" (configuré + ping OK),
+ *  "off" (non configuré) ou "offline" (configuré mais ping fail).
+ *  Phase 5 spec §1 : la pastille passe à ⚠ orange si hors ligne.
+ */
+function _integrationState(integration, settings, pingResults) {
   const settingsObj = settings || {};
   const val = settingsObj[integration.settingKey];
   const configured = (typeof val === "string" && val.trim() !== "") || val === true;
-  // Pour la PR 3.1-C, on ne ping pas les services : on indique juste configure
-  // ou non. La detection hors-ligne (etat "warn") sera Phase 3.1-D ou plus tard.
-  return configured ? "ok" : "off";
+  if (!configured) return "off";
+  const pr = pingResults && pingResults[integration.key];
+  if (pr === false) return "offline";
+  // Si pas encore pingé ou ping OK : "ok".
+  return "ok";
 }
 
-function _renderEnvironmentBar(roots, settings) {
+function _renderEnvironmentBar(roots, settings, pingResults) {
   const rootsList = Array.isArray(roots) ? roots : [];
   const rootsTxt = rootsList.length === 0
     ? "<em class=\"accueil-env-empty\">Aucun root configuré</em>"
     : rootsList.slice(0, 2).map((r) => escapeHtml(String(r))).join(", ") + (rootsList.length > 2 ? `, <span class="accueil-env-more">+${rootsList.length - 2}</span>` : "");
   const pastilles = _INTEGRATIONS.map((it) => {
-    const state = _integrationState(it, settings);
-    const symbol = state === "ok" ? "☑" : "☐";
-    const stateClass = state === "ok" ? "is-ok" : "is-off";
-    const title = state === "ok" ? `${it.label} configuré` : `${it.label} non configuré — clique pour le configurer`;
-    return `<button type="button" class="accueil-env-pill ${stateClass}" data-integration="${escapeHtml(it.key)}" title="${escapeHtml(title)}">
+    const state = _integrationState(it, settings, pingResults);
+    let symbol;
+    let stateClass;
+    let title;
+    if (state === "ok") {
+      symbol = "☑";
+      stateClass = "is-ok";
+      title = `${it.label} configuré`;
+    } else if (state === "offline") {
+      symbol = "⚠";
+      stateClass = "is-offline";
+      title = `${it.label} configuré mais hors ligne — clique pour diagnostiquer`;
+    } else {
+      symbol = "☐";
+      stateClass = "is-off";
+      title = `${it.label} non configuré — clique pour le configurer`;
+    }
+    return `<button type="button" class="accueil-env-pill ${stateClass}" data-integration="${escapeHtml(it.key)}" data-integration-state="${escapeHtml(state)}" title="${escapeHtml(title)}">
       <span class="accueil-env-pill-sym" aria-hidden="true">${symbol}</span>${escapeHtml(it.label)}
     </button>`;
   }).join("");
   return `
-    <div class="accueil-env-bar" role="status" aria-label="Environment et integrations">
+    <div class="accueil-env-bar" role="status" aria-label="Environment et integrations" data-accueil-env-bar>
       <span class="accueil-env-roots" aria-label="Dossiers racines actifs">📂 ${rootsTxt}</span>
       <span class="accueil-env-pills">${pastilles}</span>
     </div>
   `;
+}
+
+/* Cache des résultats de ping (5 min). Module-level pour persister entre
+ * (re-)renders et navigations de la même session de boot.
+ */
+const _PING_CACHE_TTL_MS = 5 * 60 * 1000;
+const _pingCache = {
+  // { key: { ok: bool, ts: ms } }
+};
+
+function _pingCacheGet(key) {
+  const entry = _pingCache[key];
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > _PING_CACHE_TTL_MS) {
+    delete _pingCache[key];
+    return undefined;
+  }
+  return entry.ok;
+}
+
+function _pingCacheSet(key, ok) {
+  _pingCache[key] = { ok: !!ok, ts: Date.now() };
+}
+
+/** Ping une seule intégration. Retourne true (ok) / false (offline) ou null
+ *  si on ne peut pas la tester (ex : pas d'endpoint dispo, ou pas configurée).
+ */
+async function _pingIntegration(key, settings) {
+  const cached = _pingCacheGet(key);
+  if (cached !== undefined) return cached;
+  try {
+    let res = null;
+    if (key === "tmdb") {
+      const apiKey = String((settings && settings.tmdb_api_key) || "");
+      if (!apiKey) return null;
+      res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 });
+    } else if (key === "jellyfin") {
+      res = await apiPost("integrations/test_jellyfin_connection", {});
+    } else if (key === "plex") {
+      res = await apiPost("integrations/test_plex_connection", {});
+    } else if (key === "radarr") {
+      res = await apiPost("integrations/test_radarr_connection", {});
+    } else if (key === "omdb") {
+      const apiKey = String((settings && settings.omdb_api_key) || "");
+      res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 });
+    }
+    const ok = !!(res && (res.ok === true || (res.data && res.data.ok === true) || (res.ok !== false && res.data && res.data.connected === true)));
+    _pingCacheSet(key, ok);
+    return ok;
+  } catch (_err) {
+    _pingCacheSet(key, false);
+    return false;
+  }
+}
+
+/** Lance les pings en arrière-plan, met à jour le DOM au fil des résultats.
+ *  N'attend pas que les pings se terminent (fire-and-forget).
+ */
+function _runEnvironmentPingsBackground(container, settings) {
+  for (const it of _INTEGRATIONS) {
+    const val = (settings || {})[it.settingKey];
+    const configured = (typeof val === "string" && val.trim() !== "") || val === true;
+    if (!configured) continue;
+    // Cache hit ? Applique direct sans refetch.
+    const cached = _pingCacheGet(it.key);
+    if (cached !== undefined) {
+      _applyPingResultToDom(container, it.key, cached);
+      continue;
+    }
+    // Fire-and-forget : on update le DOM quand le ping retourne.
+    _pingIntegration(it.key, settings).then((ok) => {
+      if (ok === null) return;
+      _applyPingResultToDom(container, it.key, ok);
+    }).catch(() => { /* déjà cache à false */ });
+  }
+}
+
+function _applyPingResultToDom(container, key, ok) {
+  if (!container || !container.isConnected) return;
+  const pill = container.querySelector(`[data-accueil-env-bar] [data-integration="${key}"]`);
+  if (!pill) return;
+  pill.classList.remove("is-ok", "is-offline", "is-off");
+  const sym = pill.querySelector(".accueil-env-pill-sym");
+  if (ok) {
+    pill.classList.add("is-ok");
+    if (sym) sym.textContent = "☑";
+    pill.dataset.integrationState = "ok";
+    pill.title = pill.title.replace(/configuré mais hors ligne.*$/, "configuré");
+  } else {
+    pill.classList.add("is-offline");
+    if (sym) sym.textContent = "⚠";
+    pill.dataset.integrationState = "offline";
+    const label = pill.textContent.trim();
+    pill.title = `${label} configuré mais hors ligne — clique pour diagnostiquer`;
+  }
 }
 
 /* Phase 3.1-C : Etat "scan en cours" — section CTA Scan transformee en
@@ -233,6 +347,7 @@ function _renderCtaScan(roots, scanProgress) {
   const rootsLabel = rootsList.length > 0
     ? rootsList.slice(0, 3).map((r) => escapeHtml(String(r))).join(" + ")
     : "<em class=\"text-muted\">Aucun root configuré. Va dans Paramètres > Sources.</em>";
+  // Phase 5 spec §3 : Démarrer = 1-clic (appel direct run/start_plan).
   return `
     <section class="accueil-section accueil-cta-scan" aria-labelledby="accueil-cta-title">
       <div class="accueil-cta-scan-content">
@@ -240,7 +355,7 @@ function _renderCtaScan(roots, scanProgress) {
         <p class="accueil-cta-scan-targets">Sur ${rootsLabel}</p>
       </div>
       <div class="accueil-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan">▶ Démarrer</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan-direct">▶ Démarrer</button>
         <button type="button" class="v5-btn v5-btn--secondary" data-accueil-action="open-scan-options">⚙ Options…</button>
       </div>
     </section>
@@ -414,7 +529,10 @@ function _renderSuggestions(stats) {
       </section>
     `;
   }
-  const rows = items.slice(0, 5).map((it) => {
+  // Phase 5 spec §4 : 3 suggestions max (top sévérité), lien "Voir toutes" si >3.
+  const _MAX_SUGGESTIONS = 3;
+  const totalItems = items.length;
+  const rows = items.slice(0, _MAX_SUGGESTIONS).map((it) => {
     const sev = it.severity;
     const sevClass = sev === "danger" ? "is-danger" : sev === "warning" ? "is-warning" : "is-info";
     const sevDot = sev === "danger" ? "🔴" : sev === "warning" ? "🟡" : "🔵";
@@ -431,16 +549,82 @@ function _renderSuggestions(stats) {
       </li>
     `;
   }).join("");
+  const moreLink = totalItems > _MAX_SUGGESTIONS
+    ? `<div class="accueil-actions"><button type="button" class="v5-btn v5-btn--ghost" data-accueil-action="view-all-suggestions">→ Voir toutes (${totalItems})</button></div>`
+    : "";
   return `
     <section class="accueil-section accueil-suggestions" aria-labelledby="accueil-suggestions-title">
-      <h2 id="accueil-suggestions-title" class="accueil-section-title">⚠️ ${items.length} Points à traiter</h2>
+      <h2 id="accueil-suggestions-title" class="accueil-section-title">⚠️ ${totalItems} Points à traiter</h2>
       <ul class="accueil-suggestion-list">${rows}</ul>
+      ${moreLink}
     </section>
   `;
 }
 
+/* Phase 5 (spec 05 §6 Activité récente) — Timeline visuelle 7 jours.
+ * Affiche une bande horizontale avec 7 colonnes (J-6 à J) ; chaque run est
+ * une "bullet" colorée selon son statut, empilée verticalement dans sa
+ * colonne. Le hover affiche un tooltip natif (title) avec les détails.
+ */
+const _TIMELINE_DAYS = 7;
+const _WEEKDAY_SHORT_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+
+/** Retourne le statut derive (APPLIED/PARTIAL/ERROR/DONE) pour un run. */
+function _deriveRunStatus(r) {
+  const errors = Number(r.errors_count || 0);
+  const applied = Number(r.applied_rows || 0);
+  const total = Number(r.total_rows || 0);
+  const explicit = String(r.status || "").toUpperCase();
+  if (explicit) {
+    if (explicit === "APPLIED" || explicit === "DONE" || explicit === "PARTIAL" || explicit === "ERROR") {
+      return explicit;
+    }
+  }
+  if (errors > 0) return "ERROR";
+  if (applied > 0 && total > 0 && applied >= total) return "APPLIED";
+  if (applied > 0 && total > 0 && applied < total) return "PARTIAL";
+  return "DONE";
+}
+
+function _statusBulletClass(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "APPLIED") return "accueil-timeline-bullet--applied";
+  if (s === "PARTIAL") return "accueil-timeline-bullet--partial";
+  if (s === "ERROR") return "accueil-timeline-bullet--error";
+  return "accueil-timeline-bullet--done";
+}
+
+/** Construit les 7 colonnes (J-6 → J) avec les runs groupes par jour calendaire. */
+function _bucketRunsByDay(runs, now) {
+  const ref = now || new Date();
+  const todayStart = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  const cols = [];
+  for (let i = _TIMELINE_DAYS - 1; i >= 0; i -= 1) {
+    const day = new Date(todayStart.getTime() - i * _ONE_DAY_MS);
+    cols.push({
+      date: day,
+      label: i === 0 ? "Auj." : (i === 1 ? "Hier" : _WEEKDAY_SHORT_FR[day.getDay()]),
+      dayNum: day.getDate(),
+      runs: [],
+    });
+  }
+  const list = Array.isArray(runs) ? runs : [];
+  for (const r of list) {
+    const tsSrc = r.started_ts != null ? new Date(Number(r.started_ts) * 1000) : (r.started_at ? new Date(r.started_at) : null);
+    if (!tsSrc || Number.isNaN(tsSrc.getTime())) continue;
+    const rDay = new Date(tsSrc.getFullYear(), tsSrc.getMonth(), tsSrc.getDate());
+    const diff = Math.round((todayStart.getTime() - rDay.getTime()) / _ONE_DAY_MS);
+    if (diff < 0 || diff >= _TIMELINE_DAYS) continue;
+    const colIdx = _TIMELINE_DAYS - 1 - diff;
+    cols[colIdx].runs.push({ ...r, _ts: tsSrc });
+  }
+  // Trie les runs intra-colonne par heure croissante (le plus ancien en bas).
+  for (const c of cols) c.runs.sort((a, b) => a._ts.getTime() - b._ts.getTime());
+  return cols;
+}
+
 function _renderRecentActivity(runs) {
-  const list = Array.isArray(runs) ? runs.slice(0, 3) : [];
+  const list = Array.isArray(runs) ? runs : [];
   if (list.length === 0) {
     return `
       <section class="accueil-section accueil-activity accueil-activity--empty" aria-labelledby="accueil-activity-title">
@@ -449,32 +633,47 @@ function _renderRecentActivity(runs) {
       </section>
     `;
   }
-  const rows = list.map((r) => {
-    // get_dashboard fournit errors_count + applied_rows mais pas status.
-    // On derive le statut : ERROR si errors_count > 0, PARTIAL si applied < total, DONE sinon.
-    const errors = Number(r.errors_count || 0);
-    const applied = Number(r.applied_rows || 0);
-    const total = Number(r.total_rows || 0);
-    const derivedStatus = errors > 0 ? "ERROR" : (applied < total && total > 0 ? "PARTIAL" : "DONE");
-    const status = String(r.status || derivedStatus).toUpperCase();
-    const statusClass = status === "ERROR" ? "is-error" : status === "PARTIAL" ? "is-partial" : "is-done";
-    // started_ts est un epoch float (secondes) ; started_at est un fallback ISO si dispo.
-    const tsSrc = r.started_ts != null ? new Date(Number(r.started_ts) * 1000) : r.started_at;
-    const date = formatRelativeTime(tsSrc);
-    const totalLabel = total > 0 ? `${total} films` : "—";
+  const cols = _bucketRunsByDay(list, new Date());
+  const colsHtml = cols.map((c) => {
+    const bullets = c.runs.map((r) => {
+      const status = _deriveRunStatus(r);
+      const cls = _statusBulletClass(status);
+      const hh = String(r._ts.getHours()).padStart(2, "0");
+      const mm = String(r._ts.getMinutes()).padStart(2, "0");
+      const total = Number(r.total_rows || 0);
+      const tooltip = `${hh}:${mm} — Run ${r.run_id} — ${total} films — ${status}`;
+      return `<button type="button" class="accueil-timeline-bullet ${cls}"
+                 data-run-id="${escapeHtml(r.run_id)}"
+                 title="${escapeHtml(tooltip)}"
+                 aria-label="${escapeHtml(tooltip)}"></button>`;
+    }).join("");
+    const isToday = c.label === "Auj.";
     return `
-      <li class="accueil-activity-row clickable-row" tabindex="0" data-run-id="${escapeHtml(r.run_id)}">
-        <time class="accueil-activity-date">${escapeHtml(date)}</time>
-        <span class="accueil-activity-id">${escapeHtml(r.run_id)}</span>
-        <span class="accueil-activity-total">${escapeHtml(totalLabel)}</span>
-        <span class="accueil-activity-status ${statusClass}">● ${escapeHtml(status || "—")}</span>
-      </li>
+      <div class="accueil-timeline-day ${isToday ? "is-today" : ""}" data-day-iso="${escapeHtml(c.date.toISOString().slice(0, 10))}">
+        <div class="accueil-timeline-bullets">${bullets}</div>
+        <div class="accueil-timeline-day-label">
+          <span class="accueil-timeline-day-name">${escapeHtml(c.label)}</span>
+          <span class="accueil-timeline-day-num">${escapeHtml(String(c.dayNum))}</span>
+        </div>
+      </div>
     `;
   }).join("");
+  // Legende des couleurs (3 statuts principaux pour la timeline).
+  const legend = `
+    <ul class="accueil-timeline-legend" aria-label="Légende des statuts">
+      <li><span class="accueil-timeline-bullet accueil-timeline-bullet--applied" aria-hidden="true"></span>Appliqué</li>
+      <li><span class="accueil-timeline-bullet accueil-timeline-bullet--partial" aria-hidden="true"></span>Partiel</li>
+      <li><span class="accueil-timeline-bullet accueil-timeline-bullet--error" aria-hidden="true"></span>Erreur</li>
+      <li><span class="accueil-timeline-bullet accueil-timeline-bullet--done" aria-hidden="true"></span>Terminé</li>
+    </ul>
+  `;
   return `
     <section class="accueil-section accueil-activity" aria-labelledby="accueil-activity-title">
-      <h2 id="accueil-activity-title" class="accueil-section-title">Activité récente</h2>
-      <ul class="accueil-activity-list">${rows}</ul>
+      <h2 id="accueil-activity-title" class="accueil-section-title">Activité récente (7 jours)</h2>
+      <div class="accueil-timeline-7d" role="img" aria-label="Timeline des runs sur les 7 derniers jours">
+        ${colsHtml}
+      </div>
+      ${legend}
       <div class="accueil-actions">
         <button type="button" class="v5-btn v5-btn--ghost" data-accueil-action="view-history">→ Voir l'historique complet</button>
       </div>
@@ -531,9 +730,15 @@ function _renderAccueil(payload, stats, settings) {
     alert_count: alertCount,
     alert_severity: alertSeverity,
   };
+  // Snapshot des pings synchrones (utilise le cache si dispo).
+  const pingSnapshot = {};
+  for (const it of _INTEGRATIONS) {
+    const cached = _pingCacheGet(it.key);
+    if (cached !== undefined) pingSnapshot[it.key] = cached;
+  }
   return `
     <section class="accueil-view">
-      ${_renderEnvironmentBar(roots, settings)}
+      ${_renderEnvironmentBar(roots, settings, pingSnapshot)}
       ${_renderHero(heroState)}
       ${_renderLastRunCard(latestRun, payload && payload.kpis)}
       ${_renderCtaScan(roots, scanProgress)}
@@ -601,11 +806,192 @@ function _buildInspectorSections(payload, stats, settings) {
   ];
 }
 
+/* --- Démarrage 1-clic + drawer Options + polling ----------------------- */
+
+/* Stocke les settings courants pour pouvoir appeler start_plan sans refetch. */
+let _currentSettings = null;
+let _pollScanTimer = null;
+let _pollContainer = null;
+
+/** Lance run/start_plan avec les settings courants. UI : bouton désactivé +
+ *  toast bref. Au succès, démarre le polling 2s sur get_dashboard pour
+ *  remplacer la card CTA par la progress bar.
+ */
+async function _triggerStartPlan(container, btn) {
+  if (!_currentSettings) {
+    // Pas de settings -> fallback sécurisé vers /traitement.
+    navigateTo("/traitement");
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Démarrage…";
+  }
+  try {
+    const res = await apiPost("run/start_plan", { settings: _currentSettings });
+    const data = res && (res.data || res);
+    if (res && res.ok === false) {
+      const msg = (res.message || res.error || "Échec du démarrage.").toString();
+      _showErrorBanner(container, msg);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "▶ Démarrer";
+      }
+      return;
+    }
+    const runId = data && (data.run_id || data.runId);
+    if (runId) {
+      // Démarrer le polling pour transitionner la card vers "scan en cours".
+      _startScanPolling(container);
+    } else {
+      _showErrorBanner(container, "Aucun run_id retourné par start_plan.");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "▶ Démarrer";
+      }
+    }
+  } catch (err) {
+    _showErrorBanner(container, err && err.message ? String(err.message) : "Erreur réseau lors du démarrage.");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "▶ Démarrer";
+    }
+  }
+}
+
+function _showErrorBanner(container, msg) {
+  try {
+    let banner = container.querySelector(".accueil-scan-error-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "accueil-scan-error-banner";
+      banner.setAttribute("role", "alert");
+      const cta = container.querySelector(".accueil-cta-scan");
+      if (cta) cta.parentElement.insertBefore(banner, cta);
+      else container.prepend(banner);
+    }
+    banner.textContent = "⚠ " + msg;
+    setTimeout(() => { if (banner && banner.isConnected) banner.remove(); }, 8000);
+  } catch (_e) { /* noop */ }
+}
+
+/** Polling get_dashboard 2s pour réactualiser la section CTA Scan + suggestions.
+ *  Phase 5 spec §3 : la card "CTA scan" transitionne en "Scan en cours" avec
+ *  progress bar et ETA pendant qu'un run est actif.
+ */
+function _startScanPolling(container) {
+  if (_pollScanTimer) clearInterval(_pollScanTimer);
+  _pollContainer = container;
+  const tick = async () => {
+    if (!_pollContainer || !_pollContainer.isConnected) {
+      _stopScanPolling();
+      return;
+    }
+    try {
+      const res = await apiPost("get_dashboard", { run_id: "latest" });
+      if (!res || res.ok === false) return;
+      const payload = res.data || res;
+      const scanProgress = _extractScanProgress(payload);
+      const ctaSection = _pollContainer.querySelector(".accueil-cta-scan");
+      if (!ctaSection) return;
+      if (scanProgress.active) {
+        // Remplace la section in-place avec la nouvelle progression.
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = _renderScanInProgress(scanProgress).trim();
+        ctaSection.replaceWith(wrapper.firstElementChild);
+        _rebindCtaScanEvents(_pollContainer);
+      } else {
+        // Run terminé : full re-render via initAccueil.
+        _stopScanPolling();
+        initAccueil(_pollContainer);
+      }
+    } catch (_err) { /* silencieux */ }
+  };
+  _pollScanTimer = setInterval(tick, 2000);
+  // Premier tick immédiat pour transitionner sans attendre 2s.
+  setTimeout(tick, 100);
+}
+
+function _stopScanPolling() {
+  if (_pollScanTimer) {
+    clearInterval(_pollScanTimer);
+    _pollScanTimer = null;
+  }
+  _pollContainer = null;
+}
+
+function _rebindCtaScanEvents(container) {
+  // Rebind les boutons de la section CTA après replace.
+  container.querySelectorAll(".accueil-cta-scan [data-accueil-action]").forEach((btn) => {
+    if (btn.dataset.accueilBound) return;
+    btn.dataset.accueilBound = "1";
+    btn.addEventListener("click", (ev) => {
+      const action = btn.dataset.accueilAction;
+      if (action === "open-traitement") navigateTo("/traitement");
+      ev.preventDefault();
+    });
+  });
+}
+
+/** Mini-drawer 3 checkboxes (dry-run, profil, ignorer doublons). */
+function _openScanOptionsDrawer(container) {
+  // Si déjà ouvert, focus.
+  const existing = container.querySelector("[data-accueil-scan-drawer]");
+  if (existing) {
+    const first = existing.querySelector("input,button");
+    if (first) first.focus();
+    return;
+  }
+  const drawer = document.createElement("div");
+  drawer.className = "accueil-scan-drawer";
+  drawer.setAttribute("data-accueil-scan-drawer", "");
+  drawer.setAttribute("role", "dialog");
+  drawer.setAttribute("aria-label", "Options du scan");
+  drawer.innerHTML = `
+    <div class="accueil-scan-drawer-inner">
+      <h3 class="accueil-scan-drawer-title">Options du scan</h3>
+      <label class="accueil-scan-drawer-row">
+        <input type="checkbox" data-opt="dry_run"> Dry-run (simulation seulement)
+      </label>
+      <label class="accueil-scan-drawer-row">
+        <input type="checkbox" data-opt="skip_duplicates"> Ignorer la détection de doublons
+      </label>
+      <label class="accueil-scan-drawer-row">
+        <input type="checkbox" data-opt="apply_after"> Appliquer automatiquement après validation
+      </label>
+      <div class="accueil-scan-drawer-actions">
+        <button type="button" class="v5-btn v5-btn--ghost" data-accueil-scan-drawer-cancel>Annuler</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-scan-drawer-start>▶ Démarrer</button>
+      </div>
+    </div>
+  `;
+  const ctaSection = container.querySelector(".accueil-cta-scan");
+  if (ctaSection) ctaSection.appendChild(drawer);
+  else container.appendChild(drawer);
+  drawer.querySelector("[data-accueil-scan-drawer-cancel]").addEventListener("click", () => drawer.remove());
+  drawer.querySelector("[data-accueil-scan-drawer-start]").addEventListener("click", async () => {
+    const opts = {};
+    drawer.querySelectorAll("input[type=checkbox][data-opt]").forEach((cb) => {
+      opts[cb.dataset.opt] = !!cb.checked;
+    });
+    drawer.remove();
+    // Merge options dans settings courants pour l'appel start_plan.
+    const merged = Object.assign({}, _currentSettings || {}, opts);
+    const previousSettings = _currentSettings;
+    _currentSettings = merged;
+    try {
+      await _triggerStartPlan(container, null);
+    } finally {
+      _currentSettings = previousSettings;
+    }
+  });
+}
+
 /* --- Event binding ----------------------------------------------------- */
 
 function _bindEvents(container) {
   // Boutons d'action principaux (start scan / resume / view detail / view history /
-  // open-insight / view-qualite / open-scan-options)
+  // open-insight / view-qualite / open-scan-options / start-scan-direct / view-all-suggestions)
   container.querySelectorAll("[data-accueil-action]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       const action = btn.dataset.accueilAction;
@@ -613,7 +999,16 @@ function _bindEvents(container) {
       const targetRoute = btn.dataset.targetRoute;
       switch (action) {
         case "start-scan":
+          // Empty state (jamais de run) -> route vers Traitement pour onboarding.
           navigateTo("/traitement");
+          break;
+        case "start-scan-direct":
+          // Phase 5 spec §3 : lancement 1-clic via run/start_plan.
+          _triggerStartPlan(container, btn);
+          break;
+        case "view-all-suggestions":
+          // Phase 5 spec §4 : "Voir toutes" => Qualité (audit complet).
+          navigateTo("/qualite");
           break;
         case "resume-validation":
           if (runId) navigateTo(`/traitement#run-${encodeURIComponent(runId)}`);
@@ -633,8 +1028,8 @@ function _bindEvents(container) {
           if (targetRoute) navigateTo(targetRoute);
           break;
         case "open-scan-options":
-          // Spec : ouvrira un drawer (Phase 3.3 ou plus tard). En attendant : Traitement.
-          navigateTo("/traitement");
+          // Phase 5 spec §3 : mini-drawer pour 3 options puis Démarrer.
+          _openScanOptionsDrawer(container);
           break;
         case "open-traitement":
           navigateTo("/traitement");
@@ -657,7 +1052,7 @@ function _bindEvents(container) {
     });
   });
 
-  // Lignes d'activite cliquables -> historique > detail run
+  // Lignes d'activite cliquables -> historique > detail run (legacy)
   container.querySelectorAll(".accueil-activity-row").forEach((row) => {
     const open = () => {
       const runId = row.dataset.runId;
@@ -669,6 +1064,15 @@ function _bindEvents(container) {
         e.preventDefault();
         open();
       }
+    });
+  });
+
+  // Phase 5 : bullets de la timeline cliquables -> historique > detail run.
+  container.querySelectorAll(".accueil-timeline-bullet[data-run-id]").forEach((bullet) => {
+    bullet.addEventListener("click", (ev) => {
+      const runId = bullet.dataset.runId;
+      if (runId) navigateTo(`/historique#run-${encodeURIComponent(runId)}`);
+      ev.preventDefault();
     });
   });
 
@@ -714,9 +1118,25 @@ export async function initAccueil(container) {
   const dashboardData = dashRes.data || dashRes;
   const stats = (statsRes && statsRes.ok !== false) ? (statsRes.data || statsRes) : {};
   const settings = (settingsRes && settingsRes.ok !== false) ? (settingsRes.data || settingsRes) : {};
+  _currentSettings = settings;
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings);
   _bindEvents(container);
+
+  // Phase 5 : lance les pings en arrière-plan pour détecter les intégrations
+  // hors-ligne. Les pastilles passent à ⚠ orange au fil des résultats.
+  _runEnvironmentPingsBackground(container, settings);
+
+  // Phase 5 : si un scan est actif au boot, démarrer le polling pour refresh.
+  const initialScan = _extractScanProgress(dashboardData);
+  if (initialScan.active) {
+    _startScanPolling(container);
+  }
+
+  // Phase 5 spec §3 : MAJ visibilité Traitement dans la sidebar selon run actif.
+  try {
+    _updateSidebarForActiveRun(initialScan.active);
+  } catch (_e) { /* noop */ }
 
   // Phase 3.1-C : alimente l'Inspecteur droit avec contexte + rappels + raccourcis.
   try {
@@ -724,5 +1144,21 @@ export async function initAccueil(container) {
   } catch (err) {
     // Defensive : l'inspecteur n'est pas critique pour l'Accueil.
     console.warn("[accueil] setSections inspector failed:", err);
+  }
+}
+
+/** Phase 5 spec §3 : dimmer/masquer l'entrée Traitement de la sidebar si
+ *  aucun run actif (visible mais grisée). Si run actif, restaurer l'état.
+ */
+function _updateSidebarForActiveRun(hasActiveRun) {
+  const el = document.querySelector('.v5-sidebar-item[data-route="processing"]');
+  if (!el) return;
+  el.classList.toggle("v5-sidebar-item--dimmed", !hasActiveRun);
+  if (!hasActiveRun) {
+    el.setAttribute("data-no-active-run", "1");
+    el.setAttribute("title", "Aucun run actif — Traitement disponible quand un scan est lancé");
+  } else {
+    el.removeAttribute("data-no-active-run");
+    el.removeAttribute("title");
   }
 }

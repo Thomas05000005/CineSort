@@ -20,7 +20,9 @@ class EnvironmentBarTests(unittest.TestCase):
         cls.js = _ACCUEIL_JS.read_text(encoding="utf-8")
 
     def test_render_environment_bar_function(self) -> None:
-        self.assertIn("function _renderEnvironmentBar(roots, settings)", self.js)
+        # Phase 5 : la signature accepte un 3eme parametre optionnel pingResults
+        # pour le statut hors-ligne. On verifie au moins les 2 premiers.
+        self.assertIn("function _renderEnvironmentBar(roots, settings", self.js)
 
     def test_integrations_list_complete(self) -> None:
         # Spec : 5 integrations - TMDb, Jellyfin, Plex, Radarr, OMDb.
@@ -47,8 +49,14 @@ class EnvironmentBarTests(unittest.TestCase):
     def test_bar_displayed_at_top(self) -> None:
         # Doit apparaitre dans _renderAccueil AVANT le hero. On cherche les
         # APPELS dans le HTML template (chaque appel est prefixe par ${).
+        # Phase 5 : l'appel inclut maintenant un 3eme argument (pingSnapshot).
+        import re
+
         rendered = self.js
-        env_pos = rendered.find("${_renderEnvironmentBar(roots, settings)}")
+        env_pos = -1
+        for m in re.finditer(r"\$\{_renderEnvironmentBar\(roots, settings[^}]*\)\}", rendered):
+            env_pos = m.start()
+            break
         hero_pos = rendered.find("${_renderHero(heroState)}")
         self.assertNotEqual(env_pos, -1, "Environment bar non rendue dans le template _renderAccueil")
         self.assertNotEqual(hero_pos, -1, "Hero non rendu dans le template _renderAccueil")
