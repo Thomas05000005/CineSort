@@ -90,6 +90,7 @@ def _legacy_pass1_disabled() -> bool:
     val = os.environ.get("CINESORT_REST_LEGACY_PASS1_DISABLED", "").strip().lower()
     return val in ("1", "true", "yes", "on")
 
+
 # Maximum request body size (16 MB).
 _MAX_BODY_SIZE = 16 * 1024 * 1024
 
