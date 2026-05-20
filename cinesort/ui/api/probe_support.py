@@ -206,7 +206,7 @@ def set_probe_tool_paths(
         save_res = api.settings.save_settings(merged)
         if not save_res.get("ok"):
             return save_res
-        return api.recheck_probe_tools()
+        return api._recheck_probe_tools_impl()
     except (OSError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception(
             "set_probe_tool_paths",

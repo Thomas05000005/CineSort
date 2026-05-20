@@ -65,7 +65,7 @@ class UndoApplyTests(unittest.TestCase):
         self.assertTrue(applied.get("ok"), applied)
         self.assertTrue(applied.get("apply_batch_id"))
 
-        preview = api.undo_last_apply_preview(run_id)
+        preview = api._undo_last_apply_preview_impl(run_id)
         self.assertTrue(preview.get("ok"), preview)
         self.assertTrue(preview.get("can_undo"), preview)
         self.assertGreaterEqual(int((preview.get("counts") or {}).get("reversible", 0)), 1)
@@ -79,7 +79,7 @@ class UndoApplyTests(unittest.TestCase):
         self.assertIn(restored.get("status"), {"UNDONE_DONE", "UNDONE_PARTIAL"})
         self.assertTrue(src_folder.exists(), f"Source folder should be restored: {src_folder}")
 
-        second_preview = api.undo_last_apply_preview(run_id)
+        second_preview = api._undo_last_apply_preview_impl(run_id)
         self.assertTrue(second_preview.get("ok"), second_preview)
         self.assertFalse(second_preview.get("can_undo"), second_preview)
 
@@ -106,7 +106,7 @@ class UndoApplyTests(unittest.TestCase):
         dry = api.apply(run_id, decisions, True, False)
         self.assertTrue(dry.get("ok"), dry)
 
-        preview = api.undo_last_apply_preview(run_id)
+        preview = api._undo_last_apply_preview_impl(run_id)
         self.assertTrue(preview.get("ok"), preview)
         self.assertFalse(preview.get("can_undo"), preview)
 
@@ -143,7 +143,7 @@ class UndoApplyTests(unittest.TestCase):
         self.assertFalse(noise_folder.exists())
         self.assertTrue(cleanup_bucket.exists(), f"Expected cleanup bucket folder: {cleanup_bucket}")
 
-        preview = api.undo_last_apply_preview(run_id)
+        preview = api._undo_last_apply_preview_impl(run_id)
         self.assertTrue(preview.get("ok"), preview)
         self.assertTrue(preview.get("can_undo"), preview)
         categories = preview.get("categories") or {}
@@ -186,7 +186,7 @@ class UndoApplyTests(unittest.TestCase):
         store.run.mark_run_done(run_id, stats={"planned_rows": 0}, ended_ts=time.time())
 
         with mock.patch.object(api, "_build_undo_preview_payload", side_effect=OSError("undo preview boom")):
-            out = api.undo_last_apply_preview(run_id)
+            out = api._undo_last_apply_preview_impl(run_id)
             out_real = api.undo_last_apply(run_id, False)
 
         self.assertFalse(out.get("ok"), out)
@@ -230,7 +230,7 @@ class UndoApplyTests(unittest.TestCase):
         applied = api.apply(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
 
-        preview = api.undo_by_row_preview(run_id)
+        preview = api._undo_by_row_preview_impl(run_id)
         self.assertTrue(preview.get("ok"), preview)
         self.assertTrue(preview.get("batch_id"))
         preview_rows = preview.get("rows", [])
@@ -270,13 +270,13 @@ class UndoApplyTests(unittest.TestCase):
 
         # Only undo the first film.
         first_row_id = rows[0]["row_id"]
-        result = api.undo_selected_rows(run_id, [first_row_id], dry_run=False)
+        result = api._undo_selected_rows_impl(run_id, [first_row_id], dry_run=False)
         self.assertTrue(result.get("ok"), result)
         self.assertIn(result.get("status"), {"UNDONE_DONE", "UNDONE_PARTIAL"})
         self.assertGreaterEqual(result.get("counts", {}).get("done", 0), 1)
 
         # The batch should be partially undone since only one film was restored.
-        preview_after = api.undo_by_row_preview(run_id)
+        preview_after = api._undo_by_row_preview_impl(run_id)
         self.assertTrue(preview_after.get("ok"), preview_after)
 
     def test_list_apply_history_returns_batches(self) -> None:
@@ -330,7 +330,7 @@ class UndoApplyTests(unittest.TestCase):
         api.apply(run_id, decisions, False, False)
 
         first_row_id = rows[0]["row_id"]
-        result = api.undo_selected_rows(run_id, [first_row_id], dry_run=True)
+        result = api._undo_selected_rows_impl(run_id, [first_row_id], dry_run=True)
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(result.get("status"), "PREVIEW_ONLY")
         self.assertTrue(result.get("dry_run"))

@@ -216,7 +216,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.assertTrue(all(str(op.get("undo_status") or "") == "PENDING" for op in ops_before), ops_before)
 
         api_undo = self._configured_api()
-        preview = api_undo.undo_last_apply_preview(run_id)
+        preview = api_undo._undo_last_apply_preview_impl(run_id)
         self.assertTrue(preview.get("ok"), preview)
         self.assertTrue(preview.get("can_undo"), preview)
         self.assertEqual(str(preview.get("batch_id") or ""), apply_batch_id)

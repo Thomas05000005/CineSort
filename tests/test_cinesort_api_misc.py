@@ -25,7 +25,7 @@ class TestServerInfoAndQR(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_get_event_ts_returns_floats(self) -> None:
-        result = self.api.get_event_ts()
+        result = self.api._get_event_ts_impl()
         self.assertTrue(result["ok"])
         self.assertIsInstance(result["last_event_ts"], float)
         self.assertIsInstance(result["last_settings_ts"], float)
@@ -160,14 +160,14 @@ class TestResetIncrementalCache(unittest.TestCase):
                 "file_hashes": 20,
             }
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.reset_incremental_cache()
+            result = self.api._reset_incremental_cache_impl()
             self.assertTrue(result["ok"])
             self.assertEqual(result["total_deleted"], 35)
             self.assertEqual(result["folder_entries_deleted"], 5)
 
     def test_reset_store_init_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("disk full")):
-            result = self.api.reset_incremental_cache()
+            result = self.api._reset_incremental_cache_impl()
             self.assertFalse(result["ok"])
             self.assertIn("Store indisponible", result["message"])
 
@@ -176,7 +176,7 @@ class TestResetIncrementalCache(unittest.TestCase):
             store = MagicMock()
             store.scan.clear_all_incremental_caches.side_effect = ValueError("sql error")
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.reset_incremental_cache()
+            result = self.api._reset_incremental_cache_impl()
             self.assertFalse(result["ok"])
             self.assertIn("Purge echouee", result["message"])
 
@@ -228,7 +228,7 @@ class TestNamingPresets(unittest.TestCase):
         self.api = backend.CineSortApi()
 
     def test_get_naming_presets(self) -> None:
-        result = self.api.get_naming_presets()
+        result = self.api._get_naming_presets_impl()
         self.assertTrue(result["ok"])
         self.assertIsInstance(result["presets"], list)
         self.assertGreater(len(result["presets"]), 0)
@@ -238,12 +238,12 @@ class TestNamingPresets(unittest.TestCase):
             self.assertIn(k, first)
 
     def test_preview_naming_template_invalid(self) -> None:
-        result = self.api.preview_naming_template(template="{unknown_var}")
+        result = self.api._preview_naming_template_impl(template="{unknown_var}")
         self.assertFalse(result["ok"])
         self.assertIn("errors", result)
 
     def test_preview_naming_template_default(self) -> None:
-        result = self.api.preview_naming_template(template="")
+        result = self.api._preview_naming_template_impl(template="")
         # Template vide → fallback "{title} ({year})"
         self.assertTrue(result["ok"])
         self.assertIn("result", result)
@@ -323,7 +323,7 @@ class TestExportShareableProfile(unittest.TestCase):
             store = MagicMock()
             store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.export_shareable_profile(name="my profile")
+            result = self.api._export_shareable_profile_impl(name="my profile")
             self.assertTrue(result["ok"])
             self.assertIn("content", result)
             payload = json.loads(result["content"])
@@ -341,7 +341,7 @@ class TestExportShareableProfile(unittest.TestCase):
                 "profile_json": json.dumps(active_profile),
             }
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.export_shareable_profile(name="x", author="me", description="d")
+            result = self.api._export_shareable_profile_impl(name="x", author="me", description="d")
             self.assertTrue(result["ok"])
             payload = json.loads(result["content"])
             self.assertEqual(payload["author"], "me")
@@ -349,7 +349,7 @@ class TestExportShareableProfile(unittest.TestCase):
 
     def test_export_store_init_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("no disk")):
-            result = self.api.export_shareable_profile()
+            result = self.api._export_shareable_profile_impl()
             self.assertTrue(result["ok"])  # fallback : utilise default profile
 
     def test_export_corrupt_profile_json(self) -> None:
@@ -357,7 +357,7 @@ class TestExportShareableProfile(unittest.TestCase):
             store = MagicMock()
             store.quality.get_active_quality_profile.return_value = {"profile_json": "not_json"}
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.export_shareable_profile()
+            result = self.api._export_shareable_profile_impl()
             self.assertTrue(result["ok"])  # fallback default
 
 
@@ -373,12 +373,12 @@ class TestImportShareableProfile(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_import_invalid_json(self) -> None:
-        result = self.api.import_shareable_profile(content="not json", activate=False)
+        result = self.api._import_shareable_profile_impl(content="not json", activate=False)
         self.assertFalse(result["ok"])
         self.assertIn("meta", result)
 
     def test_import_empty(self) -> None:
-        result = self.api.import_shareable_profile(content="", activate=False)
+        result = self.api._import_shareable_profile_impl(content="", activate=False)
         self.assertFalse(result["ok"])
 
     def test_import_valid_profile(self) -> None:
@@ -387,7 +387,7 @@ class TestImportShareableProfile(unittest.TestCase):
             store = MagicMock()
             store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
-            export_result = self.api.export_shareable_profile(name="test_imp")
+            export_result = self.api._export_shareable_profile_impl(name="test_imp")
             content = export_result["content"]
 
         # Import avec activation
@@ -395,7 +395,7 @@ class TestImportShareableProfile(unittest.TestCase):
             store = MagicMock()
             store.quality.save_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.import_shareable_profile(content=content, activate=True)
+            result = self.api._import_shareable_profile_impl(content=content, activate=True)
             self.assertTrue(result["ok"])
             self.assertTrue(result["activated"])
             store.quality.save_quality_profile.assert_called_once()
@@ -405,11 +405,11 @@ class TestImportShareableProfile(unittest.TestCase):
             store = MagicMock()
             store.quality.get_active_quality_profile.return_value = None
             mock_infra.return_value = (store, MagicMock())
-            export_result = self.api.export_shareable_profile(name="x")
+            export_result = self.api._export_shareable_profile_impl(name="x")
             content = export_result["content"]
 
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("disk")):
-            result = self.api.import_shareable_profile(content=content)
+            result = self.api._import_shareable_profile_impl(content=content)
             self.assertFalse(result["ok"])
             self.assertIn("Store indisponible", result["message"])
 

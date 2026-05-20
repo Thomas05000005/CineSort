@@ -584,7 +584,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_preview_default_template(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.preview_naming_template(template="{title} ({year})")
+            result = api._preview_naming_template_impl(template="{title} ({year})")
             self.assertTrue(result["ok"])
             self.assertEqual(result["result"], "Inception (2010)")
             self.assertIn("variables", result)
@@ -596,7 +596,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_preview_plex_template(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.preview_naming_template(template="{title} ({year}) {tmdb_tag}")
+            result = api._preview_naming_template_impl(template="{title} ({year}) {tmdb_tag}")
             self.assertTrue(result["ok"])
             self.assertIn("{tmdb-27205}", result["result"])
         finally:
@@ -607,7 +607,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_preview_jellyfin_template(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.preview_naming_template(template="{title} ({year}) [{resolution}]")
+            result = api._preview_naming_template_impl(template="{title} ({year}) [{resolution}]")
             self.assertTrue(result["ok"])
             self.assertIn("1080p", result["result"])
         finally:
@@ -618,7 +618,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_preview_invalid_template(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.preview_naming_template(template="{badvar} ({year})")
+            result = api._preview_naming_template_impl(template="{badvar} ({year})")
             self.assertFalse(result["ok"])
             self.assertIn("errors", result)
         finally:
@@ -629,7 +629,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_preview_empty_template_uses_default(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.preview_naming_template(template="")
+            result = api._preview_naming_template_impl(template="")
             # Template vide → le parametre default "{title} ({year})" est utilise
             self.assertTrue(result["ok"])
             self.assertEqual(result["result"], "Inception (2010)")
@@ -641,7 +641,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def test_get_naming_presets(self) -> None:
         api, tmp = self._make_api()
         try:
-            result = api.get_naming_presets()
+            result = api._get_naming_presets_impl()
             self.assertTrue(result["ok"])
             self.assertEqual(len(result["presets"]), 5)
             ids = {p["id"] for p in result["presets"]}

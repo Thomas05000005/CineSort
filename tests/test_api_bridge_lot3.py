@@ -497,7 +497,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         with self.assertLogs(api_mod.logger, level="ERROR") as logs:
             with mock.patch.object(api_mod, "manage_probe_tools", side_effect=OSError("winget boom")):
-                out = api.install_probe_tools({"scope": "user", "tools": ["ffprobe"]})
+                out = api._install_probe_tools_impl({"scope": "user", "tools": ["ffprobe"]})
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible d'installer les outils probe.")
@@ -1148,7 +1148,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        out = api.set_probe_tool_paths(
+        out = api._set_probe_tool_paths_impl(
             {
                 "ffprobe_path": str(Path(self._tmp) / "missing_ffprobe.exe"),
                 "mediainfo_path": "",

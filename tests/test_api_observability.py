@@ -96,7 +96,7 @@ class ApiObservabilityTests(unittest.TestCase):
     def test_install_probe_tools_logs_structured_error_and_returns_clean_message(self) -> None:
         with self.assertLogs(api_mod.logger, level="ERROR") as logs:
             with mock.patch.object(api_mod, "manage_probe_tools", side_effect=OSError("winget boom")):
-                out = self.api.install_probe_tools({"scope": "user", "tools": ["ffprobe"]})
+                out = self.api._install_probe_tools_impl({"scope": "user", "tools": ["ffprobe"]})
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible d'installer les outils probe.")
@@ -105,8 +105,8 @@ class ApiObservabilityTests(unittest.TestCase):
 
     def test_set_probe_tool_paths_logs_structured_error_and_returns_clean_message(self) -> None:
         with self.assertLogs(api_mod.logger, level="ERROR") as logs:
-            with mock.patch.object(self.api, "recheck_probe_tools", side_effect=OSError("paths boom")):
-                out = self.api.set_probe_tool_paths(
+            with mock.patch.object(self.api, "_recheck_probe_tools_impl", side_effect=OSError("paths boom")):
+                out = self.api._set_probe_tool_paths_impl(
                     {
                         "ffprobe_path": "",
                         "mediainfo_path": "",

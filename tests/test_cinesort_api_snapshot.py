@@ -75,10 +75,12 @@ class CineSortApiSnapshotTests(unittest.TestCase):
 
     def test_snapshot_file_exists(self) -> None:
         self.assertTrue(SNAPSHOT_PATH.is_file(), f"Snapshot manquant: {SNAPSHOT_PATH}")
-        # Apres PR 10 du #84, le baseline est ~50 methodes publiques sur
+        # Apres PR 10 du #84, le baseline etait ~50 methodes publiques sur
         # CineSortApi (54 ont ete privatisees -> migrees sur les 5 facades).
-        # Le seuil de "suspectement petit" devient 40.
-        self.assertGreater(len(self.snapshot), 40, "Snapshot suspectement petit")
+        # Pass 1 legacy (mai 2026) : 16 methodes additionnelles privatisees
+        # (sans appelant frontend), descendant le baseline a ~34. Le seuil
+        # de "suspectement petit" devient 25.
+        self.assertGreater(len(self.snapshot), 25, "Snapshot suspectement petit")
 
     def test_no_method_removed(self) -> None:
         """Aucune methode du snapshot ne doit avoir disparu.
@@ -122,10 +124,12 @@ class CineSortApiSnapshotTests(unittest.TestCase):
 
         Pre PR 10 #84 : 104 methodes publiques sur CineSortApi (god class).
         Post PR 10 #84 : ~50 methodes publiques (les 54 facade-isees ont
-        ete privatisees). Si ce nombre change beaucoup (< 40 ou > 70),
-        investiguer.
+        ete privatisees).
+        Post Pass 1 legacy (mai 2026) : ~34 methodes publiques (16 supplementaires
+        privatisees, sans appelant frontend). Si ce nombre change beaucoup
+        (< 25 ou > 70), investiguer.
         """
-        self.assertGreaterEqual(len(self.snapshot), 40)
+        self.assertGreaterEqual(len(self.snapshot), 25)
         self.assertLessEqual(len(self.snapshot), 70)
 
 

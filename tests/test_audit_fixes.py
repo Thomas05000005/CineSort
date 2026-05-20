@@ -37,19 +37,19 @@ class EndpointCoexistenceTests(unittest.TestCase):
         # Historique : profile brut
         self.assertTrue(hasattr(api.quality, "export_quality_profile"))
         # P4.3 : wrappé avec metadata
-        self.assertTrue(hasattr(api, "export_shareable_profile"))
+        self.assertTrue(hasattr(api, "_export_shareable_profile_impl"))
 
     def test_both_import_endpoints_exist(self):
         api = CineSortApi()
         # Issue #84 PR 10 : import_quality_profile est sur la QualityFacade
         self.assertTrue(hasattr(api.quality, "import_quality_profile"))
-        self.assertTrue(hasattr(api, "import_shareable_profile"))
+        self.assertTrue(hasattr(api, "_import_shareable_profile_impl"))
 
     def test_shareable_endpoints_distinct_signatures(self):
         import inspect
 
         api = CineSortApi()
-        sig_shareable = inspect.signature(api.export_shareable_profile)
+        sig_shareable = inspect.signature(api._export_shareable_profile_impl)
         # Issue #84 PR 10 : export_quality_profile est sur la QualityFacade
         sig_legacy = inspect.signature(api.quality.export_quality_profile)
         # shareable a plus de params
@@ -62,7 +62,7 @@ class ShareableEndpointPositionalArgsTests(unittest.TestCase):
     def test_export_shareable_accepts_positional(self):
         api = CineSortApi()
         # Simule un appel pywebview avec args positionnels
-        result = api.export_shareable_profile("MyProfile", "Alice", "Test profile")
+        result = api._export_shareable_profile_impl("MyProfile", "Alice", "Test profile")
         self.assertTrue(result.get("ok"))
         self.assertIn("content", result)
         self.assertIn("MyProfile", result.get("filename_suggestion", ""))
@@ -70,16 +70,16 @@ class ShareableEndpointPositionalArgsTests(unittest.TestCase):
     def test_export_shareable_no_args(self):
         api = CineSortApi()
         # Tous les args ont des defaults
-        result = api.export_shareable_profile()
+        result = api._export_shareable_profile_impl()
         self.assertTrue(result.get("ok"))
 
     def test_import_shareable_accepts_positional(self):
         api = CineSortApi()
         # Export puis import pour valider le roundtrip positionnel
-        exported = api.export_shareable_profile("RoundtripTest")
+        exported = api._export_shareable_profile_impl("RoundtripTest")
         self.assertTrue(exported.get("ok"))
         # Simuler un import avec args positionnels (comme depuis JS)
-        result = api.import_shareable_profile(exported["content"], True)
+        result = api._import_shareable_profile_impl(exported["content"], True)
         # L'appel peut échouer si le store n'est pas accessible dans le contexte test,
         # mais la signature ne doit JAMAIS produire de TypeError args-mismatch.
         self.assertIn("ok", result)

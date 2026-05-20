@@ -855,7 +855,7 @@ class CineSortApi:
             self._watcher = None
 
     # ---------- Server info ----------
-    def get_event_ts(self) -> Dict[str, Any]:
+    def _get_event_ts_impl(self) -> Dict[str, Any]:
         """Retourne le timestamp du dernier evenement significatif (scan/apply/settings).
 
         Utilise par le desktop pour detecter les changements et rafraichir (parite dashboard).
@@ -987,7 +987,7 @@ class CineSortApi:
         }
 
     # ---------- Cache incremental ----------
-    def reset_incremental_cache(self) -> Dict[str, Any]:
+    def _reset_incremental_cache_impl(self) -> Dict[str, Any]:
         """Purge TOTALE du cache incremental (3 tables, tous roots confondus).
 
         Utilise par le bouton "Forcer le rescan complet". Purge sans filtre :
@@ -1429,7 +1429,7 @@ class CineSortApi:
         except (OSError, ValueError, KeyError) as exc:
             return _err_response(f"Erreur test OMDb: {exc}", category="resource", level="error", log_module=__name__)
 
-    def get_naming_presets(self) -> Dict[str, Any]:
+    def _get_naming_presets_impl(self) -> Dict[str, Any]:
         """Retourne la liste des presets de renommage disponibles."""
 
         presets = []
@@ -1444,7 +1444,7 @@ class CineSortApi:
             )
         return {"ok": True, "presets": presets}
 
-    def preview_naming_template(self, template: str = "", sample_row_id: str = "") -> Dict[str, Any]:
+    def _preview_naming_template_impl(self, template: str = "", sample_row_id: str = "") -> Dict[str, Any]:
         """Preview du resultat d'un template de renommage sur un film exemple."""
 
         tpl = str(template or "{title} ({year})").strip()
@@ -1554,7 +1554,7 @@ class CineSortApi:
 
         return {"ok": True, "path": str(resolved)}
 
-    def get_tools_status(self) -> Dict[str, Any]:
+    def _get_tools_status_impl(self) -> Dict[str, Any]:
         # Compat endpoint kept for v7.0/v7.1 callers.
         return self.get_probe_tools_status()
 
@@ -1562,11 +1562,11 @@ class CineSortApi:
         """Retourne le statut de detection de ffprobe + MediaInfo (version, chemin, dispo)."""
         return probe_support.get_probe_tools_status(self, detect_probe_tools_fn=detect_probe_tools)
 
-    def recheck_probe_tools(self) -> Dict[str, Any]:
+    def _recheck_probe_tools_impl(self) -> Dict[str, Any]:
         """Force une redetection des outils probe (utile apres installation manuelle)."""
         return probe_support.recheck_probe_tools(self, detect_probe_tools_fn=detect_probe_tools)
 
-    def set_probe_tool_paths(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _set_probe_tool_paths_impl(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Enregistre des chemins manuels vers ffprobe / MediaInfo (si hors PATH)."""
         return probe_support.set_probe_tool_paths(
             self,
@@ -1575,7 +1575,7 @@ class CineSortApi:
             detect_probe_tools_fn=detect_probe_tools,
         )
 
-    def install_probe_tools(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _install_probe_tools_impl(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Installe ffprobe + MediaInfo via winget (ou options fournies)."""
         return probe_support.install_probe_tools(
             self,
@@ -1584,7 +1584,7 @@ class CineSortApi:
             detect_probe_tools_fn=detect_probe_tools,
         )
 
-    def update_probe_tools(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _update_probe_tools_impl(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Met a jour ffprobe + MediaInfo via winget."""
         return probe_support.update_probe_tools(
             self,
@@ -1597,7 +1597,7 @@ class CineSortApi:
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return probe_support.auto_install_probe_tools(self, detect_probe_tools_fn=detect_probe_tools)
 
-    def get_probe(self, run_id: str, row_id: str) -> Dict[str, Any]:
+    def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run."""
         return probe_support.get_probe(self, run_id, row_id, detect_probe_tools_fn=detect_probe_tools)
 
@@ -1972,7 +1972,7 @@ class CineSortApi:
         """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""
         return run_read_support.get_cleanup_residual_preview(self, run_id)
 
-    def get_auto_approved_summary(
+    def _get_auto_approved_summary_impl(
         self,
         run_id: str,
         threshold: int = 85,
@@ -2008,7 +2008,7 @@ class CineSortApi:
     ]:
         return apply_support.build_undo_preview_payload(self, run_id)
 
-    def undo_last_apply_preview(self, run_id: str) -> Dict[str, Any]:
+    def _undo_last_apply_preview_impl(self, run_id: str) -> Dict[str, Any]:
         """Preview (dry) de l'annulation du dernier batch apply reel (undo v1)."""
         return apply_support.undo_last_apply_preview(self, run_id)
 
@@ -2020,11 +2020,11 @@ class CineSortApi:
         """
         return apply_support.undo_last_apply(self, run_id, dry_run, atomic=atomic)
 
-    def undo_by_row_preview(self, run_id: str, batch_id: str = None) -> Dict[str, Any]:
+    def _undo_by_row_preview_impl(self, run_id: str, batch_id: str = None) -> Dict[str, Any]:
         """Preview de l'annulation par film : resume par row_id du batch cible (undo v5)."""
         return apply_support.build_undo_by_row_preview(self, run_id, batch_id=batch_id)
 
-    def undo_selected_rows(
+    def _undo_selected_rows_impl(
         self,
         run_id: str,
         row_ids: list = None,
@@ -2070,7 +2070,7 @@ class CineSortApi:
             self._touch_event()
         return result
 
-    def export_shareable_profile(
+    def _export_shareable_profile_impl(
         self,
         name: str = "",
         author: str = "",
@@ -2116,7 +2116,7 @@ class CineSortApi:
         filename = f"{safe_name}.cinesort.json"
         return {"ok": True, "content": content, "filename_suggestion": filename}
 
-    def import_shareable_profile(
+    def _import_shareable_profile_impl(
         self,
         content: str,
         activate: bool = True,
