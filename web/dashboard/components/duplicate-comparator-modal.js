@@ -686,8 +686,6 @@ function _renderModal() {
 
 export function openDuplicateComparatorModal(opts) {
   const o = opts || {};
-  if (!o.runId || !o.groupKey) {
-    console.warn("[duplicate-comparator-modal] runId/groupKey requis");
   const readOnly = o.readOnly === true;
   // En mode normal (vue Doublons), groupKey est obligatoire car requis par
   // mark_duplicate_winner. En mode readOnly (Modal Perceptuelle §5), on
@@ -722,15 +720,12 @@ export function openDuplicateComparatorModal(opts) {
 
   _state = {
     runId: String(o.runId),
-    groupKey: String(o.groupKey),
+    groupKey: o.groupKey != null ? String(o.groupKey) : "",
     rowA: String(rowA),
     rowB: String(rowB),
     rows: rows && rows.length >= 2 ? rows : null,
     pairs,
     activePairKey,
-    groupKey: o.groupKey != null ? String(o.groupKey) : "",
-    rowA: String(o.rowA),
-    rowB: String(o.rowB),
     title: o.title || "",
     year: o.year || "",
     comparison: o.comparison || null,

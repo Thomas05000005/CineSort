@@ -7,8 +7,15 @@
  * actives sur leurs routes ; V5C les portera ou supprimera.
  */
 
+// Marker tres haut dans le module pour savoir si app.js a parse et execute.
+// Si window.__APP_JS_LOADED reste undefined apres boot, le module n a pas
+// reussi a charger (import casse, parse error, CSP block).
+window.__APP_JS_LOADED = "parse-start";
+
 import { $$ } from "./core/dom.js";
 import { hasToken, setToken, onClearToken } from "./core/state.js";
+
+window.__APP_JS_LOADED = "imports-done";
 
 /* H1 fix : window.onerror global pour capturer les erreurs JS non-attrapees
  * (sinon : page blanche silencieuse). Affiche un toast minimaliste. */
@@ -447,7 +454,10 @@ window.addEventListener("hashchange", _syncShellOnRoute);
 
 /* === Bootstrap ============================================ */
 
+window.__APP_JS_LOADED = "module-end-reached";
+
 document.addEventListener("DOMContentLoaded", async () => {
+  window.__APP_JS_LOADED = "domcontentloaded-fired";
   // V7-fix : bypass login DOIT etre evalue AVANT toute init suceptible de throw,
   // sinon une erreur d'init silencieuse empeche le bypass (et l'utilisateur voit
   // le login alors que le token est present).
