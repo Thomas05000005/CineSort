@@ -1,24 +1,25 @@
-/* views/historique.js — Phase 3.4 (spec 09-historique.md) — Vue Historique refondue.
+/* views/historique.js — Phase 3.4 / Phase 5 (spec 09-historique.md) — Vue Historique complete.
  *
  * Timeline groupée par jour (decision Thomas, spec §1). Source : runs_history
- * fourni par get_dashboard("latest").
+ * fourni par get_dashboard("latest") + detail enrichi par run/get_history_stats.
  *
- * Pour la PR initiale (squelette) :
+ * Fonctionnalites :
  *  - Header avec stats agregees (N runs sur 30 jours)
- *  - Filtres : Statut, Periode, Type, recherche (filtrage cote frontend pour v1)
+ *  - Banner rétention (auto-suppression > 90j, spec §5)
+ *  - Filtres complets : Statut (avec Undone), Periode (avec Custom date picker),
+ *    Type (avec Undo), recherche par run_id OU par nom de film
  *  - Toggle Timeline / Tableau (persiste localStorage)
- *  - Timeline groupee par jour : Aujourd'hui / Hier / "5 mai" / etc.
- *  - Inspecteur droit cable via right-panel.setSections (5 onglets : Resume /
- *    Films / Apply / Doublons / Log) - PR initiale rend Resume uniquement,
- *    les autres en placeholder
- *  - Actions : "Voir rapport complet" + "Reprendre" + "Annuler l'apply" + "Supprimer"
- *    (3 dernieres en placeholder car endpoints backend a creer en PR future)
+ *  - Timeline groupee par jour avec scroll infini (batch 30 + IntersectionObserver)
+ *  - Inspecteur droit cable via right-panel.setSections (4 onglets detailles :
+ *    Films / Apply / Doublons / Log) — chaque onglet charge ses donnees via
+ *    run/get_history_stats avec cache par run_id
+ *  - Page standalone /run/:id (hash route) avec affichage plein écran des 4 onglets
+ *  - Actions cablees : "Voir rapport complet" (route /run/:id), "Reprendre" (route
+ *    /traitement), "Annuler l'apply" (undo_last_apply), "Supprimer" (run/delete_run)
+ *  - Actions dangereuses confirmees via dangerConfirmModal (cf
+ *    feedback-cinesort-actions-dangereuses)
  *
- * Actions dangereuses (suppr run, annuler apply) demanderont modale de
- * confirmation (cf feedback-cinesort-actions-dangereuses). Pour cette PR
- * squelette, on stub avec navigateTo placeholder.
- *
- * Route cible : /historique (Phase 2-B PR #261).
+ * Route cible : /historique (Phase 2-B PR #261) + /run/:id (standalone).
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -27,6 +28,7 @@ import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal } from "../components/modal.js";
+import { showToast } from "../components/toast.js";
 
 /* --- Format dates ----------------------------------------------------- */
 
@@ -59,10 +61,20 @@ function _formatDuration(seconds) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+function _formatDateIsoToFr(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("fr-FR");
+  } catch { return iso; }
+}
+
 /* --- State management -------------------------------------------------- */
 
 const STORAGE_KEY_VIEW = "cinesort.historique.view"; // "timeline" | "table"
 const STORAGE_KEY_PERIOD = "cinesort.historique.period";
+const BATCH_SIZE = 30;
 
 let _runs = [];
 let _selectedRunId = null;
@@ -71,6 +83,15 @@ let _filterPeriod = "30d";
 let _filterType = "all";
 let _searchQuery = "";
 let _viewMode = "timeline";
+let _customPeriodFrom = null;   // ISO date string or null
+let _customPeriodTo = null;     // ISO date string or null
+let _visibleCount = BATCH_SIZE; // scroll infini : nombre de runs affiches
+let _retentionDays = 90;
+let _scrollObserver = null;
+// Cache des appels get_history_stats par run_id (evite refetch a chaque switch onglet).
+const _historyStatsCache = new Map();
+// Cache des films par run_id (lookup pour recherche par nom).
+const _filmsCacheByRun = new Map();
 
 function _readString(key, fallback) {
   try {
@@ -96,6 +117,7 @@ function _deriveStatus(run) {
   const errors = Number(run.errors_count || 0);
   const applied = Number(run.applied_rows || 0);
   const total = Number(run.total_rows || 0);
+  if (run.undone) return "UNDONE";
   if (errors > 0) return "ERROR";
   if (applied > 0 && applied >= total) return "APPLIED";
   if (applied > 0 && applied < total) return "PARTIAL";
@@ -107,6 +129,7 @@ function _statusClass(status) {
     case "ERROR": return "is-error";
     case "PARTIAL": return "is-partial";
     case "APPLIED": return "is-applied";
+    case "UNDONE": return "is-undone";
     case "CANCELLED": case "CANCEL": return "is-cancelled";
     case "AWAITING_VALIDATION": return "is-pending";
     default: return "is-done";
@@ -119,39 +142,74 @@ function _runDate(run) {
   return null;
 }
 
+function _runType(run) {
+  if (run.is_undo || run.type === "undo") return "undo";
+  if (Number(run.applied_rows || 0) > 0) return "apply";
+  return "plan";
+}
+
 /* --- Filtering -------------------------------------------------------- */
 
-function _filterRuns(runs) {
+function _periodCutoff() {
   const now = new Date();
-  const periodCutoffMs = (() => {
-    switch (_filterPeriod) {
-      case "today": return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      case "7d": return now.getTime() - 7 * _ONE_DAY_MS;
-      case "30d": return now.getTime() - 30 * _ONE_DAY_MS;
-      case "90d": return now.getTime() - 90 * _ONE_DAY_MS;
-      case "all": return 0;
-      default: return now.getTime() - 30 * _ONE_DAY_MS;
+  switch (_filterPeriod) {
+    case "today": return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    case "7d": return now.getTime() - 7 * _ONE_DAY_MS;
+    case "30d": return now.getTime() - 30 * _ONE_DAY_MS;
+    case "90d": return now.getTime() - 90 * _ONE_DAY_MS;
+    case "all": return 0;
+    case "custom": {
+      if (!_customPeriodFrom) return 0;
+      const fromDate = new Date(_customPeriodFrom);
+      return fromDate.getTime();
     }
-  })();
+    default: return now.getTime() - 30 * _ONE_DAY_MS;
+  }
+}
+
+function _periodUpperBound() {
+  if (_filterPeriod === "custom" && _customPeriodTo) {
+    // include the whole day "to"
+    const d = new Date(_customPeriodTo);
+    d.setHours(23, 59, 59, 999);
+    return d.getTime();
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function _matchesSearchQuery(run, q) {
+  if (!q) return true;
+  const idLower = String(run.run_id || "").toLowerCase();
+  if (idLower.includes(q)) return true;
+  // Recherche par nom de film : on consulte le cache de films pour ce run.
+  const cached = _filmsCacheByRun.get(run.run_id);
+  if (Array.isArray(cached)) {
+    for (const f of cached) {
+      const name = String(f.title || f.name || f.filename || "").toLowerCase();
+      if (name.includes(q)) return true;
+    }
+  }
+  return false;
+}
+
+function _filterRuns(runs) {
+  const cutoffMin = _periodCutoff();
+  const cutoffMax = _periodUpperBound();
   const q = _searchQuery.trim().toLowerCase();
   return runs.filter((r) => {
     const d = _runDate(r);
-    if (!d || d.getTime() < periodCutoffMs) return false;
+    if (!d) return false;
+    const t = d.getTime();
+    if (t < cutoffMin || t > cutoffMax) return false;
     if (_filterStatus !== "all") {
       const status = _deriveStatus(r);
       if (status !== _filterStatus.toUpperCase()) return false;
     }
     if (_filterType !== "all") {
-      // Type "apply" = run avec applied_rows > 0. Type "plan" = pas d'apply.
-      // Type "undo" reservé pour PR future (Phase 3.3 traitement).
-      const hasApply = Number(r.applied_rows || 0) > 0;
-      if (_filterType === "apply" && !hasApply) return false;
-      if (_filterType === "plan" && hasApply) return false;
+      const type = _runType(r);
+      if (type !== _filterType) return false;
     }
-    if (q) {
-      const idLower = String(r.run_id || "").toLowerCase();
-      if (!idLower.includes(q)) return false;
-    }
+    if (q && !_matchesSearchQuery(r, q)) return false;
     return true;
   });
 }
@@ -199,11 +257,41 @@ function _renderError(message) {
   `;
 }
 
+function _renderRetentionBanner() {
+  const days = _retentionDays || 90;
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  const cutoffStr = cutoffDate.toLocaleDateString("fr-FR");
+  return `
+    <div class="historique-retention-banner" role="note">
+      <span class="historique-retention-banner-icon" aria-hidden="true">ℹ️</span>
+      <span>Les runs antérieurs au <strong>${escapeHtml(cutoffStr)}</strong> (rétention ${days} jours) sont supprimés automatiquement.</span>
+    </div>
+  `;
+}
+
+function _renderCustomDatePicker() {
+  if (_filterPeriod !== "custom") return "";
+  return `
+    <div class="historique-custom-period" role="group" aria-label="Période personnalisée">
+      <label class="historique-filter">
+        <span class="historique-filter-label">Du</span>
+        <input type="date" class="v5-input" data-historique-custom-from value="${escapeHtml(_customPeriodFrom || "")}">
+      </label>
+      <label class="historique-filter">
+        <span class="historique-filter-label">Au</span>
+        <input type="date" class="v5-input" data-historique-custom-to value="${escapeHtml(_customPeriodTo || "")}">
+      </label>
+    </div>
+  `;
+}
+
 function _renderHeader(stats) {
   return `
     <header class="historique-header">
       <h1 class="historique-title">Historique</h1>
       <p class="historique-summary">${escapeHtml(stats.summary)}</p>
+      ${_renderRetentionBanner()}
       <div class="historique-filters" role="toolbar" aria-label="Filtres historique">
         <label class="historique-filter">
           <span class="historique-filter-label">Statut</span>
@@ -213,6 +301,7 @@ function _renderHeader(stats) {
             <option value="cancelled" ${_filterStatus === "cancelled" ? "selected" : ""}>Cancelled</option>
             <option value="error" ${_filterStatus === "error" ? "selected" : ""}>Error</option>
             <option value="applied" ${_filterStatus === "applied" ? "selected" : ""}>Applied</option>
+            <option value="undone" ${_filterStatus === "undone" ? "selected" : ""}>Undone</option>
           </select>
         </label>
         <label class="historique-filter">
@@ -223,6 +312,7 @@ function _renderHeader(stats) {
             <option value="30d" ${_filterPeriod === "30d" ? "selected" : ""}>30 jours</option>
             <option value="90d" ${_filterPeriod === "90d" ? "selected" : ""}>90 jours</option>
             <option value="all" ${_filterPeriod === "all" ? "selected" : ""}>Tout</option>
+            <option value="custom" ${_filterPeriod === "custom" ? "selected" : ""}>Custom (date picker)</option>
           </select>
         </label>
         <label class="historique-filter">
@@ -231,11 +321,12 @@ function _renderHeader(stats) {
             <option value="all" ${_filterType === "all" ? "selected" : ""}>Tous</option>
             <option value="plan" ${_filterType === "plan" ? "selected" : ""}>Plan (scan)</option>
             <option value="apply" ${_filterType === "apply" ? "selected" : ""}>Apply</option>
+            <option value="undo" ${_filterType === "undo" ? "selected" : ""}>Undo</option>
           </select>
         </label>
         <div class="historique-search">
           <input type="search" class="v5-input historique-search-input"
-                 placeholder="🔍 Rechercher run_id..."
+                 placeholder="🔍 Rechercher run_id ou nom de film..."
                  value="${escapeHtml(_searchQuery)}"
                  data-historique-search>
         </div>
@@ -246,6 +337,7 @@ function _renderHeader(stats) {
                   data-historique-view="table" title="Vue tableau">≡</button>
         </div>
       </div>
+      ${_renderCustomDatePicker()}
     </header>
   `;
 }
@@ -256,8 +348,8 @@ function _renderRunRow(run, selected) {
   const status = _deriveStatus(run);
   const statusClass = _statusClass(status);
   const total = Number(run.total_rows || 0);
-  const isApply = Number(run.applied_rows || 0) > 0;
-  const typeLabel = isApply ? "Apply" : "Plan";
+  const type = _runType(run);
+  const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
   return `
     <li class="historique-run ${selected ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(run.run_id)}">
       <span class="historique-run-time">${escapeHtml(time)}</span>
@@ -300,12 +392,13 @@ function _renderTable(runs, selectedId) {
     const d = _runDate(r);
     const status = _deriveStatus(r);
     const total = Number(r.total_rows || 0);
-    const isApply = Number(r.applied_rows || 0) > 0;
+    const type = _runType(r);
+    const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
     return `
       <tr class="${r.run_id === selectedId ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(r.run_id)}">
         <td>${escapeHtml(d ? d.toLocaleString("fr-FR") : "—")}</td>
         <td class="historique-table-id">${escapeHtml(r.run_id)}</td>
-        <td>${escapeHtml(isApply ? "Apply" : "Plan")}</td>
+        <td>${escapeHtml(typeLabel)}</td>
         <td>${total > 0 ? total : "—"}</td>
         <td><span class="historique-run-status ${_statusClass(status)}">${escapeHtml(status)}</span></td>
         <td>${escapeHtml(_formatDuration(r.duration_s))}</td>
@@ -331,10 +424,20 @@ function _renderTable(runs, selectedId) {
   `;
 }
 
+function _renderLoadingMore(remaining) {
+  if (remaining <= 0) return "";
+  return `
+    <div class="historique-loading-more" data-historique-sentinel>
+      <span class="historique-loading-more-icon" aria-hidden="true">⏳</span>
+      <span>Chargement... (${remaining} runs restants)</span>
+    </div>
+  `;
+}
+
 function _computeHistoriqueStats(runs) {
   const totalRuns = runs.length;
   const applies = runs.filter((r) => Number(r.applied_rows || 0) > 0).length;
-  const errors = runs.filter((r) => Number(r.errors_count || 0) > 0).length;
+  const undones = runs.filter((r) => _deriveStatus(r) === "UNDONE" || _runType(r) === "undo").length;
   const periodLabel = (() => {
     switch (_filterPeriod) {
       case "today": return "aujourd'hui";
@@ -342,26 +445,43 @@ function _computeHistoriqueStats(runs) {
       case "30d": return "les 30 derniers jours";
       case "90d": return "les 90 derniers jours";
       case "all": return "toute la période";
+      case "custom": {
+        const from = _customPeriodFrom ? _formatDateIsoToFr(_customPeriodFrom) : "—";
+        const to = _customPeriodTo ? _formatDateIsoToFr(_customPeriodTo) : "aujourd'hui";
+        return `du ${from} au ${to}`;
+      }
       default: return "les 30 derniers jours";
     }
   })();
   return {
-    summary: `${totalRuns} runs · ${applies} apply · ${errors} erreurs · sur ${periodLabel}`,
+    summary: `${totalRuns} runs · ${applies} apply · ${undones} undo · sur ${periodLabel}`,
   };
 }
 
 function _renderHistorique() {
   const filtered = _filterRuns(_runs);
   const stats = _computeHistoriqueStats(filtered);
+  const visible = filtered.slice(0, _visibleCount);
+  const remaining = Math.max(0, filtered.length - visible.length);
   return `
     <section class="historique-view">
       ${_renderHeader(stats)}
-      ${_viewMode === "table" ? _renderTable(filtered, _selectedRunId) : _renderTimeline(filtered, _selectedRunId)}
+      ${_viewMode === "table" ? _renderTable(visible, _selectedRunId) : _renderTimeline(visible, _selectedRunId)}
+      ${_renderLoadingMore(remaining)}
     </section>
   `;
 }
 
 /* --- Inspector content (spec §3) -------------------------------------- */
+
+let _inspectorTab = "films"; // films | apply | doublons | log
+
+const _INSPECTOR_TABS = [
+  { id: "films", label: "Films", icon: "🎬" },
+  { id: "apply", label: "Apply", icon: "✓" },
+  { id: "doublons", label: "Doublons", icon: "🔁" },
+  { id: "log", label: "Log", icon: "📜" },
+];
 
 function _buildInspectorSections(selectedRun) {
   if (!selectedRun) {
@@ -407,15 +527,6 @@ function _buildInspectorSections(selectedRun) {
   ];
 }
 
-let _inspectorTab = "films"; // films | apply | doublons | log
-
-const _INSPECTOR_TABS = [
-  { id: "films", label: "Films", icon: "🎬" },
-  { id: "apply", label: "Apply", icon: "✓" },
-  { id: "doublons", label: "Doublons", icon: "🔁" },
-  { id: "log", label: "Log", icon: "📜" },
-];
-
 function _renderInspectorTabs() {
   return `
     <div class="historique-inspector-tabs" role="tablist" aria-label="Détail du run">
@@ -432,39 +543,161 @@ function _renderInspectorTabs() {
   `;
 }
 
-function _renderInspectorTabContent(run) {
-  const runId = run.run_id;
-  const total = Number(run.total_rows || 0);
-  const applied = Number(run.applied_rows || 0);
-  const errors = Number(run.errors_count || 0);
-  const conflicts = Number(run.conflicts_count || 0);
-  const dupGroups = Number(run.duplicates_groups || 0);
-  switch (_inspectorTab) {
-    case "films":
+/* --- Inspector detailed tabs (Phase 5) ------------------------------ */
+
+function _filmStatusLabel(film) {
+  // Map vers Approuvé/Rejeté/Doublon/Suppression
+  const tier = String(film.tier || "").toLowerCase();
+  if (tier === "reject") return { label: "Rejeté", cls: "is-rejected" };
+  const dec = String(film.decision || film.status || "").toLowerCase();
+  if (dec.includes("duplicate") || dec === "duplicate" || film.is_duplicate) return { label: "Doublon", cls: "is-duplicate" };
+  if (dec.includes("delete") || dec === "delete_marked") return { label: "Suppression", cls: "is-deleted" };
+  if (dec.includes("reject")) return { label: "Rejeté", cls: "is-rejected" };
+  return { label: "Approuvé", cls: "is-approved" };
+}
+
+function _renderFilmsList(runStats, runId) {
+  const films = Array.isArray(runStats.films) ? runStats.films : [];
+  if (films.length === 0) {
+    const total = Number(runStats.total_rows || 0);
+    if (total > 0) {
       return `
-        <p class="historique-tab-stat"><strong>${total}</strong> film${total > 1 ? "s" : ""} analysé${total > 1 ? "s" : ""}</p>
-        <p class="historique-tab-stat"><strong>${conflicts}</strong> conflit${conflicts > 1 ? "s" : ""} à vérifier</p>
+        <p class="historique-tab-stat"><strong>${total}</strong> film${total > 1 ? "s" : ""} analysé${total > 1 ? "s" : ""} (détail non disponible pour ce run)</p>
         <a href="#/bibliotheque?run_id=${encodeURIComponent(runId)}" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir dans Bibliothèque</a>
       `;
-    case "apply":
-      return `
-        <p class="historique-tab-stat"><strong>${applied}</strong> film${applied > 1 ? "s" : ""} appliqué${applied > 1 ? "s" : ""}</p>
-        <p class="historique-tab-stat"><strong>${Math.max(0, total - applied)}</strong> non appliqué${total - applied > 1 ? "s" : ""}</p>
-        <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""}</p>
-        ${applied > 0 ? `<a href="#/traitement#step-apply" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir l'étape Apply</a>` : ""}
-      `;
-    case "doublons":
-      return `
-        <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
-        ${dupGroups > 0 ? `<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : `<p class="historique-empty-msg">Aucun doublon dans ce run.</p>`}
-      `;
+    }
+    return `<p class="historique-empty-msg">Aucun film associé à ce run.</p>`;
+  }
+  const items = films.map((f) => {
+    const st = _filmStatusLabel(f);
+    const title = String(f.title || f.name || f.filename || `Film ${f.film_id || ""}`);
+    const score = (f.score != null) ? Number(f.score).toFixed(1) : "—";
+    const filmId = f.film_id != null ? `#/film/${encodeURIComponent(f.film_id)}` : null;
+    return `
+      <li class="historique-film-row">
+        <span class="historique-film-title">${escapeHtml(title)}</span>
+        <span class="historique-film-status ${st.cls}">${escapeHtml(st.label)}</span>
+        <span class="historique-film-score">${escapeHtml(score)}</span>
+        ${filmId ? `<a href="${escapeHtml(filmId)}" class="historique-film-link">→</a>` : `<span class="historique-film-link-dim">—</span>`}
+      </li>
+    `;
+  }).join("");
+  return `
+    <p class="historique-tab-stat"><strong>${films.length}</strong> film${films.length > 1 ? "s" : ""} traité${films.length > 1 ? "s" : ""}</p>
+    <ul class="historique-films-list">${items}</ul>
+    <a href="#/bibliotheque?run_id=${encodeURIComponent(runId)}" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir dans Bibliothèque</a>
+  `;
+}
+
+function _opLabel(op) {
+  const t = String(op.op_type || "").toLowerCase();
+  const src = String(op.src_path || "");
+  const dst = String(op.dst_path || "");
+  const srcShort = src.split(/[\\/]/).pop() || src;
+  const dstShort = dst.split(/[\\/]/).pop() || dst;
+  if (t === "rename") return { icon: "→", text: `Renommé ${srcShort} → ${dstShort}` };
+  if (t === "move") return { icon: "→", text: `Déplacé ${srcShort} → ${dst}` };
+  if (t === "quarantine") return { icon: "⚠", text: `Quarantaine bucket _review/ — ${srcShort}` };
+  if (t === "delete_mark" || t === "mark_delete") return { icon: "🗑", text: `Marqué suppression — ${srcShort}` };
+  return { icon: "•", text: `${op.op_type || "Op"} : ${srcShort}${dst ? " → " + dstShort : ""}` };
+}
+
+function _renderApplyOps(runStats) {
+  const ops = Array.isArray(runStats.apply_operations) ? runStats.apply_operations : [];
+  const applied = Number(runStats.applied_rows || 0);
+  const total = Number(runStats.total_rows || 0);
+  const errors = Number(runStats.errors_count || 0);
+  if (ops.length === 0) {
+    return `
+      <p class="historique-tab-stat"><strong>${applied}</strong> film${applied > 1 ? "s" : ""} appliqué${applied > 1 ? "s" : ""}</p>
+      <p class="historique-tab-stat"><strong>${Math.max(0, total - applied)}</strong> non appliqué${total - applied > 1 ? "s" : ""}</p>
+      <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""}</p>
+      ${applied > 0 ? `<p class="historique-empty-msg">Détail des opérations non disponible pour ce run.</p>` : `<p class="historique-empty-msg">Aucun apply effectué.</p>`}
+    `;
+  }
+  // Compter par type
+  const counts = ops.reduce((acc, o) => {
+    const t = String(o.op_type || "other").toLowerCase();
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
+  const countersHtml = Object.entries(counts).map(([t, n]) => `<span class="historique-apply-counter">${escapeHtml(t)}: <strong>${n}</strong></span>`).join("");
+  const opsHtml = ops.map((o) => {
+    const lbl = _opLabel(o);
+    return `<li class="historique-apply-op"><span class="historique-apply-op-icon">${escapeHtml(lbl.icon)}</span><span class="historique-apply-op-text">${escapeHtml(lbl.text)}</span></li>`;
+  }).join("");
+  return `
+    <p class="historique-tab-stat"><strong>${ops.length}</strong> opération${ops.length > 1 ? "s" : ""} appliquée${ops.length > 1 ? "s" : ""}</p>
+    <div class="historique-apply-counters">${countersHtml}</div>
+    <ul class="historique-apply-ops">${opsHtml}</ul>
+  `;
+}
+
+function _renderDoublonsList(runStats) {
+  const decided = Array.isArray(runStats.duplicates_decided) ? runStats.duplicates_decided : [];
+  const skipped = Array.isArray(runStats.duplicates_skipped) ? runStats.duplicates_skipped : [];
+  const dupGroups = Number(runStats.duplicates_groups || 0);
+  if (decided.length === 0 && skipped.length === 0) {
+    return `
+      <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
+      ${dupGroups > 0 ? `<p class="historique-empty-msg">Détail des groupes non disponible pour ce run.</p><a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : `<p class="historique-empty-msg">Aucun doublon dans ce run.</p>`}
+    `;
+  }
+  const decidedHtml = decided.map((g) => {
+    const title = String(g.title || g.canonical_title || "(Sans titre)");
+    const year = g.year ? ` (${g.year})` : "";
+    const winner = String(g.winner_label || g.winner || "—");
+    const savings = (g.size_savings != null) ? `· ${(Number(g.size_savings) / (1024 * 1024 * 1024)).toFixed(1)} Go récupérés` : "";
+    return `<li class="historique-doublon-row historique-doublon-row--decided">${escapeHtml(title + year)} — Garder ${escapeHtml(winner)} ${escapeHtml(savings)}</li>`;
+  }).join("");
+  const skippedHtml = skipped.map((g) => {
+    const title = String(g.title || g.canonical_title || "(Sans titre)");
+    const year = g.year ? ` (${g.year})` : "";
+    return `<li class="historique-doublon-row historique-doublon-row--skipped">${escapeHtml(title + year)} — Non décidé (skip)</li>`;
+  }).join("");
+  return `
+    <p class="historique-tab-stat"><strong>${decided.length}</strong> décidé${decided.length > 1 ? "s" : ""} · <strong>${skipped.length}</strong> ignoré${skipped.length > 1 ? "s" : ""}</p>
+    ${decided.length > 0 ? `<h4 class="historique-doublons-h4">Décidés</h4><ul class="historique-doublons-list">${decidedHtml}</ul>` : ""}
+    ${skipped.length > 0 ? `<h4 class="historique-doublons-h4">Ignorés</h4><ul class="historique-doublons-list">${skippedHtml}</ul>` : ""}
+  `;
+}
+
+function _renderLogViewer(runStats, runId) {
+  const lines = Array.isArray(runStats.log_lines) ? runStats.log_lines : [];
+  if (lines.length === 0) {
+    return `
+      <div class="historique-log-viewer-actions">
+        <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-historique-action="reload-log" data-run-id="${escapeHtml(runId)}">↻ Recharger</button>
+      </div>
+      <p class="historique-empty-msg">Aucun log disponible pour ce run.</p>
+    `;
+  }
+  const content = lines.map((l) => escapeHtml(String(l))).join("\n");
+  return `
+    <div class="historique-log-viewer-actions">
+      <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-historique-action="reload-log" data-run-id="${escapeHtml(runId)}">↻ Recharger</button>
+      <span class="historique-log-count">${lines.length} ligne${lines.length > 1 ? "s" : ""}</span>
+    </div>
+    <pre class="historique-log-viewer">${content}</pre>
+  `;
+}
+
+function _renderInspectorTabContent(run) {
+  const runId = run.run_id;
+  const cached = _historyStatsCache.get(runId);
+  if (!cached) {
+    return `<p class="historique-tab-loading" data-historique-tab-loading="${escapeHtml(runId)}">Chargement du détail…</p>`;
+  }
+  if (cached.error) {
+    return `<p class="historique-empty-msg">Erreur de chargement : ${escapeHtml(cached.error)}</p>`;
+  }
+  const runStats = cached.run || cached;
+  switch (_inspectorTab) {
+    case "films":   return _renderFilmsList(runStats, runId);
+    case "apply":   return _renderApplyOps(runStats);
+    case "doublons": return _renderDoublonsList(runStats);
     case "log":
-    default:
-      return `
-        <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""} loguée${errors > 1 ? "s" : ""}</p>
-        <p class="historique-empty-msg">Le log complet est dans les fichiers <code>logs/</code> du run. Ouvre l'Aide &gt; Logs pour les voir.</p>
-        <a href="#/aide" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir Aide &gt; Logs</a>
-      `;
+    default:        return _renderLogViewer(runStats, runId);
   }
 }
 
@@ -490,20 +723,118 @@ function _updateInspector() {
   }
 }
 
+/* --- Detail fetch ----------------------------------------------------- */
+
+async function _ensureHistoryStats(runId, { force = false } = {}) {
+  if (!runId) return null;
+  if (!force && _historyStatsCache.has(runId)) return _historyStatsCache.get(runId);
+  try {
+    // Endpoint backend PR #298 (run/get_history_stats). Si non encore mergé,
+    // on retourne un fallback minimal a partir du run courant pour ne pas casser.
+    const res = await apiPost("run/get_history_stats", { run_id: runId });
+    if (res && res.ok !== false) {
+      // Le payload est `{ok, run: {...}}` ou `{ok, ...}` selon impl.
+      const data = res.run ? res.run : (res.data && res.data.run ? res.data.run : (res.data || {}));
+      // Pour les logs : si pas dans payload, fallback via get_status.
+      if (!Array.isArray(data.log_lines)) {
+        try {
+          const statusRes = await apiPost("run/get_status", { run_id: runId, last_log_index: 0 });
+          const logs = (statusRes && statusRes.data && Array.isArray(statusRes.data.logs))
+            ? statusRes.data.logs
+            : (Array.isArray(statusRes?.logs) ? statusRes.logs : []);
+          data.log_lines = logs;
+        } catch { data.log_lines = []; }
+      }
+      // Indexe films par run pour la recherche.
+      if (Array.isArray(data.films)) _filmsCacheByRun.set(runId, data.films);
+      _historyStatsCache.set(runId, { ok: true, run: data });
+      return _historyStatsCache.get(runId);
+    }
+    // Fallback : on essaie au moins get_status pour avoir des logs et un état basique.
+    let logs = [];
+    try {
+      const statusRes = await apiPost("run/get_status", { run_id: runId, last_log_index: 0 });
+      logs = (statusRes && statusRes.data && Array.isArray(statusRes.data.logs))
+        ? statusRes.data.logs
+        : (Array.isArray(statusRes?.logs) ? statusRes.logs : []);
+    } catch { /* ignore */ }
+    const base = _runs.find((r) => r.run_id === runId) || {};
+    _historyStatsCache.set(runId, {
+      ok: true,
+      run: {
+        run_id: runId,
+        total_rows: base.total_rows || 0,
+        applied_rows: base.applied_rows || 0,
+        errors_count: base.errors_count || 0,
+        duplicates_groups: base.duplicates_groups || 0,
+        films: [],
+        apply_operations: [],
+        duplicates_decided: [],
+        duplicates_skipped: [],
+        log_lines: logs,
+      },
+    });
+    return _historyStatsCache.get(runId);
+  } catch (err) {
+    _historyStatsCache.set(runId, { error: String(err && err.message || err) });
+    return _historyStatsCache.get(runId);
+  }
+}
+
+async function _fetchAndUpdate(runId) {
+  await _ensureHistoryStats(runId);
+  // Si l'utilisateur a entre-temps change de run, on n'overwrite pas.
+  if (_selectedRunId === runId) {
+    _updateInspector();
+    // Re-render standalone si on est sur cette route.
+    _refreshStandaloneIfActive();
+  }
+}
+
 /* --- Events ----------------------------------------------------------- */
 
 function _selectRun(container, runId) {
   _selectedRunId = runId;
-  container.querySelectorAll("[data-run-id]").forEach((el) => {
-    el.classList.toggle("is-selected", el.dataset.runId === runId);
-  });
+  if (container) {
+    container.querySelectorAll("[data-run-id]").forEach((el) => {
+      el.classList.toggle("is-selected", el.dataset.runId === runId);
+    });
+  }
   _updateInspector();
+  // Async fetch detail.
+  _fetchAndUpdate(runId);
 }
 
 function _rerender(container) {
+  _detachScrollObserver();
   container.innerHTML = _renderHistorique();
   _bindEvents(container);
   _updateInspector();
+  _attachScrollObserver(container);
+}
+
+function _attachScrollObserver(container) {
+  if (!container) return;
+  const sentinel = container.querySelector("[data-historique-sentinel]");
+  if (!sentinel) return;
+  if (typeof IntersectionObserver === "undefined") return;
+  _scrollObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        _visibleCount += BATCH_SIZE;
+        _rerender(container);
+        break;
+      }
+    }
+  }, { rootMargin: "200px" });
+  _scrollObserver.observe(sentinel);
+}
+
+function _detachScrollObserver() {
+  if (_scrollObserver) {
+    try { _scrollObserver.disconnect(); } catch { /* noop */ }
+    _scrollObserver = null;
+  }
 }
 
 function _bindEvents(container) {
@@ -515,9 +846,27 @@ function _bindEvents(container) {
       if (filter === "status") _filterStatus = val;
       else if (filter === "period") { _filterPeriod = val; _writeString(STORAGE_KEY_PERIOD, val); }
       else if (filter === "type") _filterType = val;
+      _visibleCount = BATCH_SIZE;
       _rerender(container);
     });
   });
+  // Custom date pickers
+  const fromInput = container.querySelector("[data-historique-custom-from]");
+  if (fromInput) {
+    fromInput.addEventListener("change", (ev) => {
+      _customPeriodFrom = String(ev.target.value || "") || null;
+      _visibleCount = BATCH_SIZE;
+      _rerender(container);
+    });
+  }
+  const toInput = container.querySelector("[data-historique-custom-to]");
+  if (toInput) {
+    toInput.addEventListener("change", (ev) => {
+      _customPeriodTo = String(ev.target.value || "") || null;
+      _visibleCount = BATCH_SIZE;
+      _rerender(container);
+    });
+  }
   // Recherche
   const searchInput = container.querySelector("[data-historique-search]");
   if (searchInput) {
@@ -527,6 +876,7 @@ function _bindEvents(container) {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         _searchQuery = value;
+        _visibleCount = BATCH_SIZE;
         _rerender(container);
         // Restore focus dans la search box.
         const next = container.querySelector("[data-historique-search]");
@@ -557,12 +907,69 @@ function _bindEvents(container) {
   if (retryBtn) retryBtn.addEventListener("click", () => initHistorique(container));
 }
 
+async function _doUndoApply(runId) {
+  try {
+    const res = await apiPost("undo_last_apply", { run_id: runId, dry_run: false, atomic: true });
+    if (res && res.ok !== false) {
+      showToast({ type: "success", text: "Apply annulé. Fichiers restaurés." });
+      // Refresh dashboard + cache + UI.
+      _historyStatsCache.delete(runId);
+      await _refreshRuns();
+    } else {
+      const msg = (res && (res.message || res.error)) || "Échec de l'annulation.";
+      showToast({ type: "error", text: msg });
+    }
+  } catch (err) {
+    showToast({ type: "error", text: `Erreur : ${err && err.message || err}` });
+  }
+}
+
+async function _doDeleteRun(runId) {
+  try {
+    const res = await apiPost("run/delete_run", { run_id: runId });
+    if (res && res.ok !== false) {
+      showToast({ type: "success", text: `Run ${runId} supprimé.` });
+      // Splice du tableau local sans refetch reseau.
+      _runs = _runs.filter((r) => r.run_id !== runId);
+      _historyStatsCache.delete(runId);
+      _filmsCacheByRun.delete(runId);
+      if (_selectedRunId === runId) {
+        _selectedRunId = _runs.length > 0 ? _runs[0].run_id : null;
+      }
+      const container = document.querySelector(".historique-view");
+      const root = container ? container.parentNode : document.querySelector("#view-qij") || document.querySelector("#view-historique");
+      if (root) _rerender(root);
+    } else {
+      const msg = (res && (res.message || res.error)) || "Échec de la suppression.";
+      showToast({ type: "error", text: msg });
+    }
+  } catch (err) {
+    showToast({ type: "error", text: `Erreur : ${err && err.message || err}` });
+  }
+}
+
+async function _refreshRuns() {
+  try {
+    const res = await apiPost("get_dashboard", { run_id: "latest" });
+    if (res && res.ok !== false) {
+      const data = res.data || res;
+      _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
+      _retentionDays = Number(data.history_retention_days || _retentionDays || 90);
+      const container = document.querySelector(".historique-view");
+      const root = container ? container.parentNode : null;
+      if (root) _rerender(root);
+    }
+  } catch { /* silencieux */ }
+}
+
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
   const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
   if (tabBtn) {
     _inspectorTab = tabBtn.dataset.historiqueInspectorTab;
     _updateInspector();
+    // Si la standalone page existe, refresh aussi.
+    _refreshStandaloneIfActive();
     return;
   }
   const target = ev.target.closest && ev.target.closest("[data-historique-action]");
@@ -571,7 +978,8 @@ function _onActionClick(ev) {
   const runId = target.dataset.runId;
   switch (action) {
     case "view-report":
-      // PR future : page standalone #run/<id>. Pour l'instant : detail dans l'inspecteur seul.
+      // Phase 5 : navigation vers la page standalone /run/:id.
+      if (runId) navigateTo(`/run/${encodeURIComponent(runId)}`);
       break;
     case "resume":
       if (runId) navigateTo(`/traitement#run-${encodeURIComponent(runId)}`);
@@ -583,14 +991,10 @@ function _onActionClick(ev) {
         items: [`Run ${runId}`],
         consequence:
           "Cela va restaurer les fichiers à leur emplacement initial. " +
-          "Réversible tant qu'un nouvel apply n'a pas eu lieu. " +
-          "[Endpoint backend à brancher en PR future]",
+          "Réversible tant qu'un nouvel apply n'a pas eu lieu.",
         countdownSeconds: 3,
         confirmLabel: "✗ Annuler l'apply",
-        onConfirm: () => {
-          // TODO: appeler apply/undo_apply(run_id)
-          alert(`Action enregistrée. Endpoint backend non encore branché.`);
-        },
+        onConfirm: () => _doUndoApply(runId),
       });
       break;
     case "delete-run":
@@ -599,20 +1003,97 @@ function _onActionClick(ev) {
         title: `Supprimer le run ${runId} de l'historique ?`,
         items: [`Run ${runId}`],
         consequence:
-          "Les fichiers vidéo ne seront pas touchés. Seul le log de ce run sera retiré. " +
-          "Les runs > 90 jours sont supprimés automatiquement. " +
-          "[Endpoint backend à brancher en PR future]",
+          "Le run + son plan + son log seront supprimés définitivement. " +
+          "Aucune modification sur les fichiers vidéo du disque. Action NON réversible.",
         countdownSeconds: 3,
         confirmLabel: "✗ Supprimer le run",
-        onConfirm: () => {
-          // TODO: appeler runs/delete_run(run_id)
-          alert(`Action enregistrée. Endpoint backend non encore branché.`);
-        },
+        onConfirm: () => _doDeleteRun(runId),
       });
+      break;
+    case "reload-log":
+      if (runId) {
+        _historyStatsCache.delete(runId);
+        _fetchAndUpdate(runId);
+      }
       break;
     default:
       break;
   }
+}
+
+/* --- Standalone page /run/:id (Phase 5) ------------------------------ */
+
+let _standaloneRunId = null;
+let _standaloneContainer = null;
+
+function _renderStandalone(runId) {
+  const cached = _historyStatsCache.get(runId);
+  const run = (cached && cached.run) || { run_id: runId };
+  const d = run.started_ts ? new Date(Number(run.started_ts) * 1000) : null;
+  const dateLabel = d ? d.toLocaleString("fr-FR") : "—";
+  const status = _deriveStatus(run);
+  const total = Number(run.total_rows || 0);
+  const applied = Number(run.applied_rows || 0);
+  const dur = _formatDuration(run.duration_s);
+  return `
+    <section class="historique-run-detail-page">
+      <header class="historique-run-detail-header">
+        <button type="button" class="v5-btn v5-btn--ghost" data-historique-back>← Retour à l'historique</button>
+        <h1 class="historique-run-detail-title">Run ${escapeHtml(runId)}</h1>
+        <div class="historique-run-detail-meta">
+          <span><strong>Date</strong> : ${escapeHtml(dateLabel)}</span>
+          <span><strong>Durée</strong> : ${escapeHtml(dur)}</span>
+          <span><strong>Statut</strong> : <span class="historique-run-status ${_statusClass(status)}">${escapeHtml(status)}</span></span>
+          <span><strong>Films</strong> : ${total}</span>
+          <span><strong>Appliqués</strong> : ${applied}</span>
+        </div>
+      </header>
+      <div class="historique-run-detail-tabs" role="tablist" aria-label="Détail du run (page complète)">
+        ${_INSPECTOR_TABS.map((t) => `
+          <button type="button" class="historique-inspector-tab${_inspectorTab === t.id ? " is-active" : ""}" data-historique-inspector-tab="${t.id}" role="tab" aria-selected="${_inspectorTab === t.id}">${t.icon} ${t.label}</button>
+        `).join("")}
+      </div>
+      <div class="historique-run-detail-content" data-historique-standalone-content>
+        ${_renderInspectorTabContent({ run_id: runId })}
+      </div>
+    </section>
+  `;
+}
+
+function _refreshStandaloneIfActive() {
+  if (!_standaloneRunId || !_standaloneContainer) return;
+  // Si le DOM standalone n'existe plus (navigation), on no-op.
+  if (!document.body.contains(_standaloneContainer)) return;
+  _standaloneContainer.innerHTML = _renderStandalone(_standaloneRunId);
+  _bindStandaloneEvents();
+}
+
+function _bindStandaloneEvents() {
+  if (!_standaloneContainer) return;
+  const back = _standaloneContainer.querySelector("[data-historique-back]");
+  if (back) back.addEventListener("click", () => navigateTo("/historique"));
+  // Tab clicks (delegues via _onActionClick deja attache au document).
+}
+
+export async function initRunDetailPage(container, opts) {
+  if (!container) return;
+  const params = (opts && opts.params) || {};
+  const runId = params.id;
+  _standaloneRunId = runId;
+  _standaloneContainer = container;
+  container.innerHTML = _renderStandalone(runId);
+  _bindStandaloneEvents();
+  // Charge le detail si pas en cache.
+  await _ensureHistoryStats(runId);
+  _refreshStandaloneIfActive();
+  // Attach action click delegation (idempotent grace au listener au boot).
+  document.addEventListener("click", _onActionClick);
+}
+
+export function unmountRunDetailPage() {
+  document.removeEventListener("click", _onActionClick);
+  _standaloneRunId = null;
+  _standaloneContainer = null;
 }
 
 /* --- Entrypoint ------------------------------------------------------- */
@@ -623,6 +1104,7 @@ export async function initHistorique(container) {
   _viewMode = _readString(STORAGE_KEY_VIEW, "timeline");
   _filterPeriod = _readString(STORAGE_KEY_PERIOD, "30d");
   if (!["timeline", "table"].includes(_viewMode)) _viewMode = "timeline";
+  _visibleCount = BATCH_SIZE;
 
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
@@ -644,13 +1126,17 @@ export async function initHistorique(container) {
 
   const data = res.data || res;
   _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
+  _retentionDays = Number(data.history_retention_days || 90);
   _selectedRunId = _runs.length > 0 ? _runs[0].run_id : null;
 
   _rerender(container);
+  // Charge le detail du run selectionne par defaut.
+  if (_selectedRunId) _fetchAndUpdate(_selectedRunId);
 }
 
 export function unmountHistorique() {
   document.removeEventListener("click", _onActionClick);
+  _detachScrollObserver();
   _runs = [];
   _selectedRunId = null;
 }

@@ -34,8 +34,10 @@ class InspectorTabsTests(unittest.TestCase):
     def test_doublons_tab_links_to_doublons(self) -> None:
         self.assertIn("#/doublons", self.js)
 
-    def test_log_tab_links_to_aide(self) -> None:
-        self.assertIn("#/aide", self.js)
+    def test_log_tab_has_viewer(self) -> None:
+        # Phase 5 : tab Log remplace par viewer monospace + bouton recharger.
+        # L'ancien lien #/aide n'est plus pertinent (logs lus directement dans la vue).
+        self.assertIn("historique-log-viewer", self.js)
 
 
 class DangerActionsTests(unittest.TestCase):
