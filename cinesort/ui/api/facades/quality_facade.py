@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from cinesort.ui.api import quality_audit_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -97,31 +96,6 @@ class QualityFacade(_BaseFacade):
         return self._api._simulate_quality_preset_impl(
             run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope
         )
-
-    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §2.9) ----------
-    # Alias quality/X(...) -> meme impl que settings/X(...). Spec 11 §7 cite
-    # `quality/get_profiles()`, l'orchestration reelle delegue vers profiles_support.
-
-    def get_profiles(self) -> Dict[str, Any]:
-        """Liste tous les profils qualite (presets + custom).
-
-        Cf CineSortApi._get_profiles_impl pour la doc complete.
-        """
-        return self._api._get_profiles_impl()
-
-    def save_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
-        """Sauve un profil qualite custom (avec validation tiers + poids).
-
-        Cf CineSortApi._save_profile_impl pour la doc complete.
-        """
-        return self._api._save_profile_impl(profile)
-
-    def set_active_profile(self, profile_id: str) -> Dict[str, Any]:
-        """Active un profil qualite (preset ou custom).
-
-        Cf CineSortApi._set_active_profile_impl pour la doc complete.
-        """
-        return self._api._set_active_profile_impl(profile_id)
 
     # ---------- Report & rules (5) ----------
 
@@ -227,9 +201,7 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._get_perceptual_compare_audio_impl(run_id, row_id_a, row_id_b, options)
 
-    def queue_perceptual_analyses(
-        self, pairs: Any, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def queue_perceptual_analyses(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Phase 4 doublons : queue batch d'analyses perceptuelles en background.
 
         Args:
@@ -275,32 +247,27 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._get_calibration_report_impl()
 
-    # ---------- Vue Qualite — Audit (spec 10) ----------
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §2.9) ----------
+    # Alias quality/X(...) -> meme impl que settings/X(...). Spec 11 §7 cite
+    # `quality/get_profiles()`, l'orchestration reelle delegue vers profiles_support.
 
-    def get_films_by_tier(self, tier: str, limit: int = 8) -> Dict[str, Any]:
-        """Liste les films d'un tier V2 (default top 8 pires Reject par score asc).
+    def get_profiles(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets + custom).
 
-        Cf cinesort.ui.api.quality_audit_support.get_films_by_tier.
+        Cf CineSortApi._get_profiles_impl pour la doc complete.
         """
-        return quality_audit_support.get_films_by_tier(self._api, tier=tier, limit=limit)
+        return self._api._get_profiles_impl()
 
-    def get_history(self, period_days: int = 30) -> Dict[str, Any]:
-        """KPIs evolution score V2 + deltas sur N derniers jours.
+    def save_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom (avec validation tiers + poids).
 
-        Cf cinesort.ui.api.quality_audit_support.get_history.
+        Cf CineSortApi._save_profile_impl pour la doc complete.
         """
-        return quality_audit_support.get_history(self._api, period_days=period_days)
+        return self._api._save_profile_impl(profile)
 
-    def recompute_all_scores(self) -> Dict[str, Any]:
-        """Lance le recalcul background du Score V2 pour tous les films.
+    def set_active_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom).
 
-        Cf cinesort.ui.api.quality_audit_support.recompute_all_scores.
+        Cf CineSortApi._set_active_profile_impl pour la doc complete.
         """
-        return quality_audit_support.recompute_all_scores(self._api)
-
-    def get_recompute_job_status(self, job_id: str) -> Dict[str, Any]:
-        """Polling du status d'un job de recalcul lance par recompute_all_scores.
-
-        Cf cinesort.ui.api.quality_audit_support.get_recompute_job_status.
-        """
-        return quality_audit_support.get_recompute_job_status(self._api, job_id=job_id)
+        return self._api._set_active_profile_impl(profile_id)
