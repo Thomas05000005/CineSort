@@ -151,15 +151,26 @@ function _renderRejectSection(stats) {
   `;
 }
 
-/* Section 3 — Sagas incomplètes */
-function _renderSagasSection() {
+/* Section 3 — Sagas incomplètes (lit librarian.suggestions[sagas]) */
+function _renderSagasSection(stats) {
+  const lsugs = stats && stats.librarian && stats.librarian.suggestions;
+  const sagaSug = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || "").includes("saga")) : null;
+  const count = sagaSug && sagaSug.count != null ? Number(sagaSug.count) : null;
   return `
     <section class="qualite-section qualite-sagas" aria-labelledby="qualite-sagas-title">
-      <h2 id="qualite-sagas-title" class="qualite-section-title">⚠️ Sagas incomplètes</h2>
-      <p class="qualite-placeholder">
-        Endpoint backend <code>library/get_incomplete_sagas()</code> à créer.
-        L'Accueil affiche déjà un compteur agrégé ("X sagas avec films manquants").
-      </p>
+      <h2 id="qualite-sagas-title" class="qualite-section-title">
+        ⚠️ Sagas incomplètes
+        ${count != null ? `<span class="qualite-section-meta">${count} saga${count > 1 ? "s" : ""}</span>` : ""}
+      </h2>
+      ${count != null && count > 0 ? `
+        <p>${escapeHtml(sagaSug.message || `${count} sagas ont des films manquants.`)}</p>
+        ${sagaSug.details ? `<p class="qualite-placeholder">${escapeHtml(sagaSug.details)}</p>` : ""}
+        <div class="qualite-actions">
+          <a href="#/bibliotheque?filter=sagas_incomplete" class="v5-btn v5-btn--secondary">→ Voir dans Bibliothèque</a>
+        </div>
+      ` : `
+        <p class="qualite-placeholder">Aucune saga incomplète détectée (ou stats non disponibles).</p>
+      `}
     </section>
   `;
 }
@@ -189,15 +200,39 @@ function _renderSubsSection(stats) {
   `;
 }
 
-/* Section 5 — Décennies (placeholder) */
-function _renderDecadesSection() {
+/* Section 5 — Décennies (lit stats.by_decade si dispo) */
+function _renderDecadesSection(stats) {
+  const byDecade = stats && (stats.by_decade || (stats.summary && stats.summary.by_decade));
+  if (!byDecade || typeof byDecade !== "object") {
+    return `
+      <section class="qualite-section qualite-decades" aria-labelledby="qualite-decades-title">
+        <h2 id="qualite-decades-title" class="qualite-section-title">📅 Décennies</h2>
+        <p class="qualite-placeholder">
+          Histogramme par décennie indisponible — l'agrégation backend
+          <code>by_decade</code> n'a pas encore été exposée dans <code>get_global_stats</code>.
+        </p>
+      </section>
+    `;
+  }
+  const entries = Object.entries(byDecade)
+    .filter(([d]) => d && d !== "unknown")
+    .sort(([a], [b]) => String(a).localeCompare(String(b)));
+  const maxN = entries.reduce((m, [, v]) => Math.max(m, Number(v) || 0), 0);
   return `
     <section class="qualite-section qualite-decades" aria-labelledby="qualite-decades-title">
       <h2 id="qualite-decades-title" class="qualite-section-title">📅 Décennies</h2>
-      <p class="qualite-placeholder">
-        Histogramme horizontal du nombre de films par décennie (1930s → 2020s) à venir.
-        Endpoint backend <code>library/get_films_by_decade()</code> à créer.
-      </p>
+      <div class="qualite-decades-list">
+        ${entries.map(([decade, n]) => {
+          const pct = maxN > 0 ? Math.round((Number(n) / maxN) * 100) : 0;
+          return `
+            <a href="#/bibliotheque?filter=decade_${escapeHtml(decade)}" class="qualite-decade-row">
+              <span class="qualite-decade-label">${escapeHtml(decade)}s</span>
+              <div class="qualite-decade-bar"><span class="qualite-decade-fill" style="width:${pct}%"></span></div>
+              <span class="qualite-decade-count">${escapeHtml(String(n))}</span>
+            </a>
+          `;
+        }).join("")}
+      </div>
     </section>
   `;
 }
@@ -236,9 +271,9 @@ function _renderQualite(stats) {
       ${_renderHeader(stats)}
       ${_renderDistributionSection(stats)}
       ${_renderRejectSection(stats)}
-      ${_renderSagasSection()}
+      ${_renderSagasSection(stats)}
       ${_renderSubsSection(stats)}
-      ${_renderDecadesSection()}
+      ${_renderDecadesSection(stats)}
       ${_renderEvolutionSection(stats)}
     </section>
   `;
