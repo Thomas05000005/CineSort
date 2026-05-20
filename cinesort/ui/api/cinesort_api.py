@@ -70,6 +70,7 @@ from cinesort.ui.api import (
     notifications_support,
     perceptual_support,
     probe_support,
+    profiles_support,
     quality_internal_support,
     quality_profile_support,
     quality_report_support,
@@ -88,6 +89,7 @@ from cinesort.ui.api.facades import (
     LibraryFacade,
     QualityFacade,
     RunFacade,
+    RuntimeFacade,
     SettingsFacade,
 )
 from cinesort.ui.api.quality_simulator_support import (
@@ -293,6 +295,8 @@ class CineSortApi:
         self.quality = QualityFacade(self)
         self.integrations = IntegrationsFacade(self)
         self.library = LibraryFacade(self)
+        # Spec 12-aide.md (Phase 4 — ecran Aide) : 4 endpoints diag/logs/docs.
+        self.runtime = RuntimeFacade(self)
 
     def _touch_event(self) -> None:
         """Met a jour le timestamp du dernier evenement significatif (scan, apply, settings)."""
@@ -1738,6 +1742,38 @@ class CineSortApi:
         """
         return perceptual_support.get_perceptual_compare_frames(self, run_id, row_id_a, row_id_b, options)
 
+    def _get_perceptual_compare_audio_impl(
+        self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : waveform PNG + clip MP3 cote-a-cote.
+
+        Cf spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md
+        section 3 "Comparaison audio".
+        """
+        return perceptual_support.get_perceptual_compare_audio(self, run_id, row_id_a, row_id_b, options)
+
+    def _queue_perceptual_analyses_impl(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Phase 4 doublons : queue d'analyses perceptuelles batch en background.
+
+        Cf spec section 1 "Analyser perceptuel sur N groupes". Retourne un
+        job_id pour polling via _get_perceptual_job_status_impl.
+        """
+        return perceptual_support.queue_perceptual_analyses(self, pairs, options)
+
+    def _get_perceptual_job_status_impl(self, job_id: str) -> Dict[str, Any]:
+        """Phase 4 doublons : statut d'un batch perceptuel queue."""
+        return perceptual_support.get_perceptual_job_status(self, job_id)
+
+    def _mark_duplicate_winner_impl(
+        self, run_id: str, group_key: str, winner_row_id: str, notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : persiste la decision utilisateur.
+
+        Cf spec section 3 "Workflow decision". Les loser_row_ids seront
+        deplaces vers <root>/_review/_duplicates_user_decided/ a l'apply.
+        """
+        return run_flow_support.mark_duplicate_winner(self, run_id, group_key, winner_row_id, notes)
+
     def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)
@@ -1826,9 +1862,47 @@ class CineSortApi:
     def _get_film_full_impl(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
         """v7.6.0 Vague 4 : toutes les infos d'un film pour la page standalone.
 
-        Consolide : PlanRow, probe, perceptual V2, history, poster TMDb.
+        Consolide : PlanRow, probe, perceptual V2, history, poster TMDb, runtime,
+        director, overview (spec 06 §3.1).
         """
         return film_support.get_film_full(self, run_id, row_id)
+
+    # ---------- Spec 06 Modal Film : 3 actions de modification ----------
+    def _set_film_tmdb_candidate_impl(
+        self,
+        run_id: Optional[str],
+        row_id: str,
+        tmdb_id: int,
+    ) -> Dict[str, Any]:
+        """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+        Recalcul confidence + nouveau renommage propose. Reversible tant que
+        l'apply n'est pas faite.
+        """
+        return library_support.set_film_tmdb_candidate(self, run_id, row_id, tmdb_id)
+
+    def _mark_for_deletion_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.7 : marque un film pour le bucket `_user_marked_for_deletion/`.
+
+        Reversible via undo (clear). Le deplacement effectif sera applique
+        au prochain apply.
+        """
+        return library_support.mark_for_deletion(self, run_id, row_id)
+
+    def _mark_alert_ignored_impl(self, row_id: str, alert_code: str) -> Dict[str, Any]:
+        """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+        L'alerte disparait visuellement pour ce film mais reste loggee en DB
+        pour les stats globales.
+        """
+        return library_support.mark_alert_ignored(self, row_id, alert_code)
+
+    def _rescan_row_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
+
+        Retourne le nouveau plan_row + scores quality/perceptual updated.
+        """
+        return run_flow_support.rescan_row(self, run_id, row_id)
 
     # ---------- film history ----------
     def _get_film_history_impl(self, film_id: str) -> Dict[str, Any]:
@@ -2268,6 +2342,19 @@ class CineSortApi:
         """Demande l'annulation d'un run en cours (pose cancel_requested=1)."""
         return history_support.cancel_run(self, run_id)
 
+    # ---------- Historique (spec 09) ----------
+    def _get_history_stats_impl(self, run_id: str) -> Dict[str, Any]:
+        """Detail complet d'un run pour l'inspecteur Historique (spec 09)."""
+        return history_support.get_history_stats(self, run_id)
+
+    def _delete_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Supprime un run de l'historique (DB seulement)."""
+        return history_support.delete_run(self, run_id)
+
+    def _cleanup_old_runs_impl(self, retention_days: int = 90) -> Dict[str, Any]:
+        """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
+        return history_support.cleanup_old_runs(self, retention_days=retention_days)
+
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
@@ -2278,6 +2365,32 @@ class CineSortApi:
         """V3-09 — Taille actuelle du user-data (pour affichage UI Danger Zone)."""
 
         return {"data": reset_support.get_user_data_size(self)}
+
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §5 + §2.9) ----------
+    def _reset_settings_impl(self, scope: str = "all") -> Dict[str, Any]:
+        """Reinitialise les settings par categorie (ou tout)."""
+
+        return reset_support.reset_settings(self, scope)
+
+    def _reset_database_impl(self) -> Dict[str, Any]:
+        """Wipe complet de la DB SQLite (avec backup automatique)."""
+
+        return reset_support.reset_database(self)
+
+    def _get_profiles_impl(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets predefinis + custom)."""
+
+        return profiles_support.get_profiles(self)
+
+    def _save_profile_impl(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom dans settings (avec validation)."""
+
+        return profiles_support.save_profile(self, profile)
+
+    def _set_active_profile_impl(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom)."""
+
+        return profiles_support.set_active_profile(self, profile_id)
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
@@ -2335,3 +2448,30 @@ class CineSortApi:
             return _err_response(
                 str(exc), category="runtime", level="error", log_module=__name__, key="error", log_dir=log_dir
             )
+
+    # ---------- Spec 12-aide.md (Phase 4 — ecran Aide) ----------
+    # 4 endpoints exposes via la facade api.runtime.X(). Les methodes _impl
+    # delegent au module runtime_support pour garder cinesort_api.py mince.
+
+    def _get_diagnostic_impl(self) -> Dict[str, Any]:
+        """Retourne le diagnostic complet pour le bouton "Copier diagnostic".
+
+        Cf docs/internal/design/refonte_2026_05_17/screens/12-aide.md section 4.
+        """
+        return runtime_support.get_diagnostic(self)
+
+    def _get_recent_logs_impl(self, limit: int = 100) -> Dict[str, Any]:
+        """Lit les N dernieres lignes du log courant (cap a 1000)."""
+        return runtime_support.get_recent_logs(self, limit)
+
+    def _get_doc_impl(self, file: str) -> Dict[str, Any]:
+        """Retourne le contenu markdown brut d'un document whiteliste.
+
+        Securite : refuse tout chemin contenant `..` ou doc_id inconnu
+        (category="validation").
+        """
+        return runtime_support.get_doc(self, file)
+
+    def _search_docs_impl(self, query: str) -> Dict[str, Any]:
+        """Recherche full-text dans tous les documents whitelistes."""
+        return runtime_support.search_docs(self, query)

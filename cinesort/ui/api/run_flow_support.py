@@ -906,6 +906,196 @@ def _enrich_groups_with_quality_comparison(
         _enrich_one_group(group, run_id, store)
 
 
+def _compute_size_savings_total(data: Dict[str, Any]) -> int:
+    """Agrege sum(group.comparison.size_savings) sur tous les groupes.
+
+    Cf spec 01-doublons.md section 1 "Compteur Y Go recuperables".
+    Tolere groupes sans `comparison` (probes indisponibles).
+    """
+    total = 0
+    for g in data.get("groups") or []:
+        comp = g.get("comparison") if isinstance(g, dict) else None
+        if not isinstance(comp, dict):
+            continue
+        try:
+            total += int(comp.get("size_savings") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _group_key_for(group: Dict[str, Any]) -> str:
+    """Cle stable pour identifier un groupe de doublons.
+
+    Si le groupe expose deja une `group_key` / `id` / `signature`, on l'utilise.
+    Sinon on fallback sur title|year (cf spec section 1).
+    """
+    for key in ("group_key", "id", "signature"):
+        val = group.get(key)
+        if val:
+            return str(val)
+    title = str(group.get("title") or "").strip().lower()
+    year = group.get("year") or group.get("proposed_year") or ""
+    return f"{title}|{year}".strip("|")
+
+
+def mark_duplicate_winner(
+    api: Any,
+    run_id: str,
+    group_key: str,
+    winner_row_id: str,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persiste la decision utilisateur "garder ce winner" pour un groupe.
+
+    Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md §3 :
+      - Le winner est designe par son row_id (visible dans `check_duplicates`).
+      - Les autres rows du groupe deviennent "losers". A l'apply,
+        ils seront deplaces vers `<root>/_review/_duplicates_user_decided/`.
+      - Persistance via ApplyRepository.upsert_duplicate_decision (PK = run+group).
+
+    Retour : `{ok, group_key, winner_row_id, losers}` (cf signature dans le prompt).
+    """
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not group_key or not str(group_key).strip():
+        return _err_response("group_key requis.", category="validation", level="info", log_module=__name__)
+    if not winner_row_id or not str(winner_row_id).strip():
+        return _err_response("winner_row_id requis.", category="validation", level="info", log_module=__name__)
+
+    found = api._find_run_row(str(run_id))
+    if not found:
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+    _run_row, store = found
+
+    # Recharge le groupe pour deduire les losers a partir du run (source de verite).
+    losers: List[str] = []
+    try:
+        check_resp = check_duplicates(api, str(run_id), {})
+        if isinstance(check_resp, dict) and check_resp.get("ok"):
+            for g in check_resp.get("groups") or []:
+                if _group_key_for(g) != str(group_key):
+                    continue
+                row_ids = [str(r.get("row_id") or "") for r in (g.get("rows") or []) if isinstance(r, dict)]
+                losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
+                break
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        _logger.warning("mark_duplicate_winner: recharge groupes a echoue (%s) — losers vide", exc)
+
+    try:
+        decision = store.apply.upsert_duplicate_decision(
+            run_id=str(run_id),
+            group_key=str(group_key),
+            winner_row_id=str(winner_row_id),
+            loser_row_ids=losers,
+            notes=notes,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance decision impossible : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "group_key": str(decision.get("group_key", group_key)),
+        "winner_row_id": str(decision.get("winner_row_id", winner_row_id)),
+        "losers": list(decision.get("loser_row_ids") or []),
+        "decided_ts": float(decision.get("decided_ts") or 0.0),
+    }
+
+
+@requires_valid_run_id
+def rescan_row(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
+    """Spec 06 §3.6 : relance probe + analyse perceptuelle pour un seul row.
+
+    Comportement pragmatique :
+      - Invalide les caches probe / quality_report / perceptual_report pour la
+        ligne.
+      - Reappelle `quality/get_quality_report` qui re-execute le probe et le
+        scoring.
+      - Reappelle `perceptual/get_perceptual_report` qui relance l'analyse V2.
+      - Retourne le plan_row courant + les nouveaux scores (quality.score + V2).
+
+    Note : le match TMDb n'est PAS re-execute (le plan complet n'est pas
+    rejoue ici — trop couteux pour 1 row). Les `candidates` existants restent
+    valides. Pour reforcer un match TMDb, l'utilisateur doit relancer le run
+    complet ou utiliser `set_film_tmdb_candidate` pour choisir manuellement.
+    """
+    rid_s = str(row_id or "").strip()
+    if not rid_s:
+        return _err_response("row_id manquant.", category="validation", level="info", log_module=__name__)
+
+    found = api._find_run_row(run_id)
+    if not found:
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+    _, store = found
+
+    # 1. Invalider les caches pour cette ligne
+    try:
+        with store._managed_conn() as conn:
+            conn.execute(
+                "DELETE FROM quality_reports WHERE run_id=? AND row_id=?",
+                (str(run_id), rid_s),
+            )
+            conn.execute(
+                "DELETE FROM perceptual_reports WHERE run_id=? AND row_id=?",
+                (str(run_id), rid_s),
+            )
+    except (OSError, KeyError, TypeError, ValueError, AttributeError) as exc:
+        _logger.warning("rescan_row: cache invalidation failed (%s)", exc)
+
+    # 2. Re-execute la pipeline quality (probe + score)
+    new_quality: Dict[str, Any] = {}
+    try:
+        from cinesort.ui.api import quality_report_support
+
+        qres = quality_report_support.get_quality_report(api, str(run_id), rid_s, options={"reuse_existing": False})
+        if isinstance(qres, dict) and qres.get("ok"):
+            new_quality = {
+                "score": int(qres.get("score") or 0),
+                "tier": str(qres.get("tier") or ""),
+            }
+    except (ImportError, OSError, KeyError, TypeError, ValueError) as exc:
+        _logger.warning("rescan_row: get_quality_report failed (%s)", exc)
+
+    # 3. Re-execute la pipeline perceptuelle V2
+    new_perceptual: Dict[str, Any] = {}
+    try:
+        from cinesort.ui.api import perceptual_support
+
+        pres = perceptual_support.get_perceptual_report(api, str(run_id), rid_s)
+        if isinstance(pres, dict) and pres.get("ok"):
+            payload = pres.get("perceptual") if isinstance(pres.get("perceptual"), dict) else {}
+            gv2 = payload.get("global_score_v2") or payload.get("global_score") or 0
+            new_perceptual = {
+                "global_score_v2": float(gv2 or 0),
+                "global_tier_v2": str(payload.get("global_tier_v2") or payload.get("global_tier") or ""),
+            }
+    except (ImportError, OSError, KeyError, TypeError, ValueError) as exc:
+        _logger.warning("rescan_row: get_perceptual_report failed (%s)", exc)
+
+    # 4. Recharger la plan_row a jour
+    plan = api.run.get_plan(str(run_id))
+    plan_row: Optional[Dict[str, Any]] = None
+    if plan and plan.get("ok"):
+        for r in plan.get("rows") or []:
+            if str(r.get("row_id") or "") == rid_s:
+                plan_row = r
+                break
+
+    return {
+        "ok": True,
+        "run_id": str(run_id),
+        "row_id": rid_s,
+        "plan_row": plan_row,
+        "quality": new_quality,
+        "perceptual": new_perceptual,
+    }
+
+
 @requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
@@ -923,6 +1113,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             safe = api._normalize_decisions_for_rows(rows, decisions)
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
+            data["size_savings_total"] = _compute_size_savings_total(data)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
@@ -945,6 +1136,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         cfg = api._cfg_from_run_row(row)
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
+        data["size_savings_total"] = _compute_size_savings_total(data)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)

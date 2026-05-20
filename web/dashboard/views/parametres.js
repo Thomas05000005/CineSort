@@ -26,6 +26,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
 import { renderOmdbStatusInto } from "../components/omdb-status.js";
+import { dangerConfirmModal } from "../components/modal.js";
 
 /* --- Categories (spec §2) --------------------------------------------- */
 
@@ -388,12 +389,26 @@ function _bindEvents(container) {
     });
   }
 
-  // Reset action (placeholder, redirige vers l'ancienne vue qui gere la modale)
+  // Reset action — P0 #233 : utilise dangerConfirmModal (sans redirection legacy).
+  // L'endpoint settings/reset_all_user_data exige confirmation: "RESET" cote serveur,
+  // donc on ne l'appelle PAS automatiquement depuis cette modale ; on redirige vers
+  // /settings pour la double saisie textuelle. Mais on demande deja une confirmation
+  // explicite ici avec compteur anti-clic-reflexe.
   const resetBtn = container.querySelector("[data-parametres-action='reset']");
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
-      // PR future : implementera une vraie modale danger avec liste + countdown.
-      navigateTo("/settings");
+      dangerConfirmModal({
+        title: "Réinitialiser tous les paramètres utilisateur ?",
+        items: ["Préférences globales", "Profils qualité", "Historique runs", "Cache TMDb"],
+        consequence:
+          "Cette action est irréversible (un backup .json est cependant créé automatiquement). " +
+          "Vous serez redirigé vers la page Settings pour confirmer en tapant « RESET ».",
+        countdownSeconds: 3,
+        confirmLabel: "↺ Continuer vers Settings",
+        onConfirm: () => {
+          navigateTo("/settings");
+        },
+      });
     });
   }
 

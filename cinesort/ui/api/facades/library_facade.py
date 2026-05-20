@@ -25,7 +25,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from cinesort.ui.api import library_podiums_support, library_timeline_support
+from cinesort.ui.api import library_actions_support, library_podiums_support, library_support, library_timeline_support
+from cinesort.ui.api import library_audit_support, library_podiums_support, library_timeline_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -92,6 +93,34 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._get_scoring_rollup_impl(by=by, limit=limit, run_id=run_id)
 
+    # ---------- Spec 06 Modal Film : 3 actions de modification ----------
+
+    def set_film_tmdb_candidate(
+        self,
+        run_id: Optional[str],
+        row_id: str,
+        tmdb_id: int,
+    ) -> Dict[str, Any]:
+        """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+        Cf CineSortApi._set_film_tmdb_candidate_impl pour la doc complete.
+        """
+        return self._api._set_film_tmdb_candidate_impl(run_id, row_id, tmdb_id)
+
+    def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
+
+        Cf CineSortApi._mark_for_deletion_impl pour la doc complete.
+        """
+        return self._api._mark_for_deletion_impl(run_id, row_id)
+
+    def mark_alert_ignored(self, row_id: str, alert_code: str) -> Dict[str, Any]:
+        """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+        Cf CineSortApi._mark_alert_ignored_impl pour la doc complete.
+        """
+        return self._api._mark_alert_ignored_impl(row_id, alert_code)
+
     # ---------- Film standalone + history (3) ----------
 
     def get_film_full(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
@@ -139,3 +168,61 @@ class LibraryFacade(_BaseFacade):
         Cf cinesort.ui.api.library_timeline_support.get_library_timeline.
         """
         return library_timeline_support.get_library_timeline(self._api, months=months, run_id=run_id)
+
+    # ---------- Phase 4 spec 07 Bibliotheque : counters + bulk actions + export ----------
+
+    def get_library_counters_by_chip(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : compteurs par chip (tier x6, problemes x3, structurels x2).
+
+        Cf cinesort.ui.api.library_support.get_library_counters_by_chip.
+        """
+        return library_support.get_library_counters_by_chip(self._api, filters=filters, run_id=run_id)
+
+    def mark_for_deletion(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """Phase 4 spec 06 : marque un film pour deplacement vers `_user_marked_for_deletion/`.
+
+        Cf cinesort.ui.api.library_actions_support.mark_for_deletion.
+        """
+        return library_actions_support.mark_for_deletion(self._api, row_id, run_id=run_id)
+
+    def mark_for_deletion_bulk(
+        self,
+        row_ids: list,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : version bulk de mark_for_deletion.
+
+        Cf cinesort.ui.api.library_actions_support.mark_for_deletion_bulk.
+        """
+        return library_actions_support.mark_for_deletion_bulk(self._api, row_ids, run_id=run_id)
+
+    def export_films(
+        self,
+        row_ids: list,
+        format: str = "csv",  # noqa: A002 — nom impose par la spec d'endpoint
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : export CSV/JSON des films selectionnes.
+
+        Cf cinesort.ui.api.library_actions_support.export_films.
+        """
+        return library_actions_support.export_films(self._api, row_ids, fmt=format, run_id=run_id)
+    # ---------- Vue Qualite — Audit (spec 10) ----------
+
+    def get_films_by_decade(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Distribution des films par decennie (1930s -> 2020s).
+
+        Cf cinesort.ui.api.library_audit_support.get_films_by_decade.
+        """
+        return library_audit_support.get_films_by_decade(self._api, filters=filters)
+
+    def get_incomplete_sagas(self) -> Dict[str, Any]:
+        """Liste les sagas TMDb avec films manquants dans la bibliotheque.
+
+        Cf cinesort.ui.api.library_audit_support.get_incomplete_sagas.
+        """
+        return library_audit_support.get_incomplete_sagas(self._api)
