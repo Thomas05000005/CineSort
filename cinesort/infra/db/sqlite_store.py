@@ -38,6 +38,7 @@ REQUIRED_SCHEMA_TABLES = (
     "incremental_file_hashes",
     "incremental_scan_cache",
     "perceptual_reports",
+    "duplicate_decisions",
 )
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
@@ -59,6 +60,8 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
         "film_marked_for_deletion",
         "film_tmdb_overrides",
     ),
+    # Phase 4 doublons (migration 024, spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md).
+    "duplicate_decisions": ("duplicate_decisions",),
 }
 
 

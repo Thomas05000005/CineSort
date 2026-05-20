@@ -906,6 +906,115 @@ def _enrich_groups_with_quality_comparison(
         _enrich_one_group(group, run_id, store)
 
 
+def _compute_size_savings_total(data: Dict[str, Any]) -> int:
+    """Agrege sum(group.comparison.size_savings) sur tous les groupes.
+
+    Cf spec 01-doublons.md section 1 "Compteur Y Go recuperables".
+    Tolere groupes sans `comparison` (probes indisponibles).
+    """
+    total = 0
+    for g in data.get("groups") or []:
+        comp = g.get("comparison") if isinstance(g, dict) else None
+        if not isinstance(comp, dict):
+            continue
+        try:
+            total += int(comp.get("size_savings") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _group_key_for(group: Dict[str, Any]) -> str:
+    """Cle stable pour identifier un groupe de doublons.
+
+    Si le groupe expose deja une `group_key` / `id` / `signature`, on l'utilise.
+    Sinon on fallback sur title|year (cf spec section 1).
+    """
+    for key in ("group_key", "id", "signature"):
+        val = group.get(key)
+        if val:
+            return str(val)
+    title = str(group.get("title") or "").strip().lower()
+    year = group.get("year") or group.get("proposed_year") or ""
+    return f"{title}|{year}".strip("|")
+
+
+def mark_duplicate_winner(
+    api: Any,
+    run_id: str,
+    group_key: str,
+    winner_row_id: str,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persiste la decision utilisateur "garder ce winner" pour un groupe.
+
+    Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md §3 :
+      - Le winner est designe par son row_id (visible dans `check_duplicates`).
+      - Les autres rows du groupe deviennent "losers". A l'apply,
+        ils seront deplaces vers `<root>/_review/_duplicates_user_decided/`.
+      - Persistance via ApplyRepository.upsert_duplicate_decision (PK = run+group).
+
+    Retour : `{ok, group_key, winner_row_id, losers}` (cf signature dans le prompt).
+    """
+    if not run_id or not str(run_id).strip():
+        return _err_response(
+            "run_id requis.", category="validation", level="info", log_module=__name__
+        )
+    if not group_key or not str(group_key).strip():
+        return _err_response(
+            "group_key requis.", category="validation", level="info", log_module=__name__
+        )
+    if not winner_row_id or not str(winner_row_id).strip():
+        return _err_response(
+            "winner_row_id requis.", category="validation", level="info", log_module=__name__
+        )
+
+    found = api._find_run_row(str(run_id))
+    if not found:
+        return _err_response(
+            t("errors.run_not_found"), category="resource", level="info", log_module=__name__
+        )
+    _run_row, store = found
+
+    # Recharge le groupe pour deduire les losers a partir du run (source de verite).
+    losers: List[str] = []
+    try:
+        check_resp = check_duplicates(api, str(run_id), {})
+        if isinstance(check_resp, dict) and check_resp.get("ok"):
+            for g in check_resp.get("groups") or []:
+                if _group_key_for(g) != str(group_key):
+                    continue
+                row_ids = [str(r.get("row_id") or "") for r in (g.get("rows") or []) if isinstance(r, dict)]
+                losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
+                break
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        _logger.warning("mark_duplicate_winner: recharge groupes a echoue (%s) — losers vide", exc)
+
+    try:
+        decision = store.apply.upsert_duplicate_decision(
+            run_id=str(run_id),
+            group_key=str(group_key),
+            winner_row_id=str(winner_row_id),
+            loser_row_ids=losers,
+            notes=notes,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance decision impossible : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "group_key": str(decision.get("group_key", group_key)),
+        "winner_row_id": str(decision.get("winner_row_id", winner_row_id)),
+        "losers": list(decision.get("loser_row_ids") or []),
+        "decided_ts": float(decision.get("decided_ts") or 0.0),
+    }
+
+
 @requires_valid_run_id
 def rescan_row(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
     """Spec 06 §3.6 : relance probe + analyse perceptuelle pour un seul row.
@@ -1012,6 +1121,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             safe = api._normalize_decisions_for_rows(rows, decisions)
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
+            data["size_savings_total"] = _compute_size_savings_total(data)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
@@ -1034,6 +1144,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         cfg = api._cfg_from_run_row(row)
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
+        data["size_savings_total"] = _compute_size_savings_total(data)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
