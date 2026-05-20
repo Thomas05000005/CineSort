@@ -469,8 +469,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("[boot] initI18n", e);
   }
 
-  // Si on est authentifie, monter le shell v5 + initialiser les features
-  if (hasToken()) {
+  // Si on est authentifie OU en mode natif desktop, monter le shell v5.
+  // Le mode natif n'a pas besoin de token UI : le bridge pywebview garantit
+  // l'origine et le serveur REST accepte le ntoken via URL/Bearer header.
+  // Sans ce mount en natif, l'utilisateur voit une fenetre noire (sidebar
+  // et top-bar pas instancies) si setToken a fail silencieusement au boot.
+  if (hasToken() || isNative) {
     // V6-01-fix : synchroniser la locale depuis le setting backend si different
     try {
       const sres = await cachedGetSettings();
