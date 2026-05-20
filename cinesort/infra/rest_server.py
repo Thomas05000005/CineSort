@@ -533,7 +533,9 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         # F2 : Content-Security-Policy sur les reponses HTML du dashboard pour mitiger
         # tout innerHTML non echappe. Les API /api/* continuent d'emettre du JSON pur.
         #
@@ -606,7 +608,9 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self._send_cors_headers()
         self._send_request_id_header()
         self.end_headers()
@@ -632,7 +636,9 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self._send_cors_headers()
         self._send_request_id_header()
         self.end_headers()
