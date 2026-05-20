@@ -17,6 +17,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { dangerConfirmModal } from "../components/modal.js";
 
 const PAGE_SIZE = 60;
 const LS_VIEW = "cinesort.bibliotheque.view";
@@ -503,24 +504,26 @@ function _handleBulkAction(action) {
 }
 
 function _confirmBulkDelete(n) {
-  const titles = Array.from(_state.selected)
-    .slice(0, 5)
-    .map((id) => {
-      const r = _state.rows.find((row) => String(row.row_id) === String(id));
-      return r ? `${r.title}${r.year ? ` (${r.year})` : ""}` : id;
-    });
-  const more = n > 5 ? `\n… et ${n - 5} autre${n - 5 > 1 ? "s" : ""}` : "";
-  const msg = `Vraiment marquer ${n} film${n > 1 ? "s" : ""} pour suppression ?\n\n` +
-    `${titles.join("\n")}${more}\n\n` +
-    `Ils seront déplacés vers _user_marked_for_deletion/ au prochain apply (réversible via Undo).\n\n` +
-    `[Endpoint mark_for_deletion_bulk à brancher en itération ultérieure.]`;
-  if (n > 50) {
-    alert(`Sélection > 50 films — délai 3s avant confirmation (à implémenter via modale dédiée).\n\n${msg}`);
-    return;
-  }
-  if (confirm(msg)) {
-    alert(`Marquage de ${n} films à brancher quand library/mark_for_deletion_bulk sera dispo.`);
-  }
+  // P0 #233 : dangerConfirmModal (au lieu de window.confirm legacy + alert > 50).
+  // La modale gere elle-meme : items 5 max visibles + "et N autres", countdown
+  // anti-clic-reflexe 3s si bulk > 50.
+  const selectedIds = Array.from(_state.selected);
+  const items = selectedIds.map((id) => {
+    const r = _state.rows.find((row) => String(row.row_id) === String(id));
+    return r ? `${r.title}${r.year ? ` (${r.year})` : ""}` : String(id);
+  });
+  dangerConfirmModal({
+    title: `Confirmer la suppression de ${n} film${n > 1 ? "s" : ""} ?`,
+    items,
+    consequence:
+      `Ils seront déplacés vers _user_marked_for_deletion/ au prochain apply (réversible via Undo). ` +
+      `[Endpoint mark_for_deletion_bulk à brancher en itération ultérieure.]`,
+    countdownSeconds: n > 50 ? 3 : 0,
+    confirmLabel: "✗ Confirmer la suppression",
+    onConfirm: () => {
+      alert(`Marquage de ${n} films à brancher quand library/mark_for_deletion_bulk sera dispo.`);
+    },
+  });
 }
 
 /* --- Entrypoint --- */

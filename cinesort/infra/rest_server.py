@@ -70,6 +70,26 @@ _FACADE_ATTR_NAMES: tuple = ("run", "settings", "quality", "integrations", "libr
 # Separateur dans l'URL pour distinguer facade et methode (ex: "run/start_plan").
 _FACADE_SEPARATOR = "/"
 
+
+# P0 #233 : kill switch pour Pass 1 (methodes directes "/api/<method>" sans
+# facade). Quand activee (env var CINESORT_REST_LEGACY_PASS1_DISABLED=1), Pass 1
+# n'enregistre plus les methodes directes dans le dispatcher, et toute requete
+# POST /api/<method> non prefixee par une facade reconnue renvoie 410 Gone avec
+# le message "Use /api/<facade>/<method> instead".
+#
+# Defaut : Pass 1 reste active. Le dashboard utilise encore massivement le
+# format legacy ("get_dashboard", "apply", "get_global_stats", ...), une
+# migration cote JS est requise avant de supprimer Pass 1 pour de bon. Le kill
+# switch permet de tester la voie de transition et de detecter les appels
+# residuels en production sans casser les clients existants par defaut.
+def _legacy_pass1_disabled() -> bool:
+    """Vrai si Pass 1 (legacy direct methods) doit etre desactivee.
+
+    Lue via env var CINESORT_REST_LEGACY_PASS1_DISABLED (1/true/yes/on).
+    """
+    val = os.environ.get("CINESORT_REST_LEGACY_PASS1_DISABLED", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
 # Maximum request body size (16 MB).
 _MAX_BODY_SIZE = 16 * 1024 * 1024
 
@@ -178,17 +198,20 @@ def _get_api_methods(api: Any) -> Dict[str, Any]:
     methods: Dict[str, Any] = {}
 
     # Pass 1 : methodes directes sur l'API (comportement legacy).
-    for name in dir(api):
-        if name.startswith("_"):
-            continue
-        if name in _EXCLUDED_METHODS:
-            continue
-        if name in _FACADE_ATTR_NAMES:
-            # La facade elle-meme n'est pas un endpoint ; on walk dans la pass 2.
-            continue
-        attr = getattr(api, name, None)
-        if callable(attr):
-            methods[name] = attr
+    # P0 #233 : kill switch CINESORT_REST_LEGACY_PASS1_DISABLED=1 => Pass 1
+    # n'enregistre rien. Le dispatcher renverra alors 410 Gone (cf RestRequestHandler).
+    if not _legacy_pass1_disabled():
+        for name in dir(api):
+            if name.startswith("_"):
+                continue
+            if name in _EXCLUDED_METHODS:
+                continue
+            if name in _FACADE_ATTR_NAMES:
+                # La facade elle-meme n'est pas un endpoint ; on walk dans la pass 2.
+                continue
+            attr = getattr(api, name, None)
+            if callable(attr):
+                methods[name] = attr
 
     # Pass 2 : methodes exposees par les facades (route "/api/{facade}/{method}").
     for facade_name in _FACADE_ATTR_NAMES:
@@ -779,6 +802,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         method_name = path[5:]  # strip "/api/"
         method = self.api_methods.get(method_name)
         if not method:
+            # P0 #233 : si Pass 1 desactivee + appel legacy direct (pas de "/"
+            # dans method_name = pas de prefixe facade), renvoyer 410 Gone avec
+            # un message guidant vers le nouveau format.
+            if (
+                _legacy_pass1_disabled()
+                and method_name
+                and _FACADE_SEPARATOR not in method_name
+                and method_name.split(_FACADE_SEPARATOR, 1)[0] not in _FACADE_ATTR_NAMES
+            ):
+                self._respond_json(
+                    410,
+                    {
+                        "ok": False,
+                        "message": "Use /api/<facade>/<method> instead",
+                    },
+                )
+                logger.warning("REST POST legacy method 410 Gone: %s", method_name)
+                return
             # M9 : ne pas refleter method_name dans la reponse
             self._respond_json(404, {"ok": False, "message": "Methode inconnue"})
             logger.warning("REST POST method inconnue: %s", method_name)

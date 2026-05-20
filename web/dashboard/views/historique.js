@@ -26,6 +26,7 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
+import { dangerConfirmModal } from "../components/modal.js";
 
 /* --- Format dates ----------------------------------------------------- */
 
@@ -576,18 +577,38 @@ function _onActionClick(ev) {
       if (runId) navigateTo(`/traitement#run-${encodeURIComponent(runId)}`);
       break;
     case "undo-apply":
-      // Action dangereuse — modale de confirmation (cf feedback-cinesort-actions-dangereuses).
-      if (window.confirm(`Annuler l'apply du run ${runId} ?\n\nCela va restaurer les fichiers à leur emplacement initial.\nRéversible tant qu'un nouvel apply n'a pas eu lieu.\n\n[Endpoint backend à brancher en PR future]`)) {
-        // TODO: appeler apply/undo_apply(run_id)
-        alert(`Action enregistrée. Endpoint backend non encore branché.`);
-      }
+      // Action dangereuse — dangerConfirmModal (P0 #233, cf feedback-cinesort-actions-dangereuses).
+      dangerConfirmModal({
+        title: `Annuler l'apply du run ${runId} ?`,
+        items: [`Run ${runId}`],
+        consequence:
+          "Cela va restaurer les fichiers à leur emplacement initial. " +
+          "Réversible tant qu'un nouvel apply n'a pas eu lieu. " +
+          "[Endpoint backend à brancher en PR future]",
+        countdownSeconds: 3,
+        confirmLabel: "✗ Annuler l'apply",
+        onConfirm: () => {
+          // TODO: appeler apply/undo_apply(run_id)
+          alert(`Action enregistrée. Endpoint backend non encore branché.`);
+        },
+      });
       break;
     case "delete-run":
-      // Action dangereuse — modale + retention 90j auto (spec 09 §5).
-      if (window.confirm(`Supprimer le run ${runId} de l'historique ?\n\nLes fichiers vidéo ne seront pas touchés.\nSeul le log de ce run sera retiré.\n\nLes runs > 90 jours sont supprimés automatiquement.\n\n[Endpoint backend à brancher en PR future]`)) {
-        // TODO: appeler runs/delete_run(run_id)
-        alert(`Action enregistrée. Endpoint backend non encore branché.`);
-      }
+      // Action dangereuse — dangerConfirmModal + retention 90j auto (spec 09 §5).
+      dangerConfirmModal({
+        title: `Supprimer le run ${runId} de l'historique ?`,
+        items: [`Run ${runId}`],
+        consequence:
+          "Les fichiers vidéo ne seront pas touchés. Seul le log de ce run sera retiré. " +
+          "Les runs > 90 jours sont supprimés automatiquement. " +
+          "[Endpoint backend à brancher en PR future]",
+        countdownSeconds: 3,
+        confirmLabel: "✗ Supprimer le run",
+        onConfirm: () => {
+          // TODO: appeler runs/delete_run(run_id)
+          alert(`Action enregistrée. Endpoint backend non encore branché.`);
+        },
+      });
       break;
     default:
       break;

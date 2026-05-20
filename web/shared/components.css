@@ -5382,3 +5382,92 @@ body.v5-notif-lock {
   border-radius: 0 0 var(--radius-sm) 0;
 }
 .skip-link:focus { top: 0; outline: 2px solid #000; }
+
+/* ============================================================
+ * dangerConfirmModal — modale de confirmation pour actions dangereuses
+ * (P0 #233, cf web/dashboard/components/modal.js dangerConfirmModal()).
+ *
+ * Differente de .modal-overlay (legacy showModal) : ARIA alertdialog,
+ * focus initial sur Annuler, bouton primary en variant --danger,
+ * compteur anti-clic-reflexe optionnel.
+ * =========================================================== */
+.danger-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: fade-in 120ms ease-out;
+}
+
+.danger-modal {
+  width: 100%;
+  max-width: 540px;
+  max-height: calc(100vh - var(--sp-8));
+  overflow-y: auto;
+  padding: var(--sp-5);
+  background: var(--bg-1, #1a1a1a);
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  color: var(--text-1, #fff);
+}
+
+.danger-modal-title {
+  margin: 0 0 var(--sp-3) 0;
+  font-size: var(--fs-lg, 1.125rem);
+  font-weight: var(--fw-semibold, 600);
+  color: var(--danger, #e25555);
+}
+
+.danger-modal-items {
+  margin: 0 0 var(--sp-3) 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-sm, 0.9rem);
+  color: var(--text-2, #ccc);
+  list-style: disc;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.danger-modal-items li {
+  margin-bottom: var(--sp-1);
+  word-break: break-word;
+}
+
+.danger-modal-items-more {
+  list-style: none;
+  margin-left: calc(-1 * var(--sp-4));
+  padding-left: 0;
+  font-style: italic;
+  color: var(--text-3, #999);
+}
+
+.danger-modal-consequence {
+  margin: 0 0 var(--sp-4) 0;
+  padding: var(--sp-3);
+  background: rgba(226, 85, 85, 0.08);
+  border-left: 3px solid var(--danger, #e25555);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--fs-sm, 0.9rem);
+  line-height: 1.5;
+  color: var(--text-2, #ddd);
+}
+
+.danger-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.danger-modal-confirm-countdown {
+  margin-left: var(--sp-1);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
