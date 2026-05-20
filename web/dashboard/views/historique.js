@@ -391,13 +391,7 @@ function _buildInspectorSections(selectedRun) {
         </dl>
       `,
     },
-    {
-      title: "Onglets de détail",
-      html: `
-        <p class="historique-empty-msg">Onglets Films / Apply / Doublons / Log à implémenter en PR future
-        (spec 09 §3 — nécessite endpoint <code>get_history_stats(run_id)</code> backend).</p>
-      `,
-    },
+    _buildInspectorTabSection(selectedRun),
     {
       title: "Actions",
       html: `
@@ -410,6 +404,79 @@ function _buildInspectorSections(selectedRun) {
       `,
     },
   ];
+}
+
+let _inspectorTab = "films"; // films | apply | doublons | log
+
+const _INSPECTOR_TABS = [
+  { id: "films", label: "Films", icon: "🎬" },
+  { id: "apply", label: "Apply", icon: "✓" },
+  { id: "doublons", label: "Doublons", icon: "🔁" },
+  { id: "log", label: "Log", icon: "📜" },
+];
+
+function _renderInspectorTabs() {
+  return `
+    <div class="historique-inspector-tabs" role="tablist" aria-label="Détail du run">
+      ${_INSPECTOR_TABS.map((t) => `
+        <button type="button"
+                class="historique-inspector-tab${_inspectorTab === t.id ? " is-active" : ""}"
+                data-historique-inspector-tab="${t.id}"
+                role="tab"
+                aria-selected="${_inspectorTab === t.id}">
+          ${t.icon} ${t.label}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function _renderInspectorTabContent(run) {
+  const runId = run.run_id;
+  const total = Number(run.total_rows || 0);
+  const applied = Number(run.applied_rows || 0);
+  const errors = Number(run.errors_count || 0);
+  const conflicts = Number(run.conflicts_count || 0);
+  const dupGroups = Number(run.duplicates_groups || 0);
+  switch (_inspectorTab) {
+    case "films":
+      return `
+        <p class="historique-tab-stat"><strong>${total}</strong> film${total > 1 ? "s" : ""} analysé${total > 1 ? "s" : ""}</p>
+        <p class="historique-tab-stat"><strong>${conflicts}</strong> conflit${conflicts > 1 ? "s" : ""} à vérifier</p>
+        <a href="#/bibliotheque?run_id=${encodeURIComponent(runId)}" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir dans Bibliothèque</a>
+      `;
+    case "apply":
+      return `
+        <p class="historique-tab-stat"><strong>${applied}</strong> film${applied > 1 ? "s" : ""} appliqué${applied > 1 ? "s" : ""}</p>
+        <p class="historique-tab-stat"><strong>${Math.max(0, total - applied)}</strong> non appliqué${total - applied > 1 ? "s" : ""}</p>
+        <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""}</p>
+        ${applied > 0 ? `<a href="#/traitement#step-apply" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir l'étape Apply</a>` : ""}
+      `;
+    case "doublons":
+      return `
+        <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
+        ${dupGroups > 0 ? `<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : `<p class="historique-empty-msg">Aucun doublon dans ce run.</p>`}
+      `;
+    case "log":
+    default:
+      return `
+        <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""} loguée${errors > 1 ? "s" : ""}</p>
+        <p class="historique-empty-msg">Le log complet est dans les fichiers <code>logs/</code> du run. Ouvre l'Aide &gt; Logs pour les voir.</p>
+        <a href="#/aide" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir Aide &gt; Logs</a>
+      `;
+  }
+}
+
+function _buildInspectorTabSection(selectedRun) {
+  return {
+    title: "Détail",
+    html: `
+      ${_renderInspectorTabs()}
+      <div class="historique-inspector-tab-content" data-historique-inspector-content>
+        ${_renderInspectorTabContent(selectedRun)}
+      </div>
+    `,
+  };
 }
 
 function _updateInspector() {
@@ -490,6 +557,13 @@ function _bindEvents(container) {
 }
 
 function _onActionClick(ev) {
+  // Tab clicks dans l'inspector
+  const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
+  if (tabBtn) {
+    _inspectorTab = tabBtn.dataset.historiqueInspectorTab;
+    _updateInspector();
+    return;
+  }
   const target = ev.target.closest && ev.target.closest("[data-historique-action]");
   if (!target) return;
   const action = target.dataset.historiqueAction;
@@ -502,12 +576,18 @@ function _onActionClick(ev) {
       if (runId) navigateTo(`/traitement#run-${encodeURIComponent(runId)}`);
       break;
     case "undo-apply":
-      // Action dangereuse — modale a faire en PR future.
-      alert(`Annulation de l'apply ${runId} : modale de confirmation a implementer.\n\nNon implementee dans cette PR squelette.`);
+      // Action dangereuse — modale de confirmation (cf feedback-cinesort-actions-dangereuses).
+      if (window.confirm(`Annuler l'apply du run ${runId} ?\n\nCela va restaurer les fichiers à leur emplacement initial.\nRéversible tant qu'un nouvel apply n'a pas eu lieu.\n\n[Endpoint backend à brancher en PR future]`)) {
+        // TODO: appeler apply/undo_apply(run_id)
+        alert(`Action enregistrée. Endpoint backend non encore branché.`);
+      }
       break;
     case "delete-run":
-      // Action dangereuse — modale a faire en PR future.
-      alert(`Suppression du run ${runId} : modale de confirmation a implementer.\n\nNon implementee dans cette PR squelette.`);
+      // Action dangereuse — modale + retention 90j auto (spec 09 §5).
+      if (window.confirm(`Supprimer le run ${runId} de l'historique ?\n\nLes fichiers vidéo ne seront pas touchés.\nSeul le log de ce run sera retiré.\n\nLes runs > 90 jours sont supprimés automatiquement.\n\n[Endpoint backend à brancher en PR future]`)) {
+        // TODO: appeler runs/delete_run(run_id)
+        alert(`Action enregistrée. Endpoint backend non encore branché.`);
+      }
       break;
     default:
       break;
