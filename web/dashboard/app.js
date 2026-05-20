@@ -72,11 +72,18 @@ import { hasToken, setToken, onClearToken } from "./core/state.js";
       // Purger le token de l'URL pour ne pas le laisser dans l'historique.
       const url = new URL(window.location.href);
       url.searchParams.delete("ntoken");
-      // Si aucun hash n'est present (cas typique au boot natif), forcer
-      // /accueil pour eviter que le router envoie vers /login. Sans ce
-      // fix, currentHash() retourne "/login" par defaut quand hash vide,
-      // meme avec un token valide deja stocke en sessionStorage.
-      const targetHash = window.location.hash || "#/accueil";
+      // Quand on a un ntoken valide en boot natif, on force /accueil pour
+      // eviter que le router envoie vers /login. Sans ce fix :
+      //   - si hash vide : currentHash() retourne "/login" par defaut
+      //   - si hash = "#/login" (restore webview2 cache) : le router reste
+      //     sur la page login meme avec un token valide
+      // On considere que /login n'a aucun sens en mode natif puisque le
+      // token est deja fourni. On garde le hash uniquement s'il pointe
+      // vers une page valide (pas /login).
+      const currentHash = window.location.hash;
+      const targetHash = (!currentHash || currentHash === "#/login")
+        ? "#/accueil"
+        : currentHash;
       // Garder ?native=1 si present
       window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + targetHash);
     }
