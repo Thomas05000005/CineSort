@@ -59,10 +59,16 @@ export function setNotFound(fn) {
   _notFoundHandler = fn;
 }
 
-/** Retourne le hash normalise (sans le #). */
+/** Retourne le hash normalise (sans le #).
+ *
+ * Si le hash est vide, on retourne "/accueil" quand un token est present
+ * (cas du boot natif desktop ou bookmark "/dashboard/" sans hash). Sinon
+ * "/login" reste le fallback pour forcer l'authentification.
+ */
 function currentHash() {
-  const h = window.location.hash.replace(/^#/, "") || "/login";
-  return h;
+  const h = window.location.hash.replace(/^#/, "");
+  if (h) return h;
+  return hasToken() ? "/accueil" : "/login";
 }
 
 /** Navigue vers une route. Supporte le fragment : "/library#step-validation". */
