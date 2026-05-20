@@ -5831,3 +5831,19 @@ body.v5-notif-lock {
 .qualite-decade-bar { background: var(--surface-2); height: 10px; border-radius: 5px; overflow: hidden; }
 .qualite-decade-fill { display: block; height: 100%; background: var(--accent); }
 .qualite-decade-count { text-align: right; font-weight: var(--fw-semibold); }
+/* Parametres — Profils Qualite (spec 11 §2.9) */
+.parametres-profils-form { display: flex; flex-direction: column; gap: var(--sp-3); margin: var(--sp-3) 0; max-width: 480px; }
+.parametres-tier-row { display: grid; grid-template-columns: 1fr 100px; align-items: center; gap: var(--sp-3); }
+.parametres-tier-row label { display: flex; align-items: center; gap: var(--sp-2); }
+.parametres-tier-row input { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); }
+.parametres-tier-badge { display: inline-block; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: #fff; }
+.parametres-tier-badge--platinum { background: #8b5cf6; }
+.parametres-tier-badge--gold { background: #d4a017; }
+.parametres-tier-badge--silver { background: #94a3b8; color: #0f172a; }
+.parametres-tier-badge--bronze { background: #b45309; }
+.parametres-profils-message {
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-1); font-size: var(--fs-sm);
+  border-left: 3px solid var(--accent);
+}
+.parametres-profils-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
