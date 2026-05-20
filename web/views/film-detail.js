@@ -20,6 +20,7 @@
  *   - V3-06 drawer mobile preserve en export
  */
 import { apiPost, escapeHtml, renderError } from "./_v5_helpers.js";
+import { labelsForFlags, countBySeverity } from "../dashboard/core/alert-labels.js";
 
 const _state = {
   rowId: null,
@@ -252,7 +253,12 @@ function _renderOverviewTab(data) {
 
   const perc = data.perceptual || {};
   const gv2 = perc.global_score_v2 || {};
-  const warnings = (gv2.warnings || []).slice(0, 3);
+  // Spec 06 : merge warning_flags row + perceptual warnings pour humanisation.
+  const rawFlags = [];
+  if (Array.isArray(row.warning_flags)) rawFlags.push(...row.warning_flags);
+  if (Array.isArray(gv2.warnings)) rawFlags.push(...gv2.warnings);
+  const alerts = labelsForFlags(rawFlags);
+  const alertCounts = countBySeverity(rawFlags);
 
   return `
     <div class="v5-film-overview">
@@ -317,11 +323,28 @@ function _renderOverviewTab(data) {
         </section>
       ` : ""}
 
-      ${warnings.length > 0 ? `
-        <section class="v5-film-section">
-          <h2 class="v5-film-section-title">Warnings top</h2>
-          <ul class="v5-film-warnings-list">
-            ${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
+      ${alerts.length > 0 ? `
+        <section class="v5-film-section v5-film-alerts">
+          <h2 class="v5-film-section-title">
+            ${alertCounts.critical > 0 ? "🛑" : alertCounts.warning > 0 ? "⚠️" : "ℹ️"}
+            ${alerts.length} alerte${alerts.length > 1 ? "s" : ""}
+            ${alertCounts.critical > 0 ? `<span class="v5-alert-count v5-alert-count--critical">${alertCounts.critical} critique${alertCounts.critical > 1 ? "s" : ""}</span>` : ""}
+          </h2>
+          <ul class="v5-film-alerts-list">
+            ${alerts.map((a) => `
+              <li class="v5-film-alert v5-film-alert--${escapeHtml(a.severity)}" data-alert-code="${escapeHtml(a.code)}">
+                <div class="v5-film-alert-head">
+                  <span class="v5-film-alert-icon" aria-hidden="true">${escapeHtml(a.icon)}</span>
+                  <span class="v5-film-alert-label">${escapeHtml(a.label)}</span>
+                </div>
+                <div class="v5-film-alert-desc">${escapeHtml(a.description)}</div>
+                ${a.action ? `<div class="v5-film-alert-action">
+                  <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost"
+                          data-v5-alert-action="${escapeHtml(a.action.kind)}"
+                          data-v5-alert-code="${escapeHtml(a.code)}">${escapeHtml(a.action.label)}</button>
+                </div>` : ""}
+              </li>
+            `).join("")}
           </ul>
         </section>
       ` : ""}
