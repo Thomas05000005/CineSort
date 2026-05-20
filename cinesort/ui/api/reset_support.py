@@ -1,16 +1,174 @@
-"""V3-09 — Reset all user data (avec backup de securite)."""
+"""V3-09 — Reset all user data (avec backup de securite).
+
+Phase 4 backend-parametres-endpoints (spec 11 §5 Reset) :
+Ajout de `reset_settings(scope)` (par categorie) et `reset_database()` (wipe DB
+seulement, avec backup).
+"""
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
+
+
+# Mapping scope -> liste de cles settings a reset.
+# Aligne sur spec 11 §2 (10 categories) + scope "all".
+# Note : "profils-qualite" ne reset PAS la DB du profil actif, juste
+# settings.active_quality_profile_id + settings.custom_quality_profiles
+# (le reset complet du profil store passe par reset_quality_profile).
+_RESET_SCOPE_KEYS: Dict[str, List[str]] = {
+    "sources": ["root", "roots", "root_example"],
+    "analyse": [
+        "probe_backend",
+        "mediainfo_path",
+        "ffprobe_path",
+        "probe_timeout_s",
+        "probe_workers",
+        "probe_parallelism_enabled",
+        "incremental_scan_enabled",
+        "quarantine_unapproved",
+        "auto_quarantine_corrupted",
+        "perceptual_enabled",
+        "perceptual_auto_on_scan",
+        "perceptual_auto_on_quality",
+        "perceptual_timeout_per_film_s",
+        "perceptual_frames_count",
+        "perceptual_skip_percent",
+        "perceptual_dark_weight",
+        "perceptual_audio_deep",
+        "perceptual_audio_segment_s",
+        "perceptual_comparison_frames",
+        "perceptual_comparison_timeout_s",
+        "perceptual_parallelism_mode",
+        "perceptual_parallelism_enabled",
+        "perceptual_workers",
+        "perceptual_audio_fingerprint_enabled",
+        "perceptual_scene_detection_enabled",
+        "perceptual_audio_spectral_enabled",
+        "perceptual_ssim_self_ref_enabled",
+        "perceptual_hdr10_plus_detection_enabled",
+        "perceptual_interlacing_detection_enabled",
+        "perceptual_crop_detection_enabled",
+        "perceptual_judder_detection_enabled",
+        "perceptual_grain_intelligence_enabled",
+        "perceptual_audio_mel_enabled",
+        "perceptual_lpips_enabled",
+        "subtitle_detection_enabled",
+        "subtitle_expected_languages",
+    ],
+    "nommage": [
+        "naming_preset",
+        "naming_movie_template",
+        "naming_tv_template",
+    ],
+    "bibliotheque": [
+        "collection_folder_enabled",
+        "collection_folder_name",
+        "enable_tv_detection",
+        "move_empty_folders_enabled",
+        "empty_folders_folder_name",
+        "empty_folders_scope",
+        "cleanup_residual_folders_enabled",
+        "cleanup_residual_folders_folder_name",
+        "cleanup_residual_folders_scope",
+        "cleanup_residual_include_nfo",
+        "cleanup_residual_include_images",
+        "cleanup_residual_include_subtitles",
+        "cleanup_residual_include_texts",
+    ],
+    "integrations": [
+        # TMDb
+        "tmdb_enabled",
+        "tmdb_timeout_s",
+        "tmdb_cache_ttl_days",
+        # Jellyfin
+        "jellyfin_enabled",
+        "jellyfin_url",
+        "jellyfin_user_id",
+        "jellyfin_refresh_on_apply",
+        "jellyfin_sync_watched",
+        "jellyfin_timeout_s",
+        # Plex
+        "plex_enabled",
+        "plex_url",
+        "plex_library_id",
+        "plex_refresh_on_apply",
+        "plex_timeout_s",
+        # Radarr
+        "radarr_enabled",
+        "radarr_url",
+        "radarr_timeout_s",
+        # OMDb
+        "omdb_enabled",
+        "omdb_min_confidence_for_call",
+    ],
+    "notifications": [
+        "notifications_enabled",
+        "notifications_scan_triggered",
+        "notifications_scan_done",
+        "notifications_apply_done",
+        "notifications_undo_done",
+        "notifications_errors",
+        "email_enabled",
+        "email_smtp_host",
+        "email_smtp_port",
+        "email_smtp_user",
+        "email_smtp_tls",
+        "email_to",
+        "email_on_scan",
+        "email_on_apply",
+        "plugins_enabled",
+        "plugins_timeout_s",
+    ],
+    "serveur": [
+        "rest_api_enabled",
+        "rest_api_port",
+        "rest_api_cors_origin",
+        "rest_api_https_enabled",
+        "rest_api_cert_path",
+        "rest_api_key_path",
+        # Pas de reset du rest_api_token (sera regenere par apply_settings_defaults)
+    ],
+    "apparence": [
+        "theme",
+        "animation_level",
+        "effect_speed",
+        "glow_intensity",
+        "light_intensity",
+        "locale",
+    ],
+    "profils-qualite": [
+        "active_quality_profile_id",
+        "custom_quality_profiles",
+    ],
+    "avance": [
+        "expert_mode",
+        "onboarding_completed",
+        "update_check_enabled",
+        "update_check_channel",
+        "update_github_repo",
+        "watch_enabled",
+        "watch_interval_minutes",
+        "log_level",
+        "composite_score_version",
+        "auto_approve_enabled",
+        "auto_approve_threshold",
+        "dry_run_apply",
+    ],
+}
+
+
+def _valid_reset_scopes() -> List[str]:
+    return ["all", *_RESET_SCOPE_KEYS.keys()]
 
 
 def _resolve_state_dir(api: Any) -> Optional[Path]:
@@ -118,3 +276,225 @@ def get_user_data_size(api: Any) -> dict:
         "size_mb": round(total / (1024 * 1024), 2),
         "items": items,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 backend-parametres-endpoints (spec 11 §5 Reset)
+# ---------------------------------------------------------------------------
+
+
+def _build_default_settings(api: Any) -> Dict[str, Any]:
+    """Construit le payload settings 100 % par defaut (sans aucune valeur user).
+
+    Utilise `apply_settings_defaults({}, ...)` avec les memes constantes que
+    `_get_settings_impl`. Lazy import pour eviter d'embarquer `settings_support`
+    a chaque appel `reset_support` (et eviter un cycle import).
+    """
+    # Lazy imports : settings_support importe pywebview/Jellyfin via state, donc
+    # on garde le import a l'interieur pour limiter le blast radius.
+    from cinesort.ui.api import cinesort_api as _api_mod
+    from cinesort.ui.api import settings_support as _settings_support
+
+    state_dir = _resolve_state_dir(api) or Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
+    return _settings_support.apply_settings_defaults(
+        {},
+        state_dir=state_dir,
+        default_root=getattr(_api_mod, "DEFAULT_ROOT", str(Path.home() / "Videos" / "Movies")),
+        default_state_dir_example=getattr(_api_mod, "DEFAULT_STATE_DIR_EXAMPLE", str(state_dir)),
+        default_collection_folder_name=getattr(_api_mod, "DEFAULT_COLLECTION_FOLDER_NAME", "Collections"),
+        default_empty_folders_folder_name=getattr(_api_mod, "DEFAULT_EMPTY_FOLDERS_FOLDER_NAME", "_empty"),
+        default_residual_cleanup_folder_name=getattr(_api_mod, "DEFAULT_RESIDUAL_CLEANUP_FOLDER_NAME", "_review"),
+        default_probe_backend=getattr(_api_mod, "DEFAULT_PROBE_BACKEND", "auto"),
+        debug_enabled=False,
+    )
+
+
+def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
+    """Reinitialise les settings (totalement ou par categorie).
+
+    Cf spec 11 §5 Reset. Scope :
+      - "all" : reset complet vers les defauts
+      - "sources" / "analyse" / "nommage" / "bibliotheque" / "integrations" /
+        "notifications" / "serveur" / "apparence" / "profils-qualite" / "avance"
+
+    Retourne {ok, reset_keys: [...], scope}.
+    """
+    scope_norm = str(scope or "all").strip().lower()
+    if scope_norm not in _valid_reset_scopes():
+        return _err_response(
+            f"Scope inconnu : {scope!r}. Valides : {_valid_reset_scopes()}",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+
+    try:
+        defaults = _build_default_settings(api)
+    except (ImportError, OSError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Echec construction defaults : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    # Si scope = all, on persiste tout le payload defauts
+    if scope_norm == "all":
+        try:
+            api.settings.save_settings(defaults)
+        except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
+            return _err_response(
+                f"Echec sauvegarde defaults : {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+        return {
+            "ok": True,
+            "scope": "all",
+            "reset_keys": sorted(defaults.keys()),
+        }
+
+    # Scope cible : on lit les settings courants et on remplace cle par cle
+    try:
+        current = api.settings.get_settings() or {}
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Echec lecture settings : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    keys = _RESET_SCOPE_KEYS.get(scope_norm, [])
+    reset_keys: List[str] = []
+    patched = dict(current)
+    for key in keys:
+        if key in defaults:
+            patched[key] = defaults[key]
+            reset_keys.append(key)
+        else:
+            # Cle sans default litteral : on la retire pour qu'apply_settings_defaults
+            # remette la valeur derivee au prochain get_settings.
+            patched.pop(key, None)
+            reset_keys.append(key)
+
+    try:
+        api.settings.save_settings(patched)
+    except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Echec sauvegarde scope {scope_norm} : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "scope": scope_norm,
+        "reset_keys": reset_keys,
+    }
+
+
+def _resolve_db_path(api: Any) -> Optional[Path]:
+    """Retrouve le chemin du fichier SQLite cinesort.db dans le state_dir."""
+    state_path = _resolve_state_dir(api)
+    if state_path is None:
+        return None
+    # cinesort.db par convention. Cf cinesort/infra/db/store.py.
+    candidate = state_path / "cinesort.db"
+    return candidate
+
+
+def reset_database(api: Any) -> Dict[str, Any]:
+    """Wipe complet de la DB SQLite (films, runs, perceptual, scores, etc.).
+
+    Backup automatique avant suppression vers
+    `<state_dir>/db/backups/wipe_<timestamp>.bak`.
+
+    IRREVERSIBLE cote DB mais le backup permet une restauration manuelle.
+    Les settings.json et logs/ sont preserves.
+
+    Retourne {ok, backup_path, removed_db_path}.
+    """
+    state_path = _resolve_state_dir(api)
+    if state_path is None:
+        return _err_response(
+            "Dossier user-data introuvable.",
+            category="state",
+            level="warning",
+            log_module=__name__,
+        )
+
+    db_path = _resolve_db_path(api)
+    if db_path is None:
+        return _err_response(
+            "Chemin DB introuvable.",
+            category="state",
+            level="warning",
+            log_module=__name__,
+        )
+
+    if not db_path.exists():
+        # Pas de DB a supprimer : on retourne ok=True avec backup_path=""
+        return {
+            "ok": True,
+            "backup_path": "",
+            "removed_db_path": str(db_path),
+            "message": "Aucune DB existante a supprimer.",
+        }
+
+    backup_dir = state_path / "db" / "backups"
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _err_response(
+            f"Impossible de creer le dossier de backup : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    timestamp = int(time.time())
+    backup_path = backup_dir / f"wipe_{timestamp}.bak"
+
+    # On essaie d'utiliser sqlite3 backup API (cf cinesort/infra/db) si on peut,
+    # sinon copy2 (la DB est rarement ecrite pendant un reset, c'est suffisant).
+    try:
+        # 1) Tentative : fermer les connexions de l'API si disponibles
+        if hasattr(api, "_close_infra"):
+            try:
+                api._close_infra()
+            except (AttributeError, OSError, TypeError) as exc:
+                logger.warning("reset_database: _close_infra a echoue (%s), continue.", exc)
+
+        # 2) Backup par copie
+        shutil.copy2(str(db_path), str(backup_path))
+        logger.info("reset_database: backup cree -> %s", backup_path)
+
+        # 3) Suppression
+        db_path.unlink()
+        # Supprime aussi les fichiers WAL/SHM associes
+        for suffix in ("-wal", "-shm"):
+            ancillary = db_path.with_name(db_path.name + suffix)
+            with contextlib.suppress(OSError):
+                ancillary.unlink(missing_ok=True)
+
+        logger.warning(
+            "reset_database: DB supprimee %s, backup conserve : %s",
+            db_path,
+            backup_path,
+        )
+        return {
+            "ok": True,
+            "backup_path": str(backup_path),
+            "removed_db_path": str(db_path),
+        }
+    except (OSError, shutil.Error) as exc:
+        logger.exception("reset_database: echec")
+        return _err_response(
+            f"Echec reset DB : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )

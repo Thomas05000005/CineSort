@@ -843,6 +843,416 @@ def get_perceptual_compare_frames(
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
+# =============================================================================
+# Phase 4 doublons (cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md)
+# =============================================================================
+
+# Registry global des jobs perceptuels batch en cours / termines.
+# Cle = job_id, valeur = dict {status, total, done, errors, ts_start, ts_end, results}.
+# Threading : lock dedie pour eviter les courses entre worker thread et polling.
+_PERCEPTUAL_JOBS_LOCK = threading.RLock()
+_PERCEPTUAL_JOBS: Dict[str, Dict[str, Any]] = {}
+_PERCEPTUAL_JOB_RETENTION = 16  # cap pour eviter la fuite memoire
+
+
+def _record_job_snapshot(job_id: str, **changes: Any) -> None:
+    with _PERCEPTUAL_JOBS_LOCK:
+        snapshot = _PERCEPTUAL_JOBS.get(job_id)
+        if not snapshot:
+            return
+        snapshot.update(changes)
+
+
+def _trim_perceptual_jobs() -> None:
+    """Cap memoire : on garde les N derniers jobs termines + tous les actifs."""
+    with _PERCEPTUAL_JOBS_LOCK:
+        if len(_PERCEPTUAL_JOBS) <= _PERCEPTUAL_JOB_RETENTION:
+            return
+        finished = sorted(
+            ((k, v) for k, v in _PERCEPTUAL_JOBS.items() if v.get("status") in ("done", "error", "cancelled")),
+            key=lambda kv: kv[1].get("ts_end") or 0.0,
+        )
+        excess = len(_PERCEPTUAL_JOBS) - _PERCEPTUAL_JOB_RETENTION
+        for k, _v in finished[:excess]:
+            _PERCEPTUAL_JOBS.pop(k, None)
+
+
+def _normalize_pairs(pairs: Any) -> List[Dict[str, str]]:
+    """Normalise la liste de paires en dicts {run_id, row_a, row_b}.
+
+    Tolere les variantes {row_id_a, row_id_b} pour compat. Skip silencieux
+    les entrees malformees.
+    """
+    out: List[Dict[str, str]] = []
+    if not isinstance(pairs, (list, tuple)):
+        return out
+    for item in pairs:
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get("run_id") or "").strip()
+        a = str(item.get("row_a") or item.get("row_id_a") or "").strip()
+        b = str(item.get("row_b") or item.get("row_id_b") or "").strip()
+        if not rid or not a or not b:
+            continue
+        out.append({"run_id": rid, "row_a": a, "row_b": b})
+    return out
+
+
+def _run_perceptual_job(
+    api: Any,
+    job_id: str,
+    pairs: List[Dict[str, str]],
+    options: Optional[Dict[str, Any]],
+) -> None:
+    """Worker thread daemon : execute compare_perceptual sur chaque paire."""
+    results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    done_count = 0
+    for pair in pairs:
+        try:
+            res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
+            if isinstance(res, dict) and res.get("ok"):
+                results.append({**pair, "ok": True})
+            else:
+                msg = str(res.get("message", "")) if isinstance(res, dict) else "erreur inconnue"
+                errors.append({**pair, "ok": False, "message": msg})
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            errors.append({**pair, "ok": False, "message": str(exc)})
+        done_count += 1
+        _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
+
+    _record_job_snapshot(
+        job_id,
+        status="done",
+        done=done_count,
+        ts_end=time.time(),
+        results=list(results),
+        errors=list(errors),
+    )
+    _trim_perceptual_jobs()
+
+
+def queue_perceptual_analyses(
+    api: Any,
+    pairs: Any,
+    options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Queue un batch d'analyses perceptuelles en background.
+
+    Cf spec section 1 "Analyser perceptuel sur N groupes" + section 4 §4.
+    Lance un thread daemon qui execute compare_perceptual sur chaque paire,
+    expose le job_id pour polling via get_perceptual_job_status.
+
+    Args:
+        pairs: liste de {run_id, row_a, row_b}.
+        options: passe a compare_perceptual (force, etc.).
+
+    Returns:
+        {ok: True, job_id, total} ou err.
+    """
+    normalized = _normalize_pairs(pairs)
+    if not normalized:
+        return _err_response(
+            "Aucune paire valide. Format attendu : [{run_id, row_a, row_b}, ...]",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+
+    job_id = f"perceptual_batch_{int(time.time() * 1000)}_{id(normalized) & 0xFFFF:04x}"
+    snapshot: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": "running",
+        "total": len(normalized),
+        "done": 0,
+        "results": [],
+        "errors": [],
+        "ts_start": time.time(),
+        "ts_end": None,
+    }
+    with _PERCEPTUAL_JOBS_LOCK:
+        _PERCEPTUAL_JOBS[job_id] = snapshot
+
+    thread = threading.Thread(
+        target=_run_perceptual_job,
+        args=(api, job_id, normalized, options),
+        name=f"perc-{job_id}",
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "job_id": job_id, "total": len(normalized)}
+
+
+def get_perceptual_job_status(api: Any, job_id: str) -> Dict[str, Any]:  # noqa: ARG001
+    """Polling : retourne le statut d'un job perceptuel batch.
+
+    Returns:
+        {ok: True, job_id, status, total, done, results, errors, ts_start, ts_end}
+        ou err si job_id inconnu.
+    """
+    if not job_id or not str(job_id).strip():
+        return _err_response("job_id requis.", category="validation", level="info", log_module=__name__)
+    with _PERCEPTUAL_JOBS_LOCK:
+        snap = _PERCEPTUAL_JOBS.get(str(job_id))
+        if not snap:
+            return _err_response("Job inconnu.", category="resource", level="info", log_module=__name__)
+        # Copie defensive pour eviter race condition cote caller.
+        return {"ok": True, **{k: (list(v) if isinstance(v, list) else v) for k, v in snap.items()}}
+
+
+def get_perceptual_compare_audio(
+    api: Any,
+    run_id: str,
+    row_id_a: str,
+    row_id_b: str,
+    options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Extrait waveform PNG + clip MP3 court pour les 2 films d'une paire.
+
+    Cf spec section 3 "Comparaison audio" + section 4 §2.
+
+    Pour chaque fichier :
+      - Genere une waveform PNG via ffmpeg `showwavespic=s=400x80` sur un
+        timestamp representatif (par defaut milieu du film).
+      - Extrait un clip MP3 court (~10s par defaut) via ffmpeg
+        `-c:a libmp3lame -b:a 96k`.
+
+    Args:
+        run_id, row_id_a, row_id_b: identifiants standards.
+        options: dict optionnel :
+            - duration_s (int, 5-30, def 10)
+            - timestamp_s (float, def = duration/2)
+            - width / height (int, def 400x80)
+
+    Returns:
+        {ok, waveform_a_b64, waveform_b_b64, audio_a_b64, audio_b_b64,
+         audio_mime, duration_s, timestamp_s} ou err.
+    """
+    opts = options if isinstance(options, dict) else {}
+    try:
+        duration_s = int(opts.get("duration_s") or 10)
+    except (TypeError, ValueError):
+        duration_s = 10
+    duration_s = max(5, min(30, duration_s))
+
+    try:
+        waveform_w = int(opts.get("width") or 400)
+    except (TypeError, ValueError):
+        waveform_w = 400
+    try:
+        waveform_h = int(opts.get("height") or 80)
+    except (TypeError, ValueError):
+        waveform_h = 80
+    waveform_w = max(100, min(1200, waveform_w))
+    waveform_h = max(40, min(400, waveform_h))
+
+    if not run_id or not row_id_a or not row_id_b:
+        return _err_response(
+            "run_id, row_id_a et row_id_b requis",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+
+    try:
+        settings = api.settings.get_settings()
+        if not settings.get("perceptual_enabled"):
+            return _err_response(
+                "Analyse perceptuelle desactivee dans les reglages.",
+                category="state",
+                level="info",
+                log_module=__name__,
+            )
+
+        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
+        if not ffmpeg_path:
+            return _err_response(
+                "ffmpeg introuvable.",
+                category="config",
+                level="info",
+                log_module=__name__,
+                missing_tool="ffmpeg",
+            )
+
+        found = api._find_run_row(run_id)
+        if not found:
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
+        run_row, store = found
+        state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+        rs = api._get_run(run_id)
+        rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
+        cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
+
+        row_a = next((r for r in rows if str(r.row_id) == str(row_id_a)), None)
+        row_b = next((r for r in rows if str(r.row_id) == str(row_id_b)), None)
+        if not row_a or not row_b:
+            return _err_response(
+                "Film introuvable dans le plan.",
+                category="resource",
+                level="info",
+                log_module=__name__,
+            )
+
+        media_a = api._resolve_media_path_for_row(cfg, row_a)
+        media_b = api._resolve_media_path_for_row(cfg, row_b)
+        if not media_a or not media_b:
+            return _err_response(
+                "Fichier media introuvable.",
+                category="resource",
+                level="warning",
+                log_module=__name__,
+            )
+
+        probe_a = _load_probe(api, store, run_row, media_a)
+        probe_b = _load_probe(api, store, run_row, media_b)
+        na = probe_a.get("normalized") if isinstance(probe_a, dict) else {} or {}
+        nb = probe_b.get("normalized") if isinstance(probe_b, dict) else {} or {}
+        dur_a = float(na.get("duration_s") or 0)
+        dur_b = float(nb.get("duration_s") or 0)
+
+        # Timestamp par defaut = milieu de la duree min (les 2 films sont supposes
+        # representer le meme contenu : on prend la borne la plus prudente).
+        if opts.get("timestamp_s") is not None:
+            try:
+                ts = float(opts.get("timestamp_s") or 0)
+            except (TypeError, ValueError):
+                ts = max(dur_a, dur_b) / 2.0
+        else:
+            base = min(dur_a, dur_b) if dur_a > 0 and dur_b > 0 else max(dur_a, dur_b)
+            ts = base / 2.0 if base > 0 else 0.0
+        # On s'assure qu'on a au moins `duration_s` de marge avant la fin.
+        ts = max(0.0, ts)
+
+        # Extraction sequentielle (2 paires waveform+audio = 4 ffmpeg) — le batch
+        # batch est court (~2s par fichier sur SSD moderne), pas la peine de
+        # paralleliser pour 4 jobs.
+        waveform_a_b64 = _extract_audio_waveform_b64(ffmpeg_path, str(media_a), ts, duration_s, waveform_w, waveform_h)
+        waveform_b_b64 = _extract_audio_waveform_b64(ffmpeg_path, str(media_b), ts, duration_s, waveform_w, waveform_h)
+        audio_a_b64 = _extract_audio_clip_b64(ffmpeg_path, str(media_a), ts, duration_s)
+        audio_b_b64 = _extract_audio_clip_b64(ffmpeg_path, str(media_b), ts, duration_s)
+
+        return {
+            "ok": True,
+            "waveform_a_b64": waveform_a_b64,
+            "waveform_b_b64": waveform_b_b64,
+            "audio_a_b64": audio_a_b64,
+            "audio_b_b64": audio_b_b64,
+            "audio_mime": "audio/mpeg",
+            "duration_s": duration_s,
+            "timestamp_s": float(ts),
+            "width": waveform_w,
+            "height": waveform_h,
+        }
+
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("get_perceptual_compare_audio error: %s", exc)
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+
+def _extract_audio_waveform_b64(
+    ffmpeg_path: str,
+    media_path: str,
+    ts: float,
+    duration_s: int,
+    width: int,
+    height: int,
+) -> str:
+    """Genere une waveform PNG via `ffmpeg showwavespic`, retourne base64.
+
+    Renvoie chaine vide si ffmpeg echoue (pas d'erreur, l'UI peut afficher
+    un placeholder).
+    """
+    import base64
+    import subprocess
+
+    cmd = [
+        ffmpeg_path,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        str(max(0.0, float(ts))),
+        "-t",
+        str(int(duration_s)),
+        "-i",
+        media_path,
+        "-filter_complex",
+        f"showwavespic=s={int(width)}x{int(height)}:colors=#4FC3F7",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-c:v",
+        "png",
+        "-",
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+            cmd,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("waveform ffmpeg failed (%s)", exc)
+        return ""
+    if result.returncode != 0 or not result.stdout:
+        return ""
+    return base64.b64encode(result.stdout).decode("ascii")
+
+
+def _extract_audio_clip_b64(
+    ffmpeg_path: str,
+    media_path: str,
+    ts: float,
+    duration_s: int,
+) -> str:
+    """Extrait un clip MP3 court via ffmpeg + libmp3lame, retourne base64."""
+    import base64
+    import subprocess
+
+    cmd = [
+        ffmpeg_path,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        str(max(0.0, float(ts))),
+        "-t",
+        str(int(duration_s)),
+        "-i",
+        media_path,
+        "-vn",
+        "-ac",
+        "2",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "96k",
+        "-f",
+        "mp3",
+        "-",
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+            cmd,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("audio clip ffmpeg failed (%s)", exc)
+        return ""
+    if result.returncode != 0 or not result.stdout:
+        return ""
+    return base64.b64encode(result.stdout).decode("ascii")
+
+
 def enrich_quality_report_with_perceptual(
     store: Any,
     run_id: str,

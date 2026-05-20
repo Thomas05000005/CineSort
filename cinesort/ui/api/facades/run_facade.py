@@ -20,8 +20,9 @@ Strategie Strangler Fig + Adapter pattern :
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+from cinesort.ui.api import library_actions_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -105,3 +106,77 @@ class RunFacade(_BaseFacade):
         Cf CineSortApi._list_pending_runs_impl pour la doc complete.
         """
         return self._api._list_pending_runs_impl()
+    # ---------- Phase 4 spec 07 + 06 : rescan single + bulk ----------
+
+    def rescan_row(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """Phase 4 spec 06 : relance probe + analyse + match TMDb sur 1 row (lance un job).
+
+        Cf cinesort.ui.api.library_actions_support.rescan_row.
+        """
+        return library_actions_support.rescan_row(self._api, row_id, run_id=run_id)
+
+    def rescan_rows_bulk(self, row_ids: list, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """Phase 4 spec 07 : version bulk de rescan_row (lance un JobRunner).
+
+        Cf cinesort.ui.api.library_actions_support.rescan_rows_bulk.
+        """
+        return library_actions_support.rescan_rows_bulk(self._api, row_ids, run_id=run_id)
+    # ----- Historique (spec 09) -----
+    def get_history_stats(self, run_id: str) -> Dict[str, Any]:
+        """Detail complet d'un run pour l'inspecteur Historique.
+
+        Retourne `{ok, run: {run_id, started_ts, duration_s, status,
+        total_rows, applied_rows, validated_count, rejected_count,
+        errors_count, conflicts_count, duplicates_groups, score_avg,
+        films_by_tier, apply_operations: [...]}}` avec fallback gracieux
+        si certaines tables/JSON ne sont pas disponibles.
+
+        Cf spec 09 §6 (Source backend).
+        """
+        return self._api._get_history_stats_impl(run_id)
+
+    def delete_run(self, run_id: str) -> Dict[str, Any]:
+        """Supprime un run de l'historique (DB seulement, pas les fichiers video).
+
+        Cascade :
+        - errors / quality_reports / anomalies (FK CASCADE)
+        - perceptual_reports / apply_batches / apply_operations (manuel)
+
+        Cf spec 09 §4 (action dangereuse — frontend affiche modale).
+        """
+        return self._api._delete_run_impl(run_id)
+
+    def cleanup_old_runs(self, retention_days: int = 90) -> Dict[str, Any]:
+        """Supprime tous les runs > N jours (defaut 90).
+
+        Appele :
+        - manuellement (debug / forcer la purge)
+        - automatiquement au boot par le cron retention_cleanup
+
+        Retourne `{ok, deleted_count, deleted_run_ids: [...], retention_days}`.
+        """
+        return self._api._cleanup_old_runs_impl(retention_days)
+    def rescan_row(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
+
+        Cf CineSortApi._rescan_row_impl pour la doc complete.
+        """
+        return self._api._rescan_row_impl(run_id, row_id)
+
+    def mark_duplicate_winner(
+        self,
+        run_id: str,
+        group_key: str,
+        winner_row_id: str,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : persiste la decision utilisateur "garder ce winner".
+
+        Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md
+        section 3. Les autres rows du groupe seront deplaces vers
+        <root>/_review/_duplicates_user_decided/ a l'apply.
+
+        Returns:
+            {ok, group_key, winner_row_id, losers, decided_ts}.
+        """
+        return self._api._mark_duplicate_winner_impl(run_id, group_key, winner_row_id, notes)

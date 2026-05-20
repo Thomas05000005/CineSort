@@ -16,6 +16,7 @@ from .migration_manager import MigrationManager, _split_sql_statements
 from .repositories import (
     AnomalyRepository,
     ApplyRepository,
+    FilmModalRepository,
     PerceptualRepository,
     ProbeRepository,
     QualityRepository,
@@ -37,6 +38,7 @@ REQUIRED_SCHEMA_TABLES = (
     "incremental_file_hashes",
     "incremental_scan_cache",
     "perceptual_reports",
+    "duplicate_decisions",
 )
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
@@ -50,6 +52,16 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "perceptual": ("perceptual_reports",),
     # P4.1 : table calibration feedback utilisateur (migration 014).
     "user_feedback": ("user_quality_feedback",),
+    # Spec 06 Modal Film (migration 023) : etat persistant des decisions
+    # utilisateur sur le modal (alertes ignorees, marquages suppression,
+    # overrides TMDb manuels).
+    "film_modal_state": (
+        "ignored_alerts",
+        "film_marked_for_deletion",
+        "film_tmdb_overrides",
+    ),
+    # Phase 4 doublons (migration 024, spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md).
+    "duplicate_decisions": ("duplicate_decisions",),
 }
 
 
@@ -579,3 +591,5 @@ class SQLiteStore(_StoreBase):
         self.quality = QualityRepository(self)
         self.run = RunRepository(self)
         self.scan = ScanRepository(self)
+        # Spec 06 Modal Film (migration 023) : etat utilisateur sur les films.
+        self.film_modal = FilmModalRepository(self)
