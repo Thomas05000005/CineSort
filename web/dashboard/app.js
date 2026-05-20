@@ -148,12 +148,6 @@ import { initBibliotheque, unmountBibliotheque } from "./views/bibliotheque.js";
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
 import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
 
-// === Vues v4 conservees (V5C les portera ou supprimera) ===
-import { initJellyfin } from "./views/jellyfin.js";
-import { initPlex } from "./views/plex.js";
-import { initRadarr } from "./views/radarr.js";
-import { initLogs } from "./views/logs.js";
-
 // === Helpers UI legacy preserves ===
 import { initKeyboard } from "./core/keyboard.js";
 import { initDropHandlers } from "./core/drop.js";
@@ -200,8 +194,8 @@ registerRoute("/film/:id", {
 });
 
 // V7-fusion Phase 3 : routes legacy /jellyfin /plex /radarr /logs aliasent vers QIJ
-// (avant : 4 vues v4 separees). On garde initJellyfin/Plex/Radarr/Logs imported pour
-// compat (au cas ou un autre code les appelle), mais les routes pointent vers QIJ.
+// (avant : 4 vues v4 separees). Les imports initJellyfin/Plex/Radarr/Logs ont
+// ete retires car plus jamais appeles ; les routes pointent vers QIJ.
 // V2-C R4-MEM-4 : init() retourne le unmount pour cleanup au navigate.
 registerRoute("/jellyfin", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
 registerRoute("/plex",     { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
@@ -376,18 +370,24 @@ window.addEventListener("cinesort:undo", () => {
 /* === Sync sidebar/breadcrumb au changement de route ====== */
 
 const ROUTE_BREADCRUMBS = {
+  // === Routes FR canoniques (refonte 2026-05-17 spec 04 Shell 3 zones) ===
+  "/accueil":      [{ label: "Accueil" }],
+  "/traitement":   [{ label: "Traitement" }],
+  "/bibliotheque": [{ label: "Bibliothèque" }],
+  "/qualite":      [{ label: "Qualité" }],
+  "/historique":   [{ label: "Historique" }],
+  "/parametres":   [{ label: "Paramètres" }],
+  "/aide":         [{ label: "Aide" }],
+  // === Alias rétrocompat (mêmes routes, ancienne URL) ===
   "/home":       [{ label: "Accueil" }],
-  "/library":    [{ label: "Bibliotheque" }],
+  "/library":    [{ label: "Bibliothèque" }],
   "/processing": [{ label: "Traitement" }],
-  // V7-fusion Phase 3 : QIJ + alias legacy.
-  "/qij":        [{ label: "QIJ" }],
-  "/quality":    [{ label: "QIJ", route: "/qij" }, { label: "Qualite" }],
-  "/jellyfin":   [{ label: "QIJ", route: "/qij" }, { label: "Integrations" }, { label: "Jellyfin" }],
-  "/plex":       [{ label: "QIJ", route: "/qij" }, { label: "Integrations" }, { label: "Plex" }],
-  "/radarr":     [{ label: "QIJ", route: "/qij" }, { label: "Integrations" }, { label: "Radarr" }],
-  "/logs":       [{ label: "QIJ", route: "/qij" }, { label: "Journal" }],
-  "/settings":   [{ label: "Parametres" }],
+  "/settings":   [{ label: "Paramètres" }],
   "/help":       [{ label: "Aide" }],
+  // V7-fusion Phase 3 : QIJ + alias legacy (kept while QIJ legacy reste route).
+  "/qij":        [{ label: "QIJ" }],
+  "/quality":    [{ label: "QIJ", route: "/qij" }, { label: "Qualité" }],
+  "/logs":       [{ label: "QIJ", route: "/qij" }, { label: "Journal" }],
 };
 
 function _syncShellOnRoute() {
