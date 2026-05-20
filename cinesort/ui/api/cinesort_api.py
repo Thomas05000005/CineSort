@@ -70,6 +70,7 @@ from cinesort.ui.api import (
     notifications_support,
     perceptual_support,
     probe_support,
+    profiles_support,
     quality_internal_support,
     quality_profile_support,
     quality_report_support,
@@ -2274,6 +2275,32 @@ class CineSortApi:
         """V3-09 — Taille actuelle du user-data (pour affichage UI Danger Zone)."""
 
         return {"data": reset_support.get_user_data_size(self)}
+
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §5 + §2.9) ----------
+    def _reset_settings_impl(self, scope: str = "all") -> Dict[str, Any]:
+        """Reinitialise les settings par categorie (ou tout)."""
+
+        return reset_support.reset_settings(self, scope)
+
+    def _reset_database_impl(self) -> Dict[str, Any]:
+        """Wipe complet de la DB SQLite (avec backup automatique)."""
+
+        return reset_support.reset_database(self)
+
+    def _get_profiles_impl(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets predefinis + custom)."""
+
+        return profiles_support.get_profiles(self)
+
+    def _save_profile_impl(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom dans settings (avec validation)."""
+
+        return profiles_support.save_profile(self, profile)
+
+    def _set_active_profile_impl(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom)."""
+
+        return profiles_support.set_active_profile(self, profile_id)
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
