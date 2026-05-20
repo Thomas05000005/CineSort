@@ -5089,6 +5089,58 @@ body.v5-notif-lock {
 .historique-tab-stat { margin: var(--sp-1) 0; color: var(--text-1); }
 .historique-tab-stat strong { color: var(--accent); }
 
+/* Phase 5 — vue Historique completee (spec 09 §3 / §4 / §5) */
+.historique-run-status.is-undone { color: var(--info, #2563eb); }
+.historique-retention-banner { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); border-radius: var(--radius-md); font-size: var(--fs-xs); color: var(--text-2); margin-bottom: var(--sp-3); }
+.historique-retention-banner-icon { font-size: var(--fs-md); }
+.historique-retention-banner strong { color: var(--text-1); }
+.historique-custom-period { display: flex; gap: var(--sp-3); margin-top: var(--sp-2); }
+.historique-custom-period .v5-input { min-width: 140px; }
+.historique-loading-more { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--text-3); font-style: italic; }
+.historique-loading-more-icon { font-size: var(--fs-md); }
+.historique-tab-loading { font-style: italic; color: var(--text-3); padding: var(--sp-2) 0; }
+/* Films list */
+.historique-films-list { list-style: none; padding: 0; margin: var(--sp-2) 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 360px; overflow-y: auto; }
+.historique-film-row { display: grid; grid-template-columns: 1fr 90px 50px 30px; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+.historique-film-row:hover { background: var(--surface-2); }
+.historique-film-title { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.historique-film-status { font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; padding: 1px 6px; border-radius: var(--radius-pill, 999px); }
+.historique-film-status.is-approved { color: var(--success, #16a34a); background: rgba(22, 163, 74, 0.1); }
+.historique-film-status.is-rejected { color: var(--danger, #b91c1c); background: rgba(185, 28, 28, 0.1); }
+.historique-film-status.is-duplicate { color: var(--warning, #d97706); background: rgba(217, 119, 6, 0.1); }
+.historique-film-status.is-deleted { color: var(--text-3); background: var(--surface-2); }
+.historique-film-score { font-family: monospace; font-size: var(--fs-xs); color: var(--text-2); text-align: right; }
+.historique-film-link { text-decoration: none; color: var(--accent); font-weight: var(--fw-semibold); }
+.historique-film-link-dim { color: var(--text-3); }
+/* Apply ops */
+.historique-apply-counters { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: var(--sp-2) 0; }
+.historique-apply-counter { padding: 2px 8px; background: var(--surface-2); border-radius: var(--radius-pill, 999px); font-size: var(--fs-xs); color: var(--text-2); }
+.historique-apply-counter strong { color: var(--text-1); }
+.historique-apply-ops { list-style: none; padding: 0; margin: var(--sp-2) 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 360px; overflow-y: auto; font-size: var(--fs-sm); }
+.historique-apply-op { display: flex; gap: var(--sp-2); align-items: baseline; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); }
+.historique-apply-op:hover { background: var(--surface-2); }
+.historique-apply-op-icon { color: var(--accent); font-weight: var(--fw-semibold); flex-shrink: 0; }
+.historique-apply-op-text { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+/* Doublons */
+.historique-doublons-h4 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); margin: var(--sp-2) 0 var(--sp-1); }
+.historique-doublons-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 240px; overflow-y: auto; }
+.historique-doublon-row { padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); font-size: var(--fs-sm); color: var(--text-1); }
+.historique-doublon-row--decided { border-left: 3px solid var(--success, #16a34a); padding-left: var(--sp-2); }
+.historique-doublon-row--skipped { border-left: 3px solid var(--text-3); padding-left: var(--sp-2); color: var(--text-2); }
+/* Log viewer */
+.historique-log-viewer-actions { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.historique-log-count { font-size: var(--fs-xs); color: var(--text-3); }
+.historique-log-viewer { font-family: monospace; font-size: var(--fs-xs); background: var(--surface-2); color: var(--text-1); padding: var(--sp-2); border-radius: var(--radius-md); max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+/* Standalone page /run/:id */
+.historique-run-detail-page { display: flex; flex-direction: column; gap: var(--sp-4); max-width: 1280px; margin: 0 auto; padding: var(--sp-4) 0; }
+.historique-run-detail-header { display: flex; flex-direction: column; gap: var(--sp-2); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--border-1); }
+.historique-run-detail-title { font-family: var(--font-family-display, var(--font-family-base)); font-size: var(--fs-2xl); font-weight: var(--fw-semibold); color: var(--text-1); margin: 0; }
+.historique-run-detail-meta { display: flex; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-2); }
+.historique-run-detail-meta strong { color: var(--text-1); font-weight: var(--fw-semibold); }
+.historique-run-detail-tabs { display: flex; gap: var(--sp-2); border-bottom: 1px solid var(--border-1); flex-wrap: wrap; }
+.historique-run-detail-tabs .historique-inspector-tab { font-size: var(--fs-md); padding: var(--sp-2) var(--sp-3); }
+.historique-run-detail-content { background: var(--surface-1); border: 1px solid var(--border-1); border-radius: var(--radius-lg); padding: var(--sp-4); min-height: 280px; }
+
 /* ===========================================================
  * QUALITE — Phase 3.4 (spec 10-qualite.md)
  * =========================================================== */
