@@ -73,7 +73,6 @@ function currentHash() {
 
 /** Navigue vers une route. Supporte le fragment : "/library#step-validation". */
 export function navigateTo(hash) {
-  console.log("[dash-router] -> %s", hash);
   const target = `#${hash}`;
   if (window.location.hash === target) {
     // Meme hash : forcer le resolve manuellement (scroll vers fragment par ex)

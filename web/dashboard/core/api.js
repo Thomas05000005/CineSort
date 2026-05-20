@@ -73,7 +73,6 @@ export async function apiGet(path) {
   } else {
     _noteSuccess();
   }
-  console.log("[dash-api] GET %s -> %d (%dms)", path, resp.status, Math.round(performance.now() - _t0));
   return { status: resp.status, data };
 }
 
@@ -159,7 +158,6 @@ export async function apiPost(method, params = {}, opts = {}) {
       invalidateSettingsCache();
     }
   }
-  console.log("[dash-api] POST /api/%s -> %d (%dms)", method, resp.status, Math.round(performance.now() - _t0));
   return { status: resp.status, data };
 }
 

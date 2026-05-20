@@ -821,7 +821,6 @@ async function _pollIdleWithEventCheck() {
       return;
     }
     if (health?.data?.last_settings_ts && checkSettingsChanged(health.data.last_settings_ts)) {
-      console.log("[sync] settings changed, reloading theme");
       // V2-B / H13 : settings ont change cote serveur (ex: edit desktop pywebview).
       // Invalide le cache memoire avant de relire pour eviter de servir une valeur stale
       // aux autres consommateurs (sidebar features, integrations, etc.).

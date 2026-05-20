@@ -78,7 +78,6 @@ async function _processDrop(e) {
 /** Active le drag & drop si on est en mode natif (pywebview). */
 export function initDropHandlers() {
   if (!window.__CINESORT_NATIVE__) {
-    console.log("[dash-drop] mode non-natif, drag-drop desactive");
     return;
   }
   _createOverlay();
@@ -86,5 +85,4 @@ export function initDropHandlers() {
   document.addEventListener("dragleave", _onDragLeave);
   document.addEventListener("dragover", _onDragOver);
   document.addEventListener("drop", _onDrop);
-  console.log("[dash-drop] drag-drop natif active");
 }

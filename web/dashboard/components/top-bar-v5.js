@@ -158,7 +158,6 @@ function _bindEvents(root, opts) {
         // ne se passe au clic sur Luxe / Neon".
         e.stopPropagation();
         const theme = item.dataset.theme;
-        console.log("[v5-topbar] theme item clicked:", theme);
         setTheme(theme);
         if (typeof opts.onThemeChange === "function") opts.onThemeChange(theme);
         setMenuOpen(false);
@@ -200,7 +199,6 @@ export function setTheme(theme) {
     console.warn("[v5-topbar] setTheme reject:", theme, "(not in THEMES list)");
     return;
   }
-  console.log("[v5-topbar] setTheme apply:", theme);
   // V7-fix : appliquer sur <html> ET <body>. Certains styles legacy ciblent
   // body[data-theme] et d'autres tout element [data-theme]. Set des 2 pour
   // garantir l'application visuelle sur tous les themes (Luxe/Neon inclus).

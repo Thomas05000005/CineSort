@@ -36,7 +36,6 @@ export function initLogin() {
     showMsg(msg, "");
 
     try {
-      console.log("[login] attempt");
       const result = await testConnection(token);
       if (result.ok) {
         setToken(token, persist ? persist.checked : false);
