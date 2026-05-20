@@ -201,9 +201,7 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._get_perceptual_compare_audio_impl(run_id, row_id_a, row_id_b, options)
 
-    def queue_perceptual_analyses(
-        self, pairs: Any, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def queue_perceptual_analyses(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Phase 4 doublons : queue batch d'analyses perceptuelles en background.
 
         Args:
