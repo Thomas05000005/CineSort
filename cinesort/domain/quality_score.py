@@ -22,6 +22,11 @@ DEFAULT_PROFILE_VERSION = 1
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
+# Spec 11 §2.9 (Phase 4 backend-parametres-endpoints) :
+# 2 nouveaux presets pour completer le catalogue (streaming + compact)
+# en miroir des 2 existants (remux_strict + equilibre/CinemaLux).
+QUALITY_PRESET_STREAMING_OPTIMAL = "streaming_optimal"
+QUALITY_PRESET_COMPACT = "compact"
 
 
 def default_quality_profile() -> Dict[str, Any]:
@@ -146,6 +151,64 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
     light["languages"].update({"bonus_vo_present": 5, "bonus_vf_present": 3})
     light["tiers"].update({"premium": 80, "bon": 64, "moyen": 50})
 
+    # Streaming optimal : profil pour bibliotheques destinees au streaming
+    # (Plex/Jellyfin). Tolerant sur l'audio (peu de pertes a 5.1), severe sur
+    # le debit video (les players de salon n'apprecient pas le low bitrate).
+    streaming_optimal = copy.deepcopy(base)
+    streaming_optimal["id"] = "StreamingOptimal_v1"
+    streaming_optimal["weights"].update({"video": 55, "audio": 25, "extras": 20})
+    streaming_optimal["toggles"].update({"enable_4k_light": True, "include_metadata": True, "include_naming": True})
+    streaming_optimal["video_thresholds"].update(
+        {
+            "bitrate_min_kbps_2160p": 15000,
+            "bitrate_min_kbps_1080p": 6500,
+            "penalty_low_bitrate": 12,
+            "penalty_4k_light": 6,
+            "penalty_hdr_8bit": 7,
+        }
+    )
+    streaming_optimal["codec_bonuses"].update({"hevc_bonus": 10, "av1_bonus": 12, "avc_bonus": 4})
+    streaming_optimal["audio_bonuses"].update(
+        {
+            "truehd_atmos_bonus": 10,
+            "dts_hd_ma_bonus": 9,
+            "dts_bonus": 6,
+            "aac_bonus": 5,
+            "channels_bonus_map": {"2.0": 3, "5.1": 7, "7.1": 8},
+        }
+    )
+    streaming_optimal["languages"].update({"bonus_vo_present": 5, "bonus_vf_present": 4})
+    streaming_optimal["tiers"].update({"platinum": 82, "gold": 66, "silver": 52, "bronze": 32})
+
+    # Compact : profil pour bibliotheques portables (NAS petite capacite,
+    # serveur ARM). Accepte H.264/HEVC compact 5-6 GB pour 1080p, valorise
+    # AV1, peu severe sur les bitrate bas.
+    compact = copy.deepcopy(base)
+    compact["id"] = "Compact_v1"
+    compact["weights"].update({"video": 50, "audio": 30, "extras": 20})
+    compact["toggles"].update({"enable_4k_light": True, "include_metadata": True, "include_naming": True})
+    compact["video_thresholds"].update(
+        {
+            "bitrate_min_kbps_2160p": 10000,
+            "bitrate_min_kbps_1080p": 4200,
+            "penalty_low_bitrate": 6,
+            "penalty_4k_light": 3,
+            "penalty_hdr_8bit": 4,
+        }
+    )
+    compact["codec_bonuses"].update({"hevc_bonus": 9, "av1_bonus": 12, "avc_bonus": 5})
+    compact["audio_bonuses"].update(
+        {
+            "truehd_atmos_bonus": 8,
+            "dts_hd_ma_bonus": 7,
+            "dts_bonus": 5,
+            "aac_bonus": 5,
+            "channels_bonus_map": {"2.0": 3, "5.1": 5, "7.1": 6},
+        }
+    )
+    compact["languages"].update({"bonus_vo_present": 5, "bonus_vf_present": 4})
+    compact["tiers"].update({"platinum": 78, "gold": 60, "silver": 46, "bronze": 28})
+
     return {
         QUALITY_PRESET_REMUX_STRICT: {
             "preset_id": QUALITY_PRESET_REMUX_STRICT,
@@ -155,8 +218,8 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
         },
         QUALITY_PRESET_EQUILIBRE: {
             "preset_id": QUALITY_PRESET_EQUILIBRE,
-            "label": "Equilibre",
-            "description": "Profil recommande pour un usage mixte sans biais remux ou light.",
+            "label": "CinemaLux (equilibre)",
+            "description": "Profil par defaut recommande pour un usage mixte sans biais remux ou light.",
             "profile_json": equilibre,
         },
         QUALITY_PRESET_LIGHT: {
@@ -164,6 +227,18 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
             "label": "Light",
             "description": "Tolerance plus large pour encodes compacts et bibliotheques heterogenes.",
             "profile_json": light,
+        },
+        QUALITY_PRESET_STREAMING_OPTIMAL: {
+            "preset_id": QUALITY_PRESET_STREAMING_OPTIMAL,
+            "label": "Streaming optimal",
+            "description": "Optimise pour Plex/Jellyfin : bonus codec moderne, audio 5.1 valorise.",
+            "profile_json": streaming_optimal,
+        },
+        QUALITY_PRESET_COMPACT: {
+            "preset_id": QUALITY_PRESET_COMPACT,
+            "label": "Compact",
+            "description": "Bibliotheques portables : tolerant aux faibles bitrates, valorise AV1/HEVC.",
+            "profile_json": compact,
         },
     }
 
@@ -181,7 +256,13 @@ def _get_presets_catalog() -> Dict[str, Dict[str, Any]]:
 def list_quality_presets(*, include_profiles: bool = False) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     catalog = _get_presets_catalog()
-    for preset_id in (QUALITY_PRESET_REMUX_STRICT, QUALITY_PRESET_EQUILIBRE, QUALITY_PRESET_LIGHT):
+    for preset_id in (
+        QUALITY_PRESET_REMUX_STRICT,
+        QUALITY_PRESET_EQUILIBRE,
+        QUALITY_PRESET_LIGHT,
+        QUALITY_PRESET_STREAMING_OPTIMAL,
+        QUALITY_PRESET_COMPACT,
+    ):
         item = catalog[preset_id]
         profile_json = copy.deepcopy(item["profile_json"])
         row: Dict[str, Any] = {
