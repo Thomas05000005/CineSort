@@ -19,6 +19,7 @@ from cinesort.ui.api.facades.integrations_facade import IntegrationsFacade
 from cinesort.ui.api.facades.library_facade import LibraryFacade
 from cinesort.ui.api.facades.quality_facade import QualityFacade
 from cinesort.ui.api.facades.run_facade import RunFacade
+from cinesort.ui.api.facades.runtime_facade import RuntimeFacade
 from cinesort.ui.api.facades.settings_facade import SettingsFacade
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "LibraryFacade",
     "QualityFacade",
     "RunFacade",
+    "RuntimeFacade",
     "SettingsFacade",
 ]

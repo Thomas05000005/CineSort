@@ -957,23 +957,15 @@ def mark_duplicate_winner(
     Retour : `{ok, group_key, winner_row_id, losers}` (cf signature dans le prompt).
     """
     if not run_id or not str(run_id).strip():
-        return _err_response(
-            "run_id requis.", category="validation", level="info", log_module=__name__
-        )
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
     if not group_key or not str(group_key).strip():
-        return _err_response(
-            "group_key requis.", category="validation", level="info", log_module=__name__
-        )
+        return _err_response("group_key requis.", category="validation", level="info", log_module=__name__)
     if not winner_row_id or not str(winner_row_id).strip():
-        return _err_response(
-            "winner_row_id requis.", category="validation", level="info", log_module=__name__
-        )
+        return _err_response("winner_row_id requis.", category="validation", level="info", log_module=__name__)
 
     found = api._find_run_row(str(run_id))
     if not found:
-        return _err_response(
-            t("errors.run_not_found"), category="resource", level="info", log_module=__name__
-        )
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _run_row, store = found
 
     # Recharge le groupe pour deduire les losers a partir du run (source de verite).

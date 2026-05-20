@@ -11,6 +11,11 @@ class RunStatus(str, Enum):
     DONE = "DONE"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    # V8-01 spec 08 Traitement : etats supplementaires pour Run Control.
+    # Cf docs/internal/design/refonte_2026_05_17/screens/08-traitement.md §5
+    PAUSED = "PAUSED"
+    SAVED = "SAVED"
+    AWAITING_VALIDATION = "AWAITING_VALIDATION"
 
 
 @dataclass(frozen=True)

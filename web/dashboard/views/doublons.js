@@ -1,15 +1,19 @@
-/* views/doublons.js — Phase 3.3 (spec 01-doublons.md).
+/* views/doublons.js — Vue Doublons (spec 01-doublons.md).
  *
- * Vue Doublons refondue : liste des groupes de doublons avec cartes A/B
- * (codec/source/taille/score) + alertes humanisees + actions.
+ * Vue principale §1 : liste des groupes avec cartes A/B (codec/source/taille/score)
+ * + poster TMDb par groupe + boutons Garder A/B + bulk perceptual.
  *
- * Hors scope cette PR (itererations futures) :
- *   - Modal Comparateur 3 onglets (Aperçu / Frames / Audio) → ouvre la
- *     vue legacy lib-duplicates.js en attendant
- *   - Drag rectangulaire de selection bulk
- *   - Endpoint queue_perceptual_analyses + mark_duplicate_winner
+ * Inspecteur droit §2 : alimente via right-panel.setSections (poster grand
+ * format + alertes humanisees + synopsis + candidats TMDb).
  *
- * Route : /doublons (a creer dans app.js).
+ * Modal Comparateur §3 : ouvert via openDuplicateComparatorModal (composant
+ * dedie). 3 onglets : Aperçu / Frames / Audio.
+ *
+ * Workflow decision §4 : appel run/mark_duplicate_winner depuis la carte
+ * et depuis le modal. Toast de progression sur les bulk d'analyses
+ * perceptuelles (quality/queue_perceptual_analyses + polling job_id).
+ *
+ * Route : /doublons (deja cablee dans app.js).
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -17,9 +21,15 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 import { openPerceptualModal } from "../components/perceptual-modal.js";
+import { openDuplicateComparatorModal } from "../components/duplicate-comparator-modal.js";
+import { showToast } from "../components/toast.js";
+import { setSections as setRightPanelSections } from "../components/right-panel.js";
 
 let _state = null;
 let _container = null;
+let _filmCache = new Map();   // row_id -> {poster_url, overview, candidates}
+let _keyboardHandler = null;
+const _SELECTED_KEY_STORAGE = "cinesort.doublons.selectedGroupKey";
 
 function _initState() {
   return {
@@ -27,12 +37,29 @@ function _initState() {
     sizeSavingsTotal: 0,
     decidedCount: 0,
     pendingCount: 0,
-    selectedGroupKey: null,
+    selectedGroupKey: _readStoredSelection(),
     runId: null,
     loading: true,
     error: null,
     filter: "all", // all | conflict | pending | decided
+    bulkInFlight: false,
+    decisionInFlight: false,
   };
+}
+
+function _readStoredSelection() {
+  try {
+    return localStorage.getItem(_SELECTED_KEY_STORAGE) || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function _writeStoredSelection(key) {
+  try {
+    if (key) localStorage.setItem(_SELECTED_KEY_STORAGE, key);
+    else localStorage.removeItem(_SELECTED_KEY_STORAGE);
+  } catch (_e) { /* noop */ }
 }
 
 /* --- Formatters --- */
@@ -41,11 +68,99 @@ function _fmtSize(bytes) {
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
   if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(1)} Go`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
 }
 
 function _groupKey(group) {
+  for (const key of ["group_key", "id", "signature"]) {
+    if (group[key]) return String(group[key]);
+  }
   return String(group.key || group.title || "") + "::" + String(group.year || "");
+}
+
+function _firstRowId(group) {
+  if (group.rows && group.rows[0]) return group.rows[0].row_id;
+  return null;
+}
+
+function _payload(res) {
+  // Tolere {status, data} et payload direct.
+  if (!res) return {};
+  return res.data && typeof res.data === "object" ? res.data : res;
+}
+
+function _rowIdsOfGroup(group) {
+  return (group.rows || [])
+    .map((r) => r.row_id)
+    .filter((rid) => Boolean(rid));
+}
+
+/* --- TMDb cache via library/get_film_full --- */
+
+async function _fetchFilmFull(rowId) {
+  if (!rowId) return null;
+  const cached = _filmCache.get(rowId);
+  if (cached) return cached;
+  // Pose un placeholder pour eviter de relancer pendant le fetch
+  _filmCache.set(rowId, { _loading: true });
+  try {
+    const res = await apiPost("library/get_film_full", { run_id: _state ? _state.runId : null, row_id: rowId });
+    const data = _payload(res);
+    if (data.ok === false) {
+      _filmCache.set(rowId, { poster_url: null, overview: null, candidates: [] });
+      return _filmCache.get(rowId);
+    }
+    const entry = {
+      poster_url: data.poster_url || null,
+      overview: data.overview || null,
+      runtime: data.runtime || null,
+      director: data.director || null,
+      candidates: Array.isArray(data.row && data.row.candidates) ? data.row.candidates : [],
+    };
+    _filmCache.set(rowId, entry);
+    return entry;
+  } catch (_err) {
+    _filmCache.set(rowId, { poster_url: null, overview: null, candidates: [] });
+    return _filmCache.get(rowId);
+  }
+}
+
+async function _hydrateGroupsWithPosters() {
+  // Charge en parallele les film_full des premiers rows de chaque groupe
+  if (!_state || !_state.groups) return;
+  const tasks = [];
+  for (const g of _state.groups) {
+    const rid = _firstRowId(g);
+    if (rid && !_filmCache.has(rid)) {
+      tasks.push(_fetchFilmFull(rid));
+    }
+  }
+  if (tasks.length === 0) return;
+  await Promise.allSettled(tasks);
+  // Re-render pour afficher les posters
+  _render();
+  _renderRightPanel();
+}
+
+/* --- Filtering --- */
+
+function _visibleGroups() {
+  const all = Array.isArray(_state.groups) ? _state.groups : [];
+  switch (_state.filter) {
+    case "pending":
+      return all.filter((g) => !g.winner_decided);
+    case "decided":
+      return all.filter((g) => g.winner_decided);
+    case "conflict":
+      return all.filter((g) => g.plan_conflict);
+    default:
+      return all;
+  }
+}
+
+function _findGroupByKey(key) {
+  if (!key) return null;
+  return (_state.groups || []).find((g) => _groupKey(g) === key) || null;
 }
 
 /* --- Renderers --- */
@@ -72,13 +187,17 @@ function _renderError(msg) {
 function _renderHeader() {
   const n = _state.groups.length;
   const savings = _fmtSize(_state.sizeSavingsTotal);
+  const pendingForBulk = _visibleGroups().filter((g) => !g.winner_decided).length;
+  const bulkBtnDisabled = (_state.bulkInFlight || pendingForBulk === 0) ? "disabled" : "";
   return `
     <header class="doublons-header">
       <div class="doublons-header-top">
         <h1 class="doublons-title">Doublons</h1>
         <p class="doublons-summary">
           <strong>${n}</strong> groupe${n > 1 ? "s" : ""} ·
-          <strong>${escapeHtml(savings)}</strong> récupérable${savings === "—" ? "" : "s"}
+          <strong>${escapeHtml(savings)}</strong> récupérable${savings === "—" ? "" : "s"} ·
+          <strong>${_state.decidedCount}</strong> décidé${_state.decidedCount > 1 ? "s" : ""} ·
+          <strong>${_state.pendingCount}</strong> en attente
         </p>
       </div>
       <div class="doublons-toolbar" role="toolbar" aria-label="Actions Doublons">
@@ -89,7 +208,9 @@ function _renderHeader() {
           <option value="pending"${_state.filter === "pending" ? " selected" : ""}>À décider (${_state.pendingCount})</option>
           <option value="decided"${_state.filter === "decided" ? " selected" : ""}>Décidés (${_state.decidedCount})</option>
         </select>
-        <button type="button" class="v5-btn v5-btn--ghost" data-doublons-action="legacy">→ Mode workflow legacy</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-doublons-action="bulk-perceptual" ${bulkBtnDisabled}>
+          ▾ Analyser perceptuel sur ${pendingForBulk} groupe${pendingForBulk > 1 ? "s" : ""}
+        </button>
       </div>
     </header>
   `;
@@ -119,7 +240,7 @@ function _renderGroupCard(group) {
   const scoreA = Math.round(Number(comparison.total_score_a) || 0);
   const scoreB = Math.round(Number(comparison.total_score_b) || 0);
 
-  // Alertes agregees sur tous les rows du groupe
+  // Alertes agregees
   const allFlags = [];
   for (const row of (group.rows || [])) {
     if (Array.isArray(row.warning_flags)) allFlags.push(...row.warning_flags);
@@ -128,17 +249,46 @@ function _renderGroupCard(group) {
   const alertCounts = countBySeverity(allFlags);
 
   const recommendation = comparison.recommendation || "—";
-  const isSelected = _state.selectedGroupKey === _groupKey(group);
+  const groupKey = _groupKey(group);
+  const isSelected = _state.selectedGroupKey === groupKey;
+
+  // Poster TMDb du premier row (cache hydrate apres premier load)
+  const firstRid = _firstRowId(group);
+  const filmInfo = firstRid ? _filmCache.get(firstRid) : null;
+  const posterUrl = filmInfo && !filmInfo._loading ? filmInfo.poster_url : null;
+
+  // Decision badge
+  const decided = Boolean(group.winner_decided);
+  const winnerSide = String(group.winner_side || group.winner || "").toLowerCase();
+  const winnerLabel = winnerSide === "a" ? "A" : winnerSide === "b" ? "B" : "?";
+  const savings = _fmtSize(group.size_savings || (comparison && comparison.size_savings) || 0);
+
+  // Ids row pour les boutons Garder A/B (sur la carte)
+  const rowAId = group.rows && group.rows[0] ? group.rows[0].row_id : null;
+  const rowBId = group.rows && group.rows[1] ? group.rows[1].row_id : null;
+  const inflight = _state.decisionInFlight ? "disabled" : "";
 
   return `
-    <article class="doublons-card${isSelected ? " is-selected" : ""}" data-doublons-group="${escapeHtml(_groupKey(group))}">
+    <article class="doublons-card${isSelected ? " is-selected" : ""}${decided ? " is-decided" : ""}"
+             data-doublons-group="${escapeHtml(groupKey)}" tabindex="0">
       <header class="doublons-card-header">
-        <h3 class="doublons-card-title">${escapeHtml(title)} <span class="doublons-card-year">${escapeHtml(year)}</span></h3>
-        <div class="doublons-card-meta">
-          <span>${totalFiles} fichier${totalFiles > 1 ? "s" : ""}</span>
-          <span>·</span>
-          <span>${escapeHtml(_fmtSize(totalSize))}</span>
-          ${alertCounts.total > 0 ? `<span class="doublons-card-alerts">⚠ ${alertCounts.total} alerte${alertCounts.total > 1 ? "s" : ""}</span>` : ""}
+        <div class="doublons-card-poster" aria-hidden="true">
+          ${posterUrl
+            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" />`
+            : `<div class="doublons-card-poster-placeholder">🎬</div>`}
+        </div>
+        <div class="doublons-card-title-block">
+          <h3 class="doublons-card-title">${escapeHtml(title)} <span class="doublons-card-year">${escapeHtml(year)}</span></h3>
+          <div class="doublons-card-meta">
+            <span>${totalFiles} fichier${totalFiles > 1 ? "s" : ""}</span>
+            <span>·</span>
+            <span>${escapeHtml(_fmtSize(totalSize))}</span>
+            ${alertCounts.total > 0 ? `<span class="doublons-card-alerts">⚠ ${alertCounts.total} alerte${alertCounts.total > 1 ? "s" : ""}</span>` : ""}
+          </div>
+          ${decided ? `
+            <p class="duplicate-decision-badge duplicate-decision-badge--decided">
+              ✓ Décidé : Garder ${escapeHtml(winnerLabel)}${savings !== "—" ? ` · ${escapeHtml(savings)} récupérables` : ""}
+            </p>` : ""}
         </div>
       </header>
       <div class="doublons-card-versions">
@@ -177,12 +327,30 @@ function _renderGroupCard(group) {
       <footer class="doublons-card-footer">
         <div class="doublons-card-reco">${escapeHtml(recommendation)}</div>
         <div class="doublons-card-actions">
-          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-doublons-card-action="compare" data-group-key="${escapeHtml(_groupKey(group))}">
+          ${rowAId ? `
+          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm"
+                  data-doublons-card-action="keep" data-side="a"
+                  data-row-id="${escapeHtml(rowAId)}"
+                  data-group-key="${escapeHtml(groupKey)}" ${inflight}>
+            ✓ Garder A
+          </button>` : ""}
+          ${rowBId ? `
+          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm"
+                  data-doublons-card-action="keep" data-side="b"
+                  data-row-id="${escapeHtml(rowBId)}"
+                  data-group-key="${escapeHtml(groupKey)}" ${inflight}>
+            ✓ Garder B
+          </button>` : ""}
+          <button type="button" class="v5-btn v5-btn--primary v5-btn--sm"
+                  data-doublons-card-action="compare" data-group-key="${escapeHtml(groupKey)}">
             Comparer en détail
           </button>
           ${(group.rows && group.rows[0] && group.rows[0].row_id) ? `
-          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-doublons-card-action="perceptual" data-row-id="${escapeHtml(group.rows[0].row_id)}" data-row-title="${escapeHtml(title)}">
-            ▶ Analyser perceptuel
+          <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm"
+                  data-doublons-card-action="perceptual"
+                  data-row-id="${escapeHtml(group.rows[0].row_id)}"
+                  data-row-title="${escapeHtml(title)}">
+            ▶ Perceptuel
           </button>` : ""}
         </div>
       </footer>
@@ -197,12 +365,13 @@ function _renderBody() {
   if (_state.error) {
     return `<div class="doublons-section doublons-error">${escapeHtml(_state.error)}</div>`;
   }
-  if (_state.groups.length === 0) {
+  const list = _visibleGroups();
+  if (list.length === 0) {
     return _renderEmpty();
   }
   return `
     <div class="doublons-list">
-      ${_state.groups.map(_renderGroupCard).join("")}
+      ${list.map(_renderGroupCard).join("")}
     </div>
   `;
 }
@@ -218,19 +387,353 @@ function _render() {
   _bindEvents();
 }
 
+/* --- Right Panel (Inspecteur §2) --- */
+
+function _renderRightPanel() {
+  if (typeof setRightPanelSections !== "function") return;
+  const total = _state.groups.length;
+  const sectionContext = {
+    title: "Contexte",
+    html: `
+      <p class="doublons-inspector-stat">
+        <strong>${total}</strong> groupe${total > 1 ? "s" : ""} au total
+      </p>
+      <p class="doublons-inspector-stat">
+        <strong>${escapeHtml(_fmtSize(_state.sizeSavingsTotal))}</strong> récupérables
+      </p>
+      <p class="doublons-inspector-stat">
+        <strong>${_state.decidedCount}</strong> décidé${_state.decidedCount > 1 ? "s" : ""} ·
+        <strong>${_state.pendingCount}</strong> en attente
+      </p>
+    `,
+  };
+
+  const sections = [sectionContext];
+
+  const group = _findGroupByKey(_state.selectedGroupKey);
+  if (group) {
+    const title = group.title || "Sans titre";
+    const year = group.year ? ` (${group.year})` : "";
+    const firstRid = _firstRowId(group);
+    const filmInfo = firstRid ? _filmCache.get(firstRid) : null;
+    const posterUrl = filmInfo && !filmInfo._loading ? filmInfo.poster_url : null;
+    const overview = filmInfo && !filmInfo._loading ? filmInfo.overview : null;
+    const candidates = filmInfo && !filmInfo._loading ? (filmInfo.candidates || []) : [];
+    const runtime = filmInfo && !filmInfo._loading ? filmInfo.runtime : null;
+
+    const allFlags = [];
+    for (const r of (group.rows || [])) {
+      if (Array.isArray(r.warning_flags)) allFlags.push(...r.warning_flags);
+    }
+    const alerts = labelsForFlags(allFlags);
+
+    const inflight = _state.decisionInFlight ? "disabled" : "";
+
+    sections.push({
+      title: "📌 Groupe sélectionné",
+      html: `
+        ${posterUrl
+          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" /></div>`
+          : `<div class="doublons-inspector-poster doublons-inspector-poster--empty">🎬</div>`}
+        <h4 class="doublons-inspector-title">${escapeHtml(title)}${escapeHtml(year)}</h4>
+        ${runtime ? `<p class="doublons-inspector-meta">${escapeHtml(String(runtime))} min</p>` : ""}
+        ${alerts.length > 0 ? `
+          <p class="doublons-inspector-alerts-title">⚠ ${alerts.length} alerte${alerts.length > 1 ? "s" : ""}</p>
+          <ul class="doublons-inspector-alerts">
+            ${alerts.map((a) => `
+              <li class="doublons-card-alert doublons-card-alert--${escapeHtml(a.severity)}">
+                <span class="doublons-card-alert-icon">${escapeHtml(a.icon)}</span>
+                ${escapeHtml(a.label)}
+              </li>
+            `).join("")}
+          </ul>` : ""}
+        ${overview ? `
+          <p class="doublons-inspector-section-title">🎬 Synopsis</p>
+          <p class="doublons-inspector-overview">${escapeHtml(overview)}</p>` : ""}
+        ${candidates && candidates.length > 0 ? `
+          <p class="doublons-inspector-section-title">🏷 Candidats TMDb</p>
+          <ul class="doublons-inspector-candidates">
+            ${candidates.slice(0, 3).map((c) => {
+              const conf = c.confidence != null ? Math.round(Number(c.confidence) * 100) : null;
+              return `<li>
+                <strong>${escapeHtml(c.title || "?")}</strong>${c.year ? ` (${escapeHtml(String(c.year))})` : ""}
+                ${conf != null ? `<br><span class="doublons-inspector-confidence">Confiance ${conf}%</span>` : ""}
+              </li>`;
+            }).join("")}
+          </ul>` : ""}
+      `,
+    });
+
+    sections.push({
+      title: "Actions",
+      html: `
+        <div class="doublons-inspector-actions">
+          <button type="button" class="v5-btn v5-btn--primary"
+                  data-doublons-inspector-action="compare"
+                  data-group-key="${escapeHtml(_groupKey(group))}">
+            ▶ Comparer en détail
+          </button>
+          <button type="button" class="v5-btn v5-btn--secondary"
+                  data-doublons-inspector-action="perceptual"
+                  data-row-id="${firstRid ? escapeHtml(firstRid) : ""}"
+                  data-row-title="${escapeHtml(title)}" ${firstRid ? "" : "disabled"}>
+            ▾ Analyser perceptuel
+          </button>
+          <button type="button" class="v5-btn v5-btn--ghost"
+                  data-doublons-inspector-action="skip" ${inflight}>
+            → Skip ce groupe
+          </button>
+        </div>
+      `,
+    });
+  } else if (total === 0) {
+    sections.push({
+      title: "Aucun groupe sélectionné",
+      html: `<p class="doublons-inspector-empty">Aucun doublon dans la liste.</p>`,
+    });
+  } else {
+    sections.push({
+      title: "Aucun groupe sélectionné",
+      html: `<p class="doublons-inspector-empty">Clique sur un groupe pour voir son détail.</p>`,
+    });
+  }
+
+  setRightPanelSections(sections);
+  _bindRightPanelEvents();
+}
+
+function _bindRightPanelEvents() {
+  // Les sections du right-panel sont rendues dans un container externe geré par
+  // right-panel.js. On binde via delegation sur document.
+  document.querySelectorAll("[data-doublons-inspector-action]").forEach((btn) => {
+    // Eviter de re-bind
+    if (btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.doublonsInspectorAction;
+      const groupKey = btn.dataset.groupKey;
+      if (action === "compare" && groupKey) {
+        _openComparator(_findGroupByKey(groupKey));
+      } else if (action === "perceptual") {
+        const rowId = btn.dataset.rowId;
+        const rowTitle = btn.dataset.rowTitle;
+        if (rowId) openPerceptualModal({ rowId, runId: _state.runId, rowTitle });
+      } else if (action === "skip") {
+        _navigateNext();
+      }
+    });
+  });
+}
+
+/* --- Comparator open --- */
+
+function _openComparator(group) {
+  if (!group) return;
+  const rowAId = group.rows && group.rows[0] ? group.rows[0].row_id : null;
+  const rowBId = group.rows && group.rows[1] ? group.rows[1].row_id : null;
+  if (!rowAId || !rowBId) {
+    showToast({ type: "warn", text: "Comparaison nécessite au moins 2 rows valides." });
+    return;
+  }
+  openDuplicateComparatorModal({
+    runId: _state.runId,
+    groupKey: _groupKey(group),
+    rowA: rowAId,
+    rowB: rowBId,
+    title: group.title,
+    year: group.year,
+    comparison: group.comparison || {},
+    onDecided: (decision) => {
+      _handleDecision(decision.groupKey, decision.winnerSide, decision.winnerRowId, decision.payload);
+    },
+  });
+}
+
+/* --- Decision (mark_duplicate_winner) --- */
+
+async function _decideFromCard(groupKey, side, winnerRowId) {
+  if (!_state || _state.decisionInFlight) return;
+  _state.decisionInFlight = true;
+  _render();
+  try {
+    const res = await apiPost("run/mark_duplicate_winner", {
+      run_id: _state.runId,
+      group_key: groupKey,
+      winner_row_id: winnerRowId,
+      notes: null,
+    });
+    const data = _payload(res);
+    if (data.ok === false) {
+      showToast({ type: "error", text: data.message || data.error || "Échec décision" });
+      _state.decisionInFlight = false;
+      _render();
+      return;
+    }
+    _handleDecision(groupKey, side, winnerRowId, data);
+  } catch (err) {
+    showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+    _state.decisionInFlight = false;
+    _render();
+  }
+}
+
+function _handleDecision(groupKey, side, winnerRowId, payload) {
+  // Met a jour le groupe en local pour eviter un round-trip a check_duplicates.
+  const group = _findGroupByKey(groupKey);
+  if (group) {
+    group.winner_decided = true;
+    group.winner_side = side;
+    group.winner_row_id = winnerRowId;
+    if (payload && payload.losers) group.losers = payload.losers;
+  }
+  // Compteurs
+  _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
+  _state.pendingCount = _state.groups.length - _state.decidedCount;
+  _state.decisionInFlight = false;
+  const sideLabel = side === "a" ? "A" : "B";
+  showToast({ type: "success", text: `✓ Décidé : Garder ${sideLabel}` });
+  _render();
+  _renderRightPanel();
+}
+
+/* --- Bulk perceptual --- */
+
+async function _bulkPerceptual() {
+  if (!_state || _state.bulkInFlight) return;
+  const targets = _visibleGroups().filter((g) => !g.winner_decided);
+  if (targets.length === 0) {
+    showToast({ type: "info", text: "Aucun groupe à analyser." });
+    return;
+  }
+  const pairs = [];
+  for (const g of targets) {
+    const ids = _rowIdsOfGroup(g);
+    if (ids.length >= 2) {
+      pairs.push({ run_id: _state.runId, row_a: ids[0], row_b: ids[1] });
+    }
+  }
+  if (pairs.length === 0) {
+    showToast({ type: "warn", text: "Aucune paire valide à analyser." });
+    return;
+  }
+  _state.bulkInFlight = true;
+  _render();
+  showToast({ type: "info", text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…` });
+
+  try {
+    const res = await apiPost("quality/queue_perceptual_analyses", { pairs, options: {} });
+    const data = _payload(res);
+    if (data.ok === false) {
+      showToast({ type: "error", text: data.message || data.error || "Échec queue analyses" });
+      _state.bulkInFlight = false;
+      _render();
+      return;
+    }
+    const jobId = data.job_id;
+    if (!jobId) {
+      showToast({ type: "warn", text: "Job ID manquant." });
+      _state.bulkInFlight = false;
+      _render();
+      return;
+    }
+    // Polling job status (max 30 essais, 2s entre chaque = 1 min)
+    await _pollJobUntilDone(jobId, 30, 2000);
+  } catch (err) {
+    showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+  } finally {
+    _state.bulkInFlight = false;
+    _render();
+  }
+}
+
+async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await apiPost("quality/get_perceptual_job_status", { job_id: jobId });
+      const data = _payload(res);
+      if (data.ok === false) {
+        showToast({ type: "error", text: data.message || data.error || "Polling job échoué" });
+        return;
+      }
+      const status = String(data.status || "").toLowerCase();
+      const done = Number(data.done || 0);
+      const total = Number(data.total || 0);
+      if (status === "done" || status === "complete" || status === "completed" || status === "finished") {
+        showToast({ type: "success", text: `✓ ${done}/${total} analyses terminées` });
+        return;
+      }
+      if (status === "error" || status === "failed") {
+        showToast({ type: "error", text: "Analyses échouées." });
+        return;
+      }
+      // En cours
+      if (i > 0 && i % 5 === 0) {
+        showToast({ type: "info", text: `⏳ ${done}/${total} analyses…` });
+      }
+    } catch (err) {
+      showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs." });
+}
+
+/* --- Navigation clavier --- */
+
+function _navigateNext() {
+  const list = _visibleGroups();
+  if (list.length === 0) return;
+  const cur = _state.selectedGroupKey;
+  const idx = list.findIndex((g) => _groupKey(g) === cur);
+  const next = list[Math.min(list.length - 1, Math.max(0, idx + 1))];
+  if (next) _selectGroup(_groupKey(next));
+}
+
+function _navigatePrev() {
+  const list = _visibleGroups();
+  if (list.length === 0) return;
+  const cur = _state.selectedGroupKey;
+  const idx = list.findIndex((g) => _groupKey(g) === cur);
+  const prev = list[Math.max(0, idx - 1)];
+  if (prev) _selectGroup(_groupKey(prev));
+}
+
+function _selectGroup(key) {
+  _state.selectedGroupKey = key;
+  _writeStoredSelection(key);
+  _render();
+  _renderRightPanel();
+}
+
+function _onKeydown(ev) {
+  if (!_state) return;
+  // Ignorer si l'utilisateur tape dans un input/select/textarea ou dans un modal
+  const tgt = ev.target;
+  if (tgt && tgt.matches && tgt.matches("input, select, textarea, [contenteditable]")) return;
+  if (document.body.classList.contains("modal-open")) return;
+  if (ev.key === "ArrowDown") {
+    ev.preventDefault();
+    _navigateNext();
+  } else if (ev.key === "ArrowUp") {
+    ev.preventDefault();
+    _navigatePrev();
+  }
+}
+
 /* --- Data --- */
 
 async function _loadGroups() {
   _state.loading = true;
   _state.error = null;
   _render();
+  _renderRightPanel();
 
-  // Resolve current run_id
   let runId = _state.runId;
   if (!runId) {
     try {
       const dash = await apiPost("get_dashboard", { run_id_or: "latest" });
-      const data = dash && (dash.data || dash);
+      const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;
     } catch (_e) { /* on continuera meme sans runId */ }
@@ -240,33 +743,50 @@ async function _loadGroups() {
     _state.error = "Aucun run actif. Lance un scan d'abord.";
     _state.loading = false;
     _render();
+    _renderRightPanel();
     return;
   }
 
   try {
     const res = await apiPost("check_duplicates", { run_id: runId, decisions: {} });
-    if (!res || res.ok === false) {
-      _state.error = (res && (res.message || res.error)) || "Erreur de chargement.";
+    const data = _payload(res);
+    if (data.ok === false) {
+      _state.error = data.message || data.error || "Erreur de chargement.";
       _state.loading = false;
       _render();
+      _renderRightPanel();
       return;
     }
-    const data = res.data || res;
     _state.groups = Array.isArray(data.groups) ? data.groups : [];
-    _state.sizeSavingsTotal = _state.groups.reduce((sum, g) => {
-      return sum + (Number(g.comparison && g.comparison.size_savings) || 0);
-    }, 0);
+    // Utilise size_savings_total enrichi backend si dispo, sinon agrège
+    if (typeof data.size_savings_total === "number") {
+      _state.sizeSavingsTotal = data.size_savings_total;
+    } else {
+      _state.sizeSavingsTotal = _state.groups.reduce((sum, g) => {
+        return sum + (Number(g.comparison && g.comparison.size_savings) || 0);
+      }, 0);
+    }
     _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
     _state.pendingCount = _state.groups.length - _state.decidedCount;
     _state.loading = false;
+    // Selection : restaurer si encore valide, sinon premier groupe non décidé
+    if (_state.selectedGroupKey && !_findGroupByKey(_state.selectedGroupKey)) {
+      _state.selectedGroupKey = null;
+    }
     if (!_state.selectedGroupKey && _state.groups.length > 0) {
-      _state.selectedGroupKey = _groupKey(_state.groups[0]);
+      const firstUndec = _state.groups.find((g) => !g.winner_decided) || _state.groups[0];
+      _state.selectedGroupKey = _groupKey(firstUndec);
+      _writeStoredSelection(_state.selectedGroupKey);
     }
     _render();
+    _renderRightPanel();
+    // Hydrater posters en background
+    void _hydrateGroupsWithPosters();
   } catch (err) {
     _state.error = err && err.message ? err.message : String(err);
     _state.loading = false;
     _render();
+    _renderRightPanel();
   }
 }
 
@@ -281,7 +801,7 @@ function _bindEvents() {
     btn.addEventListener("click", () => {
       const action = btn.dataset.doublonsAction;
       if (action === "refresh") _loadGroups();
-      else if (action === "legacy") window.location.hash = "#/library";
+      else if (action === "bulk-perceptual") void _bulkPerceptual();
     });
   });
 
@@ -297,8 +817,7 @@ function _bindEvents() {
     card.addEventListener("click", (ev) => {
       // Eviter de re-selectionner sur clic d'un bouton enfant
       if (ev.target.closest("[data-doublons-card-action]")) return;
-      _state.selectedGroupKey = card.dataset.doublonsGroup;
-      _render();
+      _selectGroup(card.dataset.doublonsGroup);
     });
   });
 
@@ -306,13 +825,19 @@ function _bindEvents() {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const action = btn.dataset.doublonsCardAction;
+      const groupKey = btn.dataset.groupKey;
       if (action === "compare") {
-        // Fallback : ouvre la vue legacy lib-duplicates.js pour l'instant.
-        window.location.hash = "#/library";
+        _openComparator(_findGroupByKey(groupKey));
       } else if (action === "perceptual") {
         const rowId = btn.dataset.rowId;
         const rowTitle = btn.dataset.rowTitle;
         if (rowId) openPerceptualModal({ rowId, runId: _state.runId, rowTitle });
+      } else if (action === "keep") {
+        const side = btn.dataset.side;
+        const rowId = btn.dataset.rowId;
+        if (groupKey && rowId && (side === "a" || side === "b")) {
+          void _decideFromCard(groupKey, side, rowId);
+        }
       }
     });
   });
@@ -324,13 +849,27 @@ export async function initDoublons(container) {
   if (!container) return;
   _container = container;
   _state = _initState();
+  _filmCache = new Map();
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
   void signal;
+  // Keyboard nav
+  if (_keyboardHandler) {
+    document.removeEventListener("keydown", _keyboardHandler);
+  }
+  _keyboardHandler = _onKeydown;
+  document.addEventListener("keydown", _keyboardHandler);
   await _loadGroups();
 }
 
 export function unmountDoublons() {
   _container = null;
   _state = null;
+  if (_keyboardHandler) {
+    document.removeEventListener("keydown", _keyboardHandler);
+    _keyboardHandler = null;
+  }
+  if (typeof setRightPanelSections === "function") {
+    setRightPanelSections([]);
+  }
 }

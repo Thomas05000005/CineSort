@@ -76,6 +76,7 @@ from cinesort.ui.api import (
     quality_report_support,
     quality_support,
     reset_support,
+    run_control_support,
     run_data_support,
     run_flow_support,
     run_read_support,
@@ -89,6 +90,7 @@ from cinesort.ui.api.facades import (
     LibraryFacade,
     QualityFacade,
     RunFacade,
+    RuntimeFacade,
     SettingsFacade,
 )
 from cinesort.ui.api.quality_simulator_support import (
@@ -294,6 +296,8 @@ class CineSortApi:
         self.quality = QualityFacade(self)
         self.integrations = IntegrationsFacade(self)
         self.library = LibraryFacade(self)
+        # Spec 12-aide.md (Phase 4 — ecran Aide) : 4 endpoints diag/logs/docs.
+        self.runtime = RuntimeFacade(self)
 
     def _touch_event(self) -> None:
         """Met a jour le timestamp du dernier evenement significatif (scan, apply, settings)."""
@@ -1407,7 +1411,12 @@ class CineSortApi:
 
     # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
     def _test_omdb_connection_impl(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
-        """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption)."""
+        """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption).
+
+        Retourne (cf spec 03-settings-omdb §2) :
+          {ok, message, sample_title?, sample_year?, error_code?,
+           quota_remaining?, quota_limit?, quota_reset_at?}
+        """
 
         okey = self._unmask_or_stored("omdb_api_key", api_key)
         if not okey:
@@ -1416,8 +1425,7 @@ class CineSortApi:
         cache_path = Path(self._state_dir) / "omdb_cache_test.json"
         try:
             client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=max(1.0, min(30.0, float(timeout_s))))
-            result = client.test_connection()
-            return result
+            return client.test_connection()
         except (OSError, ValueError, KeyError) as exc:
             return _err_response(f"Erreur test OMDb: {exc}", category="resource", level="error", log_module=__name__)
 
@@ -1745,9 +1753,7 @@ class CineSortApi:
         """
         return perceptual_support.get_perceptual_compare_audio(self, run_id, row_id_a, row_id_b, options)
 
-    def _queue_perceptual_analyses_impl(
-        self, pairs: Any, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def _queue_perceptual_analyses_impl(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Phase 4 doublons : queue d'analyses perceptuelles batch en background.
 
         Cf spec section 1 "Analyser perceptuel sur N groupes". Retourne un
@@ -2337,6 +2343,35 @@ class CineSortApi:
         """Demande l'annulation d'un run en cours (pose cancel_requested=1)."""
         return history_support.cancel_run(self, run_id)
 
+    # ---------- Run Control (V8-01 spec 08 Traitement) ----------
+    def _pause_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Suspend un run actif (signaling + DB PAUSED). Cf spec 08 §5."""
+        return run_control_support.pause_run(self, run_id)
+
+    def _resume_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Reprend un run PAUSED ou SAVED (signaling + DB RUNNING). Cf spec 08 §5."""
+        return run_control_support.resume_run(self, run_id)
+
+    def _save_for_later_impl(self, run_id: str) -> Dict[str, Any]:
+        """Sauvegarde un run pour plus tard (signaling + DB SAVED). Cf spec 08 §5."""
+        return run_control_support.save_for_later(self, run_id)
+
+    def _list_pending_runs_impl(self) -> Dict[str, Any]:
+        """Liste les runs PAUSED / SAVED / AWAITING_VALIDATION. Cf spec 08 §5."""
+        return run_control_support.list_pending_runs(self)
+    # ---------- Historique (spec 09) ----------
+    def _get_history_stats_impl(self, run_id: str) -> Dict[str, Any]:
+        """Detail complet d'un run pour l'inspecteur Historique (spec 09)."""
+        return history_support.get_history_stats(self, run_id)
+
+    def _delete_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Supprime un run de l'historique (DB seulement)."""
+        return history_support.delete_run(self, run_id)
+
+    def _cleanup_old_runs_impl(self, retention_days: int = 90) -> Dict[str, Any]:
+        """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
+        return history_support.cleanup_old_runs(self, retention_days=retention_days)
+
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
@@ -2430,3 +2465,30 @@ class CineSortApi:
             return _err_response(
                 str(exc), category="runtime", level="error", log_module=__name__, key="error", log_dir=log_dir
             )
+
+    # ---------- Spec 12-aide.md (Phase 4 — ecran Aide) ----------
+    # 4 endpoints exposes via la facade api.runtime.X(). Les methodes _impl
+    # delegent au module runtime_support pour garder cinesort_api.py mince.
+
+    def _get_diagnostic_impl(self) -> Dict[str, Any]:
+        """Retourne le diagnostic complet pour le bouton "Copier diagnostic".
+
+        Cf docs/internal/design/refonte_2026_05_17/screens/12-aide.md section 4.
+        """
+        return runtime_support.get_diagnostic(self)
+
+    def _get_recent_logs_impl(self, limit: int = 100) -> Dict[str, Any]:
+        """Lit les N dernieres lignes du log courant (cap a 1000)."""
+        return runtime_support.get_recent_logs(self, limit)
+
+    def _get_doc_impl(self, file: str) -> Dict[str, Any]:
+        """Retourne le contenu markdown brut d'un document whiteliste.
+
+        Securite : refuse tout chemin contenant `..` ou doc_id inconnu
+        (category="validation").
+        """
+        return runtime_support.get_doc(self, file)
+
+    def _search_docs_impl(self, query: str) -> Dict[str, Any]:
+        """Recherche full-text dans tous les documents whitelistes."""
+        return runtime_support.search_docs(self, query)

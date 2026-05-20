@@ -158,6 +158,92 @@ class RunRepository(_BaseRepository):
                 (ts, stats_json, run_id),
             )
 
+    def mark_run_paused(self, run_id: str, *, saved: bool = False, paused_ts: Optional[float] = None) -> bool:
+        """Bascule le run en PAUSED (ou SAVED si `saved=True`) et enregistre `paused_at`.
+
+        V8-01 spec 08 Traitement : un run en cours peut etre suspendu (PAUSED)
+        ou sauvegarde pour plus tard (SAVED). La transition est autorisee
+        uniquement depuis un etat actif (PENDING, RUNNING, AWAITING_VALIDATION).
+        Retourne True si la transition a eu lieu, False sinon.
+        """
+        ts = float(paused_ts if paused_ts is not None else time.time())
+        target = "SAVED" if saved else "PAUSED"
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE runs
+                SET status=?, paused_at=?
+                WHERE run_id=? AND status IN ('PENDING', 'RUNNING', 'AWAITING_VALIDATION')
+                """,
+                (target, ts, run_id),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def mark_run_resumed(self, run_id: str, *, resumed_ts: Optional[float] = None) -> bool:
+        """Bascule un run PAUSED ou SAVED vers RUNNING.
+
+        V8-01 spec 08 : le complement de `mark_run_paused`. Efface `paused_at`
+        et restaure le statut RUNNING. Autorise uniquement depuis PAUSED ou SAVED.
+        Retourne True si la transition a eu lieu, False sinon.
+        """
+        ts = float(resumed_ts if resumed_ts is not None else time.time())
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE runs
+                SET status='RUNNING', paused_at=NULL, started_ts=COALESCE(started_ts, ?)
+                WHERE run_id=? AND status IN ('PAUSED', 'SAVED')
+                """,
+                (ts, run_id),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def list_pending_runs(self) -> List[Dict[str, Any]]:
+        """Retourne tous les runs en attente d'action utilisateur.
+
+        V8-01 spec 08 Traitement §5 : `run/list_pending_runs` doit lister
+        les runs PAUSED, SAVED ou AWAITING_VALIDATION pour permettre a l'UI
+        d'afficher les runs reprenables dans la sidebar / l'historique.
+
+        Format de chaque row :
+            run_id, status, created_at, total_rows, last_activity_at.
+
+        `last_activity_at` = `paused_at` si non null, sinon `started_ts`,
+        sinon `created_ts`.
+        """
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id, status, created_ts, started_ts, ended_ts, paused_at,
+                       idx, total, stats_json
+                FROM runs
+                WHERE status IN ('PAUSED', 'SAVED', 'AWAITING_VALIDATION')
+                ORDER BY COALESCE(paused_at, started_ts, created_ts) DESC,
+                         created_ts DESC
+                """
+            )
+            out: List[Dict[str, Any]] = []
+            for row in cur.fetchall():
+                stats = self._decode_row_json(row, "stats_json", default={}, expected_type=dict)
+                total_rows = int(row["total"] or stats.get("planned_rows", 0) or 0)
+                created_at = float(row["created_ts"] or 0.0)
+                paused_at = float(row["paused_at"]) if row["paused_at"] is not None else None
+                started_at = float(row["started_ts"]) if row["started_ts"] is not None else None
+                last_activity_at = (
+                    paused_at if paused_at is not None else (started_at if started_at is not None else created_at)
+                )
+                out.append(
+                    {
+                        "run_id": str(row["run_id"]),
+                        "status": str(row["status"] or ""),
+                        "created_at": created_at,
+                        "total_rows": total_rows,
+                        "last_activity_at": last_activity_at,
+                    }
+                )
+            return out
+
     def mark_run_failed(self, run_id: str, *, error_message: str, ended_ts: Optional[float] = None) -> None:
         """Bascule le run en statut FAILED et enregistre le message d'erreur."""
         ts = float(ended_ts if ended_ts is not None else time.time())
@@ -300,3 +386,96 @@ class RunRepository(_BaseRepository):
                 tuple(ids),
             )
             return {str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()}
+
+    def delete_run(self, run_id: str) -> int:
+        """Supprime un run de la DB.
+
+        Cascade DB (cf migration 021_fk_cascade) :
+        - errors           : ON DELETE CASCADE
+        - quality_reports  : ON DELETE CASCADE
+        - anomalies        : ON DELETE CASCADE
+
+        Cascade manuelle (tables sans FK CASCADE) :
+        - perceptual_reports : suppression manuelle par run_id
+        - apply_batches      : suppression manuelle (et donc apply_operations
+          via FK CASCADE sur batch_id)
+
+        Les fichiers vidéo (root) ne sont JAMAIS touchés. Les fichiers
+        d'état (plan.jsonl, validation.json, log.txt) restent eux aussi
+        sur disque, le cron de cleanup ou l'utilisateur les supprimera.
+
+        Retourne le nombre d'enregistrements directement liés au run qui
+        ont été supprimés (toutes tables confondues, incluant la row
+        `runs` elle-même).
+        """
+        rid = str(run_id or "").strip()
+        if not rid:
+            return 0
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            # PRAGMA foreign_keys=ON est applique au niveau de la connection
+            # par SQLiteStore (cf sqlite_store.py). Les CASCADE sur errors,
+            # quality_reports, anomalies se feront automatiquement.
+            cur = conn.execute("SELECT COUNT(*) AS n FROM errors WHERE run_id=?", (rid,))
+            errors_count = int(cur.fetchone()["n"] or 0)
+            cur = conn.execute("SELECT COUNT(*) AS n FROM quality_reports WHERE run_id=?", (rid,))
+            quality_count = int(cur.fetchone()["n"] or 0)
+            cur = conn.execute("SELECT COUNT(*) AS n FROM anomalies WHERE run_id=?", (rid,))
+            anomalies_count = int(cur.fetchone()["n"] or 0)
+
+            # perceptual_reports n'a PAS de FK CASCADE — purge explicite.
+            cur = conn.execute("DELETE FROM perceptual_reports WHERE run_id=?", (rid,))
+            perceptual_deleted = int(cur.rowcount or 0)
+
+            # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
+            # AVANT de supprimer le run pour pouvoir compter les operations
+            # rattachees (apply_operations CASCADE sur batch_id).
+            cur = conn.execute(
+                "SELECT batch_id FROM apply_batches WHERE run_id=?",
+                (rid,),
+            )
+            batch_ids = [str(r["batch_id"]) for r in cur.fetchall()]
+            apply_ops_deleted = 0
+            if batch_ids:
+                placeholders = ",".join("?" for _ in batch_ids)
+                cur = conn.execute(
+                    f"SELECT COUNT(*) AS n FROM apply_operations WHERE batch_id IN ({placeholders})",
+                    tuple(batch_ids),
+                )
+                apply_ops_deleted = int(cur.fetchone()["n"] or 0)
+                conn.execute(
+                    f"DELETE FROM apply_batches WHERE batch_id IN ({placeholders})",
+                    tuple(batch_ids),
+                )
+            batches_deleted = len(batch_ids)
+
+            cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
+            run_deleted = int(cur.rowcount or 0)
+
+        return (
+            run_deleted
+            + errors_count
+            + quality_count
+            + anomalies_count
+            + perceptual_deleted
+            + batches_deleted
+            + apply_ops_deleted
+        )
+
+    def list_runs_older_than(self, *, cutoff_ts: float) -> List[str]:
+        """Retourne les run_ids dont la date la plus recente (started_ts > created_ts) est < cutoff_ts.
+
+        Utile pour le cron de retention.
+        """
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id
+                FROM runs
+                WHERE COALESCE(started_ts, created_ts) < ?
+                ORDER BY COALESCE(started_ts, created_ts) ASC
+                """,
+                (float(cutoff_ts),),
+            )
+            return [str(r["run_id"]) for r in cur.fetchall()]

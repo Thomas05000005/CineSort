@@ -11,22 +11,25 @@ _COMPONENTS_CSS = _ROOT / "web" / "shared" / "components.css"
 
 
 class SagasSectionTests(unittest.TestCase):
-    """Spec 10 §3 : Sagas incompletes - lit librarian.suggestions."""
+    """Spec 10 §3 : Sagas incompletes - Phase 5 lit l'endpoint dedie."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _QUALITE_JS.read_text(encoding="utf-8")
 
-    def test_sagas_reads_librarian(self) -> None:
-        self.assertIn("librarian", self.js)
-        self.assertIn("sagaSug", self.js)
+    def test_sagas_calls_endpoint(self) -> None:
+        # Phase 5 : cable sur l'endpoint dedie au lieu de librarian.suggestions
+        self.assertIn("library/get_incomplete_sagas", self.js)
 
-    def test_sagas_link_to_library(self) -> None:
-        self.assertIn("sagas_incomplete", self.js)
+    def test_sagas_data_fields(self) -> None:
+        # Les champs cles de la reponse get_incomplete_sagas doivent etre utilises
+        self.assertIn("missing_films", self.js)
+        self.assertIn("owned_films", self.js)
+        self.assertIn("total_films_in_collection", self.js)
 
 
 class DecadesSectionTests(unittest.TestCase):
-    """Spec 10 §5 : Decennies - lit stats.by_decade si dispo."""
+    """Spec 10 §5 : Decennies - lit stats.by_decade ou endpoint dedie."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -36,7 +39,9 @@ class DecadesSectionTests(unittest.TestCase):
         self.assertIn("by_decade", self.js)
 
     def test_decade_row_clickable(self) -> None:
-        self.assertIn('href="#/bibliotheque?filter=decade_', self.js)
+        # Phase 5 : passage de <a href> a <button> + navigateTo
+        self.assertIn("data-qualite-decade", self.js)
+        self.assertIn("/bibliotheque?filter=decade_", self.js)
 
 
 class CssTests(unittest.TestCase):
