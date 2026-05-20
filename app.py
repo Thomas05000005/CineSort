@@ -724,11 +724,27 @@ def main() -> None:
                         import json as _json
 
                         tk_js = _json.dumps(_desktop_dashboard_token)
+                        # Bypass complet du login en mode pywebview desktop :
+                        # - sessionStorage token : lu par state.js (auth API)
+                        # - localStorage 'cinesort.native' : signal persistant aux refresh
+                        # - localStorage token (mirror) : robustesse si sessionStorage
+                        #   est isole differemment par WebView2 selon le boot
+                        # - __CINESORT_NATIVE__ : detecte par requireAuth(), currentHash()
+                        # - location.hash = "#/accueil" si vide ou login : force la vue
+                        # - body.classList "is-native" : style natif
                         inject_js = (
                             "try {"
                             f"  sessionStorage.setItem('cinesort.dashboard.token', {tk_js});"
+                            f"  localStorage.setItem('cinesort.dashboard.token', {tk_js});"
+                            "  localStorage.setItem('cinesort.dashboard.persist', '1');"
+                            "  localStorage.setItem('cinesort.native', '1');"
                             "  window.__CINESORT_NATIVE__ = true;"
-                            "} catch (e) { console.warn('token inject fail', e); }"
+                            "  if (document.body) document.body.classList.add('is-native');"
+                            "  var h = window.location.hash;"
+                            "  if (!h || h === '#' || h.indexOf('/login') !== -1) {"
+                            "    window.location.hash = '#/accueil';"
+                            "  }"
+                            "} catch (e) { console.warn('native bootstrap inject fail', e); }"
                         )
                         main_window.evaluate_js(inject_js)
                         _log.info("splash: token injecte dans sessionStorage (mode natif)")
