@@ -54,18 +54,30 @@ import { hasToken, setToken, onClearToken } from "./core/state.js";
   });
 })();
 
-/* --- Detection mode natif (pywebview desktop) via URL params ---
- * L'app desktop charge l'URL /dashboard/?ntoken=XXX&native=1
- * On recupere le token AVANT que le router ne redirige vers /login.
+/* --- Detection mode natif (pywebview desktop) ---
+ * 3 sources, par ordre de fiabilite croissante :
+ *   1) ?native=1 dans l'URL (boot initial fourni par app.py)
+ *   2) flag persiste en localStorage (survit aux refresh / WebView2 cache)
+ *   3) window.chrome.webview present (signature WebView2 injectee par l'host
+ *      WebView2 quand la page tourne dans une app native, perdure meme apres
+ *      perte des query string).
+ * Une seule source = mode natif. On persiste le flag pour les boots suivants
+ * (au cas ou WebView2 reload sans la query).
  */
+const NATIVE_FLAG_KEY = "cinesort.native";
 (function _detectNativeBoot() {
   try {
     const params = new URLSearchParams(window.location.search);
     const ntoken = params.get("ntoken");
-    const native = params.get("native") === "1";
+    const nativeFromQuery = params.get("native") === "1";
+    let nativeFromStorage = false;
+    try { nativeFromStorage = localStorage.getItem(NATIVE_FLAG_KEY) === "1"; } catch { /* no-op */ }
+    const nativeFromWebView2 = !!(window.chrome && window.chrome.webview);
+    const native = nativeFromQuery || nativeFromStorage || nativeFromWebView2;
     if (native) {
       window.__CINESORT_NATIVE__ = true;
       document.documentElement.classList.add("cinesort-native-pending");
+      try { localStorage.setItem(NATIVE_FLAG_KEY, "1"); } catch { /* no-op */ }
     }
     if (ntoken) {
       setToken(ntoken, true);  // persist
