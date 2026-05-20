@@ -41,6 +41,29 @@ function baseUrl() {
 }
 
 /**
+ * Detecte si on tourne en mode pywebview desktop local. 4 signaux
+ * independants — UN SEUL suffit pour considerer qu'on est en natif :
+ *   1) flag __CINESORT_NATIVE__ pose par l'IIFE detection
+ *   2) window.pywebview.api : signature pywebview FIABLE (toujours injectee
+ *      par pywebview quand js_api est present, perdure aux refresh)
+ *   3) hostname 127.0.0.1 / localhost : on est en local, login web n'a aucun sens
+ *   4) flag persiste en localStorage (survit aux redemarrage / cache wipe)
+ *
+ * Utilise pour BYPASS le redirect /login sur 401 — un 401 en mode local
+ * est un bug serveur (token mal passe), pas une raison de remettre l'user
+ * sur un ecran login qui n'a pas de sens en desktop.
+ */
+function _isNativeMode() {
+  if (typeof window === "undefined") return false;
+  if (window.__CINESORT_NATIVE__) return true;
+  if (window.pywebview && window.pywebview.api) return true;
+  const host = window.location && window.location.hostname;
+  if (host === "127.0.0.1" || host === "localhost") return true;
+  try { if (localStorage.getItem("cinesort.native") === "1") return true; } catch { /* no-op */ }
+  return false;
+}
+
+/**
  * Appel GET generique avec gestion auth et erreurs.
  * @returns {Promise<{status: number, data: any}>}
  */
@@ -56,7 +79,7 @@ export async function apiGet(path) {
     // Mode pywebview desktop : un 401 ne doit JAMAIS purger le token ni
     // rediriger vers /login (l'origine est garantie par le bridge natif).
     // On remonte le 401 a l'appelant qui decidera (retry, message d'erreur, etc.).
-    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+    if (_isNativeMode()) {
       console.warn("[dash-api] GET %s -> 401 (mode natif : pas de redirect login)", path);
       return { status: 401, data: { ok: false, message: "Authentification refusee par le backend." } };
     }
@@ -131,7 +154,7 @@ export async function apiPost(method, params = {}, opts = {}) {
   }
 
   if (resp.status === 401) {
-    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+    if (_isNativeMode()) {
       console.warn("[dash-api] POST /api/%s -> 401 (mode natif : pas de redirect login)", method);
       return { status: 401, data: { ok: false, message: "Authentification refusee par le backend." } };
     }

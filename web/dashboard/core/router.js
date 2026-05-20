@@ -5,6 +5,21 @@ import { hasToken, stopAllPolling } from "./state.js";
 import { abortCurrent as abortCurrentNav } from "./nav-abort.js";
 
 /**
+ * Detecte le mode pywebview desktop via 4 signaux independants.
+ * UN SEUL suffit. Utilise par requireAuth() et currentHash() pour ne
+ * jamais router vers /login en mode local.
+ */
+function _isNativeMode() {
+  if (typeof window === "undefined") return false;
+  if (window.__CINESORT_NATIVE__) return true;
+  if (window.pywebview && window.pywebview.api) return true;
+  const host = window.location && window.location.hostname;
+  if (host === "127.0.0.1" || host === "localhost") return true;
+  try { if (localStorage.getItem("cinesort.native") === "1") return true; } catch { /* no-op */ }
+  return false;
+}
+
+/**
  * Table de routes : { hash: { view, init, guard? } }
  * Populee par registerRoute().
  */
@@ -69,7 +84,7 @@ function currentHash() {
   const h = window.location.hash.replace(/^#/, "");
   if (h) return h;
   // Mode natif desktop : jamais de fallback /login, on va sur /accueil.
-  if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) return "/accueil";
+  if (_isNativeMode()) return "/accueil";
   return hasToken() ? "/accueil" : "/login";
 }
 
@@ -104,7 +119,7 @@ function resolve() {
   if (!route) {
     // Route inconnue : redirect login ou notFound (jamais login en mode natif).
     if (_notFoundHandler) _notFoundHandler(hash);
-    else if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) navigateTo("/accueil");
+    else if (_isNativeMode()) navigateTo("/accueil");
     else navigateTo("/login");
     return;
   }
@@ -112,7 +127,7 @@ function resolve() {
   // Guard : si la route necessite un token et qu'il n'y en a pas.
   // Le mode natif (pywebview) bypass le guard via requireAuth() => true.
   if (route.guard && !route.guard()) {
-    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+    if (_isNativeMode()) {
       navigateTo("/accueil");
     } else {
       navigateTo("/login");
@@ -245,7 +260,7 @@ function resolve() {
  * en local.
  */
 export function requireAuth() {
-  if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) return true;
+  if (_isNativeMode()) return true;
   return hasToken();
 }
 
