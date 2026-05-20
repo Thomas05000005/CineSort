@@ -20,6 +20,7 @@ import { apiPost } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
 import { glossaryTooltip } from "../components/glossary-tooltip.js";
 import { t, onLocaleChange } from "../core/i18n.js";
+import { renderOmdbStatusInto } from "../components/omdb-status.js";
 
 /**
  * V6-02 helper : resout un label sur un objet { labelKey?, label?, l? } via i18n.
@@ -717,7 +718,29 @@ function _renderContent(container) {
   if (showDangerZone) _bindDangerZoneEvents(container);
   // V7-port : si la section contient un QR dashboard, le charger.
   if (container.querySelector("[data-qr-dashboard]")) _loadQrDashboard(container);
+  // OMDb spec §3 : initialiser l'état affiché (vide ou non testé) sans test
+  _initOmdbInitialState(container);
   _updateSavedStateLabel();
+}
+
+/** Initialise l'affichage du status OMDb avant tout click sur "Tester".
+ *  - clé vide      → état 1 (Configurer une clé...)
+ *  - clé renseignée → état 2 (Cliquez sur Tester...)
+ */
+function _initOmdbInitialState(container) {
+  const resultEl = container.querySelector('[data-test-result-for="omdb_api_key"]');
+  if (!resultEl) return;
+  const key = String(_state.settings?.omdb_api_key || "").trim();
+  if (!key) {
+    renderOmdbStatusInto(resultEl, { ok: false, error_code: "empty_key" });
+  } else {
+    // État 2 : saisie mais pas encore testée (pas de payload backend dispo).
+    // On utilise une marque sentinelle pour que le test n'écrase pas par erreur.
+    resultEl.innerHTML = `<span class="omdb-status omdb-status--info" role="status">
+        <span class="omdb-status__label">Cliquez sur Tester pour vérifier la clé</span>
+      </span>`;
+    resultEl.style.color = "";
+  }
 }
 
 function _renderDangerZone() {
@@ -833,13 +856,22 @@ function _bindContentEvents(container) {
           } else params[k] = v;
         }
         const res = await apiPost(method, params);
-        const ok = !!(res?.data?.ok);
-        const msg = ok
-          ? t("settings.rest_test_ok", { server: res.data?.server_name ? "— " + res.data.server_name : "" })
-          : t("settings.rest_test_fail", { msg: res?.data?.message || res?.data?.error || t("common.failed") });
-        if (resultEl) { resultEl.textContent = msg; resultEl.style.color = ok ? "var(--success)" : "var(--danger)"; }
+        // OMDb : rendu enrichi avec 6 états (cf spec 03-settings-omdb §3)
+        if (fieldKey === "omdb_api_key") {
+          renderOmdbStatusInto(resultEl, res?.data || {});
+        } else {
+          const ok = !!(res?.data?.ok);
+          const msg = ok
+            ? t("settings.rest_test_ok", { server: res.data?.server_name ? "— " + res.data.server_name : "" })
+            : t("settings.rest_test_fail", { msg: res?.data?.message || res?.data?.error || t("common.failed") });
+          if (resultEl) { resultEl.textContent = msg; resultEl.style.color = ok ? "var(--success)" : "var(--danger)"; }
+        }
       } catch (e) {
-        if (resultEl) { resultEl.textContent = t("common.error_network"); resultEl.style.color = "var(--danger)"; }
+        if (fieldKey === "omdb_api_key") {
+          renderOmdbStatusInto(resultEl, { ok: false, error_code: "network", message: "Reseau indisponible" });
+        } else if (resultEl) {
+          resultEl.textContent = t("common.error_network"); resultEl.style.color = "var(--danger)";
+        }
       } finally {
         btn.disabled = false;
       }

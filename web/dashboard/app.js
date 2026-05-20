@@ -132,7 +132,7 @@ import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
 import { initDoublons, unmountDoublons } from "./views/doublons.js"; // /doublons (nouvelle UI)
 // Phase 3.4 (spec 09-historique.md) : nouvelle vue Historique refondue
 // (timeline groupee par jour + filtres + inspecteur 5 onglets).
-import { initHistorique, unmountHistorique } from "./views/historique.js"; // /historique (nouvelle UI)
+import { initHistorique, unmountHistorique, initRunDetailPage, unmountRunDetailPage } from "./views/historique.js"; // /historique (nouvelle UI) + /run/:id (page standalone)
 // Phase 3.4 (spec 10-qualite.md) : nouvelle vue Qualité audit transverse
 // (6 sections + filtres + re-calcul scores).
 import { initQualite, unmountQualite } from "./views/qualite.js"; // /qualite (nouvelle UI)
@@ -227,6 +227,10 @@ registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init:
 // container car le view-historique n'existe pas dans le DOM, et initHistorique
 // remplit le container avec son propre HTML.
 registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initHistorique(el, opts); return unmountHistorique; } });
+// Phase 5 : page standalone /run/:id (vue complete d'un run, 4 onglets en grand).
+// Reutilise le mount point view-qij car aucun view-run-detail dans le DOM ;
+// initRunDetailPage remplit le container avec son propre HTML.
+registerRoute("/run/:id", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initRunDetailPage(el, opts); return unmountRunDetailPage; } });
 // Phase 3.4 : /qualite cable la nouvelle vue Qualité refondue (spec 10).
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQualite(el, opts); return unmountQualite; } });
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).

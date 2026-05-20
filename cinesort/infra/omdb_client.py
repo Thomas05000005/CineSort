@@ -134,6 +134,24 @@ def _parse_rating(raw: Any) -> Optional[float]:
     return v if 0.0 <= v <= 10.0 else None
 
 
+def _parse_quota_int(raw: Any) -> Optional[int]:
+    """Parse un header X-RateLimit-* en int. None si absent / invalide.
+
+    Tolerant : OMDb peut renvoyer "247", " 247 ", ou rien. Retourne None
+    plutôt que de planter le test_connection si le header est malformé.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        v = int(s)
+    except (ValueError, TypeError):
+        return None
+    return v if v >= 0 else None
+
+
 def _parse_votes(raw: Any) -> Optional[int]:
     """Parse '828,114' -> 828114. None si invalide."""
     if not raw:
@@ -349,19 +367,168 @@ class OmdbClient:
         return _parse_omdb_response(data)
 
     def test_connection(self) -> Dict[str, Any]:
-        """Teste la cle API. Retourne {ok, message, sample_title}.
+        """Teste la cle API OMDb. Retourne {ok, message, sample_title, sample_year,
+        quota_remaining, quota_limit, quota_reset_at, error_code}.
 
-        Utilise pour le bouton "Tester" dans les settings UI.
+        Utilise pour le bouton "Tester" dans les settings UI (cf spec écran 03).
+
+        Erreurs gérées explicitement :
+          - "empty_key"    : clé vide saisie
+          - "auth"         : 401 → clé API invalide
+          - "quota"        : 429 → quota épuisé pour aujourd'hui
+          - "timeout"      : délai réseau dépassé
+          - "network"      : erreur réseau autre
+          - "invalid_resp" : réponse OMDb illisible / Response=False
         """
         if not self.api_key:
-            return {"ok": False, "message": "Cle API vide"}
-        # Test avec un IMDb id connu (tt0111161 = The Shawshank Redemption)
-        result = self.find_by_imdb_id("tt0111161")
-        if not result:
-            return {"ok": False, "message": "Aucune reponse OMDb (cle invalide ou API down)"}
+            return {
+                "ok": False,
+                "message": "Cle API vide",
+                "error_code": "empty_key",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
+
+        # Test avec un IMDb id connu (tt0111161 = The Shawshank Redemption).
+        # On fait l'appel HTTP DIRECTEMENT (pas via find_by_imdb_id) pour capter
+        # le status code et les headers OMDb (X-RateLimit-*) que _http_get masque.
+        params = {"i": "tt0111161", "apikey": self.api_key}
+        self._rate_limit_wait()
+        try:
+            response = self._session.get(
+                OMDB_API_BASE,
+                params=params,
+                timeout=self.timeout_s,
+            )
+        except requests.Timeout:
+            return {
+                "ok": False,
+                "message": "Delai depasse — reseau ou OMDb hors-ligne",
+                "error_code": "timeout",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
+        except requests.RequestException as exc:
+            logger.debug("omdb test_connection network error: %s", exc)
+            return {
+                "ok": False,
+                "message": "Erreur reseau",
+                "error_code": "network",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
+
+        # Capture des headers de quota (présents sur réponse 2xx OU 429)
+        headers = getattr(response, "headers", {}) or {}
+        quota_remaining = _parse_quota_int(headers.get("X-RateLimit-Remaining"))
+        quota_limit = _parse_quota_int(headers.get("X-RateLimit-Limit"))
+        quota_reset_at = headers.get("X-RateLimit-Reset") or None
+
+        status = int(getattr(response, "status_code", 0) or 0)
+
+        if status == 401:
+            return {
+                "ok": False,
+                "message": "Cle API invalide",
+                "error_code": "auth",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+        if status == 429:
+            return {
+                "ok": False,
+                "message": "Quota depasse pour aujourd'hui",
+                "error_code": "quota",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+        if status >= 400:
+            return {
+                "ok": False,
+                "message": f"Erreur HTTP {status}",
+                "error_code": "network",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+
+        # 2xx — parser le body. OMDb peut renvoyer 200 + Response=False
+        # quand la clé est invalide (selon version). On gère ce cas.
+        try:
+            data = response.json()
+        except ValueError:
+            return {
+                "ok": False,
+                "message": "Reponse OMDb illisible",
+                "error_code": "invalid_resp",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+
+        if not isinstance(data, dict):
+            return {
+                "ok": False,
+                "message": "Reponse OMDb illisible",
+                "error_code": "invalid_resp",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+
+        # Cas OMDb : 200 + Response=False + Error="Invalid API key!"
+        if str(data.get("Response", "")).strip().lower() != "true":
+            err = str(data.get("Error") or "").strip().lower()
+            if "invalid api key" in err or "no api key" in err:
+                return {
+                    "ok": False,
+                    "message": "Cle API invalide",
+                    "error_code": "auth",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            if "request limit reached" in err or "daily limit" in err:
+                return {
+                    "ok": False,
+                    "message": "Quota depasse pour aujourd'hui",
+                    "error_code": "quota",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            return {
+                "ok": False,
+                "message": data.get("Error") or "Reponse OMDb invalide",
+                "error_code": "invalid_resp",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+
+        result = _parse_omdb_response(data)
+        if result is None:
+            return {
+                "ok": False,
+                "message": "Aucune reponse OMDb exploitable",
+                "error_code": "invalid_resp",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
+            }
+
         return {
             "ok": True,
             "message": f"Connexion OK. Reponse OMDb : {result.title} ({result.year})",
             "sample_title": result.title,
             "sample_year": result.year,
+            "quota_remaining": quota_remaining,
+            "quota_limit": quota_limit,
+            "quota_reset_at": quota_reset_at,
+            "error_code": None,
         }
