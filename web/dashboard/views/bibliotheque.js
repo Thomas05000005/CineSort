@@ -16,8 +16,8 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
-import { navigateTo } from "../core/router.js";
 import { dangerConfirmModal } from "../components/modal.js";
+import { renderFilmDetail } from "../components/film-detail.js";
 
 const PAGE_SIZE = 60;
 const LS_VIEW = "cinesort.bibliotheque.view";
@@ -450,15 +450,20 @@ function _bindEvents(container) {
     });
   });
 
+  // Spec 06 : clic carte -> mode A (inspecteur droit), double-clic -> mode C (overlay).
   container.querySelectorAll(".bibliotheque-card").forEach((card) => {
     card.addEventListener("click", () => {
       const rowId = card.dataset.rowId;
-      if (rowId) navigateTo(`/film/${encodeURIComponent(rowId)}`);
+      if (rowId) renderFilmDetail({ mode: "A", rowId });
+    });
+    card.addEventListener("dblclick", () => {
+      const rowId = card.dataset.rowId;
+      if (rowId) renderFilmDetail({ mode: "C", rowId });
     });
     card.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         const rowId = card.dataset.rowId;
-        if (rowId) navigateTo(`/film/${encodeURIComponent(rowId)}`);
+        if (rowId) renderFilmDetail({ mode: "A", rowId });
       } else if (ev.key === " ") {
         ev.preventDefault();
         const rowId = card.dataset.rowId;
@@ -475,7 +480,12 @@ function _bindEvents(container) {
     tr.addEventListener("click", (ev) => {
       if (ev.target.tagName === "INPUT") return;
       const rowId = tr.dataset.rowId;
-      if (rowId) navigateTo(`/film/${encodeURIComponent(rowId)}`);
+      if (rowId) renderFilmDetail({ mode: "A", rowId });
+    });
+    tr.addEventListener("dblclick", (ev) => {
+      if (ev.target.tagName === "INPUT") return;
+      const rowId = tr.dataset.rowId;
+      if (rowId) renderFilmDetail({ mode: "C", rowId });
     });
   });
 

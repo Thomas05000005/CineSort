@@ -82,8 +82,10 @@ class GridAndSelectionTests(unittest.TestCase):
         self.assertIn("function _renderFilmCard(row)", self.js)
 
     def test_navigates_to_film_detail(self) -> None:
-        self.assertIn("/film/", self.js)
-        self.assertIn("navigateTo", self.js)
+        # Phase 5 spec 06 : clic carte -> renderFilmDetail(mode A/C) au lieu
+        # de navigateTo("/film/:id"). Le composant film-detail est utilise.
+        self.assertIn("renderFilmDetail", self.js)
+        self.assertIn('mode: "A"', self.js)
 
 
 class PaginationTests(unittest.TestCase):
