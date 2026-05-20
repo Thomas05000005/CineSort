@@ -1306,6 +1306,8 @@ class ApplyExecutionContext:
     conflicts_sidecars_root: Path
     duplicates_identical_root: Path
     leftovers_root: Path
+    # Phase 6 doublons (spec 01-doublons.md §3.7) : bucket des losers post-decision UI.
+    duplicates_user_decided_root: Optional[Path] = None
     touched_top_level_dirs: Set[Path] = field(default_factory=set)
     folder_map: Dict[str, str] = field(default_factory=dict)
     dedup_seen_ops: Set[Tuple[str, str, str]] = field(default_factory=set)

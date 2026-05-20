@@ -5,14 +5,27 @@
  *   - Frames  : 3 paires de frames PNG via quality/get_perceptual_compare_frames (lazy)
  *   - Audio   : waveforms PNG + clips MP3 via quality/get_perceptual_compare_audio (lazy)
  *
- * Footer : boutons "✓ Garder A", "✓ Garder B", "→ Skip" cables sur
- * run/mark_duplicate_winner.
+ * Footer : boutons "✓ Garder A", "✓ Garder B" (… "✓ Garder N" si 3+ fichiers),
+ * "→ Skip" cables sur run/mark_duplicate_winner.
+ *
+ * Cas 3+ fichiers (spec 01 §3 « Cas 3+ fichiers ») :
+ *   Si la prop `rows` contient >= 3 éléments, on affiche au-dessus des onglets
+ *   un sélecteur de paire `[A vs B] [A vs C] [B vs C] …` (toutes les combinaisons
+ *   non ordonnées). Changer de paire reload les onglets frames/audio (cache par
+ *   paire). Le footer propose autant de boutons "✓ Garder X" qu'il y a de rows.
  *
  * Mode readOnly (spec 02 §5 — Modal Perceptuelle) : quand on compare 2 films
  * arbitraires (pas un vrai groupe de doublons), on cache le footer de decision
  * et on ne demande pas de groupKey. Seuls Apercu / Frames / Audio sont actifs.
  *
  * API :
+ *   openDuplicateComparatorModal({
+ *     runId, groupKey,
+ *     rowA, rowB,              // legacy 2-fichiers
+ *     rows,                    // optionnel : [{row_id, label, file_name?}, …]
+ *                              //  — si >= 3, active la bar de paires
+ *     title, year, comparison, onDecided
+ *   })
  *   openDuplicateComparatorModal({ runId, groupKey, rowA, rowB, title, year,
  *                                  comparison, onDecided, readOnly })
  *   closeDuplicateComparatorModal()
@@ -50,17 +63,79 @@ function _payload(res) {
   return res.data && typeof res.data === "object" ? res.data : res;
 }
 
+/* --- Multi-rows (3+) helpers --- */
+
+function _letter(i) {
+  // 0 -> A, 1 -> B, ... 25 -> Z. Au-dela : AA, AB... (cas pratique <= 6).
+  if (i < 26) return String.fromCharCode(65 + i);
+  return `${String.fromCharCode(65 + Math.floor(i / 26) - 1)}${String.fromCharCode(65 + (i % 26))}`;
+}
+
+function _buildPairs(rowsCount) {
+  // Toutes les combinaisons non ordonnees (i < j) pour rowsCount rows.
+  const pairs = [];
+  for (let i = 0; i < rowsCount; i += 1) {
+    for (let j = i + 1; j < rowsCount; j += 1) {
+      pairs.push({ idxA: i, idxB: j, key: `${i}_${j}` });
+    }
+  }
+  return pairs;
+}
+
+function _currentPair() {
+  if (!_state || !_state.pairs || _state.pairs.length === 0) return null;
+  const k = _state.activePairKey;
+  return _state.pairs.find((p) => p.key === k) || _state.pairs[0];
+}
+
+function _currentRowIds() {
+  // Resout (rowAId, rowBId) selon la paire active dans le state multi-rows.
+  if (!_state) return { rowA: null, rowB: null };
+  const pair = _currentPair();
+  if (pair && _state.rows && _state.rows.length >= 2) {
+    return {
+      rowA: _state.rows[pair.idxA].row_id,
+      rowB: _state.rows[pair.idxB].row_id,
+    };
+  }
+  return { rowA: _state.rowA, rowB: _state.rowB };
+}
+
 /* --- Header / Footer --- */
 
 function _renderHeader() {
-  const { title, year } = _state;
+  const { title, year, rows } = _state;
+  const subtitle = rows && rows.length >= 3 ? `${rows.length} fichiers` : "";
   return `
     <header class="duplicate-modal-header">
       <h2 class="duplicate-modal-title" id="duplicate-modal-title">
-        Comparer : ${escapeHtml(title || "Sans titre")}${year ? ` (${escapeHtml(String(year))})` : ""}
+        Comparer : ${escapeHtml(title || "Sans titre")}${year ? ` (${escapeHtml(String(year))})` : ""}${subtitle ? ` — ${escapeHtml(subtitle)}` : ""}
       </h2>
       <button type="button" class="duplicate-modal-close" data-duplicate-close aria-label="Fermer">✕</button>
     </header>
+  `;
+}
+
+function _renderPairsBar() {
+  // Spec 01 §3 « Cas 3+ fichiers » : sélecteur paire-à-paire.
+  if (!_state || !_state.rows || _state.rows.length < 3) return "";
+  const pairs = _state.pairs || [];
+  const active = _state.activePairKey;
+  return `
+    <nav class="duplicate-modal-pairs" role="tablist" aria-label="Sélection paire à comparer">
+      ${pairs.map((p) => {
+        const lbl = `${_letter(p.idxA)} vs ${_letter(p.idxB)}`;
+        const isActive = p.key === active;
+        return `
+          <button type="button" role="tab"
+                  class="duplicate-modal-pair${isActive ? " is-active" : ""}"
+                  aria-selected="${isActive ? "true" : "false"}"
+                  data-duplicate-pair="${escapeHtml(p.key)}">
+            ${escapeHtml(lbl)}
+          </button>
+        `;
+      }).join("")}
+    </nav>
   `;
 }
 
@@ -85,6 +160,7 @@ function _renderTabs() {
 }
 
 function _renderFooter() {
+  const { rows, decisionInFlight } = _state;
   const { rowA, rowB, decisionInFlight, readOnly } = _state;
   // Spec 02 §5 : en mode readOnly (comparaison ad-hoc depuis Modal Perceptuelle),
   // pas de boutons de decision — juste un footer informatif avec Fermer.
@@ -104,17 +180,35 @@ function _renderFooter() {
     `;
   }
   const disabled = decisionInFlight ? "disabled" : "";
+
+  let buttons = "";
+  if (rows && rows.length >= 3) {
+    // Spec 01 §3 « Cas 3+ fichiers » : un bouton "Garder X" par row.
+    buttons = rows.map((r, i) => `
+      <button type="button" class="v5-btn v5-btn--primary" data-duplicate-decide="${i}"
+              data-row-id="${escapeHtml(String(r.row_id || ""))}" ${disabled}>
+        ✓ Garder ${_letter(i)}
+      </button>
+    `).join("");
+  } else {
+    const rowA = _state.rowA;
+    const rowB = _state.rowB;
+    buttons = `
+      <button type="button" class="v5-btn v5-btn--primary" data-duplicate-decide="a"
+              data-row-id="${escapeHtml(String(rowA || ""))}" ${disabled}>
+        ✓ Garder A
+      </button>
+      <button type="button" class="v5-btn v5-btn--primary" data-duplicate-decide="b"
+              data-row-id="${escapeHtml(String(rowB || ""))}" ${disabled}>
+        ✓ Garder B
+      </button>
+    `;
+  }
+
   return `
     <footer class="duplicate-modal-footer">
       <div class="duplicate-modal-footer-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-duplicate-decide="a"
-                data-row-id="${escapeHtml(String(rowA || ""))}" ${disabled}>
-          ✓ Garder A
-        </button>
-        <button type="button" class="v5-btn v5-btn--primary" data-duplicate-decide="b"
-                data-row-id="${escapeHtml(String(rowB || ""))}" ${disabled}>
-          ✓ Garder B
-        </button>
+        ${buttons}
         <button type="button" class="v5-btn v5-btn--ghost" data-duplicate-decide="skip" ${disabled}>
           → Skip ce groupe
         </button>
@@ -250,27 +344,32 @@ function _renderFramesPayload(payload) {
 
 async function _loadFramesTab() {
   if (!_state) return;
-  if (_state.framesLoaded) return; // cache
-  _state.framesLoaded = true;
+  const pair = _currentPair();
+  const pairKey = pair ? pair.key : "default";
+  // Cache par paire (cas 3+ fichiers).
+  if (!_state.framesLoadedByPair) _state.framesLoadedByPair = {};
+  if (_state.framesLoadedByPair[pairKey]) return;
+  _state.framesLoadedByPair[pairKey] = true;
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="frames"]');
   if (!tabContent) return;
+  const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_frames", {
       run_id: _state.runId,
-      row_id_a: _state.rowA,
-      row_id_b: _state.rowB,
+      row_id_a: rowA,
+      row_id_b: rowB,
       options: { max_frames: 3 },
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.framesLoaded = false;
+      _state.framesLoadedByPair[pairKey] = false;
       const msg = data.message || data.error || "Échec extraction frames";
       _replaceTabContent("frames", _renderFramesError(msg));
       return;
     }
     _replaceTabContent("frames", _renderFramesPayload(data));
   } catch (err) {
-    _state.framesLoaded = false;
+    _state.framesLoadedByPair[pairKey] = false;
     _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)));
   }
 }
@@ -323,26 +422,30 @@ function _renderAudioPayload(payload) {
 
 async function _loadAudioTab() {
   if (!_state) return;
-  if (_state.audioLoaded) return;
-  _state.audioLoaded = true;
+  const pair = _currentPair();
+  const pairKey = pair ? pair.key : "default";
+  if (!_state.audioLoadedByPair) _state.audioLoadedByPair = {};
+  if (_state.audioLoadedByPair[pairKey]) return;
+  _state.audioLoadedByPair[pairKey] = true;
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="audio"]');
   if (!tabContent) return;
+  const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_audio", {
       run_id: _state.runId,
-      row_id_a: _state.rowA,
-      row_id_b: _state.rowB,
+      row_id_a: rowA,
+      row_id_b: rowB,
       options: { duration_s: 10 },
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.audioLoaded = false;
+      _state.audioLoadedByPair[pairKey] = false;
       _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"));
       return;
     }
     _replaceTabContent("audio", _renderAudioPayload(data));
   } catch (err) {
-    _state.audioLoaded = false;
+    _state.audioLoadedByPair[pairKey] = false;
     _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)));
   }
 }
@@ -384,6 +487,22 @@ function _switchTab(tabId) {
   else if (tabId === "audio") void _loadAudioTab();
 }
 
+function _switchPair(pairKey) {
+  if (!_state) return;
+  if (_state.activePairKey === pairKey) return;
+  _state.activePairKey = pairKey;
+  // Re-render pairs bar
+  const bar = _modalEl.querySelector(".duplicate-modal-pairs");
+  if (bar) {
+    bar.outerHTML = _renderPairsBar();
+    _bindPairsBarEvents();
+  }
+  // Re-render le body de l'onglet actif
+  _replaceTabContent(_state.activeTab, _renderTabContent());
+  if (_state.activeTab === "frames") void _loadFramesTab();
+  else if (_state.activeTab === "audio") void _loadAudioTab();
+}
+
 /* --- Decision (mark_duplicate_winner) --- */
 
 async function _decideWinner(side) {
@@ -392,7 +511,23 @@ async function _decideWinner(side) {
     closeDuplicateComparatorModal();
     return;
   }
-  const winnerRow = side === "a" ? _state.rowA : _state.rowB;
+
+  // Mode multi-rows : `side` est un index numerique 0..N
+  let winnerRow = null;
+  let sideLabel = "?";
+  let winnerIndex = null;
+  if (_state.rows && _state.rows.length >= 3) {
+    const idx = Number(side);
+    if (Number.isFinite(idx) && idx >= 0 && idx < _state.rows.length) {
+      winnerRow = _state.rows[idx].row_id;
+      sideLabel = _letter(idx);
+      winnerIndex = idx;
+    }
+  } else if (side === "a" || side === "b") {
+    winnerRow = side === "a" ? _state.rowA : _state.rowB;
+    sideLabel = side === "a" ? "A" : "B";
+  }
+
   if (!winnerRow) {
     showToast({ type: "error", text: "Row ID winner manquant" });
     return;
@@ -413,7 +548,6 @@ async function _decideWinner(side) {
       _refreshFooter();
       return;
     }
-    const sideLabel = side === "a" ? "A" : "B";
     const savings = data.size_savings || (_state.comparison && _state.comparison.size_savings) || 0;
     let toastText = `✓ Décidé : Garder ${sideLabel}`;
     if (savings > 0) {
@@ -425,7 +559,9 @@ async function _decideWinner(side) {
       try {
         _state.onDecided({
           groupKey: _state.groupKey,
-          winnerSide: side,
+          // legacy : winnerSide = "a"|"b". En 3+ : on expose aussi winnerIndex.
+          winnerSide: side === "a" || side === "b" ? side : "a",
+          winnerIndex,
           winnerRowId: winnerRow,
           payload: data,
         });
@@ -481,12 +617,21 @@ function _bindTabNavEvents() {
   });
 }
 
+function _bindPairsBarEvents() {
+  if (!_modalEl) return;
+  _modalEl.querySelectorAll("[data-duplicate-pair]").forEach((btn) => {
+    btn.addEventListener("click", () => _switchPair(btn.dataset.duplicatePair));
+  });
+}
+
 function _bindTabContentEvents() {
   if (!_modalEl) return;
   const retryFrames = _modalEl.querySelector("[data-duplicate-retry-frames]");
   if (retryFrames) {
     retryFrames.addEventListener("click", () => {
-      _state.framesLoaded = false;
+      const pair = _currentPair();
+      const pairKey = pair ? pair.key : "default";
+      if (_state.framesLoadedByPair) _state.framesLoadedByPair[pairKey] = false;
       _replaceTabContent("frames", _renderFramesPlaceholder());
       void _loadFramesTab();
     });
@@ -494,7 +639,9 @@ function _bindTabContentEvents() {
   const retryAudio = _modalEl.querySelector("[data-duplicate-retry-audio]");
   if (retryAudio) {
     retryAudio.addEventListener("click", () => {
-      _state.audioLoaded = false;
+      const pair = _currentPair();
+      const pairKey = pair ? pair.key : "default";
+      if (_state.audioLoadedByPair) _state.audioLoadedByPair[pairKey] = false;
       _replaceTabContent("audio", _renderAudioPlaceholder());
       void _loadAudioTab();
     });
@@ -517,6 +664,7 @@ function _bindEvents() {
     btn.addEventListener("click", closeDuplicateComparatorModal);
   });
   _bindTabNavEvents();
+  _bindPairsBarEvents();
   _bindTabContentEvents();
   _bindFooterEvents();
 }
@@ -525,6 +673,7 @@ function _renderModal() {
   if (!_modalEl) return;
   _modalEl.innerHTML = `
     ${_renderHeader()}
+    ${_renderPairsBar()}
     ${_renderTabs()}
     <div class="duplicate-modal-body" data-duplicate-tabbody>
       ${_renderTabContent()}
@@ -538,6 +687,8 @@ function _renderModal() {
 
 export function openDuplicateComparatorModal(opts) {
   const o = opts || {};
+  if (!o.runId || !o.groupKey) {
+    console.warn("[duplicate-comparator-modal] runId/groupKey requis");
   const readOnly = o.readOnly === true;
   // En mode normal (vue Doublons), groupKey est obligatoire car requis par
   // mark_duplicate_winner. En mode readOnly (Modal Perceptuelle §5), on
@@ -546,8 +697,38 @@ export function openDuplicateComparatorModal(opts) {
     console.warn("[duplicate-comparator-modal] runId/rowA/rowB requis (groupKey requis hors readOnly)");
     return;
   }
+
+  // Normalisation rows / rowA / rowB.
+  // - Si `rows` (array) fournie et >= 2, on l'utilise comme source de verite.
+  // - Sinon on fallback sur rowA/rowB legacy.
+  let rows = null;
+  if (Array.isArray(o.rows) && o.rows.length >= 2) {
+    rows = o.rows.map((r, i) => ({
+      row_id: String(r.row_id || r.rowId || ""),
+      label: r.label || _letter(i),
+      file_name: r.file_name || r.fileName || "",
+    })).filter((r) => r.row_id);
+  }
+
+  const rowA = o.rowA || (rows && rows[0] ? rows[0].row_id : null);
+  const rowB = o.rowB || (rows && rows[1] ? rows[1].row_id : null);
+
+  if (!rowA || !rowB) {
+    console.warn("[duplicate-comparator-modal] rowA/rowB requis (ou rows[0/1])");
+    return;
+  }
+
+  const pairs = rows && rows.length >= 3 ? _buildPairs(rows.length) : [];
+  const activePairKey = pairs.length > 0 ? pairs[0].key : null;
+
   _state = {
     runId: String(o.runId),
+    groupKey: String(o.groupKey),
+    rowA: String(rowA),
+    rowB: String(rowB),
+    rows: rows && rows.length >= 2 ? rows : null,
+    pairs,
+    activePairKey,
     groupKey: o.groupKey != null ? String(o.groupKey) : "",
     rowA: String(o.rowA),
     rowB: String(o.rowB),
@@ -557,8 +738,8 @@ export function openDuplicateComparatorModal(opts) {
     onDecided: typeof o.onDecided === "function" ? o.onDecided : null,
     readOnly,
     activeTab: "apercu",
-    framesLoaded: false,
-    audioLoaded: false,
+    framesLoadedByPair: {},
+    audioLoadedByPair: {},
     decisionInFlight: false,
   };
   _ensureOverlay();

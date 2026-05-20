@@ -96,6 +96,13 @@ const FLAG_MAP = {
     severity: "warning",
     action: { kind: "config_subs", label: "Configurer recherche subs" },
   },
+  subtitle_missing_en: {
+    icon: "💬",
+    label: "Sous-titres EN manquants",
+    description: "Aucun sous-titre anglais détecté pour ce film.",
+    severity: "warning",
+    action: { kind: "config_subs", label: "Configurer recherche subs" },
+  },
   subtitle_missing: {
     icon: "💬",
     label: "Sous-titres manquants",
@@ -126,6 +133,22 @@ const FLAG_MAP = {
     severity: "warning",
     action: { kind: "open_duplicates", label: "Voir les doublons" },
   },
+  duplicate_same_root: {
+    icon: "🔁",
+    label: "Doublon dans la même racine",
+    description: "Ce film apparaît plusieurs fois dans le même dossier racine — à arbitrer via le comparateur.",
+    severity: "warning",
+    action: { kind: "open_duplicates", label: "Voir les doublons" },
+  },
+
+  // --- TMDb confiance ---
+  low_confidence_tmdb: {
+    icon: "🎯",
+    label: "Match TMDb peu fiable",
+    description: "Le match TMDb a une confiance inférieure à 70 % — vérifier le candidat retenu avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
 
   // --- Qualité / Probe ---
   low_bitrate: {
@@ -141,6 +164,13 @@ const FLAG_MAP = {
     description: "La durée du fichier diffère significativement de celle annoncée par TMDb (>30 min). Probablement faux match ou édition non détectée.",
     severity: "critical",
     action: null,
+  },
+  runtime_mismatch_likely_wrong_film: {
+    icon: "⏱",
+    label: "Durée — probablement un autre film",
+    description: "La durée diffère trop fortement de TMDb pour être une simple édition étendue : il s'agit probablement d'un autre film. Vérifier le match avant Apply.",
+    severity: "critical",
+    action: { kind: "open_film", label: "Voir détail" },
   },
 };
 
