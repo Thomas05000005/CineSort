@@ -585,6 +585,274 @@ def get_scoring_rollup(
     return {"ok": True, "by": dim, "groups": groups, "run_id": resolved_rid}
 
 
+# ---------------------------------------------------------------------------
+# Spec 06 Modal Film — 3 endpoints d'actions sur un film
+# ---------------------------------------------------------------------------
+
+
+def _get_store(api: Any):
+    """Helper : retourne le SQLiteStore via les facades, ou None si indispo."""
+    try:
+        settings = api.settings.get_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        store, _ = api._get_or_create_infra(state_dir)
+        return store
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("library_support _get_store error: %s", exc)
+        return None
+
+
+def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
+    """Recherche une PlanRow dans le run, par row_id."""
+    try:
+        plan = api.run.get_plan(run_id)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if not plan or not plan.get("ok"):
+        return None
+    for r in plan.get("rows") or []:
+        if str(r.get("row_id") or "") == str(row_id):
+            return r
+    return None
+
+
+def _confidence_label_from_value(value: int) -> str:
+    """Reproduit la grille de labels utilisee par compute_confidence."""
+    v = int(value or 0)
+    if v >= 85:
+        return "high"
+    if v >= 60:
+        return "med"
+    return "low"
+
+
+def _format_proposed_path(api: Any, run_id: str, title: str, year: int) -> str:
+    """Reconstruit le 'proposed_path' relatif (sous-dossier) selon le template
+    de renommage configure dans le run. Fallback : `Title (Year)/`.
+
+    On garde simple : on ne reconstruit pas le path complet (ROOT inconnu sans
+    cfg du run), on retourne juste le folder name + slash trailing, comme
+    `proposed_path` est consomme cote frontend (diff avec current_path).
+    """
+    # Import lazy : module domain optionnel selon contexte UI/CLI/tests.
+    try:
+        from cinesort.domain import naming as _naming
+    except ImportError:
+        # Fallback ultra-simple
+        return f"{title} ({int(year or 0)})/" if year else f"{title}/"
+    template = ""
+    try:
+        settings = api.settings.get_settings()
+        template = str(settings.get("naming_movie_template") or "")
+    except (OSError, AttributeError, KeyError, TypeError, ValueError):
+        template = ""
+    ctx = {
+        "title": str(title or ""),
+        "year": str(int(year or 0)) if year else "",
+        "edition": "",
+        "edition-tag": "",
+        "source-tag": "",
+        "quality": "",
+        "score": "",
+    }
+    try:
+        folder = _naming.format_movie_folder(template, ctx)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        folder = f"{title} ({int(year or 0)})" if year else str(title or "Film")
+    return f"{folder}/"
+
+
+def set_film_tmdb_candidate(
+    api: Any,
+    run_id: Optional[str],
+    row_id: str,
+    tmdb_id: int,
+) -> Dict[str, Any]:
+    """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+    - Recherche le candidat dans `row.candidates[]` par tmdb_id
+    - Recalcule la confidence depuis candidate.score (0..1) * 100
+    - Construit le nouveau proposed_path depuis title + year
+    - Persiste l'override en DB (table film_tmdb_overrides)
+    - Reversible tant que l'apply n'est pas faite (clear_tmdb_override)
+
+    Retourne :
+        { ok, new_confidence, new_confidence_label, new_proposed_path,
+          proposed_title, proposed_year, tmdb_id }
+    """
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+    try:
+        tmdb_int = int(tmdb_id)
+    except (TypeError, ValueError):
+        return _err_response("tmdb_id invalide.", category="validation", level="info", log_module=__name__)
+    if tmdb_int <= 0:
+        return _err_response("tmdb_id invalide.", category="validation", level="info", log_module=__name__)
+
+    row = _find_plan_row(api, rid, row_id)
+    if not row:
+        return _err_response(
+            f"Film introuvable (row_id={row_id}).", category="resource", level="info", log_module=__name__
+        )
+
+    # Recherche du candidat
+    chosen = None
+    for c in row.get("candidates") or []:
+        if int(c.get("tmdb_id") or 0) == tmdb_int:
+            chosen = c
+            break
+    if chosen is None:
+        return _err_response(
+            f"Candidat TMDb {tmdb_int} introuvable parmi les candidats du film.",
+            category="resource",
+            level="info",
+            log_module=__name__,
+        )
+
+    # Recalcul confidence : candidate.score (0..1) -> 0..100, plancher 30
+    raw_score = chosen.get("score")
+    try:
+        score_pct = int(round(float(raw_score or 0.0) * 100))
+    except (TypeError, ValueError):
+        score_pct = 0
+    new_confidence = max(30, min(100, score_pct))
+    new_label = _confidence_label_from_value(new_confidence)
+
+    proposed_title = str(chosen.get("title") or row.get("proposed_title") or "").strip()
+    try:
+        proposed_year = int(chosen.get("year") or row.get("proposed_year") or 0)
+    except (TypeError, ValueError):
+        proposed_year = 0
+
+    new_proposed_path = _format_proposed_path(api, rid, proposed_title, proposed_year)
+
+    # Persistance override
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        store.film_modal.upsert_tmdb_override(
+            run_id=rid,
+            row_id=str(row_id),
+            tmdb_id=tmdb_int,
+            new_confidence=new_confidence,
+            proposed_title=proposed_title,
+            proposed_year=proposed_year,
+        )
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance override echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "run_id": rid,
+        "row_id": str(row_id),
+        "tmdb_id": tmdb_int,
+        "new_confidence": new_confidence,
+        "new_confidence_label": new_label,
+        "new_proposed_path": new_proposed_path,
+        "proposed_title": proposed_title,
+        "proposed_year": proposed_year,
+    }
+
+
+def mark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """Spec 06 §3.7 : marque un film pour le bucket `_user_marked_for_deletion/`.
+
+    - Persiste en DB (table film_marked_for_deletion)
+    - Reversible via undo (clear / unmark_for_deletion)
+    - Le deplacement effectif sera applique au prochain apply
+
+    Retourne : { ok, marked, run_id, row_id, source_path, marked_at }
+    """
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+
+    row = _find_plan_row(api, rid, str(row_id))
+    if not row:
+        return _err_response(
+            f"Film introuvable (row_id={row_id}).", category="resource", level="info", log_module=__name__
+        )
+
+    source_path = str(row.get("source_path") or row.get("folder") or "")
+
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.mark_for_deletion(
+            run_id=rid,
+            row_id=str(row_id),
+            source_path=source_path,
+        )
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance marquage echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "marked": True,
+        "run_id": rid,
+        "row_id": str(row_id),
+        "source_path": source_path,
+        "marked_at": float(res.get("marked_at") or 0.0),
+    }
+
+
+def mark_alert_ignored(api: Any, row_id: str, alert_code: str) -> Dict[str, Any]:
+    """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+    - Insert en DB (table ignored_alerts)
+    - L'alerte disparait visuellement mais reste loggee pour stats globales
+    - Idempotent : meme couple (row_id, alert_code) ne re-insere pas
+
+    Retourne : { ok, ignored, row_id, alert_code, ignored_at }
+    """
+    rid_s = str(row_id or "").strip()
+    code_s = str(alert_code or "").strip()
+    if not rid_s:
+        return _err_response("row_id manquant.", category="validation", level="info", log_module=__name__)
+    if not code_s:
+        return _err_response("alert_code manquant.", category="validation", level="info", log_module=__name__)
+
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.insert_ignored_alert(rid_s, code_s)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance alerte ignoree echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+
+    return {
+        "ok": True,
+        "ignored": True,
+        "row_id": rid_s,
+        "alert_code": code_s,
+        "ignored_at": float(res.get("ignored_at") or 0.0),
+        "already_ignored": not bool(res.get("inserted")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rollup interne (legacy)
+# ---------------------------------------------------------------------------
+
+
 def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
     """Extrait la cle de regroupement depuis une row enrichie."""
     if dim == "franchise":

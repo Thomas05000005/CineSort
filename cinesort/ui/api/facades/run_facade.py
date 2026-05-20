@@ -76,3 +76,10 @@ class RunFacade(_BaseFacade):
         Cf CineSortApi.list_apply_history pour la doc complete.
         """
         return self._api._list_apply_history_impl(run_id)
+
+    def rescan_row(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
+
+        Cf CineSortApi._rescan_row_impl pour la doc complete.
+        """
+        return self._api._rescan_row_impl(run_id, row_id)

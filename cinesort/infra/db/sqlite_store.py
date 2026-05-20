@@ -16,6 +16,7 @@ from .migration_manager import MigrationManager, _split_sql_statements
 from .repositories import (
     AnomalyRepository,
     ApplyRepository,
+    FilmModalRepository,
     PerceptualRepository,
     ProbeRepository,
     QualityRepository,
@@ -50,6 +51,14 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "perceptual": ("perceptual_reports",),
     # P4.1 : table calibration feedback utilisateur (migration 014).
     "user_feedback": ("user_quality_feedback",),
+    # Spec 06 Modal Film (migration 023) : etat persistant des decisions
+    # utilisateur sur le modal (alertes ignorees, marquages suppression,
+    # overrides TMDb manuels).
+    "film_modal_state": (
+        "ignored_alerts",
+        "film_marked_for_deletion",
+        "film_tmdb_overrides",
+    ),
 }
 
 
@@ -579,3 +588,5 @@ class SQLiteStore(_StoreBase):
         self.quality = QualityRepository(self)
         self.run = RunRepository(self)
         self.scan = ScanRepository(self)
+        # Spec 06 Modal Film (migration 023) : etat utilisateur sur les films.
+        self.film_modal = FilmModalRepository(self)

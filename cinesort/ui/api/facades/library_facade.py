@@ -92,6 +92,34 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._get_scoring_rollup_impl(by=by, limit=limit, run_id=run_id)
 
+    # ---------- Spec 06 Modal Film : 3 actions de modification ----------
+
+    def set_film_tmdb_candidate(
+        self,
+        run_id: Optional[str],
+        row_id: str,
+        tmdb_id: int,
+    ) -> Dict[str, Any]:
+        """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+        Cf CineSortApi._set_film_tmdb_candidate_impl pour la doc complete.
+        """
+        return self._api._set_film_tmdb_candidate_impl(run_id, row_id, tmdb_id)
+
+    def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
+
+        Cf CineSortApi._mark_for_deletion_impl pour la doc complete.
+        """
+        return self._api._mark_for_deletion_impl(run_id, row_id)
+
+    def mark_alert_ignored(self, row_id: str, alert_code: str) -> Dict[str, Any]:
+        """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+        Cf CineSortApi._mark_alert_ignored_impl pour la doc complete.
+        """
+        return self._api._mark_alert_ignored_impl(row_id, alert_code)
+
     # ---------- Film standalone + history (3) ----------
 
     def get_film_full(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
