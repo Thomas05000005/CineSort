@@ -104,3 +104,18 @@ class SettingsFacade(_BaseFacade):
         Cf CineSortApi._set_active_profile_impl pour la doc complete.
         """
         return self._api._set_active_profile_impl(profile_id)
+
+    # ---------- Server info / QR code (dashboard distant) ----------
+    def get_server_info(self) -> Dict[str, Any]:
+        """Retourne les infos du serveur REST (IP, port, URL dashboard).
+
+        Cf CineSortApi._get_server_info_impl pour la doc complete.
+        """
+        return self._api._get_server_info_impl()
+
+    def get_dashboard_qr(self) -> Dict[str, Any]:
+        """Retourne un QR code SVG inline pour l'URL du dashboard distant.
+
+        Cf CineSortApi._get_dashboard_qr_impl pour la doc complete.
+        """
+        return self._api._get_dashboard_qr_impl()

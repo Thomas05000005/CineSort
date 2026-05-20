@@ -32,7 +32,7 @@ class TestServerInfoAndQR(unittest.TestCase):
 
     def test_get_server_info_no_server(self) -> None:
         self.api._rest_server = None  # type: ignore[attr-defined]
-        result = self.api.get_server_info()
+        result = self.api._get_server_info_impl()
         self.assertFalse(result["ok"])
         self.assertIn("non demarre", result["message"])
 
@@ -46,7 +46,7 @@ class TestServerInfoAndQR(unittest.TestCase):
             patch("cinesort.infra.network_utils.get_local_ip", return_value="192.168.1.10"),
             patch("cinesort.infra.network_utils.build_dashboard_url", return_value="http://192.168.1.10:9999/"),
         ):
-            result = self.api.get_server_info()
+            result = self.api._get_server_info_impl()
             self.assertTrue(result["ok"])
             self.assertEqual(result["port"], 9999)
             self.assertEqual(result["ip"], "192.168.1.10")
@@ -60,7 +60,7 @@ class TestServerInfoAndQR(unittest.TestCase):
                 patch("cinesort.infra.network_utils.get_local_ip", return_value="10.0.0.5"),
                 patch("cinesort.infra.network_utils.build_dashboard_url", return_value="http://10.0.0.5:8642/"),
             ):
-                result = self.api.get_dashboard_qr()
+                result = self.api._get_dashboard_qr_impl()
                 self.assertTrue(result["ok"])
                 self.assertIn("svg", result)
                 self.assertIn("<svg", result["svg"])
@@ -75,7 +75,7 @@ class TestServerInfoAndQR(unittest.TestCase):
                 patch("cinesort.infra.network_utils.build_dashboard_url", return_value="http://x"),
                 patch("segno.make", side_effect=ValueError("bad")),
             ):
-                result = self.api.get_dashboard_qr()
+                result = self.api._get_dashboard_qr_impl()
                 self.assertFalse(result["ok"])
                 self.assertIn("Erreur", result["message"])
 

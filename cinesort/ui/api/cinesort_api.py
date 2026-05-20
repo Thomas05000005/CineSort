@@ -866,7 +866,7 @@ class CineSortApi:
             "last_settings_ts": float(self._last_settings_ts),
         }
 
-    def get_server_info(self) -> Dict[str, Any]:
+    def _get_server_info_impl(self) -> Dict[str, Any]:
         """Retourne les infos du serveur REST (IP, port, URL dashboard)."""
         server = self._rest_server
         if server is None or not getattr(server, "is_running", False):
@@ -878,14 +878,14 @@ class CineSortApi:
         url = _network_utils_mod.build_dashboard_url(ip, port, is_https)
         return {"ok": True, "ip": ip, "port": port, "https": is_https, "dashboard_url": url}
 
-    def get_dashboard_qr(self) -> Dict[str, Any]:
+    def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
         import io
         import logging as _logging
 
         _log = _logging.getLogger(__name__)
 
-        info = self.get_server_info()
+        info = self._get_server_info_impl()
         if not info.get("ok"):
             # Fallback : construire l'URL depuis les settings
             settings = self._get_settings_impl()

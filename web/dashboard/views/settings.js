@@ -603,12 +603,12 @@ async function _loadQrDashboard(container) {
   }
   let qrSvg = "", url = "";
   try {
-    const r = await apiPost("get_dashboard_qr");
+    const r = await apiPost("settings/get_dashboard_qr");
     if (r?.data?.ok) { qrSvg = r.data.svg || ""; url = r.data.url || ""; }
   } catch { /* noop */ }
   if (!url) {
     try {
-      const si = await apiPost("get_server_info");
+      const si = await apiPost("settings/get_server_info");
       if (si?.data?.ok) url = si.data.dashboard_url || "";
     } catch { /* noop */ }
   }

@@ -73,7 +73,7 @@ class ServerInfoEndpointTests(unittest.TestCase):
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         api = CineSortApi()
-        result = api.get_server_info()
+        result = api._get_server_info_impl()
         self.assertFalse(result["ok"])
         self.assertIn("non demarre", result["message"])
 
@@ -88,7 +88,7 @@ class ServerInfoEndpointTests(unittest.TestCase):
             _is_https = False
 
         api._rest_server = _FakeServer()
-        result = api.get_server_info()
+        result = api._get_server_info_impl()
         self.assertTrue(result["ok"])
         self.assertIn("dashboard_url", result)
         self.assertIn("8642", result["dashboard_url"])

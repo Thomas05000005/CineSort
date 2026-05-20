@@ -936,12 +936,12 @@ async function _renderRemoteAccessBlock(settings) {
   }
   let qrSvg = ""; let dashUrl = "";
   try {
-    const qr = await apiPost("get_dashboard_qr");
+    const qr = await apiPost("settings/get_dashboard_qr");
     if (qr?.data?.ok) { qrSvg = qr.data.svg || ""; dashUrl = qr.data.url || ""; }
   } catch { /* noop */ }
   if (!dashUrl) {
     try {
-      const si = await apiPost("get_server_info");
+      const si = await apiPost("settings/get_server_info");
       if (si?.data?.ok) dashUrl = si.data.dashboard_url || "";
     } catch { /* noop */ }
   }
