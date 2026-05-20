@@ -363,7 +363,10 @@ function _renderDecadesSection(stats) {
   `;
 }
 
-/* Section 6 — Évolution (SVG line + KPIs delta + filtre période) — Phase 5 */
+/* Section 6 — Évolution (SVG line + KPIs delta + filtre période) — Phase 5
+ * Phase 6 (spec 10 §6) : captions dates aux extrémités, tooltips au survol des
+ * points, labels axe X (dates) et axe Y (scores graduations).
+ */
 function _renderEvolutionSection() {
   const hist = _state.history;
   const period = (hist && hist.period_days) || _state.filters.period_days || 30;
@@ -389,6 +392,11 @@ function _renderEvolutionSection() {
     return `<button type="button" class="qualite-period-btn ${active}" data-qualite-period="${p}">${label}</button>`;
   }).join("");
 
+  // Caption : "entre 5 avril et 5 mai" si filtre 30j (spec §6 — format français lisible)
+  const captionText = validPoints.length > 0
+    ? _buildEvolutionCaption(validPoints, period)
+    : "";
+
   return `
     <section class="qualite-section qualite-evolution" aria-labelledby="qualite-evolution-title">
       <h2 id="qualite-evolution-title" class="qualite-section-title">
@@ -404,32 +412,123 @@ function _renderEvolutionSection() {
       <div class="qualite-evolution-chart">${chartSvg}</div>
       ${validPoints.length === 0
         ? `<p class="qualite-empty-msg">Aucune mesure disponible sur la période.</p>`
-        : `<p class="qualite-evolution-caption">${validPoints.length} points de mesure entre ${escapeHtml(validPoints[0].date || "")} et ${escapeHtml(validPoints[validPoints.length - 1].date || "")}</p>`}
+        : `<p class="qualite-evolution-caption">${escapeHtml(captionText)}</p>`}
     </section>
   `;
 }
 
+/* Formate une date ISO "2026-05-05" en "5 mai 2026" (libellé court "5 mai" si même année). */
+function _formatDateFr(isoDate, includeYear = false) {
+  if (!isoDate || typeof isoDate !== "string") return "";
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoDate;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const months = ["janvier", "février", "mars", "avril", "mai", "juin",
+                  "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+  const monthLabel = months[month - 1] || `m${month}`;
+  return includeYear ? `${day} ${monthLabel} ${year}` : `${day} ${monthLabel}`;
+}
+
+/* Construit la caption "N points entre <date1> et <date2>" en format français. */
+function _buildEvolutionCaption(validPoints, period) {
+  if (!validPoints || validPoints.length === 0) return "";
+  const first = validPoints[0].date || "";
+  const last = validPoints[validPoints.length - 1].date || "";
+  // Inclure année dans la borne de début si bornes traversent plusieurs années
+  const firstYear = (first.match(/^(\d{4})/) || [])[1];
+  const lastYear = (last.match(/^(\d{4})/) || [])[1];
+  const includeYear = firstYear && lastYear && firstYear !== lastYear;
+  const startLabel = _formatDateFr(first, includeYear) || first;
+  const endLabel = _formatDateFr(last, true) || last;
+  const n = validPoints.length;
+  const periodLabel = period === 0 ? "tout l'historique" : `${period}j`;
+  return `${n} point${n > 1 ? "s" : ""} de mesure entre ${startLabel} et ${endLabel} (${periodLabel})`;
+}
+
 function _renderEvolutionChart(validPoints) {
   if (!Array.isArray(validPoints) || validPoints.length === 0) {
-    return `<svg class="qualite-evolution-svg" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="20" x2="100" y2="20" stroke="var(--text-2)" stroke-dasharray="2 2"/></svg>`;
+    return `<svg class="qualite-evolution-svg" viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="25" x2="100" y2="25" stroke="var(--text-2)" stroke-dasharray="2 2"/></svg>`;
   }
+  // Marges étendues pour accueillir les labels d'axes (gauche pour Y, bas pour X)
   const w = 100;
-  const h = 40;
-  const pad = 2;
-  const xs = validPoints.map((p, i) => pad + (i / Math.max(1, validPoints.length - 1)) * (w - pad * 2));
+  const h = 50;
+  const padTop = 3;
+  const padRight = 3;
+  const padBottom = 9;   // place pour labels axe X (dates)
+  const padLeft = 10;    // place pour labels axe Y (scores)
+
+  const innerW = w - padLeft - padRight;
+  const innerH = h - padTop - padBottom;
+
+  const xs = validPoints.map((_, i) => padLeft + (i / Math.max(1, validPoints.length - 1)) * innerW);
   const ys = validPoints.map((p) => Number(p.avg_score) || 0);
   const minY = Math.min(...ys, 0);
   const maxY = Math.max(...ys, 100);
   const range = Math.max(1, maxY - minY);
-  const toSvgY = (v) => pad + (1 - (Number(v) - minY) / range) * (h - pad * 2);
+  const toSvgY = (v) => padTop + (1 - (Number(v) - minY) / range) * innerH;
   const pts = xs.map((x, i) => `${x.toFixed(2)},${toSvgY(ys[i]).toFixed(2)}`);
   const lineD = "M " + pts.join(" L ");
-  const areaD = lineD + ` L ${xs[xs.length - 1].toFixed(2)},${h - pad} L ${xs[0].toFixed(2)},${h - pad} Z`;
+  const baselineY = h - padBottom;
+  const areaD = lineD + ` L ${xs[xs.length - 1].toFixed(2)},${baselineY.toFixed(2)} L ${xs[0].toFixed(2)},${baselineY.toFixed(2)} Z`;
+
+  // Axe Y : 3 graduations (min / mid / max)
+  const yTicks = [minY, (minY + maxY) / 2, maxY].map((v) => ({
+    y: toSvgY(v).toFixed(2),
+    label: Math.round(v),
+  }));
+
+  const yAxisLabels = yTicks.map((t) =>
+    `<text x="${(padLeft - 1).toFixed(2)}" y="${t.y}" class="qualite-evolution-axis-label" text-anchor="end" dominant-baseline="middle">${t.label}</text>`
+  ).join("");
+
+  // Axe X : labels date début + date fin (+ milieu si assez de place)
+  const firstDate = validPoints[0].date || "";
+  const lastDate = validPoints[validPoints.length - 1].date || "";
+  const xAxisLabels = [];
+  if (firstDate) {
+    xAxisLabels.push(
+      `<text x="${xs[0].toFixed(2)}" y="${(h - 1).toFixed(2)}" class="qualite-evolution-axis-label" text-anchor="start">${escapeHtml(_formatDateFr(firstDate))}</text>`
+    );
+  }
+  if (validPoints.length >= 3) {
+    const midIdx = Math.floor(validPoints.length / 2);
+    const midDate = validPoints[midIdx].date || "";
+    if (midDate) {
+      xAxisLabels.push(
+        `<text x="${xs[midIdx].toFixed(2)}" y="${(h - 1).toFixed(2)}" class="qualite-evolution-axis-label" text-anchor="middle">${escapeHtml(_formatDateFr(midDate))}</text>`
+      );
+    }
+  }
+  if (lastDate && lastDate !== firstDate) {
+    xAxisLabels.push(
+      `<text x="${xs[xs.length - 1].toFixed(2)}" y="${(h - 1).toFixed(2)}" class="qualite-evolution-axis-label" text-anchor="end">${escapeHtml(_formatDateFr(lastDate))}</text>`
+    );
+  }
+
+  // Ligne baseline axe X
+  const baseline = `<line x1="${padLeft}" y1="${baselineY.toFixed(2)}" x2="${(w - padRight).toFixed(2)}" y2="${baselineY.toFixed(2)}" class="qualite-evolution-axis"/>`;
+
+  // Cercles + tooltips (title attribute) sur chaque point
+  const circles = validPoints.map((p, i) => {
+    const x = xs[i].toFixed(2);
+    const y = toSvgY(ys[i]).toFixed(2);
+    const dateLabel = _formatDateFr(p.date || "", true);
+    const score = Math.round(ys[i]);
+    const filmsCount = p.count_films != null ? Number(p.count_films) : null;
+    const tooltip = `${dateLabel || p.date || ""} — Score ${score}/100${filmsCount != null ? ` — ${filmsCount} films` : ""}`;
+    return `<circle cx="${x}" cy="${y}" r="0.9" class="qualite-evolution-point" data-qualite-point-index="${i}"><title>${escapeHtml(tooltip)}</title></circle>`;
+  }).join("");
+
   return `
-    <svg class="qualite-evolution-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Graphique d'évolution du score moyen">
+    <svg class="qualite-evolution-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Graphique d'évolution du score moyen, ${validPoints.length} points entre ${escapeHtml(_formatDateFr(firstDate, true))} et ${escapeHtml(_formatDateFr(lastDate, true))}">
       <path d="${areaD}" fill="var(--accent)" fill-opacity="0.15"/>
       <path d="${lineD}" fill="none" stroke="var(--accent)" stroke-width="0.8" stroke-linejoin="round"/>
-      ${pts.map((p) => `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="0.7" fill="var(--accent)"/>`).join("")}
+      ${baseline}
+      ${yAxisLabels}
+      ${xAxisLabels.join("")}
+      ${circles}
     </svg>
   `;
 }
@@ -951,6 +1050,8 @@ export const __testing__ = {
   TIER_LABELS: _TIER_LABELS,
   resolveTierDist: _resolveTierDist,
   renderEvolutionChart: _renderEvolutionChart,
+  formatDateFr: _formatDateFr,
+  buildEvolutionCaption: _buildEvolutionCaption,
   renderRejectSection: _renderRejectSection,
   renderSagasSection: _renderSagasSection,
   renderDecadesSection: _renderDecadesSection,
