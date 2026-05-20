@@ -29,6 +29,11 @@ class _RuntimeRun:
     thread: Optional[threading.Thread]
     snapshot: RunSnapshot
     debug_log: Optional[Callable[[str], None]]
+    # V8-01 spec 08 Traitement : signaling pause/resume. Le worker job_fn
+    # peut interroger `pause_event.is_set()` au meme titre que `should_cancel()`
+    # pour suspendre proprement la boucle. La pause est persistee en DB via
+    # RunRepository.mark_run_paused, le runner ne fait que signaler.
+    pause_event: Optional[threading.Event] = None
 
 
 class JobRunner:
@@ -171,6 +176,7 @@ class JobRunner:
                 thread=None,
                 snapshot=snapshot,
                 debug_log=run_debug,
+                pause_event=threading.Event(),
             )
             self._runs[run_id] = rt
             self._active_run_id = run_id
@@ -349,6 +355,65 @@ class JobRunner:
         self._store.run.mark_cancel_requested(run_id)
         self._debug(f"request_cancel persisted cancel_requested run_id={run_id}", run_debug)
         return True
+
+    def request_pause(self, run_id: str) -> bool:
+        """Demande la suspension d'un run actif. Pose le `pause_event`.
+
+        V8-01 spec 08 Traitement : la pause est cooperative — le job_fn doit
+        verifier `_should_pause()` (via le factory ci-dessous) dans sa boucle
+        pour suspendre proprement. Retourne False si run inconnu ou deja
+        termine. Pas de persistance ici : le caller (RunControlSupport) gere
+        l'etat DB via `RunRepository.mark_run_paused`.
+        """
+        run_debug: Optional[Callable[[str], None]] = None
+        with self._lock:
+            rt = self._runs.get(run_id)
+            if not rt:
+                self._debug(f"request_pause ignored: unknown run_id={run_id}", run_debug)
+                return False
+            run_debug = rt.debug_log
+            if rt.snapshot.status in _TERMINAL:
+                self._debug(f"request_pause ignored: run_id={run_id} terminal={rt.snapshot.status.value}", run_debug)
+                return False
+            if rt.pause_event is None:
+                rt.pause_event = threading.Event()
+            rt.pause_event.set()
+            self._debug(f"request_pause set pause flag run_id={run_id}", run_debug)
+        return True
+
+    def request_resume(self, run_id: str) -> bool:
+        """Efface le flag de pause pour permettre la reprise du worker.
+
+        Symetrique de `request_pause`. Retourne False si run inconnu ou
+        deja termine. Pas de persistance : caller gere via
+        `RunRepository.mark_run_resumed`.
+        """
+        run_debug: Optional[Callable[[str], None]] = None
+        with self._lock:
+            rt = self._runs.get(run_id)
+            if not rt:
+                self._debug(f"request_resume ignored: unknown run_id={run_id}", run_debug)
+                return False
+            run_debug = rt.debug_log
+            if rt.snapshot.status in _TERMINAL:
+                self._debug(f"request_resume ignored: run_id={run_id} terminal={rt.snapshot.status.value}", run_debug)
+                return False
+            if rt.pause_event is not None:
+                rt.pause_event.clear()
+            self._debug(f"request_resume clear pause flag run_id={run_id}", run_debug)
+        return True
+
+    def is_paused(self, run_id: str) -> bool:
+        """Indique si le `pause_event` est pose pour ce run.
+
+        Utilisable par le job_fn pour decider de suspendre la boucle. Renvoie
+        False pour un run inconnu (defensif : on n'introduit pas de blocage).
+        """
+        with self._lock:
+            rt = self._runs.get(run_id)
+            if not rt or rt.pause_event is None:
+                return False
+            return rt.pause_event.is_set()
 
     def get_status(self, run_id: str) -> Optional[RunSnapshot]:
         """Renvoie le `RunSnapshot` courant pour ce `run_id` (mémoire puis BDD)."""
