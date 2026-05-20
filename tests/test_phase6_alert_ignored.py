@@ -135,7 +135,9 @@ class GetFilmFullFiltersIgnoredAlertsTests(unittest.TestCase):
         self.assertTrue(res["ok"])
         row = res["row"]
         # Les 3 alertes initiales preservees
-        self.assertEqual(set(row["warning_flags"]), {"subtitle_missing_fr", "root_level_source", "duplicate_cross_root"})
+        self.assertEqual(
+            set(row["warning_flags"]), {"subtitle_missing_fr", "root_level_source", "duplicate_cross_root"}
+        )
         # _ignored_alerts absent ou vide
         self.assertNotIn("_ignored_alerts", row)
 

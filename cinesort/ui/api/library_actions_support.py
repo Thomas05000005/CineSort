@@ -194,11 +194,15 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
 
     base_result = run_flow_support.rescan_row(api, run_id, row_id)
     if not isinstance(base_result, dict) or not base_result.get("ok"):
-        return base_result if isinstance(base_result, dict) else _err_response(
-            "Echec rescan probe/perceptual.",
-            category="runtime",
-            level="error",
-            log_module=__name__,
+        return (
+            base_result
+            if isinstance(base_result, dict)
+            else _err_response(
+                "Echec rescan probe/perceptual.",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
         )
 
     tmdb_rematched = False
@@ -293,10 +297,10 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     tmp_path.replace(plan_jsonl)
 
     if tmdb is not None:
-        try:
+        import contextlib  # noqa: PLC0415
+
+        with contextlib.suppress(AttributeError, OSError):
             tmdb.flush()
-        except (AttributeError, OSError):
-            pass
 
     return new_row_json
 

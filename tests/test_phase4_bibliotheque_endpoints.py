@@ -436,14 +436,34 @@ class RescanRowsBulkTests(unittest.TestCase):
             res = library_actions_support.rescan_rows_bulk(api, ["f1"], run_id="r1")
             self.assertFalse(res["ok"])
 
-    def test_single_rescan_row_delegates_to_bulk(self) -> None:
+    def test_single_rescan_row_delegates_to_full_pipeline(self) -> None:
+        """Spec 06 §3.6 : rescan_row appelle le vrai pipeline (probe + perceptual
+        + TMDb re-match) via run_flow_support.rescan_row, pas un JobRunner.
+
+        Cf phase 6 — rescan_row n'est plus un stub bulk : la version single
+        est synchrone et adaptee au Modal Film.
+        """
         from cinesort.ui.api import library_actions_support
 
         with tempfile.TemporaryDirectory() as tmp:
             api = _make_mock_api_with_rows(Path(tmp))
-            res = library_actions_support.rescan_row(api, "f1", run_id="r1")
+            with patch(
+                "cinesort.ui.api.run_flow_support.rescan_row",
+                return_value={
+                    "ok": True,
+                    "run_id": "r1",
+                    "row_id": "f1",
+                    "plan_row": {"row_id": "f1"},
+                    "quality": {"score": 80, "tier": "gold"},
+                    "perceptual": {},
+                },
+            ) as mock_run_flow:
+                res = library_actions_support.rescan_row(api, "f1", run_id="r1")
             self.assertTrue(res["ok"])
-            self.assertEqual(res["count"], 1)
+            mock_run_flow.assert_called_once_with(api, "r1", "f1")
+            # Le retour contient les nouveaux champs (plan_row, quality, perceptual)
+            self.assertIn("plan_row", res)
+            self.assertEqual(res["quality"]["score"], 80)
 
 
 # ---------------------------------------------------------------------------

@@ -1846,6 +1846,7 @@ def replan_single_row(
         rien produit (cas degenere : video inexistante, etc.).
     """
     if log is None:
+
         def log(level: str, msg: str) -> None:  # noqa: ARG001
             _log.debug("replan_single_row[%s] %s", level, msg)
 

@@ -205,46 +205,52 @@ class RescanRowTmdbRematchTests(unittest.TestCase):
 
             new_row_mock = MagicMock()
             new_row_mock.candidates = []
-            with patch(
-                "cinesort.ui.api.run_flow_support.rescan_row",
-                return_value={
-                    "ok": True,
-                    "run_id": "r1",
-                    "row_id": "f1",
-                    "plan_row": {"row_id": "f1"},
-                    "quality": {},
-                    "perceptual": {},
-                },
-            ), patch(
-                "cinesort.app.plan_support.replan_single_row",
-                return_value=new_row_mock,
-            ) as mock_replan, patch(
-                "cinesort.app.plan_support.plan_row_to_jsonable",
-                return_value={
-                    "row_id": "F1_NEW",
-                    "proposed_title": "La Doublure",
-                    "proposed_year": 2006,
-                    "confidence": 90,
-                    "candidates": [{"tmdb_id": 12345, "title": "La Doublure"}],
-                    "warning_flags": [],
-                },
+            with (
+                patch(
+                    "cinesort.ui.api.run_flow_support.rescan_row",
+                    return_value={
+                        "ok": True,
+                        "run_id": "r1",
+                        "row_id": "f1",
+                        "plan_row": {"row_id": "f1"},
+                        "quality": {},
+                        "perceptual": {},
+                    },
+                ),
+                patch(
+                    "cinesort.app.plan_support.replan_single_row",
+                    return_value=new_row_mock,
+                ) as mock_replan,
+                patch(
+                    "cinesort.app.plan_support.plan_row_to_jsonable",
+                    return_value={
+                        "row_id": "F1_NEW",
+                        "proposed_title": "La Doublure",
+                        "proposed_year": 2006,
+                        "confidence": 90,
+                        "candidates": [{"tmdb_id": 12345, "title": "La Doublure"}],
+                        "warning_flags": [],
+                    },
+                ),
             ):
                 res = library_actions_support.rescan_row(api, "f1", run_id="r1")
 
-        self.assertTrue(res["ok"])
-        self.assertTrue(res["tmdb_rematched"])
-        self.assertEqual(res["candidates_count"], 1)
-        mock_replan.assert_called_once()
-        updated = [
-            json.loads(line)
-            for line in paths.plan_jsonl.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        self.assertEqual(len(updated), 2)
-        self.assertEqual(updated[0]["row_id"], "f1")  # row_id stable
-        self.assertEqual(updated[0]["confidence"], 90)
-        self.assertEqual(len(updated[0]["candidates"]), 1)
-        self.assertEqual(updated[1]["row_id"], "f2")
+            self.assertTrue(res["ok"])
+            self.assertTrue(res["tmdb_rematched"])
+            self.assertEqual(res["candidates_count"], 1)
+            mock_replan.assert_called_once()
+            self.assertTrue(
+                paths.plan_jsonl.exists(),
+                f"plan.jsonl missing at {paths.plan_jsonl}",
+            )
+            updated = [
+                json.loads(line) for line in paths.plan_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()
+            ]
+            self.assertEqual(len(updated), 2)
+            self.assertEqual(updated[0]["row_id"], "f1")  # row_id stable
+            self.assertEqual(updated[0]["confidence"], 90)
+            self.assertEqual(len(updated[0]["candidates"]), 1)
+            self.assertEqual(updated[1]["row_id"], "f2")
 
     def test_rescan_row_tmdb_failure_keeps_base_result(self) -> None:
         from cinesort.ui.api import library_actions_support
@@ -261,19 +267,22 @@ class RescanRowTmdbRematchTests(unittest.TestCase):
             )
             api.settings.get_settings.return_value = {"state_dir": tmp, "tmdb_api_key": "k"}
 
-            with patch(
-                "cinesort.ui.api.run_flow_support.rescan_row",
-                return_value={
-                    "ok": True,
-                    "run_id": "r1",
-                    "row_id": "f1",
-                    "plan_row": {"row_id": "f1"},
-                    "quality": {},
-                    "perceptual": {},
-                },
-            ), patch(
-                "cinesort.app.plan_support.replan_single_row",
-                side_effect=ValueError("boom"),
+            with (
+                patch(
+                    "cinesort.ui.api.run_flow_support.rescan_row",
+                    return_value={
+                        "ok": True,
+                        "run_id": "r1",
+                        "row_id": "f1",
+                        "plan_row": {"row_id": "f1"},
+                        "quality": {},
+                        "perceptual": {},
+                    },
+                ),
+                patch(
+                    "cinesort.app.plan_support.replan_single_row",
+                    side_effect=ValueError("boom"),
+                ),
             ):
                 res = library_actions_support.rescan_row(api, "f1", run_id="r1")
         self.assertTrue(res["ok"])
