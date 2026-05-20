@@ -451,6 +451,10 @@ tr:hover td { background: var(--accent-soft); }
 .status-msg.success { color: var(--success); }
 
 /* --- Login card -------------------------------------------- */
+/* Diag-7v2 fix : sans :not(.active), .login-wrap (display: flex)
+   ecrase .view { display: none } par cascade et le login s affiche
+   toujours, meme en mode natif desktop ou il devrait etre cache. */
+#view-login:not(.active) { display: none !important; }
 .login-wrap {
   display: flex; align-items: center; justify-content: center;
   min-height: 100vh; padding: var(--sp-4);
