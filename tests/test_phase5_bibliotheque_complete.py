@@ -245,7 +245,13 @@ class DoubleClickModeCTests(unittest.TestCase):
         self.assertIn('addEventListener("dblclick"', self.js)
 
     def test_open_film_detail_modal(self) -> None:
-        self.assertIn("_openFilmDetailModal", self.js)
+        # Spec 07 Fix 100% : le double-clic appelle directement renderFilmDetail
+        # mode C (overlay) au lieu de passer par _openFilmDetailModal qui faisait
+        # un navigateTo /film/:id (function non importee, ReferenceError au runtime).
+        self.assertRegex(
+            self.js,
+            r'renderFilmDetail\(\s*\{\s*mode\s*:\s*[\"\']C[\"\']',
+        )
 
 
 # ---------------------------------------------------------------------------

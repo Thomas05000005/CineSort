@@ -204,7 +204,7 @@ class LibraryFacade(_BaseFacade):
         format: str = "csv",  # noqa: A002 — nom impose par la spec d'endpoint
         run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Phase 4 spec 07 : export CSV/JSON des films selectionnes.
+        """Phase 4 spec 07 : export CSV / JSON / NDJSON des films selectionnes.
 
         Cf cinesort.ui.api.library_actions_support.export_films.
         """
