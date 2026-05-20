@@ -467,3 +467,128 @@ class ApplyRepository(_BaseRepository):
             cur = conn.execute("SELECT COUNT(*) AS n FROM apply_pending_moves")
             row = cur.fetchone()
         return int(row["n"]) if row else 0
+
+    # =====================================================================
+    # Phase 4 doublons (migration 023, cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md)
+    # =====================================================================
+    # Decisions utilisateur "garder ce winner" sur un groupe de doublons.
+    # A l'apply, les loser_row_ids seront deplaces vers
+    # <root>/_review/_duplicates_user_decided/.
+
+    def _ensure_duplicate_decisions_table(self) -> None:
+        self._ensure_schema_group("duplicate_decisions")
+
+    def upsert_duplicate_decision(
+        self,
+        *,
+        run_id: str,
+        group_key: str,
+        winner_row_id: str,
+        loser_row_ids: List[str],
+        decided_ts: Optional[float] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persiste la decision utilisateur pour un groupe de doublons.
+
+        (run_id, group_key) est PK : upsert sur conflict pour permettre
+        a l'utilisateur de changer d'avis.
+
+        Retourne le dict serialise (winner + losers + ts).
+        """
+        self._ensure_duplicate_decisions_table()
+        now = float(decided_ts if decided_ts is not None else time.time())
+        losers_json = json.dumps([str(x) for x in (loser_row_ids or [])], ensure_ascii=False)
+        with self._managed_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO duplicate_decisions(
+                  run_id, group_key, winner_row_id, loser_row_ids, decided_ts, notes
+                )
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, group_key) DO UPDATE SET
+                    winner_row_id = excluded.winner_row_id,
+                    loser_row_ids = excluded.loser_row_ids,
+                    decided_ts    = excluded.decided_ts,
+                    notes         = excluded.notes
+                """,
+                (
+                    str(run_id),
+                    str(group_key),
+                    str(winner_row_id),
+                    losers_json,
+                    now,
+                    str(notes) if notes else None,
+                ),
+            )
+        return {
+            "run_id": str(run_id),
+            "group_key": str(group_key),
+            "winner_row_id": str(winner_row_id),
+            "loser_row_ids": [str(x) for x in (loser_row_ids or [])],
+            "decided_ts": now,
+            "notes": notes,
+        }
+
+    def get_duplicate_decision(self, *, run_id: str, group_key: str) -> Optional[Dict[str, Any]]:
+        """Retourne la decision persistee pour ce groupe, ou None si aucune."""
+        self._ensure_duplicate_decisions_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id, group_key, winner_row_id, loser_row_ids, decided_ts, notes
+                FROM duplicate_decisions
+                WHERE run_id=? AND group_key=?
+                """,
+                (str(run_id), str(group_key)),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            losers = json.loads(row["loser_row_ids"]) if row["loser_row_ids"] else []
+            if not isinstance(losers, list):
+                losers = []
+        except (TypeError, ValueError):
+            losers = []
+        return {
+            "run_id": str(row["run_id"]),
+            "group_key": str(row["group_key"]),
+            "winner_row_id": str(row["winner_row_id"]),
+            "loser_row_ids": [str(x) for x in losers],
+            "decided_ts": float(row["decided_ts"] or 0.0),
+            "notes": str(row["notes"]) if row["notes"] else None,
+        }
+
+    def list_duplicate_decisions(self, *, run_id: str) -> List[Dict[str, Any]]:
+        """Liste toutes les decisions doublons d'un run (recent en premier)."""
+        self._ensure_duplicate_decisions_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id, group_key, winner_row_id, loser_row_ids, decided_ts, notes
+                FROM duplicate_decisions
+                WHERE run_id=?
+                ORDER BY decided_ts DESC
+                """,
+                (str(run_id),),
+            )
+            rows = cur.fetchall()
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                losers = json.loads(row["loser_row_ids"]) if row["loser_row_ids"] else []
+                if not isinstance(losers, list):
+                    losers = []
+            except (TypeError, ValueError):
+                losers = []
+            out.append(
+                {
+                    "run_id": str(row["run_id"]),
+                    "group_key": str(row["group_key"]),
+                    "winner_row_id": str(row["winner_row_id"]),
+                    "loser_row_ids": [str(x) for x in losers],
+                    "decided_ts": float(row["decided_ts"] or 0.0),
+                    "notes": str(row["notes"]) if row["notes"] else None,
+                }
+            )
+        return out

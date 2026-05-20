@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from cinesort.ui.api import library_podiums_support, library_timeline_support
+from cinesort.ui.api import library_audit_support, library_podiums_support, library_timeline_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -92,6 +92,34 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._get_scoring_rollup_impl(by=by, limit=limit, run_id=run_id)
 
+    # ---------- Spec 06 Modal Film : 3 actions de modification ----------
+
+    def set_film_tmdb_candidate(
+        self,
+        run_id: Optional[str],
+        row_id: str,
+        tmdb_id: int,
+    ) -> Dict[str, Any]:
+        """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+        Cf CineSortApi._set_film_tmdb_candidate_impl pour la doc complete.
+        """
+        return self._api._set_film_tmdb_candidate_impl(run_id, row_id, tmdb_id)
+
+    def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
+
+        Cf CineSortApi._mark_for_deletion_impl pour la doc complete.
+        """
+        return self._api._mark_for_deletion_impl(run_id, row_id)
+
+    def mark_alert_ignored(self, row_id: str, alert_code: str) -> Dict[str, Any]:
+        """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+        Cf CineSortApi._mark_alert_ignored_impl pour la doc complete.
+        """
+        return self._api._mark_alert_ignored_impl(row_id, alert_code)
+
     # ---------- Film standalone + history (3) ----------
 
     def get_film_full(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
@@ -139,3 +167,19 @@ class LibraryFacade(_BaseFacade):
         Cf cinesort.ui.api.library_timeline_support.get_library_timeline.
         """
         return library_timeline_support.get_library_timeline(self._api, months=months, run_id=run_id)
+
+    # ---------- Vue Qualite — Audit (spec 10) ----------
+
+    def get_films_by_decade(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Distribution des films par decennie (1930s -> 2020s).
+
+        Cf cinesort.ui.api.library_audit_support.get_films_by_decade.
+        """
+        return library_audit_support.get_films_by_decade(self._api, filters=filters)
+
+    def get_incomplete_sagas(self) -> Dict[str, Any]:
+        """Liste les sagas TMDb avec films manquants dans la bibliotheque.
+
+        Cf cinesort.ui.api.library_audit_support.get_incomplete_sagas.
+        """
+        return library_audit_support.get_incomplete_sagas(self._api)

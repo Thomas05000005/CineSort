@@ -68,3 +68,39 @@ class SettingsFacade(_BaseFacade):
         Cf CineSortApi.get_user_data_size pour la doc complete.
         """
         return self._api._get_user_data_size_impl()
+
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §5 + §2.9) ----------
+    def reset_settings(self, scope: str = "all") -> Dict[str, Any]:
+        """Reinitialise les settings par categorie (ou tout).
+
+        Cf CineSortApi._reset_settings_impl pour la doc complete.
+        """
+        return self._api._reset_settings_impl(scope)
+
+    def reset_database(self) -> Dict[str, Any]:
+        """Wipe complet de la DB SQLite (films/runs/perceptual/scores) + backup.
+
+        Cf CineSortApi._reset_database_impl pour la doc complete.
+        """
+        return self._api._reset_database_impl()
+
+    def get_profiles(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets + custom).
+
+        Cf CineSortApi._get_profiles_impl pour la doc complete.
+        """
+        return self._api._get_profiles_impl()
+
+    def save_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom (avec validation tiers + poids).
+
+        Cf CineSortApi._save_profile_impl pour la doc complete.
+        """
+        return self._api._save_profile_impl(profile)
+
+    def set_active_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom).
+
+        Cf CineSortApi._set_active_profile_impl pour la doc complete.
+        """
+        return self._api._set_active_profile_impl(profile_id)

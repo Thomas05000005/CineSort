@@ -46,11 +46,15 @@ class DangerActionsTests(unittest.TestCase):
         cls.js = _HISTORIQUE_JS.read_text(encoding="utf-8")
 
     def test_undo_apply_confirms(self) -> None:
+        # P0 #233 : window.confirm() remplace par dangerConfirmModal() (modale dediee
+        # actions dangereuses cf feedback-cinesort-actions-dangereuses).
         self.assertIn("Annuler l'apply", self.js)
-        self.assertIn("window.confirm", self.js)
+        self.assertIn("dangerConfirmModal", self.js)
 
     def test_delete_run_confirms(self) -> None:
         self.assertIn("Supprimer le run", self.js)
+        # P0 #233 : assertion explicite que la suppression utilise dangerConfirmModal.
+        self.assertIn("dangerConfirmModal", self.js)
 
 
 class CssTests(unittest.TestCase):
