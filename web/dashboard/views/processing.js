@@ -23,7 +23,7 @@
  *   initProcessing(container, opts?)  // opts.step = "scan" | "review" | "apply"
  */
 import { apiPost, escapeHtml } from "./_v5_helpers.js";
-import { buildEmptyState, bindEmptyStateCta } from "../dashboard/components/empty-state.js";
+import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 
 const STEPS = [
   { id: "scan", num: 1, label: "Scan", sub: "Explorer les dossiers" },

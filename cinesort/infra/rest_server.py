@@ -105,10 +105,6 @@ _RATE_LIMIT_WINDOW_S = 60.0
 _DASHBOARD_PREFIX = "/dashboard"
 # §16b / Vague 0 v7.6.0 : shared design system servi par le REST pour le dashboard distant.
 _SHARED_PREFIX = "/shared"
-# V5B-01 : vues v5 ESM (web/views/*.js) importees par le dashboard via "../views/...".
-# Apres migration B (PR #257 + #258), seuls processing.js, film-detail.js et
-# _v5_helpers.js sont conserves. Servi pour rendre /dashboard/?native=1 fonctionnel.
-_VIEWS_PREFIX = "/views"
 # V6-01 Polish Total v7.7.0 : fichiers de traduction servis via /locales/<locale>.json.
 # Lus par web/dashboard/core/i18n.js au boot et a chaque setLocale().
 _LOCALES_PREFIX = "/locales"
@@ -151,19 +147,6 @@ def _resolve_shared_root() -> Path:
     if candidate.is_dir():
         return candidate.resolve()
     return (Path.cwd() / "web" / "shared").resolve()
-
-
-def _resolve_views_root() -> Path:
-    """Localise web/views/ (vues v5 ESM portees, importees par le dashboard)."""
-    base = Path(getattr(__import__("sys"), "_MEIPASS", ""))
-    candidate = base / "web" / "views"
-    if candidate.is_dir():
-        return candidate.resolve()
-    project_root = Path(__file__).resolve().parents[2]
-    candidate = project_root / "web" / "views"
-    if candidate.is_dir():
-        return candidate.resolve()
-    return (Path.cwd() / "web" / "views").resolve()
 
 
 def _resolve_locales_root() -> Path:
@@ -640,34 +623,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def _serve_views_file(self, url_path: str) -> None:
-        """Sert un fichier statique depuis web/views/ (vues v5 ESM portees).
-
-        V5B-01 / Migration B : le dashboard /dashboard/app.js fait
-            import { initProcessing } from "../views/processing.js";
-            import { initFilmDetail } from "../views/film-detail.js";
-        ce qui resout en /views/<name>.js cote serveur. Meme garde anti
-        path-traversal que _serve_shared_file.
-        """
-        resolved = self._resolve_static_path(url_path, _VIEWS_PREFIX, getattr(self, "views_root", None))
-        if resolved is None:
-            return
-        content = self._read_static_bytes(resolved, "Views")
-        if content is None:
-            return
-
-        mime = self._guess_mime(str(resolved))
-        self.send_response(200)
-        self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self._send_cors_headers()
-        self._send_request_id_header()
-        self.end_headers()
-        self.wfile.write(content)
-
     def _serve_locale_file(self, url_path: str) -> None:
         """Sert un fichier de traduction depuis `locales/<locale>.json`.
 
@@ -751,11 +706,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # v7.6.0 Vague 0 : design system v5 partage (web/shared/) pour le dashboard distant
         if clean == _SHARED_PREFIX or path.startswith(_SHARED_PREFIX + "/"):
             self._serve_shared_file(path.split("?")[0])
-            return
-
-        # V5B-01 : vues v5 ESM (web/views/*.js) importees par le dashboard
-        if clean == _VIEWS_PREFIX or path.startswith(_VIEWS_PREFIX + "/"):
-            self._serve_views_file(path.split("?")[0])
             return
 
         # V6-01 Polish Total v7.7.0 : fichiers de traduction (locales/<locale>.json)
@@ -1002,7 +952,6 @@ class RestApiServer:
         spec = generate_openapi_spec(self._api, port=self._port)
         dashboard_root = _resolve_dashboard_root()
         shared_root = _resolve_shared_root()
-        views_root = _resolve_views_root()
         locales_root = _resolve_locales_root()  # V6-01 i18n
 
         # Configure handler class attributes.
@@ -1018,7 +967,6 @@ class RestApiServer:
                 "rate_limiter": self._rate_limiter,
                 "dashboard_root": dashboard_root,
                 "shared_root": shared_root,
-                "views_root": views_root,
                 "locales_root": locales_root,
             },
         )

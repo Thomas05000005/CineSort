@@ -15,7 +15,7 @@ from pathlib import Path
 class ProcessingV5PortedTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.src = Path("web/views/processing.js").read_text(encoding="utf-8")
+        cls.src = Path("web/dashboard/views/processing.js").read_text(encoding="utf-8")
 
     def test_es_module_export(self):
         self.assertIn("export async function initProcessing", self.src)
@@ -56,7 +56,9 @@ class ProcessingV5PortedTests(unittest.TestCase):
         self.assertIn("_initApplyStep", self.src)
 
     def test_emptystate_imported_from_dashboard(self):
-        self.assertIn('from "../dashboard/components/empty-state.js"', self.src)
+        # Migration legacy 2026-05-20 : processing.js deplace de web/views/ vers
+        # web/dashboard/views/, donc l'import devient relatif "../components/...".
+        self.assertIn('from "../components/empty-state.js"', self.src)
 
     def test_apipost_calls_use_kwargs(self):
         # apiPost utilise des kwargs (objet) — pas de positional args.

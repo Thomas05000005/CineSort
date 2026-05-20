@@ -93,9 +93,12 @@ class V5BActivationTests(unittest.TestCase):
         # V1-05 (post-revert V5) : seules processing/film-detail restent en v5
         # actif (pas d'equivalent v4). Les autres vues principales sont v4
         # RESTAUREES (cf commentaire app.js "Vues v4 RESTAUREES").
+        # Migration legacy 2026-05-20 : ces 2 vues + _v5_helpers ont ete deplaces
+        # vers web/dashboard/views/, donc imports relatifs en "./views/..." comme
+        # le reste des vues v4. Le dossier web/views/ a ete supprime.
         for view_module in (
-            "../views/processing.js",
-            "../views/film-detail.js",
+            "./views/processing.js",
+            "./views/film-detail.js",
         ):
             self.assertIn(view_module, self.app, f"Vue v5 non importee : {view_module}")
 

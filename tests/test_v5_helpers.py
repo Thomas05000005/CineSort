@@ -1,4 +1,4 @@
-"""V5bis-00 — Verifie le module shared web/views/_v5_helpers.js.
+"""V5bis-00 — Verifie le module shared web/dashboard/views/_v5_helpers.js.
 
 Tests structurels (parsing texte) qui garantissent les contrats publics
 attendus par les vues v5 portees (V5bis-01 a 07).
@@ -15,11 +15,11 @@ class V5HelpersStructureTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.path = Path("web/views/_v5_helpers.js")
+        cls.path = Path("web/dashboard/views/_v5_helpers.js")
         cls.src = cls.path.read_text(encoding="utf-8")
 
     def test_file_exists(self):
-        self.assertTrue(self.path.exists(), "web/views/_v5_helpers.js doit exister")
+        self.assertTrue(self.path.exists(), "web/dashboard/views/_v5_helpers.js doit exister")
 
     def test_apiPost_exported(self):
         self.assertIn("export async function apiPost", self.src)
@@ -27,7 +27,7 @@ class V5HelpersStructureTests(unittest.TestCase):
     def test_apiPost_uses_rest_first(self):
         # Le wrapper doit importer apiPost depuis le client REST du SPA
         self.assertIn("_spaApiPost", self.src)
-        self.assertIn('from "../dashboard/core/api.js"', self.src)
+        self.assertIn('from "../core/api.js"', self.src)
 
     def test_apiPost_fallback_pywebview(self):
         # Fallback pywebview present pour mode natif
@@ -37,13 +37,13 @@ class V5HelpersStructureTests(unittest.TestCase):
         self.assertIn("export async function apiGet", self.src)
 
     def test_dom_helpers_exported(self):
-        # escapeHtml exporte (re-export depuis dashboard/core/dom.js)
+        # escapeHtml exporte (re-export depuis core/dom.js)
         self.assertIn("export const escapeHtml", self.src)
         # $, $$, el exportes
         self.assertIn("export { $, $$, el }", self.src)
 
     def test_dom_helpers_imported_from_dashboard(self):
-        self.assertIn('from "../dashboard/core/dom.js"', self.src)
+        self.assertIn('from "../core/dom.js"', self.src)
 
     def test_init_view_pattern(self):
         # Pattern standardise skeleton -> load -> render | error
@@ -93,7 +93,7 @@ class V5HelpersResponseFormatTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.src = Path("web/views/_v5_helpers.js").read_text(encoding="utf-8")
+        cls.src = Path("web/dashboard/views/_v5_helpers.js").read_text(encoding="utf-8")
 
     def test_normalized_format_documented(self):
         # Le commentaire en tete documente le format de retour

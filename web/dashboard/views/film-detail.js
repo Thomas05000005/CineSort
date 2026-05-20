@@ -20,7 +20,7 @@
  *   - V3-06 drawer mobile preserve en export
  */
 import { apiPost, escapeHtml, renderError } from "./_v5_helpers.js";
-import { labelsForFlags, countBySeverity } from "../dashboard/core/alert-labels.js";
+import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 
 const _state = {
   rowId: null,

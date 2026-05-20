@@ -10,11 +10,11 @@ from pathlib import Path
 
 
 class ProcessingV5FeaturesTests(unittest.TestCase):
-    """Couvre les 5 features V1-V4 portees dans web/views/processing.js."""
+    """Couvre les 5 features V1-V4 portees dans web/dashboard/views/processing.js."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.src = Path("web/views/processing.js").read_text(encoding="utf-8")
+        cls.src = Path("web/dashboard/views/processing.js").read_text(encoding="utf-8")
 
     def test_v2_04_promise_allsettled(self) -> None:
         """V2-04 : Promise.allSettled present pour la resilience reseau."""

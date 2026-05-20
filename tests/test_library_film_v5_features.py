@@ -34,7 +34,7 @@ class LibraryV5FeaturesTests(unittest.TestCase):
 class FilmDetailV5FeaturesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.src = Path("web/views/film-detail.js").read_text(encoding="utf-8")
+        cls.src = Path("web/dashboard/views/film-detail.js").read_text(encoding="utf-8")
 
     def test_v2_04_promise_allsettled(self):
         self.assertIn("Promise.allSettled", self.src)

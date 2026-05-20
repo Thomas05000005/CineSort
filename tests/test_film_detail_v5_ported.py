@@ -8,7 +8,7 @@ from pathlib import Path
 class FilmDetailV5PortedTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.src = Path("web/views/film-detail.js").read_text(encoding="utf-8")
+        cls.src = Path("web/dashboard/views/film-detail.js").read_text(encoding="utf-8")
 
     def test_es_module_init(self):
         self.assertIn("export async function initFilmDetail", self.src)

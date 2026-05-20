@@ -14,8 +14,8 @@
  *   - status = code HTTP (REST) ou 0 (fallback pywebview)
  */
 
-import { apiPost as _spaApiPost, apiGet as _spaApiGet } from "../dashboard/core/api.js";
-import { escapeHtml as _escapeHtml, $, $$, el } from "../dashboard/core/dom.js";
+import { apiPost as _spaApiPost, apiGet as _spaApiGet } from "../core/api.js";
+import { escapeHtml as _escapeHtml, $, $$, el } from "../core/dom.js";
 
 /* ============================================================
    apiPost : wrapper REST + fallback pywebview
