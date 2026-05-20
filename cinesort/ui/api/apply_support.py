@@ -4,7 +4,7 @@ import json
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import logging
 
@@ -1160,6 +1160,21 @@ def _execute_apply(
             log_fn("WARN", f"Journal audit apply indisponible : {exc}")
             auditor = None
 
+    # Phase 6 doublons (spec 01-doublons.md §3.7) : recuperer la liste des losers
+    # depuis la table duplicate_decisions pour les deplacer dans le bucket
+    # `_duplicates_user_decided/` avant l'apply principal (cf
+    # cinesort.app.apply_core.move_duplicate_losers_to_user_decided).
+    duplicate_losers: Set[str] = set()
+    try:
+        decisions_db = store.apply.list_duplicate_decisions(run_id=run_id)
+        for dec in decisions_db or []:
+            for lid in dec.get("loser_row_ids") or []:
+                lid_s = str(lid or "").strip()
+                if lid_s:
+                    duplicate_losers.add(lid_s)
+    except (OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Lecture duplicate_decisions impossible: {exc}")
+
     # Multi-root : grouper les rows par source_root et appeler apply_rows par root
     rows_by_root: Dict[str, List[Any]] = {}
     for row in rows:
@@ -1231,6 +1246,7 @@ def _execute_apply(
             run_review_root=(run_paths.run_dir / "_review"),
             decision_presence=decision_presence,
             record_op=record_op_for_apply,
+            duplicate_loser_row_ids=duplicate_losers if duplicate_losers else None,
         )
 
         if result is None:

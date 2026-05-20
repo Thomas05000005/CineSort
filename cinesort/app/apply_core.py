@@ -32,7 +32,8 @@ def build_apply_context(
     """Construit le contexte d'exécution apply (cfg normalisée, buckets review, cache hash).
 
     Crée à la volée les sous-dossiers `_review/_conflicts`, `_conflicts_sidecars`,
-    `_duplicates_identical` et `_leftovers` (sauf en dry_run).
+    `_duplicates_identical`, `_duplicates_user_decided` (Phase 6 doublons) et
+    `_leftovers` (sauf en dry_run).
     """
     cfg = cfg.normalized()
     res = core_mod.ApplyResult()
@@ -46,6 +47,8 @@ def build_apply_context(
     conflicts_root = merge_review_root / "_conflicts"
     conflicts_sidecars_root = merge_review_root / "_conflicts_sidecars"
     duplicates_identical_root = merge_review_root / "_duplicates_identical"
+    # Phase 6 doublons (spec 01-doublons.md §3.7) : losers post-decision UI.
+    duplicates_user_decided_root = merge_review_root / "_duplicates_user_decided"
     leftovers_root = merge_review_root / "_leftovers"
 
     if quarantine_unapproved and (not dry_run):
@@ -54,6 +57,7 @@ def build_apply_context(
         conflicts_root.mkdir(parents=True, exist_ok=True)
         conflicts_sidecars_root.mkdir(parents=True, exist_ok=True)
         duplicates_identical_root.mkdir(parents=True, exist_ok=True)
+        duplicates_user_decided_root.mkdir(parents=True, exist_ok=True)
         leftovers_root.mkdir(parents=True, exist_ok=True)
 
     return core_mod.ApplyExecutionContext(
@@ -65,6 +69,7 @@ def build_apply_context(
         conflicts_root=conflicts_root,
         conflicts_sidecars_root=conflicts_sidecars_root,
         duplicates_identical_root=duplicates_identical_root,
+        duplicates_user_decided_root=duplicates_user_decided_root,
         leftovers_root=leftovers_root,
     )
 
@@ -721,6 +726,129 @@ def merge_dir_safe(
         res.source_dirs_deleted_count += 1
 
 
+def move_duplicate_losers_to_user_decided(
+    cfg: "Config",
+    rows: list["PlanRow"],
+    loser_row_ids: Set[str],
+    *,
+    duplicates_user_decided_root: Path,
+    dry_run: bool,
+    log: Callable[[str, str], None],
+    res: "ApplyResult",
+    record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> None:
+    """Phase 6 doublons (spec 01-doublons.md §3.7) : déplace les fichiers/dossiers
+    "losers" d'une décision utilisateur vers `<root>/_review/_duplicates_user_decided/`.
+
+    Doit être appelé AVANT la boucle d'apply principale : on retire les losers du
+    plan en les déplaçant dans le bucket dédié, puis l'apply normal continue sur
+    les winners. Les déplacements passent par `atomic_move` + `record_apply_op`
+    pour rester réversibles via l'undo (même mécanisme que `_duplicates_identical/`).
+
+    `loser_row_ids` : set des row_id dont la décision a marqué un autre row comme
+    winner. Tolère un set vide (no-op).
+    """
+    if not loser_row_ids:
+        return
+    if not dry_run:
+        duplicates_user_decided_root.mkdir(parents=True, exist_ok=True)
+
+    by_row: Dict[str, "PlanRow"] = {str(r.row_id): r for r in rows if getattr(r, "row_id", None)}
+    losers_seen: Set[str] = set()
+    for rid in loser_row_ids:
+        if rid in losers_seen:
+            continue
+        losers_seen.add(rid)
+        row = by_row.get(str(rid))
+        if row is None:
+            log("WARN", f"DUPLICATE_LOSER row_id introuvable, skip: {rid}")
+            continue
+
+        folder = Path(row.folder)
+        video_name = str(row.video or "").strip()
+        # Wrap record_op pour injecter le row_id (traçabilité Undo v5).
+        row_record_op = None
+        if record_op is not None:
+            _rid_str = str(row.row_id or "")
+
+            def row_record_op(payload: Dict[str, Any]) -> None:
+                if isinstance(payload, dict) and not payload.get("row_id"):
+                    payload["row_id"] = _rid_str
+                record_op(payload)
+
+        # Cas "collection" : on a un video_name dans un dossier partagé →
+        # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
+        # entier, car d'autres films peuvent y vivre).
+        if row.kind == "collection" and video_name:
+            video = folder / video_name
+            if not video.exists():
+                # tolère case-insensitive : iter le dossier
+                try:
+                    matches = [
+                        p for p in folder.iterdir() if p.is_file() and p.name.lower() == video_name.lower()
+                    ]
+                    video = matches[0] if matches else video
+                except (OSError, PermissionError):
+                    pass
+            if not video.exists():
+                log("WARN", f"DUPLICATE_LOSER video manquant pour row {rid}, skip: {video}")
+                continue
+            # Déplace la vidéo + sidecars associés
+            sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+            for sidecar in sidecars:
+                if not sidecar.exists():
+                    continue
+                move_to_review_bucket(
+                    sidecar,
+                    src_anchor=folder,
+                    bucket_root=duplicates_user_decided_root,
+                    bucket_name="DUPLICATE_LOSER moved to _review/_duplicates_user_decided",
+                    include_anchor_name=True,
+                    use_dup_suffix=False,
+                    rel_override=None,
+                    dry_run=dry_run,
+                    log=log,
+                    res=res,
+                    record_op=row_record_op,
+                )
+                res.duplicates_identical_moved_count += 1
+            move_to_review_bucket(
+                video,
+                src_anchor=folder,
+                bucket_root=duplicates_user_decided_root,
+                bucket_name="DUPLICATE_LOSER moved to _review/_duplicates_user_decided",
+                include_anchor_name=True,
+                use_dup_suffix=False,
+                rel_override=None,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=row_record_op,
+            )
+            res.duplicates_identical_moved_count += 1
+            continue
+
+        # Cas "single" : déplace le dossier entier vers le bucket.
+        if not folder.exists():
+            log("WARN", f"DUPLICATE_LOSER dossier manquant pour row {rid}, skip: {folder}")
+            continue
+        target = duplicates_user_decided_root / core_mod.windows_safe(folder.name)
+        # Anti-collision : suffixe __DUP1/2/... si déjà présent.
+        target = unique_path_dup(target)
+        log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+            record_apply_op(
+                row_record_op,
+                op_type="MOVE_DIR",
+                src_path=folder,
+                dst_path=target,
+                reversible=True,
+            )
+        res.duplicates_identical_moved_count += 1
+
+
 def move_collection_folder(
     cfg: "Config",
     folder: Path,
@@ -775,8 +903,14 @@ def apply_rows(
     run_review_root: Optional[Path] = None,
     decision_presence: Optional[Set[str]] = None,
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
+    duplicate_loser_row_ids: Optional[Set[str]] = None,
 ) -> "ApplyResult":
-    """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup."""
+    """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup.
+
+    Phase 6 doublons (spec 01-doublons.md §3.7) : si `duplicate_loser_row_ids`
+    est fourni, ces rows sont d'abord déplacés vers `_review/_duplicates_user_decided/`
+    et exclus de la boucle apply normale.
+    """
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
         cfg,
@@ -788,6 +922,23 @@ def apply_rows(
     )
     cfg = ctx.cfg
     res = ctx.res
+
+    # Phase 6 doublons : déplacer les losers AVANT la boucle apply principale.
+    losers_set: Set[str] = {str(r) for r in (duplicate_loser_row_ids or set()) if r}
+    if losers_set and ctx.duplicates_user_decided_root is not None:
+        move_duplicate_losers_to_user_decided(
+            cfg,
+            rows,
+            losers_set,
+            duplicates_user_decided_root=ctx.duplicates_user_decided_root,
+            dry_run=dry_run,
+            log=log,
+            res=res,
+            record_op=record_op,
+        )
+        # Retirer les losers des rows à apply normalement.
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in losers_set]
+
     migrate_legacy_collection_root(
         cfg,
         dry_run=dry_run,
