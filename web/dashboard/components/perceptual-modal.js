@@ -1,11 +1,12 @@
-/* components/perceptual-modal.js — Modal Analyse Perceptuelle (Phase 3.2, spec 02).
+/* components/perceptual-modal.js — Modal Analyse Perceptuelle (Phase 5, spec 02).
  *
- * Mode B (overlay) : modal centree fullscreen sur fond noir.
- * Mode A (inspecteur elargi) : implementation differee (reportee a la spec
- *   inspecteur-droit). Pour l'instant on rend toujours en overlay.
+ * Mode B (overlay) : modal centree fullscreen sur fond noir (Accueil / Parametres / Aide).
+ * Mode A (inspecteur elargi) : injecte le contenu dans right-panel.setSections() et
+ *   force la largeur a 600px (Bibliotheque / Doublons / Qualite / Historique).
  *
  * API :
- *   openPerceptualModal({ rowId, runId, rowTitle })
+ *   openPerceptualModal({ rowId, runId, rowTitle, mode? })
+ *     mode = "A" (inspecteur) | "B" (overlay) | auto (defaut, choisi selon hash route)
  *   closePerceptualModal()
  *
  * Source des donnees : quality/get_perceptual_details(run_id, row_id).
@@ -18,11 +19,20 @@
  *   4.3 disabled    -> redirige vers Parametres
  *   4.4 no_ffmpeg   -> redirige vers Parametres > Outils video
  *   4.5 partial     -> rendu normal avec champs "Non calcule" + [Completer]
+ *
+ * Sections specifiques :
+ *   §1 Frames lazy           -> bouton "Voir les frames", appel ondemand
+ *   §5 Dropdown Comparer     -> liste films du run, route vers comparateur doublons
  */
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { humanize, severityForTier, SCORE_V2_COMPONENTS } from "../core/perceptual-labels.js";
+import { setSections as rpSetSections, setExpandedWidth as rpSetExpandedWidth, isExpandedWidth as rpIsExpandedWidth } from "./right-panel.js";
+
+// Spec 02 §0 : vues qui affichent l'analyse perceptuelle dans l'inspecteur droit.
+// Le reste utilise l'overlay modal.
+const _VIEWS_INSPECTOR = ["/bibliotheque", "/library", "/doublons", "/qualite", "/historique", "/qij", "/traitement", "/processing"];
 
 let _overlayEl = null;
 let _modalEl = null;
@@ -53,16 +63,66 @@ function _scoreBar(score, total = 100) {
   return `<div class="perceptual-bar"><div class="perceptual-bar-fill" style="width:${pct}%"></div></div>`;
 }
 
+/** Spec 02 §0 : decide le mode A/B selon la route active.
+ * Si opts.mode est explicite ("A"/"B"), on respecte. Sinon on lit window.location.hash.
+ */
+function _resolveMode(opts) {
+  if (opts && (opts.mode === "A" || opts.mode === "B")) return opts.mode;
+  if (typeof window === "undefined" || !window.location) return "B";
+  const hash = String(window.location.hash || "").replace(/^#/, "");
+  const base = hash.split("#")[0].split("?")[0];
+  return _VIEWS_INSPECTOR.includes(base) ? "A" : "B";
+}
+
+/** Detection de l'etat "partial" : au moins un champ cle null/manquant
+ * (spec 02 §4.5). On considere : audio_fingerprint, ssim_self_ref, spectral_cutoff_hz.
+ */
+function _isPartial(d) {
+  if (!d) return false;
+  const missingFp = d.audio_fingerprint == null || d.audio_fingerprint === "";
+  const missingSsim = d.ssim_self_ref == null;
+  const missingCutoff = d.spectral_cutoff_hz == null || d.spectral_cutoff_hz === 0;
+  return missingFp || missingSsim || missingCutoff;
+}
+
+/** Rend une cellule "valeur" avec fallback "Non calcule" + [Completer] si null. */
+function _renderPartialCell(value, displayValue) {
+  if (value == null || value === "" || value === 0) {
+    return `<span class="perceptual-partial-row">Non calculé dans cette passe <button type="button" class="v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-action="complete" title="Relancer pour completer">↻ Compléter</button></span>`;
+  }
+  return displayValue != null ? displayValue : escapeHtml(String(value));
+}
+
 /* --- Rendering --- */
+
+function _renderCompareDropdown() {
+  return `
+    <details class="perceptual-compare-dropdown" data-perceptual-compare>
+      <summary>▾ Comparer avec un autre film du run</summary>
+      <div class="perceptual-compare-panel">
+        <input type="search" class="perceptual-compare-filter" placeholder="🔍 Filtrer..." data-perceptual-compare-filter autocomplete="off" />
+        <ul class="perceptual-compare-list" data-perceptual-compare-list>
+          <li class="perceptual-compare-loading">Chargement des films du run...</li>
+        </ul>
+      </div>
+    </details>
+  `;
+}
 
 function _renderHeader(title) {
   return `
     <header class="perceptual-modal-header">
-      <h2 class="perceptual-modal-title">
-        Analyse perceptuelle
-        ${title ? `<span class="perceptual-modal-subtitle">— ${escapeHtml(title)}</span>` : ""}
-      </h2>
-      <button type="button" class="perceptual-modal-close" data-perceptual-close aria-label="Fermer">✕</button>
+      <div class="perceptual-modal-title-row">
+        <h2 class="perceptual-modal-title">
+          Analyse perceptuelle
+          ${title ? `<span class="perceptual-modal-subtitle">— ${escapeHtml(title)}</span>` : ""}
+        </h2>
+        <div class="perceptual-modal-header-actions">
+          ${_state && _state.mode === "A" ? `<button type="button" class="perceptual-modal-toggle-width v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-action="toggle-width" title="Basculer largeur normale/elargie" aria-label="Basculer largeur">${rpIsExpandedWidth() ? "◀" : "▶"}</button>` : ""}
+          <button type="button" class="perceptual-modal-close" data-perceptual-close aria-label="Fermer">✕</button>
+        </div>
+      </div>
+      ${_renderCompareDropdown()}
     </header>
   `;
 }
@@ -187,6 +247,31 @@ function _renderScoreSection(d) {
   `;
 }
 
+/** Spec 02 §1 : ligne "Bitrate vs resolution" calcul JS (Mbps/megapixel).
+ * < 3 -> faible ; 3-6 -> moyen ; > 6 -> bon.
+ */
+function _renderBitrateVsResolution(d) {
+  const bitrateKbps = Number(d.bitrate_kbps || 0);
+  const width = Number(d.width || (d.video_streams && d.video_streams[0] && d.video_streams[0].width) || 0);
+  const height = Number(d.height || (d.video_streams && d.video_streams[0] && d.video_streams[0].height) || 0);
+  if (!bitrateKbps || !width || !height) return null;
+  const bitrateMbps = bitrateKbps / 1000;
+  const megapixels = (width * height) / 1000000;
+  if (megapixels <= 0) return null;
+  const ratio = bitrateMbps / megapixels;
+  // Resolution label
+  let resLabel = `${width}x${height}`;
+  if (height >= 2000) resLabel = "4K";
+  else if (height >= 1000) resLabel = "1080p";
+  else if (height >= 700) resLabel = "720p";
+  else if (height >= 460) resLabel = "480p";
+  let verdict;
+  if (ratio < 3) verdict = `faible : ~6+ attendu pour ${resLabel}`;
+  else if (ratio < 6) verdict = `moyen pour ${resLabel}`;
+  else verdict = `bon pour ${resLabel}`;
+  return `${bitrateMbps.toFixed(1)} Mbps pour ${resLabel} (${verdict}, ratio ${ratio.toFixed(1)} Mb/s/MP)`;
+}
+
 function _renderVideoSection(d) {
   const ssim = d.ssim_self_ref != null ? _fmtNumber(d.ssim_self_ref, 2) : null;
   const ssimVerdict = ssim != null && Number(ssim) >= 0.85 ? "authentique (>0.85 = vrai natif)" : "potentiel upscale";
@@ -198,17 +283,24 @@ function _renderVideoSection(d) {
   const codec = String(d.codec || "—").toUpperCase();
   const bitDepth = d.bit_depth != null ? `${d.bit_depth}-bit` : "";
   const bitrate = d.bitrate_kbps != null ? _fmtKbps(d.bitrate_kbps) : "—";
+  const bitrateVsRes = _renderBitrateVsResolution(d);
+
+  // Spec 02 §4.5 : champs vides en mode partial
+  const ssimCell = d.ssim_self_ref != null
+    ? `${escapeHtml(ssim)} → ${escapeHtml(ssimVerdict)}`
+    : _renderPartialCell(null, null);
 
   return `
     <section class="perceptual-section" data-section="video">
       <h3 class="perceptual-section-title">🎬 Métriques vidéo</h3>
       <dl class="perceptual-dl">
-        ${ssim != null ? `<dt>SSIM self-ref</dt><dd>${escapeHtml(ssim)} → ${escapeHtml(ssimVerdict)}</dd>` : ""}
+        <dt>SSIM self-ref</dt><dd>${ssimCell}</dd>
         ${upscale ? `<dt>Faux 4K détecté</dt><dd>${escapeHtml(upscale)}</dd>` : ""}
         <dt>Grain</dt><dd>${escapeHtml(grain)}</dd>
         <dt>HDR</dt><dd>${escapeHtml(hdrLabel)}</dd>
-        <dt>Codec</dt><dd>${escapeHtml(codec)} ${escapeHtml(bitDepth)}</dd>
+        <dt>Codec</dt><dd>${escapeHtml(codec)} ${escapeHtml(bitDepth)} ${bitrate !== "—" ? "@ " + escapeHtml(bitrate) : ""}</dd>
         <dt>Bitrate</dt><dd>${escapeHtml(bitrate)}</dd>
+        ${bitrateVsRes ? `<dt>Bitrate vs résolution</dt><dd>${escapeHtml(bitrateVsRes)}</dd>` : ""}
       </dl>
     </section>
   `;
@@ -216,23 +308,37 @@ function _renderVideoSection(d) {
 
 function _renderAudioSection(d) {
   const fp = d.audio_fingerprint || "";
+  // Spec 02 fix : on stocke la valeur complete pour copie
+  if (_state) _state.fullFingerprint = fp;
   const cutoff = _fmtKhz(d.spectral_cutoff_hz);
   const lossyVerdict = humanize(d.lossy_verdict, "—");
   const tracks = Array.isArray(d.audio_streams) ? d.audio_streams : [];
   const dynamicRange = d.audio_perceptual && d.audio_perceptual.dynamic_range_db;
 
+  // Spec 02 §4.5 : champs vides
+  const fpBlock = fp ? `
+    <div class="perceptual-audio-fp">
+      <span class="perceptual-audio-fp-label">Empreinte Chromaprint :</span>
+      <code class="perceptual-audio-fp-value" data-perceptual-fp>${escapeHtml(fp.slice(0, 80))}${fp.length > 80 ? "…" : ""}</code>
+      <button type="button" class="v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-copy-fp title="Copier l'empreinte complète">📋 Copier</button>
+    </div>
+  ` : `
+    <div class="perceptual-audio-fp perceptual-audio-fp--missing">
+      <span class="perceptual-audio-fp-label">Empreinte Chromaprint :</span>
+      ${_renderPartialCell(null, null)}
+    </div>
+  `;
+
+  const cutoffCell = (d.spectral_cutoff_hz != null && d.spectral_cutoff_hz !== 0)
+    ? escapeHtml(cutoff)
+    : _renderPartialCell(null, null);
+
   return `
     <section class="perceptual-section" data-section="audio">
       <h3 class="perceptual-section-title">🔊 Métriques audio</h3>
-      ${fp ? `
-        <div class="perceptual-audio-fp">
-          <span class="perceptual-audio-fp-label">Empreinte Chromaprint :</span>
-          <code class="perceptual-audio-fp-value" data-perceptual-fp>${escapeHtml(fp.slice(0, 80))}${fp.length > 80 ? "…" : ""}</code>
-          <button type="button" class="v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-copy-fp title="Copier l'empreinte complète">📋 Copier</button>
-        </div>
-      ` : ""}
+      ${fpBlock}
       <dl class="perceptual-dl">
-        <dt>Cutoff spectral</dt><dd>${escapeHtml(cutoff)}</dd>
+        <dt>Cutoff spectral</dt><dd>${cutoffCell}</dd>
         <dt>Verdict audio</dt><dd>${escapeHtml(lossyVerdict)}</dd>
         ${tracks.length > 0 ? `
           <dt>Pistes</dt>
@@ -257,43 +363,46 @@ function _renderAudioSection(d) {
 function _renderBreakdownSection(d) {
   const breakdown = Array.isArray(d.breakdown) ? d.breakdown : null;
   if (!breakdown || breakdown.length === 0) {
-    // Reconstruction approximative avec SCORE_V2_COMPONENTS si pas de breakdown DB
     return `
       <section class="perceptual-section" data-section="breakdown">
-        <h3 class="perceptual-section-title">📐 Composantes du Score V2</h3>
-        <p class="perceptual-empty">Détail composantes indisponible dans cette passe.</p>
-        <ul class="perceptual-breakdown-weights">
-          ${SCORE_V2_COMPONENTS.map((c) => `
-            <li><span class="perceptual-breakdown-name">${escapeHtml(c.label)}</span>
-                <span class="perceptual-breakdown-weight">× ${(c.weight * 100).toFixed(0)}%</span></li>
-          `).join("")}
-        </ul>
+        <h3 class="perceptual-section-title">📐 Composantes du Score V2 <button type="button" class="v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-action="toggle-breakdown" title="Replier/deployer">▼ Replier</button></h3>
+        <div data-perceptual-breakdown-body>
+          <p class="perceptual-empty">Détail composantes indisponible dans cette passe.</p>
+          <ul class="perceptual-breakdown-weights">
+            ${SCORE_V2_COMPONENTS.map((c) => `
+              <li><span class="perceptual-breakdown-name">${escapeHtml(c.label)}</span>
+                  <span class="perceptual-breakdown-weight">× ${(c.weight * 100).toFixed(0)}%</span></li>
+            `).join("")}
+          </ul>
+        </div>
       </section>
     `;
   }
   const total = breakdown.reduce((sum, row) => sum + (Number(row.points) || 0), 0);
   return `
     <section class="perceptual-section" data-section="breakdown">
-      <h3 class="perceptual-section-title">📐 Breakdown détaillé (Score V2)</h3>
-      <table class="perceptual-breakdown-table">
-        <thead><tr><th>Composante</th><th>Valeur</th><th>Statut</th><th>Points</th></tr></thead>
-        <tbody>
-          ${breakdown.map((row) => `
+      <h3 class="perceptual-section-title">📐 Breakdown détaillé (Score V2) <button type="button" class="v5-btn v5-btn--xs v5-btn--ghost" data-perceptual-action="toggle-breakdown" title="Replier/deployer">▼ Replier</button></h3>
+      <div data-perceptual-breakdown-body>
+        <table class="perceptual-breakdown-table">
+          <thead><tr><th>Composante</th><th>Valeur</th><th>Statut</th><th>Points</th></tr></thead>
+          <tbody>
+            ${breakdown.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.component || "?")} <span class="perceptual-weight">× ${row.weight != null ? Number(row.weight).toFixed(2) : "?"}</span></td>
+                <td>${escapeHtml(row.value_label || "—")}</td>
+                <td><span class="perceptual-status perceptual-status--${escapeHtml(row.status || "info")}">${escapeHtml(row.status || "—")}</span></td>
+                <td class="perceptual-breakdown-points">${row.points != null ? Math.round(Number(row.points)) : "—"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+          <tfoot>
             <tr>
-              <td>${escapeHtml(row.component || "?")} <span class="perceptual-weight">× ${row.weight != null ? Number(row.weight).toFixed(2) : "?"}</span></td>
-              <td>${escapeHtml(row.value_label || "—")}</td>
-              <td><span class="perceptual-status perceptual-status--${escapeHtml(row.status || "info")}">${escapeHtml(row.status || "—")}</span></td>
-              <td class="perceptual-breakdown-points">${row.points != null ? Math.round(Number(row.points)) : "—"}</td>
+              <td colspan="3">Total</td>
+              <td class="perceptual-breakdown-points perceptual-breakdown-points--total">${Math.round(total)} / 100</td>
             </tr>
-          `).join("")}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="3">Total</td>
-            <td class="perceptual-breakdown-points perceptual-breakdown-points--total">${Math.round(total)} / 100</td>
-          </tr>
-        </tfoot>
-      </table>
+          </tfoot>
+        </table>
+      </div>
     </section>
   `;
 }
@@ -316,6 +425,19 @@ function _renderCrossVerdictsSection(d) {
   `;
 }
 
+/** Spec 02 §1 : section Frames lazy. Bouton declenche fetch + rendu PNG. */
+function _renderFramesSection() {
+  return `
+    <section class="perceptual-section" data-section="frames">
+      <h3 class="perceptual-section-title">🔬 Frames analysées</h3>
+      <div data-perceptual-frames-container>
+        <p class="perceptual-empty">Extraction ~10-30s (sera affichee a la demande).</p>
+        <button type="button" class="v5-btn v5-btn--secondary" data-perceptual-action="load-frames">▶ Voir les frames</button>
+      </div>
+    </section>
+  `;
+}
+
 function _renderNormal(title, d) {
   return `
     ${_renderHeader(title)}
@@ -325,8 +447,19 @@ function _renderNormal(title, d) {
       ${_renderAudioSection(d)}
       ${_renderBreakdownSection(d)}
       ${_renderCrossVerdictsSection(d)}
+      ${_renderFramesSection()}
     </div>
     ${_renderFooter(d.analyzed_at, true)}
+  `;
+}
+
+function _renderLoading(title) {
+  return `
+    ${_renderHeader(title)}
+    <div class="perceptual-modal-body perceptual-modal-state perceptual-modal-state--loading">
+      <p>Chargement de l'analyse perceptuelle…</p>
+    </div>
+    ${_renderFooter(null, false)}
   `;
 }
 
@@ -347,37 +480,38 @@ async function _loadAndRender() {
     _setModalContent(_renderError(rowTitle, "Réponse vide"));
     return;
   }
-  if (res.ok === false) {
-    const data = res.data || res;
-    if (data.missing) {
+  // apiPost peut retourner {status, data} ou directement les donnees selon le wrapper.
+  const payload = res.data != null ? res.data : res;
+  if (payload.ok === false) {
+    // Spec 02 §7 : detection via codes structures (category, missing_tool)
+    if (payload.missing === true) {
       _setModalContent(_renderMissing(rowTitle));
       return;
     }
-    const msg = String(data.message || data.error || "").toLowerCase();
-    if (msg.includes("desactivee") || msg.includes("désactivée")) {
-      _setModalContent(_renderDisabled(rowTitle));
-      return;
-    }
-    if (msg.includes("ffmpeg")) {
+    if (payload.missing_tool === "ffmpeg" || payload.missing_tool === "ffprobe") {
       _setModalContent(_renderNoFfmpeg(rowTitle));
       return;
     }
-    _setModalContent(_renderError(rowTitle, data.message || data.error || "Erreur inconnue"));
+    if (payload.category === "state") {
+      // feature desactivee dans les reglages
+      _setModalContent(_renderDisabled(rowTitle));
+      return;
+    }
+    // Fallback string-match pour endpoints non encore migres
+    const msg = String(payload.message || payload.error || "").toLowerCase();
+    if (msg.includes("desactivee") || msg.includes("désactivée") || msg.includes("disabled")) {
+      _setModalContent(_renderDisabled(rowTitle));
+      return;
+    }
+    if (msg.includes("ffmpeg") || msg.includes("ffprobe")) {
+      _setModalContent(_renderNoFfmpeg(rowTitle));
+      return;
+    }
+    _setModalContent(_renderError(rowTitle, payload.message || payload.error || "Erreur inconnue"));
     return;
   }
-  const data = res.data || res;
-  const details = data.details || data;
+  const details = payload.details || payload;
   _setModalContent(_renderNormal(rowTitle, details || {}));
-}
-
-function _renderLoading(title) {
-  return `
-    ${_renderHeader(title)}
-    <div class="perceptual-modal-body perceptual-modal-state perceptual-modal-state--loading">
-      <p>Chargement de l'analyse perceptuelle…</p>
-    </div>
-    ${_renderFooter(null, false)}
-  `;
 }
 
 async function _launchAnalysis() {
@@ -390,8 +524,9 @@ async function _launchAnalysis() {
       row_id: rowId,
       options: { force: false },
     });
-    if (!res || res.ok === false) {
-      _setModalContent(_renderError(rowTitle, (res && (res.message || res.error)) || "Échec de l'analyse"));
+    const payload = res && res.data != null ? res.data : res;
+    if (!payload || payload.ok === false) {
+      _setModalContent(_renderError(rowTitle, (payload && (payload.message || payload.error)) || "Échec de l'analyse"));
       return;
     }
     await _loadAndRender();
@@ -400,23 +535,154 @@ async function _launchAnalysis() {
   }
 }
 
-async function _relaunchAnalysis() {
+async function _relaunchAnalysis(opts) {
   if (!_state) return;
   const { runId, rowId, rowTitle } = _state;
   _setModalContent(_renderLoading(rowTitle));
+  const options = { force: true };
+  // Spec 02 §4.5 : flag only_missing pour completer les champs absents
+  if (opts && opts.onlyMissing) options.only_missing = true;
   try {
     const res = await apiPost("quality/get_perceptual_report", {
       run_id: runId,
       row_id: rowId,
-      options: { force: true },
+      options,
     });
-    if (!res || res.ok === false) {
-      _setModalContent(_renderError(rowTitle, (res && (res.message || res.error)) || "Échec du relancement"));
+    const payload = res && res.data != null ? res.data : res;
+    if (!payload || payload.ok === false) {
+      _setModalContent(_renderError(rowTitle, (payload && (payload.message || payload.error)) || "Échec du relancement"));
       return;
     }
     await _loadAndRender();
   } catch (err) {
     _setModalContent(_renderError(rowTitle, err && err.message ? err.message : String(err)));
+  }
+}
+
+/** Spec 02 §1 : appel get_perceptual_compare_frames pour les self-frames. */
+async function _loadFrames() {
+  if (!_state) return;
+  const { runId, rowId } = _state;
+  const container = _modalEl && _modalEl.querySelector("[data-perceptual-frames-container]");
+  if (!container) return;
+  container.innerHTML = `<p class="perceptual-empty">Extraction en cours… (~10-30s)</p>`;
+  try {
+    // self-comparison : row_id_a = row_id_b = rowId pour avoir les frames du film
+    const res = await apiPost("quality/get_perceptual_compare_frames", {
+      run_id: runId,
+      row_id_a: rowId,
+      row_id_b: rowId,
+      options: { max_frames: 3 },
+    });
+    const payload = res && res.data != null ? res.data : res;
+    if (!payload || payload.ok === false) {
+      container.innerHTML = `<p class="perceptual-empty">Erreur : ${escapeHtml((payload && (payload.message || payload.error)) || "indisponible")}</p>`;
+      return;
+    }
+    const frames = Array.isArray(payload.frames) ? payload.frames : [];
+    if (frames.length === 0) {
+      container.innerHTML = `<p class="perceptual-empty">Aucune frame disponible.</p>`;
+      return;
+    }
+    container.innerHTML = `
+      <div class="perceptual-frames-grid">
+        ${frames.map((f) => `
+          <figure class="perceptual-frame-item">
+            <img src="data:image/png;base64,${escapeHtml(f.frame_a_b64 || f.frame_b_b64 || "")}" alt="Frame à t=${escapeHtml(String(f.timestamp || "?"))}s" loading="lazy" />
+            <figcaption>t = ${escapeHtml(String(f.timestamp != null ? Number(f.timestamp).toFixed(1) : "?"))}s</figcaption>
+          </figure>
+        `).join("")}
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<p class="perceptual-empty">Erreur : ${escapeHtml(err && err.message ? err.message : String(err))}</p>`;
+  }
+}
+
+/* --- Compare dropdown (spec 02 §5) --- */
+
+let _filterDebounceTimer = null;
+
+async function _loadCompareList() {
+  if (!_state) return;
+  const { runId, rowId } = _state;
+  const listEl = _modalEl && _modalEl.querySelector("[data-perceptual-compare-list]");
+  if (!listEl) return;
+  if (_state.compareLoaded) return;
+  try {
+    const res = await apiPost("library/get_library_filtered", {
+      run_id: runId,
+      page_size: 500,
+      page: 1,
+    });
+    const payload = res && res.data != null ? res.data : res;
+    if (!payload || payload.ok === false) {
+      listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml((payload && (payload.message || payload.error)) || "indisponible")}</li>`;
+      return;
+    }
+    // Le contrat peut etre {rows: [...]} ou {items: [...]}
+    const rows = payload.rows || payload.items || payload.films || [];
+    _state.compareRows = rows.filter((r) => String(r.row_id || r.id) !== String(rowId));
+    _state.compareLoaded = true;
+    _renderCompareListItems(_state.compareRows);
+  } catch (err) {
+    listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml(err && err.message ? err.message : String(err))}</li>`;
+  }
+}
+
+function _renderCompareListItems(rows) {
+  const listEl = _modalEl && _modalEl.querySelector("[data-perceptual-compare-list]");
+  if (!listEl) return;
+  if (!rows || rows.length === 0) {
+    listEl.innerHTML = `<li class="perceptual-compare-loading">Aucun film trouvé.</li>`;
+    return;
+  }
+  // Cap a 100 entries pour perf
+  const items = rows.slice(0, 100);
+  listEl.innerHTML = items.map((r) => {
+    const id = String(r.row_id || r.id || "");
+    const title = String(r.title || r.final_name || r.original_name || r.basename || id);
+    const year = r.year ? `(${r.year})` : "";
+    const score = r.global_score_v2 != null ? `Score ${Math.round(Number(r.global_score_v2))}` : "";
+    return `<li><button type="button" class="perceptual-compare-item" data-perceptual-compare-pick="${escapeHtml(id)}" data-row-title="${escapeHtml(title)}">${escapeHtml(title)} ${escapeHtml(year)} <span class="perceptual-compare-score">${escapeHtml(score)}</span></button></li>`;
+  }).join("");
+}
+
+function _filterCompareList(query) {
+  if (!_state || !_state.compareRows) return;
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) {
+    _renderCompareListItems(_state.compareRows);
+    return;
+  }
+  const filtered = _state.compareRows.filter((r) => {
+    const title = String(r.title || r.final_name || r.original_name || r.basename || "").toLowerCase();
+    return title.includes(q);
+  });
+  _renderCompareListItems(filtered);
+}
+
+function _onPickCompare(otherRowId, otherTitle) {
+  if (!_state) return;
+  // Tentative d'ouvrir le comparateur doublons (s'il est dispo)
+  if (typeof window !== "undefined") {
+    // Ferme la modal actuelle avant la navigation
+    const runId = _state.runId;
+    const rowId = _state.rowId;
+    closePerceptualModal();
+    // Si comparateur disponible (FE-DOUBLONS), on l'appelle.
+    // Sinon fallback : navigation vers /doublons avec params.
+    try {
+      // Stub : route vers /doublons. Au futur, ajouter window.openDuplicateComparatorModal({...}).
+      if (typeof window.openDuplicateComparatorModal === "function") {
+        window.openDuplicateComparatorModal({ runId, rowA: rowId, rowB: otherRowId });
+      } else {
+        window.location.hash = `#/doublons?compareA=${encodeURIComponent(rowId)}&compareB=${encodeURIComponent(otherRowId)}`;
+      }
+    } catch (e) {
+      console.warn("[perceptual-modal] openDuplicateComparatorModal indisponible", e);
+    }
+    void otherTitle;
   }
 }
 
@@ -440,7 +706,7 @@ function _ensureOverlay() {
 }
 
 function _onKeydown(ev) {
-  if (ev.key === "Escape" && _overlayEl) closePerceptualModal();
+  if (ev.key === "Escape" && (_overlayEl || (_state && _state.mode === "A"))) closePerceptualModal();
 }
 
 function _bindEvents() {
@@ -453,7 +719,22 @@ function _bindEvents() {
       const action = btn.dataset.perceptualAction;
       if (action === "launch") _launchAnalysis();
       else if (action === "relaunch") _relaunchAnalysis();
-      else if (action === "open-settings") {
+      else if (action === "complete") _relaunchAnalysis({ onlyMissing: true });
+      else if (action === "load-frames") _loadFrames();
+      else if (action === "toggle-breakdown") {
+        const body = _modalEl.querySelector("[data-perceptual-breakdown-body]");
+        if (body) {
+          const hidden = body.style.display === "none";
+          body.style.display = hidden ? "" : "none";
+          btn.textContent = hidden ? "▼ Replier" : "▶ Déployer";
+        }
+      } else if (action === "toggle-width") {
+        if (_state && _state.mode === "A") {
+          const wasExpanded = rpIsExpandedWidth();
+          rpSetExpandedWidth(!wasExpanded);
+          btn.textContent = !wasExpanded ? "◀" : "▶";
+        }
+      } else if (action === "open-settings") {
         closePerceptualModal();
         if (typeof window !== "undefined") window.location.hash = "#/parametres";
       }
@@ -462,8 +743,8 @@ function _bindEvents() {
   const copyFpBtn = _modalEl.querySelector("[data-perceptual-copy-fp]");
   if (copyFpBtn) {
     copyFpBtn.addEventListener("click", async () => {
-      const fpEl = _modalEl.querySelector("[data-perceptual-fp]");
-      const fp = fpEl ? fpEl.textContent : "";
+      // Spec 02 fix : copie la valeur complete, pas la version tronquee
+      const fp = (_state && _state.fullFingerprint) || "";
       if (fp && navigator.clipboard) {
         try {
           await navigator.clipboard.writeText(fp);
@@ -473,11 +754,44 @@ function _bindEvents() {
       }
     });
   }
+  // Spec 02 §5 : dropdown Comparer
+  const compareDetails = _modalEl.querySelector("[data-perceptual-compare]");
+  if (compareDetails) {
+    compareDetails.addEventListener("toggle", () => {
+      if (compareDetails.open) _loadCompareList();
+    });
+  }
+  const filterInput = _modalEl.querySelector("[data-perceptual-compare-filter]");
+  if (filterInput) {
+    filterInput.addEventListener("input", (ev) => {
+      if (_filterDebounceTimer) clearTimeout(_filterDebounceTimer);
+      const val = ev.target.value;
+      _filterDebounceTimer = setTimeout(() => _filterCompareList(val), 250);
+    });
+  }
+  // Delegation pour le pick dans la liste (rendue dynamiquement)
+  const listEl = _modalEl.querySelector("[data-perceptual-compare-list]");
+  if (listEl) {
+    listEl.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-perceptual-compare-pick]");
+      if (!btn) return;
+      const otherId = btn.dataset.perceptualComparePick;
+      const otherTitle = btn.dataset.rowTitle;
+      _onPickCompare(otherId, otherTitle);
+    });
+  }
 }
 
 function _setModalContent(html) {
   if (!_modalEl) return;
-  _modalEl.innerHTML = html;
+  if (_state && _state.mode === "A") {
+    // Mode A : injection dans le right-panel via setSections
+    rpSetSections([{ title: "", html }]);
+    // Le _modalEl est un placeholder pour eviter de casser les query selectors
+    _modalEl.innerHTML = html;
+  } else {
+    _modalEl.innerHTML = html;
+  }
   _bindEvents();
 }
 
@@ -489,9 +803,34 @@ export async function openPerceptualModal(opts) {
     console.warn("[perceptual-modal] rowId requis");
     return;
   }
-  _state = { rowId, runId: runId || null, rowTitle: rowTitle || "" };
-  _ensureOverlay();
-  document.body.classList.add("modal-open");
+  const mode = _resolveMode(opts);
+  _state = {
+    rowId,
+    runId: runId || null,
+    rowTitle: rowTitle || "",
+    mode,
+    fullFingerprint: "",
+    compareLoaded: false,
+    compareRows: [],
+  };
+
+  if (mode === "A") {
+    // Mode A : injecter dans le right-panel, ne PAS creer d'overlay
+    rpSetExpandedWidth(true);
+    // Reuse _modalEl comme conteneur de queries DOM (rattache au right-panel body)
+    const rpBody = document.querySelector("[data-v5-right-panel-body]");
+    if (rpBody) {
+      _modalEl = rpBody;
+    } else {
+      // Fallback en cas d'absence d'inspecteur : on retombe sur overlay
+      _ensureOverlay();
+    }
+    document.addEventListener("keydown", _onKeydown);
+  } else {
+    // Mode B : overlay classique
+    _ensureOverlay();
+    document.body.classList.add("modal-open");
+  }
   _setModalContent(_renderLoading(rowTitle));
   await _loadAndRender();
 }
@@ -502,7 +841,19 @@ export function closePerceptualModal() {
     _overlayEl.remove();
     _overlayEl = null;
     _modalEl = null;
+  } else if (_state && _state.mode === "A") {
+    document.removeEventListener("keydown", _onKeydown);
+    // Mode A : reset le right-panel + largeur normale
+    try {
+      rpSetSections([]);
+      rpSetExpandedWidth(false);
+    } catch (_e) { /* noop */ }
+    _modalEl = null;
   }
   _state = null;
   document.body.classList.remove("modal-open");
+  if (_filterDebounceTimer) {
+    clearTimeout(_filterDebounceTimer);
+    _filterDebounceTimer = null;
+  }
 }

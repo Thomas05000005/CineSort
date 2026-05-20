@@ -25,6 +25,11 @@ const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
 const DEFAULT_WIDTH = 360;
 
+// Spec 02 §0 (Mode A inspecteur elargi) : pour la modal perceptuelle on
+// elargit le panneau jusqu'a 600px, au-dela du resize manuel normal.
+// Borne haute aussi par 50% de window.innerWidth.
+const EXPANDED_MAX_WIDTH = 600;
+
 // Spec 04 §4 : inspecteur par defaut par route.
 // Replie sur Accueil/Parametres/Aide (vues synthese / config), visible sur les
 // vues expertes (Traitement, Bibliotheque, Qualite, Historique).
@@ -135,7 +140,11 @@ function _onResizeStart(ev) {
 function _onResizeMove(ev) {
   if (!_isResizing || !_root) return;
   const delta = _resizeStartX - ev.clientX;
-  const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, _resizeStartWidth + delta));
+  // Si l'inspecteur est en mode elargi (Mode A perceptuelle), autoriser jusqu'a
+  // EXPANDED_MAX_WIDTH ; sinon cap a MAX_WIDTH (480) comme avant.
+  const expanded = _root.classList.contains("is-mode-expanded");
+  const upper = expanded ? EXPANDED_MAX_WIDTH : MAX_WIDTH;
+  const newWidth = Math.max(MIN_WIDTH, Math.min(upper, _resizeStartWidth + delta));
   _root.style.width = `${newWidth}px`;
 }
 
@@ -204,9 +213,36 @@ export function setExpanded(expanded) {
 
 export function setWidth(px) {
   if (!_root) return;
-  const w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(px)));
+  // Spec 02 §0 : autoriser jusqu'a EXPANDED_MAX_WIDTH (600) pour Mode A.
+  // Capped par 50% de window.innerWidth pour rester utilisable sur petits ecrans.
+  const winLimit = typeof window !== "undefined" && window.innerWidth
+    ? Math.floor(window.innerWidth * 0.5)
+    : EXPANDED_MAX_WIDTH;
+  const upper = Math.min(EXPANDED_MAX_WIDTH, Math.max(MAX_WIDTH, winLimit));
+  const w = Math.max(MIN_WIDTH, Math.min(upper, Math.round(px)));
   _root.style.width = `${w}px`;
   _writeStorage(STORAGE_KEY_WIDTH, w);
+}
+
+/**
+ * Spec 02 §0 : largeur normale (DEFAULT_WIDTH) ou elargie (EXPANDED_MAX_WIDTH).
+ * Utilise par la Modal Perceptuelle Mode A pour le toggle bouton ▶/◀.
+ */
+export function setExpandedWidth(isExpanded) {
+  if (!_root) return;
+  if (isExpanded) {
+    setWidth(EXPANDED_MAX_WIDTH);
+    _root.classList.add("is-mode-expanded");
+  } else {
+    setWidth(DEFAULT_WIDTH);
+    _root.classList.remove("is-mode-expanded");
+  }
+}
+
+/** Spec 02 §0 : verifie si l'inspecteur est en mode elargi (>= MAX_WIDTH). */
+export function isExpandedWidth() {
+  if (!_root) return false;
+  return (_root.offsetWidth || 0) > MAX_WIDTH;
 }
 
 export function reset() {
