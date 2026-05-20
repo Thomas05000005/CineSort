@@ -273,6 +273,30 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._get_calibration_report_impl()
 
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §2.9) ----------
+    # Alias quality/X(...) -> meme impl que settings/X(...). Spec 11 §7 cite
+    # `quality/get_profiles()`, l'orchestration reelle delegue vers profiles_support.
+
+    def get_profiles(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets + custom).
+
+        Cf CineSortApi._get_profiles_impl pour la doc complete.
+        """
+        return self._api._get_profiles_impl()
+
+    def save_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom (avec validation tiers + poids).
+
+        Cf CineSortApi._save_profile_impl pour la doc complete.
+        """
+        return self._api._save_profile_impl(profile)
+
+    def set_active_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom).
+
+        Cf CineSortApi._set_active_profile_impl pour la doc complete.
+        """
+        return self._api._set_active_profile_impl(profile_id)
     # ---------- Vue Qualite — Audit (spec 10) ----------
 
     def get_films_by_tier(self, tier: str, limit: int = 8) -> Dict[str, Any]:
