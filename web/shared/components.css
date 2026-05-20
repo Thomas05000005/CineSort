@@ -4632,10 +4632,7 @@ body.v5-notif-lock {
   align-items: end;
   padding: var(--sp-3) 0 var(--sp-2);
   min-height: 96px;
-<<<<<<< HEAD
-=======
   background: linear-gradient(to top, var(--surface-2) 0%, var(--surface-2) 1px, transparent 1px);
->>>>>>> origin/main
 }
 
 .accueil-timeline-day {

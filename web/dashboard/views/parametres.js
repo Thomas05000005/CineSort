@@ -26,11 +26,8 @@
 
 import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
-=======
-import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
 import { renderOmdbStatusInto } from "../components/omdb-status.js";
->>>>>>> origin/main
 import { dangerConfirmModal } from "../components/modal.js";
 
 /* =============================================================
@@ -264,7 +261,6 @@ const _state = {
   profileDraft: null,  // { id, label, tiers: {...}, weights: {...} }
 };
 
-<<<<<<< HEAD
 const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
 const _DEFAULT_WEIGHTS = {
   resolution: 0.25,
