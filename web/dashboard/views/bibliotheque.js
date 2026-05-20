@@ -96,6 +96,25 @@ let _abortController = null;
 let _scrollObserver = null;
 let _runId = null; // dernier run_id reçu (pour appel quality/analyze_perceptual_batch)
 
+// Drag-select rectangulaire (spec 07 §5) : etat module-scope pour permettre
+// le nettoyage lors d'un unmount et eviter les leak listeners window.
+const _dragSelect = {
+  active: false,       // true quand le rectangle est dessine (apres seuil)
+  startX: 0,           // origine pageX
+  startY: 0,           // origine pageY
+  startScrollX: 0,     // window.scrollX au mousedown
+  startScrollY: 0,     // window.scrollY au mousedown
+  baseSelection: null, // Set<string> snapshot avant drag (additif si Ctrl)
+  additive: false,     // Ctrl/Cmd ou Shift au mousedown
+  overlay: null,       // element DOM overlay
+  rafId: 0,            // requestAnimationFrame en cours
+  // Move handlers binds (pour removeEventListener fiable)
+  onMove: null,
+  onUp: null,
+  onKey: null,
+};
+const DRAG_THRESHOLD_PX = 5;
+
 function _initState() {
   let adv = { ...ADVANCED_DRAWER_DEFAULTS };
   let advActive = false;
@@ -691,6 +710,189 @@ function _setupScrollObserver() {
   _scrollObserver.observe(sentinel);
 }
 
+/* --- Drag-select rectangulaire (spec 07 §5) ---
+ *
+ * Comportement :
+ *  - mousedown sur la grille en dehors d'une carte demarre un drag
+ *  - mousemove > DRAG_THRESHOLD_PX dessine l'overlay et met a jour la selection
+ *  - mouseup commit la selection (carte intersectee => _state.selected)
+ *  - Esc annule (restaure baseSelection, supprime overlay)
+ *  - Ctrl/Cmd ou Shift au mousedown : drag additif (preserve la selection)
+ *  - Seuil de 5px : protege le clic simple / double-clic sur carte
+ */
+
+function _resetDragSelect() {
+  if (_dragSelect.overlay && _dragSelect.overlay.parentNode) {
+    _dragSelect.overlay.parentNode.removeChild(_dragSelect.overlay);
+  }
+  if (_dragSelect.rafId) {
+    cancelAnimationFrame(_dragSelect.rafId);
+    _dragSelect.rafId = 0;
+  }
+  if (_dragSelect.onMove) {
+    window.removeEventListener("mousemove", _dragSelect.onMove);
+  }
+  if (_dragSelect.onUp) {
+    window.removeEventListener("mouseup", _dragSelect.onUp);
+  }
+  if (_dragSelect.onKey) {
+    window.removeEventListener("keydown", _dragSelect.onKey);
+  }
+  _dragSelect.active = false;
+  _dragSelect.overlay = null;
+  _dragSelect.onMove = null;
+  _dragSelect.onUp = null;
+  _dragSelect.onKey = null;
+  _dragSelect.baseSelection = null;
+}
+
+function _dragSelectRect(curX, curY) {
+  const x1 = Math.min(_dragSelect.startX, curX);
+  const y1 = Math.min(_dragSelect.startY, curY);
+  const x2 = Math.max(_dragSelect.startX, curX);
+  const y2 = Math.max(_dragSelect.startY, curY);
+  return { left: x1, top: y1, right: x2, bottom: y2, width: x2 - x1, height: y2 - y1 };
+}
+
+function _dragSelectApplyOverlay(rect) {
+  if (!_dragSelect.overlay) return;
+  const o = _dragSelect.overlay;
+  // L'overlay est en position fixed -> coords viewport (rect en pageX/pageY).
+  o.style.left = `${rect.left - window.scrollX}px`;
+  o.style.top = `${rect.top - window.scrollY}px`;
+  o.style.width = `${rect.width}px`;
+  o.style.height = `${rect.height}px`;
+}
+
+function _dragSelectIntersect(rect) {
+  // rect est en coords page (pageX/pageY). getBoundingClientRect retourne du
+  // viewport -> on convertit en page en ajoutant scrollX/scrollY.
+  if (!_container) return;
+  const cards = _container.querySelectorAll(".bibliotheque-card[data-row-id]");
+  const base = _dragSelect.baseSelection || new Set();
+  // Reconstruit selection a partir de base + cartes intersectees.
+  const next = new Set(base);
+  cards.forEach((card) => {
+    const cr = card.getBoundingClientRect();
+    const cardLeft = cr.left + window.scrollX;
+    const cardTop = cr.top + window.scrollY;
+    const cardRight = cardLeft + cr.width;
+    const cardBottom = cardTop + cr.height;
+    const intersects = !(
+      cardRight < rect.left ||
+      cardLeft > rect.right ||
+      cardBottom < rect.top ||
+      cardTop > rect.bottom
+    );
+    const rowId = card.dataset.rowId;
+    if (!rowId) return;
+    if (intersects) {
+      next.add(rowId);
+      card.classList.add("is-selected");
+      card.setAttribute("aria-pressed", "true");
+    } else if (!base.has(rowId)) {
+      // Pas dans le rectangle et pas dans la base -> retire l'effet visuel.
+      card.classList.remove("is-selected");
+      card.setAttribute("aria-pressed", "false");
+    }
+  });
+  _state.selected = next;
+}
+
+function _onDragSelectMouseDown(ev) {
+  // Bouton gauche uniquement, pas sur une carte/input/bouton/etc.
+  if (ev.button !== 0) return;
+  // Si le clic est sur (ou descend d') une carte, un input, ou un bouton, on
+  // laisse le comportement natif (clic carte, checkbox, etc.) prendre le pas.
+  const target = ev.target;
+  if (!target || typeof target.closest !== "function") return;
+  if (
+    target.closest(".bibliotheque-card") ||
+    target.closest("input") ||
+    target.closest("button") ||
+    target.closest("a") ||
+    target.closest("label")
+  ) {
+    return;
+  }
+  const grid = _container && _container.querySelector(".bibliotheque-grid");
+  if (!grid || !grid.contains(target)) return;
+
+  _dragSelect.startX = ev.pageX;
+  _dragSelect.startY = ev.pageY;
+  _dragSelect.startScrollX = window.scrollX;
+  _dragSelect.startScrollY = window.scrollY;
+  _dragSelect.additive = !!(ev.ctrlKey || ev.metaKey || ev.shiftKey);
+  _dragSelect.baseSelection = _dragSelect.additive
+    ? new Set(_state.selected)
+    : new Set();
+  _dragSelect.active = false; // bascule a true apres franchissement du seuil
+
+  _dragSelect.onMove = (mv) => _onDragSelectMouseMove(mv);
+  _dragSelect.onUp = (mu) => _onDragSelectMouseUp(mu);
+  _dragSelect.onKey = (kv) => _onDragSelectKey(kv);
+  window.addEventListener("mousemove", _dragSelect.onMove);
+  window.addEventListener("mouseup", _dragSelect.onUp);
+  window.addEventListener("keydown", _dragSelect.onKey);
+}
+
+function _onDragSelectMouseMove(ev) {
+  const dx = ev.pageX - _dragSelect.startX;
+  const dy = ev.pageY - _dragSelect.startY;
+  if (!_dragSelect.active) {
+    if (Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return;
+    _dragSelect.active = true;
+    // Cree l'overlay au franchissement du seuil seulement (evite flash sur clic simple).
+    const overlay = document.createElement("div");
+    overlay.className = "bibliotheque-drag-overlay";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.style.position = "fixed";
+    overlay.style.pointerEvents = "none";
+    overlay.style.zIndex = "9999";
+    document.body.appendChild(overlay);
+    _dragSelect.overlay = overlay;
+    // Empeche la selection de texte pendant le drag.
+    document.body.style.userSelect = "none";
+  }
+  if (_dragSelect.rafId) cancelAnimationFrame(_dragSelect.rafId);
+  _dragSelect.rafId = requestAnimationFrame(() => {
+    const rect = _dragSelectRect(ev.pageX, ev.pageY);
+    _dragSelectApplyOverlay(rect);
+    _dragSelectIntersect(rect);
+  });
+}
+
+function _onDragSelectMouseUp(ev) {
+  const wasActive = _dragSelect.active;
+  if (wasActive) {
+    // Commit final : recalcule a la position finale.
+    const rect = _dragSelectRect(ev.pageX, ev.pageY);
+    _dragSelectIntersect(rect);
+  }
+  document.body.style.userSelect = "";
+  _resetDragSelect();
+  if (wasActive) {
+    // Re-render uniquement si un drag effectif a eu lieu (pour rafraichir la
+    // bulk toolbar et l'inspecteur droit). Pas de re-render pour un clic simple
+    // -> evite de casser le double-clic sur carte.
+    _render();
+  }
+}
+
+function _onDragSelectKey(ev) {
+  if (ev.key === "Escape" && _dragSelect.active) {
+    // Restaure la base selection.
+    if (_dragSelect.baseSelection) {
+      _state.selected = new Set(_dragSelect.baseSelection);
+    } else {
+      _state.selected = new Set();
+    }
+    document.body.style.userSelect = "";
+    _resetDragSelect();
+    _render();
+  }
+}
+
 /* --- Event handlers --- */
 
 function _bindEvents(container) {
@@ -882,6 +1084,13 @@ function _bindEvents(container) {
       _handleBulkAction(action);
     });
   });
+
+  // Drag-select rectangulaire (spec 07 §5) : un seul listener sur la grille,
+  // les listeners window sont (re)installes au mousedown via _onDragSelectMouseDown.
+  const grid = container.querySelector(".bibliotheque-grid");
+  if (grid) {
+    grid.addEventListener("mousedown", _onDragSelectMouseDown);
+  }
 }
 
 function _openFilmDetailModal(rowId) {
@@ -1029,6 +1238,9 @@ export function unmountBibliotheque() {
     _scrollObserver.disconnect();
     _scrollObserver = null;
   }
+  // Drag-select : nettoyage listeners window + overlay residuel.
+  _resetDragSelect();
+  document.body.style.userSelect = "";
   _container = null;
   _state = null;
 }

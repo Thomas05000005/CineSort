@@ -6613,7 +6613,9 @@ body.v5-notif-lock {
 .bibliotheque-chip.is-active .bibliotheque-chip-count { color: var(--accent); }
 .bibliotheque-bulk-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-3); background: var(--surface-2); border-radius: var(--radius-md); border: 1px solid var(--accent); }
 .bibliotheque-bulk-count { font-weight: var(--fw-semibold); color: var(--accent); margin-right: var(--sp-2); }
-.bibliotheque-grid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.bibliotheque-grid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); user-select: none; }
+/* Drag-select rectangulaire (spec 07 §5) : overlay semi-transparent accent. */
+.bibliotheque-drag-overlay { position: fixed; pointer-events: none; z-index: 9999; border: 1px dashed var(--accent); background: rgba(99, 102, 241, 0.1); border-radius: var(--radius-sm); box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15); }
 .bibliotheque-card { display: flex; flex-direction: column; gap: var(--sp-2); background: var(--surface-1); border: 1px solid var(--border-1); border-radius: var(--radius-md); overflow: hidden; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; outline: none; }
 .bibliotheque-card:hover, .bibliotheque-card:focus-visible { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.18); border-color: var(--accent); }
 .bibliotheque-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
