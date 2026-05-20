@@ -869,11 +869,7 @@ def _trim_perceptual_jobs() -> None:
         if len(_PERCEPTUAL_JOBS) <= _PERCEPTUAL_JOB_RETENTION:
             return
         finished = sorted(
-            (
-                (k, v)
-                for k, v in _PERCEPTUAL_JOBS.items()
-                if v.get("status") in ("done", "error", "cancelled")
-            ),
+            ((k, v) for k, v in _PERCEPTUAL_JOBS.items() if v.get("status") in ("done", "error", "cancelled")),
             key=lambda kv: kv[1].get("ts_end") or 0.0,
         )
         excess = len(_PERCEPTUAL_JOBS) - _PERCEPTUAL_JOB_RETENTION
@@ -1000,9 +996,7 @@ def get_perceptual_job_status(api: Any, job_id: str) -> Dict[str, Any]:  # noqa:
     with _PERCEPTUAL_JOBS_LOCK:
         snap = _PERCEPTUAL_JOBS.get(str(job_id))
         if not snap:
-            return _err_response(
-                "Job inconnu.", category="resource", level="info", log_module=__name__
-            )
+            return _err_response("Job inconnu.", category="resource", level="info", log_module=__name__)
         # Copie defensive pour eviter race condition cote caller.
         return {"ok": True, **{k: (list(v) if isinstance(v, list) else v) for k, v in snap.items()}}
 
@@ -1084,9 +1078,7 @@ def get_perceptual_compare_audio(
 
         found = api._find_run_row(run_id)
         if not found:
-            return _err_response(
-                "Run introuvable.", category="resource", level="info", log_module=__name__
-            )
+            return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
         run_row, store = found
         state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -1137,12 +1129,8 @@ def get_perceptual_compare_audio(
         # Extraction sequentielle (2 paires waveform+audio = 4 ffmpeg) — le batch
         # batch est court (~2s par fichier sur SSD moderne), pas la peine de
         # paralleliser pour 4 jobs.
-        waveform_a_b64 = _extract_audio_waveform_b64(
-            ffmpeg_path, str(media_a), ts, duration_s, waveform_w, waveform_h
-        )
-        waveform_b_b64 = _extract_audio_waveform_b64(
-            ffmpeg_path, str(media_b), ts, duration_s, waveform_w, waveform_h
-        )
+        waveform_a_b64 = _extract_audio_waveform_b64(ffmpeg_path, str(media_a), ts, duration_s, waveform_w, waveform_h)
+        waveform_b_b64 = _extract_audio_waveform_b64(ffmpeg_path, str(media_b), ts, duration_s, waveform_w, waveform_h)
         audio_a_b64 = _extract_audio_clip_b64(ffmpeg_path, str(media_a), ts, duration_s)
         audio_b_b64 = _extract_audio_clip_b64(ffmpeg_path, str(media_b), ts, duration_s)
 

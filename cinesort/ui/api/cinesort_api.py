@@ -1744,9 +1744,7 @@ class CineSortApi:
         """
         return perceptual_support.get_perceptual_compare_audio(self, run_id, row_id_a, row_id_b, options)
 
-    def _queue_perceptual_analyses_impl(
-        self, pairs: Any, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def _queue_perceptual_analyses_impl(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Phase 4 doublons : queue d'analyses perceptuelles batch en background.
 
         Cf spec section 1 "Analyser perceptuel sur N groupes". Retourne un
