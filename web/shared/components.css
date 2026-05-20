@@ -3999,6 +3999,12 @@ body.v5-notif-lock {
   overflow: hidden;
 }
 
+/* Spec 02 §0 : Mode A inspecteur elargi pour Modal Perceptuelle.
+ * Override max-width pour autoriser jusqu'a 600px. */
+.v5-right-panel.is-mode-expanded {
+  max-width: 600px;
+}
+
 .v5-right-panel.is-collapsed .v5-right-panel-handle,
 .v5-right-panel.is-collapsed .v5-right-panel-header,
 .v5-right-panel.is-collapsed .v5-right-panel-body {
@@ -4492,6 +4498,14 @@ body.v5-notif-lock {
   color: var(--text-3);
 }
 
+/* Phase 5 spec §1 : pastille "configurée mais hors-ligne" en orange. */
+.accueil-env-pill.is-offline,
+.accueil-env-bar-badge--offline {
+  color: var(--sev-warning-solid, #F59E0B);
+  border-color: var(--sev-warning-solid, #F59E0B);
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .accueil-env-pill-sym {
   font-size: 12px;
 }
@@ -4603,6 +4617,187 @@ body.v5-notif-lock {
 .accueil-error-message {
   color: var(--text-2);
   margin: 0 0 var(--sp-4);
+}
+
+/* ===========================================================
+ * ACCUEIL — Phase 5 (timeline 7j + CTA 1-clic + drawer options)
+ * ===========================================================
+ */
+
+/* Timeline 7 jours (spec 05 §6 Activité récente) ---------------------- */
+.accueil-timeline-7d {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--sp-2);
+  align-items: end;
+  padding: var(--sp-3) 0 var(--sp-2);
+  min-height: 96px;
+  background: linear-gradient(to top, var(--surface-2) 0%, var(--surface-2) 1px, transparent 1px);
+}
+
+.accueil-timeline-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 80px;
+  justify-content: flex-end;
+}
+
+.accueil-timeline-day.is-today .accueil-timeline-day-label {
+  color: var(--accent, #60A5FA);
+  font-weight: var(--fw-semibold);
+}
+
+.accueil-timeline-bullets {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  align-items: center;
+  min-height: 48px;
+  justify-content: flex-end;
+}
+
+.accueil-timeline-bullet {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  background: var(--text-3);
+  transition: transform var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.accueil-timeline-bullet:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15);
+}
+
+.accueil-timeline-bullet:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent, #60A5FA));
+  outline-offset: 2px;
+}
+
+.accueil-timeline-bullet--applied { background: var(--sev-success-solid, #10B981); }
+.accueil-timeline-bullet--done { background: var(--text-3, #6B7280); }
+.accueil-timeline-bullet--partial { background: var(--sev-warning-solid, #F59E0B); }
+.accueil-timeline-bullet--error { background: var(--sev-danger-solid, #EF4444); }
+
+.accueil-timeline-day-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.1;
+  gap: 2px;
+}
+
+.accueil-timeline-day-name {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accueil-timeline-day-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+}
+
+.accueil-timeline-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: 0;
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.accueil-timeline-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.accueil-timeline-legend .accueil-timeline-bullet {
+  width: 8px;
+  height: 8px;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Drawer Options du scan (spec 05 §3) --------------------------------- */
+.accueil-scan-drawer {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  animation: accueil-drawer-slide var(--dur-base) var(--ease-out);
+}
+
+@keyframes accueil-drawer-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.accueil-scan-drawer-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.accueil-scan-drawer-title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+
+.accueil-scan-drawer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.accueil-scan-drawer-row input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.accueil-scan-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* Bannière d'erreur au-dessus de la CTA Scan -------------------------- */
+.accueil-scan-error-banner {
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--sev-danger-solid, #EF4444);
+  border-radius: var(--radius-md);
+  color: var(--sev-danger-solid, #EF4444);
+  font-size: var(--fs-sm);
+}
+
+/* Sidebar Traitement dimmed (spec 05 §3) ------------------------------ */
+.v5-sidebar-item--dimmed {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+  transition: opacity var(--dur-base) var(--ease-out), filter var(--dur-base) var(--ease-out);
+}
+
+.v5-sidebar-item--dimmed:hover {
+  opacity: 0.9;
+  filter: grayscale(0);
 }
 
 /* ===========================================================
@@ -5298,7 +5493,10 @@ body.v5-notif-lock {
  * =========================================================== */
 .perceptual-modal-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; padding: var(--sp-4); }
 .perceptual-modal { background: var(--surface-1); color: var(--text-1); border-radius: var(--radius-lg); border: 1px solid var(--border-1); max-width: 800px; width: 100%; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
-.perceptual-modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4); border-bottom: 1px solid var(--border-1); flex-shrink: 0; }
+.perceptual-modal-header { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4); border-bottom: 1px solid var(--border-1); flex-shrink: 0; }
+.perceptual-modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.perceptual-modal-header-actions { display: flex; gap: var(--sp-1); align-items: center; }
+.perceptual-modal-toggle-width { font-size: 14px; }
 .perceptual-modal-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0; }
 .perceptual-modal-subtitle { font-weight: var(--fw-regular); color: var(--text-2); margin-left: var(--sp-2); }
 .perceptual-modal-close { background: transparent; border: none; color: var(--text-2); cursor: pointer; font-size: 18px; padding: var(--sp-2); }
@@ -5355,6 +5553,31 @@ body.v5-notif-lock {
 .perceptual-empty { color: var(--text-2); font-style: italic; margin: 0 0 var(--sp-3); }
 .perceptual-breakdown-weights { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
 .perceptual-breakdown-weights li { display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); background: var(--surface-1); border-radius: var(--radius-sm); }
+
+/* Phase 5 spec 02 §5 : dropdown Comparer avec un autre film */
+.perceptual-compare-dropdown { width: 100%; margin-top: var(--sp-2); position: relative; }
+.perceptual-compare-dropdown summary { cursor: pointer; user-select: none; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-sm); color: var(--text-2); list-style: none; }
+.perceptual-compare-dropdown summary::-webkit-details-marker { display: none; }
+.perceptual-compare-dropdown summary:hover { background: var(--surface-3, var(--surface-2)); color: var(--text-1); }
+.perceptual-compare-dropdown[open] summary { color: var(--text-1); }
+.perceptual-compare-panel { margin-top: var(--sp-2); padding: var(--sp-2); background: var(--surface-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
+.perceptual-compare-filter { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-1); font-size: var(--fs-sm); width: 100%; box-sizing: border-box; }
+.perceptual-compare-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.perceptual-compare-list li { width: 100%; }
+.perceptual-compare-loading { color: var(--text-2); font-style: italic; padding: var(--sp-2); font-size: var(--fs-sm); }
+.perceptual-compare-item { width: 100%; text-align: left; padding: var(--sp-1) var(--sp-2); background: transparent; border: none; color: var(--text-1); cursor: pointer; font-size: var(--fs-sm); border-radius: var(--radius-sm); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.perceptual-compare-item:hover { background: var(--surface-3, var(--surface-1)); }
+.perceptual-compare-score { color: var(--text-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+
+/* Phase 5 spec 02 §1 : grille Frames analysees */
+.perceptual-frames-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-2); }
+.perceptual-frame-item { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.perceptual-frame-item img { width: 100%; height: auto; border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-1); }
+.perceptual-frame-item figcaption { font-size: var(--fs-xs); color: var(--text-2); text-align: center; font-variant-numeric: tabular-nums; }
+
+/* Phase 5 spec 02 §4.5 : etat partial — champ "Non calcule" + bouton Completer */
+.perceptual-partial-row { color: var(--text-3); font-style: italic; display: inline-flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.perceptual-audio-fp--missing { color: var(--text-3); }
 
 /* ===========================================================
  * PARAMETRES PROFILS QUALITE — Phase 3.1-D (spec 11 §2.9)
