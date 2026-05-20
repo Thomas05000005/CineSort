@@ -383,10 +383,10 @@ function _renderShell(vm, container) {
   if (vm.hasV2Overview) {
     html += `<div class="card bento-card bento-card--wide v5-overview-card">
       <h3>Aperçu V2 — vue d'ensemble bibliothèque</h3>
-      <div class="v5-overview-grid" style="display:grid;gap:var(--sp-4);margin-top:var(--sp-3)">
+      <div class="v5-overview-grid status-overview-grid">
         <div id="v2-overview-kpis" data-stat="v2-kpis"></div>
         <div id="v2-overview-insights" data-stat="v2-insights"></div>
-        <div class="v5-overview-charts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--sp-4)">
+        <div class="v5-overview-charts status-overview-charts">
           <div id="v2-overview-donut" data-stat="v2-donut"></div>
           <div id="v2-overview-line" data-stat="v2-line"></div>
         </div>
@@ -402,13 +402,13 @@ function _renderShell(vm, container) {
 
   // === Distribution qualite ===
   html += `<div class="card bento-card bento-card--half">
-    <h3>Distribution qualité <span class="badge" style="margin-left:auto" data-stat="tier-total">${vm.tierTotal} films</span></h3>
-    <div class="quality-rows" style="margin-top:var(--sp-4)">
+    <h3>Distribution qualité <span class="badge status-badge-right" data-stat="tier-total">${vm.tierTotal} films</span></h3>
+    <div class="quality-rows status-quality-rows">
       ${["platinum", "gold", "silver", "bronze", "reject"].map((k) => {
         const label = k.charAt(0).toUpperCase() + k.slice(1);
         return `<div class="quality-row">
           <span class="tier-label tier-${k}"><span class="tier-dot"></span>${label}</span>
-          <div class="quality-track"><div class="quality-fill tier-${k}" data-tier-fill="${k}" style="width:${vm.tiers[k].pct}%"></div></div>
+          <div class="quality-track"><div class="quality-fill quality-fill-dyn tier-${k}" data-tier-fill="${k}" style="--fill-width:${vm.tiers[k].pct}%"></div></div>
           <span class="quality-value" data-tier-count="${k}">${vm.tiers[k].count}</span>
         </div>`;
       }).join("")}
@@ -420,7 +420,7 @@ function _renderShell(vm, container) {
     html += `<div id="statusRunProgress" class="card bento-card bento-card--half">
       <h3><span class="live-dot"></span> ${glossaryTooltip("Run")} en cours : <span class="text-accent">${escapeHtml(vm.activeRunId || "")}</span></h3>
       <div id="statusProgressBar" class="progress-bar mt-4">
-        <div class="progress-fill" data-stat="progress-fill" style="width:${vm.progressPct}%"></div>
+        <div class="progress-fill progress-fill-dyn" data-stat="progress-fill" style="--fill-width:${vm.progressPct}%"></div>
       </div>
       <p id="statusProgressText" class="text-muted mt-4" data-stat="progress-text">${escapeHtml(vm.progressText)}</p>
       <button id="btnCancelRun" class="btn btn-danger mt-4">Annuler</button>
@@ -429,7 +429,7 @@ function _renderShell(vm, container) {
 
   // === Sante ===
   html += `<div class="card bento-card bento-card--third"><h3>Santé</h3>
-    <ul class="status-health-list" style="margin-top:var(--sp-3)" data-stat="health-list">
+    <ul class="status-health-list" data-stat="health-list">
       ${_renderHealthListHtml(vm.health)}
     </ul>
   </div>`;
@@ -441,11 +441,11 @@ function _renderShell(vm, container) {
 
   // === Actions rapides ===
   html += `<div class="card bento-card bento-card--third"><h3>Actions rapides</h3>
-    <div style="display:flex;flex-direction:column;gap:var(--sp-3);margin-top:var(--sp-3)">
-      <button class="btn btn-primary" style="justify-content:flex-start" data-nav-route="/processing">▶ Lancer un nouveau scan</button>
-      <button class="btn" style="justify-content:flex-start" data-nav-route="/processing">⎘ Verifier les doublons</button>
-      <button class="btn" style="justify-content:flex-start" data-nav-route="/qij">▼ Voir la qualite</button>
-      <button class="btn" style="justify-content:flex-start" data-nav-route="/settings">⚙ Parametres</button>
+    <div class="status-quick-actions">
+      <button class="btn btn-primary" data-nav-route="/processing">▶ Lancer un nouveau scan</button>
+      <button class="btn" data-nav-route="/processing">⎘ Verifier les doublons</button>
+      <button class="btn" data-nav-route="/qij">▼ Voir la qualite</button>
+      <button class="btn" data-nav-route="/settings">⚙ Parametres</button>
     </div>
   </div>`;
 
@@ -484,7 +484,7 @@ function _renderShell(vm, container) {
     </div>`;
   }
   if (vm.showPrudent) {
-    html += `<div class="card card--banner mt-4" style="border-left-color:var(--warning)">
+    html += `<div class="card card--banner mt-4 status-warn-banner">
       <span class="badge badge-warning">Prudent</span>
       <span>${escapeHtml(vm.prudentMsg)}</span>
     </div>`;
@@ -502,7 +502,7 @@ function _renderShell(vm, container) {
     html += `<div class="card mt-4" id="statusRemoteAccess">
       <h3>📱 Accès distant (téléphone / autre PC)</h3>
       <p class="text-muted">Ouvre CineSort depuis n'importe quel appareil du même réseau Wi-Fi.</p>
-      <div id="statusRemoteAccessBody" style="margin-top:var(--sp-3)"><span class="text-muted">Chargement…</span></div>
+      <div id="statusRemoteAccessBody" class="status-remote-access-body"><span class="text-muted">Chargement…</span></div>
     </div>`;
   }
 
@@ -519,7 +519,7 @@ function _renderShell(vm, container) {
 
 function _renderHeroHtml(vm) {
   const cls = vm.isRunActive ? "kpi-card kpi-card--hero bento-card--hero is-run-active" : "kpi-card kpi-card--hero bento-card--hero";
-  return `<div class="${cls}" style="border-left-color:${vm.avgScoreColor}" data-stat="hero-card">
+  return `<div class="${cls} status-hero-card-dyn" style="--hero-color:${vm.avgScoreColor}" data-stat="hero-card">
     <h3><span class="live-dot"></span> <span data-stat="hero-label">${escapeHtml(vm.heroLabel)}</span></h3>
     <div class="hero-content">
       <div class="hero-primary">
@@ -588,7 +588,7 @@ function _renderSpaceHtml(space) {
   ]) {
     const bytes = byTier[tier] || byTier[_legacy[tier]] || 0;
     const pct = Math.round(bytes / total * 100);
-    tierChart += `<div class="space-bar-row"><span class="space-bar-label">${tier}</span><div class="space-bar-track"><div class="space-bar-fill" style="width:${pct}%;background:${color}"></div></div><span class="space-bar-value">${_fmtBytes(bytes)} (${pct}%)</span></div>`;
+    tierChart += `<div class="space-bar-row"><span class="space-bar-label">${tier}</span><div class="space-bar-track"><div class="space-bar-fill space-bar-fill-dyn" style="--fill-width:${pct}%;--fill-color:${color}"></div></div><span class="space-bar-value">${_fmtBytes(bytes)} (${pct}%)</span></div>`;
   }
   tierChart += '</div></div>';
   html += tierChart;
@@ -608,7 +608,7 @@ function _renderSpaceHtml(space) {
 function _renderSuggestionsHtml(suggestions, hs) {
   const hsColor = hs >= 80 ? "var(--success)" : hs >= 50 ? "var(--warning)" : "var(--danger)";
   let html = '<div class="card bento-card bento-card--third"><h3>Suggestions</h3>';
-  html += `<p class="mt-4">Sante : <strong style="color:${hsColor}" data-stat="health-score">${hs}%</strong></p>`;
+  html += `<p class="mt-4">Sante : <strong class="status-health-strong" style="--health-color:${hsColor}" data-stat="health-score">${hs}%</strong></p>`;
   if (suggestions.length === 0) {
     html += '<p class="text-muted mt-4">Bibliotheque en excellent etat.</p>';
   } else {
@@ -617,11 +617,11 @@ function _renderSuggestionsHtml(suggestions, hs) {
     const prioLabels = { high: "Haute", medium: "Moyenne", low: "Info" };
     for (const s of suggestions) {
       const c = prioColors[s.priority] || "var(--text-muted)";
-      html += `<div class="suggestion-card" style="border-left-color:${c}">`;
-      html += `<span class="badge" style="background:${c};color:#fff">${escapeHtml(prioLabels[s.priority] || "")}</span> `;
+      html += `<div class="suggestion-card suggestion-card-dyn" style="--card-color:${c}">`;
+      html += `<span class="badge status-suggestion-badge" style="--badge-bg:${c}">${escapeHtml(prioLabels[s.priority] || "")}</span> `;
       html += `${escapeHtml(s.message)}`;
       if (Array.isArray(s.details) && s.details.length) {
-        html += `<div class="text-muted" style="font-size:var(--fs-xs);margin-top:4px">${s.details.map((d) => escapeHtml(d)).join(", ")}</div>`;
+        html += `<div class="text-muted status-suggestion-details">${s.details.map((d) => escapeHtml(d)).join(", ")}</div>`;
       }
       html += "</div>";
     }
@@ -635,7 +635,7 @@ function _renderTrendHtml(timelinePoints, ht) {
   let html = '<div class="card bento-card bento-card--third"><h3>Tendance sante</h3>';
   if (ht.message) {
     const tColor = ht.delta > 0 ? "var(--success)" : ht.delta < 0 ? "var(--danger)" : "var(--text-muted)";
-    html += `<p class="mt-4" style="color:${tColor};font-weight:var(--fw-semi)">${escapeHtml(ht.message)}</p>`;
+    html += `<p class="mt-4 status-hint-msg" style="--hint-color:${tColor}">${escapeHtml(ht.message)}</p>`;
   }
   const svgW = 400, svgH = 100, pad = 20;
   const n = timelinePoints.length;
@@ -948,25 +948,25 @@ async function _renderRemoteAccessBlock(settings) {
   }
   const tokenMasked = token.length > 8 ? token.slice(0, 4) + "••••" + token.slice(-4) : "••••";
   host.innerHTML = `
-    <div style="display:flex;gap:var(--sp-4);align-items:flex-start;flex-wrap:wrap">
-      ${qrSvg ? `<div style="min-width:140px">${qrSvg}</div>` : ""}
-      <div style="flex:1;min-width:260px">
-        <div style="margin-bottom:var(--sp-2)">
-          <div class="text-muted" style="font-size:0.85em">URL</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <code id="statusRemoteUrl" style="flex:1;word-break:break-all;font-family:monospace;padding:6px 10px;background:var(--bg-raised);border-radius:var(--radius-sm);border:1px solid var(--border)">${escapeHtml(dashUrl || "http://<ton-ip>:8642/dashboard/")}</code>
+    <div class="status-remote-row">
+      ${qrSvg ? `<div class="status-remote-qr">${qrSvg}</div>` : ""}
+      <div class="status-remote-col">
+        <div class="status-remote-block">
+          <div class="text-muted status-remote-block-sm">URL</div>
+          <div class="status-remote-inline">
+            <code id="statusRemoteUrl" class="status-remote-code">${escapeHtml(dashUrl || "http://<ton-ip>:8642/dashboard/")}</code>
             <button class="btn btn--compact" id="statusCopyUrl" title="Copier l'URL">📋</button>
           </div>
         </div>
         <div>
-          <div class="text-muted" style="font-size:0.85em">Clé d'accès</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <code id="statusRemoteToken" data-full="${escapeHtml(token)}" data-shown="0" style="flex:1;font-family:monospace;padding:6px 10px;background:var(--bg-raised);border-radius:var(--radius-sm);border:1px solid var(--border)">${escapeHtml(tokenMasked)}</code>
+          <div class="text-muted status-remote-block-sm">Clé d'accès</div>
+          <div class="status-remote-inline">
+            <code id="statusRemoteToken" data-full="${escapeHtml(token)}" data-shown="0" class="status-remote-code">${escapeHtml(tokenMasked)}</code>
             <button class="btn btn--compact" id="statusShowToken" title="Afficher / masquer">👁</button>
             <button class="btn btn--compact" id="statusCopyToken" title="Copier la clé">📋</button>
           </div>
         </div>
-        <div id="statusRemoteMsg" class="text-muted" style="margin-top:var(--sp-2);font-size:0.85em"></div>
+        <div id="statusRemoteMsg" class="text-muted status-remote-msg"></div>
       </div>
     </div>`;
   const showBtn = document.getElementById("statusShowToken");

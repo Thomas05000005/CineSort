@@ -93,7 +93,7 @@ function _showRestoreBanner(draft) {
   // V6-04 : datetime locale-aware via core/format.js (formatDateTime).
   const date = formatDateTime(draft.ts);
   const count = Object.keys(draft.decisions || {}).length;
-  const html = `<div class="alert alert--info" id="valDraftBanner" role="status" style="display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin-bottom:1em">
+  const html = `<div class="alert alert--info review-draft-banner" id="valDraftBanner" role="status">
     <span>Decisions non sauvegardees du <strong>${escapeHtml(date)}</strong> (${count} films).</span>
     <button class="btn btn--compact" id="valDraftRestore">Restaurer</button>
     <button class="btn btn--compact" id="valDraftDiscard">Ignorer</button>
@@ -221,7 +221,7 @@ async function _load() {
   if (!container.innerHTML.trim()) {
     container.innerHTML = `<div aria-busy="true" aria-label="Chargement de la review">
       ${skeletonLinesHtml(2)}
-      <div class="skeleton skeleton--block" style="height:240px;margin-top:var(--sp-3)"></div>
+      <div class="skeleton skeleton--block review-skeleton-block"></div>
     </div>`;
   }
 
@@ -303,7 +303,7 @@ function _renderFull(container) {
   html += '<button id="btnBulkApprove" class="btn btn-approve-bulk">Approuver les surs</button>';
   html += '<button id="btnBulkReject" class="btn btn-danger">Tout rejeter</button>';
   html += '<button id="btnBulkReset" class="btn">Reinitialiser</button>';
-  html += '<button id="btnDashUndo" class="btn" style="margin-left:auto">Annuler dernier apply</button>';
+  html += '<button id="btnDashUndo" class="btn review-undo-btn">Annuler dernier apply</button>';
   html += "</div>";
 
   // Table
@@ -321,9 +321,9 @@ function _renderFull(container) {
   html += `<button id="btnReviewApply" class="btn btn-primary">Appliquer</button>${glossaryTooltip("Apply", "")}`;
   html += "</div>";
   // V4.6 : boutons d'export du journal d'audit
-  html += '<div class="review-action-bar mt-2" style="flex-wrap:wrap">';
-  html += '<button id="btnDashAuditJsonl" class="btn" style="font-size:var(--fs-sm)" title="Journal d\'audit JSONL (apres apply reel)">Journal audit (.jsonl)</button>';
-  html += '<button id="btnDashAuditCsv" class="btn" style="font-size:var(--fs-sm)" title="Journal d\'audit au format CSV">Journal (.csv)</button>';
+  html += '<div class="review-action-bar mt-2 review-action-bar-wrap">';
+  html += '<button id="btnDashAuditJsonl" class="btn review-audit-btn" title="Journal d\'audit JSONL (apres apply reel)">Journal audit (.jsonl)</button>';
+  html += '<button id="btnDashAuditCsv" class="btn review-audit-btn" title="Journal d\'audit au format CSV">Journal (.csv)</button>';
   html += "</div>";
   html += '<div id="reviewMsg" class="status-msg mt-4"></div>';
 
@@ -560,38 +560,38 @@ function _hookBulkActions() {
 function _showPreviewModal(data) {
   const films = data.films || [];
   const t = data.totals || {};
-  let html = `<div style="padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised); margin-bottom:10px">
-    <div style="display:flex; gap:16px; font-size:var(--fs-sm); flex-wrap:wrap">
+  let html = `<div class="review-preview-summary">
+    <div class="review-preview-row">
       <div><strong>${t.films || 0}</strong> film(s)</div>
       <div><strong>${t.changes_count || 0}</strong> changement(s)</div>
       ${t.noop_count ? `<div><strong>${t.noop_count}</strong> deja conforme(s)</div>` : ""}
-      ${t.quarantined ? `<div style="color:#F59E0B"><strong>${t.quarantined}</strong> quarantaine</div>` : ""}
-      ${t.errors ? `<div style="color:#EF4444"><strong>${t.errors}</strong> erreur(s)</div>` : ""}
+      ${t.quarantined ? `<div class="review-preview-warn"><strong>${t.quarantined}</strong> quarantaine</div>` : ""}
+      ${t.errors ? `<div class="review-preview-err"><strong>${t.errors}</strong> erreur(s)</div>` : ""}
     </div>
-    <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">Total ${t.total_ops || 0} operations. Aucun fichier n'a ete touche.</div>
+    <div class="review-preview-foot">Total ${t.total_ops || 0} operations. Aucun fichier n'a ete touche.</div>
   </div>`;
   if (!films.length) {
     html += '<p class="text-muted">Aucun film avec changement dans ce plan.</p>';
   } else {
     for (const film of films) {
       const warns = (film.warnings || []).filter(w => w && !String(w).startsWith("subtitle_missing_"));
-      const warnTag = warns.length ? ` <span style="font-size:var(--fs-xs); padding:1px 6px; border-radius:8px; background:rgba(251,191,36,.15); color:#FBBF24; margin-left:4px">${warns.length} alerte${warns.length > 1 ? "s" : ""}</span>` : "";
+      const warnTag = warns.length ? ` <span class="review-warn-tag">${warns.length} alerte${warns.length > 1 ? "s" : ""}</span>` : "";
       const tierHtml = typeof tierPill === "function" ? tierPill(film.confidence_label || "", { compact: true }) : escapeHtml(String(film.confidence_label || ""));
       const ctMap = { rename_folder: "Renommage dossier", move_files: "Deplacement fichiers", move_mixed: "Renommage + deplacement", noop: "Aucun changement" };
       const ctLabel = ctMap[film.change_type] || film.change_type || "Changement";
-      const opsHtml = (film.ops || []).map(op => `<div style="font-family:monospace; font-size:var(--fs-xs); color:var(--text-muted); padding:2px 0">
-        <span style="color:var(--text-muted)">${escapeHtml(op.op_type)}</span>
-        <div style="margin-left:6px">${escapeHtml(_shortenDashPreviewPath(op.src_path))}<br><span style="color:#60A5FA">→</span> ${escapeHtml(_shortenDashPreviewPath(op.dst_path))}</div>
+      const opsHtml = (film.ops || []).map(op => `<div class="review-ops-list">
+        <span class="review-ops-type">${escapeHtml(op.op_type)}</span>
+        <div class="review-ops-detail">${escapeHtml(_shortenDashPreviewPath(op.src_path))}<br><span class="review-ops-arrow">→</span> ${escapeHtml(_shortenDashPreviewPath(op.dst_path))}</div>
       </div>`).join("");
-      html += `<div style="padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised); margin-bottom:8px">
-        <div style="display:flex; justify-content:space-between; align-items:center">
+      html += `<div class="review-film-card">
+        <div class="review-film-card-head">
           <div>
             <strong>${escapeHtml(film.title || "?")}</strong>${film.year ? ` <span class="text-muted">(${escapeHtml(String(film.year))})</span>` : ""}
-            <div style="font-size:var(--fs-xs); color:var(--text-muted)">${escapeHtml(ctLabel)}</div>
+            <div class="review-film-card-sub">${escapeHtml(ctLabel)}</div>
           </div>
           <div>${tierHtml}${warnTag}</div>
         </div>
-        <div style="margin-top:6px">${opsHtml}</div>
+        <div class="review-film-card-body">${opsHtml}</div>
       </div>`;
     }
   }
@@ -724,48 +724,48 @@ function _dashCompareCard(side, cmp) {
   const channels = byName.audio_channels || byName.channels || "";
   const hdr = byName.hdr;
 
-  return `<div class="compare-card" style="flex:1; min-width:0; padding:10px; border:2px solid ${borderColor}; border-radius:8px; background:var(--bg-raised)">
-    <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:3px">Version ${side.toUpperCase()}</div>
-    <div style="font-family:monospace; font-size:var(--fs-sm); font-weight:600; word-break:break-all; margin-bottom:8px" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-    <div style="font-size:var(--fs-sm); line-height:1.6; color:var(--text-muted)">
-      <div><strong style="color:var(--text-primary)">${escapeHtml(String(resolution))}</strong> · ${escapeHtml(String(codec).toUpperCase())} · ${escapeHtml(String(bitrate))}</div>
+  return `<div class="compare-card compare-card-dyn" style="--border-color:${borderColor};--tier-color:${tierColor};--verdict-bg:${verdictColor}22;--verdict-color:${verdictColor}">
+    <div class="compare-card-eyebrow">Version ${side.toUpperCase()}</div>
+    <div class="compare-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+    <div class="compare-card-info">
+      <div><strong>${escapeHtml(String(resolution))}</strong> · ${escapeHtml(String(codec).toUpperCase())} · ${escapeHtml(String(bitrate))}</div>
       <div>${escapeHtml(String(audio).toUpperCase())}${channels && channels !== "?" ? " " + escapeHtml(String(channels)) : ""}</div>
       ${hdr && hdr !== "-" && hdr !== "?" ? `<div>${escapeHtml(String(hdr))}</div>` : ""}
-      <div style="margin-top:4px"><strong style="color:var(--text-primary)">${_fmtSize(size || 0)}</strong></div>
+      <div class="compare-card-size"><strong>${_fmtSize(size || 0)}</strong></div>
     </div>
-    <hr style="border:0; border-top:1px solid var(--border); margin:8px 0">
-    <div style="display:flex; justify-content:space-between; align-items:center">
-      <div><div style="font-size:var(--fs-xs); color:var(--text-muted)">Score</div><div style="font-size:1.3em; font-weight:700; color:${tierColor}">${quality.score || "?"}</div></div>
-      <div style="text-align:right"><div style="font-size:var(--fs-xs); color:var(--text-muted)">Tier</div><div style="font-weight:600; color:${tierColor}">${escapeHtml(quality.tier || "?")}</div></div>
+    <hr class="compare-card-sep">
+    <div class="compare-card-foot">
+      <div><div class="compare-card-foot-label">Score</div><div class="compare-card-foot-score">${quality.score || "?"}</div></div>
+      <div class="compare-card-foot-tier-wrap"><div class="compare-card-foot-label">Tier</div><div class="compare-card-foot-tier">${escapeHtml(quality.tier || "?")}</div></div>
     </div>
-    <div style="margin-top:8px; padding:5px 8px; border-radius:4px; background:${verdictColor}22; color:${verdictColor}; font-weight:600; font-size:var(--fs-sm); text-align:center">${verdictIcon} ${escapeHtml(verdict || "")}</div>
+    <div class="compare-card-verdict">${verdictIcon} ${escapeHtml(verdict || "")}</div>
   </div>`;
 }
 
 function _buildDashComparisonHtml(cmp) {
-  let html = `<div style="display:flex; gap:10px; margin-top:8px; align-items:stretch; flex-wrap:wrap">
+  let html = `<div class="compare-wrap">
     ${_dashCompareCard("a", cmp)}
     ${_dashCompareCard("b", cmp)}
   </div>`;
 
   if (cmp.recommendation) {
     const savings = Number(cmp.size_savings) || 0;
-    html += `<div style="margin-top:10px; padding:8px; background:rgba(96,165,250,.1); border-left:3px solid #60A5FA; border-radius:4px">
-      <div style="font-weight:600; color:#60A5FA; font-size:var(--fs-sm); margin-bottom:3px">Recommandation</div>
-      <div style="font-size:var(--fs-sm)">${escapeHtml(cmp.recommendation)}${savings > 0 ? " — économie potentielle " + _fmtSize(savings) : ""}</div>
+    html += `<div class="compare-reco">
+      <div class="compare-reco-title">Recommandation</div>
+      <div class="compare-reco-body">${escapeHtml(cmp.recommendation)}${savings > 0 ? " — économie potentielle " + _fmtSize(savings) : ""}</div>
     </div>`;
   }
 
   // Détail critères en details
-  html += '<details style="margin-top:10px"><summary style="cursor:pointer; font-weight:600; font-size:var(--fs-sm)">Voir le détail critère par critère</summary>';
-  html += '<div class="table-wrap" style="margin-top:6px"><table class="compare-table"><thead><tr><th>Critère</th><th>Version A</th><th>Version B</th><th>Points</th></tr></thead><tbody>';
+  html += '<details class="compare-details"><summary class="compare-details-summary">Voir le détail critère par critère</summary>';
+  html += '<div class="table-wrap compare-details-body"><table class="compare-table"><thead><tr><th>Critère</th><th>Version A</th><th>Version B</th><th>Points</th></tr></thead><tbody>';
   for (const c of (cmp.criteria || [])) {
     const pts = Number(c.points_delta || 0);
     const ptsStr = pts === 0 ? "=" : (pts > 0 ? `A+${pts}` : `B+${-pts}`);
     const ptsColor = pts === 0 ? "var(--text-muted)" : (pts > 0 ? "#34D399" : "#F59E0B");
-    const aStyle = c.winner === "a" ? 'style="color:#34D399; font-weight:600"' : "";
-    const bStyle = c.winner === "b" ? 'style="color:#34D399; font-weight:600"' : "";
-    html += `<tr><td>${escapeHtml(c.label)}</td><td ${aStyle}>${escapeHtml(c.value_a || "?")}</td><td ${bStyle}>${escapeHtml(c.value_b || "?")}</td><td style="text-align:right; font-family:monospace; font-size:var(--fs-xs); color:${ptsColor}">${ptsStr}</td></tr>`;
+    const aCls = c.winner === "a" ? ' class="compare-cell-winner"' : "";
+    const bCls = c.winner === "b" ? ' class="compare-cell-winner"' : "";
+    html += `<tr><td>${escapeHtml(c.label)}</td><td${aCls}>${escapeHtml(c.value_a || "?")}</td><td${bCls}>${escapeHtml(c.value_b || "?")}</td><td class="compare-pts-cell" style="--pts-color:${ptsColor}">${ptsStr}</td></tr>`;
   }
   html += '</tbody></table></div></details>';
   return html;
@@ -785,7 +785,7 @@ async function _loadDuplicatesSection() {
     }
     let html = `<div class="card"><h3>Doublons detectes (${groups.length})</h3>`;
     for (const g of groups) {
-      html += `<div class="card mt-2" style="padding:var(--sp-3)"><h4>${escapeHtml(g.title || "?")} ${g.year ? `(${g.year})` : ""}</h4>`;
+      html += `<div class="card mt-2 review-group-card"><h4>${escapeHtml(g.title || "?")} ${g.year ? `(${g.year})` : ""}</h4>`;
       if (g.comparison) {
         html += _buildDashComparisonHtml(g.comparison);
       } else {
@@ -940,8 +940,8 @@ function _renderInspectorContent(rowId) {
 
   html += `<div class="inspector-section">
     <h5 class="inspector-section__title">Chemins</h5>
-    <p><strong>Ancien :</strong><br><span class="text-muted" style="word-break:break-all">${escapeHtml(folder || "—")}</span></p>
-    <p><strong>Nouveau :</strong><br><span style="word-break:break-all">${escapeHtml(proposedPath || "—")}</span></p>
+    <p><strong>Ancien :</strong><br><span class="text-muted review-word-break">${escapeHtml(folder || "—")}</span></p>
+    <p><strong>Nouveau :</strong><br><span class="review-word-break">${escapeHtml(proposedPath || "—")}</span></p>
   </div>`;
 
   if (flags.length || encWarn.length) {

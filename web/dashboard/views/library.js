@@ -264,7 +264,7 @@ async function _renderMosaic() {
   if (!el) return;
 
   if (_filteredRows.length === 0) {
-    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:32px">Aucun film.</p>';
+    el.innerHTML = '<p class="text-muted view-empty-center">Aucun film.</p>';
     return;
   }
 
@@ -437,7 +437,7 @@ function _renderTable() {
       clickable: true,
     });
   } else if (_filteredRows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${_COLUMNS.length}" class="text-muted" style="text-align:center">Aucun film.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${_COLUMNS.length}" class="text-muted cell-empty-center">Aucun film.</td></tr>`;
   } else {
     // 2) Virtualisation transparente. Si rows <= _VIRT_THRESHOLD, le helper
     // retombe sur tbody.innerHTML simple (comportement identique a avant).
@@ -572,11 +572,11 @@ function _showDetail(row) {
   // Candidats TMDb
   const cands = Array.isArray(row.candidates) ? row.candidates : [];
   if (cands.length > 0) {
-    body += `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:var(--fs-sm)">Candidats TMDb (${cands.length})</summary>`;
-    body += '<div style="margin-top:4px">';
+    body += `<details class="view-details-inline"><summary class="view-details-summary">Candidats TMDb (${cands.length})</summary>`;
+    body += '<div class="view-details-list">';
     for (const c of cands) {
       const selected = c.tmdb_id && row.chosen_tmdb_id && String(c.tmdb_id) === String(row.chosen_tmdb_id);
-      body += `<div style="padding:4px 0;border-bottom:1px solid var(--border);${selected ? 'color:var(--accent);font-weight:600' : ''}">`;
+      body += `<div class="view-details-item${selected ? ' is-selected' : ''}">`;
       body += `${escapeHtml(c.title || "?")} (${c.year || "?"}) `;
       body += `<span class="text-muted">score=${(c.score * 100).toFixed(0)}% src=${escapeHtml(c.source || "?")}</span>`;
       if (c.tmdb_id) body += ` <span class="text-muted">tmdb:${c.tmdb_id}</span>`;
@@ -585,7 +585,7 @@ function _showDetail(row) {
     body += '</div></details>';
   }
 
-  body += `<div style="margin-top:12px"><button class="btn btn--compact" id="btnFilmHistory">Historique</button> <button class="btn btn--compact" id="btnDashPerceptual">Analyse perceptuelle</button> <button class="btn btn--compact" id="btnDashExplainScore">Détail du score</button></div>`;
+  body += `<div class="view-action-row"><button class="btn btn--compact" id="btnFilmHistory">Historique</button> <button class="btn btn--compact" id="btnDashPerceptual">Analyse perceptuelle</button> <button class="btn btn--compact" id="btnDashExplainScore">Détail du score</button></div>`;
   body += `<div id="filmTimelineContainer"></div>`;
   body += `<div id="dashPerceptualContainer"></div>`;
   body += `<div id="dashExplainScoreContainer"></div>`;
@@ -609,16 +609,16 @@ async function _loadDashPerceptual(row) {
     if (!r?.data?.ok) { container.innerHTML = `<p class="text-muted">Erreur : ${escapeHtml(r?.data?.message || "echec")}</p>`; return; }
     const p = r.data.perceptual || {};
     const cv = p.cross_verdicts || [];
-    let html = `<div style="margin-top:8px">`;
+    let html = `<div class="score-explain-section">`;
     html += `<span class="badge badge-perceptual-${p.global_tier || "degrade"}">${p.global_score ?? "?"}/100 ${p.global_tier || ""}</span>`;
     html += ` <span class="text-muted">Video ${p.visual_score ?? "?"} | Audio ${p.audio_score ?? "?"}</span>`;
-    if (cv.length) { cv.forEach(v => { html += `<div class="cross-verdict cross-verdict--${escapeHtml(v.severity || "info")}" style="margin-top:4px">${escapeHtml(v.label || "")}</div>`; }); }
+    if (cv.length) { cv.forEach(v => { html += `<div class="cross-verdict cross-verdict--${escapeHtml(v.severity || "info")} cross-verdict-spaced">${escapeHtml(v.label || "")}</div>`; }); }
     html += `</div>`;
 
     // §16b v7.5.0 — Score composite V2 (cercle + jauges + accordeon + warnings)
     const gsv2 = p.global_score_v2;
     if (gsv2) {
-      html += `<div style="margin-top:10px"><div class="text-muted font-sm" style="margin-bottom:4px">Score CineSort V2</div>`;
+      html += `<div class="score-explain-section"><div class="text-muted font-sm score-explain-section-title">Score CineSort V2</div>`;
       html += renderScoreV2Container(gsv2);
       html += `</div>`;
     }
@@ -675,19 +675,19 @@ function _buildDashExplainHtml(data) {
   const tierColor = _explainTierColor(tier);
 
   // Header
-  let html = `<div style="margin-top:12px; padding:8px; border-left:4px solid ${tierColor}; background:var(--bg-raised); border-radius:4px">
-    <div style="display:flex; gap:12px; align-items:center">
-      <div style="font-size:1.8em; font-weight:700; color:${tierColor}">${score}</div>
+  let html = `<div class="score-explain-header" style="--explain-tier-color:${tierColor}">
+    <div class="score-explain-header-row">
+      <div class="score-explain-value">${score}</div>
       <div>
-        <div><strong>${escapeHtml(tier)}</strong> <span class="text-muted" style="font-size:var(--fs-xs)">/100</span></div>
-        ${baseline.next_tier && baseline.distance_to_next_tier != null ? `<div class="text-muted" style="font-size:var(--fs-xs)">À ${baseline.distance_to_next_tier} pt(s) du tier ${escapeHtml(baseline.next_tier)}</div>` : ""}
+        <div><strong>${escapeHtml(tier)}</strong> <span class="text-muted score-explain-sub">/100</span></div>
+        ${baseline.next_tier && baseline.distance_to_next_tier != null ? `<div class="text-muted score-explain-sub">À ${baseline.distance_to_next_tier} pt(s) du tier ${escapeHtml(baseline.next_tier)}</div>` : ""}
       </div>
     </div>
-    <p style="font-style:italic; font-size:var(--fs-sm); color:var(--text-muted); margin:6px 0 0">${escapeHtml(narrative)}</p>
+    <p class="score-explain-narrative">${escapeHtml(narrative)}</p>
   </div>`;
 
   // Categories bars
-  html += '<div style="margin-top:10px"><div class="text-muted" style="font-size:var(--fs-xs); font-weight:600; margin-bottom:4px">Contribution par catégorie</div>';
+  html += '<div class="score-explain-section"><div class="text-muted score-explain-section-title">Contribution par catégorie</div>';
   for (const cat of ["video", "audio", "extras"]) {
     const c = categories[cat] || {};
     const sub = c.subscore || 0;
@@ -697,13 +697,13 @@ function _buildDashExplainHtml(data) {
     const negC = c.negative_count || 0;
     const pct = Math.max(0, Math.min(100, sub));
     const fill = sub >= 85 ? "#A78BFA" : sub >= 68 ? "#FBBF24" : sub >= 54 ? "#9CA3AF" : sub >= 30 ? "#FB923C" : "#EF4444";
-    html += `<div style="margin-bottom:6px">
-      <div style="display:flex; justify-content:space-between; font-size:var(--fs-sm)">
+    html += `<div class="score-explain-bar-row">
+      <div class="score-explain-bar-row-head">
         <strong>${escapeHtml(c.label || cat)}</strong>
-        <span class="text-muted" style="font-size:var(--fs-xs)">${weight}% · contrib. ${contrib.toFixed(1)}/100</span>
+        <span class="text-muted score-explain-sub">${weight}% · contrib. ${contrib.toFixed(1)}/100</span>
       </div>
-      <div style="height:8px; background:var(--bg-raised); border-radius:4px; overflow:hidden; margin:3px 0"><div style="width:${pct}%; height:100%; background:${fill}"></div></div>
-      <div class="text-muted" style="font-size:var(--fs-xs)">${sub}/100 · ${posC} atout(s), ${negC} pénalité(s)</div>
+      <div class="score-explain-bar-track"><div class="score-explain-bar-fill" style="--bar-width:${pct}%;--bar-color:${fill}"></div></div>
+      <div class="score-explain-bar-foot">${sub}/100 · ${posC} atout(s), ${negC} pénalité(s)</div>
     </div>`;
   }
   html += '</div>';
@@ -711,21 +711,21 @@ function _buildDashExplainHtml(data) {
   // Factors table
   const sorted = [...factors].sort((a, b) => Math.abs(Number(b.weighted_delta || 0)) - Math.abs(Number(a.weighted_delta || 0)));
   if (sorted.length) {
-    html += '<div style="margin-top:10px"><div class="text-muted" style="font-size:var(--fs-xs); font-weight:600; margin-bottom:4px">Règles appliquées (par impact)</div>';
-    html += '<table style="width:100%; border-collapse:collapse"><thead><tr style="font-size:var(--fs-xs); color:var(--text-muted)"><th style="text-align:left; padding:2px 4px">Catégorie</th><th style="text-align:left; padding:2px 4px">Règle</th><th style="text-align:right; padding:2px 4px">Impact</th></tr></thead><tbody>';
+    html += '<div class="score-explain-section"><div class="text-muted score-explain-section-title">Règles appliquées (par impact)</div>';
+    html += '<table class="score-explain-table"><thead><tr><th>Catégorie</th><th>Règle</th><th>Impact</th></tr></thead><tbody>';
     for (const f of sorted.slice(0, 20)) {
       const wd = Number(f.weighted_delta || 0);
-      html += `<tr style="font-size:var(--fs-xs)"><td style="padding:1px 4px; color:var(--text-muted)">${escapeHtml(_explainCatLabel(f.category))}</td><td style="padding:1px 4px">${escapeHtml(f.label || "")}</td><td style="padding:1px 4px; text-align:right; color:${_explainDeltaColor(wd)}; font-weight:600">${_explainFmtDelta(wd)}</td></tr>`;
+      html += `<tr><td>${escapeHtml(_explainCatLabel(f.category))}</td><td>${escapeHtml(f.label || "")}</td><td style="--delta-color:${_explainDeltaColor(wd)}">${_explainFmtDelta(wd)}</td></tr>`;
     }
-    if (sorted.length > 20) html += `<tr><td colspan="3" style="text-align:center; font-size:var(--fs-xs); color:var(--text-muted); padding:3px">... ${sorted.length - 20} autre(s) facteur(s)</td></tr>`;
+    if (sorted.length > 20) html += `<tr><td colspan="3" class="score-explain-table-more">... ${sorted.length - 20} autre(s) facteur(s)</td></tr>`;
     html += '</tbody></table></div>';
   }
 
   // Suggestions
   if (Array.isArray(suggestions) && suggestions.length) {
-    html += '<div style="margin-top:10px; padding:8px; background:rgba(245,158,11,.1); border-left:3px solid #F59E0B; border-radius:4px">';
-    html += '<div style="color:#F59E0B; font-weight:600; font-size:var(--fs-sm); margin-bottom:3px">Pour améliorer :</div>';
-    html += '<ul style="margin:0; padding-left:18px; font-size:var(--fs-sm)">';
+    html += '<div class="score-explain-suggestions">';
+    html += '<div class="score-explain-suggestions-title">Pour améliorer :</div>';
+    html += '<ul class="score-explain-suggestions-list">';
     for (const s of suggestions) html += `<li>${escapeHtml(s)}</li>`;
     html += '</ul></div>';
   }
@@ -742,18 +742,18 @@ function _buildDashFeedbackForm(row) {
     <option value="video">Vidéo</option>
     <option value="audio">Audio</option>
     <option value="extras">Extras</option>`;
-  return `<div style="margin-top:10px; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised)">
-    <div style="color:var(--text-muted); font-size:var(--fs-xs); font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px">Ce score vous semble-t-il juste ?</div>
-    <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:6px">Votre feedback contribue à calibrer le scoring (P4.1). Stocké localement.</div>
-    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; align-items:center">
-      <label style="font-size:var(--fs-sm)">Tier attendu :</label>
-      <select id="dashFbTier" class="input" style="height:28px; font-size:var(--fs-sm)">${tierOpts}</select>
-      <label style="font-size:var(--fs-sm)">Catégorie :</label>
-      <select id="dashFbCategory" class="input" style="height:28px; font-size:var(--fs-sm)">${catOpts}</select>
+  return `<div class="dash-feedback-form">
+    <div class="dash-feedback-eyebrow">Ce score vous semble-t-il juste ?</div>
+    <div class="dash-feedback-hint">Votre feedback contribue à calibrer le scoring (P4.1). Stocké localement.</div>
+    <div class="dash-feedback-row">
+      <label>Tier attendu :</label>
+      <select id="dashFbTier" class="input dash-feedback-select">${tierOpts}</select>
+      <label>Catégorie :</label>
+      <select id="dashFbCategory" class="input dash-feedback-select">${catOpts}</select>
     </div>
-    <input id="dashFbComment" class="input" placeholder="Commentaire (optionnel)" style="width:100%; font-size:var(--fs-sm); margin-bottom:6px" />
+    <input id="dashFbComment" class="input dash-feedback-input" placeholder="Commentaire (optionnel)" />
     <button class="btn btn--compact" id="dashFbSubmit" data-run-id="${escapeHtml(row.run_id || "")}" data-row-id="${escapeHtml(row.row_id || "")}">Enregistrer</button>
-    <span id="dashFbResult" style="font-size:var(--fs-sm); margin-left:8px" aria-live="polite"></span>
+    <span id="dashFbResult" class="dash-feedback-result" aria-live="polite"></span>
   </div>`;
 }
 
@@ -797,9 +797,9 @@ function _hookDashFeedbackForm() {
       if (data.ok) {
         const delta = Number(data.tier_delta || 0);
         const label = delta === 0 ? "Accord" : (delta > 0 ? `Sous-évalué (+${delta})` : `Sur-évalué (${delta})`);
-        if (result) result.innerHTML = `<span style="color:#34D399">✓ Enregistré</span> <span class="text-muted">(${escapeHtml(label)})</span>`;
+        if (result) result.innerHTML = `<span class="dash-feedback-success">✓ Enregistré</span> <span class="text-muted">(${escapeHtml(label)})</span>`;
       } else {
-        if (result) result.innerHTML = `<span style="color:#EF4444">${escapeHtml(data.message || "Erreur")}</span>`;
+        if (result) result.innerHTML = `<span class="dash-feedback-error">${escapeHtml(data.message || "Erreur")}</span>`;
         btn.disabled = false;
       }
     } catch (e) {
@@ -867,28 +867,28 @@ function _buildDashHistoryHeader(data) {
   const trendDelta = (firstScore != null && currentScore != null) ? (currentScore - firstScore) : 0;
   const tierPillHtml = (currentScore != null && lastTier && typeof tierPill === "function") ? tierPill(lastTier, { compact: false }) : "";
   const trendHtml = trendDelta !== 0
-    ? `<span style="font-size:var(--fs-xs); color:${trendDelta > 0 ? "#34D399" : "#EF4444"}; font-weight:600">${trendDelta > 0 ? "↑ +" : "↓ "}${trendDelta}</span>`
-    : '<span style="font-size:var(--fs-xs); color:var(--text-muted)">→ stable</span>';
+    ? `<span class="dash-history-trend ${trendDelta > 0 ? "dash-history-trend--up" : "dash-history-trend--down"}">${trendDelta > 0 ? "↑ +" : "↓ "}${trendDelta}</span>`
+    : '<span class="dash-history-trend dash-history-trend--flat">→ stable</span>';
 
-  return `<div style="padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised); margin-bottom:10px">
-    <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+  return `<div class="dash-history-card">
+    <div class="dash-history-row">
       <div>
-        <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">Film</div>
-        <div style="font-weight:700">${escapeHtml(data.title || "?")}${data.year ? ` <span class="text-muted">(${data.year})</span>` : ""}</div>
+        <div class="dash-history-eyebrow">Film</div>
+        <div class="dash-history-title">${escapeHtml(data.title || "?")}${data.year ? ` <span class="text-muted">(${data.year})</span>` : ""}</div>
       </div>
       ${currentScore != null ? `
       <div>
-        <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">Score</div>
-        <div style="display:flex; align-items:center; gap:6px">
-          <span style="font-size:1.3em; font-weight:700">${currentScore}</span>
+        <div class="dash-history-eyebrow">Score</div>
+        <div class="dash-history-score-line">
+          <span class="dash-history-score">${currentScore}</span>
           ${tierPillHtml}
           ${trendHtml}
         </div>
       </div>` : ""}
       <div>
-        <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">Activite</div>
-        <div style="font-size:var(--fs-sm)"><strong>${data.scan_count || 0}</strong> scan · <strong>${data.apply_count || 0}</strong> apply</div>
-        ${daysSinceLast != null ? `<div style="font-size:var(--fs-xs); color:var(--text-muted)">Dernier : il y a ${daysSinceLast}j</div>` : ""}
+        <div class="dash-history-eyebrow">Activite</div>
+        <div class="dash-history-activity"><strong>${data.scan_count || 0}</strong> scan · <strong>${data.apply_count || 0}</strong> apply</div>
+        ${daysSinceLast != null ? `<div class="dash-history-eyebrow">Dernier : il y a ${daysSinceLast}j</div>` : ""}
       </div>
     </div>
   </div>`;
@@ -930,12 +930,12 @@ function _buildDashSparkline(events) {
   const totalDelta = lastScore - firstScore;
   const deltaLabel = totalDelta > 0 ? `+${totalDelta}` : String(totalDelta);
   const deltaColor = totalDelta > 0 ? "#34D399" : totalDelta < 0 ? "#EF4444" : "var(--text-muted)";
-  return `<div style="padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised); margin-bottom:10px">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-      <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">Evolution (${scorePoints.length} mesures)</div>
-      <div style="font-size:var(--fs-sm); color:${deltaColor}; font-weight:600">Total ${deltaLabel}</div>
+  return `<div class="dash-sparkline-card">
+    <div class="dash-sparkline-head">
+      <div class="dash-sparkline-eyebrow">Evolution (${scorePoints.length} mesures)</div>
+      <div class="dash-sparkline-delta" style="--delta-color:${deltaColor}">Total ${deltaLabel}</div>
     </div>
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto; display:block" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${w} ${h}" class="dash-sparkline-svg" preserveAspectRatio="xMidYMid meet">
       ${thresholdsHtml}
       <path d="${areaPath}" fill="url(#dashScoreGrad)" opacity="0.2"/>
       <path d="${polyPath}" fill="none" stroke="#60A5FA" stroke-width="2"/>
@@ -949,32 +949,32 @@ function _buildDashTimelineEvents(events) {
   const items = events.map((e, idx) => {
     const date = _fmtTs(e.ts);
     const isLast = idx === events.length - 1;
-    const connector = isLast ? "" : '<div style="position:absolute; left:14px; top:24px; bottom:-12px; width:2px; background:var(--border)"></div>';
+    const connector = isLast ? "" : '<div class="dash-timeline-connector"></div>';
     let iconColor = "var(--text-muted)"; let icon = "•"; let bodyHtml = "";
     if (e.type === "scan") {
       iconColor = "#60A5FA"; icon = "\u{1F50D}";
       bodyHtml = `<div><strong>Scan</strong> — confiance <strong>${e.confidence}</strong>, source ${escapeHtml(e.source || "?")}</div>`;
     } else if (e.type === "score") {
       iconColor = "#FBBF24"; icon = "⭐";
-      const deltaText = e.delta === 0 ? "" : (e.delta > 0 ? ` <span style="color:#34D399">+${e.delta}</span>` : ` <span style="color:#EF4444">${e.delta}</span>`);
+      const deltaText = e.delta === 0 ? "" : (e.delta > 0 ? ` <span class="dash-timeline-delta-pos">+${e.delta}</span>` : ` <span class="dash-timeline-delta-neg">${e.delta}</span>`);
       const tierHtml = typeof tierPill === "function" ? tierPill(e.tier || "", { compact: true }) : escapeHtml(String(e.tier || ""));
       bodyHtml = `<div><strong>Score ${e.score}</strong>${deltaText} &nbsp; ${tierHtml}</div>`;
     } else if (e.type === "apply") {
       iconColor = "#34D399"; icon = "\u{1F4C1}";
-      const ops = (e.operations || []).map(op => `<div style="font-family:monospace; font-size:var(--fs-xs); color:var(--text-muted)" title="${escapeHtml(op.from || "")} → ${escapeHtml(op.to || "")}">${escapeHtml(_shortenDashPath(op.from || ""))}<br>&nbsp;→ ${escapeHtml(_shortenDashPath(op.to || ""))}</div>`).join("");
-      bodyHtml = `<div><strong>Apply</strong> (${(e.operations || []).length} op)</div><div style="margin-top:4px">${ops}</div>`;
+      const ops = (e.operations || []).map(op => `<div class="dash-timeline-ops" title="${escapeHtml(op.from || "")} → ${escapeHtml(op.to || "")}">${escapeHtml(_shortenDashPath(op.from || ""))}<br>&nbsp;→ ${escapeHtml(_shortenDashPath(op.to || ""))}</div>`).join("");
+      bodyHtml = `<div><strong>Apply</strong> (${(e.operations || []).length} op)</div><div class="view-details-list">${ops}</div>`;
     } else {
       bodyHtml = `<div>${escapeHtml(e.type || "?")}</div>`;
     }
-    return `<div style="position:relative; padding-left:32px; padding-bottom:14px; min-height:28px">
-      <div style="position:absolute; left:4px; top:2px; width:18px; height:18px; border-radius:50%; background:var(--bg-raised); border:2px solid ${iconColor}; display:flex; align-items:center; justify-content:center; font-size:.65em; z-index:2">${icon}</div>
+    return `<div class="dash-timeline-item">
+      <div class="dash-timeline-icon" style="--icon-color:${iconColor}">${icon}</div>
       ${connector}
-      <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:2px">${escapeHtml(date)}</div>
-      <div style="font-size:var(--fs-sm)">${bodyHtml}</div>
+      <div class="dash-timeline-date">${escapeHtml(date)}</div>
+      <div class="dash-timeline-body">${bodyHtml}</div>
     </div>`;
   }).join("");
-  return `<div style="padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-raised)">
-    <div style="font-size:var(--fs-xs); color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px">Chronologie detaillee</div>
+  return `<div class="dash-timeline-card">
+    <div class="dash-timeline-title">Chronologie detaillee</div>
     ${items}
   </div>`;
 }
