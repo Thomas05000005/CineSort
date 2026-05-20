@@ -172,17 +172,183 @@ def mark_for_deletion_bulk(
 
 
 # ---------------------------------------------------------------------------
-# Endpoint : rescan_rows_bulk (lance JobRunner)
+# Endpoint : rescan_row (single, synchrone) + rescan_rows_bulk (JobRunner)
 # ---------------------------------------------------------------------------
 
 
-def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
-    """Build un job_fn compatible JobRunner pour rescanner N rows.
+def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
+    """Vraie implementation spec 06 §3.6 : probe + perceptual + TMDb re-match + plan update.
 
-    Le job se contente, pour l'instant, d'iterer sur les rows et de logger.
-    L'implementation reelle (probe + analyse + match TMDb) sera branchee
-    ulterieurement quand le pipeline de rescan single-row sera disponible.
+    Pipeline complet pour 1 row (synchrone, sans JobRunner) :
+      1. Invalide quality_reports + perceptual_reports en DB (delegation
+         a run_flow_support.rescan_row).
+      2. Re-execute probe ffprobe + mediainfo via get_quality_report
+         (force reuse_existing=False).
+      3. Re-execute analyse perceptuelle LPIPS V2 via get_perceptual_report.
+      4. Re-execute match TMDb (search_movie + scoring) via
+         plan_support.replan_single_row sur le fichier video.
+      5. Met a jour le plan.jsonl : remplace l'ancienne row par la nouvelle
+         (avec nouveau score / confidence / proposed_title / candidates).
     """
+    from cinesort.ui.api import run_flow_support  # noqa: PLC0415
+
+    base_result = run_flow_support.rescan_row(api, run_id, row_id)
+    if not isinstance(base_result, dict) or not base_result.get("ok"):
+        return (
+            base_result
+            if isinstance(base_result, dict)
+            else _err_response(
+                "Echec rescan probe/perceptual.",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+        )
+
+    tmdb_rematched = False
+    candidates_count = 0
+    new_row_json: Optional[Dict[str, Any]] = None
+    try:
+        new_row_json = _rematch_tmdb_and_update_plan(api, run_id, row_id)
+        if new_row_json is not None:
+            tmdb_rematched = True
+            candidates_count = len(new_row_json.get("candidates") or [])
+    except (OSError, AttributeError, KeyError, TypeError, ValueError, ImportError) as exc:
+        logger.warning(
+            "rescan_row: TMDb re-match failed (best-effort), row_id=%s run_id=%s: %s",
+            row_id,
+            run_id,
+            exc,
+        )
+
+    return {
+        "ok": True,
+        "run_id": str(run_id),
+        "row_id": str(row_id),
+        "plan_row": new_row_json or base_result.get("plan_row"),
+        "quality": base_result.get("quality") or {},
+        "perceptual": base_result.get("perceptual") or {},
+        "tmdb_rematched": tmdb_rematched,
+        "candidates_count": candidates_count,
+    }
+
+
+def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
+    """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl."""
+    try:
+        settings = api.settings.get_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("_rematch_tmdb: run_paths_for failed: %s", exc)
+        return None
+
+    plan_jsonl = getattr(run_paths, "plan_jsonl", None)
+    if plan_jsonl is None or not plan_jsonl.exists():
+        return None
+
+    all_rows: List[Dict[str, Any]] = []
+    target_idx: Optional[int] = None
+    with open(plan_jsonl, encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            all_rows.append(data)
+            if str(data.get("row_id") or "") == str(row_id):
+                target_idx = len(all_rows) - 1
+
+    if target_idx is None:
+        return None
+
+    target = all_rows[target_idx]
+    folder_path = Path(str(target.get("folder") or ""))
+    video_path = folder_path / str(target.get("video") or "")
+    if not video_path.exists() or not folder_path.exists():
+        logger.debug("_rematch_tmdb: video introuvable %s", video_path)
+        return None
+
+    cfg = _build_cfg_for_row(api, settings, root=folder_path)
+    if cfg is None:
+        return None
+    tmdb = _build_tmdb_client_optional(settings, state_dir)
+
+    from cinesort.app.plan_support import plan_row_to_jsonable, replan_single_row  # noqa: PLC0415
+
+    kind = "collection" if str(target.get("kind") or "") == "collection" else "single"
+    new_row = replan_single_row(cfg, folder_path, video_path, tmdb=tmdb, kind=kind)
+    if new_row is None:
+        return None
+
+    new_row_json = plan_row_to_jsonable(new_row)
+    new_row_json["row_id"] = str(row_id)
+
+    all_rows[target_idx] = new_row_json
+    tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as fp:
+        for r in all_rows:
+            fp.write(json.dumps(r, ensure_ascii=False) + "\n")
+    tmp_path.replace(plan_jsonl)
+
+    if tmdb is not None:
+        import contextlib  # noqa: PLC0415
+
+        with contextlib.suppress(AttributeError, OSError):
+            tmdb.flush()
+
+    return new_row_json
+
+
+def _build_cfg_for_row(api: Any, settings: Dict[str, Any], *, root: Path):
+    """Construit un core.Config minimal pour re-executer _plan_item sur 1 row."""
+    try:
+        if hasattr(api, "_build_cfg_from_settings"):
+            return api._build_cfg_from_settings(settings, root)
+        from cinesort.ui.api.settings_support import build_cfg_from_settings  # noqa: PLC0415
+
+        return build_cfg_from_settings(
+            settings,
+            root=root,
+            default_collection_folder_name="_collections",
+            default_empty_folders_folder_name="_empty",
+            default_residual_cleanup_folder_name="_residuals",
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("_build_cfg_for_row failed: %s", exc)
+        return None
+
+
+def _build_tmdb_client_optional(settings: Dict[str, Any], state_dir: Path):
+    """Construit un TmdbClient si une cle est configuree, sinon None."""
+    api_key = str(settings.get("tmdb_api_key") or "").strip()
+    if not api_key:
+        return None
+    try:
+        from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
+
+        try:
+            cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        except (TypeError, ValueError):
+            cache_ttl_days = 30
+        return TmdbClient(
+            api_key=api_key,
+            cache_path=state_dir / "tmdb_cache.json",
+            timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+            cache_ttl_days=cache_ttl_days,
+        )
+    except (ImportError, OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("TmdbClient build failed (best-effort): %s", exc)
+        return None
+
+
+def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
+    """Build un job_fn compatible JobRunner pour rescanner N rows via le vrai pipeline."""
 
     def job_fn(should_cancel) -> Dict[str, Any]:
         processed = 0
@@ -191,10 +357,12 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
             if should_cancel():
                 break
             try:
-                # Stub : marquer "rescan_pending" dans les notes du run (best-effort).
-                logger.info("rescan_rows_bulk: rescanning row_id=%s run_id=%s", rid, run_id)
-                processed += 1
-            except (OSError, AttributeError, TypeError, ValueError) as exc:
+                res = _rescan_single_row_full_pipeline(api, run_id, rid)
+                if isinstance(res, dict) and res.get("ok"):
+                    processed += 1
+                else:
+                    skipped += 1
+            except (OSError, AttributeError, TypeError, ValueError, ImportError) as exc:
                 logger.warning("rescan failed row_id=%s: %s", rid, exc)
                 skipped += 1
         return {
@@ -272,11 +440,25 @@ def rescan_row(
     row_id: str,
     run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Version single-row de rescan (spec 06). Equivalent a rescan_rows_bulk avec 1 element."""
+    """Spec 06 §3.6 : relance probe + analyse + match TMDb pour 1 row (synchrone).
+
+    Contrairement a rescan_rows_bulk (JobRunner background pour N rows), cette
+    version synchrone est adaptee au Modal Film : l'utilisateur clique
+    "Re-scanner ce fichier" et attend le resultat.
+
+    Pipeline : invalide caches -> probe ffprobe/mediainfo -> analyse LPIPS V2
+    -> re-match TMDb -> mise a jour plan.jsonl.
+    """
     rid = str(row_id or "").strip()
     if not rid:
         return _err_response("row_id requis.", category="validation", level="info", log_module=__name__)
-    return rescan_rows_bulk(api, [rid], run_id=run_id)
+    resolved = _resolve_run_id(api, run_id)
+    if not resolved:
+        return _err_response("Aucun run actif.", category="resource", level="info", log_module=__name__)
+    try:
+        return _rescan_single_row_full_pipeline(api, resolved, rid)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError, ImportError) as exc:
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
 # ---------------------------------------------------------------------------
