@@ -724,14 +724,12 @@ def main() -> None:
                         import json as _json
 
                         tk_js = _json.dumps(_desktop_dashboard_token)
-                        # Bypass complet du login en mode pywebview desktop :
-                        # - sessionStorage token : lu par state.js (auth API)
-                        # - localStorage 'cinesort.native' : signal persistant aux refresh
-                        # - localStorage token (mirror) : robustesse si sessionStorage
-                        #   est isole differemment par WebView2 selon le boot
-                        # - __CINESORT_NATIVE__ : detecte par requireAuth(), currentHash()
-                        # - location.hash = "#/accueil" si vide ou login : force la vue
-                        # - body.classList "is-native" : style natif
+                        # Bypass complet du login en mode pywebview desktop.
+                        # Cf 2026-05-20 fix : ce evaluate_js doit s executer APRES
+                        # main_window.show() ; sinon la window etant hidden + le bus
+                        # JS-Python pas pret, evaluate_js leve "Main window failed to
+                        # start" et toute l injection est perdue silencieusement
+                        # (token, native flag, hash, body class) -> ecran noir total.
                         inject_js = (
                             "try {"
                             f"  sessionStorage.setItem('cinesort.dashboard.token', {tk_js});"
@@ -744,12 +742,19 @@ def main() -> None:
                             "  if (!h || h === '#' || h.indexOf('/login') !== -1) {"
                             "    window.location.hash = '#/accueil';"
                             "  }"
+                            "  var appShell = document.getElementById('app-shell');"
+                            "  if (appShell) appShell.classList.remove('hidden');"
+                            "  var loginView = document.getElementById('view-login');"
+                            "  if (loginView) loginView.classList.add('hidden');"
                             "} catch (e) { console.warn('native bootstrap inject fail', e); }"
                         )
-                        main_window.evaluate_js(inject_js)
-                        _log.info("splash: token injecte dans sessionStorage (mode natif)")
+                        # Le inject_js sera execute APRES show() ci-dessous.
+                        _pending_native_inject = inject_js
                     except Exception as exc:
-                        _log.warning("splash: injection token echouee — %s", exc)
+                        _log.warning("splash: preparation inject token echouee — %s", exc)
+                        _pending_native_inject = None
+                else:
+                    _pending_native_inject = None
 
                 _log.info("splash: etape finale — Pret")
                 _update_splash(splash, 7, "Pret !", 100)
@@ -758,6 +763,22 @@ def main() -> None:
                 # Afficher la fenetre principale et detruire le splash
                 main_window.show()
                 _log.info("splash: fenetre principale affichee, splash detruit")
+
+                # Injection JS APRES show() : la window est maintenant visible,
+                # le bus JS-Python est pret, evaluate_js fonctionne.
+                # On laisse 600ms au DOM pour finir de parser avant d ecraser des
+                # variables / classlist.
+                if _pending_native_inject:
+                    _time.sleep(0.6)
+                    for _attempt in range(3):
+                        try:
+                            main_window.evaluate_js(_pending_native_inject)
+                            _log.info("splash: token + native bootstrap injecte (attempt=%d)", _attempt + 1)
+                            break
+                        except Exception as _ie:
+                            _log.warning("splash: inject attempt %d echouee — %s", _attempt + 1, _ie)
+                            _time.sleep(0.5)
+
                 with contextlib.suppress(Exception):
                     splash.destroy()
 
