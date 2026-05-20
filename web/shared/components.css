@@ -5847,3 +5847,13 @@ body.v5-notif-lock {
   border-left: 3px solid var(--accent);
 }
 .parametres-profils-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+
+/* A11y skip-link (web/dashboard/index.html "Aller au contenu principal").
+ * Cache hors ecran par defaut, visible uniquement au focus clavier. */
+.skip-link {
+  position: absolute; top: -100px; left: 0; z-index: 99999;
+  padding: var(--sp-2) var(--sp-3); background: var(--accent, #d4a017);
+  color: #000; font-weight: var(--fw-semibold); text-decoration: none;
+  border-radius: 0 0 var(--radius-sm) 0;
+}
+.skip-link:focus { top: 0; outline: 2px solid #000; }

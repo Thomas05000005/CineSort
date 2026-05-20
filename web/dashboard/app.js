@@ -72,8 +72,13 @@ import { hasToken, setToken, onClearToken } from "./core/state.js";
       // Purger le token de l'URL pour ne pas le laisser dans l'historique.
       const url = new URL(window.location.href);
       url.searchParams.delete("ntoken");
+      // Si aucun hash n'est present (cas typique au boot natif), forcer
+      // /accueil pour eviter que le router envoie vers /login. Sans ce
+      // fix, currentHash() retourne "/login" par defaut quand hash vide,
+      // meme avec un token valide deja stocke en sessionStorage.
+      const targetHash = window.location.hash || "#/accueil";
       // Garder ?native=1 si present
-      window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + window.location.hash);
+      window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + targetHash);
     }
   } catch (e) {
     console.warn("[dash-boot] detection native echouee", e);
@@ -206,10 +211,9 @@ registerRoute("/status", { view: "view-status", guard: requireAuth, init: initSt
 // alias rétrocompat pour les bookmarks et les liens externes deja partages.
 // Phase 3.1 : /accueil cable la nouvelle vue refondue (spec 05-accueil.md).
 registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initAccueil });
-registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
-// Phase 3.3 : /traitement cable la nouvelle vue refondue (spec 08, squelette).
+// Phase 3.3 : /traitement cable la nouvelle vue refondue (spec 08).
 registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: (el, opts) => { initTraitement(el, opts); return unmountTraitement; } });
-// Phase 3.2 : /bibliotheque cable la nouvelle vue (squelette pour cette PR).
+// Phase 3.2 : /bibliotheque cable la nouvelle grille refondue (spec 07).
 registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initBibliotheque(el, opts); return unmountBibliotheque; } });
 // Phase 3.4 : /historique cable la nouvelle vue Historique refondue (spec 09).
 // La vue cherche un mount point #view-historique ; on garde view-qij comme
