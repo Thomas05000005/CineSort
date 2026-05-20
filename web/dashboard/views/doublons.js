@@ -352,11 +352,6 @@ function _renderGroupCard(group) {
           </button>
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-doublons-card-action="detail" data-row-id="${escapeHtml(group.rows[0].row_id)}">
             Voir fiche détaillée
-          <button type="button" class="v5-btn v5-btn--ghost v5-btn--sm"
-                  data-doublons-card-action="perceptual"
-                  data-row-id="${escapeHtml(group.rows[0].row_id)}"
-                  data-row-title="${escapeHtml(title)}">
-            ▶ Perceptuel
           </button>` : ""}
         </div>
       </footer>
