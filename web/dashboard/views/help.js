@@ -216,7 +216,7 @@ let _logPathsCache = null;
 async function _fetchLogPaths() {
   if (_logPathsCache) return _logPathsCache;
   try {
-    const { data } = await apiPost("get_log_paths");
+    const { data } = await apiPost("runtime/get_log_paths");
     _logPathsCache = (data && data.data) || {};
   } catch (err) {
     console.warn("[help] get_log_paths failed", err);
@@ -374,7 +374,7 @@ async function _refreshLogPathDisplay() {
 async function _onClickOpenLogs(btn) {
   btn.disabled = true;
   try {
-    const { data } = await apiPost("open_logs_folder");
+    const { data } = await apiPost("runtime/open_logs_folder");
     if (data && data.ok) {
       _setHint(`Ouvert : ${data.opened || ""}`);
     } else {

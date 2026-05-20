@@ -78,17 +78,17 @@ class DemoModeBackendCycleTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_initially_inactive(self) -> None:
-        self.assertFalse(self.api.is_demo_mode_active().get("active"))
+        self.assertFalse(self.api.runtime.is_demo_mode_active().get("active"))
 
     def test_start_creates_run_quality_reports_and_plan_jsonl(self) -> None:
-        result = self.api.start_demo_mode()
+        result = self.api.runtime.start_demo_mode()
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(result.get("count"), 15)
         run_id = result["run_id"]
         self.assertTrue(run_id.startswith("demo_"))
 
         # is_active doit refléter l'état
-        self.assertTrue(self.api.is_demo_mode_active().get("active"))
+        self.assertTrue(self.api.runtime.is_demo_mode_active().get("active"))
 
         # 15 quality_reports persistés
         store, _ = self.api._get_or_create_infra(self.state_dir)
@@ -115,24 +115,24 @@ class DemoModeBackendCycleTests(unittest.TestCase):
         self.assertTrue(cfg.get("is_demo"))
 
     def test_start_twice_is_rejected(self) -> None:
-        first = self.api.start_demo_mode()
+        first = self.api.runtime.start_demo_mode()
         self.assertTrue(first.get("ok"))
-        second = self.api.start_demo_mode()
+        second = self.api.runtime.start_demo_mode()
         self.assertFalse(second.get("ok"))
         self.assertIn("démo", str(second.get("error", "")))
 
     def test_stop_removes_run_quality_reports_and_run_dir(self) -> None:
-        start = self.api.start_demo_mode()
+        start = self.api.runtime.start_demo_mode()
         run_id = start["run_id"]
         run_dir = self.state_dir / "runs" / f"tri_films_{run_id}"
         self.assertTrue(run_dir.is_dir())
 
-        stop = self.api.stop_demo_mode()
+        stop = self.api.runtime.stop_demo_mode()
         self.assertTrue(stop.get("ok"), stop)
         self.assertGreaterEqual(stop.get("removed", 0), 1)
 
         # is_active doit être False
-        self.assertFalse(self.api.is_demo_mode_active().get("active"))
+        self.assertFalse(self.api.runtime.is_demo_mode_active().get("active"))
 
         # Quality reports supprimés
         store, _ = self.api._get_or_create_infra(self.state_dir)
@@ -158,9 +158,9 @@ class DemoModeFrontendStructureTests(unittest.TestCase):
         self.assertIn("export async function renderDemoBanner", self.wizard_js)
 
     def test_wizard_calls_api(self) -> None:
-        self.assertIn('apiPost("start_demo_mode")', self.wizard_js)
-        self.assertIn('apiPost("stop_demo_mode")', self.wizard_js)
-        self.assertIn('apiPost("is_demo_mode_active")', self.wizard_js)
+        self.assertIn('apiPost("runtime/start_demo_mode")', self.wizard_js)
+        self.assertIn('apiPost("runtime/stop_demo_mode")', self.wizard_js)
+        self.assertIn('apiPost("runtime/is_demo_mode_active")', self.wizard_js)
 
     def test_app_js_imports_wizard(self) -> None:
         self.assertIn("demo-wizard.js", self.app_js)

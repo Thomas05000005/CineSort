@@ -824,7 +824,7 @@ function _bindEvents(container, diagnostic) {
         }
         case "open-logs": {
           try {
-            const res = await apiPost("open_logs_folder", {});
+            const res = await apiPost("runtime/open_logs_folder", {});
             const data = (res && res.data) || res || null;
             if (data && data.ok !== false) {
               _setStatus(container, "data-aide-logs-status", "✓ Dossier des logs ouvert.");

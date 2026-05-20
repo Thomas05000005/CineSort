@@ -53,7 +53,7 @@ class HelpLogsApiTests(unittest.TestCase):
 
         # Appel sur classe sans instancier (method binding via descriptor)
         # On utilise un objet leger qui simule self : seul os.environ est lu.
-        result = CineSortApi.get_log_paths(object())
+        result = CineSortApi._get_log_paths_impl(object())
         self.assertIn("data", result)
         data = result["data"]
         self.assertIn("log_dir", data)
@@ -68,7 +68,7 @@ class HelpLogsApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # Pointer sur un dir vide pour garantir absence de logs/
             with patch.dict(os.environ, {"LOCALAPPDATA": tmp}, clear=False):
-                result = CineSortApi.open_logs_folder(object())
+                result = CineSortApi._open_logs_folder_impl(object())
         self.assertFalse(result.get("ok"))
         self.assertIn("error", result)
 

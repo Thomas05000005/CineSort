@@ -1485,7 +1485,7 @@ class CineSortApi:
         result = format_movie_folder(tpl, context)
         return {"ok": True, "result": result, "variables": context}
 
-    def validate_dropped_path(self, path: str = "") -> Dict[str, Any]:
+    def _validate_dropped_path_impl(self, path: str = "") -> Dict[str, Any]:
         r"""Valide qu'un chemin droppe est un dossier existant.
 
         M-7 audit QA 20260429 : refuse les symlinks et chemins UNC speciaux
@@ -1558,7 +1558,7 @@ class CineSortApi:
         # Compat endpoint kept for v7.0/v7.1 callers.
         return self._get_probe_tools_status_impl()
 
-    def get_probe_tools_status(self) -> Dict[str, Any]:
+    def _get_probe_tools_status_impl(self) -> Dict[str, Any]:
         """Retourne le statut de detection de ffprobe + MediaInfo (version, chemin, dispo)."""
         return probe_support.get_probe_tools_status(self, detect_probe_tools_fn=detect_probe_tools)
 
@@ -1593,7 +1593,7 @@ class CineSortApi:
             detect_probe_tools_fn=detect_probe_tools,
         )
 
-    def auto_install_probe_tools(self) -> Dict[str, Any]:
+    def _auto_install_probe_tools_impl(self) -> Dict[str, Any]:
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return probe_support.auto_install_probe_tools(self, detect_probe_tools_fn=detect_probe_tools)
 
@@ -1830,7 +1830,7 @@ class CineSortApi:
         return library_support.get_scoring_rollup(self, by=by, limit=limit, run_id=run_id)
 
     # ---------- v7.6.0 Vague 9 : Notification Center ----------
-    def get_notifications(
+    def _get_notifications_impl(
         self,
         unread_only: bool = False,
         limit: int = 100,
@@ -1839,23 +1839,23 @@ class CineSortApi:
         """v7.6.0 Vague 9 : liste les notifications en memoire (LIFO)."""
         return notifications_support.get_notifications(self, unread_only=unread_only, limit=limit, category=category)
 
-    def dismiss_notification(self, notification_id: str) -> Dict[str, Any]:
+    def _dismiss_notification_impl(self, notification_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : supprime une notification du centre."""
         return notifications_support.dismiss_notification(self, notification_id)
 
-    def mark_notification_read(self, notification_id: str) -> Dict[str, Any]:
+    def _mark_notification_read_impl(self, notification_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : marque une notification comme lue."""
         return notifications_support.mark_read(self, notification_id)
 
-    def mark_all_notifications_read(self) -> Dict[str, Any]:
+    def _mark_all_notifications_read_impl(self) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : marque toutes les notifications comme lues."""
         return notifications_support.mark_all_read(self)
 
-    def clear_notifications(self) -> Dict[str, Any]:
+    def _clear_notifications_impl(self) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : vide completement le centre de notifications."""
         return notifications_support.clear_all_notifications(self)
 
-    def get_notifications_unread_count(self) -> Dict[str, Any]:
+    def _get_notifications_unread_count_impl(self) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : compteur pour le badge top bar."""
         return {"ok": True, "count": notifications_support.get_unread_count(self)}
 
@@ -2419,7 +2419,7 @@ class CineSortApi:
         )
 
     # ---------- support / logs (V3-13) ----------
-    def get_log_paths(self) -> Dict[str, Any]:
+    def _get_log_paths_impl(self) -> Dict[str, Any]:
         """V3-13 — Retourne les chemins des logs (pour affichage UI + copie)."""
         log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CineSort", "logs")
         return {
@@ -2430,7 +2430,7 @@ class CineSortApi:
             }
         }
 
-    def open_logs_folder(self) -> Dict[str, Any]:
+    def _open_logs_folder_impl(self) -> Dict[str, Any]:
         """V3-13 — Ouvre le dossier des logs dans l'explorateur Windows.
 
         Cf issue #72 (audit-2026-05-12:e3f5) : si la requete vient d'un client

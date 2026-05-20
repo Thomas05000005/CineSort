@@ -49,7 +49,7 @@ async function _processDrop(e) {
     alert("Le glisser-déposer de dossiers requiert le mode natif (desktop). Utilisez le bouton Parcourir dans les Paramètres.");
     return;
   }
-  const result = await apiPost("validate_dropped_path", { path });
+  const result = await apiPost("runtime/validate_dropped_path", { path });
   if (!result?.data?.ok) {
     alert(result?.data?.message || "Chemin invalide.");
     return;

@@ -46,7 +46,7 @@ class OpenLogsFolderLocalOnlyTests(unittest.TestCase):
         api = CineSortApi()
         token = set_remote_request(True)
         try:
-            result = api.open_logs_folder()
+            result = api.runtime.open_logs_folder()
             self.assertFalse(result["ok"])
             self.assertIn("locale", result.get("error", "").lower())
         finally:
@@ -63,7 +63,7 @@ class OpenLogsFolderLocalOnlyTests(unittest.TestCase):
 
         api = CineSortApi()
         # remote=False par defaut
-        result = api.open_logs_folder()
+        result = api.runtime.open_logs_folder()
         # Soit ok=True (le dossier existe et startfile a marche),
         # soit ok=False avec message != "locale uniquement" (dossier manquant)
         if not result["ok"]:

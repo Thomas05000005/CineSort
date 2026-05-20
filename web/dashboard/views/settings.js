@@ -541,7 +541,7 @@ function _readField(field, fieldEl) {
 async function _loadUpdateStatus() {
   const el = document.getElementById("updateStatusContent");
   if (!el) return;
-  const res = await apiPost("get_update_info");
+  const res = await apiPost("runtime/get_update_info");
   if (!res || !res.data) { el.innerHTML = `<p class="v5u-text-muted">${_esc(t("settings.updates.status_unavailable"))}</p>`; return; }
   const info = res.data || {};
   const current = info.current_version || "?";
@@ -569,7 +569,7 @@ function _bindUpdateStatusEvents(container) {
       target.disabled = true;
       const old = target.textContent;
       target.textContent = t("settings.updates.checking");
-      await apiPost("check_for_updates");
+      await apiPost("runtime/check_for_updates");
       await _loadUpdateStatus();
       target.disabled = false;
       target.textContent = old;

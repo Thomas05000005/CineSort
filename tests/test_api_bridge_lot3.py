@@ -1126,7 +1126,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        out = api.get_probe_tools_status()
+        out = api.runtime.get_probe_tools_status()
         self.assertTrue(out.get("ok"), out)
         self.assertIn("tools", out)
         self.assertIn("hybrid_ready", out)
@@ -1174,24 +1174,24 @@ class ValidateDroppedPathTests(unittest.TestCase):
     def test_valid_directory(self):
         d = Path(self.tmp) / "films"
         d.mkdir()
-        r = self.api.validate_dropped_path(str(d))
+        r = self.api.runtime.validate_dropped_path(str(d))
         self.assertTrue(r["ok"])
         self.assertIn("path", r)
 
     def test_nonexistent_path(self):
-        r = self.api.validate_dropped_path(str(Path(self.tmp) / "nope"))
+        r = self.api.runtime.validate_dropped_path(str(Path(self.tmp) / "nope"))
         self.assertFalse(r["ok"])
         self.assertIn("introuvable", r["message"])
 
     def test_file_not_directory(self):
         f = Path(self.tmp) / "file.txt"
         f.write_text("hi")
-        r = self.api.validate_dropped_path(str(f))
+        r = self.api.runtime.validate_dropped_path(str(f))
         self.assertFalse(r["ok"])
         self.assertIn("dossier", r["message"])
 
     def test_empty_path(self):
-        r = self.api.validate_dropped_path("")
+        r = self.api.runtime.validate_dropped_path("")
         self.assertFalse(r["ok"])
 
 

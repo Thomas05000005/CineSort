@@ -190,35 +190,35 @@ class TestValidateDroppedPath(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_empty_path(self) -> None:
-        result = self.api.validate_dropped_path(path="")
+        result = self.api.runtime.validate_dropped_path(path="")
         self.assertFalse(result["ok"])
         self.assertIn("vide", result["message"])
 
     def test_unc_special_qmark(self) -> None:
-        result = self.api.validate_dropped_path(path=r"\\?\C:\test")
+        result = self.api.runtime.validate_dropped_path(path=r"\\?\C:\test")
         self.assertFalse(result["ok"])
         self.assertIn("UNC special", result["message"])
 
     def test_unc_special_dot(self) -> None:
-        result = self.api.validate_dropped_path(path=r"\\.\C:\test")
+        result = self.api.runtime.validate_dropped_path(path=r"\\.\C:\test")
         self.assertFalse(result["ok"])
         self.assertIn("UNC special", result["message"])
 
     def test_nonexistent_path(self) -> None:
-        result = self.api.validate_dropped_path(path=str(Path(self._tmp) / "no_such_dir"))
+        result = self.api.runtime.validate_dropped_path(path=str(Path(self._tmp) / "no_such_dir"))
         self.assertFalse(result["ok"])
         # Soit "introuvable", soit "inaccessible"
         self.assertIn("ok", result)
 
     def test_existing_directory(self) -> None:
-        result = self.api.validate_dropped_path(path=self._tmp)
+        result = self.api.runtime.validate_dropped_path(path=self._tmp)
         self.assertTrue(result["ok"])
         self.assertIn("path", result)
 
     def test_file_not_dir(self) -> None:
         f = Path(self._tmp) / "file.txt"
         f.write_text("x")
-        result = self.api.validate_dropped_path(path=str(f))
+        result = self.api.runtime.validate_dropped_path(path=str(f))
         self.assertFalse(result["ok"])
         self.assertIn("pas un dossier", result["message"])
 

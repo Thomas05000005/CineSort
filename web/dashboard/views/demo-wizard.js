@@ -23,7 +23,7 @@ export async function showDemoWizardIfFirstRun(settings, globalStats) {
   const noRuns = !summary || Number(summary.total_runs || 0) === 0;
   if (!noRoots || !noRuns) return false;
 
-  const res = await apiPost("is_demo_mode_active");
+  const res = await apiPost("runtime/is_demo_mode_active");
   if (res?.data?.active) return false;
 
   if (document.getElementById(OVERLAY_ID)) return false;
@@ -59,7 +59,7 @@ function _renderWizardOverlay() {
     btnStart.disabled = true;
     btnStart.textContent = "Création...";
     try {
-      const res = await apiPost("start_demo_mode");
+      const res = await apiPost("runtime/start_demo_mode");
       const payload = res?.data || {};
       if (payload.ok) {
         overlay.remove();
@@ -113,7 +113,7 @@ export async function renderDemoBanner() {
   const existing = document.getElementById(BANNER_ID);
   let active = false;
   try {
-    const res = await apiPost("is_demo_mode_active");
+    const res = await apiPost("runtime/is_demo_mode_active");
     active = !!(res?.data?.active);
   } catch (err) {
     console.warn("[demo-wizard] is_demo_mode_active", err);
@@ -155,7 +155,7 @@ export async function renderDemoBanner() {
     btnStop.disabled = true;
     btnStop.textContent = "Suppression...";
     try {
-      const res = await apiPost("stop_demo_mode");
+      const res = await apiPost("runtime/stop_demo_mode");
       if (res?.data?.ok) {
         banner.remove();
         document.body.classList.remove("demo-mode-active");

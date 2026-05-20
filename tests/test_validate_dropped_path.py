@@ -31,29 +31,29 @@ class ValidateDroppedPathTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_empty_path_refused(self) -> None:
-        result = self.api.validate_dropped_path("")
+        result = self.api.runtime.validate_dropped_path("")
         self.assertFalse(result["ok"])
         self.assertIn("vide", result["message"].lower())
 
     def test_whitespace_only_refused(self) -> None:
-        result = self.api.validate_dropped_path("   ")
+        result = self.api.runtime.validate_dropped_path("   ")
         self.assertFalse(result["ok"])
 
     def test_missing_path_refused(self) -> None:
         ghost = str(self.tmp / "ghost_folder_xyz")
-        result = self.api.validate_dropped_path(ghost)
+        result = self.api.runtime.validate_dropped_path(ghost)
         self.assertFalse(result["ok"])
         self.assertIn("introuvable", result["message"].lower())
 
     def test_file_refused(self) -> None:
         f = self.tmp / "file.txt"
         f.write_text("hello")
-        result = self.api.validate_dropped_path(str(f))
+        result = self.api.runtime.validate_dropped_path(str(f))
         self.assertFalse(result["ok"])
         self.assertIn("dossier", result["message"].lower())
 
     def test_valid_dir_accepted(self) -> None:
-        result = self.api.validate_dropped_path(str(self.tmp))
+        result = self.api.runtime.validate_dropped_path(str(self.tmp))
         self.assertTrue(result["ok"], result)
         self.assertIn("path", result)
         # Le path retourne doit etre resolu (absolu)
@@ -61,17 +61,17 @@ class ValidateDroppedPathTests(unittest.TestCase):
 
     def test_unc_special_namespace_refused(self) -> None:
         """M-7 : \\\\?\\C:\\Users ou \\\\.\\C:\\Users sont des UNC speciaux."""
-        result = self.api.validate_dropped_path("\\\\?\\C:\\Users\\Test")
+        result = self.api.runtime.validate_dropped_path("\\\\?\\C:\\Users\\Test")
         self.assertFalse(result["ok"])
         self.assertIn("UNC special", result["message"])
 
-        result = self.api.validate_dropped_path("\\\\.\\C:\\Users\\Test")
+        result = self.api.runtime.validate_dropped_path("\\\\.\\C:\\Users\\Test")
         self.assertFalse(result["ok"])
         self.assertIn("UNC special", result["message"])
 
     def test_unc_special_with_forward_slashes_refused(self) -> None:
         """Variante avec / : //?/C:/... est aussi refuse apres normalisation."""
-        result = self.api.validate_dropped_path("//?/C:/Users/Test")
+        result = self.api.runtime.validate_dropped_path("//?/C:/Users/Test")
         self.assertFalse(result["ok"])
         self.assertIn("UNC special", result["message"])
 
@@ -82,7 +82,7 @@ class ValidateDroppedPathTests(unittest.TestCase):
         target.mkdir()
         link = self.tmp / "link"
         os.symlink(str(target), str(link))
-        result = self.api.validate_dropped_path(str(link))
+        result = self.api.runtime.validate_dropped_path(str(link))
         self.assertFalse(result["ok"])
         self.assertIn("symboliques", result["message"].lower())
 
@@ -93,7 +93,7 @@ class ValidateDroppedPathTests(unittest.TestCase):
         ne les rejette pas a tort."""
         # On ne peut pas tester un vrai \\server\share sans reseau, mais
         # on peut verifier qu'on ne tombe PAS sur le message "UNC special"
-        result = self.api.validate_dropped_path("\\\\fakeserver\\share")
+        result = self.api.runtime.validate_dropped_path("\\\\fakeserver\\share")
         self.assertFalse(result["ok"])
         self.assertNotIn("UNC special", result.get("message", ""))
 

@@ -179,13 +179,13 @@ function _bindDrawer(drawer) {
 
     const markAll = e.target.closest("[data-notif-mark-all]");
     if (markAll && !markAll.disabled) {
-      apiPost("mark_all_notifications_read").then(() => refreshNotifications()).catch(() => {});
+      apiPost("runtime/mark_all_notifications_read").then(() => refreshNotifications()).catch(() => {});
       return;
     }
 
     const clearAll = e.target.closest("[data-notif-clear-all]");
     if (clearAll && !clearAll.disabled) {
-      apiPost("clear_notifications").then(() => refreshNotifications()).catch(() => {});
+      apiPost("runtime/clear_notifications").then(() => refreshNotifications()).catch(() => {});
       return;
     }
 
@@ -195,14 +195,14 @@ function _bindDrawer(drawer) {
       const item = dismiss.closest("[data-notif-id]");
       if (!item) return;
       const id = item.dataset.notifId;
-      apiPost("dismiss_notification", { notification_id: id }).then(() => refreshNotifications()).catch(() => {});
+      apiPost("runtime/dismiss_notification", { notification_id: id }).then(() => refreshNotifications()).catch(() => {});
       return;
     }
 
     const itemEl = e.target.closest("[data-notif-id]");
     if (itemEl) {
       const id = itemEl.dataset.notifId;
-      apiPost("mark_notification_read", { notification_id: id }).then(() => refreshNotifications()).catch(() => {});
+      apiPost("runtime/mark_notification_read", { notification_id: id }).then(() => refreshNotifications()).catch(() => {});
     }
   };
   drawer.addEventListener("click", _drawerClickHandler);
@@ -210,7 +210,7 @@ function _bindDrawer(drawer) {
 
 export function refreshNotifications() {
   const drawer = _ensureDrawer();
-  return apiPost("get_notifications", { unread_only: false, limit: 100 })
+  return apiPost("runtime/get_notifications", { unread_only: false, limit: 100 })
     .then((res) => {
       if (!res || !res.ok) return;
       _cache.items = res.notifications || [];
@@ -275,7 +275,7 @@ export function closeNotifications() {
 export function toggleNotifications() { _isOpen ? closeNotifications() : openNotifications(); }
 
 export function getUnreadCount() {
-  return apiPost("get_notifications_unread_count")
+  return apiPost("runtime/get_notifications_unread_count")
     .then((res) => (res && res.ok) ? Number(res.count || 0) : 0)
     .catch(() => 0);
 }
