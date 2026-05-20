@@ -247,6 +247,15 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             return True
         return str(row_val or "").lower() in [str(v).lower() for v in filter_list]
 
+    def _any_in_list(row_vals: Any, filter_list: Any) -> bool:
+        """True si au moins un element de row_vals (liste) est dans filter_list."""
+        if not filter_list:
+            return True
+        if not row_vals:
+            return False
+        wanted = {str(v).lower() for v in filter_list}
+        return any(str(rv or "").lower() in wanted for rv in row_vals)
+
     if not _in_list(row.get("tier_v2"), filters.get("tier_v2")):
         return False
     if not _in_list(row.get("codec"), filters.get("codec")):
@@ -258,6 +267,13 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if not _in_list(row.get("grain_era_v2"), filters.get("grain_era_v2")):
         return False
     if not _in_list(row.get("grain_nature"), filters.get("grain_nature")):
+        return False
+    # Phase 5 spec 07 : source / audio_langs / subtitle_langs (drawer avance)
+    if not _in_list(row.get("proposed_source"), filters.get("source")):
+        return False
+    if not _any_in_list(row.get("audio_languages"), filters.get("audio_languages")):
+        return False
+    if not _any_in_list(row.get("subtitle_languages"), filters.get("subtitle_languages")):
         return False
 
     # Warnings : OR interne (au moins un warning du filtre present dans la row)
@@ -285,6 +301,53 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if d_max and dur and dur > int(d_max):
         return False
 
+    # Phase 5 spec 07 : size range (bytes) — convertit Go en bytes cote frontend
+    size_b = int(row.get("size_bytes") or 0)
+    s_min = filters.get("size_min")
+    s_max = filters.get("size_max")
+    if s_min and size_b and size_b < int(s_min):
+        return False
+    if s_max and size_b and size_b > int(s_max):
+        return False
+
+    # Phase 5 spec 07 : confidence range (0-100)
+    conf = int(row.get("confidence") or 0)
+    c_min = filters.get("confidence_min")
+    c_max = filters.get("confidence_max")
+    if c_min is not None and conf < int(c_min):
+        return False
+    if c_max is not None and conf > int(c_max):
+        return False
+
+    # Phase 5 spec 07 : added date range (added_ts epoch seconds)
+    added = float(row.get("added_ts") or 0.0)
+    a_min = filters.get("added_after")
+    a_max = filters.get("added_before")
+    if a_min is not None and added and added < float(a_min):
+        return False
+    if a_max is not None and added and added > float(a_max):
+        return False
+
+    # Phase 5 spec 07 : chips non-tier (subs_missing_fr / unidentified /
+    # recently_modified / in_duplicates / sagas_incomplete). AND interne.
+    chips = filters.get("chips") or []
+    if chips:
+        chip_set = {str(c).strip().lower() for c in chips if c}
+        if "subs_missing_fr" in chip_set and not _row_subs_missing_fr(row):
+            return False
+        if "unidentified" in chip_set and not _row_unidentified(row):
+            return False
+        if "recently_modified" in chip_set and not _row_recently_modified(
+            row,
+            time.time(),
+            _RECENTLY_MODIFIED_WINDOW_S,
+        ):
+            return False
+        if "sagas_incomplete" in chip_set and not row.get("tmdb_collection_name"):
+            return False
+        # "in_duplicates" est evalue a l'echelle de la collection (cf
+        # _filter_in_duplicates apres _row_matches) - on le laisse passer ici.
+
     return True
 
 
@@ -299,6 +362,9 @@ _SORT_KEY = {
     "duration_asc": lambda r: r.get("duration_s") or 0,
     "added_desc": lambda r: -(r.get("added_ts") or 0),
     "added_asc": lambda r: r.get("added_ts") or 0,
+    # Phase 5 spec 07 : tri par taille fichier
+    "size_desc": lambda r: -(r.get("size_bytes") or 0),
+    "size_asc": lambda r: r.get("size_bytes") or 0,
 }
 
 
@@ -374,6 +440,25 @@ def get_library_filtered(
 
     all_rows = _build_library_rows(api, resolved_rid)
     filtered = [r for r in all_rows if _row_matches(r, filters)]
+
+    # Phase 5 spec 07 : chip "in_duplicates" — necessite une evaluation cross-row.
+    chips = filters.get("chips") or []
+    if chips and "in_duplicates" in {str(c).strip().lower() for c in chips if c}:
+        by_titleyear: Dict[tuple, int] = {}
+        for r in filtered:
+            key = (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0))
+            if key[0]:
+                by_titleyear[key] = by_titleyear.get(key, 0) + 1
+        filtered = [
+            r
+            for r in filtered
+            if by_titleyear.get(
+                (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0)),
+                0,
+            )
+            >= 2
+        ]
+
     total = len(filtered)
 
     # Stats pour la sidebar (counts par tier)

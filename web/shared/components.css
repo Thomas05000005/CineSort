@@ -5235,6 +5235,217 @@ body.v5-notif-lock {
 .bibliotheque-error { text-align: center; padding: var(--sp-6); color: var(--danger, #b91c1c); }
 
 /* ===========================================================
+ * BIBLIOTHEQUE — Phase 5 (spec 07-bibliotheque.md complete)
+ * Additions : chips non-tier, drawer avance, tableau triable,
+ *             scroll infini, inspecteur droit.
+ * =========================================================== */
+.bibliotheque-chips--nontier { padding-top: 0; }
+.bibliotheque-chip--nontier { background: var(--surface-1); }
+.bibliotheque-chip--nontier.is-active { background: var(--surface-2); border-color: var(--info, #2563eb); color: var(--info, #2563eb); }
+.bibliotheque-chip--nontier.is-active .bibliotheque-chip-count { color: var(--info, #2563eb); }
+.bibliotheque-table-sortable th.bibliotheque-table-sortable { cursor: pointer; user-select: none; transition: background 0.12s; }
+.bibliotheque-table-sortable th.bibliotheque-table-sortable:hover { background: var(--surface-1); }
+.bibliotheque-table-sortable th.bibliotheque-table-sortable.is-active { color: var(--accent); }
+.bibliotheque-table-sortable th.bibliotheque-table-sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bibliotheque-infinite-sentinel {
+  text-align: center;
+  padding: var(--sp-5);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-style: italic;
+}
+.bibliotheque-infinite-sentinel[aria-busy="true"] {
+  color: var(--accent);
+}
+.bibliotheque-infinite-end {
+  text-align: center;
+  padding: var(--sp-4);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.bibliotheque-inspector-poster {
+  width: 100%;
+  max-width: 220px;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-3);
+  display: block;
+}
+.bibliotheque-inspector-poster--placeholder {
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 2/3;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  color: var(--text-3);
+}
+.bibliotheque-inspector-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.bibliotheque-inspector-meta dt {
+  color: var(--text-2);
+  font-weight: var(--fw-medium);
+}
+.bibliotheque-inspector-meta dd {
+  margin: 0;
+  color: var(--text-1);
+}
+.bibliotheque-inspector-warnings {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--warning, #d97706);
+}
+.bibliotheque-inspector-empty {
+  color: var(--text-3);
+  font-style: italic;
+  font-size: var(--fs-sm);
+  margin: 0;
+}
+.bibliotheque-inspector-aggregates,
+.bibliotheque-inspector-tierdist,
+.bibliotheque-inspector-actions {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.bibliotheque-inspector-aggregates li,
+.bibliotheque-inspector-tierdist li,
+.bibliotheque-inspector-actions li {
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border-1);
+}
+.bibliotheque-inspector-aggregates li:last-child,
+.bibliotheque-inspector-tierdist li:last-child,
+.bibliotheque-inspector-actions li:last-child { border-bottom: none; }
+
+/* ----- Drawer "Filtres avances" ----- */
+.bibliotheque-drawer-host {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  pointer-events: none;
+}
+.bibliotheque-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.bibliotheque-drawer-host.is-open .bibliotheque-drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bibliotheque-drawer-advanced {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 420px;
+  max-width: 90vw;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border-1);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease-out;
+  pointer-events: auto;
+}
+.bibliotheque-drawer-host.is-open .bibliotheque-drawer-advanced {
+  transform: translateX(0);
+}
+.bibliotheque-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-1);
+}
+.bibliotheque-drawer-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+.bibliotheque-drawer-close {
+  font-size: var(--fs-lg);
+  padding: var(--sp-1) var(--sp-2);
+  min-width: 32px;
+}
+.bibliotheque-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.bibliotheque-drawer-section h3 {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+  margin: 0 0 var(--sp-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bibliotheque-drawer-range {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.bibliotheque-drawer-range-input {
+  width: 100%;
+  max-width: 110px;
+}
+.bibliotheque-drawer-range-sep {
+  color: var(--text-3);
+}
+.bibliotheque-drawer-range-suffix {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.bibliotheque-drawer-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.bibliotheque-drawer-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.bibliotheque-drawer-date-range input[type="date"] {
+  width: 100%;
+  max-width: 160px;
+}
+.bibliotheque-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border-1);
+  background: var(--surface-1);
+}
+/* Slider visuel (input range si on en ajoute plus tard) */
+.bibliotheque-slider {
+  width: 100%;
+  cursor: pointer;
+}
+
+/* ===========================================================
  * DOUBLONS — Phase 3.3 (spec 01-doublons.md)
  * =========================================================== */
 .doublons-view { display: flex; flex-direction: column; gap: var(--sp-5); max-width: 1280px; margin: 0 auto; padding: var(--sp-4) 0; }
