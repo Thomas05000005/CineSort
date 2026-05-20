@@ -305,6 +305,11 @@ const _state = {
   // (ex: #/parametres#integrations-jellyfin ouvre Integrations + scroll jellyfin).
   hashChangeHandler: null,
   pendingScrollSection: null,
+  // Phase 6 (spec 11 §OMDb) : dernier resultat du test OMDb pour piloter
+  // l'affichage des 6 etats UI explicites (non-configure / config-pending /
+  // ok / ko-401 / ko-429 / ko-reseau). Null = aucun test effectue cette session.
+  // Forme : { ok, error_code, message, quota_remaining, quota_limit, ts }
+  omdbLastTest: null,
 };
 
 /**
@@ -492,6 +497,109 @@ function _sectionStatus(section, settings) {
 /* =============================================================
  * 4) RENDERERS — FIELDS
  * ============================================================= */
+
+/**
+ * Calcule l'etat OMDb a partir des settings courants + dernier test.
+ * 6 etats explicites (Spec 11 §OMDb) :
+ *  - "non-configure"  : toggle OFF
+ *  - "config-pending" : toggle ON + cle vide
+ *  - "ok"             : test 200 (sample_title present)
+ *  - "ko-401"         : test 401 / error_code=auth
+ *  - "ko-429"         : test 429 / error_code=quota
+ *  - "ko-reseau"      : timeout / network / inconnu
+ * Sans test effectue (settings + cle presente), on retourne "config-pending"
+ * (l'utilisateur doit cliquer "Tester" pour basculer vers ok/ko-*).
+ */
+function _computeOmdbState(settings, lastTest) {
+  const enabled = !!settings.omdb_enabled;
+  const key = String(settings.omdb_api_key || "").trim();
+  if (!enabled) return "non-configure";
+  if (!key) return "config-pending";
+  if (!lastTest) return "config-pending";
+  if (lastTest.ok) return "ok";
+  switch (lastTest.error_code) {
+    case "auth":    return "ko-401";
+    case "quota":   return "ko-429";
+    case "timeout":
+    case "network": return "ko-reseau";
+    default:        return "ko-reseau";
+  }
+}
+
+/**
+ * Rend le panneau de statut OMDb pour l'un des 6 etats.
+ * @param {string} state - "non-configure" | "config-pending" | "ok" | "ko-401" | "ko-429" | "ko-reseau"
+ * @param {object} data  - { quota_remaining, quota_limit, message } (optionnel)
+ * @returns {string} HTML du panneau
+ */
+function _renderOmdbStatus(state, data) {
+  const d = data || {};
+  const used = (typeof d.quota_remaining === "number" && typeof d.quota_limit === "number")
+    ? Math.max(0, d.quota_limit - d.quota_remaining)
+    : null;
+  const limit = (typeof d.quota_limit === "number") ? d.quota_limit : 1000;
+
+  let cls = "parametres-omdb-status";
+  let title = "";
+  let detail = "";
+
+  switch (state) {
+    case "non-configure":
+      cls += " parametres-omdb-status--off";
+      title = "OMDb desactive.";
+      detail = "Activer pour valider les matches TMDb douteux.";
+      break;
+    case "config-pending":
+      cls += " parametres-omdb-status--pending";
+      title = "Cle OMDb requise.";
+      detail = "Renseignez votre cle OMDb (gratuit 1000/jour sur omdbapi.com).";
+      break;
+    case "ok":
+      cls += " parametres-omdb-status--ok";
+      title = (used !== null)
+        ? `✓ Connecte (quota ${used}/${limit} utilise aujourd'hui)`
+        : "✓ Connecte";
+      detail = "Cross-check IMDb actif sur les matches a faible confiance.";
+      break;
+    case "ko-401":
+      cls += " parametres-omdb-status--ko-auth";
+      title = "❌ Cle invalide (401).";
+      detail = "Verifiez votre cle sur omdbapi.com.";
+      break;
+    case "ko-429":
+      cls += " parametres-omdb-status--ko-quota";
+      title = "⚠ Quota depasse (429).";
+      detail = "Reessayez demain.";
+      break;
+    case "ko-reseau":
+    default:
+      cls += " parametres-omdb-status--ko-net";
+      title = "⚠ Reseau inaccessible.";
+      detail = "Reessayez plus tard.";
+      break;
+  }
+
+  return `<div class="${cls}" data-omdb-status data-omdb-state="${_esc(state)}" role="status" aria-live="polite">
+    <span class="parametres-omdb-status-title">${_esc(title)}</span>
+    <span class="parametres-omdb-status-detail">${_esc(detail)}</span>
+  </div>`;
+}
+
+/**
+ * Swap le panneau de statut OMDb in-place (pas de full re-render).
+ * Appele apres un test reussi/echoue ou un changement de toggle/cle.
+ */
+function _refreshOmdbStatusPanel(container) {
+  const host = container && container.querySelector('[data-section-id="omdb"] [data-omdb-status]');
+  if (!host) return;
+  const state = _computeOmdbState(_state.settings, _state.omdbLastTest);
+  const html = _renderOmdbStatus(state, _state.omdbLastTest);
+  // Remplacer le node entier (preserve la structure parent)
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const next = tmp.firstElementChild;
+  if (next) host.replaceWith(next);
+}
 
 function _renderField(field, value, query) {
   const id = `prm_${_esc(field.key)}`;
@@ -786,12 +894,16 @@ function _renderCategoryPanel(categoryId) {
       .filter((f) => _fieldMatches(_state.searchQuery, f))
       .map((f) => _renderField(f, _state.settings[f.key], _state.searchQuery))
       .join("");
+    // Phase 6 (spec 11 §OMDb) : panneau de statut 6 etats au-dessus des champs OMDb
+    const extraTop = (section.id === "omdb")
+      ? _renderOmdbStatus(_computeOmdbState(_state.settings, _state.omdbLastTest), _state.omdbLastTest)
+      : "";
     return `<section class="parametres-section" data-section-id="${_esc(section.id)}">
       <header class="parametres-section-header">
         <h3 class="parametres-section-title">${_highlightLabel(section.label, _state.searchQuery)}</h3>
         ${badge}
       </header>
-      <div class="parametres-section-body">${fields}</div>
+      <div class="parametres-section-body">${extraTop}${fields}</div>
     </section>`;
   }).join("");
 
@@ -1345,6 +1457,12 @@ function _bindFields(container) {
         const label = container.querySelector(`[data-range-value-for="${key}"]`);
         if (label) label.textContent = String(v);
       }
+      // Phase 6 (spec 11 §OMDb) : si la cle ou le toggle change, on invalide
+      // le dernier resultat et on refresh le panneau de statut.
+      if (key === "omdb_enabled" || key === "omdb_api_key") {
+        _state.omdbLastTest = null;
+        _refreshOmdbStatusPanel(container);
+      }
       _scheduleSave();
     };
     if (field.type === "toggle" || field.type === "select") fieldEl.addEventListener("change", handler);
@@ -1366,6 +1484,7 @@ function _bindFields(container) {
       const method = btn.dataset.testMethod;
       const fieldKey = btn.dataset.testField;
       const field = _findFieldByKey(fieldKey);
+      const isOmdb = (fieldKey === "omdb_api_key");
       const resultEl = container.querySelector(`[data-test-result-for="${fieldKey}"]`);
       if (resultEl) { resultEl.textContent = "Test…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
       btn.disabled = true;
@@ -1379,13 +1498,41 @@ function _bindFields(container) {
           } else params[k] = v;
         }
         const res = await apiPost(method, params);
-        const ok = !!(res?.data?.ok);
-        if (resultEl) {
-          resultEl.textContent = ok ? "✓ Connexion réussie" : `✗ Échec : ${res?.data?.message || res?.data?.error || "inconnu"}`;
+        const payload = res?.data || {};
+        const ok = !!payload.ok;
+        // Phase 6 (spec 11 §OMDb) : pour OMDb on stocke le statut riche
+        // (error_code 401/429/network/timeout + quota_remaining/limit) et
+        // on rafraichit le panneau d'etat plutot que la pastille inline.
+        if (isOmdb) {
+          _state.omdbLastTest = {
+            ok,
+            error_code: payload.error_code || (ok ? null : "network"),
+            message: payload.message || payload.error || "",
+            quota_remaining: payload.quota_remaining ?? null,
+            quota_limit: payload.quota_limit ?? null,
+            quota_reset_at: payload.quota_reset_at ?? null,
+            ts: Date.now(),
+          };
+          _refreshOmdbStatusPanel(container);
+          if (resultEl) { resultEl.textContent = ""; resultEl.className = "parametres-test-result"; }
+        } else if (resultEl) {
+          resultEl.textContent = ok ? "✓ Connexion réussie" : `✗ Échec : ${payload.message || payload.error || "inconnu"}`;
           resultEl.className = `parametres-test-result parametres-test-result--${ok ? "ok" : "error"}`;
         }
       } catch (err) {
-        if (resultEl) {
+        if (isOmdb) {
+          _state.omdbLastTest = {
+            ok: false,
+            error_code: "network",
+            message: String(err?.message || err || "Erreur reseau"),
+            quota_remaining: null,
+            quota_limit: null,
+            quota_reset_at: null,
+            ts: Date.now(),
+          };
+          _refreshOmdbStatusPanel(container);
+          if (resultEl) { resultEl.textContent = ""; resultEl.className = "parametres-test-result"; }
+        } else if (resultEl) {
           resultEl.textContent = `✗ Erreur réseau : ${err?.message || err}`;
           resultEl.className = "parametres-test-result parametres-test-result--error";
         }

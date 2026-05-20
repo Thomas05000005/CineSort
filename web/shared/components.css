@@ -4388,10 +4388,9 @@ body.v5-notif-lock {
 }
 
 .accueil-suggestion-row {
-  display: grid;
-  grid-template-columns: 28px 1fr 36px;
-  align-items: center;
-  gap: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--radius-md);
   background: var(--surface-2);
@@ -4401,6 +4400,14 @@ body.v5-notif-lock {
 .accueil-suggestion-row.is-danger { border-left-color: var(--sev-danger-solid, #EF4444); }
 .accueil-suggestion-row.is-warning { border-left-color: var(--sev-warning-solid, #F59E0B); }
 .accueil-suggestion-row.is-info { border-left-color: var(--sev-info-solid, #3B82F6); }
+
+/* Ligne d'en-tete (dot + texte + flèche d'action) */
+.accueil-suggestion-head {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: var(--sp-3);
+}
 
 .accueil-suggestion-dot {
   font-size: var(--fs-base);
@@ -4426,6 +4433,72 @@ body.v5-notif-lock {
   width: 36px;
   height: 32px;
   padding: 0;
+}
+
+/* Spec 05 §4 (completion) : samples concrets cliquables sous chaque suggestion. */
+.accueil-suggestion-samples {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0 calc(28px + var(--sp-3));
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.accueil-suggestion-sample {
+  display: inline-flex;
+}
+
+.accueil-suggestion-sample--loading {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.accueil-suggestion-sample-btn {
+  background: var(--surface-3, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.accueil-suggestion-sample-btn:hover,
+.accueil-suggestion-sample-btn:focus {
+  background: var(--surface-4, rgba(255, 255, 255, 0.08));
+  color: var(--text-1);
+  outline: 1px solid var(--accent-1, currentColor);
+}
+
+/* Spec 05 (completion) : banner discret "Mode démo actif" en haut. */
+.accueil-demo-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  margin: 0 0 var(--sp-2) 0;
+  background: var(--sev-info-bg, rgba(59, 130, 246, 0.12));
+  border: 1px solid var(--sev-info-solid, #3B82F6);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.accueil-demo-banner-icon {
+  font-size: var(--fs-base);
+}
+
+.accueil-demo-banner-text {
+  flex: 1;
+}
+
+.accueil-demo-banner-stop {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
 }
 
 /* Environment bar — Phase 3.1-C (spec 05 §2.1) ------------------------- */
@@ -5218,7 +5291,28 @@ body.v5-notif-lock {
 
 .parametres-test-result--ok { color: var(--sev-success-solid, #10B981); }
 .parametres-test-result--error { color: var(--sev-danger-solid, #EF4444); }
+.parametres-test-result--warn { color: var(--sev-warning-solid, #F59E0B); }
 .parametres-test-result--info { color: var(--text-2); }
+
+/* OMDb status panel — 6 etats explicites (Spec 11 §OMDb) */
+.parametres-omdb-status {
+  display: block;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--text-3);
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.parametres-omdb-status--off       { border-left-color: var(--text-3); color: var(--text-2); }
+.parametres-omdb-status--pending   { border-left-color: var(--sev-info-solid, #3B82F6); color: var(--text-1); }
+.parametres-omdb-status--ok        { border-left-color: var(--sev-success-solid, #10B981); color: var(--sev-success-solid, #10B981); }
+.parametres-omdb-status--ko-auth   { border-left-color: var(--sev-danger-solid, #EF4444); color: var(--sev-danger-solid, #EF4444); }
+.parametres-omdb-status--ko-quota  { border-left-color: var(--sev-warning-solid, #F59E0B); color: var(--sev-warning-solid, #F59E0B); }
+.parametres-omdb-status--ko-net    { border-left-color: var(--sev-warning-solid, #F59E0B); color: var(--sev-warning-solid, #F59E0B); }
+.parametres-omdb-status-title { font-weight: 600; display: block; margin-bottom: 2px; }
+.parametres-omdb-status-detail { display: block; color: var(--text-2); font-size: var(--fs-xs); }
 
 /* QR Dashboard --------------------------------------------------------- */
 .parametres-field--qr {
