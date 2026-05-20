@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from cinesort.ui.api import library_actions_support, library_podiums_support, library_support, library_timeline_support
 from cinesort.ui.api import library_audit_support, library_podiums_support, library_timeline_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
@@ -168,6 +169,48 @@ class LibraryFacade(_BaseFacade):
         """
         return library_timeline_support.get_library_timeline(self._api, months=months, run_id=run_id)
 
+    # ---------- Phase 4 spec 07 Bibliotheque : counters + bulk actions + export ----------
+
+    def get_library_counters_by_chip(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : compteurs par chip (tier x6, problemes x3, structurels x2).
+
+        Cf cinesort.ui.api.library_support.get_library_counters_by_chip.
+        """
+        return library_support.get_library_counters_by_chip(self._api, filters=filters, run_id=run_id)
+
+    def mark_for_deletion(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """Phase 4 spec 06 : marque un film pour deplacement vers `_user_marked_for_deletion/`.
+
+        Cf cinesort.ui.api.library_actions_support.mark_for_deletion.
+        """
+        return library_actions_support.mark_for_deletion(self._api, row_id, run_id=run_id)
+
+    def mark_for_deletion_bulk(
+        self,
+        row_ids: list,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : version bulk de mark_for_deletion.
+
+        Cf cinesort.ui.api.library_actions_support.mark_for_deletion_bulk.
+        """
+        return library_actions_support.mark_for_deletion_bulk(self._api, row_ids, run_id=run_id)
+
+    def export_films(
+        self,
+        row_ids: list,
+        format: str = "csv",  # noqa: A002 — nom impose par la spec d'endpoint
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Phase 4 spec 07 : export CSV/JSON des films selectionnes.
+
+        Cf cinesort.ui.api.library_actions_support.export_films.
+        """
+        return library_actions_support.export_films(self._api, row_ids, fmt=format, run_id=run_id)
     # ---------- Vue Qualite — Audit (spec 10) ----------
 
     def get_films_by_decade(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

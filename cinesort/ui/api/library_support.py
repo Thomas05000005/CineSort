@@ -170,6 +170,22 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         height = int(probe_video.get("height") or 0)
         duration_s = float(metrics.get("duration_s") or 0)
 
+        # Phase 4 spec 07 : exposer audio_langs / subs_langs / subs_missing pour
+        # compteurs chips + export. audio_languages est dans metrics.audio.
+        audio_metrics = metrics.get("audio") if isinstance(metrics, dict) else None
+        audio_langs: List[str] = []
+        if isinstance(audio_metrics, list):
+            for stream in audio_metrics:
+                if isinstance(stream, dict):
+                    lang = str(stream.get("language") or "").strip().lower()
+                    if lang and lang not in audio_langs:
+                        audio_langs.append(lang)
+
+        subtitle_languages = [str(s).lower() for s in (r.get("subtitle_languages") or [])]
+        subtitle_missing_langs = [str(s).lower() for s in (r.get("subtitle_missing_langs") or [])]
+        proposed_source = str(r.get("proposed_source") or "").strip().lower()
+        confidence = int(r.get("confidence") or 0)
+
         row = {
             "row_id": row_id,
             "title": r.get("proposed_title") or r.get("nfo_title") or "",
@@ -192,6 +208,13 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),
             "edition": r.get("edition"),
+            # Phase 4 spec 07 : champs additionnels pour counters chips + export
+            "audio_languages": audio_langs,
+            "subtitle_languages": subtitle_languages,
+            "subtitle_missing_langs": subtitle_missing_langs,
+            "proposed_source": proposed_source,
+            "confidence": confidence,
+            "size_bytes": int(r.get("size_bytes") or metrics.get("size_bytes") or 0),
         }
 
         # Si grain dans metrics
@@ -224,6 +247,15 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             return True
         return str(row_val or "").lower() in [str(v).lower() for v in filter_list]
 
+    def _any_in_list(row_vals: Any, filter_list: Any) -> bool:
+        """True si au moins un element de row_vals (liste) est dans filter_list."""
+        if not filter_list:
+            return True
+        if not row_vals:
+            return False
+        wanted = {str(v).lower() for v in filter_list}
+        return any(str(rv or "").lower() in wanted for rv in row_vals)
+
     if not _in_list(row.get("tier_v2"), filters.get("tier_v2")):
         return False
     if not _in_list(row.get("codec"), filters.get("codec")):
@@ -235,6 +267,13 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if not _in_list(row.get("grain_era_v2"), filters.get("grain_era_v2")):
         return False
     if not _in_list(row.get("grain_nature"), filters.get("grain_nature")):
+        return False
+    # Phase 5 spec 07 : source / audio_langs / subtitle_langs (drawer avance)
+    if not _in_list(row.get("proposed_source"), filters.get("source")):
+        return False
+    if not _any_in_list(row.get("audio_languages"), filters.get("audio_languages")):
+        return False
+    if not _any_in_list(row.get("subtitle_languages"), filters.get("subtitle_languages")):
         return False
 
     # Warnings : OR interne (au moins un warning du filtre present dans la row)
@@ -262,6 +301,53 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if d_max and dur and dur > int(d_max):
         return False
 
+    # Phase 5 spec 07 : size range (bytes) — convertit Go en bytes cote frontend
+    size_b = int(row.get("size_bytes") or 0)
+    s_min = filters.get("size_min")
+    s_max = filters.get("size_max")
+    if s_min and size_b and size_b < int(s_min):
+        return False
+    if s_max and size_b and size_b > int(s_max):
+        return False
+
+    # Phase 5 spec 07 : confidence range (0-100)
+    conf = int(row.get("confidence") or 0)
+    c_min = filters.get("confidence_min")
+    c_max = filters.get("confidence_max")
+    if c_min is not None and conf < int(c_min):
+        return False
+    if c_max is not None and conf > int(c_max):
+        return False
+
+    # Phase 5 spec 07 : added date range (added_ts epoch seconds)
+    added = float(row.get("added_ts") or 0.0)
+    a_min = filters.get("added_after")
+    a_max = filters.get("added_before")
+    if a_min is not None and added and added < float(a_min):
+        return False
+    if a_max is not None and added and added > float(a_max):
+        return False
+
+    # Phase 5 spec 07 : chips non-tier (subs_missing_fr / unidentified /
+    # recently_modified / in_duplicates / sagas_incomplete). AND interne.
+    chips = filters.get("chips") or []
+    if chips:
+        chip_set = {str(c).strip().lower() for c in chips if c}
+        if "subs_missing_fr" in chip_set and not _row_subs_missing_fr(row):
+            return False
+        if "unidentified" in chip_set and not _row_unidentified(row):
+            return False
+        if "recently_modified" in chip_set and not _row_recently_modified(
+            row,
+            time.time(),
+            _RECENTLY_MODIFIED_WINDOW_S,
+        ):
+            return False
+        if "sagas_incomplete" in chip_set and not row.get("tmdb_collection_name"):
+            return False
+        # "in_duplicates" est evalue a l'echelle de la collection (cf
+        # _filter_in_duplicates apres _row_matches) - on le laisse passer ici.
+
     return True
 
 
@@ -276,6 +362,9 @@ _SORT_KEY = {
     "duration_asc": lambda r: r.get("duration_s") or 0,
     "added_desc": lambda r: -(r.get("added_ts") or 0),
     "added_asc": lambda r: r.get("added_ts") or 0,
+    # Phase 5 spec 07 : tri par taille fichier
+    "size_desc": lambda r: -(r.get("size_bytes") or 0),
+    "size_asc": lambda r: r.get("size_bytes") or 0,
 }
 
 
@@ -351,6 +440,25 @@ def get_library_filtered(
 
     all_rows = _build_library_rows(api, resolved_rid)
     filtered = [r for r in all_rows if _row_matches(r, filters)]
+
+    # Phase 5 spec 07 : chip "in_duplicates" — necessite une evaluation cross-row.
+    chips = filters.get("chips") or []
+    if chips and "in_duplicates" in {str(c).strip().lower() for c in chips if c}:
+        by_titleyear: Dict[tuple, int] = {}
+        for r in filtered:
+            key = (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0))
+            if key[0]:
+                by_titleyear[key] = by_titleyear.get(key, 0) + 1
+        filtered = [
+            r
+            for r in filtered
+            if by_titleyear.get(
+                (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0)),
+                0,
+            )
+            >= 2
+        ]
+
     total = len(filtered)
 
     # Stats pour la sidebar (counts par tier)
@@ -586,6 +694,152 @@ def get_scoring_rollup(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 spec 07 — Compteurs par chip pour la vue Bibliotheque
+# ---------------------------------------------------------------------------
+
+
+_RECENTLY_MODIFIED_WINDOW_S = 7 * 24 * 3600  # 7 jours
+
+
+def _row_subs_missing_fr(row: Dict[str, Any]) -> bool:
+    """True si la row n'a pas de sous-titres FR (langue manquante ou liste subs vide)."""
+    subs = set(row.get("subtitle_languages") or [])
+    missing = set(row.get("subtitle_missing_langs") or [])
+    # Soit "fr" est explicitement marque comme manquant, soit absent de la liste presente
+    if any(lang.startswith("fr") for lang in missing):
+        return True
+    if not any(lang.startswith("fr") for lang in subs):
+        return True
+    return False
+
+
+def _row_unidentified(row: Dict[str, Any]) -> bool:
+    """True si la row n'a pas ete identifiee par TMDb (cf domain/librarian.py)."""
+    src = str(row.get("proposed_source") or "").strip().lower()
+    conf = int(row.get("confidence") or 0)
+    return src in ("unknown", "") or conf == 0
+
+
+def _row_recently_modified(row: Dict[str, Any], now_ts: float, window_s: float) -> bool:
+    ts = float(row.get("added_ts") or 0.0)
+    if ts <= 0:
+        return False
+    return (now_ts - ts) <= window_s
+
+
+def _count_duplicates_and_sagas(rows: List[Dict[str, Any]]) -> tuple[int, int]:
+    """Compte les films "in_duplicates" (meme titre+annee >= 2) et "sagas_incomplete".
+
+    Heuristique pour in_duplicates : groupes de >= 2 rows avec meme (title, year).
+    Heuristique pour sagas_incomplete : films appartenant a une collection TMDb.
+    """
+    by_titleyear: Dict[tuple, int] = {}
+    sagas_count = 0
+    for r in rows:
+        key = (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0))
+        if key[0]:
+            by_titleyear[key] = by_titleyear.get(key, 0) + 1
+        if r.get("tmdb_collection_name"):
+            sagas_count += 1
+
+    in_duplicates = sum(c for c in by_titleyear.values() if c >= 2)
+    return in_duplicates, sagas_count
+
+
+def get_library_counters_by_chip(
+    api: Any,
+    filters: Optional[Dict[str, Any]] = None,
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Phase 4 spec 07 — Retourne les counts par chip pour la vue Bibliotheque.
+
+    Les chips couvrent :
+    - Tier qualite (6) : platinum, gold, silver, bronze, reject, unknown
+    - Filtres problematiques (3) : subs_missing_fr, unidentified, recently_modified
+    - Filtres structurels (2) : in_duplicates, sagas_incomplete
+
+    Le filter `filters` est applique avant comptage (utile pour scope counters
+    sur une sous-selection, ex: search="dune" -> counts dans le sous-ensemble).
+
+    Returns:
+      {
+        ok: bool,
+        run_id: str,
+        total: int,
+        counts: {
+          platinum: int, gold: int, silver: int, bronze: int, reject: int, unknown: int,
+          subs_missing_fr: int, unidentified: int, recently_modified: int,
+          in_duplicates: int, sagas_incomplete: int,
+        }
+      }
+    """
+    filters = filters or {}
+    resolved_rid = _resolve_run_id(api, run_id)
+    if not resolved_rid:
+        return {
+            "ok": True,
+            "run_id": None,
+            "total": 0,
+            "counts": {
+                "platinum": 0,
+                "gold": 0,
+                "silver": 0,
+                "bronze": 0,
+                "reject": 0,
+                "unknown": 0,
+                "subs_missing_fr": 0,
+                "unidentified": 0,
+                "recently_modified": 0,
+                "in_duplicates": 0,
+                "sagas_incomplete": 0,
+            },
+        }
+
+    all_rows = _build_library_rows(api, resolved_rid)
+    # Appliquer filters EN AMONT pour scoper les counters (utile si search actif).
+    scoped_rows = [r for r in all_rows if _row_matches(r, filters)]
+
+    counts: Dict[str, int] = {
+        "platinum": 0,
+        "gold": 0,
+        "silver": 0,
+        "bronze": 0,
+        "reject": 0,
+        "unknown": 0,
+        "subs_missing_fr": 0,
+        "unidentified": 0,
+        "recently_modified": 0,
+        "in_duplicates": 0,
+        "sagas_incomplete": 0,
+    }
+
+    now_ts = time.time()
+    for row in scoped_rows:
+        tier = str(row.get("tier_v2") or "unknown").lower()
+        if tier in counts:
+            counts[tier] += 1
+        else:
+            counts["unknown"] += 1
+
+        if _row_subs_missing_fr(row):
+            counts["subs_missing_fr"] += 1
+        if _row_unidentified(row):
+            counts["unidentified"] += 1
+        if _row_recently_modified(row, now_ts, _RECENTLY_MODIFIED_WINDOW_S):
+            counts["recently_modified"] += 1
+
+    in_dup, sagas = _count_duplicates_and_sagas(scoped_rows)
+    counts["in_duplicates"] = in_dup
+    counts["sagas_incomplete"] = sagas
+
+    return {
+        "ok": True,
+        "run_id": resolved_rid,
+        "total": len(scoped_rows),
+        "counts": counts,
+    }
+
+
 # Spec 06 Modal Film — 3 endpoints d'actions sur un film
 # ---------------------------------------------------------------------------
 
