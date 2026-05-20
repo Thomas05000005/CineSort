@@ -173,14 +173,21 @@ class AppJsWiringTests(unittest.TestCase):
         # la vue legacy est supprimee. Elle redirige vers /parametres.
         self.assertNotIn("initSettings", self.js)
         self.assertNotIn("unmountSettings", self.js)
-        # Verifie la redirection vers /parametres avec preservation du fragment.
+        # Verifie la redirection vers /parametres. La redirection peut soit
+        # apparaitre sous forme litterale "#/parametres" (ancien code), soit
+        # passer par le helper _legacyRedirect("settings", "/parametres")
+        # (refonte 2026-05 : pattern homogene pour les 10 alias legacy).
         line_start = self.js.find('registerRoute("/settings"')
         self.assertNotEqual(line_start, -1)
         # Le bloc d'init peut tenir sur plusieurs lignes (flecha fn multilignes).
         # On cherche la fermeture du registerRoute en repérant '});'.
         block_end = self.js.find("});", line_start)
         snippet = self.js[line_start:block_end]
-        self.assertIn("#/parametres", snippet)
+        # Accepte les deux patterns equivalents :
+        self.assertTrue(
+            "#/parametres" in snippet or '_legacyRedirect("settings", "/parametres")' in snippet,
+            f"redirection /settings -> /parametres non detectee : {snippet}",
+        )
 
 
 class CssTests(unittest.TestCase):

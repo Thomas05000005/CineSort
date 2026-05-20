@@ -158,9 +158,22 @@ class AppJsWiringTests(unittest.TestCase):
         self.assertIn("initAide", snippet)
 
     def test_legacy_help_route_kept_for_compat(self) -> None:
-        # /help (FAQ v4) doit rester pour retrocompat.
+        # /help doit rester registre pour la retrocompat des bookmarks, mais
+        # redirige desormais vers /aide (la vue legacy help.js a ete remplacee
+        # par aide.js, refonte 2026-05).
         self.assertIn('registerRoute("/help"', self.js)
-        self.assertIn("initHelpV4", self.js)
+        # La route /help ne doit plus utiliser initHelpV4 (vue legacy retiree
+        # apres refonte) : elle redirige vers /aide via _legacyRedirect.
+        self.assertNotIn("initHelpV4", self.js)
+        # Verifie la redirection vers /aide (helper _legacyRedirect ou litteral).
+        line_start = self.js.find('registerRoute("/help"')
+        self.assertNotEqual(line_start, -1)
+        block_end = self.js.find("});", line_start)
+        snippet = self.js[line_start:block_end]
+        self.assertTrue(
+            "#/aide" in snippet or '_legacyRedirect("help", "/aide")' in snippet,
+            f"redirection /help -> /aide non detectee : {snippet}",
+        )
 
 
 class CssTests(unittest.TestCase):

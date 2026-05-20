@@ -72,23 +72,44 @@ _FACADE_SEPARATOR = "/"
 
 
 # P0 #233 : kill switch pour Pass 1 (methodes directes "/api/<method>" sans
-# facade). Quand activee (env var CINESORT_REST_LEGACY_PASS1_DISABLED=1), Pass 1
-# n'enregistre plus les methodes directes dans le dispatcher, et toute requete
-# POST /api/<method> non prefixee par une facade reconnue renvoie 410 Gone avec
-# le message "Use /api/<facade>/<method> instead".
+# facade). Quand desactivee, Pass 1 n'enregistre plus les methodes directes
+# dans le dispatcher, et toute requete POST /api/<method> non prefixee par
+# une facade reconnue renvoie 410 Gone avec le message
+# "Use /api/<facade>/<method> instead".
 #
-# Defaut : Pass 1 reste active. Le dashboard utilise encore massivement le
-# format legacy ("get_dashboard", "apply", "get_global_stats", ...), une
-# migration cote JS est requise avant de supprimer Pass 1 pour de bon. Le kill
-# switch permet de tester la voie de transition et de detecter les appels
-# residuels en production sans casser les clients existants par defaut.
+# Defaut (FINAL phase migration 2026-05) : Pass 1 est DESACTIVEE par defaut.
+# Le dashboard a ete migre sur "/api/<facade>/<method>" (run, settings, quality,
+# integrations, library, runtime), donc le format legacy n'est plus necessaire
+# en production. Le kill switch protege ainsi contre les regressions d'appel
+# direct (audit + 410 Gone explicite).
+#
+# Pour RE-ACTIVER Pass 1 (cas E2E pywebview natif ou debug), positionner
+# CINESORT_REST_LEGACY_PASS1_ENABLED=1 dans l'environnement avant lancement.
+# L'ancienne variable CINESORT_REST_LEGACY_PASS1_DISABLED=1 reste lue pour
+# forcer explicitement la desactivation (compat retro avec scripts existants).
 def _legacy_pass1_disabled() -> bool:
     """Vrai si Pass 1 (legacy direct methods) doit etre desactivee.
 
-    Lue via env var CINESORT_REST_LEGACY_PASS1_DISABLED (1/true/yes/on).
+    Defaut : True (Pass 1 desactivee par defaut a partir de la refonte 2026-05).
+
+    Variables d'environnement :
+    - CINESORT_REST_LEGACY_PASS1_ENABLED=1 : RE-active Pass 1 (debug, E2E natif).
+    - CINESORT_REST_LEGACY_PASS1_DISABLED=1 : force la desactivation (compat retro).
+
+    Si les deux sont positionnees, ENABLED gagne (re-activation explicite).
     """
-    val = os.environ.get("CINESORT_REST_LEGACY_PASS1_DISABLED", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    enabled_val = os.environ.get("CINESORT_REST_LEGACY_PASS1_ENABLED", "").strip().lower()
+    if enabled_val in ("1", "true", "yes", "on"):
+        return False  # explicitement re-active
+
+    # Compat retro : si l'ancienne var est positionnee explicitement (n'importe
+    # quelle valeur reconnue), on respecte sa semantique d'origine.
+    disabled_val = os.environ.get("CINESORT_REST_LEGACY_PASS1_DISABLED", "").strip().lower()
+    if disabled_val in ("1", "true", "yes", "on"):
+        return True
+
+    # Defaut final : Pass 1 desactivee.
+    return True
 
 
 # Maximum request body size (16 MB).
@@ -182,8 +203,9 @@ def _get_api_methods(api: Any) -> Dict[str, Any]:
     methods: Dict[str, Any] = {}
 
     # Pass 1 : methodes directes sur l'API (comportement legacy).
-    # P0 #233 : kill switch CINESORT_REST_LEGACY_PASS1_DISABLED=1 => Pass 1
-    # n'enregistre rien. Le dispatcher renverra alors 410 Gone (cf RestRequestHandler).
+    # P0 #233 (finalise 2026-05) : kill switch DESACTIVE PAR DEFAUT => Pass 1
+    # n'enregistre rien sauf si CINESORT_REST_LEGACY_PASS1_ENABLED=1.
+    # Le dispatcher renverra 410 Gone pour les appels legacy (cf RestRequestHandler).
     if not _legacy_pass1_disabled():
         for name in dir(api):
             if name.startswith("_"):
@@ -753,9 +775,10 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         method_name = path[5:]  # strip "/api/"
         method = self.api_methods.get(method_name)
         if not method:
-            # P0 #233 : si Pass 1 desactivee + appel legacy direct (pas de "/"
-            # dans method_name = pas de prefixe facade), renvoyer 410 Gone avec
-            # un message guidant vers le nouveau format.
+            # P0 #233 (finalise 2026-05 : Pass 1 desactivee par defaut) :
+            # appel legacy direct (pas de "/" dans method_name = pas de prefixe
+            # facade) renvoie 410 Gone avec message guidant vers le nouveau
+            # format /api/<facade>/<method>.
             if (
                 _legacy_pass1_disabled()
                 and method_name

@@ -274,7 +274,7 @@ export function mountHelpFab(opts = {}) {
     if (typeof opts.onClick === "function") {
       opts.onClick();
     } else {
-      window.location.hash = "#/help";
+      window.location.hash = "#/aide";
     }
   });
   document.body.appendChild(btn);

@@ -143,9 +143,15 @@ class RestSecurityHttpTests(unittest.TestCase):
 
     # 32
     def test_404_no_path_reflection(self) -> None:
-        """M9 : la reponse 404 ne contient pas le path brut."""
+        """M9 : la reponse 404/410 ne contient pas le path brut.
+
+        Post-2026-05 : avec le kill switch Pass 1 actif par defaut, un appel
+        direct legacy (sans prefixe facade) renvoie 410 Gone au lieu de 404.
+        On accepte les deux statuts ; l'invariant clef reste : pas de
+        reflexion du path dans le message d'erreur.
+        """
         status, data, _ = self._request("POST", "/api/nonexistent_xyz_foo", body={}, token=self.token)
-        self.assertEqual(status, 404)
+        self.assertIn(status, (404, 410))
         msg = str(data.get("message", ""))
         self.assertNotIn("nonexistent_xyz_foo", msg)
         self.assertNotIn("xyz", msg.lower())
@@ -164,11 +170,17 @@ class RestSecurityHttpTests(unittest.TestCase):
 
     # 34
     def test_path_traversal_post_harmless(self) -> None:
-        """Path traversal dans le body : pas de crash et pas de reflexion."""
+        """Path traversal dans le body : pas de crash et pas de reflexion.
+
+        Post-2026-05 : Pass 1 desactivee par defaut => /api/get_dashboard
+        (appel legacy direct) renvoie 410. On utilise le nouveau format facade
+        /api/run/get_dashboard pour conserver le test d'attaque utile, et on
+        accepte aussi 410 par precaution.
+        """
         status, data, _ = self._request(
-            "POST", "/api/get_dashboard", body={"run_id": "../../etc/passwd"}, token=self.token
+            "POST", "/api/run/get_dashboard", body={"run_id": "../../etc/passwd"}, token=self.token
         )
-        self.assertIn(status, (200, 400, 404, 500))
+        self.assertIn(status, (200, 400, 404, 410, 500))
         if status == 500:
             msg = str(data.get("message", ""))
             self.assertNotIn("etc/passwd", msg)

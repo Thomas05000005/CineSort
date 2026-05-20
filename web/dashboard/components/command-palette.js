@@ -34,14 +34,16 @@ function _noteMru(id) {
 function _buildCommands() {
   const cmds = [];
   const views = [
-    ["/status", "Accueil", "Dashboard principal + KPIs"],
-    ["/library", "Bibliothèque", "Workflow 5 étapes"],
-    ["/quality", "Qualité", "Scoring + distribution"],
-    ["/jellyfin", "Jellyfin", "Intégration Jellyfin"],
-    ["/plex", "Plex", "Intégration Plex"],
-    ["/radarr", "Radarr", "Candidats upgrade"],
-    ["/logs", "Journaux", "Logs live + historique"],
-    ["/settings", "Paramètres", "Configuration"],
+    ["/accueil", "Accueil", "Dashboard principal + KPIs"],
+    ["/bibliotheque", "Bibliothèque", "Collection films + scroll infini"],
+    ["/qualite", "Qualité", "Scoring + distribution"],
+    ["/historique", "Historique", "Runs passés + journal"],
+    ["/parametres#integrations-jellyfin", "Jellyfin", "Intégration Jellyfin"],
+    ["/parametres#integrations-plex", "Plex", "Intégration Plex"],
+    ["/parametres#integrations-radarr", "Radarr", "Candidats upgrade"],
+    ["/aide#diagnostic", "Diagnostic", "Logs + diagnostic intégrés à l'aide"],
+    ["/parametres", "Paramètres", "Configuration"],
+    ["/aide", "Aide", "Documentation + raccourcis"],
   ];
   for (const [route, title, hint] of views) {
     cmds.push({

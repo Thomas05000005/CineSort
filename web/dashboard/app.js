@@ -104,29 +104,22 @@ import * as notifCenter from "./components/notification-center.js";
 // Phase 2 (spec 04 Shell 3 zones) : inspecteur droit persistant.
 import * as rightPanel from "./components/right-panel.js";
 
-// === Vues v4 RESTAUREES (post-fix : la v5 perdait trop de fonctionnalites) ===
+// === Vues v5 actives (refonte 2026-05 : alias legacy migres en redirections) ===
 import { initLogin } from "./views/login.js";
-import { initStatus } from "./views/status.js";          // /home + /status (dashboard complet, legacy)
 // Phase 3.1 (spec 05-accueil.md) : nouvelle vue Accueil refondue. Active sur
-// /accueil ; les anciennes routes /home /status gardent status.js (rétrocompat).
+// /accueil ; les anciennes routes /home /status /qij redirigent vers /accueil.
 import { initAccueil } from "./views/accueil.js";        // /accueil (nouvelle UI)
-import { initLibraryWorkflow, unmountLibrary } from "./views/library/library.js";  // /library
-import { initQuality } from "./views/quality.js";        // /quality
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
-// Traitement "agir : scan/review/apply"). Avant : /processing aliasait
-// /library, donc deux onglets sidebar montraient la meme chose.
-import { initProcessing } from "./views/processing.js"; // /processing
-// V7-fusion Phase 3 : vue QIJ consolidee remplace 5 vues separees
-// (quality + logs + jellyfin + plex + radarr). Routes legacy gardees en alias.
-// V2-C R4-MEM-4 : import des unmount* exposes pour cleanup au navigate.
-import { initQij, unmountQij } from "./views/qij.js"; // /qij + alias /quality /logs /jellyfin /plex /radarr
+// Traitement "agir : scan/review/apply"). /processing reste fonctionnelle :
+// elle est utilisee en INTERNE par traitement.js et qij.js comme etape stepper.
+import { initProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
 // Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
-// 10 categories. Active sur /parametres ; /settings reste en alias retrocompat
-// (redirige vers /parametres en preservant le fragment de section).
+// 10 categories. Active sur /parametres ; /settings redirige vers /parametres
+// (preservation du fragment de section).
 import { initParametres, unmountParametres } from "./views/parametres.js"; // /parametres (nouvelle UI)
-import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4, legacy)
 // Phase 3.5 (spec 12-aide.md) : nouvelle vue Aide refondue (5 sections + recherche).
-// Active sur /aide ; /help garde la FAQ v4 pour retrocompat.
+// Active sur /aide ; /help et /logs redirigent vers /aide (le diagnostic +
+// journal sont integres dans la vue Aide).
 import { initAide, unmountAide } from "./views/aide.js"; // /aide (nouvelle UI)
 // Phase 3.3 (spec 01-doublons.md) : vue Doublons refondue. Active sur /doublons.
 import { initDoublons, unmountDoublons } from "./views/doublons.js"; // /doublons (nouvelle UI)
@@ -167,56 +160,63 @@ import { cleanupExpiredDrafts } from "./core/drafts-cleanup.js";
 /* === Routes v5 ESM ======================================== */
 
 registerRoute("/login", { view: "view-login", init: initLogin });
-// Toutes les routes principales pointent vers les vues v4 RESTAUREES (post-fix V5).
-// La v5 reste disponible (web/views/*) mais n'est plus active : elle perdait trop
-// de fonctionnalites par rapport aux vues v4 originales (cf incident dashboard).
-// Phase 3.1-fix : /home pointe desormais vers la NOUVELLE vue Accueil (initAccueil)
-// et plus l'ancienne vue de synthese (initStatus). Les bookmarks utilisateur
-// pointant vers /home obtiennent ainsi la nouvelle UI directement. initStatus
-// reste utilisable via /status pour retrocompat dev/debug.
-registerRoute("/home", { view: "view-status", guard: requireAuth, init: initAccueil });
-registerRoute("/library", { view: "view-library", guard: requireAuth, init: (el, opts) => { initLibraryWorkflow(el, opts); return unmountLibrary; } });
-// V7-fix : /processing utilise la vraie vue v5 (stepper scan -> review -> apply)
-// au lieu d'aliaser /library. Mount dedie #view-processing (vide dans index.html,
-// initProcessing fait container.innerHTML lui-meme).
-registerRoute("/processing", { view: "view-processing", guard: requireAuth, init: initProcessing });
-// V7-fusion Phase 3 : route principale QIJ. Aliases /quality /logs /jellyfin /plex /radarr
-// en bas pour la retrocompat (anciens liens externes + data-nav-route legacy).
-// V2-C R4-MEM-4 : init() retourne le unmount pour que le router l'appelle au navigate.
-registerRoute("/qij", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, opts); return unmountQij; } });
-registerRoute("/quality", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
-// Alias retrocompat : /settings (vue legacy v4) redirige vers /parametres en
-// preservant le fragment de section (ex: #/settings#email -> #/parametres#email).
-// La vue settings.js a ete supprimee : tout son contenu fonctionnel est porte
-// dans parametres.js (cf commit 76e756a + chore /settings -> /parametres).
-registerRoute("/settings", { view: "view-settings", guard: requireAuth, init: (el, opts) => {
-  // Hash courant : "#/settings" ou "#/settings#email" ; on extrait le fragment.
-  const currentHash = (typeof window !== "undefined" && window.location && window.location.hash) || "";
-  const sectionMatch = currentHash.match(/^#\/settings(?:#(.+))?$/);
-  const fragment = sectionMatch && sectionMatch[1] ? `#${sectionMatch[1]}` : "";
-  window.location.hash = `#/parametres${fragment}`;
-  // Aucun unmount : la navigation suivante va re-router immediatement.
-} });
-registerRoute("/help", { view: "view-help", guard: requireAuth, init: initHelpV4 });
+
+// === Helper : redirection rétrocompat vers route canonique FR =============
+// Extrait le fragment de section depuis le hash courant et redirige vers la
+// route canonique en preservant ce fragment (ex: "#/library#step-analyse" ->
+// "#/bibliotheque#step-analyse"). Aucun unmount : la navigation suivante va
+// re-router immediatement vers la cible.
+function _legacyRedirect(legacyName, canonicalRoute) {
+  return (_el, _opts) => {
+    const currentHash = (typeof window !== "undefined" && window.location && window.location.hash) || "";
+    const re = new RegExp(`^#/${legacyName}(?:#(.+))?$`);
+    const sectionMatch = currentHash.match(re);
+    const fragment = sectionMatch && sectionMatch[1] ? `#${sectionMatch[1]}` : "";
+    window.location.hash = `#${canonicalRoute}${fragment}`;
+  };
+}
+
+// === Routes canoniques FR (refonte 2026-05-17 spec 04 Shell 3 zones) ======
 registerRoute("/film/:id", {
   view: "view-film-detail",
   guard: requireAuth,
   init: (el, opts) => initFilmDetail(el, { filmId: opts && opts.params ? opts.params.id : undefined }),
 });
+// /processing reste fonctionnelle : utilisee en INTERNE par traitement.js et
+// qij.js comme etape stepper du workflow (scan -> review -> apply). Mount
+// dedie #view-processing (vide dans index.html, initProcessing fait
+// container.innerHTML lui-meme).
+registerRoute("/processing", { view: "view-processing", guard: requireAuth, init: initProcessing });
 
-// V7-fusion Phase 3 : routes legacy /jellyfin /plex /radarr /logs aliasent vers QIJ
-// (avant : 4 vues v4 separees). Les imports initJellyfin/Plex/Radarr/Logs ont
-// ete retires car plus jamais appeles ; les routes pointent vers QIJ.
-// V2-C R4-MEM-4 : init() retourne le unmount pour cleanup au navigate.
-registerRoute("/jellyfin", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
-registerRoute("/plex",     { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
-registerRoute("/radarr",   { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "integrations" }); return unmountQij; } });
-registerRoute("/logs",     { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
-
-// Alias compat /status : conserve l'ANCIENNE vue de synthese (initStatus) pour
-// permettre comparaison cote a cote pendant la refonte. Sera supprime quand
-// la nouvelle UI sera consideree comme complete (Phase 3.4+).
-registerRoute("/status", { view: "view-status", guard: requireAuth, init: initStatus });
+// === Alias rétrocompat : redirections vers routes canoniques FR ===========
+// Les anciennes URLs (/home /status /library /quality /help /logs /jellyfin
+// /plex /radarr /qij /settings) restent registrees pour les bookmarks et liens
+// externes deja partages, mais elles redirigent toutes immediatement vers la
+// nouvelle route canonique en preservant le fragment de section/ancre.
+// La vue ciblee s'affichera apres la navigation (re-routage).
+registerRoute("/home",     { view: "view-status",   guard: requireAuth, init: _legacyRedirect("home", "/accueil") });
+registerRoute("/status",   { view: "view-status",   guard: requireAuth, init: _legacyRedirect("status", "/accueil") });
+registerRoute("/qij",      { view: "view-qij",      guard: requireAuth, init: _legacyRedirect("qij", "/accueil") });
+registerRoute("/library",  { view: "view-library",  guard: requireAuth, init: _legacyRedirect("library", "/bibliotheque") });
+registerRoute("/quality",  { view: "view-qij",      guard: requireAuth, init: _legacyRedirect("quality", "/qualite") });
+registerRoute("/help",     { view: "view-help",     guard: requireAuth, init: _legacyRedirect("help", "/aide") });
+// /logs redirige vers /aide#diagnostic (journal integre dans la vue Aide).
+registerRoute("/logs",     { view: "view-qij",      guard: requireAuth, init: (_el, _opts) => {
+  window.location.hash = "#/aide#diagnostic";
+} });
+// /jellyfin /plex /radarr : redirigent vers /parametres avec ancre integrations.
+registerRoute("/jellyfin", { view: "view-qij",      guard: requireAuth, init: (_el, _opts) => {
+  window.location.hash = "#/parametres#integrations-jellyfin";
+} });
+registerRoute("/plex",     { view: "view-qij",      guard: requireAuth, init: (_el, _opts) => {
+  window.location.hash = "#/parametres#integrations-plex";
+} });
+registerRoute("/radarr",   { view: "view-qij",      guard: requireAuth, init: (_el, _opts) => {
+  window.location.hash = "#/parametres#integrations-radarr";
+} });
+// /settings : redirection deja active depuis le commit 0280f2a. Conserve le
+// même pattern pour homogeneite (helper _legacyRedirect).
+registerRoute("/settings", { view: "view-settings", guard: requireAuth, init: _legacyRedirect("settings", "/parametres") });
 
 // Phase 2-B (spec 04 Shell 3 zones) : routes francaises canoniques.
 // Les anciennes URLs (/home /library /processing /settings /help) restent en
@@ -338,7 +338,7 @@ async function _mountV5Shell() {
   if (rightPanelMount) {
     rightPanel.render(rightPanelMount);
     const _syncRightPanelToRoute = () => {
-      const hash = (window.location.hash || "#/home").replace(/^#/, "");
+      const hash = (window.location.hash || "#/accueil").replace(/^#/, "");
       rightPanel.adaptToRoute(hash.split("#")[0]);
     };
     window.addEventListener("hashchange", _syncRightPanelToRoute);
@@ -347,7 +347,7 @@ async function _mountV5Shell() {
 
   // FAB Aide V3-08 (bouton flottant ?)
   if (typeof topBarV5.mountHelpFab === "function") {
-    topBarV5.mountHelpFab({ onClick: () => navigateTo("/help") });
+    topBarV5.mountHelpFab({ onClick: () => navigateTo("/aide") });
   }
 
   // Affichage du shell (le router le toggle ensuite selon /login vs autre)
@@ -389,16 +389,12 @@ const ROUTE_BREADCRUMBS = {
   "/historique":   [{ label: "Historique" }],
   "/parametres":   [{ label: "Paramètres" }],
   "/aide":         [{ label: "Aide" }],
-  // === Alias rétrocompat (mêmes routes, ancienne URL) ===
-  "/home":       [{ label: "Accueil" }],
-  "/library":    [{ label: "Bibliothèque" }],
-  "/processing": [{ label: "Traitement" }],
-  "/settings":   [{ label: "Paramètres" }],
-  "/help":       [{ label: "Aide" }],
-  // V7-fusion Phase 3 : QIJ + alias legacy (kept while QIJ legacy reste route).
-  "/qij":        [{ label: "QIJ" }],
-  "/quality":    [{ label: "QIJ", route: "/qij" }, { label: "Qualité" }],
-  "/logs":       [{ label: "QIJ", route: "/qij" }, { label: "Journal" }],
+  // /processing reste fonctionnelle (usage interne stepper traitement/qij).
+  "/processing":   [{ label: "Traitement" }],
+  // Routes alias (/home /status /library /quality /help /logs /jellyfin /plex
+  // /radarr /qij /settings) sont des REDIRECTIONS immediates : leur breadcrumb
+  // n'est jamais rendu car la navigation est re-routee avant le sync shell.
+  // Aucune entree necessaire ici.
 };
 
 function _syncShellOnRoute() {
@@ -428,7 +424,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (isNative && hasToken()) {
     if (!window.location.hash || window.location.hash === "#" || window.location.hash.includes("/login")) {
-      window.location.hash = "#/home";
+      window.location.hash = "#/accueil";
     }
   } else if (!hasToken() && !window.location.hash.includes("/login")) {
     window.location.hash = "#/login";
@@ -649,7 +645,7 @@ document.addEventListener("click", (ev) => {
   if (!item) return;
   ev.preventDefault();
   ev.stopPropagation();
-  navigateTo("/settings");
+  navigateTo("/parametres");
 }, true);
 
 /* === Compat helpers (anciens listeners externes) ========= */
