@@ -175,5 +175,79 @@ class EndpointAndUiTests(unittest.TestCase):
         self.assertIn(".sync-error", css)
 
 
+class RunIdValidationTests(unittest.TestCase):
+    """Audit 2026-05-20 : run_id non valide doit etre rejete avant la construction de chemin.
+
+    Les endpoints sync Jellyfin/Plex/Radarr construisent state_dir / "runs" / run_id /
+    "plan.jsonl". Sans validation, un run_id contenant "../" permettait de lire un
+    fichier hors du dossier runs/ (CWE-22 Path Traversal).
+    """
+
+    def _make_api_with_settings(self, settings: dict):
+        import tempfile
+        from unittest.mock import patch
+
+        import cinesort.ui.api.cinesort_api as backend
+
+        tmp = tempfile.mkdtemp(prefix="audit_runid_")
+        state_dir = Path(tmp) / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        api = backend.CineSortApi()
+        api._state_dir = state_dir  # type: ignore[attr-defined]
+        patcher = patch.object(api, "_get_settings_impl", return_value=settings)
+        patcher.start()
+        return api, tmp, patcher
+
+    def _cleanup(self, tmp: str, patcher) -> None:
+        import shutil
+
+        patcher.stop()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_jellyfin_sync_report_rejects_path_traversal_run_id(self) -> None:
+        settings = {
+            "jellyfin_enabled": True,
+            "jellyfin_url": "http://localhost:8096",
+            "jellyfin_api_key": "fake_key",
+            "jellyfin_user_id": "fake_user",
+        }
+        api, tmp, patcher = self._make_api_with_settings(settings)
+        try:
+            result = api._get_jellyfin_sync_report_impl(run_id="../../etc/passwd")
+            self.assertFalse(result.get("ok"))
+            self.assertIn("invalide", str(result.get("message", "")).lower())
+        finally:
+            self._cleanup(tmp, patcher)
+
+    def test_plex_sync_report_rejects_path_traversal_run_id(self) -> None:
+        settings = {
+            "plex_enabled": True,
+            "plex_url": "http://localhost:32400",
+            "plex_token": "fake_token",
+            "plex_library_id": "1",
+        }
+        api, tmp, patcher = self._make_api_with_settings(settings)
+        try:
+            result = api._get_plex_sync_report_impl(run_id="../../etc/passwd")
+            self.assertFalse(result.get("ok"))
+            self.assertIn("invalide", str(result.get("message", "")).lower())
+        finally:
+            self._cleanup(tmp, patcher)
+
+    def test_radarr_status_rejects_path_traversal_run_id(self) -> None:
+        settings = {
+            "radarr_enabled": True,
+            "radarr_url": "http://localhost:7878",
+            "radarr_api_key": "fake_key",
+        }
+        api, tmp, patcher = self._make_api_with_settings(settings)
+        try:
+            result = api._get_radarr_status_impl(run_id="../../etc/passwd")
+            self.assertFalse(result.get("ok"))
+            self.assertIn("invalide", str(result.get("message", "")).lower())
+        finally:
+            self._cleanup(tmp, patcher)
+
+
 if __name__ == "__main__":
     unittest.main()

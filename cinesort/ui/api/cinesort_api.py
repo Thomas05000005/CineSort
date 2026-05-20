@@ -1162,6 +1162,13 @@ class CineSortApi:
                     break
         if not target_run_id:
             return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
+        if not self._is_valid_run_id(target_run_id):
+            return _err_response(
+                "Identifiant de run invalide.",
+                category="validation",
+                level="warning",
+                log_module=__name__,
+            )
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
@@ -1222,6 +1229,13 @@ class CineSortApi:
                 break
         if not target_run_id:
             return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
+        if not self._is_valid_run_id(target_run_id):
+            return _err_response(
+                "Identifiant de run invalide.",
+                category="validation",
+                level="warning",
+                log_module=__name__,
+            )
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
@@ -1284,6 +1298,13 @@ class CineSortApi:
                     break
         if not target_run_id:
             return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
+        if not self._is_valid_run_id(target_run_id):
+            return _err_response(
+                "Identifiant de run invalide.",
+                category="validation",
+                level="warning",
+                log_module=__name__,
+            )
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
@@ -1357,6 +1378,13 @@ class CineSortApi:
                     break
         if not target_run_id:
             return _err_response("Aucun run termine disponible.", category="state", level="info", log_module=__name__)
+        if not self._is_valid_run_id(target_run_id):
+            return _err_response(
+                "Identifiant de run invalide.",
+                category="validation",
+                level="warning",
+                log_module=__name__,
+            )
 
         plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
