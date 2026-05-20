@@ -1410,7 +1410,12 @@ class CineSortApi:
 
     # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
     def _test_omdb_connection_impl(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
-        """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption)."""
+        """Teste la cle OMDb avec un IMDb id connu (Shawshank Redemption).
+
+        Retourne (cf spec 03-settings-omdb §2) :
+          {ok, message, sample_title?, sample_year?, error_code?,
+           quota_remaining?, quota_limit?, quota_reset_at?}
+        """
 
         okey = self._unmask_or_stored("omdb_api_key", api_key)
         if not okey:
@@ -1419,8 +1424,7 @@ class CineSortApi:
         cache_path = Path(self._state_dir) / "omdb_cache_test.json"
         try:
             client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=max(1.0, min(30.0, float(timeout_s))))
-            result = client.test_connection()
-            return result
+            return client.test_connection()
         except (OSError, ValueError, KeyError) as exc:
             return _err_response(f"Erreur test OMDb: {exc}", category="resource", level="error", log_module=__name__)
 
