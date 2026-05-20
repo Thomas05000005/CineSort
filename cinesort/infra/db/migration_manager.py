@@ -125,6 +125,18 @@ class MigrationManager:
                     # M2 : executescript fait un COMMIT implicite par statement — dangereux.
                     # On execute chaque statement dans une transaction explicite pour pouvoir rollback.
                     statements = _split_sql_statements(sql)
+
+                    # V8-01 : certaines migrations doivent recreer une table parent
+                    # sans declencher de CASCADE sur les enfants (ex: migration 023
+                    # qui recree `runs` pour etendre la CHECK status). Le marker
+                    # `-- @manager: disable_fk` permet de desactiver les FK pour
+                    # cette migration uniquement. PRAGMA foreign_keys ne fonctionne
+                    # PAS dans une transaction, donc on le pose avant BEGIN et on
+                    # le restaure apres COMMIT.
+                    needs_fk_disable = "@manager: disable_fk" in sql
+                    if needs_fk_disable:
+                        conn.execute("PRAGMA foreign_keys = OFF")
+
                     conn.execute("BEGIN")
                     try:
                         for idx, stmt in enumerate(statements):
@@ -155,6 +167,9 @@ class MigrationManager:
                     except sqlite3.DatabaseError:
                         conn.rollback()
                         raise
+                    finally:
+                        if needs_fk_disable:
+                            conn.execute("PRAGMA foreign_keys = ON")
                     # DB3 audit : tracer dans schema_migrations si la table existe
                     # (elle est creee par la migration 012 elle-meme). INSERT OR IGNORE
                     # pour que ce soit idempotent si la migration est rejouee.

@@ -18,11 +18,14 @@ class ProfilQualiteEditorTests(unittest.TestCase):
         cls.js = _PARAMETRES_JS.read_text(encoding="utf-8")
 
     def test_render_profils_qualite_panel(self) -> None:
-        self.assertIn("_renderProfilsQualitePanel", self.js)
+        # Phase 5 : la fonction a ete renommee _renderProfilsQualite (sans Panel suffixe).
+        self.assertIn("_renderProfilsQualite", self.js)
 
     def test_4_tier_inputs(self) -> None:
+        # Phase 5 : les rows sont generes dynamiquement via data-tier-input="${name}".
+        self.assertIn('data-tier-input', self.js)
         for tier in ("platinum", "gold", "silver", "bronze"):
-            self.assertIn(f'data-tier-input="{tier}"', self.js)
+            self.assertIn(tier, self.js, f"tier {tier} manquant")
 
     def test_default_tiers_values(self) -> None:
         """Defaults alignes avec cinesort/domain/quality_score.py."""
@@ -37,9 +40,10 @@ class ProfilQualiteEditorTests(unittest.TestCase):
         self.assertIn("settings/save_settings", self.js)
 
     def test_quality_profile_tiers(self) -> None:
-        """Spec : on persiste sous settings.quality_profile.tiers."""
-        self.assertIn("quality_profile", self.js)
-        self.assertIn("profile.tiers", self.js)
+        """Spec 11 §2.9 : on persiste via les endpoints dedies settings/save_profile."""
+        # Phase 5 : on utilise les endpoints dedies au lieu de settings.quality_profile.tiers.
+        self.assertIn("settings/save_profile", self.js)
+        self.assertIn("tiers", self.js)
 
     def test_validation_order(self) -> None:
         """Validation : Platinum > Gold > Silver > Bronze (decroissant)."""

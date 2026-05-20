@@ -89,15 +89,15 @@ class GridAndSelectionTests(unittest.TestCase):
 
 
 class PaginationTests(unittest.TestCase):
-    """Spec 07 §8 : pagination prev/next (substitute scroll infini pour v1)."""
+    """Spec 07 §8 : Phase 5 - remplace prev/next par scroll infini (IntersectionObserver)."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _BIBLIOTHEQUE_JS.read_text(encoding="utf-8")
 
-    def test_pagination_buttons(self) -> None:
-        self.assertIn('data-bibliotheque-page="prev"', self.js)
-        self.assertIn('data-bibliotheque-page="next"', self.js)
+    def test_infinite_scroll_observer(self) -> None:
+        self.assertIn("IntersectionObserver", self.js)
+        self.assertIn("data-bibliotheque-sentinel", self.js)
 
     def test_page_size_constant(self) -> None:
         self.assertIn("PAGE_SIZE = 60", self.js)

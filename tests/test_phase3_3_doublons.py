@@ -80,9 +80,11 @@ class ToolbarAndFiltersTests(unittest.TestCase):
     def test_refresh_action(self) -> None:
         self.assertIn('data-doublons-action="refresh"', self.js)
 
-    def test_legacy_fallback(self) -> None:
-        """Spec 01 : Modal Comparateur differe -> fallback vers #/library legacy."""
-        self.assertIn("#/library", self.js)
+    def test_modal_comparator_replaces_legacy_fallback(self) -> None:
+        """Spec 01 §3 : le fallback legacy a ete remplace par le nouveau modal
+        Comparateur (phase 5). Le hash redirect "#/library" n'est plus utilise."""
+        self.assertIn("openDuplicateComparatorModal", self.js)
+        self.assertNotIn('window.location.hash = "#/library"', self.js)
 
 
 class AppJsRoutingTests(unittest.TestCase):

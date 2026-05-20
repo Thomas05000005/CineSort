@@ -49,9 +49,7 @@ class MarkDuplicateWinnerDbTests(unittest.TestCase):
     def test_table_duplicate_decisions_exists_after_init(self) -> None:
         """La migration 023 cree la table duplicate_decisions."""
         with self.store._managed_conn() as conn:
-            cur = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='duplicate_decisions'"
-            )
+            cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='duplicate_decisions'")
             self.assertIsNotNone(cur.fetchone())
 
     def test_upsert_persists_winner_and_losers(self) -> None:
@@ -64,9 +62,7 @@ class MarkDuplicateWinnerDbTests(unittest.TestCase):
         self.assertEqual(result["winner_row_id"], "rowA")
         self.assertEqual(result["loser_row_ids"], ["rowB", "rowC"])
 
-        read = self.store.apply.get_duplicate_decision(
-            run_id="run1", group_key="fast_furious_4|2009"
-        )
+        read = self.store.apply.get_duplicate_decision(run_id="run1", group_key="fast_furious_4|2009")
         assert read is not None
         self.assertEqual(read["winner_row_id"], "rowA")
         self.assertEqual(set(read["loser_row_ids"]), {"rowB", "rowC"})
@@ -106,9 +102,7 @@ class MarkDuplicateWinnerDbTests(unittest.TestCase):
         self.assertEqual(keys, {"g1", "g2"})
 
     def test_get_returns_none_for_unknown_decision(self) -> None:
-        self.assertIsNone(
-            self.store.apply.get_duplicate_decision(run_id="ghost", group_key="x")
-        )
+        self.assertIsNone(self.store.apply.get_duplicate_decision(run_id="ghost", group_key="x"))
 
 
 class MarkDuplicateWinnerEndpointTests(unittest.TestCase):
@@ -233,9 +227,7 @@ class CheckDuplicatesSizeSavingsTests(unittest.TestCase):
                 ]
             },
         ):
-            with mock.patch.object(
-                run_flow_support, "_enrich_groups_with_quality_comparison"
-            ):
+            with mock.patch.object(run_flow_support, "_enrich_groups_with_quality_comparison"):
                 r = run_flow_support.check_duplicates(api, "run1", {})
 
         self.assertTrue(r["ok"], msg=str(r))
@@ -394,9 +386,7 @@ class CompareAudioTests(unittest.TestCase):
             mock.patch.object(self.api, "_find_run_row", return_value=(run_row, store)),
             mock.patch.object(self.api, "_get_run", return_value=rs),
             mock.patch.object(self.api, "_run_paths_for", return_value=mock.MagicMock()),
-            mock.patch.object(
-                self.api, "_load_rows_from_plan_jsonl", return_value=[row_a, row_b]
-            ),
+            mock.patch.object(self.api, "_load_rows_from_plan_jsonl", return_value=[row_a, row_b]),
             mock.patch.object(
                 self.api,
                 "_resolve_media_path_for_row",

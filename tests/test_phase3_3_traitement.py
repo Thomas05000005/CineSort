@@ -92,11 +92,10 @@ class StatsTests(unittest.TestCase):
     def test_renders_stats_per_step(self) -> None:
         self.assertIn("_renderStepStats", self.js)
 
-    def test_actions_to_legacy(self) -> None:
-        self.assertIn("#/library#step-", self.js)
-
-    def test_doublons_step_links_to_new_doublons_view(self) -> None:
-        self.assertIn("#/doublons", self.js)
+    def test_doublons_step_uses_native_component(self) -> None:
+        # Phase 5 : Doublons est inline (composant initDoublons) au lieu d'un lien.
+        self.assertIn("initDoublons", self.js)
+        self.assertIn("traitement-doublons-mount", self.js)
 
 
 class CssTests(unittest.TestCase):

@@ -77,7 +77,8 @@ class SubSidebarTests(unittest.TestCase):
         cls.js = _PARAMETRES_JS.read_text(encoding="utf-8")
 
     def test_render_sub_sidebar_function(self) -> None:
-        self.assertIn("function _renderSubSidebar(activeId)", self.js)
+        # Phase 5 : _renderSubSidebar() sans arg (utilise _state.activeCategory).
+        self.assertIn("function _renderSubSidebar(", self.js)
 
     def test_sub_sidebar_role_navigation(self) -> None:
         self.assertIn('role="navigation"', self.js)
@@ -89,26 +90,23 @@ class SubSidebarTests(unittest.TestCase):
 
 
 class CategoryPanelsTests(unittest.TestCase):
-    """Chaque catégorie doit avoir un panneau (au moins un placeholder)."""
+    """Chaque catégorie doit avoir un panneau avec ses champs."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _PARAMETRES_JS.read_text(encoding="utf-8")
 
-    def test_category_panels_dict_present(self) -> None:
-        self.assertIn("_CATEGORY_PLACEHOLDERS", self.js)
+    def test_category_panels_schema_present(self) -> None:
+        # Phase 5 : schema declaratif PARAMETRES_GROUPS (au lieu de _CATEGORY_PLACEHOLDERS).
+        self.assertIn("PARAMETRES_GROUPS", self.js)
 
     def test_render_category_panel_function(self) -> None:
         self.assertIn("function _renderCategoryPanel(categoryId)", self.js)
 
-    def test_legacy_link_for_unported_categories(self) -> None:
-        # Les categories non encore portees pointent vers /settings (legacy).
-        self.assertIn('href="#/settings"', self.js)
-
     def test_omdb_visible_in_integrations(self) -> None:
         # Spec 03 : OMDb visible dans integrations apres la migration.
-        # Le placeholder doit le mentionner.
         self.assertIn("OMDb", self.js)
+        self.assertIn("omdb_api_key", self.js)
 
 
 class ExpertModeTests(unittest.TestCase):
@@ -116,15 +114,17 @@ class ExpertModeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.js = _PARAMETRES_JS.read_text(encoding="utf-8")
 
-    def test_storage_key_expert(self) -> None:
-        self.assertIn("cinesort.parametres.expert", self.js)
+    def test_settings_expert_mode_key(self) -> None:
+        # Phase 5 : persiste dans settings.expert_mode backend (plus localStorage).
+        self.assertIn("expert_mode", self.js)
 
     def test_toggle_input_present(self) -> None:
         self.assertIn("data-parametres-expert", self.js)
 
-    def test_default_off(self) -> None:
-        # Spec : OFF par defaut.
-        self.assertIn("_readBool(STORAGE_KEY_EXPERT, false)", self.js)
+    def test_default_off_via_settings(self) -> None:
+        # Le defaut est null/false cote settings backend (apply_settings_defaults).
+        # On verifie juste que le toggle lit settings.expert_mode.
+        self.assertIn("_state.settings.expert_mode", self.js)
 
 
 class SearchInputTests(unittest.TestCase):
