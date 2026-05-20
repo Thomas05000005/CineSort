@@ -1304,6 +1304,17 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         trend_30days = _compute_trend_30days(store)
         insights = _compute_active_insights(api, store, run_ids, settings)
 
+        # 13. Spec 10 Qualite — by_decade distribution top-level (best-effort).
+        # Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
+        by_decade: Dict[str, int] = {}
+        try:
+            from cinesort.ui.api.library_audit_support import compute_by_decade
+
+            by_decade = compute_by_decade(api, run_id=run_ids[0] if run_ids else None)
+        except (OSError, AttributeError, ImportError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("get_global_stats by_decade fallback (err=%s)", exc)
+            by_decade = {}
+
         # v7.6.0 Vague 9 : miroir des insights actifs dans le notification
         # center (deduplique par (code, source) pour la session).
         notifications_support.emit_from_insights(api, insights, source="dashboard")
@@ -1331,6 +1342,8 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             "v2_tier_distribution": v2_tier_distribution,
             "trend_30days": trend_30days,
             "insights": insights,
+            # Spec 10 Qualite — distribution films par decennie
+            "by_decade": by_decade,
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.warning("get_global_stats error: %s", exc, exc_info=True)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from cinesort.ui.api import quality_audit_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -96,6 +97,31 @@ class QualityFacade(_BaseFacade):
         return self._api._simulate_quality_preset_impl(
             run_id=run_id, preset_id=preset_id, overrides=overrides, scope=scope
         )
+
+    # ---------- Phase 4 backend-parametres-endpoints (spec 11 §2.9) ----------
+    # Alias quality/X(...) -> meme impl que settings/X(...). Spec 11 §7 cite
+    # `quality/get_profiles()`, l'orchestration reelle delegue vers profiles_support.
+
+    def get_profiles(self) -> Dict[str, Any]:
+        """Liste tous les profils qualite (presets + custom).
+
+        Cf CineSortApi._get_profiles_impl pour la doc complete.
+        """
+        return self._api._get_profiles_impl()
+
+    def save_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Sauve un profil qualite custom (avec validation tiers + poids).
+
+        Cf CineSortApi._save_profile_impl pour la doc complete.
+        """
+        return self._api._save_profile_impl(profile)
+
+    def set_active_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Active un profil qualite (preset ou custom).
+
+        Cf CineSortApi._set_active_profile_impl pour la doc complete.
+        """
+        return self._api._set_active_profile_impl(profile_id)
 
     # ---------- Report & rules (5) ----------
 
@@ -190,6 +216,33 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._get_perceptual_compare_frames_impl(run_id, row_id_a, row_id_b, options)
 
+    def get_perceptual_compare_audio(
+        self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : waveform PNG + clip MP3 court cote-a-cote.
+
+        Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md
+        section 3 "Comparaison audio". Pattern similaire a
+        get_perceptual_compare_frames.
+        """
+        return self._api._get_perceptual_compare_audio_impl(run_id, row_id_a, row_id_b, options)
+
+    def queue_perceptual_analyses(self, pairs: Any, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Phase 4 doublons : queue batch d'analyses perceptuelles en background.
+
+        Args:
+            pairs: liste de {run_id, row_a, row_b}.
+            options: passe a compare_perceptual.
+
+        Returns:
+            {ok, job_id, total}. Polling via get_perceptual_job_status(job_id).
+        """
+        return self._api._queue_perceptual_analyses_impl(pairs, options)
+
+    def get_perceptual_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Phase 4 doublons : statut d'un job perceptuel batch."""
+        return self._api._get_perceptual_job_status_impl(job_id)
+
     # ---------- Feedback / Calibration (3) ----------
 
     def submit_score_feedback(
@@ -219,3 +272,33 @@ class QualityFacade(_BaseFacade):
         Cf CineSortApi.get_calibration_report pour la doc complete.
         """
         return self._api._get_calibration_report_impl()
+
+    # ---------- Vue Qualite — Audit (spec 10) ----------
+
+    def get_films_by_tier(self, tier: str, limit: int = 8) -> Dict[str, Any]:
+        """Liste les films d'un tier V2 (default top 8 pires Reject par score asc).
+
+        Cf cinesort.ui.api.quality_audit_support.get_films_by_tier.
+        """
+        return quality_audit_support.get_films_by_tier(self._api, tier=tier, limit=limit)
+
+    def get_history(self, period_days: int = 30) -> Dict[str, Any]:
+        """KPIs evolution score V2 + deltas sur N derniers jours.
+
+        Cf cinesort.ui.api.quality_audit_support.get_history.
+        """
+        return quality_audit_support.get_history(self._api, period_days=period_days)
+
+    def recompute_all_scores(self) -> Dict[str, Any]:
+        """Lance le recalcul background du Score V2 pour tous les films.
+
+        Cf cinesort.ui.api.quality_audit_support.recompute_all_scores.
+        """
+        return quality_audit_support.recompute_all_scores(self._api)
+
+    def get_recompute_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Polling du status d'un job de recalcul lance par recompute_all_scores.
+
+        Cf cinesort.ui.api.quality_audit_support.get_recompute_job_status.
+        """
+        return quality_audit_support.get_recompute_job_status(self._api, job_id=job_id)

@@ -12,6 +12,7 @@ Consolide en 1 seul appel :
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any, Dict, Optional
 
@@ -51,16 +52,103 @@ def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any
     return None
 
 
-def _fetch_poster_url(api: Any, tmdb_id: int) -> Optional[str]:
+def _fetch_poster_url(api: Any, tmdb_id: int, size: str = "w500") -> Optional[str]:
+    """Spec 06 §3.1 : poster TMDb taille w500 par defaut (~200x300 affichage)."""
     if not tmdb_id or int(tmdb_id) <= 0:
         return None
     try:
-        result = api.integrations.get_tmdb_posters([int(tmdb_id)], "w342")
+        result = api.integrations.get_tmdb_posters([int(tmdb_id)], size)
         if result and result.get("ok"):
             return result.get("posters", {}).get(str(int(tmdb_id)))
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("poster fetch error: %s", exc)
     return None
+
+
+def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
+    """Spec 06 §3.1 : recupere runtime (min) + director + overview via TmdbClient.
+
+    Best-effort : retourne dict vide si TMDb pas configure ou indispo. Utilise
+    le cache local TmdbClient.
+    """
+    out: Dict[str, Any] = {"runtime": None, "director": None, "overview": None}
+    if not tmdb_id or int(tmdb_id) <= 0:
+        return out
+    # Import lazy : TmdbClient n'est pas necessaire si pas de cle TMDb.
+    try:
+        from cinesort.infra.tmdb_client import TmdbClient
+    except ImportError:
+        return out
+    try:
+        settings = api.settings.get_settings()
+        api_key = str(settings.get("tmdb_api_key") or "").strip()
+        if not api_key:
+            return out
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        try:
+            cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        except (TypeError, ValueError):
+            cache_ttl_days = 30
+        client = TmdbClient(
+            api_key=api_key,
+            cache_path=state_dir / "tmdb_cache.json",
+            timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+            cache_ttl_days=cache_ttl_days,
+        )
+        try:
+            out["runtime"] = client.get_movie_runtime(int(tmdb_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.debug("tmdb runtime fetch error: %s", exc)
+        # Director : via _get_movie_detail_cached -> data["credits"]["crew"]
+        # Le cache TmdbClient ne stocke pas le director ; on tape directement
+        # le HTTP detail pour beneficier du cache local file-side.
+        try:
+            detail = client._get_movie_detail_cached(int(tmdb_id))
+            if isinstance(detail, dict):
+                # overview / director ne sont pas systematiquement caches : on
+                # fait un appel direct si besoin.
+                pass
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+        # Director + overview : appel HTTP frais (le cache _get_movie_detail_cached
+        # ne stocke pas ces champs aujourd'hui). On utilise l'API requests
+        # directement avec append_to_response=credits pour avoir crew.
+        try:
+            import requests as _req
+
+            r = _req.get(
+                f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
+                params={
+                    "api_key": api_key,
+                    "language": "fr-FR",
+                    "append_to_response": "credits",
+                },
+                timeout=float(settings.get("tmdb_timeout_s") or 10.0),
+            )
+            if r.status_code == 200:
+                data = r.json() or {}
+                # Director : prend le premier crew member job=Director
+                credits = data.get("credits") or {}
+                crew = credits.get("crew") or []
+                for c in crew:
+                    if str(c.get("job") or "").lower() == "director":
+                        out["director"] = str(c.get("name") or "").strip() or None
+                        break
+                out["overview"] = str(data.get("overview") or "").strip() or None
+                # Runtime aussi en fallback si pas deja recupere
+                if not out.get("runtime"):
+                    try:
+                        rt = int(data.get("runtime") or 0)
+                        out["runtime"] = rt if rt > 0 else None
+                    except (TypeError, ValueError):
+                        pass
+        except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("tmdb extras http fetch error: %s", exc)
+        with contextlib.suppress(OSError, AttributeError):
+            client.flush()
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("_fetch_tmdb_extras error: %s", exc)
+    return out
 
 
 def _film_identity_key(row: Dict[str, Any]) -> str:
@@ -143,12 +231,18 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("history fetch error: %s", exc)
 
-    # TMDb poster
+    # TMDb poster (taille w500 selon spec 06 §3.1)
     tmdb_id = 0
     candidates = row.get("candidates") or []
     if candidates:
         tmdb_id = int(candidates[0].get("tmdb_id") or 0)
-    poster_url = _fetch_poster_url(api, tmdb_id) if tmdb_id > 0 else None
+    poster_url = _fetch_poster_url(api, tmdb_id, size="w500") if tmdb_id > 0 else None
+
+    # Spec 06 §3.1 : enrichissement runtime + director + overview depuis TMDb
+    extras = _fetch_tmdb_extras(api, tmdb_id) if tmdb_id > 0 else {}
+    runtime = extras.get("runtime")
+    director = extras.get("director")
+    overview = extras.get("overview")
 
     return {
         "ok": True,
@@ -160,4 +254,8 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
         "history": history,
         "poster_url": poster_url,
         "tmdb_id": tmdb_id,
+        # Spec 06 §3.1 : champs top-level pour le hero du Modal Film
+        "runtime": runtime,
+        "director": director,
+        "overview": overview,
     }

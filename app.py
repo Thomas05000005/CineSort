@@ -407,6 +407,15 @@ def main_api() -> None:
     # V5-03 polish v7.7.0 (R5-STRESS-4) : purge auto cache TMDb au boot.
     _purge_tmdb_cache_in_background(api, settings)
 
+    # Spec 09 §5 (Historique) : cron retention 90j en mode standalone REST.
+    try:
+        from cinesort.app.retention_cleanup import start_retention_cron
+
+        retention_days_api = int(settings.get("history_retention_days") or 90)
+        start_retention_cron(api, retention_days=retention_days_api)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
+        print(f"[REST] spec 09 retention cron init echouee: {_ret_exc}", file=sys.stderr)
+
     server.start()
     try:
         server.join()
@@ -684,6 +693,18 @@ def main() -> None:
                 # V5-03 polish v7.7.0 (R5-STRESS-4) : purge auto cache TMDb expire
                 # en arriere-plan (non-bloquant). Evite l'accumulation orphelins.
                 _purge_tmdb_cache_in_background(api, settings)
+
+                # Spec 09 §5 (Historique) : cron retention 90j par defaut, demarre
+                # un thread daemon qui purge les vieux runs toutes les 24h.
+                # Configurable via setting `history_retention_days` (defaut 90,
+                # 0 desactive).
+                try:
+                    from cinesort.app.retention_cleanup import start_retention_cron
+
+                    retention_days = int(settings.get("history_retention_days") or 90)
+                    start_retention_cron(api, retention_days=retention_days)
+                except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
+                    _log.warning("spec 09: retention cron init echouee — %s", _ret_exc)
 
                 # Injecter le token dans le sessionStorage du dashboard avant l'affichage
                 # pour bypass automatique de la page login (mode desktop natif).

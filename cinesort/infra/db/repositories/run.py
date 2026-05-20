@@ -300,3 +300,96 @@ class RunRepository(_BaseRepository):
                 tuple(ids),
             )
             return {str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()}
+
+    def delete_run(self, run_id: str) -> int:
+        """Supprime un run de la DB.
+
+        Cascade DB (cf migration 021_fk_cascade) :
+        - errors           : ON DELETE CASCADE
+        - quality_reports  : ON DELETE CASCADE
+        - anomalies        : ON DELETE CASCADE
+
+        Cascade manuelle (tables sans FK CASCADE) :
+        - perceptual_reports : suppression manuelle par run_id
+        - apply_batches      : suppression manuelle (et donc apply_operations
+          via FK CASCADE sur batch_id)
+
+        Les fichiers vidéo (root) ne sont JAMAIS touchés. Les fichiers
+        d'état (plan.jsonl, validation.json, log.txt) restent eux aussi
+        sur disque, le cron de cleanup ou l'utilisateur les supprimera.
+
+        Retourne le nombre d'enregistrements directement liés au run qui
+        ont été supprimés (toutes tables confondues, incluant la row
+        `runs` elle-même).
+        """
+        rid = str(run_id or "").strip()
+        if not rid:
+            return 0
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            # PRAGMA foreign_keys=ON est applique au niveau de la connection
+            # par SQLiteStore (cf sqlite_store.py). Les CASCADE sur errors,
+            # quality_reports, anomalies se feront automatiquement.
+            cur = conn.execute("SELECT COUNT(*) AS n FROM errors WHERE run_id=?", (rid,))
+            errors_count = int(cur.fetchone()["n"] or 0)
+            cur = conn.execute("SELECT COUNT(*) AS n FROM quality_reports WHERE run_id=?", (rid,))
+            quality_count = int(cur.fetchone()["n"] or 0)
+            cur = conn.execute("SELECT COUNT(*) AS n FROM anomalies WHERE run_id=?", (rid,))
+            anomalies_count = int(cur.fetchone()["n"] or 0)
+
+            # perceptual_reports n'a PAS de FK CASCADE — purge explicite.
+            cur = conn.execute("DELETE FROM perceptual_reports WHERE run_id=?", (rid,))
+            perceptual_deleted = int(cur.rowcount or 0)
+
+            # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
+            # AVANT de supprimer le run pour pouvoir compter les operations
+            # rattachees (apply_operations CASCADE sur batch_id).
+            cur = conn.execute(
+                "SELECT batch_id FROM apply_batches WHERE run_id=?",
+                (rid,),
+            )
+            batch_ids = [str(r["batch_id"]) for r in cur.fetchall()]
+            apply_ops_deleted = 0
+            if batch_ids:
+                placeholders = ",".join("?" for _ in batch_ids)
+                cur = conn.execute(
+                    f"SELECT COUNT(*) AS n FROM apply_operations WHERE batch_id IN ({placeholders})",
+                    tuple(batch_ids),
+                )
+                apply_ops_deleted = int(cur.fetchone()["n"] or 0)
+                conn.execute(
+                    f"DELETE FROM apply_batches WHERE batch_id IN ({placeholders})",
+                    tuple(batch_ids),
+                )
+            batches_deleted = len(batch_ids)
+
+            cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
+            run_deleted = int(cur.rowcount or 0)
+
+        return (
+            run_deleted
+            + errors_count
+            + quality_count
+            + anomalies_count
+            + perceptual_deleted
+            + batches_deleted
+            + apply_ops_deleted
+        )
+
+    def list_runs_older_than(self, *, cutoff_ts: float) -> List[str]:
+        """Retourne les run_ids dont la date la plus recente (started_ts > created_ts) est < cutoff_ts.
+
+        Utile pour le cron de retention.
+        """
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id
+                FROM runs
+                WHERE COALESCE(started_ts, created_ts) < ?
+                ORDER BY COALESCE(started_ts, created_ts) ASC
+                """,
+                (float(cutoff_ts),),
+            )
+            return [str(r["run_id"]) for r in cur.fetchall()]

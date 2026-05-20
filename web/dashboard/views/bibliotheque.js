@@ -31,6 +31,7 @@ import {
   ADVANCED_DRAWER_DEFAULTS,
 } from "../components/library-advanced-drawer.js";
 import * as rightPanel from "../components/right-panel.js";
+>>>>>>> origin/main
 
 const PAGE_SIZE = 60;
 const LS_VIEW = "cinesort.bibliotheque.view";
@@ -877,6 +878,7 @@ function _openFilmDetailModal(rowId) {
   navigateTo(`/film/${encodeURIComponent(rowId)}`);
 }
 
+<<<<<<< HEAD
 /* --- Bulk actions cablees --- */
 
 function _handleBulkAction(action) {
@@ -957,6 +959,13 @@ async function _bulkExport(rowIds) {
 function _confirmBulkDelete(rowIds) {
   const n = rowIds.length;
   const items = rowIds.map((id) => {
+=======
+function _confirmBulkDelete(n) {
+  // P0 #233 : dangerConfirmModal (au lieu de window.confirm legacy + alert > 50).
+  // La modale gere elle-meme : items 5 max visibles + "et N autres", countdown
+  // anti-clic-reflexe 3s si bulk > 50.
+  const selectedIds = Array.from(_state.selected);
+  const items = selectedIds.map((id) => {
     const r = _state.rows.find((row) => String(row.row_id) === String(id));
     return r ? `${r.title}${r.year ? ` (${r.year})` : ""}` : String(id);
   });
@@ -983,6 +992,12 @@ function _confirmBulkDelete(rowIds) {
       } catch (err) {
         showToast({ type: "error", text: String(err && err.message ? err.message : err) });
       }
+      `Ils seront déplacés vers _user_marked_for_deletion/ au prochain apply (réversible via Undo). ` +
+      `[Endpoint mark_for_deletion_bulk à brancher en itération ultérieure.]`,
+    countdownSeconds: n > 50 ? 3 : 0,
+    confirmLabel: "✗ Confirmer la suppression",
+    onConfirm: () => {
+      alert(`Marquage de ${n} films à brancher quand library/mark_for_deletion_bulk sera dispo.`);
     },
   });
 }
