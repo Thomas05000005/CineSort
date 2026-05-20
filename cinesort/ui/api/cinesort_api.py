@@ -1734,6 +1734,40 @@ class CineSortApi:
         """
         return perceptual_support.get_perceptual_compare_frames(self, run_id, row_id_a, row_id_b, options)
 
+    def _get_perceptual_compare_audio_impl(
+        self, run_id: str, row_id_a: str, row_id_b: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : waveform PNG + clip MP3 cote-a-cote.
+
+        Cf spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md
+        section 3 "Comparaison audio".
+        """
+        return perceptual_support.get_perceptual_compare_audio(self, run_id, row_id_a, row_id_b, options)
+
+    def _queue_perceptual_analyses_impl(
+        self, pairs: Any, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : queue d'analyses perceptuelles batch en background.
+
+        Cf spec section 1 "Analyser perceptuel sur N groupes". Retourne un
+        job_id pour polling via _get_perceptual_job_status_impl.
+        """
+        return perceptual_support.queue_perceptual_analyses(self, pairs, options)
+
+    def _get_perceptual_job_status_impl(self, job_id: str) -> Dict[str, Any]:
+        """Phase 4 doublons : statut d'un batch perceptuel queue."""
+        return perceptual_support.get_perceptual_job_status(self, job_id)
+
+    def _mark_duplicate_winner_impl(
+        self, run_id: str, group_key: str, winner_row_id: str, notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Phase 4 doublons : persiste la decision utilisateur.
+
+        Cf spec section 3 "Workflow decision". Les loser_row_ids seront
+        deplaces vers <root>/_review/_duplicates_user_decided/ a l'apply.
+        """
+        return run_flow_support.mark_duplicate_winner(self, run_id, group_key, winner_row_id, notes)
+
     def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)
