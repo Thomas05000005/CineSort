@@ -62,6 +62,7 @@ RESTORED_V4_VIEWS = [
 TRULY_REMOVED_VIEWS = [
     "web/dashboard/views/review.js",  # FIX-4 CRIT-5 : section /review supprimee
     "web/dashboard/views/runs.js",  # FIX-4 CRIT-5 : section /runs supprimee
+    "web/dashboard/views/library.js",  # Orpheline (refonte 2026-05) : remplacee par bibliotheque.js/historique.js
 ]
 
 
@@ -76,7 +77,6 @@ KEPT_FILES = [
     # Conserves : dependances actives qui n'ont pas (encore) ete portees en v5.
     "web/dashboard/views/about.js",
     "web/dashboard/views/demo-wizard.js",
-    "web/dashboard/views/library.js",
 ]
 
 
