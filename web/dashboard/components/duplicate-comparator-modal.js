@@ -160,8 +160,7 @@ function _renderTabs() {
 }
 
 function _renderFooter() {
-  const { rows, decisionInFlight } = _state;
-  const { rowA, rowB, decisionInFlight, readOnly } = _state;
+  const { rows, rowA, rowB, decisionInFlight, readOnly } = _state;
   // Spec 02 §5 : en mode readOnly (comparaison ad-hoc depuis Modal Perceptuelle),
   // pas de boutons de decision — juste un footer informatif avec Fermer.
   if (readOnly) {

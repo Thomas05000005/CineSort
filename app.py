@@ -624,6 +624,14 @@ def main() -> None:
             main_url = Path(index).resolve().as_uri()
             _desktop_dashboard_token = ""
 
+        # Note 2026-05-20 fix ecran noir : main_window N EST PLUS hidden=True.
+        # Avec hidden=True, pywebview/WebView2 retardait l initialisation reelle
+        # du HWND tant que show() n etait pas appele, et evaluate_js levait
+        # "Main window failed to start" meme apres show() (l init async n etait
+        # pas terminee). Resultat : token + native flag jamais injectes -> noir.
+        # Sans hidden, la window est initialisee des create_window et evaluate_js
+        # fonctionne tout de suite. Le splash frameless reste sur on_top pour
+        # masquer le boot visuel.
         main_window = webview.create_window(
             title,
             url=main_url,
@@ -631,7 +639,6 @@ def main() -> None:
             width=1250,
             height=820,
             min_size=(1000, 700),
-            hidden=True,
         )
 
         # --- 3. Fonction de startup (tourne dans le thread webview) ---
@@ -758,38 +765,32 @@ def main() -> None:
 
                 _log.info("splash: etape finale — Pret")
                 _update_splash(splash, 7, "Pret !", 100)
-                _time.sleep(0.4)
 
-                # Afficher la fenetre principale et detruire le splash
-                main_window.show()
-                _log.info("splash: fenetre principale affichee, splash detruit")
-
-                # Injection JS APRES show() : la window est maintenant visible,
-                # le bus JS-Python est pret, evaluate_js fonctionne.
-                # On laisse 600ms au DOM pour finir de parser avant d ecraser des
-                # variables / classlist.
+                # main_window est deja visible (plus de hidden=True). Attendre
+                # que le DOM soit parse avant d injecter (token + native flag).
+                # Retry x5 avec backoff ; main_window est initialisee mais le
+                # dashboard distant peut prendre 1-2s a finir de charger.
                 if _pending_native_inject:
-                    _time.sleep(0.6)
-                    for _attempt in range(3):
+                    for _attempt in range(5):
+                        _time.sleep(0.4)
                         try:
                             main_window.evaluate_js(_pending_native_inject)
                             _log.info("splash: token + native bootstrap injecte (attempt=%d)", _attempt + 1)
                             break
                         except Exception as _ie:
                             _log.warning("splash: inject attempt %d echouee — %s", _attempt + 1, _ie)
-                            _time.sleep(0.5)
 
+                _log.info("splash: fenetre principale affichee, splash detruit")
                 with contextlib.suppress(Exception):
                     splash.destroy()
 
             except Exception as exc:
                 _log.error("splash: erreur startup — %s", exc)
-                # En cas d'erreur, montrer quand meme la fenetre principale
+                # En cas d'erreur, garantir que la fenetre principale est visible
                 try:
                     if api:
                         api._window = main_window
                         api._notify.set_window(main_window)
-                    main_window.show()
                 except Exception:
                     pass
                 with contextlib.suppress(Exception):
