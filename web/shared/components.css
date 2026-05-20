@@ -2849,6 +2849,144 @@
   color: var(--sev-critical-solid, #b91c1c); font-weight: var(--fw-semibold);
 }
 
+/* ===========================================================
+ * MODAL PERCEPTUELLE — Phase 3.2 (spec 02-modal-perceptuelle.md)
+ * =========================================================== */
+.perceptual-modal-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-4);
+}
+.perceptual-modal {
+  background: var(--surface-1); color: var(--text-1);
+  border-radius: var(--radius-lg); border: 1px solid var(--border-1);
+  max-width: 800px; width: 100%; max-height: 90vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.perceptual-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-4); border-bottom: 1px solid var(--border-1); flex-shrink: 0;
+}
+.perceptual-modal-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0; }
+.perceptual-modal-subtitle { font-weight: var(--fw-regular); color: var(--text-2); margin-left: var(--sp-2); }
+.perceptual-modal-close {
+  background: transparent; border: none; color: var(--text-2); cursor: pointer;
+  font-size: 18px; padding: var(--sp-2);
+}
+.perceptual-modal-close:hover { color: var(--text-1); }
+
+.perceptual-modal-body {
+  flex: 1; overflow-y: auto; padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+}
+.perceptual-modal-state {
+  text-align: center; padding: var(--sp-6) var(--sp-4); align-items: center;
+}
+.perceptual-state-icon { font-size: 48px; margin: 0 0 var(--sp-3); }
+.perceptual-modal-state h3 { margin: 0 0 var(--sp-3); }
+.perceptual-modal-state ul { display: inline-block; text-align: left; margin: var(--sp-2) 0; }
+.perceptual-state-eta { font-style: italic; color: var(--text-2); margin: var(--sp-3) 0; }
+
+.perceptual-section {
+  background: var(--surface-2); border-radius: var(--radius-md);
+  padding: var(--sp-3); border: 1px solid var(--border-1);
+}
+.perceptual-section-title {
+  font-size: var(--fs-md); font-weight: var(--fw-semibold);
+  margin: 0 0 var(--sp-3); color: var(--text-1);
+}
+
+.perceptual-score-grid { display: flex; align-items: center; gap: var(--sp-4); }
+.perceptual-score-circle {
+  width: 100px; height: 100px; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--surface-3, var(--surface-1));
+  border: 3px solid var(--text-3);
+  flex-shrink: 0;
+}
+.perceptual-score-circle--good { border-color: #16a34a; }
+.perceptual-score-circle--warning { border-color: #d97706; }
+.perceptual-score-circle--critical { border-color: #b91c1c; }
+.perceptual-score-value { font-size: 28px; font-weight: var(--fw-bold); }
+.perceptual-score-total { font-size: var(--fs-xs); color: var(--text-2); }
+.perceptual-score-bars { flex: 1; display: flex; flex-direction: column; gap: var(--sp-2); }
+.perceptual-score-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.perceptual-score-label { width: 60px; color: var(--text-2); }
+.perceptual-score-value-sm { color: var(--text-2); font-size: var(--fs-xs); width: 60px; text-align: right; }
+.perceptual-score-tier { color: var(--accent); }
+
+.perceptual-bar {
+  flex: 1; height: 10px; background: var(--surface-3, var(--border-1));
+  border-radius: 5px; overflow: hidden;
+}
+.perceptual-bar-fill { height: 100%; background: var(--accent, #3b82f6); transition: width 0.3s; }
+
+.perceptual-verdict {
+  font-style: italic; color: var(--text-2);
+  margin: var(--sp-2) 0 0; padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-1);
+}
+
+.perceptual-dl { display: grid; grid-template-columns: 200px 1fr; gap: var(--sp-2) var(--sp-3); margin: 0; font-size: var(--fs-sm); }
+.perceptual-dl dt { color: var(--text-2); }
+.perceptual-dl dd { margin: 0; color: var(--text-1); }
+
+.perceptual-audio-fp {
+  background: var(--surface-3, var(--surface-1));
+  padding: var(--sp-2); border-radius: var(--radius-sm); margin-bottom: var(--sp-3);
+  display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap;
+}
+.perceptual-audio-fp-label { font-size: var(--fs-xs); color: var(--text-2); }
+.perceptual-audio-fp-value { font-family: monospace; font-size: var(--fs-xs); word-break: break-all; flex: 1; }
+.perceptual-audio-tracks { margin: 0; padding-left: var(--sp-4); }
+
+.perceptual-breakdown-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.perceptual-breakdown-table th, .perceptual-breakdown-table td {
+  text-align: left; padding: var(--sp-2); border-bottom: 1px solid var(--border-1);
+}
+.perceptual-breakdown-table th { color: var(--text-2); font-weight: var(--fw-semibold); }
+.perceptual-breakdown-points { text-align: right; font-weight: var(--fw-semibold); }
+.perceptual-breakdown-points--total { font-size: var(--fs-md); color: var(--accent); }
+.perceptual-weight { color: var(--text-3); font-size: var(--fs-xs); }
+.perceptual-status {
+  display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill, 999px);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+}
+.perceptual-status--good, .perceptual-status--ok { background: rgba(22, 163, 74, 0.15); color: #16a34a; }
+.perceptual-status--warning { background: rgba(217, 119, 6, 0.15); color: #d97706; }
+.perceptual-status--critical, .perceptual-status--reject { background: rgba(185, 28, 28, 0.15); color: #b91c1c; }
+.perceptual-status--info { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+
+.perceptual-verdicts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.perceptual-verdict-item {
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm);
+  border-left: 3px solid var(--sev-info-solid, #3b82f6);
+  background: var(--sev-info-bg, rgba(59, 130, 246, 0.08));
+  font-size: var(--fs-sm);
+}
+.perceptual-verdict-item--warning {
+  border-left-color: var(--sev-warning-solid, #d97706);
+  background: var(--sev-warning-bg, rgba(217, 119, 6, 0.08));
+}
+.perceptual-verdict-item--critical {
+  border-left-color: var(--sev-critical-solid, #b91c1c);
+  background: var(--sev-critical-bg, rgba(185, 28, 28, 0.08));
+}
+.perceptual-verdict-suggestion { font-style: italic; color: var(--text-2); }
+
+.perceptual-modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-1); flex-shrink: 0;
+  background: var(--surface-2);
+}
+.perceptual-modal-meta { color: var(--text-2); font-size: var(--fs-sm); }
+.perceptual-modal-actions { display: flex; gap: var(--sp-2); }
+.perceptual-empty { color: var(--text-2); font-style: italic; margin: 0 0 var(--sp-3); }
+.perceptual-breakdown-weights { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
+.perceptual-breakdown-weights li { display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); background: var(--surface-3, var(--surface-1)); border-radius: var(--radius-sm); }
+
 /* Analysis tab */
 .v5-film-analysis-empty,
 .v5-film-comparison-empty {
