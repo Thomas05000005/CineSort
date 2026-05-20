@@ -820,21 +820,21 @@ class CineSortApi:
         return {"ok": True, "locale": normalized, "persisted": persisted}
 
     # ---------- V3-05 — Mode démo wizard (premier-run) ----------
-    def start_demo_mode(self) -> Dict[str, Any]:
+    def _start_demo_mode_impl(self) -> Dict[str, Any]:
         """V3-05 : active le mode démo (15 films fictifs + run + plan.jsonl)."""
         result = demo_support.start_demo_mode(self)
         if result.get("ok"):
             self._touch_event()
         return result
 
-    def stop_demo_mode(self) -> Dict[str, Any]:
+    def _stop_demo_mode_impl(self) -> Dict[str, Any]:
         """V3-05 : désactive le mode démo (supprime runs + quality_reports + run_dir)."""
         result = demo_support.stop_demo_mode(self)
         if result.get("ok"):
             self._touch_event()
         return result
 
-    def is_demo_mode_active(self) -> Dict[str, Any]:
+    def _is_demo_mode_active_impl(self) -> Dict[str, Any]:
         """V3-05 : True si au moins un run is_demo est présent en BDD."""
         return {"ok": True, "active": bool(demo_support.is_demo_active(self))}
 
@@ -910,7 +910,7 @@ class CineSortApi:
         _log.info("api: QR code genere pour %s", url)
         return {"ok": True, "svg": svg_str, "url": url}
 
-    def check_for_updates(self) -> Dict[str, Any]:
+    def _check_for_updates_impl(self) -> Dict[str, Any]:
         """V3-12 — Force un check MAJ immediat (bouton "Verifier maintenant").
 
         Ignore le cache existant, interroge GitHub Releases et stocke le
@@ -936,7 +936,7 @@ class CineSortApi:
             pass  # ne pas bloquer le check si la persistence echoue
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
-    def get_update_info(self) -> Dict[str, Any]:
+    def _get_update_info_impl(self) -> Dict[str, Any]:
         """V3-12 — Retourne le dernier resultat connu (cache).
 
         Sert l'info instantanement apres le check au boot. Si le cache est
@@ -1121,7 +1121,7 @@ class CineSortApi:
             return _err_response(str(exc), category="resource", level="error", log_module=__name__)
 
     # ---------- Email ----------
-    def test_email_report(self) -> Dict[str, Any]:
+    def _test_email_report_impl(self) -> Dict[str, Any]:
         """Envoie un email test avec des donnees mock."""
         settings = self._get_settings_impl()
         if not settings.get("email_smtp_host") or not settings.get("email_to"):

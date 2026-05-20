@@ -2,12 +2,13 @@
 
 Cf docs/internal/REFACTOR_PLAN_84.md.
 
-11 methodes du bounded context Integrations :
+12 methodes du bounded context Integrations :
     - TMDb (2) : test_tmdb_key, get_tmdb_posters
     - Jellyfin (3) : test_jellyfin_connection, get_jellyfin_libraries,
                      get_jellyfin_sync_report
     - Plex (3) : test_plex_connection, get_plex_libraries, get_plex_sync_report
     - Radarr (3) : test_radarr_connection, get_radarr_status, request_radarr_upgrade
+    - Email (1) : test_email_report
 
 Strategie Strangler Fig + Adapter pattern :
 - Les 11 methodes existent EN PARALLELE sur CineSortApi (preserve backward-compat)
@@ -153,3 +154,12 @@ class IntegrationsFacade(_BaseFacade):
         Cf CineSortApi._test_omdb_connection_impl pour la doc complete.
         """
         return self._api._test_omdb_connection_impl(api_key=api_key, timeout_s=timeout_s)
+
+    # ---------- Email (1) — Rapports SMTP ----------
+
+    def test_email_report(self) -> Dict[str, Any]:
+        """Envoie un email test avec des donnees mock pour valider la config SMTP.
+
+        Cf CineSortApi._test_email_report_impl pour la doc complete.
+        """
+        return self._api._test_email_report_impl()

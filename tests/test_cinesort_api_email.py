@@ -25,14 +25,14 @@ class TestEmailReport(unittest.TestCase):
     @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_smtp_host_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "", "email_to": "x@y"}
-        result = self.api.test_email_report()
+        result = self.api.integrations.test_email_report()
         self.assertFalse(result["ok"])
         self.assertIn("SMTP", result["message"])
 
     @patch.object(backend.CineSortApi, "_get_settings_impl")
     def test_email_to_missing(self, mock_get_settings: MagicMock) -> None:
         mock_get_settings.return_value = {"email_smtp_host": "smtp.example.com", "email_to": ""}
-        result = self.api.test_email_report()
+        result = self.api.integrations.test_email_report()
         self.assertFalse(result["ok"])
 
     @patch("cinesort.app.email_report.send_email_report")
@@ -43,7 +43,7 @@ class TestEmailReport(unittest.TestCase):
             "email_to": "x@y",
         }
         mock_send.return_value = True
-        result = self.api.test_email_report()
+        result = self.api.integrations.test_email_report()
         self.assertTrue(result["ok"])
         self.assertIn("envoye", result["message"])
         mock_send.assert_called_once()
@@ -59,7 +59,7 @@ class TestEmailReport(unittest.TestCase):
             "email_to": "x@y",
         }
         mock_send.return_value = False
-        result = self.api.test_email_report()
+        result = self.api.integrations.test_email_report()
         self.assertFalse(result["ok"])
         self.assertIn("Echec", result["message"])
 

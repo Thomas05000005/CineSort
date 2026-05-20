@@ -186,7 +186,7 @@ export const SETTINGS_GROUPS = [
         { key: "email_smtp_user", label: "Utilisateur", type: "text", advanced: true },
         // V7-fix R2 : nom backend (etait email_password en v5 = mismatch DPAPI critique).
         { key: "email_smtp_password", label: "Mot de passe", type: "api-key", advanced: true,
-          testMethod: "test_email_report" },
+          testMethod: "integrations/test_email_report" },
         { key: "email_smtp_tls", label: "STARTTLS", type: "toggle", advanced: true },
         { key: "email_to", label: "Destinataire", type: "text" },
         { key: "email_on_scan", label: "Après scan", type: "toggle", advanced: true },

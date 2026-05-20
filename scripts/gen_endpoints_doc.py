@@ -119,7 +119,6 @@ _CATEGORIES: List[Tuple[str, List[str]]] = [
             "get_radarr_status",
             "request_radarr_upgrade",
             "import_watchlist",
-            "test_email_report",
         ],
     ),
     (

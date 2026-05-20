@@ -223,8 +223,9 @@ class EmailEndpointAndUiTests(unittest.TestCase):
         import cinesort.ui.api.cinesort_api as backend
 
         api = backend.CineSortApi()
-        self.assertTrue(hasattr(api, "test_email_report"))
-        self.assertTrue(callable(api.test_email_report))
+        # Migration vers facade integrations (Pass 1 cleanup).
+        self.assertTrue(hasattr(api.integrations, "test_email_report"))
+        self.assertTrue(callable(api.integrations.test_email_report))
 
     def test_ui_section_present(self) -> None:
         root = Path(__file__).resolve().parents[1]

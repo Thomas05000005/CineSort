@@ -49,7 +49,8 @@ class ParityAdditionsTests(unittest.TestCase):
         self.assertIn('id="msgTestEmail"', self.html)
 
     def test_email_test_handler(self):
-        self.assertIn("test_email_report", self.settings_js)
+        # Migration vers facade integrations (Pass 1 cleanup) : route /api/integrations/test_email_report.
+        self.assertIn("integrations/test_email_report", self.settings_js)
 
     # --- Lot 1.3 : quality profile buttons ---
     def test_quality_export_button(self):

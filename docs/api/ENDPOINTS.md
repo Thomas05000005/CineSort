@@ -5,7 +5,7 @@
 
 ## Vue d'ensemble
 
-- **Total endpoints publics** : 32
+- **Total endpoints publics** : 29
 - **Methode HTTP** : `POST /api/{method_name}` avec body JSON
 - **Auth** : `Authorization: Bearer <token>` (token configure dans les Reglages)
 - **Format reponse** : `{"ok": true, ...}` ou `{"ok": false, "message": "..."}`
@@ -15,12 +15,6 @@
 ## Endpoints groupes par categorie
 
 ### 1. Configuration & Settings
-
-#### `POST /api/get_server_info`
-
-**Signature** : `get_server_info() -> Dict[str, Any]`
-
-**Description** : Retourne les infos du serveur REST (IP, port, URL dashboard).
 
 #### `POST /api/get_log_paths`
 
@@ -106,12 +100,6 @@
 
 **Description** : Importe une watchlist CSV et compare avec la bibliotheque locale.
 
-#### `POST /api/test_email_report`
-
-**Signature** : `test_email_report() -> Dict[str, Any]`
-
-**Description** : Envoie un email test avec des donnees mock.
-
 
 ### 8. Library, Films & UI
 
@@ -120,12 +108,6 @@
 **Signature** : `get_dashboard(run_id: str = 'latest') -> Dict[str, Any]`
 
 **Description** : Dashboard d'un run (KPIs, distribution scores, anomalies, timeline).
-
-#### `POST /api/get_dashboard_qr`
-
-**Signature** : `get_dashboard_qr() -> Dict[str, Any]`
-
-**Description** : Retourne un QR code SVG inline pour l'URL du dashboard distant.
 
 #### `POST /api/get_global_stats`
 
