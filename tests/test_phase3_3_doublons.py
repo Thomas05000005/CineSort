@@ -62,8 +62,8 @@ class GroupCardTests(unittest.TestCase):
 
     def test_versions_a_and_b(self) -> None:
         self.assertIn("doublons-version", self.js)
-        self.assertIn("winner === \"a\"", self.js)
-        self.assertIn("winner === \"b\"", self.js)
+        self.assertIn('winner === "a"', self.js)
+        self.assertIn('winner === "b"', self.js)
 
 
 class ToolbarAndFiltersTests(unittest.TestCase):
