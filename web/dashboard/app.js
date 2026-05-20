@@ -496,12 +496,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   // V2-C R4-MEM-5 : purge drafts review.js expires (TTL 30j) — cleanup global au boot.
   try { cleanupExpiredDrafts(); } catch (e) { console.warn("[boot] cleanupExpiredDrafts", e); }
 
+  // CRITIQUE : retirer .hidden de app-shell IMMEDIATEMENT en mode natif,
+  // AVANT toute init async qui pourrait hang (initI18n, cachedGetSettings).
+  // Sans ca, si un await bloque, app-shell reste hidden -> fenetre noire.
+  // En mode natif, il n y a pas de raison d'attendre.
+  if (isNative) {
+    const _appShell = document.getElementById("app-shell");
+    if (_appShell) _appShell.classList.remove("hidden");
+    const _loginView = document.getElementById("view-login");
+    if (_loginView) _loginView.classList.add("hidden");
+  }
+
   startRouter();
 
   // V6-01-fix : initialiser i18n AVANT le mount (sinon t() retourne les cles brutes)
   // Charge fr.json + locale stockee, sans bloquer >500ms.
+  // Promise.race avec timeout : si initI18n hang (network/file), on continue
+  // sans bloquer le rendu du shell.
   try {
-    await initI18n();
+    await Promise.race([
+      initI18n(),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
   } catch (e) {
     console.warn("[boot] initI18n", e);
   }
@@ -513,8 +529,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // et top-bar pas instancies) si setToken a fail silencieusement au boot.
   if (hasToken() || isNative) {
     // V6-01-fix : synchroniser la locale depuis le setting backend si different
+    // Timeout 1.5s : si l'appel API hang, on continue sans bloquer.
     try {
-      const sres = await cachedGetSettings();
+      const sres = await Promise.race([
+        cachedGetSettings(),
+        new Promise((resolve) => setTimeout(() => resolve({ data: {} }), 1500)),
+      ]);
       const backendLocale = (sres && sres.data && sres.data.locale) || "fr";
       if (backendLocale && backendLocale !== "fr") {
         await setLocale(backendLocale);
