@@ -38,16 +38,21 @@ export function decorateWithKbd(target, keys) {
 
 /* --- Catalogue des raccourcis decores ------------------------ */
 
-/** Raccourcis dispatches par dashboard/core/keyboard.js (Alt+1..8). */
+/** Raccourcis dispatches par dashboard/core/keyboard.js (Alt+1..7).
+ *  Phase 2-B : alignes sur les routes FR canoniques exposees par la sidebar
+ *  refonte (cf. _ROUTES dans core/keyboard.js). L'ancienne entree /logs a ete
+ *  supprimee (la vue logs est integree a /parametres#diagnostic et /aide ;
+ *  plus de route dediee). Les anciens slugs anglais (/status, /library, ...)
+ *  restent disponibles en alias retrocompat cote router mais ne sont plus
+ *  cibles pour la decoration `<kbd>`. */
 const SIDEBAR_SHORTCUTS = [
-  { selector: '.nav-btn[data-route="/status"]',   keys: "Alt+1" },
-  { selector: '.nav-btn[data-route="/library"]',  keys: "Alt+2" },
-  { selector: '.nav-btn[data-route="/quality"]',  keys: "Alt+3" },
-  { selector: '.nav-btn[data-route="/jellyfin"]', keys: "Alt+4" },
-  { selector: '.nav-btn[data-route="/plex"]',     keys: "Alt+5" },
-  { selector: '.nav-btn[data-route="/radarr"]',   keys: "Alt+6" },
-  { selector: '.nav-btn[data-route="/logs"]',     keys: "Alt+7" },
-  { selector: '.nav-btn[data-route="/settings"]', keys: "Alt+8" },
+  { selector: '.nav-btn[data-route="/accueil"]',      keys: "Alt+1" },
+  { selector: '.nav-btn[data-route="/traitement"]',   keys: "Alt+2" },
+  { selector: '.nav-btn[data-route="/bibliotheque"]', keys: "Alt+3" },
+  { selector: '.nav-btn[data-route="/qualite"]',      keys: "Alt+4" },
+  { selector: '.nav-btn[data-route="/historique"]',   keys: "Alt+5" },
+  { selector: '.nav-btn[data-route="/parametres"]',   keys: "Alt+6" },
+  { selector: '.nav-btn[data-route="/aide"]',         keys: "Alt+7" },
 ];
 
 /**
