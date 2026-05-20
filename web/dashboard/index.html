@@ -18,6 +18,9 @@
   <!-- v7.6.0 Design System v5 (shared) — charge AVANT les styles legacy -->
   <!-- Dashboard distant : servi par REST via /shared/* (pas ../shared/ car path traversal) -->
   <link rel="stylesheet" href="/shared/tokens.css">
+  <!-- Spec transverse design 100% : typography.css dedie apres tokens.css
+       (utilise les variables --font-*/--fs-*/--fw-* definies dans tokens). -->
+  <link rel="stylesheet" href="/shared/typography.css">
   <link rel="stylesheet" href="/shared/themes.css">
   <link rel="stylesheet" href="/shared/animations.css">
   <link rel="stylesheet" href="/shared/components.css">
