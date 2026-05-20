@@ -65,7 +65,7 @@ _EXCLUDED_METHODS: Set[str] = {
 # l'URL "/api/{facade_name}/{method_name}" en plus des methodes directes
 # (backward-compat preservee jusqu'a la PR 10).
 # Cf docs/internal/REFACTOR_PLAN_84.md.
-_FACADE_ATTR_NAMES: tuple = ("run", "settings", "quality", "integrations", "library")
+_FACADE_ATTR_NAMES: tuple = ("run", "settings", "quality", "integrations", "library", "runtime")
 
 # Separateur dans l'URL pour distinguer facade et methode (ex: "run/start_plan").
 _FACADE_SEPARATOR = "/"

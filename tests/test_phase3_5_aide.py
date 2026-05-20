@@ -103,23 +103,14 @@ class ShortcutsTests(unittest.TestCase):
 
 
 class DiagnosticEndpointsTests(unittest.TestCase):
-    """Phase 3.5 v1 : agrege depuis endpoints existants (server_info + settings + global_stats)."""
+    """Phase 5 : endpoint dedie runtime/get_diagnostic (PR #300)."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _AIDE_JS.read_text(encoding="utf-8")
 
-    def test_uses_get_server_info(self) -> None:
-        self.assertIn('"get_server_info"', self.js)
-
-    def test_uses_settings_get_settings(self) -> None:
-        self.assertIn('"settings/get_settings"', self.js)
-
-    def test_uses_get_global_stats(self) -> None:
-        self.assertIn('"get_global_stats"', self.js)
-
-    def test_promise_all_for_parallel_loading(self) -> None:
-        self.assertIn("Promise.all([", self.js)
+    def test_uses_runtime_get_diagnostic(self) -> None:
+        self.assertIn('"runtime/get_diagnostic"', self.js)
 
 
 class ActionsTests(unittest.TestCase):

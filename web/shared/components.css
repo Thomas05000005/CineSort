@@ -5038,6 +5038,242 @@ body.v5-notif-lock {
   margin: 0 0 var(--sp-3);
 }
 
+/* Recherche dropdown (Phase 5 - spec 12) ------------------------------- */
+.aide-search {
+  position: relative;
+}
+
+.aide-search-results {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  width: 480px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border-2, var(--border-1));
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: var(--sp-2);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.aide-search-results[hidden] {
+  display: none;
+}
+
+.aide-search-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-style: italic;
+  margin: 0;
+  padding: var(--sp-2);
+}
+
+.aide-search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-1);
+  transition: background var(--dur-quick) var(--ease-out);
+}
+
+.aide-search-result:hover,
+.aide-search-result:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+  border-color: var(--border-1);
+}
+
+.aide-search-result-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+}
+
+.aide-search-result-snippet {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-family: var(--font-family-mono, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 4.2em;
+  overflow: hidden;
+}
+
+.aide-search-result-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.aide-search-highlight {
+  background: rgba(250, 204, 21, 0.4);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Drawer documentation (Phase 5 - spec 12) ----------------------------- */
+.aide-doc-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.aide-doc-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.aide-doc-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(640px, 100%);
+  background: var(--surface-1);
+  border-left: 1px solid var(--border-1);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.aide-doc-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--surface-2);
+}
+
+.aide-doc-drawer-title {
+  flex: 1;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-1);
+  margin: 0;
+}
+
+.aide-doc-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--text-1);
+}
+
+.aide-error {
+  color: var(--danger, #ef4444);
+}
+
+/* Mini-markdown renderer (Phase 5) ------------------------------------- */
+.aide-markdown-h1 {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  margin: 0 0 var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.aide-markdown-h2 {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+.aide-markdown-h3 {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  margin: var(--sp-3) 0 var(--sp-2);
+  color: var(--text-1);
+}
+
+.aide-markdown-h4 {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  margin: var(--sp-3) 0 var(--sp-1);
+  color: var(--text-2);
+}
+
+.aide-markdown-p {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-1);
+  margin: 0 0 var(--sp-3);
+}
+
+.aide-markdown-list {
+  padding-left: var(--sp-5);
+  margin: 0 0 var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.aide-markdown-list li {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.aide-markdown-link {
+  color: var(--accent, #60A5FA);
+  text-decoration: underline;
+}
+
+.aide-markdown-link:hover {
+  text-decoration: none;
+}
+
+.aide-markdown-code-inline {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+}
+
+.aide-markdown-code-block {
+  font-family: var(--font-family-mono, monospace);
+  font-size: var(--fs-xs);
+  background: var(--surface-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-1);
+  overflow-x: auto;
+  margin: 0 0 var(--sp-3);
+  white-space: pre;
+}
+
+.aide-markdown-quote {
+  border-left: 3px solid var(--accent, #60A5FA);
+  padding: var(--sp-2) var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+  font-style: italic;
+  background: var(--surface-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.aide-markdown-hr {
+  border: none;
+  border-top: 1px solid var(--border-1);
+  margin: var(--sp-4) 0;
+}
+
 
 /* ===========================================================
  * HISTORIQUE — Phase 3.4 (spec 09-historique.md)
