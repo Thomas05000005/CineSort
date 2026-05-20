@@ -1,23 +1,24 @@
-/* views/qualite.js — Phase 3.4 (spec 10-qualite.md) — Vue Qualité audit transverse.
+/* views/qualite.js — Phase 5 (spec 10-qualite.md) — Vue Qualité complète.
  *
  * 6 sections (spec §1) :
  *  1. Distribution qualité (bargraph 5 tiers)
- *  2. À remplacer en priorité (top 8 mini-posters Reject)
- *  3. Sagas incomplètes
- *  4. Subs FR manquants (count + lien)
- *  5. Décennies (histogramme horizontal)
- *  6. Évolution 30j (graphique line + KPIs delta)
+ *  2. À remplacer en priorité (grille 4×2 mini-posters Reject)
+ *  3. Sagas incomplètes (cards + barre progression + lien TMDb)
+ *  4. Subs FR manquants (banner)
+ *  5. Décennies (histogramme horizontal cliquable)
+ *  6. Évolution (graphique SVG line/area + KPIs delta + filtre période)
  *
- * + Filtres globaux (décennie / genre / source / audio / période) — placeholder
- * + Action "Re-calculer scores" — placeholder (action longue, modale conf)
+ * + Drawer filtres globaux (décennie / genre / source / audio / période)
+ * + Action "Re-calculer scores" (dangerConfirmModal + polling toast)
+ * + Inspecteur droit contextuel par section sélectionnée
  *
- * Pour la PR initiale, sections 1 / 4 / 6 sont câblées sur les endpoints existants
- * (get_global_stats). Les 4 autres (Reject top, sagas, décennies, évolution KPIs)
- * sont des placeholders qui pointent vers les endpoints backend à créer :
- *   - quality/get_films_by_tier
- *   - library/get_incomplete_sagas
- *   - library/get_films_by_decade
- *   - quality/get_history(period)
+ * Tous les endpoints sont consommés depuis PR #304 :
+ *   - quality/get_films_by_tier(tier, limit)
+ *   - library/get_incomplete_sagas()
+ *   - library/get_films_by_decade(filters)  (fallback : get_global_stats.by_decade)
+ *   - quality/get_history(period_days)
+ *   - quality/recompute_all_scores()
+ *   - quality/get_recompute_job_status(job_id)
  *
  * Route cible : /qualite (Phase 2-B PR #261).
  */
@@ -27,6 +28,9 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
+import { dangerConfirmModal } from "../components/modal.js";
+import { showToast } from "../components/toast.js";
+import { openQualiteFiltersDrawer, emptyFilters } from "../components/qualite-filters-drawer.js";
 
 /* --- Tier order + labels --------------------------------------------- */
 
@@ -39,6 +43,24 @@ const _TIER_LABELS = {
   reject: "Reject",
 };
 
+/* --- Module state ---------------------------------------------------- */
+// État interne, recyclé par re-render (filtres globaux + section sélectionnée
+// pour l'inspecteur droit + cache des données chargées).
+const _state = {
+  stats: null,
+  rejectFilms: [],     // top 8 Reject
+  sagas: [],           // sagas incomplètes
+  history: null,       // { points, delta_score, delta_films, delta_reject, period_days }
+  byDecade: {},        // { "1930": 12, ... }
+  filters: emptyFilters(),
+  inspectorSection: "overview",
+  inspectorPayload: null,  // payload spécifique (tier / film / saga / décennie)
+  recomputeJobId: null,
+  recomputePollTimer: null,
+};
+
+/* --- Normalize helpers ----------------------------------------------- */
+
 function _normalizeTierDist(rawDist) {
   const out = {};
   for (const [k, v] of Object.entries(rawDist || {})) {
@@ -48,7 +70,6 @@ function _normalizeTierDist(rawDist) {
 }
 
 function _resolveTierDist(stats) {
-  // Priorite v2 si non vide, sinon legacy tier_distribution.
   if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
     const v2 = _normalizeTierDist(stats.v2_tier_distribution.counts);
     const v2sum = _TIER_ORDER.reduce((s, t) => s + (v2[t] || 0), 0);
@@ -56,6 +77,18 @@ function _resolveTierDist(stats) {
   }
   if (stats && stats.tier_distribution) return _normalizeTierDist(stats.tier_distribution);
   return {};
+}
+
+function _resolveData(res) {
+  // apiPost retourne {status, data}; data contient {ok, ...}.
+  if (!res) return null;
+  if (res.data) return res.data;
+  return res;
+}
+
+function _isOk(res) {
+  const d = _resolveData(res);
+  return !!(d && d.ok !== false);
 }
 
 /* --- Renderers ------------------------------------------------------- */
@@ -85,7 +118,15 @@ function _renderHeader(stats) {
   const avgScore = (stats && stats.summary && stats.summary.avg_score) || 0;
   const dist = _resolveTierDist(stats);
   const totalScored = _TIER_ORDER.reduce((s, t) => s + (dist[t] || 0), 0);
-  const healthPct = totalScored > 0 ? Math.round(((dist.platinum + dist.gold + dist.silver) / totalScored) * 100) : 0;
+  const healthPct = totalScored > 0
+    ? Math.round(((dist.platinum + dist.gold + dist.silver) / totalScored) * 100)
+    : 0;
+
+  const activeFilterCount = (_state.filters.decades.length
+    + _state.filters.genres.length
+    + _state.filters.sources.length
+    + _state.filters.audio_languages.length);
+
   return `
     <header class="qualite-header">
       <h1 class="qualite-title">Qualité — Audit de la bibliothèque</h1>
@@ -95,7 +136,9 @@ function _renderHeader(stats) {
         Santé globale <strong>${healthPct}%</strong>
       </p>
       <div class="qualite-controls" role="toolbar" aria-label="Actions Qualité">
-        <button type="button" class="v5-btn v5-btn--secondary" data-qualite-action="filters">▾ Filtres globaux</button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-qualite-action="filters">
+          ▾ Filtres globaux${activeFilterCount > 0 ? ` <span class="qualite-filter-badge">${activeFilterCount}</span>` : ""}
+        </button>
         <button type="button" class="v5-btn v5-btn--ghost" data-qualite-action="recompute">↻ Re-calculer les scores</button>
       </div>
     </header>
@@ -118,7 +161,7 @@ function _renderDistributionSection(stats) {
     const count = dist[t] || 0;
     const pct = total > 0 ? Math.round((count / total) * 100) : 0;
     return `
-      <div class="qualite-tier-row" data-qualite-tier="${escapeHtml(t)}">
+      <div class="qualite-tier-row" data-qualite-tier="${escapeHtml(t)}" role="button" tabindex="0">
         <span class="qualite-tier-label">${escapeHtml(_TIER_LABELS[t])}</span>
         <div class="qualite-tier-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <span class="qualite-tier-fill qualite-tier-fill--${escapeHtml(t)}" style="width:${pct}%"></span>
@@ -136,51 +179,130 @@ function _renderDistributionSection(stats) {
   `;
 }
 
-/* Section 2 — À remplacer en priorité (top 8 Reject) */
+/* Section 2 — À remplacer en priorité (top 8 Reject) — Phase 5 */
 function _renderRejectSection(stats) {
   const dist = _resolveTierDist(stats);
   const count = dist.reject || 0;
+  const films = Array.isArray(_state.rejectFilms) ? _state.rejectFilms : [];
+
+  if (count === 0) {
+    return `
+      <section class="qualite-section qualite-reject" aria-labelledby="qualite-reject-title">
+        <h2 id="qualite-reject-title" class="qualite-section-title">🔴 À remplacer en priorité</h2>
+        <p class="qualite-empty-msg">Aucun Reject — bravo !</p>
+      </section>
+    `;
+  }
+
+  const cards = films.slice(0, 8).map((f, idx) => {
+    const rowId = String(f.row_id || "");
+    const title = String(f.title || "(sans titre)");
+    const year = f.year ? Number(f.year) : null;
+    const score = f.score_v2 != null ? Math.round(Number(f.score_v2)) : null;
+    const poster = f.poster_url || "";
+    const warningsCount = Array.isArray(f.warnings) ? f.warnings.length : 0;
+    return `
+      <button type="button" class="qualite-reject-card" data-qualite-reject-card="${escapeHtml(rowId)}" data-qualite-reject-index="${idx}" aria-label="${escapeHtml(title)} (${year || "?"})">
+        <div class="qualite-reject-poster">
+          ${poster
+            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" />`
+            : `<div class="qualite-reject-poster-empty" aria-hidden="true">🎬</div>`}
+          ${score != null ? `<span class="qualite-reject-score" title="Score V2">${score}</span>` : ""}
+        </div>
+        <div class="qualite-reject-meta">
+          <span class="qualite-reject-title">${escapeHtml(title)}</span>
+          <span class="qualite-reject-year">${year || "—"}</span>
+          ${warningsCount > 0 ? `<span class="qualite-reject-warnings">⚠ ${warningsCount}</span>` : ""}
+        </div>
+      </button>
+    `;
+  }).join("");
+
   return `
     <section class="qualite-section qualite-reject" aria-labelledby="qualite-reject-title">
       <h2 id="qualite-reject-title" class="qualite-section-title">🔴 À remplacer en priorité <span class="qualite-section-meta">${count} films Reject</span></h2>
-      <p class="qualite-placeholder">
-        Liste des 8 films au pire score V2 à venir (endpoint backend <code>quality/get_films_by_tier("reject", limit=8)</code> à créer).
-        En attendant : <a href="#/bibliotheque?filter=tier_reject" class="link-primary">voir tous les Reject dans la Bibliothèque</a>.
-      </p>
+      ${films.length > 0
+        ? `<div class="qualite-reject-grid">${cards}</div>`
+        : `<p class="qualite-empty-msg">Chargement des films Reject…</p>`}
+      <div class="qualite-actions">
+        <a href="#/bibliotheque?filter=tier_reject" class="v5-btn v5-btn--ghost">→ Voir tous les Reject (${count})</a>
+      </div>
     </section>
   `;
 }
 
-/* Section 3 — Sagas incomplètes (lit librarian.suggestions[sagas]) */
-function _renderSagasSection(stats) {
-  const lsugs = stats && stats.librarian && stats.librarian.suggestions;
-  const sagaSug = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || "").includes("saga")) : null;
-  const count = sagaSug && sagaSug.count != null ? Number(sagaSug.count) : null;
+/* Section 3 — Sagas incomplètes — Phase 5 */
+function _renderSagasSection() {
+  const sagas = Array.isArray(_state.sagas) ? _state.sagas : [];
+  if (sagas.length === 0) {
+    return `
+      <section class="qualite-section qualite-sagas" aria-labelledby="qualite-sagas-title">
+        <h2 id="qualite-sagas-title" class="qualite-section-title">⚠️ Sagas incomplètes</h2>
+        <p class="qualite-empty-msg">Aucune saga incomplète détectée.</p>
+      </section>
+    `;
+  }
+
+  const cards = sagas.slice(0, 12).map((saga, idx) => {
+    const cid = saga.collection_id ? Number(saga.collection_id) : null;
+    const name = String(saga.name || "Saga sans nom");
+    const total = Number(saga.total_films_in_collection || 0);
+    const owned = Number(saga.owned_count || 0);
+    const missing = Number(saga.missing_count || 0);
+    const pct = total > 0 ? Math.round((owned / total) * 100) : 0;
+    const missingFilms = Array.isArray(saga.missing_films) ? saga.missing_films : [];
+    const ownedFilms = Array.isArray(saga.owned_films) ? saga.owned_films : [];
+
+    const missingPreview = missingFilms.slice(0, 3).map((f) => {
+      const t = String(f.title || "?");
+      const y = f.year ? Number(f.year) : null;
+      return `<li>${escapeHtml(t)}${y ? ` <span class="qualite-saga-year">(${y})</span>` : ""}</li>`;
+    }).join("");
+    const moreMissing = missingFilms.length > 3
+      ? `<li class="qualite-saga-more">… et ${missingFilms.length - 3} autre${missingFilms.length - 3 > 1 ? "s" : ""}</li>`
+      : "";
+
+    return `
+      <article class="qualite-saga-card" data-qualite-saga-index="${idx}" tabindex="0">
+        <header class="qualite-saga-header">
+          <h3 class="qualite-saga-name">${escapeHtml(name)}</h3>
+          <span class="qualite-saga-counts">${owned} / ${total} <span class="qualite-saga-missing-pill">${missing} manquant${missing > 1 ? "s" : ""}</span></span>
+        </header>
+        <div class="qualite-saga-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${pct}% complet">
+          <span class="qualite-saga-progress-fill" style="width:${pct}%"></span>
+        </div>
+        ${missingPreview ? `
+          <details class="qualite-saga-details">
+            <summary>Voir les films manquants (${missingFilms.length})</summary>
+            <ul class="qualite-saga-list qualite-saga-list--missing">${missingPreview}${moreMissing}</ul>
+            ${ownedFilms.length > 0 ? `
+              <p class="qualite-saga-owned-title">Présents (${ownedFilms.length}) :</p>
+              <ul class="qualite-saga-list qualite-saga-list--owned">${ownedFilms.slice(0, 3).map((f) => `<li>${escapeHtml(String(f.title || "?"))}${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""}</li>`).join("")}${ownedFilms.length > 3 ? `<li class="qualite-saga-more">… et ${ownedFilms.length - 3} autre${ownedFilms.length - 3 > 1 ? "s" : ""}</li>` : ""}</ul>
+            ` : ""}
+          </details>
+        ` : ""}
+        <div class="qualite-saga-actions">
+          ${cid
+            ? `<a href="https://www.themoviedb.org/collection/${cid}" target="_blank" rel="noopener noreferrer" class="v5-btn v5-btn--ghost qualite-saga-tmdb">→ Voir sur TMDb</a>`
+            : `<span class="qualite-saga-no-tmdb">Pas d'ID TMDb</span>`}
+        </div>
+      </article>
+    `;
+  }).join("");
+
   return `
     <section class="qualite-section qualite-sagas" aria-labelledby="qualite-sagas-title">
-      <h2 id="qualite-sagas-title" class="qualite-section-title">
-        ⚠️ Sagas incomplètes
-        ${count != null ? `<span class="qualite-section-meta">${count} saga${count > 1 ? "s" : ""}</span>` : ""}
-      </h2>
-      ${count != null && count > 0 ? `
-        <p>${escapeHtml(sagaSug.message || `${count} sagas ont des films manquants.`)}</p>
-        ${sagaSug.details ? `<p class="qualite-placeholder">${escapeHtml(sagaSug.details)}</p>` : ""}
-        <div class="qualite-actions">
-          <a href="#/bibliotheque?filter=sagas_incomplete" class="v5-btn v5-btn--secondary">→ Voir dans Bibliothèque</a>
-        </div>
-      ` : `
-        <p class="qualite-placeholder">Aucune saga incomplète détectée (ou stats non disponibles).</p>
-      `}
+      <h2 id="qualite-sagas-title" class="qualite-section-title">⚠️ Sagas incomplètes <span class="qualite-section-meta">${sagas.length} saga${sagas.length > 1 ? "s" : ""}</span></h2>
+      <div class="qualite-saga-cards">${cards}</div>
     </section>
   `;
 }
 
-/* Section 4 — Subs FR manquants */
+/* Section 4 — Subs FR manquants (banner) */
 function _renderSubsSection(stats) {
   const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
   const subsInsight = insights.find((i) => String(i.type || i.code || "").includes("subs_missing"));
   const count = subsInsight && subsInsight.count != null ? Number(subsInsight.count) : null;
-  // Fallback sur librarian (suggestion id="subs_missing").
   const lsugs = stats && stats.librarian && stats.librarian.suggestions;
   const subsLs = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || "").includes("subs_missing")) : null;
   const finalCount = count != null ? count : (subsLs && subsLs.count != null ? Number(subsLs.count) : null);
@@ -200,17 +322,19 @@ function _renderSubsSection(stats) {
   `;
 }
 
-/* Section 5 — Décennies (lit stats.by_decade si dispo) */
+/* Section 5 — Décennies (histogramme cliquable) — Phase 5 */
 function _renderDecadesSection(stats) {
-  const byDecade = stats && (stats.by_decade || (stats.summary && stats.summary.by_decade));
-  if (!byDecade || typeof byDecade !== "object") {
+  // Priorise byDecade depuis l'endpoint dédié (get_films_by_decade)
+  // sinon fallback sur stats.by_decade (enrichi par get_global_stats).
+  const fromState = _state.byDecade && Object.keys(_state.byDecade).length > 0 ? _state.byDecade : null;
+  const fromStats = stats && (stats.by_decade || (stats.summary && stats.summary.by_decade));
+  const byDecade = fromState || fromStats;
+
+  if (!byDecade || typeof byDecade !== "object" || Object.keys(byDecade).length === 0) {
     return `
       <section class="qualite-section qualite-decades" aria-labelledby="qualite-decades-title">
         <h2 id="qualite-decades-title" class="qualite-section-title">📅 Décennies</h2>
-        <p class="qualite-placeholder">
-          Histogramme par décennie indisponible — l'agrégation backend
-          <code>by_decade</code> n'a pas encore été exposée dans <code>get_global_stats</code>.
-        </p>
+        <p class="qualite-empty-msg">Aucune donnée par décennie disponible.</p>
       </section>
     `;
   }
@@ -218,18 +342,20 @@ function _renderDecadesSection(stats) {
     .filter(([d]) => d && d !== "unknown")
     .sort(([a], [b]) => String(a).localeCompare(String(b)));
   const maxN = entries.reduce((m, [, v]) => Math.max(m, Number(v) || 0), 0);
+
   return `
     <section class="qualite-section qualite-decades" aria-labelledby="qualite-decades-title">
-      <h2 id="qualite-decades-title" class="qualite-section-title">📅 Décennies</h2>
+      <h2 id="qualite-decades-title" class="qualite-section-title">📅 Décennies <span class="qualite-section-meta">${entries.length} décennie${entries.length > 1 ? "s" : ""}</span></h2>
       <div class="qualite-decades-list">
         ${entries.map(([decade, n]) => {
-          const pct = maxN > 0 ? Math.round((Number(n) / maxN) * 100) : 0;
+          const count = Number(n) || 0;
+          const pct = maxN > 0 ? Math.round((count / maxN) * 100) : 0;
           return `
-            <a href="#/bibliotheque?filter=decade_${escapeHtml(decade)}" class="qualite-decade-row">
-              <span class="qualite-decade-label">${escapeHtml(decade)}s</span>
+            <button type="button" class="qualite-decade-row" data-qualite-decade="${escapeHtml(decade)}">
+              <span class="qualite-decade-label">${escapeHtml(decade)}s : ${count}</span>
               <div class="qualite-decade-bar"><span class="qualite-decade-fill" style="width:${pct}%"></span></div>
-              <span class="qualite-decade-count">${escapeHtml(String(n))}</span>
-            </a>
+              <span class="qualite-decade-count">${count}</span>
+            </button>
           `;
         }).join("")}
       </div>
@@ -237,31 +363,74 @@ function _renderDecadesSection(stats) {
   `;
 }
 
-/* Section 6 — Évolution 30j */
-function _renderEvolutionSection(stats) {
-  const trend = Array.isArray(stats && stats.trend_30days) ? stats.trend_30days : [];
-  const validPoints = trend.filter((p) => p && p.avg_score != null);
-  const first = validPoints[0];
-  const last = validPoints[validPoints.length - 1];
-  let deltaTxt = "—";
-  let deltaIcon = "→";
-  if (first && last) {
-    const delta = Math.round((Number(last.avg_score) - Number(first.avg_score)) * 10) / 10;
-    deltaTxt = `${delta >= 0 ? "+" : ""}${delta}`;
-    deltaIcon = delta > 0 ? "📈" : delta < 0 ? "📉" : "→";
-  }
+/* Section 6 — Évolution (SVG line + KPIs delta + filtre période) — Phase 5 */
+function _renderEvolutionSection() {
+  const hist = _state.history;
+  const period = (hist && hist.period_days) || _state.filters.period_days || 30;
+  const points = Array.isArray(hist && hist.points) ? hist.points : [];
+  const validPoints = points.filter((p) => p && p.avg_score != null);
+
+  const deltaScore = hist && hist.delta_score != null ? Number(hist.delta_score) : 0;
+  const deltaFilms = hist && hist.delta_films != null ? Number(hist.delta_films) : 0;
+  const deltaReject = hist && hist.delta_reject != null ? Number(hist.delta_reject) : 0;
+
+  const fmtDelta = (v) => `${v > 0 ? "+" : ""}${v}`;
+  const iconFor = (v, inverted = false) => {
+    if (v === 0) return "→";
+    const positive = inverted ? v < 0 : v > 0;
+    return positive ? "📈" : "📉";
+  };
+
+  const chartSvg = _renderEvolutionChart(validPoints);
+
+  const periodBtns = [7, 30, 90, 0].map((p) => {
+    const active = Number(p) === Number(period) ? "qualite-period-btn--active" : "";
+    const label = p === 0 ? "Tout" : `${p}j`;
+    return `<button type="button" class="qualite-period-btn ${active}" data-qualite-period="${p}">${label}</button>`;
+  }).join("");
+
   return `
     <section class="qualite-section qualite-evolution" aria-labelledby="qualite-evolution-title">
-      <h2 id="qualite-evolution-title" class="qualite-section-title">📈 Évolution (30 derniers jours)</h2>
+      <h2 id="qualite-evolution-title" class="qualite-section-title">
+        📈 Évolution
+        <span class="qualite-section-meta">${period === 0 ? "Tout l'historique" : `${period} derniers jours`}</span>
+      </h2>
+      <div class="qualite-period-switch" role="tablist" aria-label="Période d'évolution">${periodBtns}</div>
       <dl class="qualite-evolution-kpis">
-        <div><dt>Δ Score moyen</dt><dd>${escapeHtml(deltaTxt)} ${deltaIcon}</dd></div>
-        <div><dt>Points de mesure</dt><dd>${validPoints.length}</dd></div>
+        <div><dt>Δ Score moyen</dt><dd>${fmtDelta(deltaScore)} ${iconFor(deltaScore)}</dd></div>
+        <div><dt>Δ Films classifiés</dt><dd>${fmtDelta(deltaFilms)} ${iconFor(deltaFilms)}</dd></div>
+        <div><dt>Δ Reject</dt><dd class="${deltaReject < 0 ? "qualite-kpi-good" : (deltaReject > 0 ? "qualite-kpi-bad" : "")}">${fmtDelta(deltaReject)} ${iconFor(deltaReject, true)}</dd></div>
       </dl>
-      <p class="qualite-placeholder">
-        Le graphique line/area complet et les KPIs delta films/reject sont à venir
-        (endpoint <code>quality/get_history(period)</code> à créer).
-      </p>
+      <div class="qualite-evolution-chart">${chartSvg}</div>
+      ${validPoints.length === 0
+        ? `<p class="qualite-empty-msg">Aucune mesure disponible sur la période.</p>`
+        : `<p class="qualite-evolution-caption">${validPoints.length} points de mesure entre ${escapeHtml(validPoints[0].date || "")} et ${escapeHtml(validPoints[validPoints.length - 1].date || "")}</p>`}
     </section>
+  `;
+}
+
+function _renderEvolutionChart(validPoints) {
+  if (!Array.isArray(validPoints) || validPoints.length === 0) {
+    return `<svg class="qualite-evolution-svg" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="20" x2="100" y2="20" stroke="var(--text-2)" stroke-dasharray="2 2"/></svg>`;
+  }
+  const w = 100;
+  const h = 40;
+  const pad = 2;
+  const xs = validPoints.map((p, i) => pad + (i / Math.max(1, validPoints.length - 1)) * (w - pad * 2));
+  const ys = validPoints.map((p) => Number(p.avg_score) || 0);
+  const minY = Math.min(...ys, 0);
+  const maxY = Math.max(...ys, 100);
+  const range = Math.max(1, maxY - minY);
+  const toSvgY = (v) => pad + (1 - (Number(v) - minY) / range) * (h - pad * 2);
+  const pts = xs.map((x, i) => `${x.toFixed(2)},${toSvgY(ys[i]).toFixed(2)}`);
+  const lineD = "M " + pts.join(" L ");
+  const areaD = lineD + ` L ${xs[xs.length - 1].toFixed(2)},${h - pad} L ${xs[0].toFixed(2)},${h - pad} Z`;
+  return `
+    <svg class="qualite-evolution-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Graphique d'évolution du score moyen">
+      <path d="${areaD}" fill="var(--accent)" fill-opacity="0.15"/>
+      <path d="${lineD}" fill="none" stroke="var(--accent)" stroke-width="0.8" stroke-linejoin="round"/>
+      ${pts.map((p) => `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="0.7" fill="var(--accent)"/>`).join("")}
+    </svg>
   `;
 }
 
@@ -271,45 +440,15 @@ function _renderQualite(stats) {
       ${_renderHeader(stats)}
       ${_renderDistributionSection(stats)}
       ${_renderRejectSection(stats)}
-      ${_renderSagasSection(stats)}
+      ${_renderSagasSection()}
       ${_renderSubsSection(stats)}
       ${_renderDecadesSection(stats)}
-      ${_renderEvolutionSection(stats)}
+      ${_renderEvolutionSection()}
     </section>
   `;
 }
 
 /* --- Inspector content (spec §5) -------------------------------------- */
-
-function _buildInspectorSections(stats) {
-  const dist = _resolveTierDist(stats);
-  const total = _TIER_ORDER.reduce((s, t) => s + (dist[t] || 0), 0);
-  return [
-    {
-      title: "Vue d'ensemble",
-      html: `
-        <dl class="qualite-inspector-dl">
-          <div><dt>Films classés</dt><dd>${total}</dd></div>
-          <div><dt>Score moyen</dt><dd>${(stats && stats.summary && stats.summary.avg_score) || "—"}/100</dd></div>
-          <div><dt>Tier dominant</dt><dd>${_TIER_LABELS[_dominantTier(dist)] || "—"}</dd></div>
-        </dl>
-      `,
-    },
-    {
-      title: "Détail par section",
-      html: `
-        <p class="qualite-empty-msg">Clique sur une barre Distribution ou une décennie pour voir le détail du tier ou de l'époque sélectionnés.</p>
-      `,
-    },
-    {
-      title: "Action longue",
-      html: `
-        <button type="button" class="v5-btn v5-btn--ghost" data-qualite-action="recompute" style="width:100%">↻ Re-calculer tous les scores</button>
-        <p class="qualite-empty-msg" style="margin-top:var(--sp-2);">Utile après modification du profil qualité (Paramètres > Profils Qualité). Durée : 5-10 minutes.</p>
-      `,
-    },
-  ];
-}
 
 function _dominantTier(dist) {
   let max = -1;
@@ -321,12 +460,199 @@ function _dominantTier(dist) {
   return dom;
 }
 
-function _updateInspector(stats) {
+function _buildInspectorSections() {
+  const stats = _state.stats || {};
+  const dist = _resolveTierDist(stats);
+  const total = _TIER_ORDER.reduce((s, t) => s + (dist[t] || 0), 0);
+  const overview = {
+    title: "Vue d'ensemble",
+    html: `
+      <dl class="qualite-inspector-dl">
+        <div><dt>Films classés</dt><dd>${total}</dd></div>
+        <div><dt>Score moyen</dt><dd>${(stats.summary && stats.summary.avg_score) || "—"}/100</dd></div>
+        <div><dt>Tier dominant</dt><dd>${_TIER_LABELS[_dominantTier(dist)] || "—"}</dd></div>
+      </dl>
+    `,
+  };
+
+  let contextual = null;
+  switch (_state.inspectorSection) {
+    case "distribution": {
+      const tier = _state.inspectorPayload && _state.inspectorPayload.tier;
+      const tierLabel = tier ? _TIER_LABELS[tier] || tier : "?";
+      // Top 10 / bottom 10 reposent sur cache _state.rejectFilms si tier=reject,
+      // sinon on annonce un chargement à la demande.
+      const films = (_state.inspectorPayload && _state.inspectorPayload.films) || [];
+      contextual = {
+        title: `Tier ${escapeHtml(tierLabel)}`,
+        html: films.length > 0
+          ? `<ul class="qualite-inspector-list">${films.slice(0, 10).map((f) => `<li><strong>${escapeHtml(String(f.title || "?"))}</strong>${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""} <span class="qualite-inspector-score">${f.score_v2 != null ? Math.round(Number(f.score_v2)) : "—"}/100</span></li>`).join("")}</ul>`
+          : `<p class="qualite-empty-msg">Aucun film dans ce tier.</p>`,
+      };
+      break;
+    }
+    case "reject_card": {
+      const film = _state.inspectorPayload && _state.inspectorPayload.film;
+      if (film) {
+        const warningsList = Array.isArray(film.warnings) && film.warnings.length > 0
+          ? `<ul class="qualite-inspector-warnings">${film.warnings.slice(0, 5).map((w) => `<li>${escapeHtml(String(w))}</li>`).join("")}</ul>`
+          : `<p class="qualite-empty-msg">Aucun warning</p>`;
+        contextual = {
+          title: escapeHtml(String(film.title || "Film")),
+          html: `
+            <dl class="qualite-inspector-dl">
+              <div><dt>Année</dt><dd>${film.year || "—"}</dd></div>
+              <div><dt>Score V2</dt><dd>${film.score_v2 != null ? Math.round(Number(film.score_v2)) + "/100" : "—"}</dd></div>
+              <div><dt>Tier</dt><dd>${escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")}</dd></div>
+            </dl>
+            <p class="qualite-inspector-warnings-title">Warnings :</p>
+            ${warningsList}
+            <div class="qualite-actions">
+              <button type="button" class="v5-btn v5-btn--primary" data-qualite-action="open-film" data-qualite-row-id="${escapeHtml(String(film.row_id || ""))}">Ouvrir la fiche détail</button>
+            </div>
+          `,
+        };
+      }
+      break;
+    }
+    case "saga": {
+      const saga = _state.inspectorPayload && _state.inspectorPayload.saga;
+      if (saga) {
+        const owned = Array.isArray(saga.owned_films) ? saga.owned_films : [];
+        const missing = Array.isArray(saga.missing_films) ? saga.missing_films : [];
+        const cid = saga.collection_id;
+        contextual = {
+          title: escapeHtml(String(saga.name || "Saga")),
+          html: `
+            <p>${owned.length} possédés · ${missing.length} manquants</p>
+            <p class="qualite-inspector-warnings-title">Possédés :</p>
+            <ul class="qualite-inspector-list">${owned.slice(0, 10).map((f) => `<li>${escapeHtml(String(f.title || "?"))}${f.year ? ` (${Number(f.year)})` : ""}</li>`).join("")}</ul>
+            <p class="qualite-inspector-warnings-title">Manquants :</p>
+            <ul class="qualite-inspector-list">${missing.slice(0, 10).map((f) => `<li>${escapeHtml(String(f.title || "?"))}${f.year ? ` (${Number(f.year)})` : ""}</li>`).join("")}</ul>
+            ${cid ? `<div class="qualite-actions"><a href="https://www.themoviedb.org/collection/${Number(cid)}" target="_blank" rel="noopener noreferrer" class="v5-btn v5-btn--ghost">→ TMDb</a></div>` : ""}
+          `,
+        };
+      }
+      break;
+    }
+    case "decade": {
+      const decade = _state.inspectorPayload && _state.inspectorPayload.decade;
+      const count = (_state.byDecade && _state.byDecade[decade]) || 0;
+      contextual = {
+        title: `Décennie ${escapeHtml(String(decade || "?"))}s`,
+        html: `
+          <p><strong>${count}</strong> film${count > 1 ? "s" : ""} de cette décennie.</p>
+          <div class="qualite-actions">
+            <a href="#/bibliotheque?filter=decade_${escapeHtml(String(decade || ""))}" class="v5-btn v5-btn--ghost">→ Voir dans Bibliothèque</a>
+          </div>
+        `,
+      };
+      break;
+    }
+    case "evolution": {
+      const hist = _state.history;
+      const rows = Array.isArray(hist && hist.points) ? hist.points : [];
+      contextual = {
+        title: "Historique des mesures",
+        html: rows.length > 0
+          ? `<table class="qualite-inspector-table"><thead><tr><th>Date</th><th>Score</th><th>Films</th></tr></thead><tbody>${rows.slice(-15).map((p) => `<tr><td>${escapeHtml(p.date || "")}</td><td>${p.avg_score != null ? Math.round(Number(p.avg_score)) : "—"}</td><td>${p.count_films != null ? Number(p.count_films) : "—"}</td></tr>`).join("")}</tbody></table>`
+          : `<p class="qualite-empty-msg">Aucun point disponible.</p>`,
+      };
+      break;
+    }
+    default:
+      contextual = {
+        title: "Détail par section",
+        html: `<p class="qualite-empty-msg">Clique sur un tier, un Reject, une saga, une décennie ou la section Évolution pour voir le détail ici.</p>`,
+      };
+  }
+
+  return [
+    overview,
+    contextual,
+    {
+      title: "Action longue",
+      html: `
+        <button type="button" class="v5-btn v5-btn--ghost" data-qualite-action="recompute" style="width:100%">↻ Re-calculer tous les scores</button>
+        <p class="qualite-empty-msg" style="margin-top:var(--sp-2);">Utile après modification du profil qualité (Paramètres &gt; Profils Qualité). Durée : 5-10 minutes.</p>
+      `,
+    },
+  ];
+}
+
+function _updateInspector() {
   if (typeof rightPanel.setSections !== "function") return;
   try {
-    rightPanel.setSections(_buildInspectorSections(stats));
+    rightPanel.setSections(_buildInspectorSections());
   } catch (err) {
     console.warn("[qualite] setSections inspector failed:", err);
+  }
+}
+
+/* --- Data loaders ----------------------------------------------------- */
+
+async function _loadRejectFilms(signal) {
+  try {
+    const res = await apiPost("quality/get_films_by_tier", { tier: "reject", limit: 8 }, { signal });
+    const data = _resolveData(res);
+    if (data && data.ok !== false && Array.isArray(data.films)) {
+      _state.rejectFilms = data.films;
+    } else {
+      _state.rejectFilms = [];
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") throw err;
+    console.warn("[qualite] get_films_by_tier failed:", err);
+    _state.rejectFilms = [];
+  }
+}
+
+async function _loadSagas(signal) {
+  try {
+    const res = await apiPost("library/get_incomplete_sagas", {}, { signal });
+    const data = _resolveData(res);
+    if (data && data.ok !== false && Array.isArray(data.sagas)) {
+      _state.sagas = data.sagas;
+    } else {
+      _state.sagas = [];
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") throw err;
+    console.warn("[qualite] get_incomplete_sagas failed:", err);
+    _state.sagas = [];
+  }
+}
+
+async function _loadByDecade(signal, filters) {
+  try {
+    const payload = filters && Object.keys(filters).length > 0 ? { filters } : {};
+    const res = await apiPost("library/get_films_by_decade", payload, { signal });
+    const data = _resolveData(res);
+    if (data && data.ok !== false && data.by_decade) {
+      _state.byDecade = data.by_decade;
+    } else {
+      _state.byDecade = {};
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") throw err;
+    console.warn("[qualite] get_films_by_decade failed:", err);
+    _state.byDecade = {};
+  }
+}
+
+async function _loadHistory(signal, periodDays) {
+  try {
+    const res = await apiPost("quality/get_history", { period_days: Number(periodDays) || 30 }, { signal });
+    const data = _resolveData(res);
+    if (data && data.ok !== false) {
+      _state.history = data;
+    } else {
+      _state.history = null;
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") throw err;
+    console.warn("[qualite] get_history failed:", err);
+    _state.history = null;
   }
 }
 
@@ -339,32 +665,232 @@ function _bindEvents(container) {
       const action = btn.dataset.qualiteAction;
       switch (action) {
         case "filters":
-          // PR future : drawer de filtres globaux.
-          alert("Filtres globaux (décennie / genre / source / audio / période) : à implémenter en PR future.");
+          _openFiltersDrawer(container);
           break;
         case "recompute":
-          // Action dangereuse (longue) : modale de confirmation à créer.
-          alert("Re-calcul des scores (5-10 min) : modale de confirmation + JobRunner à implémenter en PR future.");
+          _confirmRecompute();
           break;
         case "configure-subs":
           navigateTo("/parametres#analyse-subs");
           break;
+        case "open-film": {
+          const rid = btn.dataset.qualiteRowId;
+          if (rid) navigateTo(`/film/${encodeURIComponent(rid)}`);
+          break;
+        }
         default:
           break;
       }
     });
   });
-  // Clic sur tier bar -> navigation vers Bibliothèque filtrée
+
+  // Clic sur tier bar -> sélection inspecteur + navigation Bibliothèque
   container.querySelectorAll("[data-qualite-tier]").forEach((row) => {
-    row.addEventListener("click", () => {
+    const handler = (navAlso) => {
       const tier = row.dataset.qualiteTier;
-      navigateTo(`/bibliotheque?filter=tier_${encodeURIComponent(tier)}`);
+      _state.inspectorSection = "distribution";
+      _state.inspectorPayload = { tier, films: tier === "reject" ? _state.rejectFilms : [] };
+      _updateInspector();
+      if (navAlso) {
+        navigateTo(`/bibliotheque?filter=tier_${encodeURIComponent(tier)}`);
+      }
+    };
+    row.addEventListener("click", () => handler(true));
+    row.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        handler(true);
+      }
     });
     row.style.cursor = "pointer";
   });
 
+  // Clic sur card Reject -> inspecteur (mode C) ; navigation /film/:id si dispo
+  container.querySelectorAll("[data-qualite-reject-card]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const idx = Number(card.dataset.qualiteRejectIndex);
+      const film = _state.rejectFilms[idx];
+      if (!film) return;
+      _state.inspectorSection = "reject_card";
+      _state.inspectorPayload = { film };
+      _updateInspector();
+      // Ouverture inline via /film/:id (sinon inspecteur seul affiche les details)
+      if (film.row_id) {
+        navigateTo(`/film/${encodeURIComponent(film.row_id)}`);
+      }
+    });
+  });
+
+  // Clic sur saga card -> inspecteur
+  container.querySelectorAll("[data-qualite-saga-index]").forEach((card) => {
+    card.addEventListener("click", (ev) => {
+      // Ne pas trigger si clic sur lien TMDb interne
+      if (ev.target && (ev.target.closest("a") || ev.target.closest("details") || ev.target.closest("summary"))) {
+        return;
+      }
+      const idx = Number(card.dataset.qualiteSagaIndex);
+      const saga = _state.sagas[idx];
+      if (!saga) return;
+      _state.inspectorSection = "saga";
+      _state.inspectorPayload = { saga };
+      _updateInspector();
+    });
+  });
+
+  // Clic sur décennie -> inspecteur + nav
+  container.querySelectorAll("[data-qualite-decade]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const decade = row.dataset.qualiteDecade;
+      _state.inspectorSection = "decade";
+      _state.inspectorPayload = { decade };
+      _updateInspector();
+      navigateTo(`/bibliotheque?filter=decade_${encodeURIComponent(decade)}`);
+    });
+  });
+
+  // Switch période (Évolution)
+  container.querySelectorAll("[data-qualite-period]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const newPeriod = Number(btn.dataset.qualitePeriod);
+      _state.filters.period_days = newPeriod;
+      const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
+      await _loadHistory(signal, newPeriod);
+      _rerender(container);
+      _state.inspectorSection = "evolution";
+      _updateInspector();
+    });
+  });
+
+  // Click sur section Evolution (whole) -> inspecteur historique tableau
+  const evoSection = container.querySelector(".qualite-evolution");
+  if (evoSection) {
+    evoSection.addEventListener("click", (ev) => {
+      // N'override pas si clic sur bouton interne
+      if (ev.target && (ev.target.closest("[data-qualite-period]") || ev.target.closest("[data-qualite-action]"))) return;
+      _state.inspectorSection = "evolution";
+      _state.inspectorPayload = null;
+      _updateInspector();
+    });
+  }
+
   const retryBtn = container.querySelector("[data-qualite-retry]");
   if (retryBtn) retryBtn.addEventListener("click", () => initQualite(container));
+}
+
+/* --- Filters drawer --------------------------------------------------- */
+
+function _openFiltersDrawer(container) {
+  openQualiteFiltersDrawer({
+    initial: _state.filters,
+    onReset: () => {
+      _state.filters = emptyFilters();
+    },
+    onApply: async (newFilters) => {
+      _state.filters = newFilters;
+      const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
+      // Re-charger les sections impactees par les filtres
+      try {
+        await Promise.all([
+          _loadByDecade(signal, newFilters),
+          _loadHistory(signal, newFilters.period_days || 30),
+        ]);
+      } catch (_e) { /* abort */ }
+      _rerender(container);
+      showToast({ type: "info", text: "Filtres appliqués", duration: 2000 });
+    },
+  });
+}
+
+/* --- Recompute ------------------------------------------------------- */
+
+function _confirmRecompute() {
+  const total = (_state.stats && _state.stats.summary && _state.stats.summary.total_films) || 0;
+  const eta = total > 0 ? `Durée estimée : ~${Math.max(1, Math.round(total / 100))} minute${total > 100 ? "s" : ""}` : "Durée estimée : 5-10 minutes";
+
+  dangerConfirmModal({
+    title: "Re-calculer tous les scores ?",
+    consequence: `Cette opération va re-scorer ${total > 0 ? total + " " : ""}films classés à partir du profil de qualité actuel. ${eta}. Aucune modification sur les fichiers du disque. Réversible.`,
+    confirmLabel: "Lancer le re-calcul",
+    cancelLabel: "Annuler",
+    countdownSeconds: 0,
+    onConfirm: async () => {
+      await _startRecompute();
+    },
+  });
+}
+
+async function _startRecompute() {
+  let res;
+  try {
+    res = await apiPost("quality/recompute_all_scores", {});
+  } catch (err) {
+    showToast({ type: "error", text: `Re-calcul impossible : ${err && err.message ? err.message : err}` });
+    return;
+  }
+  const data = _resolveData(res);
+  if (!data || data.ok === false) {
+    showToast({ type: "error", text: (data && (data.message || data.error)) || "Re-calcul impossible" });
+    return;
+  }
+  const jobId = data.job_id;
+  const total = data.total || 0;
+  _state.recomputeJobId = jobId;
+  showToast({ type: "info", text: `Re-calcul lancé (${total} films)`, duration: 2500 });
+  _pollRecompute(jobId, total);
+}
+
+function _pollRecompute(jobId, total) {
+  if (_state.recomputePollTimer) {
+    clearInterval(_state.recomputePollTimer);
+    _state.recomputePollTimer = null;
+  }
+  const tick = async () => {
+    let res;
+    try {
+      res = await apiPost("quality/get_recompute_job_status", { job_id: jobId });
+    } catch (err) {
+      console.warn("[qualite] poll recompute err:", err);
+      return;
+    }
+    const data = _resolveData(res);
+    if (!data || data.ok === false) {
+      clearInterval(_state.recomputePollTimer);
+      _state.recomputePollTimer = null;
+      showToast({ type: "error", text: (data && (data.message || data.error)) || "Polling impossible" });
+      return;
+    }
+    const status = data.status;
+    const progress = Number(data.progress || 0);
+    const totalJob = Number(data.total || total || 0);
+    if (status === "running" || status === "pending") {
+      showToast({ type: "info", text: `Re-calcul ${progress}/${totalJob}…`, duration: 1500 });
+      return;
+    }
+    // Terminé
+    clearInterval(_state.recomputePollTimer);
+    _state.recomputePollTimer = null;
+    if (status === "done") {
+      showToast({ type: "success", text: `✓ Scores re-calculés (${progress}/${totalJob})`, duration: 4500 });
+    } else if (status === "failed") {
+      showToast({ type: "error", text: `Re-calcul échoué : ${data.error || "erreur inconnue"}` });
+    } else if (status === "cancelled") {
+      showToast({ type: "warn", text: "Re-calcul annulé" });
+    } else {
+      showToast({ type: "info", text: `Re-calcul ${status}` });
+    }
+  };
+  _state.recomputePollTimer = setInterval(tick, 2000);
+  // Tick immédiat pour fluidité
+  tick();
+}
+
+/* --- Rerender helper ------------------------------------------------- */
+
+function _rerender(container) {
+  if (!container) return;
+  container.innerHTML = _renderQualite(_state.stats || {});
+  _bindEvents(container);
+  _updateInspector();
 }
 
 /* --- Entrypoint ------------------------------------------------------- */
@@ -374,6 +900,7 @@ export async function initQualite(container) {
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
 
+  // 1) get_global_stats : socle
   let res = null;
   try {
     res = await apiPost("get_global_stats", {}, { signal });
@@ -383,18 +910,51 @@ export async function initQualite(container) {
     _bindEvents(container);
     return;
   }
-  if (!res || res.ok === false) {
-    container.innerHTML = _renderError((res && (res.message || res.error)) || "Erreur de chargement.");
+  if (!_isOk(res)) {
+    const data = _resolveData(res);
+    container.innerHTML = _renderError((data && (data.message || data.error)) || "Erreur de chargement.");
     _bindEvents(container);
     return;
   }
+  _state.stats = _resolveData(res);
 
-  const stats = res.data || res;
-  container.innerHTML = _renderQualite(stats);
-  _bindEvents(container);
-  _updateInspector(stats);
+  // 2) Endpoints supplémentaires en parallèle (silent fail individuel)
+  try {
+    await Promise.allSettled([
+      _loadRejectFilms(signal),
+      _loadSagas(signal),
+      _loadByDecade(signal, _state.filters),
+      _loadHistory(signal, _state.filters.period_days || 30),
+    ]);
+  } catch (err) {
+    if (err && err.name === "AbortError") return;
+  }
+
+  _rerender(container);
 }
 
 export function unmountQualite() {
-  /* Pas d'etat global a reinitialiser. */
+  if (_state.recomputePollTimer) {
+    clearInterval(_state.recomputePollTimer);
+    _state.recomputePollTimer = null;
+  }
+  _state.recomputeJobId = null;
+  _state.inspectorSection = "overview";
+  _state.inspectorPayload = null;
 }
+
+/* --- Test hooks (exportés pour tests Phase 5) ------------------------ */
+// Permet aux tests unitaires de vérifier l'état sans toucher au DOM.
+export const __testing__ = {
+  state: _state,
+  TIER_ORDER: _TIER_ORDER,
+  TIER_LABELS: _TIER_LABELS,
+  resolveTierDist: _resolveTierDist,
+  renderEvolutionChart: _renderEvolutionChart,
+  renderRejectSection: _renderRejectSection,
+  renderSagasSection: _renderSagasSection,
+  renderDecadesSection: _renderDecadesSection,
+  renderEvolutionSection: _renderEvolutionSection,
+  renderHeader: _renderHeader,
+  buildInspectorSections: _buildInspectorSections,
+};

@@ -5136,6 +5136,89 @@ body.v5-notif-lock {
 .qualite-decade-bar { background: var(--surface-2); height: 10px; border-radius: 5px; overflow: hidden; }
 .qualite-decade-fill { display: block; height: 100%; background: var(--accent); }
 .qualite-decade-count { text-align: right; font-weight: var(--fw-semibold); }
+.qualite-decade-row { background: none; border: none; cursor: pointer; width: 100%; text-align: left; }
+.qualite-decade-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ===========================================================
+ * QUALITE — Phase 5 (spec 10-qualite.md) — sections completes
+ * =========================================================== */
+.qualite-filter-badge { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: var(--radius-pill, 999px); background: var(--accent); color: var(--text-on-accent, #fff); font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; margin-left: 4px; }
+
+/* Section 2 — Reject grid */
+.qualite-reject-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); }
+@media (max-width: 720px) { .qualite-reject-grid { grid-template-columns: repeat(2, 1fr); } }
+.qualite-reject-card { display: flex; flex-direction: column; gap: var(--sp-1); background: var(--surface-2); border: 1px solid var(--border-1); border-radius: var(--radius-md); padding: var(--sp-2); cursor: pointer; text-align: left; transition: transform 0.15s, border-color 0.15s; font: inherit; color: inherit; }
+.qualite-reject-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.qualite-reject-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qualite-reject-poster { position: relative; aspect-ratio: 2 / 3; width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-3, var(--surface-2)); }
+.qualite-reject-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.qualite-reject-poster-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: var(--text-2); }
+.qualite-reject-score { position: absolute; bottom: 4px; right: 4px; background: rgba(185, 28, 28, 0.92); color: #fff; font-size: var(--fs-xs); font-weight: var(--fw-semibold); padding: 2px 6px; border-radius: var(--radius-sm); }
+.qualite-reject-meta { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
+.qualite-reject-title { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-1); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.qualite-reject-year { font-size: var(--fs-xs); color: var(--text-2); }
+.qualite-reject-warnings { font-size: var(--fs-xs); color: #d4a017; }
+
+/* Section 3 — Sagas */
+.qualite-saga-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
+.qualite-saga-card { background: var(--surface-2); border: 1px solid var(--border-1); border-radius: var(--radius-md); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); cursor: pointer; }
+.qualite-saga-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qualite-saga-header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.qualite-saga-name { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-1); margin: 0; }
+.qualite-saga-counts { font-size: var(--fs-sm); color: var(--text-2); }
+.qualite-saga-missing-pill { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--radius-pill, 999px); background: #b45309; color: #fff; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.qualite-saga-progress { background: var(--surface-3, var(--surface-1)); height: 10px; border-radius: 5px; overflow: hidden; }
+.qualite-saga-progress-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #34d399); transition: width 0.3s; }
+.qualite-saga-details { font-size: var(--fs-sm); color: var(--text-2); }
+.qualite-saga-details summary { cursor: pointer; color: var(--accent); margin-bottom: var(--sp-1); }
+.qualite-saga-list { list-style: none; padding-left: 0; margin: var(--sp-1) 0; display: flex; flex-direction: column; gap: 2px; }
+.qualite-saga-list--missing li { color: var(--text-1); }
+.qualite-saga-list--owned li { color: var(--text-2); }
+.qualite-saga-year { color: var(--text-2); font-size: var(--fs-xs); }
+.qualite-saga-more { font-style: italic; color: var(--text-2); }
+.qualite-saga-owned-title { margin: var(--sp-2) 0 var(--sp-1); font-weight: var(--fw-semibold); color: var(--text-2); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+.qualite-saga-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: auto; }
+.qualite-saga-no-tmdb { font-size: var(--fs-xs); color: var(--text-2); font-style: italic; }
+
+/* Section 6 — Evolution */
+.qualite-period-switch { display: flex; gap: var(--sp-1); margin-bottom: var(--sp-3); background: var(--surface-2); border-radius: var(--radius-md); padding: 4px; width: max-content; }
+.qualite-period-btn { background: none; border: none; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); color: var(--text-2); border-radius: var(--radius-sm); cursor: pointer; font: inherit; transition: background 0.15s, color 0.15s; }
+.qualite-period-btn:hover { color: var(--text-1); }
+.qualite-period-btn--active { background: var(--surface-1); color: var(--text-1); font-weight: var(--fw-semibold); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+.qualite-evolution-chart { width: 100%; height: 160px; background: var(--surface-2); border-radius: var(--radius-md); padding: var(--sp-2); margin-bottom: var(--sp-2); }
+.qualite-evolution-svg { width: 100%; height: 100%; display: block; }
+.qualite-evolution-caption { font-size: var(--fs-xs); color: var(--text-2); margin: 0; text-align: center; }
+.qualite-kpi-good { color: #16a34a; }
+.qualite-kpi-bad { color: #b91c1c; }
+
+/* Inspector helpers (right panel) */
+.qualite-inspector-list { list-style: none; padding-left: 0; margin: var(--sp-1) 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--text-1); }
+.qualite-inspector-list li { padding: 2px 0; border-bottom: 1px solid var(--border-1); }
+.qualite-inspector-list li:last-child { border-bottom: none; }
+.qualite-inspector-score { float: right; font-weight: var(--fw-semibold); color: var(--text-2); font-size: var(--fs-xs); }
+.qualite-inspector-warnings-title { font-size: var(--fs-xs); color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; margin: var(--sp-2) 0 var(--sp-1); }
+.qualite-inspector-warnings { list-style: disc; padding-left: var(--sp-4); margin: 0; font-size: var(--fs-sm); color: var(--text-1); }
+.qualite-inspector-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.qualite-inspector-table th { text-align: left; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 6px; border-bottom: 1px solid var(--border-1); }
+.qualite-inspector-table td { padding: 4px 6px; border-bottom: 1px solid var(--border-1); color: var(--text-1); }
+.qualite-inspector-table tr:last-child td { border-bottom: none; }
+
+/* Drawer filtres globaux */
+.qualite-drawer-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1000; }
+.qualite-drawer-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); }
+.qualite-drawer { position: absolute; top: 0; right: 0; height: 100vh; width: min(420px, 100vw); background: var(--surface-1); border-left: 1px solid var(--border-1); display: flex; flex-direction: column; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15); animation: qualite-drawer-slide 0.2s ease-out; }
+@keyframes qualite-drawer-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.qualite-drawer-header { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border-1); }
+.qualite-drawer-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-1); margin: 0; }
+.qualite-drawer-close { background: none; border: none; font-size: 1.5rem; color: var(--text-2); cursor: pointer; padding: 0 var(--sp-1); line-height: 1; }
+.qualite-drawer-close:hover { color: var(--text-1); }
+.qualite-drawer-body { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.qualite-drawer-group { border: 1px solid var(--border-1); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); }
+.qualite-drawer-group legend { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-1); padding: 0 var(--sp-1); }
+.qualite-drawer-checks { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); margin-top: var(--sp-2); }
+.qualite-drawer-check { display: flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--text-1); cursor: pointer; }
+.qualite-drawer-check input { margin: 0; cursor: pointer; }
+.qualite-drawer-footer { display: flex; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-1); background: var(--surface-2); }
 
 /* ===========================================================
  * TRAITEMENT — Phase 3.3 (spec 08-traitement.md)
