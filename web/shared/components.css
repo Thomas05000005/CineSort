@@ -7774,6 +7774,8 @@ body.v5-notif-lock {
 .film-detail--mode-A .film-detail-actions .v5-btn {
   width: 100%;
   justify-content: flex-start;
+}
+
 /* ============================================================================
  * Doublons — refonte v1 (spec 01-doublons.md)
  *   Poster TMDb sur cartes, inspecteur droit, modal Comparateur 3 onglets
