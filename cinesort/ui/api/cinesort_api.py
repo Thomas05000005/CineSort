@@ -2492,3 +2492,63 @@ class CineSortApi:
     def _search_docs_impl(self, query: str) -> Dict[str, Any]:
         """Recherche full-text dans tous les documents whitelistes."""
         return runtime_support.search_docs(self, query)
+
+    def _get_app_version_impl(self) -> Dict[str, Any]:
+        """Retourne la version applicative + metadonnees build pour l'ecran About.
+
+        Source de verite : fichier `VERSION` a la racine (lu au demarrage dans
+        `self._app_version`). Inclut aussi `build_date` (mtime du fichier
+        VERSION), `git_sha` (best-effort via `git rev-parse`, vide si indispo
+        ex. installation packagee sans .git), et `python_version`.
+
+        Endpoint dedie pour about.js (cf web/dashboard/views/about.js).
+        Cle "version" = ce que about.js consomme ; les autres champs enrichissent
+        l'affichage sans casser la backward-compat si absents.
+
+        Returns:
+            {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
+        """
+        # Imports locaux : evite de polluer le top-level pour un endpoint
+        # ponctuel (subprocess lourd, sys/datetime non utilises au module-level).
+        import datetime as _dt  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        version = str(getattr(self, "_app_version", "") or "unknown")
+
+        # build_date : mtime du fichier VERSION (date ISO UTC). Best-effort.
+        build_date = ""
+        try:
+            version_file = Path(__file__).resolve().parents[3] / "VERSION"
+            if version_file.is_file():
+                mtime = version_file.stat().st_mtime
+                build_date = _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
+        except (OSError, ValueError):
+            pass
+
+        # git_sha : court (7 chars), best-effort. Vide si pas un repo git ou git absent.
+        git_sha = ""
+        try:
+            repo_root = Path(__file__).resolve().parents[3]
+            if (repo_root / ".git").exists():
+                result = subprocess.run(  # noqa: S603 - args fixes, pas d'injection
+                    ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],  # noqa: S607
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    git_sha = result.stdout.strip()
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+
+        python_version = ".".join(str(x) for x in sys.version_info[:3])
+
+        return {
+            "ok": True,
+            "version": version,
+            "build_date": build_date,
+            "git_sha": git_sha,
+            "python_version": python_version,
+        }

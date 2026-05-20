@@ -2,11 +2,12 @@
 
 Cf docs/internal/design/refonte_2026_05_17/screens/12-aide.md.
 
-4 endpoints exposes pour l'ecran Aide :
+5 endpoints exposes pour les ecrans Aide / About :
     - get_diagnostic : bloc texte complet (version, Python, DB, integrations...)
     - get_recent_logs : N dernieres lignes du log courant (cap a 1000)
     - get_doc : lecture d'un markdown whiteliste (anti path traversal)
     - search_docs : recherche full-text dans les docs publiques
+    - get_app_version : version + build_date + git_sha + python_version (ecran About)
 
 Strategie : meme pattern Strangler Fig + Adapter que les autres facades.
 Les methodes existent EN PARALLELE sur CineSortApi via `_X_impl()` pour
@@ -17,6 +18,7 @@ Usage frontend :
     api.runtime.get_recent_logs(limit=100)
     api.runtime.get_doc("user-guide")
     api.runtime.search_docs("score V2")
+    api.runtime.get_app_version()
 """
 
 from __future__ import annotations
@@ -57,3 +59,13 @@ class RuntimeFacade(_BaseFacade):
         Cf CineSortApi._search_docs_impl pour la doc complete.
         """
         return self._api._search_docs_impl(query)
+
+    def get_app_version(self) -> Dict[str, Any]:
+        """Retourne la version applicative + metadonnees build pour l'ecran About.
+
+        Cf CineSortApi._get_app_version_impl pour la doc complete.
+
+        Returns:
+            {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
+        """
+        return self._api._get_app_version_impl()

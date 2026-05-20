@@ -2,8 +2,9 @@
  *
  * Port ES module du desktop. Utilise showModal du dashboard pour rendre la modale.
  *
- * NOTE : les endpoints get_app_version / open_logs_dir n'existent pas (V1-12).
- * Fallback : version hardcoded + path logs affiche pour copie manuelle.
+ * Branche sur l'endpoint facade `runtime/get_app_version` qui retourne
+ * version + build_date + git_sha + python_version. Fallback gracieux
+ * "version indisponible" si l'API echoue (offline, backend indispo).
  */
 
 import { showModal, closeModal } from "../components/modal.js";
@@ -36,7 +37,7 @@ function _ensureStyle() {
 
 const PROJECT_GITHUB_URL = "https://github.com/PLACEHOLDER/cinesort";
 const PROJECT_ISSUES_URL = `${PROJECT_GITHUB_URL}/issues`;
-const FALLBACK_VERSION = "7.6.0-dev"; // TODO: remplacer par apiPost("get_app_version") une fois expose
+const FALLBACK_VERSION_LABEL = "version indisponible";
 const LOGS_PATH_HINT = "%LOCALAPPDATA%\\CineSort\\logs\\cinesort.log";
 const DEPENDENCIES_TOP5 = [
   { name: "pywebview", license: "BSD-3-Clause", role: "interface graphique embarquee" },
@@ -46,19 +47,24 @@ const DEPENDENCIES_TOP5 = [
   { name: "onnxruntime", license: "MIT", role: "moteur ML LPIPS (analyse perceptuelle)" },
 ];
 
-async function _readAppVersion() {
-  // Tente d'appeler l'endpoint REST si jamais expose un jour.
+async function _readAppInfo() {
+  // Endpoint facade : runtime/get_app_version (cf RuntimeFacade.get_app_version).
+  // Retourne { version, build_date, git_sha, python_version }. Fallback gracieux
+  // si l'API echoue (offline, backend down, route absente sur ancienne version).
   try {
-    const res = await apiPost("get_app_version", {});
-    if (res && typeof res === "object") {
-      const v = res.version || res.app_version || res.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
+    const res = await apiPost("runtime/get_app_version", {});
+    if (res && typeof res === "object" && res.ok !== false) {
+      return {
+        version: typeof res.version === "string" && res.version.trim() ? res.version.trim() : "",
+        build_date: typeof res.build_date === "string" ? res.build_date.trim() : "",
+        git_sha: typeof res.git_sha === "string" ? res.git_sha.trim() : "",
+        python_version: typeof res.python_version === "string" ? res.python_version.trim() : "",
+      };
     }
-    if (typeof res === "string" && res.trim()) return res.trim();
   } catch (err) {
-    console.warn("[about] get_app_version unavailable, using fallback", err);
+    console.warn("[about] runtime/get_app_version unavailable, using fallback", err);
   }
-  return FALLBACK_VERSION;
+  return { version: "", build_date: "", git_sha: "", python_version: "" };
 }
 
 function _depsHtml() {
@@ -67,8 +73,18 @@ function _depsHtml() {
   }).join("");
 }
 
-function _bodyHtml(version) {
-  const v = escapeHtml(version || FALLBACK_VERSION);
+function _versionMetaHtml(info) {
+  const parts = [];
+  if (info && info.build_date) parts.push(`build ${escapeHtml(info.build_date)}`);
+  if (info && info.git_sha) parts.push(`commit ${escapeHtml(info.git_sha)}`);
+  if (info && info.python_version) parts.push(`Python ${escapeHtml(info.python_version)}`);
+  if (!parts.length) return "";
+  return `<div class="text-muted font-sm mt-1" data-testid="about-version-meta">${parts.join(" · ")}</div>`;
+}
+
+function _bodyHtml(info) {
+  const safeInfo = info || { version: "", build_date: "", git_sha: "", python_version: "" };
+  const v = escapeHtml(safeInfo.version || FALLBACK_VERSION_LABEL);
   const issuesHref = escapeHtml(PROJECT_ISSUES_URL);
   const repoHref = escapeHtml(PROJECT_GITHUB_URL);
   const logsPath = escapeHtml(LOGS_PATH_HINT);
@@ -76,6 +92,7 @@ function _bodyHtml(version) {
     <section class="about-section">
       <h4 class="about-section__title">Version</h4>
       <p class="about-version" data-testid="about-version">CineSort <strong>${v}</strong></p>
+      ${_versionMetaHtml(safeInfo)}
     </section>
 
     <section class="about-section">
@@ -136,21 +153,22 @@ function _hookCopyLogs() {
  */
 export async function openAboutModal() {
   _ensureStyle();
-  // Affiche d'abord avec la valeur de fallback pour ne pas bloquer
+  // Affiche d'abord un placeholder vide pour ne pas bloquer (UX progressive).
+  const placeholder = { version: "", build_date: "", git_sha: "", python_version: "" };
   showModal({
     title: "A propos de CineSort",
-    body: _bodyHtml(FALLBACK_VERSION),
+    body: _bodyHtml(placeholder),
     actions: [
       { label: "Fermer", cls: "btn--primary", onClick: () => closeModal() },
     ],
   });
   _hookCopyLogs();
-  // Puis raffraichit la version asynchrone
-  const version = await _readAppVersion();
-  if (version && version !== FALLBACK_VERSION) {
+  // Puis recupere les vraies infos via la facade runtime (try/catch dans _readAppInfo).
+  const info = await _readAppInfo();
+  if (info && (info.version || info.build_date || info.git_sha || info.python_version)) {
     const body = document.querySelector("#dashModal .modal-body");
     if (body) {
-      body.innerHTML = _bodyHtml(version);
+      body.innerHTML = _bodyHtml(info);
       _hookCopyLogs();
     }
   }
