@@ -189,6 +189,21 @@ export function markIntegrationState(itemId, enabled, label) {
   }
 }
 
+/** Phase 5 (spec 05 §3) — Dimmer/restaurer un item de la sidebar.
+ *  Utilisé par l'Accueil pour griser l'entrée "Traitement" si aucun run actif.
+ *  L'item reste cliquable (accessibilité), mais visuellement atténué.
+ */
+export function setItemDimmed(itemId, dimmed, title) {
+  const el = document.querySelector(`.v5-sidebar-item[data-route="${itemId}"]`);
+  if (!el) return;
+  el.classList.toggle("v5-sidebar-item--dimmed", !!dimmed);
+  if (dimmed && title) {
+    el.setAttribute("data-dim-title", title);
+  } else {
+    el.removeAttribute("data-dim-title");
+  }
+}
+
 /** V1-13 — Affiche un badge "•" sur l'item Parametres si MAJ dispo. */
 export function setUpdateBadge(itemId, available, latestVersion) {
   const el = document.querySelector(`.v5-sidebar-item[data-route="${itemId}"]`);
