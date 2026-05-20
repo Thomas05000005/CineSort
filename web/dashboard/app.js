@@ -211,10 +211,6 @@ registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init:
 registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: (el, opts) => { initTraitement(el, opts); return unmountTraitement; } });
 // Phase 3.2 : /bibliotheque cable la nouvelle vue (squelette pour cette PR).
 registerRoute("/bibliotheque", { view: "view-library", guard: requireAuth, init: (el, opts) => { initBibliotheque(el, opts); return unmountBibliotheque; } });
-registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: initProcessing });
-// /qualite : audit qualite seul (sans onglet integrations/journal). Reutilise la
-// vue QIJ avec tab=quality jusqu'a ce que la Phase 3.4 porte la vue dediee.
-registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
 // Phase 3.4 : /historique cable la nouvelle vue Historique refondue (spec 09).
 // La vue cherche un mount point #view-historique ; on garde view-qij comme
 // container car le view-historique n'existe pas dans le DOM, et initHistorique
@@ -222,9 +218,6 @@ registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opt
 registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initHistorique(el, opts); return unmountHistorique; } });
 // Phase 3.4 : /qualite cable la nouvelle vue Qualité refondue (spec 10).
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQualite(el, opts); return unmountQualite; } });
-// /historique : journal des runs seul. Reutilise la vue QIJ avec tab=journal
-// jusqu'a ce que la Phase 3.4 porte la vue dediee.
-registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "journal" }); return unmountQij; } });
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 // Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
