@@ -1,8 +1,8 @@
 /* components/omdb-status.js — Phase OMDb (spec 03-settings-omdb §3).
  *
  * Helper de rendu pour les 6 états du test de connexion OMDb. Utilisé par
- * `views/settings.js` (bloc complet) ET `views/parametres.js` (rendu compact
- * dans la catégorie Intégrations).
+ * `views/parametres.js` (rendu compact dans la catégorie Intégrations).
+ * Anciennement utilisé aussi par `views/settings.js` (vue legacy v4, supprimée).
  *
  * Les 6 états documentés (cf spec) :
  *   1. vide              : aucune clé saisie         → message d'invite

@@ -115,14 +115,14 @@ import { initQuality } from "./views/quality.js";        // /quality
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
 // Traitement "agir : scan/review/apply"). Avant : /processing aliasait
 // /library, donc deux onglets sidebar montraient la meme chose.
-import { initProcessing } from "../views/processing.js"; // /processing
+import { initProcessing } from "./views/processing.js"; // /processing
 // V7-fusion Phase 3 : vue QIJ consolidee remplace 5 vues separees
 // (quality + logs + jellyfin + plex + radarr). Routes legacy gardees en alias.
 // V2-C R4-MEM-4 : import des unmount* exposes pour cleanup au navigate.
 import { initQij, unmountQij } from "./views/qij.js"; // /qij + alias /quality /logs /jellyfin /plex /radarr
-import { initSettings, unmountSettings } from "./views/settings.js"; // /settings (dashboard v4 complet, 15 sections, legacy)
 // Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
-// 10 categories. Active sur /parametres ; /settings garde l'ancienne pour retrocompat.
+// 10 categories. Active sur /parametres ; /settings reste en alias retrocompat
+// (redirige vers /parametres en preservant le fragment de section).
 import { initParametres, unmountParametres } from "./views/parametres.js"; // /parametres (nouvelle UI)
 import { initHelp as initHelpV4 } from "./views/help.js"; // /help (FAQ v4, legacy)
 // Phase 3.5 (spec 12-aide.md) : nouvelle vue Aide refondue (5 sections + recherche).
@@ -146,7 +146,7 @@ import { initTraitement, unmountTraitement } from "./views/traitement.js"; // /t
 import { initBibliotheque, unmountBibliotheque } from "./views/bibliotheque.js"; // /bibliotheque
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
-import { initFilmDetail } from "../views/film-detail.js"; // /film/:id (pas de page v4)
+import { initFilmDetail } from "./views/film-detail.js"; // /film/:id (pas de page v4)
 
 // === Helpers UI legacy preserves ===
 import { initKeyboard } from "./core/keyboard.js";
@@ -185,7 +185,18 @@ registerRoute("/processing", { view: "view-processing", guard: requireAuth, init
 // V2-C R4-MEM-4 : init() retourne le unmount pour que le router l'appelle au navigate.
 registerRoute("/qij", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, opts); return unmountQij; } });
 registerRoute("/quality", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQij(el, { ...opts, tab: "quality" }); return unmountQij; } });
-registerRoute("/settings", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initSettings(el, opts); return unmountSettings; } });
+// Alias retrocompat : /settings (vue legacy v4) redirige vers /parametres en
+// preservant le fragment de section (ex: #/settings#email -> #/parametres#email).
+// La vue settings.js a ete supprimee : tout son contenu fonctionnel est porte
+// dans parametres.js (cf commit 76e756a + chore /settings -> /parametres).
+registerRoute("/settings", { view: "view-settings", guard: requireAuth, init: (el, opts) => {
+  // Hash courant : "#/settings" ou "#/settings#email" ; on extrait le fragment.
+  const currentHash = (typeof window !== "undefined" && window.location && window.location.hash) || "";
+  const sectionMatch = currentHash.match(/^#\/settings(?:#(.+))?$/);
+  const fragment = sectionMatch && sectionMatch[1] ? `#${sectionMatch[1]}` : "";
+  window.location.hash = `#/parametres${fragment}`;
+  // Aucun unmount : la navigation suivante va re-router immediatement.
+} });
 registerRoute("/help", { view: "view-help", guard: requireAuth, init: initHelpV4 });
 registerRoute("/film/:id", {
   view: "view-film-detail",

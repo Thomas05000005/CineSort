@@ -165,9 +165,22 @@ class AppJsWiringTests(unittest.TestCase):
         self.assertIn("initParametres", snippet)
 
     def test_legacy_settings_route_kept_for_compat(self) -> None:
-        # /settings doit rester pour la retrocompat des bookmarks.
+        # /settings doit rester pour la retrocompat des bookmarks, mais
+        # redirige desormais vers /parametres (la vue legacy settings.js a
+        # ete supprimee — son contenu fonctionnel est porte dans parametres.js).
         self.assertIn('registerRoute("/settings"', self.js)
-        self.assertIn("initSettings", self.js)
+        # La route /settings ne doit plus appeler initSettings/unmountSettings :
+        # la vue legacy est supprimee. Elle redirige vers /parametres.
+        self.assertNotIn("initSettings", self.js)
+        self.assertNotIn("unmountSettings", self.js)
+        # Verifie la redirection vers /parametres avec preservation du fragment.
+        line_start = self.js.find('registerRoute("/settings"')
+        self.assertNotEqual(line_start, -1)
+        # Le bloc d'init peut tenir sur plusieurs lignes (flecha fn multilignes).
+        # On cherche la fermeture du registerRoute en repérant '});'.
+        block_end = self.js.find("});", line_start)
+        snippet = self.js[line_start:block_end]
+        self.assertIn("#/parametres", snippet)
 
 
 class CssTests(unittest.TestCase):
