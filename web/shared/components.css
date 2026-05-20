@@ -5372,6 +5372,128 @@ body.v5-notif-lock {
 .parametres-profils-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
 /* ===========================================================
+ * OMDb status indicator — spec 03-settings-omdb §3 (6 etats)
+ * Utilise par settings.js (data-test-result-for="omdb_api_key")
+ * et parametres.js (data-omdb-status).
+ * =========================================================== */
+.omdb-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium, 500);
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+.omdb-status__icon { display: inline-flex; align-items: center; }
+.omdb-status__label { display: inline-block; }
+.omdb-status__hint {
+  color: var(--text-2, #475569);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-normal, 400);
+  margin-left: var(--sp-1);
+}
+.omdb-status--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.30);
+}
+.omdb-status--warning {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.35);
+}
+.omdb-status--error {
+  background: rgba(185, 28, 28, 0.12);
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.30);
+}
+.omdb-status--info {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+  border-color: rgba(59, 130, 246, 0.30);
+}
+.omdb-status--idle {
+  background: var(--surface-2, #f1f5f9);
+  color: var(--text-2, #475569);
+  border-color: var(--border-1, #e2e8f0);
+}
+.omdb-quota {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold, 600);
+  padding-left: var(--sp-2);
+  border-left: 1px solid currentColor;
+  opacity: 0.9;
+}
+
+/* ===========================================================
+ * PARAMETRES — Catégorie Intégrations / OMDb (spec 03)
+ * =========================================================== */
+.parametres-integration-card {
+  border: 1px solid var(--border-1, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--sp-4) var(--sp-4);
+  background: var(--surface-1, #fff);
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.parametres-integration-title {
+  margin: 0;
+  font-size: var(--fs-lg, 1.125rem);
+  font-weight: var(--fw-semibold, 600);
+}
+.parametres-integration-subtitle {
+  color: var(--text-2, #475569);
+  font-weight: var(--fw-normal, 400);
+  font-size: var(--fs-sm);
+}
+.parametres-omdb-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.parametres-omdb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  font-weight: var(--fw-medium, 500);
+}
+.parametres-omdb-hint {
+  margin: 0;
+  color: var(--text-2, #475569);
+  font-size: var(--fs-xs);
+}
+.parametres-omdb-key-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.parametres-omdb-key-wrap .v5-input {
+  flex: 1;
+  min-width: 220px;
+}
+.parametres-omdb-threshold {
+  width: 100px;
+}
+.parametres-omdb-status-slot {
+  margin-top: var(--sp-2);
+  min-height: 28px;
+}
+.parametres-omdb-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* ===========================================================
  * A11y skip-link — index.html "Aller au contenu principal"
  * Cache hors ecran par defaut, visible uniquement au focus clavier.
  * =========================================================== */

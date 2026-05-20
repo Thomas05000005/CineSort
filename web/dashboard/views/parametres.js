@@ -25,6 +25,7 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
+import { renderOmdbStatusInto } from "../components/omdb-status.js";
 
 /* --- Categories (spec §2) --------------------------------------------- */
 
@@ -47,6 +48,11 @@ const STORAGE_KEY_LAST_CATEGORY = "cinesort.parametres.last_category";
 let _activeCategoryId = "sources";
 let _expertMode = false;
 let _searchQuery = "";
+
+/* Bloc OMDb (spec 03-settings-omdb) — état local, alimenté depuis settings backend. */
+let _omdbDraft = { enabled: false, api_key: "", min_confidence: 90 };
+let _omdbTesting = false;
+let _omdbSaving = false;
 
 /* --- localStorage helpers --------------------------------------------- */
 
@@ -147,10 +153,7 @@ const _CATEGORY_PLACEHOLDERS = {
     <p class="parametres-section-intro">Organisation (collection folder, détection TV) + nettoyage (dossiers vides, résidus).</p>
     <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
   `,
-  integrations: `
-    <p class="parametres-section-intro">5 services : TMDb · Jellyfin · Plex · Radarr · <strong>OMDb</strong> (visible maintenant, cf spec 03).</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
+  integrations: "__SPECIAL_INTEGRATIONS__",
   notifications: `
     <p class="parametres-section-intro">Toggles desktop par événement + SMTP email + hooks plugins.</p>
     <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
@@ -231,10 +234,79 @@ function _renderProfilsQualitePanel() {
   `;
 }
 
+function _renderIntegrationsPanel() {
+  const enabled = !!_omdbDraft.enabled;
+  const apiKey = String(_omdbDraft.api_key || "");
+  const threshold = Number(_omdbDraft.min_confidence ?? 90);
+  return `
+    <p class="parametres-section-intro">
+      5 services : TMDb · Jellyfin · Plex · Radarr · <strong>OMDb</strong>.
+      Édition fine TMDb/Jellyfin/Plex/Radarr dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.
+    </p>
+
+    <section class="parametres-integration-card" aria-labelledby="parametres-omdb-title">
+      <h3 id="parametres-omdb-title" class="parametres-integration-title">
+        OMDb <span class="parametres-integration-subtitle">(cross-check IMDb)</span>
+      </h3>
+
+      <div class="parametres-omdb-row">
+        <label class="parametres-omdb-toggle">
+          <input type="checkbox" data-omdb-field="enabled" ${enabled ? "checked" : ""}>
+          <span>Activer le cross-check IMDb</span>
+        </label>
+        <p class="parametres-omdb-hint">
+          Quand la confiance TMDb est basse, OMDb valide ou conteste le match.
+          Convergence : +20 confidence. Désaccord : −25 + warning sur la ligne.
+        </p>
+      </div>
+
+      <div class="parametres-omdb-row">
+        <label for="parametres-omdb-key">Clé API OMDb</label>
+        <div class="parametres-omdb-key-wrap">
+          <input type="password" id="parametres-omdb-key" class="v5-input"
+                 data-omdb-field="api_key"
+                 autocomplete="off"
+                 placeholder="Collez votre clé OMDb..."
+                 value="${escapeHtml(apiKey)}">
+          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-omdb-toggle-show title="Afficher / masquer">👁</button>
+          <button type="button" class="v5-btn v5-btn--sm" data-omdb-test ${_omdbTesting ? "disabled" : ""}>
+            ${_omdbTesting ? "Test…" : "Tester"}
+          </button>
+        </div>
+        <p class="parametres-omdb-hint">
+          Gratuit 1000 req/jour sur
+          <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noopener noreferrer">omdbapi.com/apikey.aspx</a>.
+        </p>
+        <div class="parametres-omdb-status-slot" data-omdb-status></div>
+      </div>
+
+      <div class="parametres-omdb-row">
+        <label for="parametres-omdb-threshold">Seuil d'appel OMDb (confiance %)</label>
+        <input type="number" id="parametres-omdb-threshold" class="v5-input parametres-omdb-threshold"
+               min="0" max="100" value="${threshold}"
+               data-omdb-field="min_confidence">
+        <p class="parametres-omdb-hint">
+          Appeler OMDb seulement si la confiance TMDb est &lt; ce seuil
+          (défaut : 90 ; plus bas = moins d'appels mais moins de cross-check).
+        </p>
+      </div>
+
+      <div class="parametres-omdb-actions">
+        <button type="button" class="v5-btn v5-btn--primary" data-omdb-save ${_omdbSaving ? "disabled" : ""}>
+          ${_omdbSaving ? "Sauvegarde…" : "💾 Sauvegarder"}
+        </button>
+      </div>
+    </section>
+  `;
+}
+
 function _renderCategoryPanel(categoryId) {
   const cat = PARAMETRES_CATEGORIES.find((c) => c.id === categoryId) || PARAMETRES_CATEGORIES[0];
   const raw = _CATEGORY_PLACEHOLDERS[cat.id] || "<p>Catégorie inconnue.</p>";
-  const body = raw === "__SPECIAL_PROFILS_QUALITE__" ? _renderProfilsQualitePanel() : raw;
+  let body;
+  if (raw === "__SPECIAL_PROFILS_QUALITE__") body = _renderProfilsQualitePanel();
+  else if (raw === "__SPECIAL_INTEGRATIONS__") body = _renderIntegrationsPanel();
+  else body = raw;
   return `
     <section class="parametres-panel" aria-labelledby="parametres-panel-title">
       <h2 id="parametres-panel-title" class="parametres-panel-title">
@@ -352,6 +424,123 @@ function _bindEvents(container) {
       }
     });
   });
+
+  // --- Intégrations / OMDb (spec 03-settings-omdb) ----------------------
+  _bindOmdbEvents(container);
+
+  // Affichage initial du status OMDb (état 1 ou 2) après chaque (re)render
+  _refreshOmdbInitialStatus(container);
+}
+
+function _bindOmdbEvents(container) {
+  // Changements de champs (debounce save côté serveur via bouton explicit)
+  container.querySelectorAll("[data-omdb-field]").forEach((input) => {
+    const evt = input.type === "checkbox" ? "change" : "input";
+    input.addEventListener(evt, (ev) => {
+      const key = input.dataset.omdbField;
+      if (key === "enabled") _omdbDraft.enabled = !!ev.target.checked;
+      else if (key === "api_key") _omdbDraft.api_key = String(ev.target.value || "");
+      else if (key === "min_confidence") {
+        const v = parseInt(ev.target.value, 10);
+        _omdbDraft.min_confidence = Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 90;
+      }
+      // Si la clé change → l'utilisateur doit retester
+      if (key === "api_key") {
+        _refreshOmdbInitialStatus(container);
+      }
+    });
+  });
+
+  // Show/hide clé
+  const showBtn = container.querySelector("[data-omdb-toggle-show]");
+  const keyInput = container.querySelector('input[data-omdb-field="api_key"]');
+  if (showBtn && keyInput) {
+    showBtn.addEventListener("click", () => {
+      keyInput.type = keyInput.type === "password" ? "text" : "password";
+    });
+  }
+
+  // Bouton Tester
+  const testBtn = container.querySelector("[data-omdb-test]");
+  if (testBtn) {
+    testBtn.addEventListener("click", () => _testOmdbConnection(container));
+  }
+
+  // Bouton Sauvegarder
+  const saveBtn = container.querySelector("[data-omdb-save]");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => _saveOmdbSettings(container));
+  }
+}
+
+function _refreshOmdbInitialStatus(container) {
+  const slot = container.querySelector("[data-omdb-status]");
+  if (!slot) return;
+  const key = String(_omdbDraft.api_key || "").trim();
+  if (!key) {
+    renderOmdbStatusInto(slot, { ok: false, error_code: "empty_key" });
+  } else {
+    slot.innerHTML = `<span class="omdb-status omdb-status--info" role="status">
+        <span class="omdb-status__label">Cliquez sur Tester pour vérifier la clé</span>
+      </span>`;
+  }
+}
+
+async function _testOmdbConnection(container) {
+  if (_omdbTesting) return;
+  const slot = container.querySelector("[data-omdb-status]");
+  if (!slot) return;
+  _omdbTesting = true;
+  // Mise à jour bouton + état "test en cours"
+  const btn = container.querySelector("[data-omdb-test]");
+  if (btn) { btn.disabled = true; btn.textContent = "Test…"; }
+  slot.innerHTML = `<span class="omdb-status omdb-status--info" role="status">
+      <span class="omdb-status__label">Test en cours…</span>
+    </span>`;
+  try {
+    const res = await apiPost("integrations/test_omdb_connection", {
+      api_key: _omdbDraft.api_key,
+    });
+    const data = (res && res.data) || {};
+    renderOmdbStatusInto(slot, data);
+  } catch (_e) {
+    renderOmdbStatusInto(slot, { ok: false, error_code: "network" });
+  } finally {
+    _omdbTesting = false;
+    if (btn) { btn.disabled = false; btn.textContent = "Tester"; }
+  }
+}
+
+async function _saveOmdbSettings(container) {
+  if (_omdbSaving) return;
+  _omdbSaving = true;
+  const btn = container.querySelector("[data-omdb-save]");
+  if (btn) { btn.disabled = true; btn.textContent = "Sauvegarde…"; }
+  try {
+    const cur = await apiPost("settings/get_settings", {});
+    if (!cur || cur.ok === false) throw new Error("Lecture paramètres impossible");
+    const settings = cur.data || cur;
+    settings.omdb_enabled = !!_omdbDraft.enabled;
+    settings.omdb_api_key = String(_omdbDraft.api_key || "");
+    settings.omdb_min_confidence_for_call = Number(_omdbDraft.min_confidence) || 90;
+    const res = await apiPost("settings/save_settings", { settings });
+    if (!res || res.ok === false) {
+      throw new Error((res && (res.message || res.error)) || "Sauvegarde refusée");
+    }
+  } catch (err) {
+    // Affiche l'erreur dans le slot status
+    const slot = container.querySelector("[data-omdb-status]");
+    if (slot) {
+      renderOmdbStatusInto(slot, {
+        ok: false,
+        error_code: "network",
+        message: err && err.message ? err.message : "Sauvegarde impossible",
+      });
+    }
+  } finally {
+    _omdbSaving = false;
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Sauvegarder"; }
+  }
 }
 
 function _rerenderPanel(container) {
@@ -405,7 +594,7 @@ export async function initParametres(container) {
   container.classList.toggle("is-expert", _expertMode);
   _bindEvents(container);
 
-  // Charge les seuils tier depuis settings backend
+  // Charge les seuils tier + bloc OMDb depuis settings backend
   try {
     const cur = await apiPost("settings/get_settings", {});
     if (cur && cur.ok !== false) {
@@ -419,7 +608,16 @@ export async function initParametres(container) {
           silver: Number(tiers.silver) || _DEFAULT_TIERS.silver,
           bronze: Number(tiers.bronze) || _DEFAULT_TIERS.bronze,
         };
-        if (_activeCategoryId === "profils-qualite") _rerenderPanel(container);
+      }
+      // OMDb (spec 03-settings-omdb)
+      _omdbDraft = {
+        enabled: !!settings.omdb_enabled,
+        api_key: String(settings.omdb_api_key || ""),
+        min_confidence: Number(settings.omdb_min_confidence_for_call ?? 90),
+      };
+      // Si on est sur la catégorie active, refresh affichage
+      if (_activeCategoryId === "profils-qualite" || _activeCategoryId === "integrations") {
+        _rerenderPanel(container);
       }
     }
   } catch (_e) {
