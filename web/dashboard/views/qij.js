@@ -115,7 +115,7 @@ function _qualityRender() {
   const hasData = _hasDataInDistribution(dist) || _hasDataInTrend(trend) || totalFilms > 0;
 
   if (!hasData) {
-    root.innerHTML = `<div class="v5-qij-shell"><div class="v5-library-empty" style="padding:var(--sp-6);text-align:center">
+    root.innerHTML = `<div class="v5-qij-shell"><div class="v5-library-empty qij-empty">
       <h3>${_esc(t("qij.quality.no_data_title"))}</h3>
       <p class="v5u-text-muted">${_esc(t("qij.quality.no_data_hint"))}</p>
       <button type="button" class="v5-btn v5-btn--primary" onclick="window.location.hash='#/processing?step=scan'">${_esc(t("qij.quality.btn_scan"))}</button>
@@ -152,25 +152,25 @@ function _qualityRender() {
       </header>
 
       <!-- V7-port : Boutons d'action (simulator + custom rules + batch) -->
-      <div class="v5-qij-actions" style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-4)">
+      <div class="v5-qij-actions qij-actions">
         <button type="button" class="v5-btn v5-btn--sm" id="btnQualitySimulate" title="${_esc(t("qij.quality.btn_simulate_title"))}">${_esc(t("qij.quality.btn_simulate"))}</button>
         <button type="button" class="v5-btn v5-btn--sm" id="btnCustomRulesEditor" title="${_esc(t("qij.quality.btn_custom_rules_title"))}">${_esc(t("qij.quality.btn_custom_rules"))}</button>
         <button type="button" class="v5-btn v5-btn--sm" id="qBtnAnalyzeAll">${_esc(t("qij.quality.btn_analyze_all"))}</button>
         <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" id="qBtnExportProfile">${_esc(t("qij.quality.btn_export_profile"))}</button>
         <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" id="qBtnImportProfile">${_esc(t("qij.quality.btn_import_profile"))}</button>
         <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" id="qBtnResetProfile">${_esc(t("qij.quality.btn_reset_profile"))}</button>
-        <span id="qBatchMsg" style="margin-left:var(--sp-3);font-size:var(--fs-xs);color:var(--text-muted)"></span>
+        <span id="qBatchMsg" class="qij-batch-msg"></span>
       </div>
 
       <!-- V7-port : KPI 4 cards -->
-      <div class="v5-kpi-grid" style="margin-bottom:var(--sp-4)">
+      <div class="v5-kpi-grid qij-kpi-grid">
         <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_films"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Number(stats.total_films || 0)}</span></div></article>
         <article class="v5-kpi-card v5-kpi-card--tier-gold"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_avg_score"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Math.round(avgScore)}</span><span class="v5-kpi-suffix">/100</span></div></article>
         <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_platinum"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Math.round(premiumPct)}</span><span class="v5-kpi-suffix">%</span></div></article>
-        <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_trend"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value" style="color:${trendColor}">${trendArrow}</span></div></article>
+        <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_trend"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value qij-trend-value" style="--trend-color:${trendColor}">${trendArrow}</span></div></article>
       </div>
 
-      <section class="v5-qij-charts" id="quality-charts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--sp-4);margin-bottom:var(--sp-4)">
+      <section class="v5-qij-charts qij-charts" id="quality-charts">
         <div class="v5-qij-chart-wrap card">
           <h2 class="v5-qij-section-title">Distribution ${glossaryTooltip("Tier", "tiers")}</h2>
           <div id="quality-donut"></div>
@@ -183,9 +183,9 @@ function _qualityRender() {
 
       <!-- V7-port : Distribution technique (résolutions/HDR/audio) -->
       ${(tech.resolutions || tech.hdr || tech.audio) ? `
-        <div class="card" style="margin-bottom:var(--sp-4)">
+        <div class="card qij-card-spaced">
           <h2 class="v5-qij-section-title">${_esc(t("qij.quality.section_technical"))}</h2>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--sp-4);margin-top:var(--sp-3)">
+          <div class="qij-kpi-row">
             ${tech.resolutions ? _statGrid(t("qij.quality.section_resolutions"), tech.resolutions) : ""}
             ${tech.hdr ? _statGrid(t("qij.quality.section_hdr"), tech.hdr) : ""}
             ${tech.audio ? _statGrid(t("qij.quality.section_audio"), tech.audio) : ""}
@@ -193,26 +193,26 @@ function _qualityRender() {
         </div>
       ` : ""}
 
-      <section class="v5-qij-rollup card" style="margin-bottom:var(--sp-4)">
-        <header class="v5-qij-rollup-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--sp-3)">
+      <section class="v5-qij-rollup card qij-rollup">
+        <header class="v5-qij-rollup-header qij-rollup-header">
           <h2 class="v5-qij-section-title">${_esc(t("qij.quality.section_rollup"))}</h2>
-          <div class="v5-qij-rollup-controls" role="tablist" aria-label="Dimension" style="display:flex;gap:var(--sp-2)">
+          <div class="v5-qij-rollup-controls qij-rollup-controls" role="tablist" aria-label="Dimension">
             ${["franchise", "decade", "codec", "era_grain", "resolution"].map((d) => `
               <button type="button" class="v5-btn v5-btn--sm ${d === _qState.rollupBy ? 'v5-btn--primary' : 'v5-btn--ghost'}"
                       data-rollup-by="${_esc(d)}">${_esc(_rollupLabel(d))}</button>
             `).join("")}
           </div>
         </header>
-        <div id="quality-rollup-table" style="margin-top:var(--sp-3)"></div>
+        <div id="quality-rollup-table" class="qij-rollup-table-wrap"></div>
       </section>
 
       <!-- V7-port : Anomalies + Outliers -->
       ${(anomalies.length > 0 || outliers.length > 0) ? `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--sp-4);margin-bottom:var(--sp-4)">
+        <div class="qij-grid-2col">
           ${anomalies.length > 0 ? `
             <div class="card">
               <h2 class="v5-qij-section-title">${_esc(t("qij.quality.section_anomalies"))}</h2>
-              <table class="v5-table" style="margin-top:var(--sp-3)"><thead><tr><th>${_esc(t("common.code"))}</th><th>${_esc(t("common.count"))}</th></tr></thead><tbody>
+              <table class="v5-table qij-mini-table"><thead><tr><th>${_esc(t("common.code"))}</th><th>${_esc(t("common.count"))}</th></tr></thead><tbody>
                 ${anomalies.map((a) => `<tr><td>${_esc(a.code || "")}</td><td class="v5u-tabular-nums">${a.count || 0}</td></tr>`).join("")}
               </tbody></table>
             </div>
@@ -220,9 +220,9 @@ function _qualityRender() {
           ${outliers.length > 0 ? `
             <div class="card">
               <h2 class="v5-qij-section-title">${_esc(t("qij.quality.section_outliers", { threshold: Math.round(outlierThreshold) }))}</h2>
-              <p class="v5u-text-muted" style="font-size:var(--fs-xs);margin-bottom:var(--sp-3)">${_esc(t("qij.quality.outliers_hint"))}</p>
+              <p class="v5u-text-muted qij-outliers-hint">${_esc(t("qij.quality.outliers_hint"))}</p>
               <table class="v5-table"><thead><tr><th>${_esc(t("common.title"))}</th><th>${_esc(t("common.score"))}</th><th>${_esc(t("common.tier"))}</th></tr></thead><tbody>
-                ${outliers.slice(0, 15).map((r) => `<tr class="clickable-row" data-outlier-rid="${_esc(r.row_id || "")}" style="cursor:pointer">
+                ${outliers.slice(0, 15).map((r) => `<tr class="clickable-row qij-outlier-row" data-outlier-rid="${_esc(r.row_id || "")}">
                   <td>${_esc(r.proposed_title || r.title || "")}</td>
                   <td class="v5u-tabular-nums">${Math.round(Number(r.score || 0))}</td>
                   <td>${_esc(r.tier || "—")}</td>
@@ -274,7 +274,7 @@ function _qualityRenderRollup() {
       const c = Number(d[t] || 0);
       if (c === 0) return "";
       const pct = g.count > 0 ? (c / g.count) * 100 : 0;
-      return `<span class="v5-qij-dist-seg v5-qij-dist-seg--${_esc(t)}" style="width:${pct.toFixed(1)}%" title="${_esc(t)}: ${c}"></span>`;
+      return `<span class="v5-qij-dist-seg v5-qij-dist-seg--${_esc(t)} qij-dist-seg-dyn" style="--seg-width:${pct.toFixed(1)}%" title="${_esc(t)}: ${c}"></span>`;
     }).join("");
     return `<tr>
       <td class="v5-qij-rollup-name v5u-truncate">${_esc(g.group_name)}</td>
@@ -367,9 +367,9 @@ function _qualityBindEvents(root) {
 
 function _statGrid(title, data) {
   if (!data || typeof data !== "object") return "";
-  let html = `<div><strong style="color:var(--text-muted);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.05em">${_esc(title)}</strong>`;
+  let html = `<div><strong class="qij-stat-title">${_esc(title)}</strong>`;
   for (const [k, v] of Object.entries(data)) {
-    html += `<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);padding:2px 0"><span>${_esc(k)}</span><span class="v5u-tabular-nums">${v}</span></div>`;
+    html += `<div class="qij-stat-row"><span>${_esc(k)}</span><span class="v5u-tabular-nums">${v}</span></div>`;
   }
   return html + "</div>";
 }
@@ -448,8 +448,8 @@ function _integrationsRender() {
         ${integ.apiKeyKey ? `<dt>${glossaryTooltip("API Key", "API Key")}</dt><dd>${hasKey ? "••••••••" : _esc(t("qij.integrations.key_undefined"))}</dd>` : ""}
         ${libCount != null ? `<dt>${_esc(t("qij.integrations.libraries_label"))}</dt><dd class="v5u-tabular-nums">${libCount}</dd>` : ""}
       </dl>
-      ${status && status.message ? `<div class="v5-integ-card-message ${status.ok ? 'is-ok' : 'is-error'}" style="font-size:var(--fs-xs);padding:var(--sp-2);background:var(--surface-2);border-radius:var(--radius-sm);margin:var(--sp-2) 0;color:${status.ok ? 'var(--success)' : 'var(--danger)'}">${_esc(status.message)}</div>` : ""}
-      <footer class="v5-integ-card-footer" style="display:flex;gap:var(--sp-2);flex-wrap:wrap">
+      ${status && status.message ? `<div class="v5-integ-card-message qij-integ-card-msg ${status.ok ? 'is-ok' : 'is-error'}" style="--status-color:${status.ok ? 'var(--success)' : 'var(--danger)'}">${_esc(status.message)}</div>` : ""}
+      <footer class="v5-integ-card-footer qij-integ-card-footer">
         ${integ.testMethod ? `<button type="button" class="v5-btn v5-btn--sm" data-integ-test="${_esc(integ.id)}" ${!enabled && integ.enabledKey ? "disabled" : ""}>${_esc(t("qij.integrations.btn_test"))}</button>` : ""}
         ${integ.syncMethod && enabled ? `<button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-integ-sync="${_esc(integ.id)}">${_esc(t("qij.integrations.btn_check_sync"))}</button>` : ""}
         ${integ.librariesMethod && enabled ? `<button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-integ-libraries="${_esc(integ.id)}">${_esc(t("qij.integrations.btn_libraries"))}</button>` : ""}
@@ -560,7 +560,7 @@ function _showSyncReportModal(integ, data) {
     const matched = Number(data.matched || 0);
     const total = missing.length + ghosts.length + mismatches.length;
     const cls = total === 0 ? "var(--success)" : "var(--warning)";
-    body = `<div style="padding:var(--sp-3);background:var(--surface-2);border-radius:var(--radius-md);margin-bottom:var(--sp-3);color:${cls}">
+    body = `<div class="qij-modal-info" style="--msg-color:${cls}">
       <strong>${matched}</strong> films cohérents — <strong>${missing.length}</strong> manquants — <strong>${ghosts.length}</strong> fantômes — <strong>${mismatches.length}</strong> divergences
     </div>`;
     if (missing.length) {
@@ -572,14 +572,14 @@ function _showSyncReportModal(integ, data) {
       body += `</tbody></table>`;
     }
     if (ghosts.length) {
-      body += `<h4 style="margin-top:var(--sp-4)">Fantômes dans ${_esc(integ.label)} (${ghosts.length})</h4><table class="v5-table"><thead><tr><th>Titre</th><th>Année</th></tr></thead><tbody>`;
+      body += `<h4 class="qij-modal-subhead">Fantômes dans ${_esc(integ.label)} (${ghosts.length})</h4><table class="v5-table"><thead><tr><th>Titre</th><th>Année</th></tr></thead><tbody>`;
       for (const g of ghosts.slice(0, 50)) {
         body += `<tr><td>${_esc(String(g.title || ""))}</td><td>${_esc(String(g.year || ""))}</td></tr>`;
       }
       body += `</tbody></table>`;
     }
     if (mismatches.length) {
-      body += `<h4 style="margin-top:var(--sp-4)">Divergences (${mismatches.length})</h4><table class="v5-table"><thead><tr><th>Champ</th><th>Local</th><th>${_esc(integ.label)}</th></tr></thead><tbody>`;
+      body += `<h4 class="qij-modal-subhead">Divergences (${mismatches.length})</h4><table class="v5-table"><thead><tr><th>Champ</th><th>Local</th><th>${_esc(integ.label)}</th></tr></thead><tbody>`;
       for (const mm of mismatches.slice(0, 50)) {
         const localVal = mm.field === "title" ? mm.local_title : String(mm.local_year || "");
         const remoteVal = mm.field === "title" ? (mm.jellyfin_title || mm.plex_title) : String(mm.jellyfin_year || mm.plex_year || "");
@@ -591,7 +591,7 @@ function _showSyncReportModal(integ, data) {
     const matched = Number(data.matched_count || 0);
     const notInRadarr = data.not_in_radarr || [];
     const upgradeCandidates = data.upgrade_candidates || [];
-    body = `<div style="padding:var(--sp-3);background:var(--surface-2);border-radius:var(--radius-md);margin-bottom:var(--sp-3)">
+    body = `<div class="qij-modal-info">
       <strong>${matched}</strong> films matchés — <strong>${notInRadarr.length}</strong> absents Radarr — <strong>${upgradeCandidates.length}</strong> upgrade possibles
     </div>`;
     if (upgradeCandidates.length) {
@@ -603,7 +603,7 @@ function _showSyncReportModal(integ, data) {
       body += `</tbody></table>`;
     }
     if (notInRadarr.length) {
-      body += `<h4 style="margin-top:var(--sp-4)">Films absents de Radarr (${notInRadarr.length})</h4><ul>`;
+      body += `<h4 class="qij-modal-subhead">Films absents de Radarr (${notInRadarr.length})</h4><ul>`;
       for (const f of notInRadarr.slice(0, 30)) body += `<li>${_esc(String(f.title || ""))} (${_esc(String(f.year || "?"))})</li>`;
       body += `</ul>`;
     }
@@ -744,13 +744,13 @@ function _journalRender() {
     ? t("qij.journal.header_subtitle_many", { count: runs.length, run: runWord })
     : t("qij.journal.header_subtitle_one", { count: runs.length, run: runWord });
   let html = `<div class="v5-qij-shell">
-    <header class="v5-qij-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--sp-3)">
+    <header class="v5-qij-header qij-header">
       <div>
         <h1 class="v5-qij-title">${_esc(t("qij.journal.tab_title"))}</h1>
         <p class="v5u-text-muted">${subtitle}</p>
       </div>
       <!-- V7-port : toggle Live/Historique -->
-      <div class="v5-qij-mode-toggle" role="tablist" style="display:flex;gap:var(--sp-2)">
+      <div class="v5-qij-mode-toggle qij-mode-toggle" role="tablist">
         <button type="button" class="v5-btn v5-btn--sm ${_jState.mode === "live" ? "v5-btn--primary" : "v5-btn--ghost"}" data-journal-mode="live">
           ${_jState.activeRunId ? "<span style=\"display:inline-block;width:8px;height:8px;background:var(--success);border-radius:50%;margin-right:4px;animation:pulse 1.2s infinite\"></span>" : ""}${_esc(t("qij.journal.btn_live"))}
         </button>
@@ -826,39 +826,39 @@ function _journalRender() {
 
 function _renderLiveSection() {
   if (!_jState.activeRunId) {
-    return `<div class="card" style="margin-top:var(--sp-3)">
+    return `<div class="card qij-card-mt">
       <p class="v5u-text-muted">${_esc(t("qij.journal.no_active_run"))}</p>
       <button type="button" class="v5-btn v5-btn--primary" onclick="window.location.hash='#/processing?step=scan'">${_esc(t("qij.journal.btn_scan"))}</button>
     </div>`;
   }
-  return `<div class="card" style="margin-top:var(--sp-3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-3)">
-      <h3>${_esc(t("qij.journal.run_in_progress"))} <code style="color:var(--accent)">${_esc(_jState.activeRunId)}</code></h3>
-      <button type="button" class="v5-btn v5-btn--sm" id="btnJournalCancel" style="background:var(--danger);color:#fff">${_esc(t("qij.journal.btn_cancel"))}</button>
+  return `<div class="card qij-card-mt">
+    <div class="qij-active-run-head">
+      <h3>${_esc(t("qij.journal.run_in_progress"))} <code class="qij-active-run-code">${_esc(_jState.activeRunId)}</code></h3>
+      <button type="button" class="v5-btn v5-btn--sm qij-cancel-btn" id="btnJournalCancel">${_esc(t("qij.journal.btn_cancel"))}</button>
     </div>
-    <div class="progress-bar" style="background:var(--surface-2);height:8px;border-radius:4px;overflow:hidden;margin-bottom:var(--sp-2)">
-      <div id="journal-progress-fill" style="width:0%;height:100%;background:var(--accent);transition:width 0.3s"></div>
+    <div class="progress-bar qij-progress-bar">
+      <div id="journal-progress-fill" class="qij-progress-fill" style="--progress-width:0%"></div>
     </div>
-    <p id="journal-progress-text" class="v5u-text-muted" style="font-size:var(--fs-sm);margin-bottom:var(--sp-3)">${_esc(t("qij.journal.init"))}</p>
-    <div id="journal-logs-box" class="logs-box" style="max-height:400px;overflow-y:auto;background:var(--bg);padding:var(--sp-3);border-radius:var(--radius-md);font-family:monospace;font-size:var(--fs-xs);border:1px solid var(--border-1)"></div>
+    <p id="journal-progress-text" class="v5u-text-muted qij-progress-text">${_esc(t("qij.journal.init"))}</p>
+    <div id="journal-logs-box" class="logs-box qij-logs-box"></div>
   </div>`;
 }
 
 function _renderHistorySection() {
   const runs = _jState.runs || [];
   if (runs.length === 0) {
-    return `<div class="v5-library-empty" style="margin-top:var(--sp-3)">${_esc(t("qij.journal.no_runs"))}</div>`;
+    return `<div class="v5-library-empty qij-journal-empty">${_esc(t("qij.journal.no_runs"))}</div>`;
   }
 
   // Card actions exports pour run sélectionné
-  let html = `<div class="card" style="margin-top:var(--sp-3);margin-bottom:var(--sp-3)">
-    <div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap">
+  let html = `<div class="card qij-journal-toolbar">
+    <div class="qij-journal-toolbar-row">
       <span>${_esc(t("qij.journal.selected_run_label"))} <strong><code id="journal-selected-label">${_jState.selectedRunId ? _esc(String(_jState.selectedRunId).slice(0, 20)) : _esc(t("qij.journal.selected_none"))}</code></strong></span>
       <button type="button" class="v5-btn v5-btn--sm" data-export-fmt="json">JSON</button>
       <button type="button" class="v5-btn v5-btn--sm" data-export-fmt="csv">CSV</button>
       <button type="button" class="v5-btn v5-btn--sm" data-export-fmt="html">HTML</button>
       <button type="button" class="v5-btn v5-btn--sm" id="btnJournalExportNfo">${_esc(t("qij.journal.btn_export_nfo"))}</button>
-      <span id="journal-export-msg" style="margin-left:var(--sp-2);font-size:var(--fs-xs);color:var(--text-muted)"></span>
+      <span id="journal-export-msg" class="qij-journal-export-msg"></span>
     </div>
   </div>`;
 
@@ -870,8 +870,8 @@ function _renderHistorySection() {
     const lbl = opt.labelKey ? t(opt.labelKey) : (opt.label || val);
     return `<option value="${_esc(val)}"${sel}>${_esc(lbl)}</option>`;
   }).join("");
-  html += `<div style="display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-3)">
-    <label for="journal-sort-select" style="font-size:var(--fs-sm);color:var(--text-muted)">${_esc(t("qij.journal.sort_label"))}</label>
+  html += `<div class="qij-journal-sort-row">
+    <label for="journal-sort-select" class="qij-journal-sort-label">${_esc(t("qij.journal.sort_label"))}</label>
     <select id="journal-sort-select" class="v5-select" aria-label="${_esc(t("qij.journal.sort_aria"))}">${sortOptions}</select>
   </div>`;
 
@@ -893,7 +893,7 @@ function _journalRunCard(r) {
   const err = r.errors || 0;
   const isSelected = rid === _jState.selectedRunId;
   const statusClass = status === "done" ? "is-done" : status === "error" ? "is-error" : status === "cancelled" ? "is-cancelled" : "is-running";
-  return `<article class="v5-qij-journal-card ${statusClass}" data-run-card="${_esc(rid)}" style="cursor:pointer;${isSelected ? 'border:2px solid var(--accent)' : ''}">
+  return `<article class="v5-qij-journal-card qij-journal-card ${statusClass}${isSelected ? ' is-selected' : ''}" data-run-card="${_esc(rid)}">
     <header class="v5-qij-journal-header">
       <div>
         <code class="v5-qij-journal-id">${_esc(rid)}</code>
@@ -904,7 +904,7 @@ function _journalRunCard(r) {
     <dl class="v5-qij-journal-kpis">
       <div><dt>${_esc(t("qij.journal.kpi_films"))}</dt><dd class="v5u-tabular-nums">${total}</dd></div>
       <div><dt>${glossaryTooltip("Score perceptuel", t("qij.journal.kpi_avg_score"))}</dt><dd class="v5u-tabular-nums">${scoreAvg}</dd></div>
-      ${err > 0 ? `<div><dt>${_esc(t("qij.journal.kpi_errors"))}</dt><dd class="v5u-tabular-nums" style="color:var(--warning)">${err}</dd></div>` : ""}
+      ${err > 0 ? `<div><dt>${_esc(t("qij.journal.kpi_errors"))}</dt><dd class="v5u-tabular-nums qij-journal-card-errors">${err}</dd></div>` : ""}
     </dl>
   </article>`;
 }
@@ -1029,7 +1029,7 @@ export async function initQij(container, opts = {}) {
   if (!["quality", "integrations", "journal"].includes(_qijState.activeTab)) _qijState.activeTab = "quality";
 
   container.innerHTML = `<div class="v5-qij-tabs-wrap">
-    <div class="v5-qij-tabs" role="tablist" aria-label="${_esc(t("qij.tabs.aria_label"))}" style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-4);border-bottom:1px solid var(--border-1);padding-bottom:var(--sp-3)">
+    <div class="v5-qij-tabs qij-tabs" role="tablist" aria-label="${_esc(t("qij.tabs.aria_label"))}">
       <button type="button" role="tab" data-qij-tab="quality" class="v5-btn v5-btn--sm ${_qijState.activeTab === "quality" ? "v5-btn--primary is-active" : "v5-btn--ghost"}">${_esc(t("qij.tabs.quality"))}</button>
       <button type="button" role="tab" data-qij-tab="integrations" class="v5-btn v5-btn--sm ${_qijState.activeTab === "integrations" ? "v5-btn--primary is-active" : "v5-btn--ghost"}">${_esc(t("qij.tabs.integrations"))}</button>
       <button type="button" role="tab" data-qij-tab="journal" class="v5-btn v5-btn--sm ${_qijState.activeTab === "journal" ? "v5-btn--primary is-active" : "v5-btn--ghost"}">${_esc(t("qij.tabs.journal"))}</button>

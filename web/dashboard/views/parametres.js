@@ -8,27 +8,26 @@
  * - PARAMETRES_GROUPS : schema declaratif (categorie -> sections -> fields).
  * - _renderField(field, value) : renderer generique par type (toggle, text,
  *   number, range, api-key, multi-path, select, qr-dashboard, action,
- *   profils-qualite, danger-zone).
+ *   profils-qualite).
  * - Save debounce 500ms via settings/save_settings.
  * - Mode expert : toggle persiste en backend via settings.expert_mode.
  * - Recherche : highlight des labels + auto-switch vers la categorie qui
  *   contient le 1er match.
- * - Reset : dangerConfirmModal + champ "CONFIRMER" + countdown si scope=all,
+ * - Reset : modale custom + champ "CONFIRMER" + countdown si scope=all,
  *   appelle settings/reset_settings(scope) ou settings/reset_database().
  *
  * Endpoints :
- *   settings/get_settings, settings/save_settings  (existants)
- *   settings/reset_settings(scope), settings/reset_database()  (nouveaux)
+ *   settings/get_settings, settings/save_settings           (existants)
+ *   settings/reset_settings(scope), settings/reset_database (existants)
  *   settings/get_profiles, settings/save_profile, settings/set_active_profile
- *   settings/get_dashboard_qr, settings/get_server_info, settings/get_user_data_size
- *   integrations/test_<service>_connection  (inline test buttons)
+ *   settings/get_dashboard_qr, settings/get_server_info
+ *   settings/restart_api_server
+ *   integrations/test_<service>_connection                  (inline test buttons)
+ *   quality/recompute_all_scores
  */
 
 import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
-import { navigateTo } from "../core/router.js";
-import { renderOmdbStatusInto } from "../components/omdb-status.js";
-import { dangerConfirmModal } from "../components/modal.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -41,6 +40,13 @@ export const PARAMETRES_GROUPS = [
       { id: "roots", label: "Dossiers racines", fields: [
         { key: "roots", label: "Chemins racine", type: "multi-path", hint: "Un par ligne (ou séparés par ;)", required: true },
       ]},
+      { id: "exclusions", label: "Exclusions", fields: [
+        { key: "excluded_patterns", label: "Patterns d'exclusion (glob)", type: "multi-path",
+          hint: "Un pattern par ligne (ex : *.tmp, _review/*, **/sample.*)", advanced: true },
+        { key: "file_extensions", label: "Extensions vidéo acceptées", type: "text",
+          placeholder: ".mkv;.mp4;.avi;.mov;.m4v;.wmv;.flv;.webm;.ts",
+          hint: "Séparées par ; (toutes en minuscule, avec le point).", advanced: true },
+      ]},
       { id: "watch", label: "Surveillance automatique", fields: [
         { key: "watch_enabled", label: "Activer la surveillance (watch folder)", type: "toggle" },
         { key: "watch_interval_minutes", label: "Intervalle de vérification (min)", type: "number", min: 1, max: 60, default: 5, advanced: true },
@@ -51,22 +57,30 @@ export const PARAMETRES_GROUPS = [
     id: "analyse", label: "Analyse", icon: "🔬",
     sections: [
       { id: "probe", label: "Probe (ffprobe / mediainfo)", fields: [
-        { key: "probe_backend", label: "Backend", type: "select", options: [
+        { key: "probe_backend", label: "Backend probe", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"ffprobe",l:"ffprobe"},{v:"mediainfo",l:"mediainfo"},{v:"none",l:"Aucun"},
         ]},
+        { key: "ffprobe_path", label: "Chemin ffprobe", type: "text", placeholder: "(auto-détecté si vide)",
+          hint: "Laisser vide pour utiliser ffprobe du PATH système.", advanced: true },
+        { key: "mediainfo_path", label: "Chemin mediainfo", type: "text", placeholder: "(auto-détecté si vide)",
+          hint: "Laisser vide pour utiliser mediainfo du PATH système.", advanced: true },
         { key: "probe_timeout_s", label: "Timeout probe (s)", type: "number", min: 5, max: 300, advanced: true },
       ]},
       { id: "perceptual", label: "Analyse perceptuelle", fields: [
         { key: "perceptual_enabled", label: "Activer l'analyse perceptuelle", type: "toggle" },
         { key: "perceptual_auto_on_scan", label: "Auto-lancer sur scan", type: "toggle" },
-        { key: "perceptual_frames_count", label: "Frames analysées", type: "number", min: 5, max: 30, advanced: true },
+        { key: "perceptual_workers_count", label: "Workers parallèles (scan)", type: "number", min: 1, max: 16, default: 2,
+          hint: "Nombre de films analysés en parallèle. Auto si parallélisme = Auto.", advanced: true },
+        { key: "perceptual_frames_count", label: "Frames analysées par film", type: "number", min: 5, max: 30, advanced: true },
         { key: "perceptual_timeout_per_film_s", label: "Timeout par film (s)", type: "number", min: 30, max: 600, advanced: true },
         { key: "perceptual_audio_deep", label: "Audio analyse approfondie", type: "toggle", advanced: true },
         { key: "perceptual_lpips_enabled", label: "LPIPS ONNX (modèle deep learning)", type: "toggle", advanced: true },
       ]},
       { id: "subtitles", label: "Sous-titres", fields: [
-        { key: "subtitle_detection_enabled", label: "Détection sous-titres", type: "toggle" },
-        { key: "subtitle_expected_languages", label: "Langues attendues", type: "text", placeholder: "fr;en", hint: "Séparées par ;" },
+        { key: "subtitle_detection_enabled", label: "Détection sous-titres externes", type: "toggle" },
+        { key: "subtitle_lang_priority", label: "Priorité des langues", type: "text", placeholder: "fr;en;original",
+          hint: "Séparées par ; (la première trouvée est la principale)." },
+        { key: "subtitle_expected_languages", label: "Langues attendues", type: "text", placeholder: "fr;en", hint: "Séparées par ;", advanced: true },
       ]},
       { id: "scoring", label: "Scoring qualité", fields: [
         { key: "auto_approve_enabled", label: "Approbation automatique", type: "toggle" },
@@ -84,8 +98,20 @@ export const PARAMETRES_GROUPS = [
         { key: "naming_preset", label: "Preset", type: "select", options: [
           {v:"default",l:"Défaut"},{v:"plex",l:"Plex"},{v:"jellyfin",l:"Jellyfin"},{v:"quality",l:"Qualité"},{v:"custom",l:"Custom"},
         ]},
+        { key: "naming_template", label: "Template général", type: "text", placeholder: "{title} ({year})",
+          hint: "Variables disponibles : {title} {year} {resolution} {codec} {audio} {source}.", advanced: true },
         { key: "naming_movie_template", label: "Template film", type: "text", placeholder: "{title} ({year})" },
         { key: "naming_tv_template", label: "Template série", type: "text", placeholder: "{series} ({year})" },
+      ]},
+      { id: "rules", label: "Règles", fields: [
+        { key: "windows_safe", label: "Noms sûrs Windows (échappe < > : \" / \\ | ? *)", type: "toggle" },
+        { key: "lowercase_extensions", label: "Extensions en minuscule (.mkv vs .MKV)", type: "toggle" },
+        { key: "separator", label: "Séparateur entre éléments", type: "select", options: [
+          {v:" ",l:"Espace (Inception 2010)"},
+          {v:".",l:"Point (Inception.2010)"},
+          {v:"_",l:"Underscore (Inception_2010)"},
+          {v:"-",l:"Tiret (Inception-2010)"},
+        ]},
       ]},
     ],
   },
@@ -94,9 +120,13 @@ export const PARAMETRES_GROUPS = [
     sections: [
       { id: "organization", label: "Organisation", fields: [
         { key: "collection_folder_enabled", label: "Regrouper les sagas dans _Collection/", type: "toggle" },
+        { key: "collection_folder", label: "Nom du dossier collections", type: "text", placeholder: "_Collection",
+          hint: "Nom du sous-dossier où regrouper les films d'une même saga.", advanced: true },
         { key: "enable_tv_detection", label: "Détection séries TV", type: "toggle" },
       ]},
       { id: "cleanup", label: "Nettoyage", fields: [
+        { key: "cleanup_orphans", label: "Nettoyer les fichiers orphelins (sous-titres, .nfo, images)", type: "toggle" },
+        { key: "cleanup_empty_folders", label: "Supprimer les dossiers vides après apply", type: "toggle" },
         { key: "move_empty_folders_enabled", label: "Déplacer les dossiers vides vers _Vide", type: "toggle" },
         { key: "cleanup_residual_folders_enabled", label: "Nettoyer fichiers résiduels (.nfo, images, sous-titres)", type: "toggle" },
       ]},
@@ -107,7 +137,8 @@ export const PARAMETRES_GROUPS = [
     sections: [
       { id: "tmdb", label: "TMDb", fields: [
         { key: "tmdb_api_key", label: "Clé API TMDb", type: "api-key", required: true,
-          testMethod: "integrations/test_tmdb_key", testParams: { api_key: "$value", state_dir: "" } },
+          testMethod: "integrations/test_tmdb_key", testParams: { api_key: "$value", state_dir: "" },
+          hint: "Gratuit sur themoviedb.org/settings/api. Indispensable pour identifier les films." },
         { key: "tmdb_cache_ttl_days", label: "Durée du cache TMDb (jours)", type: "number", min: 1, max: 365 },
       ]},
       { id: "jellyfin", label: "Jellyfin", fields: [
@@ -120,14 +151,14 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "plex", label: "Plex", fields: [
         { key: "plex_enabled", label: "Activer", type: "toggle" },
-        { key: "plex_url", label: "URL Plex", type: "text" },
+        { key: "plex_url", label: "URL Plex", type: "text", placeholder: "http://plex.local:32400" },
         { key: "plex_token", label: "Token Plex", type: "api-key",
           testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" } },
         { key: "plex_refresh_on_apply", label: "Refresh après apply", type: "toggle" },
       ]},
       { id: "radarr", label: "Radarr", fields: [
         { key: "radarr_enabled", label: "Activer", type: "toggle" },
-        { key: "radarr_url", label: "URL Radarr", type: "text" },
+        { key: "radarr_url", label: "URL Radarr", type: "text", placeholder: "http://radarr.local:7878" },
         { key: "radarr_api_key", label: "Clé API", type: "api-key",
           testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
       ]},
@@ -145,8 +176,9 @@ export const PARAMETRES_GROUPS = [
   {
     id: "notifications", label: "Notifications", icon: "🔔",
     sections: [
-      { id: "desktop", label: "Desktop", fields: [
-        { key: "notifications_enabled", label: "Activer les notifications", type: "toggle" },
+      { id: "desktop", label: "Notifications desktop", fields: [
+        { key: "desktop_notifications_enabled", label: "Activer les notifications desktop", type: "toggle" },
+        { key: "notifications_enabled", label: "Activer les notifications applicatives", type: "toggle" },
         { key: "notifications_scan_done", label: "Scan terminé", type: "toggle" },
         { key: "notifications_apply_done", label: "Apply terminé", type: "toggle" },
         { key: "notifications_undo_done", label: "Undo terminé", type: "toggle" },
@@ -154,12 +186,12 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "email", label: "Rapports email (SMTP)", fields: [
         { key: "email_enabled", label: "Activer", type: "toggle" },
-        { key: "email_smtp_host", label: "SMTP host", type: "text", advanced: true },
+        { key: "email_smtp_host", label: "SMTP host", type: "text", placeholder: "smtp.gmail.com", advanced: true },
         { key: "email_smtp_port", label: "SMTP port", type: "number", min: 1, max: 65535, advanced: true },
         { key: "email_smtp_user", label: "Utilisateur", type: "text", advanced: true },
         { key: "email_smtp_password", label: "Mot de passe", type: "api-key", advanced: true },
         { key: "email_smtp_tls", label: "STARTTLS", type: "toggle", advanced: true },
-        { key: "email_to", label: "Destinataire", type: "text" },
+        { key: "email_to", label: "Destinataire", type: "text", placeholder: "vous@example.com" },
         { key: "email_on_scan", label: "Envoyer après scan", type: "toggle", advanced: true },
         { key: "email_on_apply", label: "Envoyer après apply", type: "toggle", advanced: true },
       ]},
@@ -173,16 +205,18 @@ export const PARAMETRES_GROUPS = [
     id: "serveur", label: "Serveur distant", icon: "🌐",
     sections: [
       { id: "rest", label: "API REST", fields: [
-        { key: "rest_api_enabled", label: "Activer l'API REST", type: "toggle" },
+        { key: "rest_api_enabled", label: "Activer l'API REST", type: "toggle",
+          hint: "Active le serveur HTTP pour accéder au dashboard depuis le LAN (téléphone, autre PC)." },
         { key: "rest_api_port", label: "Port", type: "number", min: 1024, max: 65535 },
-        { key: "rest_api_token", label: "Clé d'accès (Bearer)", type: "api-key-rest" },
+        { key: "rest_api_token", label: "Clé d'accès (Bearer)", type: "api-key-rest",
+          hint: "Token requis pour s'authentifier au dashboard distant. Régénérez si compromis." },
         { key: "__restart_api__", label: "", type: "action", action: "restart_api", buttonLabel: "🔄 Redémarrer le service API" },
         { key: "__qr_dashboard__", label: "QR code dashboard", type: "qr-dashboard" },
       ]},
       { id: "https", label: "HTTPS (optionnel)", fields: [
         { key: "rest_api_https_enabled", label: "Activer HTTPS", type: "toggle", advanced: true },
-        { key: "rest_api_cert_path", label: "Chemin certificat", type: "text", advanced: true },
-        { key: "rest_api_key_path", label: "Chemin clé privée", type: "text", advanced: true },
+        { key: "rest_api_cert_path", label: "Chemin certificat", type: "text", placeholder: "C:\\certs\\cert.pem", advanced: true },
+        { key: "rest_api_key_path", label: "Chemin clé privée", type: "text", placeholder: "C:\\certs\\key.pem", advanced: true },
       ]},
     ],
   },
@@ -196,6 +230,8 @@ export const PARAMETRES_GROUPS = [
         { key: "animation_level", label: "Niveau d'animation", type: "select", options: [
           {v:"subtle",l:"Subtil"},{v:"moderate",l:"Modéré"},{v:"intense",l:"Intense"},
         ], livePreview: "animation" },
+        { key: "animations_enabled", label: "Activer les animations", type: "toggle",
+          hint: "Décocher pour une interface 100% statique (utile sur PC bas de gamme).", advanced: true },
       ]},
       { id: "effects", label: "Effets visuels", fields: [
         { key: "effect_speed", label: "Vitesse animations (%)", type: "range", min: 0, max: 100, default: 50, advanced: true, livePreview: "effect_speed" },
@@ -219,6 +255,8 @@ export const PARAMETRES_GROUPS = [
         { key: "perceptual_parallelism_mode", label: "Mode parallélisme", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"max",l:"Max"},{v:"safe",l:"Sécurisé"},{v:"serial",l:"Séquentiel"},
         ]},
+        { key: "worker_count", label: "Nombre de workers globaux", type: "number", min: 1, max: 32, default: 4,
+          hint: "Limite globale pour les opérations parallèles (scan, perceptual, apply).", advanced: true },
       ]},
       { id: "logs", label: "Logs", fields: [
         { key: "log_level", label: "Niveau de verbosité", type: "select", options: [
@@ -230,12 +268,15 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "updates", label: "Mises à jour", fields: [
         { key: "update_check_enabled", label: "Vérifier automatiquement les mises à jour", type: "toggle" },
+        { key: "auto_check_updates", label: "Vérification auto au démarrage", type: "toggle", advanced: true },
         { key: "update_github_repo", label: "Dépôt GitHub (owner/repo)", type: "text", placeholder: "user/cinesort",
           hint: "Vide = check désactivé", advanced: true },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
           hint: "Au-delà, les runs sont purgés automatiquement.", advanced: true },
+        { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
+          hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
     ],
   },
@@ -278,12 +319,6 @@ const _WEIGHT_LABELS = {
   audio_channels: "Canaux audio",
   subtitles_fr: "Sous-titres FR",
 };
-/* Bloc OMDb (spec 03-settings-omdb) — état local, alimenté depuis settings backend. */
-let _omdbDraft = { enabled: false, api_key: "", min_confidence: 90 };
-let _omdbTesting = false;
-let _omdbSaving = false;
-
-/* --- localStorage helpers --------------------------------------------- */
 
 /* =============================================================
  * 3) HELPERS
@@ -330,7 +365,7 @@ function _searchMatches(query, text) {
 }
 
 function _groupMatches(query, group) {
-  if (!query) return true;
+  if (!query || !group) return true;
   if (_searchMatches(query, group.label)) return true;
   for (const section of group.sections || []) {
     if (_searchMatches(query, section.label)) return true;
@@ -357,6 +392,24 @@ function _sectionMatches(query, section) {
 function _fieldMatches(query, field) {
   if (!query) return true;
   return _searchMatches(query, field.label) || _searchMatches(query, field.hint) || _searchMatches(query, field.key);
+}
+
+function _isFieldConfigured(field, settings) {
+  if (field.key && field.key.startsWith("__")) return false;
+  const val = settings[field.key];
+  if (val === undefined || val === null || val === "") return false;
+  if (field.type === "toggle") return Boolean(val);
+  if (field.type === "number") return Number(val) !== 0;
+  return true;
+}
+
+function _sectionStatus(section, settings) {
+  const fields = (section.fields || []).filter((f) => !f.key.startsWith("__"));
+  if (fields.length === 0) return "none";
+  const configured = fields.filter((f) => _isFieldConfigured(f, settings)).length;
+  if (configured === 0) return "none";
+  if (configured === fields.length) return "full";
+  return "partial";
 }
 
 /* =============================================================
@@ -483,26 +536,8 @@ function _renderField(field, value, query) {
   }
 }
 
-function _isFieldConfigured(field, settings) {
-  if (field.key && field.key.startsWith("__")) return false;
-  const val = settings[field.key];
-  if (val === undefined || val === null || val === "") return false;
-  if (field.type === "toggle") return Boolean(val);
-  if (field.type === "number") return Number(val) !== 0;
-  return true;
-}
-
-function _sectionStatus(section, settings) {
-  const fields = (section.fields || []).filter((f) => !f.key.startsWith("__"));
-  if (fields.length === 0) return "none";
-  const configured = fields.filter((f) => _isFieldConfigured(f, settings)).length;
-  if (configured === 0) return "none";
-  if (configured === fields.length) return "full";
-  return "partial";
-}
-
 /* =============================================================
- * 5) RENDERERS — PROFILS QUALITE (catégorie 2.9)
+ * 5) RENDERERS — PROFILS QUALITE (categorie 2.9)
  * ============================================================= */
 
 function _renderProfilsQualite() {
@@ -547,42 +582,6 @@ function _renderProfilsQualite() {
       <span class="parametres-weight-value" data-weight-value="${key}">×${v.toFixed(2)}</span>
     </div>`;
   }).join("");
-const _CATEGORY_PLACEHOLDERS = {
-  sources: `
-    <p class="parametres-section-intro">Dossiers racines à scanner + patterns d'exclusion.</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>. La nouvelle version (édition avec confirmation pour les actions dangereuses) arrive en Phase 3.4.</p>
-  `,
-  analyse: `
-    <p class="parametres-section-intro">ffprobe + mediainfo + analyse perceptuelle + détection sous-titres.</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  nommage: `
-    <p class="parametres-section-intro">Templates de renommage + options Windows-safe / séparateurs.</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  bibliotheque: `
-    <p class="parametres-section-intro">Organisation (collection folder, détection TV) + nettoyage (dossiers vides, résidus).</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  integrations: "__SPECIAL_INTEGRATIONS__",
-  notifications: `
-    <p class="parametres-section-intro">Toggles desktop par événement + SMTP email + hooks plugins.</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  serveur: `
-    <p class="parametres-section-intro">API REST + QR code dashboard + HTTPS (mode expert).</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  apparence: `
-    <p class="parametres-section-intro">Thème Studio / Cinéma / Luxe / Neon + effets visuels (mode expert).</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-  "profils-qualite": "__SPECIAL_PROFILS_QUALITE__",
-  avance: `
-    <p class="parametres-section-intro">Parallélisme + onboarding + MAJ + rétention historique + log level.</p>
-    <p class="parametres-placeholder">L'édition fine est temporairement disponible dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.</p>
-  `,
-};
 
   return `<div class="parametres-field parametres-profils-qualite">
     <div class="parametres-profils-selector">
@@ -685,92 +684,15 @@ function _renderSubSidebar() {
   </aside>`;
 }
 
-function _renderIntegrationsPanel() {
-  const enabled = !!_omdbDraft.enabled;
-  const apiKey = String(_omdbDraft.api_key || "");
-  const threshold = Number(_omdbDraft.min_confidence ?? 90);
-  return `
-    <p class="parametres-section-intro">
-      5 services : TMDb · Jellyfin · Plex · Radarr · <strong>OMDb</strong>.
-      Édition fine TMDb/Jellyfin/Plex/Radarr dans <a href="#/settings" class="link-primary">l'ancienne vue Paramètres</a>.
-    </p>
-
-    <section class="parametres-integration-card" aria-labelledby="parametres-omdb-title">
-      <h3 id="parametres-omdb-title" class="parametres-integration-title">
-        OMDb <span class="parametres-integration-subtitle">(cross-check IMDb)</span>
-      </h3>
-
-      <div class="parametres-omdb-row">
-        <label class="parametres-omdb-toggle">
-          <input type="checkbox" data-omdb-field="enabled" ${enabled ? "checked" : ""}>
-          <span>Activer le cross-check IMDb</span>
-        </label>
-        <p class="parametres-omdb-hint">
-          Quand la confiance TMDb est basse, OMDb valide ou conteste le match.
-          Convergence : +20 confidence. Désaccord : −25 + warning sur la ligne.
-        </p>
-      </div>
-
-      <div class="parametres-omdb-row">
-        <label for="parametres-omdb-key">Clé API OMDb</label>
-        <div class="parametres-omdb-key-wrap">
-          <input type="password" id="parametres-omdb-key" class="v5-input"
-                 data-omdb-field="api_key"
-                 autocomplete="off"
-                 placeholder="Collez votre clé OMDb..."
-                 value="${escapeHtml(apiKey)}">
-          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-omdb-toggle-show title="Afficher / masquer">👁</button>
-          <button type="button" class="v5-btn v5-btn--sm" data-omdb-test ${_omdbTesting ? "disabled" : ""}>
-            ${_omdbTesting ? "Test…" : "Tester"}
-          </button>
-        </div>
-        <p class="parametres-omdb-hint">
-          Gratuit 1000 req/jour sur
-          <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noopener noreferrer">omdbapi.com/apikey.aspx</a>.
-        </p>
-        <div class="parametres-omdb-status-slot" data-omdb-status></div>
-      </div>
-
-      <div class="parametres-omdb-row">
-        <label for="parametres-omdb-threshold">Seuil d'appel OMDb (confiance %)</label>
-        <input type="number" id="parametres-omdb-threshold" class="v5-input parametres-omdb-threshold"
-               min="0" max="100" value="${threshold}"
-               data-omdb-field="min_confidence">
-        <p class="parametres-omdb-hint">
-          Appeler OMDb seulement si la confiance TMDb est &lt; ce seuil
-          (défaut : 90 ; plus bas = moins d'appels mais moins de cross-check).
-        </p>
-      </div>
-
-      <div class="parametres-omdb-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-omdb-save ${_omdbSaving ? "disabled" : ""}>
-          ${_omdbSaving ? "Sauvegarde…" : "💾 Sauvegarder"}
-        </button>
-      </div>
-    </section>
-  `;
-}
-
 function _renderCategoryPanel(categoryId) {
   const group = PARAMETRES_GROUPS.find((c) => c.id === categoryId) || PARAMETRES_GROUPS[0];
   const visibleSections = (group.sections || []).filter((s) => _sectionMatches(_state.searchQuery, s));
 
   if (visibleSections.length === 0) {
-    return `<section class="parametres-panel">
-      <h2 class="parametres-panel-title">
+    return `<section class="parametres-panel" aria-labelledby="parametres-panel-title">
+      <h2 id="parametres-panel-title" class="parametres-panel-title">
         <span class="parametres-panel-icon" aria-hidden="true">${group.icon}</span>
         ${_esc(group.label)}
-  const cat = PARAMETRES_CATEGORIES.find((c) => c.id === categoryId) || PARAMETRES_CATEGORIES[0];
-  const raw = _CATEGORY_PLACEHOLDERS[cat.id] || "<p>Catégorie inconnue.</p>";
-  let body;
-  if (raw === "__SPECIAL_PROFILS_QUALITE__") body = _renderProfilsQualitePanel();
-  else if (raw === "__SPECIAL_INTEGRATIONS__") body = _renderIntegrationsPanel();
-  else body = raw;
-  return `
-    <section class="parametres-panel" aria-labelledby="parametres-panel-title">
-      <h2 id="parametres-panel-title" class="parametres-panel-title">
-        <span class="parametres-panel-icon" aria-hidden="true">${cat.icon}</span>
-        ${escapeHtml(cat.label)}
       </h2>
       <div class="parametres-empty">Aucun paramètre ne correspond à votre recherche dans cette catégorie.</div>
     </section>`;
@@ -826,7 +748,7 @@ function _renderError(message) {
 }
 
 /* =============================================================
- * 7) PROFILS QUALITE — LOAD / SAVE
+ * 7) PROFILS QUALITE — LOAD / SAVE / RECOMPUTE
  * ============================================================= */
 
 async function _loadProfiles() {
@@ -835,7 +757,6 @@ async function _loadProfiles() {
     if (res && res.data && (res.data.ok || Array.isArray(res.data.profiles))) {
       _state.profilesList = res.data.profiles || [];
       _state.activeProfileId = res.data.active_profile_id || "";
-      // Initialise le draft a partir du profil actif (sinon defauts)
       const active = _state.profilesList.find((p) => String(p.id) === String(_state.activeProfileId));
       if (active) {
         _state.profileDraft = {
@@ -846,296 +767,9 @@ async function _loadProfiles() {
         };
       } else {
         _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
-function _switchCategory(container, newCategoryId) {
-  if (!PARAMETRES_CATEGORIES.some((c) => c.id === newCategoryId)) return;
-  _activeCategoryId = newCategoryId;
-  _writeString(STORAGE_KEY_LAST_CATEGORY, newCategoryId);
-  // Active la nouvelle entree
-  container.querySelectorAll("[data-category]").forEach((btn) => {
-    const isActive = btn.dataset.category === newCategoryId;
-    btn.classList.toggle("is-active", isActive);
-    if (isActive) btn.setAttribute("aria-current", "page");
-    else btn.removeAttribute("aria-current");
-  });
-  // Re-render le panneau de droite
-  const main = container.querySelector("#parametres-main-content");
-  if (main) main.innerHTML = _renderCategoryPanel(newCategoryId);
-}
-
-function _bindEvents(container) {
-  // Categories sidebar
-  container.querySelectorAll("[data-category]").forEach((btn) => {
-    btn.addEventListener("click", () => _switchCategory(container, btn.dataset.category));
-  });
-
-  // Mode expert toggle
-  const expertInput = container.querySelector("[data-parametres-expert]");
-  if (expertInput) {
-    expertInput.addEventListener("change", (ev) => {
-      _expertMode = !!ev.target.checked;
-      _writeBool(STORAGE_KEY_EXPERT, _expertMode);
-      container.classList.toggle("is-expert", _expertMode);
-    });
-  }
-
-  // Search input
-  const searchInput = container.querySelector("[data-parametres-search]");
-  if (searchInput) {
-    searchInput.addEventListener("input", (ev) => {
-      _searchQuery = String(ev.target.value || "");
-      // PR future : filtrer les champs visibles. Pour cette PR skeleton, on
-      // se contente de stocker la query dans l'etat local.
-    });
-  }
-
-  // Reset action — P0 #233 : utilise dangerConfirmModal (sans redirection legacy).
-  // L'endpoint settings/reset_all_user_data exige confirmation: "RESET" cote serveur,
-  // donc on ne l'appelle PAS automatiquement depuis cette modale ; on redirige vers
-  // /settings pour la double saisie textuelle. Mais on demande deja une confirmation
-  // explicite ici avec compteur anti-clic-reflexe.
-  const resetBtn = container.querySelector("[data-parametres-action='reset']");
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      dangerConfirmModal({
-        title: "Réinitialiser tous les paramètres utilisateur ?",
-        items: ["Préférences globales", "Profils qualité", "Historique runs", "Cache TMDb"],
-        consequence:
-          "Cette action est irréversible (un backup .json est cependant créé automatiquement). " +
-          "Vous serez redirigé vers la page Settings pour confirmer en tapant « RESET ».",
-        countdownSeconds: 3,
-        confirmLabel: "↺ Continuer vers Settings",
-        onConfirm: () => {
-          navigateTo("/settings");
-        },
-      });
-    });
-  }
-
-  // Retry button (cas erreur)
-  const retryBtn = container.querySelector("[data-parametres-retry]");
-  if (retryBtn) {
-    retryBtn.addEventListener("click", () => initParametres(container));
-  }
-
-  // Profils Qualité — inputs + actions
-  container.querySelectorAll("[data-tier-input]").forEach((input) => {
-    input.addEventListener("input", (ev) => {
-      const key = ev.target.dataset.tierInput;
-      if (!_profilDraft) _profilDraft = { ..._DEFAULT_TIERS };
-      _profilDraft[key] = Math.max(0, Math.min(100, parseInt(ev.target.value, 10) || 0));
-    });
-  });
-
-  container.querySelectorAll("[data-parametres-profils-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.dataset.parametresProfilsAction;
-      if (action === "save") {
-        _saveProfilsQualite(container);
-      } else if (action === "reset") {
-        _profilDraft = { ..._DEFAULT_TIERS };
-        _profilMessage = "Seuils restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour appliquer.";
-        _rerenderPanel(container);
-      }
-    });
-  });
-
-  // --- Intégrations / OMDb (spec 03-settings-omdb) ----------------------
-  _bindOmdbEvents(container);
-
-  // Affichage initial du status OMDb (état 1 ou 2) après chaque (re)render
-  _refreshOmdbInitialStatus(container);
-}
-
-function _bindOmdbEvents(container) {
-  // Changements de champs (debounce save côté serveur via bouton explicit)
-  container.querySelectorAll("[data-omdb-field]").forEach((input) => {
-    const evt = input.type === "checkbox" ? "change" : "input";
-    input.addEventListener(evt, (ev) => {
-      const key = input.dataset.omdbField;
-      if (key === "enabled") _omdbDraft.enabled = !!ev.target.checked;
-      else if (key === "api_key") _omdbDraft.api_key = String(ev.target.value || "");
-      else if (key === "min_confidence") {
-        const v = parseInt(ev.target.value, 10);
-        _omdbDraft.min_confidence = Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 90;
-      }
-      // Si la clé change → l'utilisateur doit retester
-      if (key === "api_key") {
-        _refreshOmdbInitialStatus(container);
-      }
-    });
-  });
-
-  // Show/hide clé
-  const showBtn = container.querySelector("[data-omdb-toggle-show]");
-  const keyInput = container.querySelector('input[data-omdb-field="api_key"]');
-  if (showBtn && keyInput) {
-    showBtn.addEventListener("click", () => {
-      keyInput.type = keyInput.type === "password" ? "text" : "password";
-    });
-  }
-
-  // Bouton Tester
-  const testBtn = container.querySelector("[data-omdb-test]");
-  if (testBtn) {
-    testBtn.addEventListener("click", () => _testOmdbConnection(container));
-  }
-
-  // Bouton Sauvegarder
-  const saveBtn = container.querySelector("[data-omdb-save]");
-  if (saveBtn) {
-    saveBtn.addEventListener("click", () => _saveOmdbSettings(container));
-  }
-}
-
-function _refreshOmdbInitialStatus(container) {
-  const slot = container.querySelector("[data-omdb-status]");
-  if (!slot) return;
-  const key = String(_omdbDraft.api_key || "").trim();
-  if (!key) {
-    renderOmdbStatusInto(slot, { ok: false, error_code: "empty_key" });
-  } else {
-    slot.innerHTML = `<span class="omdb-status omdb-status--info" role="status">
-        <span class="omdb-status__label">Cliquez sur Tester pour vérifier la clé</span>
-      </span>`;
-  }
-}
-
-async function _testOmdbConnection(container) {
-  if (_omdbTesting) return;
-  const slot = container.querySelector("[data-omdb-status]");
-  if (!slot) return;
-  _omdbTesting = true;
-  // Mise à jour bouton + état "test en cours"
-  const btn = container.querySelector("[data-omdb-test]");
-  if (btn) { btn.disabled = true; btn.textContent = "Test…"; }
-  slot.innerHTML = `<span class="omdb-status omdb-status--info" role="status">
-      <span class="omdb-status__label">Test en cours…</span>
-    </span>`;
-  try {
-    const res = await apiPost("integrations/test_omdb_connection", {
-      api_key: _omdbDraft.api_key,
-    });
-    const data = (res && res.data) || {};
-    renderOmdbStatusInto(slot, data);
-  } catch (_e) {
-    renderOmdbStatusInto(slot, { ok: false, error_code: "network" });
-  } finally {
-    _omdbTesting = false;
-    if (btn) { btn.disabled = false; btn.textContent = "Tester"; }
-  }
-}
-
-async function _saveOmdbSettings(container) {
-  if (_omdbSaving) return;
-  _omdbSaving = true;
-  const btn = container.querySelector("[data-omdb-save]");
-  if (btn) { btn.disabled = true; btn.textContent = "Sauvegarde…"; }
-  try {
-    const cur = await apiPost("settings/get_settings", {});
-    if (!cur || cur.ok === false) throw new Error("Lecture paramètres impossible");
-    const settings = cur.data || cur;
-    settings.omdb_enabled = !!_omdbDraft.enabled;
-    settings.omdb_api_key = String(_omdbDraft.api_key || "");
-    settings.omdb_min_confidence_for_call = Number(_omdbDraft.min_confidence) || 90;
-    const res = await apiPost("settings/save_settings", { settings });
-    if (!res || res.ok === false) {
-      throw new Error((res && (res.message || res.error)) || "Sauvegarde refusée");
-    }
-  } catch (err) {
-    // Affiche l'erreur dans le slot status
-    const slot = container.querySelector("[data-omdb-status]");
-    if (slot) {
-      renderOmdbStatusInto(slot, {
-        ok: false,
-        error_code: "network",
-        message: err && err.message ? err.message : "Sauvegarde impossible",
-      });
-    }
-  } finally {
-    _omdbSaving = false;
-    if (btn) { btn.disabled = false; btn.textContent = "💾 Sauvegarder"; }
-  }
-}
-
-function _rerenderPanel(container) {
-  const main = container.querySelector("#parametres-main-content");
-  if (main) main.innerHTML = _renderCategoryPanel(_activeCategoryId);
-  _bindEvents(container);
-}
-
-async function _saveProfilsQualite(container) {
-  if (_profilSaving) return;
-  const t = _profilDraft || _DEFAULT_TIERS;
-  // Validation ordre logique (Platinum > Gold > Silver > Bronze)
-  if (!(t.platinum > t.gold && t.gold > t.silver && t.silver > t.bronze)) {
-    _profilMessage = "Erreur : les seuils doivent être strictement décroissants (Platinum > Gold > Silver > Bronze).";
-    _rerenderPanel(container);
-    return;
-  }
-  _profilSaving = true;
-  _profilMessage = "Sauvegarde en cours…";
-  _rerenderPanel(container);
-  try {
-    const cur = await apiPost("settings/get_settings", {});
-    if (!cur || cur.ok === false) throw new Error("Lecture des paramètres impossible");
-    const settings = cur.data || cur;
-    const profile = (settings.quality_profile && typeof settings.quality_profile === "object")
-      ? { ...settings.quality_profile }
-      : {};
-    profile.tiers = { ...t };
-    settings.quality_profile = profile;
-    const res = await apiPost("settings/save_settings", { settings });
-    if (!res || res.ok === false) throw new Error((res && (res.message || res.error)) || "Sauvegarde refusée");
-    _profilMessage = "✓ Seuils sauvegardés. Effet immédiat sur les futurs scans.";
-  } catch (err) {
-    _profilMessage = `Erreur : ${err && err.message ? err.message : String(err)}`;
-  } finally {
-    _profilSaving = false;
-    _rerenderPanel(container);
-  }
-}
-
-/* --- Entrypoint -------------------------------------------------------- */
-
-export async function initParametres(container) {
-  if (!container) return;
-  // Restore last category + expert mode preferences
-  const lastCat = _readString(STORAGE_KEY_LAST_CATEGORY, "sources");
-  if (PARAMETRES_CATEGORIES.some((c) => c.id === lastCat)) _activeCategoryId = lastCat;
-  _expertMode = _readBool(STORAGE_KEY_EXPERT, false);
-
-  container.innerHTML = _renderParametres();
-  container.classList.toggle("is-expert", _expertMode);
-  _bindEvents(container);
-
-  // Charge les seuils tier + bloc OMDb depuis settings backend
-  try {
-    const cur = await apiPost("settings/get_settings", {});
-    if (cur && cur.ok !== false) {
-      const settings = cur.data || cur;
-      const profile = settings.quality_profile && typeof settings.quality_profile === "object" ? settings.quality_profile : null;
-      const tiers = profile && profile.tiers && typeof profile.tiers === "object" ? profile.tiers : null;
-      if (tiers) {
-        _profilDraft = {
-          platinum: Number(tiers.platinum) || _DEFAULT_TIERS.platinum,
-          gold: Number(tiers.gold) || _DEFAULT_TIERS.gold,
-          silver: Number(tiers.silver) || _DEFAULT_TIERS.silver,
-          bronze: Number(tiers.bronze) || _DEFAULT_TIERS.bronze,
-        };
-      }
-      // OMDb (spec 03-settings-omdb)
-      _omdbDraft = {
-        enabled: !!settings.omdb_enabled,
-        api_key: String(settings.omdb_api_key || ""),
-        min_confidence: Number(settings.omdb_min_confidence_for_call ?? 90),
-      };
-      // Si on est sur la catégorie active, refresh affichage
-      if (_activeCategoryId === "profils-qualite" || _activeCategoryId === "integrations") {
-        _rerenderPanel(container);
       }
     }
   } catch (_e) {
-    // Fallback silencieux : draft par defaut
     _state.profilesList = [];
     _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
   }
@@ -1206,26 +840,18 @@ async function _saveProfileAsNew() {
 }
 
 async function _recomputeScores() {
-  dangerConfirmModal({
-    title: "Re-calculer les scores avec ce profil ?",
-    items: ["Tous les films classés"],
-    consequence: "Cette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.",
-    countdownSeconds: 0,
-    confirmLabel: "↻ Lancer le re-calcul",
-    onConfirm: async () => {
-      _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
-      try {
-        const res = await apiPost("quality/recompute_all_scores", {});
-        if (res && res.data && res.data.ok) {
-          _showProfilMessage(`✓ Re-calcul terminé : ${res.data.updated_count || 0} films re-scorés.`, "ok");
-        } else {
-          _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
-        }
-      } catch (err) {
-        _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
-      }
-    },
-  });
+  if (!window.confirm("Re-calculer les scores avec ce profil ?\n\nCette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.")) return;
+  _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
+  try {
+    const res = await apiPost("quality/recompute_all_scores", {});
+    if (res && res.data && res.data.ok) {
+      _showProfilMessage(`✓ Re-calcul lancé : job_id = ${res.data.job_id || "?"}.`, "ok");
+    } else {
+      _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
+    }
+  } catch (err) {
+    _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
+  }
 }
 
 function _showProfilMessage(msg, level) {
@@ -1257,12 +883,12 @@ async function _loadQrDashboard(container) {
   try {
     const r = await apiPost("settings/get_dashboard_qr");
     if (r?.data?.ok) { qrSvg = r.data.svg || ""; url = r.data.url || ""; }
-  } catch { /* noop */ }
+  } catch (_e) { /* noop */ }
   if (!url) {
     try {
       const si = await apiPost("settings/get_server_info");
       if (si?.data?.ok) url = si.data.dashboard_url || "";
-    } catch { /* noop */ }
+    } catch (_e) { /* noop */ }
   }
   host.innerHTML = `
     ${qrSvg ? `<div class="parametres-qr-svg">${qrSvg}</div>` : ""}
@@ -1281,7 +907,7 @@ async function _loadQrDashboard(container) {
         const original = copyBtn.textContent;
         copyBtn.textContent = "✓ Copié";
         setTimeout(() => { copyBtn.textContent = original; }, 1800);
-      } catch { /* noop */ }
+      } catch (_e) { /* noop */ }
     });
   }
 }
@@ -1372,7 +998,7 @@ function _applyLivePreview(kind, value) {
 }
 
 /* =============================================================
- * 11) RESET MODAL (10 scopes + CONFIRMER + countdown)
+ * 11) RESET MODAL (12 scopes + CONFIRMER + countdown)
  * ============================================================= */
 
 const _RESET_SCOPES = [
@@ -1480,7 +1106,7 @@ function _openResetModal() {
     const prev = overlay._previouslyFocused;
     overlay.remove();
     if (prev && typeof prev.focus === "function") {
-      try { prev.focus(); } catch (e) { /* noop */ }
+      try { prev.focus(); } catch (_e) { /* noop */ }
     }
   };
 
@@ -1499,7 +1125,7 @@ function _openResetModal() {
       if (scope === "all" || scope === "__database__") {
         startCountdown(3);
         warningEl.textContent = scope === "__database__"
-          ? "⚠ TRÈS DANGEREUX : cela supprime TOUS les films, runs, scores et analyses de la base. Action TOTALEMENT irréversible côté DB (backup auto cependant)."
+          ? "⚠ TRES DANGEREUX : cela supprime TOUS les films, runs, scores et analyses de la base. Action TOTALEMENT irréversible côté DB (backup auto cependant)."
           : "Cette action réinitialise TOUS les paramètres aux valeurs par défaut.";
       } else {
         startCountdown(0);
@@ -1539,12 +1165,10 @@ function _openResetModal() {
         _state.savedAt = new Date();
         _state.saveError = null;
         invalidateSettingsCache();
-        // Recharge les settings
         await _loadSettings();
         await _loadProfiles();
         _refreshAll();
         const backupPath = res.data.backup_path || "";
-        _state.containerRef?.querySelector("[data-parametres-saved-indicator]")?.setAttribute("data-flash", "ok");
         const msg = scope === "__database__"
           ? `Base de données réinitialisée. Backup créé : ${backupPath}`
           : `Paramètres réinitialisés (${scope === "all" ? "tout" : scope}).`;
@@ -1562,7 +1186,7 @@ function _openResetModal() {
   });
 
   // Focus initial sur le champ texte
-  setTimeout(() => { try { input.focus(); } catch (e) { /* noop */ } }, 50);
+  setTimeout(() => { try { input.focus(); } catch (_e) { /* noop */ } }, 50);
 }
 
 /* =============================================================
@@ -1659,7 +1283,7 @@ function _bindFields(container) {
     });
   });
 
-  // Test buttons
+  // Test buttons (TMDb, Jellyfin, Plex, Radarr, OMDb)
   container.querySelectorAll("[data-test-method]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const method = btn.dataset.testMethod;
@@ -1704,7 +1328,7 @@ function _bindFields(container) {
       try {
         await navigator.clipboard.writeText(tokenInput.value);
         if (msgEl) { msgEl.textContent = "✓ Copié"; msgEl.className = "parametres-test-result parametres-test-result--ok"; setTimeout(() => { msgEl.textContent = ""; }, 1800); }
-      } catch { if (msgEl) msgEl.textContent = "Échec copie"; }
+      } catch (_e) { if (msgEl) msgEl.textContent = "Échec copie"; }
     });
   }
   if (regenBtn && tokenInput) {

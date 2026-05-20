@@ -14,6 +14,10 @@
  *   non ordonnées). Changer de paire reload les onglets frames/audio (cache par
  *   paire). Le footer propose autant de boutons "✓ Garder X" qu'il y a de rows.
  *
+ * Mode readOnly (spec 02 §5 — Modal Perceptuelle) : quand on compare 2 films
+ * arbitraires (pas un vrai groupe de doublons), on cache le footer de decision
+ * et on ne demande pas de groupKey. Seuls Apercu / Frames / Audio sont actifs.
+ *
  * API :
  *   openDuplicateComparatorModal({
  *     runId, groupKey,
@@ -22,9 +26,12 @@
  *                              //  — si >= 3, active la bar de paires
  *     title, year, comparison, onDecided
  *   })
+ *   openDuplicateComparatorModal({ runId, groupKey, rowA, rowB, title, year,
+ *                                  comparison, onDecided, readOnly })
  *   closeDuplicateComparatorModal()
  *
  * Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md.
+ * Cf docs/internal/design/refonte_2026_05_17/screens/02-modal-perceptuelle.md §5.
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -154,6 +161,24 @@ function _renderTabs() {
 
 function _renderFooter() {
   const { rows, decisionInFlight } = _state;
+  const { rowA, rowB, decisionInFlight, readOnly } = _state;
+  // Spec 02 §5 : en mode readOnly (comparaison ad-hoc depuis Modal Perceptuelle),
+  // pas de boutons de decision — juste un footer informatif avec Fermer.
+  if (readOnly) {
+    return `
+      <footer class="duplicate-modal-footer duplicate-modal-footer--readonly">
+        <p class="duplicate-modal-footer-note">
+          Comparaison perceptuelle (lecture seule). Pour décider d'un doublon,
+          ouvrez la vue Doublons.
+        </p>
+        <div class="duplicate-modal-footer-actions">
+          <button type="button" class="v5-btn v5-btn--ghost" data-duplicate-close>
+            Fermer
+          </button>
+        </div>
+      </footer>
+    `;
+  }
   const disabled = decisionInFlight ? "disabled" : "";
 
   let buttons = "";
@@ -664,6 +689,12 @@ export function openDuplicateComparatorModal(opts) {
   const o = opts || {};
   if (!o.runId || !o.groupKey) {
     console.warn("[duplicate-comparator-modal] runId/groupKey requis");
+  const readOnly = o.readOnly === true;
+  // En mode normal (vue Doublons), groupKey est obligatoire car requis par
+  // mark_duplicate_winner. En mode readOnly (Modal Perceptuelle §5), on
+  // tolere son absence puisqu'on ne propose pas de decision.
+  if (!o.runId || !o.rowA || !o.rowB || (!readOnly && !o.groupKey)) {
+    console.warn("[duplicate-comparator-modal] runId/rowA/rowB requis (groupKey requis hors readOnly)");
     return;
   }
 
@@ -698,10 +729,14 @@ export function openDuplicateComparatorModal(opts) {
     rows: rows && rows.length >= 2 ? rows : null,
     pairs,
     activePairKey,
+    groupKey: o.groupKey != null ? String(o.groupKey) : "",
+    rowA: String(o.rowA),
+    rowB: String(o.rowB),
     title: o.title || "",
     year: o.year || "",
     comparison: o.comparison || null,
     onDecided: typeof o.onDecided === "function" ? o.onDecided : null,
+    readOnly,
     activeTab: "apercu",
     framesLoadedByPair: {},
     audioLoadedByPair: {},

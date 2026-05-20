@@ -106,14 +106,8 @@ class RunFacade(_BaseFacade):
         Cf CineSortApi._list_pending_runs_impl pour la doc complete.
         """
         return self._api._list_pending_runs_impl()
-    # ---------- Phase 4 spec 07 + 06 : rescan single + bulk ----------
 
-    def rescan_row(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
-        """Phase 4 spec 06 : relance probe + analyse + match TMDb sur 1 row (lance un job).
-
-        Cf cinesort.ui.api.library_actions_support.rescan_row.
-        """
-        return library_actions_support.rescan_row(self._api, row_id, run_id=run_id)
+    # ---------- Phase 4 spec 07 : rescan bulk ----------
 
     def rescan_rows_bulk(self, row_ids: list, run_id: Optional[str] = None) -> Dict[str, Any]:
         """Phase 4 spec 07 : version bulk de rescan_row (lance un JobRunner).
