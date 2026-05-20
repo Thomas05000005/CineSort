@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from cinesort.ui.api import quality_audit_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -219,3 +220,33 @@ class QualityFacade(_BaseFacade):
         Cf CineSortApi.get_calibration_report pour la doc complete.
         """
         return self._api._get_calibration_report_impl()
+
+    # ---------- Vue Qualite — Audit (spec 10) ----------
+
+    def get_films_by_tier(self, tier: str, limit: int = 8) -> Dict[str, Any]:
+        """Liste les films d'un tier V2 (default top 8 pires Reject par score asc).
+
+        Cf cinesort.ui.api.quality_audit_support.get_films_by_tier.
+        """
+        return quality_audit_support.get_films_by_tier(self._api, tier=tier, limit=limit)
+
+    def get_history(self, period_days: int = 30) -> Dict[str, Any]:
+        """KPIs evolution score V2 + deltas sur N derniers jours.
+
+        Cf cinesort.ui.api.quality_audit_support.get_history.
+        """
+        return quality_audit_support.get_history(self._api, period_days=period_days)
+
+    def recompute_all_scores(self) -> Dict[str, Any]:
+        """Lance le recalcul background du Score V2 pour tous les films.
+
+        Cf cinesort.ui.api.quality_audit_support.recompute_all_scores.
+        """
+        return quality_audit_support.recompute_all_scores(self._api)
+
+    def get_recompute_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Polling du status d'un job de recalcul lance par recompute_all_scores.
+
+        Cf cinesort.ui.api.quality_audit_support.get_recompute_job_status.
+        """
+        return quality_audit_support.get_recompute_job_status(self._api, job_id=job_id)
