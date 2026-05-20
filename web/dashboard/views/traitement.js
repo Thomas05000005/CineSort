@@ -110,8 +110,6 @@ async function _loadRunInfo() {
     const targetId = _targetRunId;
     const params = targetId ? { run_id: targetId } : { run_id_or: "latest" };
     const res = await apiPost("run/get_dashboard", params);
-    if (!res || res.ok === false) {
-    const res = await apiPost("run/get_dashboard", { run_id_or: "latest" });
     if (!res || res.data?.ok === false) {
       _runInfo = null;
       return;
