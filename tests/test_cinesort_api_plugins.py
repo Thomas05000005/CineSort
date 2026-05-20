@@ -100,24 +100,24 @@ class TestImportWatchlist(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_invalid_source(self) -> None:
-        result = self.api.import_watchlist(csv_content="x", source="netflix")
+        result = self.api._import_watchlist_impl(csv_content="x", source="netflix")
         self.assertFalse(result["ok"])
         self.assertIn("Source", result["message"])
 
     def test_empty_content(self) -> None:
-        result = self.api.import_watchlist(csv_content="   ", source="letterboxd")
+        result = self.api._import_watchlist_impl(csv_content="   ", source="letterboxd")
         self.assertFalse(result["ok"])
         self.assertIn("vide", result["message"])
 
     def test_letterboxd_no_films_parsed(self) -> None:
         with patch("cinesort.app.watchlist.parse_letterboxd_csv", return_value=[]):
-            result = self.api.import_watchlist(csv_content="header\n", source="letterboxd")
+            result = self.api._import_watchlist_impl(csv_content="header\n", source="letterboxd")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun film", result["message"])
 
     def test_imdb_no_films_parsed(self) -> None:
         with patch("cinesort.app.watchlist.parse_imdb_csv", return_value=[]):
-            result = self.api.import_watchlist(csv_content="header\n", source="imdb")
+            result = self.api._import_watchlist_impl(csv_content="header\n", source="imdb")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun film", result["message"])
 
@@ -130,7 +130,7 @@ class TestImportWatchlist(unittest.TestCase):
             store = MagicMock()
             store.run.get_runs_summary.return_value = []
             mock_infra.return_value = (store, MagicMock())
-            result = self.api.import_watchlist(csv_content="x", source="letterboxd")
+            result = self.api._import_watchlist_impl(csv_content="x", source="letterboxd")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun run", result["message"])
 
@@ -148,7 +148,7 @@ class TestImportWatchlist(unittest.TestCase):
             (self.state_dir / "runs" / "r1").mkdir(parents=True)
             (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
 
-            result = self.api.import_watchlist(csv_content="x", source="letterboxd")
+            result = self.api._import_watchlist_impl(csv_content="x", source="letterboxd")
             self.assertTrue(result["ok"])
             self.assertEqual(result["source"], "letterboxd")
 

@@ -164,7 +164,7 @@ class TvPlanFlowTests(unittest.TestCase):
         decisions = {
             r["row_id"]: {"ok": True, "title": r.get("proposed_title"), "year": r.get("proposed_year")} for r in tv_rows
         }
-        applied = api.apply(run_id, decisions, False, False)
+        applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
 
         # Check that a Saison folder was created.

@@ -180,7 +180,7 @@ class EndpointAndUiTests(unittest.TestCase):
         api = backend.CineSortApi()
         self.assertTrue(hasattr(api, "import_watchlist"))
         # Source invalide → erreur
-        result = api.import_watchlist("csv", "unknown")
+        result = api._import_watchlist_impl("csv", "unknown")
         self.assertFalse(result["ok"])
 
     def test_ui_buttons_present(self) -> None:

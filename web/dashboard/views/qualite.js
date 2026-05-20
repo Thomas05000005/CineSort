@@ -1002,7 +1002,7 @@ export async function initQualite(container) {
   // 1) get_global_stats : socle
   let res = null;
   try {
-    res = await apiPost("get_global_stats", {}, { signal });
+    res = await apiPost("run/get_global_stats", {}, { signal });
   } catch (err) {
     if (err && err.name === "AbortError") return;
     container.innerHTML = _renderError(err ? String(err.message || err) : "Erreur réseau");

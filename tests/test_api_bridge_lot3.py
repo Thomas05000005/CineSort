@@ -298,13 +298,13 @@ class ApiBridgeLot3Tests(unittest.TestCase):
                 "title": row["proposed_title"],
                 "year": row["proposed_year"],
             }
-        saved = api.save_validation(run_id, decisions)
+        saved = api._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         # Simule perte memoire runtime: apply doit relire plan.jsonl + validation.json.
         api._runs.pop(run_id, None)  # type: ignore[attr-defined]
 
-        applied = api.apply(run_id, {}, True, False)
+        applied = api._apply_impl(run_id, {}, True, False)
         self.assertTrue(applied.get("ok"), applied)
         self.assertIn("result", applied)
 
@@ -346,7 +346,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         first_result = {}
 
         def call_first():
-            first_result.update(api.apply(run_id, decisions, True, False))
+            first_result.update(api._apply_impl(run_id, decisions, True, False))
 
         # Cf issue #83 : apply_support.py importe apply_rows directement (pas
         # via re-export domain.core), donc patcher au point d'usage.
@@ -359,7 +359,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             t.start()
             self.assertTrue(entered.wait(1.0), "Le premier apply n'a pas demarre")
 
-            second = api.apply(run_id, decisions, True, False)
+            second = api._apply_impl(run_id, decisions, True, False)
             self.assertFalse(second.get("ok"), second)
             self.assertIn("deja en cours", str(second.get("message", "")).lower())
 
@@ -404,7 +404,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         import cinesort.app.plan_support as plan_support
 
         with mock.patch.object(plan_support, "find_duplicate_targets", side_effect=boom):
-            res = api.apply(run_id, decisions, True, False)
+            res = api._apply_impl(run_id, decisions, True, False)
 
         self.assertFalse(res.get("ok"), res)
         self.assertIn("doublons impossible", str(res.get("message", "")).lower())
@@ -456,7 +456,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
             with mock.patch.object(plan_support, "find_duplicate_targets", return_value=[]):
                 with mock.patch.object(_apply_support_mod, "_apply_rows_fn", side_effect=OSError("primary apply boom")):
-                    res = api.apply(run_id, {}, False, False)
+                    res = api._apply_impl(run_id, {}, False, False)
 
         self.assertFalse(res.get("ok"), res)
         self.assertEqual(str(res.get("message") or ""), "Impossible d'appliquer les changements.")
@@ -817,7 +817,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(start.get("ok"), start)
         _wait_terminal(api, start["run_id"])
 
-        preview = api.get_cleanup_residual_preview(start["run_id"])
+        preview = api._get_cleanup_residual_preview_impl(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
         payload = preview.get("preview") or {}
         self.assertFalse(bool(payload.get("enabled")))
@@ -843,7 +843,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(start.get("ok"), start)
         _wait_terminal(api, start["run_id"])
 
-        preview = api.get_cleanup_residual_preview(start["run_id"])
+        preview = api._get_cleanup_residual_preview_impl(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
         payload = preview.get("preview") or {}
         self.assertTrue(bool(payload.get("enabled")))
@@ -872,7 +872,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertTrue(start.get("ok"), start)
         _wait_terminal(api, start["run_id"])
 
-        preview = api.get_cleanup_residual_preview(start["run_id"])
+        preview = api._get_cleanup_residual_preview_impl(start["run_id"])
         self.assertTrue(preview.get("ok"), preview)
         payload = preview.get("preview") or {}
         self.assertEqual(str(payload.get("status") or ""), "no_action_likely")
@@ -1106,7 +1106,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             self.assertFalse(plan.get("ok"), (bad, plan))
             self.assertIn("run_id invalide", str(plan.get("message", "")))
 
-            app = api.apply(bad, {}, True, False)
+            app = api._apply_impl(bad, {}, True, False)
             self.assertFalse(app.get("ok"), (bad, app))
             self.assertIn("run_id invalide", str(app.get("message", "")))
 

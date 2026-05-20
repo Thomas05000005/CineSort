@@ -167,7 +167,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
         )
 
     def test_get_global_stats_empty(self) -> None:
-        result = self.api.get_global_stats(20)
+        result = self.api._get_global_stats_impl(20)
         self.assertTrue(result["ok"])
         self.assertEqual(result["summary"]["total_runs"], 0)
         self.assertEqual(result["timeline"], [])
@@ -178,7 +178,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
             self._insert_run(rid, 1000.0 + i * 100, total=10)
             self._insert_quality(rid, f"row_{i}", 70 + i * 5, "Bon")
 
-        result = self.api.get_global_stats(20)
+        result = self.api._get_global_stats_impl(20)
         self.assertTrue(result["ok"])
         s = result["summary"]
         self.assertEqual(s["total_runs"], 6)
@@ -201,7 +201,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
             score = 60 + i * 4  # rising scores
             self._insert_quality(rid, f"row_{i}", score, "Bon")
 
-        result = self.api.get_global_stats(20)
+        result = self.api._get_global_stats_impl(20)
         self.assertEqual(result["summary"]["trend"], "↑")
 
     def test_trend_indicator_down(self) -> None:
@@ -212,7 +212,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
             score = 95 - i * 4  # declining scores
             self._insert_quality(rid, f"row_{i}", score, "Bon")
 
-        result = self.api.get_global_stats(20)
+        result = self.api._get_global_stats_impl(20)
         self.assertEqual(result["summary"]["trend"], "↓")
 
     def test_unscored_films_count(self) -> None:
@@ -221,7 +221,7 @@ class GlobalDashboardApiTests(unittest.TestCase):
         self._insert_quality("run_latest", "row_1", 80, "Bon")
         self._insert_quality("run_latest", "row_2", 90, "Premium")
 
-        result = self.api.get_global_stats(20)
+        result = self.api._get_global_stats_impl(20)
         # 10 total - 2 scored = 8 unscored
         self.assertEqual(result["summary"]["unscored_films"], 8)
 

@@ -1193,7 +1193,7 @@ class CineSortApi:
         return {"ok": True, "run_id": target_run_id, **report}
 
     # ---------- Watchlist ----------
-    def import_watchlist(self, csv_content: str, source: str) -> Dict[str, Any]:
+    def _import_watchlist_impl(self, csv_content: str, source: str) -> Dict[str, Any]:
         """Importe une watchlist CSV et compare avec la bibliotheque locale."""
         src = str(source or "").strip().lower()
         if src not in ("letterboxd", "imdb"):
@@ -1556,7 +1556,7 @@ class CineSortApi:
 
     def _get_tools_status_impl(self) -> Dict[str, Any]:
         # Compat endpoint kept for v7.0/v7.1 callers.
-        return self.get_probe_tools_status()
+        return self._get_probe_tools_status_impl()
 
     def get_probe_tools_status(self) -> Dict[str, Any]:
         """Retourne le statut de detection de ffprobe + MediaInfo (version, chemin, dispo)."""
@@ -1775,15 +1775,15 @@ class CineSortApi:
         """
         return run_flow_support.mark_duplicate_winner(self, run_id, group_key, winner_row_id, notes)
 
-    def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
+    def _get_dashboard_impl(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)
 
-    def get_global_stats(self, limit_runs: int = 20) -> Dict[str, Any]:
+    def _get_global_stats_impl(self, limit_runs: int = 20) -> Dict[str, Any]:
         """Global dashboard: multi-run statistics for the library."""
         return dashboard_support.get_global_stats(self, limit_runs)
 
-    def get_sidebar_counters(self) -> Dict[str, Any]:
+    def _get_sidebar_counters_impl(self) -> Dict[str, Any]:
         """V3-04 — Compteurs sidebar pour badges UI (validation/application/quality)."""
         return {"data": dashboard_support.get_sidebar_counters(self)}
 
@@ -1941,7 +1941,7 @@ class CineSortApi:
 
         return export_support.export_full_library(self)
 
-    def export_run_nfo(self, run_id: str, overwrite: bool = False, dry_run: bool = True) -> Dict[str, Any]:
+    def _export_run_nfo_impl(self, run_id: str, overwrite: bool = False, dry_run: bool = True) -> Dict[str, Any]:
         """Génère des fichiers .nfo (Kodi/Jellyfin) pour chaque film du run."""
         if not self._is_valid_run_id(run_id):
             return _err_response("run_id invalide.", category="validation", level="info", log_module=__name__)
@@ -1956,19 +1956,19 @@ class CineSortApi:
         return export_nfo_for_run(rows, overwrite=bool(overwrite), dry_run=bool(dry_run))
 
     # ---------- validation persistence ----------
-    def load_validation(self, run_id: str) -> Dict[str, Any]:
+    def _load_validation_impl(self, run_id: str) -> Dict[str, Any]:
         """Recharge les decisions (approve/reject) persistees pour ce run."""
         return history_support.load_validation(self, run_id, normalize_user_path=_normalize_user_path)
 
-    def save_validation(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def _save_validation_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Persiste les decisions de validation dans validation.json (atomique)."""
         return run_flow_support.save_validation(self, run_id, decisions)
 
-    def check_duplicates(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def _check_duplicates_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Detecte les collisions de destination entre rows approuvees avant apply."""
         return run_flow_support.check_duplicates(self, run_id, decisions)
 
-    def get_cleanup_residual_preview(self, run_id: str) -> Dict[str, Any]:
+    def _get_cleanup_residual_preview_impl(self, run_id: str) -> Dict[str, Any]:
         """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""
         return run_read_support.get_cleanup_residual_preview(self, run_id)
 
@@ -2012,7 +2012,7 @@ class CineSortApi:
         """Preview (dry) de l'annulation du dernier batch apply reel (undo v1)."""
         return apply_support.undo_last_apply_preview(self, run_id)
 
-    def undo_last_apply(self, run_id: str, dry_run: bool = True, atomic: bool = True) -> Dict[str, Any]:
+    def _undo_last_apply_impl(self, run_id: str, dry_run: bool = True, atomic: bool = True) -> Dict[str, Any]:
         """Annule le dernier batch apply reel (undo v1). `dry_run=True` ne touche rien.
 
         P1.2 : atomic=True (defaut) refuse l'annulation si un fichier a ete
@@ -2049,7 +2049,7 @@ class CineSortApi:
         """Liste les batches apply (reels + dry-run) d'un run, plus recent en premier."""
         return apply_support.list_apply_history(self, run_id)
 
-    def apply(
+    def _apply_impl(
         self,
         run_id: str,
         decisions: Dict[str, Dict[str, Any]],
@@ -2308,7 +2308,7 @@ class CineSortApi:
             "sample_feedbacks": feedbacks[:20],
         }
 
-    def export_apply_audit(
+    def _export_apply_audit_impl(
         self,
         run_id: str,
         batch_id: Optional[str] = None,

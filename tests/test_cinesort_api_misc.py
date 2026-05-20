@@ -582,7 +582,7 @@ class TestExportRunNfo(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_invalid_run_id(self) -> None:
-        result = self.api.export_run_nfo(run_id="invalid id!")
+        result = self.api._export_run_nfo_impl(run_id="invalid id!")
         self.assertFalse(result["ok"])
         self.assertIn("invalide", result["message"])
 
@@ -594,7 +594,7 @@ class TestExportRunNfo(unittest.TestCase):
                 return_value=({"ok": False, "message": "no run"}, None),
             ),
         ):
-            result = self.api.export_run_nfo(run_id="run_x")
+            result = self.api._export_run_nfo_impl(run_id="run_x")
             self.assertFalse(result["ok"])
 
     def test_no_rows_in_report(self) -> None:
@@ -605,7 +605,7 @@ class TestExportRunNfo(unittest.TestCase):
                 return_value=({"ok": True, "report": {"rows": []}}, None),
             ),
         ):
-            result = self.api.export_run_nfo(run_id="run_x")
+            result = self.api._export_run_nfo_impl(run_id="run_x")
             self.assertFalse(result["ok"])
             self.assertIn("Aucune ligne", result["message"])
 

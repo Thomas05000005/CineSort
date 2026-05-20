@@ -51,10 +51,10 @@ async function _loadRows(el) {
     // (ex: fichier de validation corrompu) n'empeche pas d'afficher le plan.
     // V2-C R4-MEM-6 : signal de nav pour abort si l'utilisateur switche route.
     const navSig = getNavSignal();
-    const labels = ["get_plan", "load_validation"];
+    const labels = ["run/get_plan", "run/load_validation"];
     const results = await Promise.allSettled([
       apiPost("run/get_plan", { run_id: _state.runId }, { signal: navSig }),
-      apiPost("load_validation", { run_id: _state.runId }, { signal: navSig }),
+      apiPost("run/load_validation", { run_id: _state.runId }, { signal: navSig }),
     ]);
     const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
     const [planRes, valRes] = results.map(_val);
@@ -542,7 +542,7 @@ function _hookValidationEvents() {
     const btn = $("libBtnSaveVal");
     if (btn) btn.disabled = true;
     try {
-      const res = await apiPost("save_validation", { run_id: _state.runId, decisions: buildDecisionsPayload() });
+      const res = await apiPost("run/save_validation", { run_id: _state.runId, decisions: buildDecisionsPayload() });
       _showMsg(res.data?.ok !== false ? "Décisions sauvegardées." : (res.data?.message || "Échec."), res.data?.ok === false);
     } catch { _showMsg("Erreur réseau.", true); }
     finally { if (btn) btn.disabled = false; }

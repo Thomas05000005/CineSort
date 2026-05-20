@@ -148,7 +148,7 @@ class DashboardApiTests(unittest.TestCase):
         self._write_plan_rows(run_id, rows)
         self._insert_reports_for_run(run_id)
 
-        data = self.api.get_dashboard(run_id)
+        data = self.api._get_dashboard_impl(run_id)
         self.assertTrue(data.get("ok"), data)
         self.assertEqual(data.get("run_id"), run_id)
         self.assertEqual(data.get("run_dir"), str(self.state_dir / "runs" / f"tri_films_{run_id}"))
@@ -210,7 +210,7 @@ class DashboardApiTests(unittest.TestCase):
             ],
         )
 
-        latest = self.api.get_dashboard("latest")
+        latest = self.api._get_dashboard_impl("latest")
         self.assertTrue(latest.get("ok"), latest)
         self.assertEqual(latest.get("run_id"), new_run)
         self.assertEqual(latest.get("run_dir"), str(self.state_dir / "runs" / f"tri_films_{new_run}"))
@@ -224,7 +224,7 @@ class DashboardApiTests(unittest.TestCase):
         self._write_plan_rows(run_id, self._sample_rows())
 
         with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("dashboard boom")):
-            out = self.api.get_dashboard(run_id)
+            out = self.api._get_dashboard_impl(run_id)
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible de charger la synthese du run.")
@@ -247,7 +247,7 @@ class DashboardApiTests(unittest.TestCase):
         self._write_plan_rows(run_id, self._sample_rows())
         self._insert_reports_for_run(run_id)
 
-        first = self.api.get_dashboard(run_id)
+        first = self.api._get_dashboard_impl(run_id)
         self.assertTrue(first.get("ok"), first)
 
         cache_path = self.state_dir / "runs" / f"tri_films_{run_id}" / "dashboard_cache.json"
@@ -256,7 +256,7 @@ class DashboardApiTests(unittest.TestCase):
         with mock.patch.object(
             self.store.quality, "list_quality_reports", side_effect=OSError("should not hit reports")
         ):
-            second = self.api.get_dashboard(run_id)
+            second = self.api._get_dashboard_impl(run_id)
 
         self.assertTrue(second.get("ok"), second)
         self.assertEqual(second.get("kpis"), first.get("kpis"))
@@ -271,7 +271,7 @@ class DashboardApiTests(unittest.TestCase):
         self._write_plan_rows(run_id, self._sample_rows())
         self._insert_reports_for_run(run_id)
 
-        first = self.api.get_dashboard(run_id)
+        first = self.api._get_dashboard_impl(run_id)
         self.assertTrue(first.get("ok"), first)
 
         run_dir = self.state_dir / "runs" / f"tri_films_{run_id}"
@@ -280,7 +280,7 @@ class DashboardApiTests(unittest.TestCase):
         plan_path.write_text(original + "\n", encoding="utf-8")
 
         with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("cache invalidated")):
-            second = self.api.get_dashboard(run_id)
+            second = self.api._get_dashboard_impl(run_id)
 
         self.assertFalse(second.get("ok"), second)
         self.assertEqual(str(second.get("message") or ""), "Impossible de charger la synthese du run.")

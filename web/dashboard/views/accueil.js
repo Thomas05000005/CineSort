@@ -888,7 +888,7 @@ function _startScanPolling(container) {
       return;
     }
     try {
-      const res = await apiPost("get_dashboard", { run_id: "latest" });
+      const res = await apiPost("run/get_dashboard", { run_id: "latest" });
       if (!res || res.ok === false) return;
       const payload = res.data || res;
       const scanProgress = _extractScanProgress(payload);
@@ -1097,8 +1097,8 @@ export async function initAccueil(container) {
   let settingsRes = null;
   try {
     [dashRes, statsRes, settingsRes] = await Promise.all([
-      apiPost("get_dashboard", { run_id: "latest" }, { signal }),
-      apiPost("get_global_stats", {}, { signal }).catch(() => null),
+      apiPost("run/get_dashboard", { run_id: "latest" }, { signal }),
+      apiPost("run/get_global_stats", {}, { signal }).catch(() => null),
       apiPost("settings/get_settings", {}, { signal }).catch(() => null),
     ]);
   } catch (err) {

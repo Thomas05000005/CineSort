@@ -79,7 +79,7 @@ class ApiObservabilityTests(unittest.TestCase):
         )
 
         with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("dashboard boom")):
-            out = self.api.get_dashboard(run_id)
+            out = self.api._get_dashboard_impl(run_id)
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible de charger la synthese du run.")
@@ -139,7 +139,7 @@ class ApiObservabilityTests(unittest.TestCase):
         run_id = "20260309_120000_011"
         with self.assertLogs(api_mod.logger, level="ERROR") as logs:
             with mock.patch.object(self.api, "_run_context_for_apply", side_effect=OSError("apply context boom")):
-                out = self.api.apply(run_id, {}, False, False)
+                out = self.api._apply_impl(run_id, {}, False, False)
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible d'appliquer les changements.")

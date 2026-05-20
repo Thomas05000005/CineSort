@@ -23,6 +23,10 @@ const _CACHEABLE = new Set([
   "integrations/get_jellyfin_libraries",
   "integrations/get_plex_libraries",
   "integrations/get_radarr_status",
+  "runtime/get_probe_tools_status",
+  // Pass 1 cleanup : 12 endpoints migres vers /api/run/*
+  "run/get_dashboard",
+  "run/get_global_stats",
 ]);
 
 export function isCacheable(method) {

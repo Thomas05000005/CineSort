@@ -204,7 +204,7 @@ class TwoAppliesSimultaneousTests(_ConcurrencyBase):
         results: list = [None, None]
 
         def _run_apply(idx: int):
-            results[idx] = api.apply(run_id, decisions, False, False)
+            results[idx] = api._apply_impl(run_id, decisions, False, False)
 
         t1 = threading.Thread(target=_run_apply, args=(0,))
         t2 = threading.Thread(target=_run_apply, args=(1,))
@@ -243,7 +243,7 @@ class ApplyUndoSimultaneousTests(_ConcurrencyBase):
         }
 
         # 1er apply (sequentiel, pour avoir un batch a undo)
-        r1 = api.apply(run_id, decisions, False, False)
+        r1 = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(r1.get("ok"), r1)
 
         # Maintenant : 2e apply + undo en parallele
@@ -252,13 +252,13 @@ class ApplyUndoSimultaneousTests(_ConcurrencyBase):
 
         def _apply_again():
             try:
-                results[0] = api.apply(run_id, decisions, False, False)
+                results[0] = api._apply_impl(run_id, decisions, False, False)
             except Exception as exc:
                 errors.append(("apply", exc))
 
         def _undo():
             try:
-                results[1] = api.undo_last_apply(run_id)
+                results[1] = api._undo_last_apply_impl(run_id)
             except Exception as exc:
                 errors.append(("undo", exc))
 

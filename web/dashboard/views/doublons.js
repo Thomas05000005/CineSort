@@ -738,7 +738,7 @@ async function _loadGroups() {
   let runId = _state.runId;
   if (!runId) {
     try {
-      const dash = await apiPost("get_dashboard", { run_id_or: "latest" });
+      const dash = await apiPost("run/get_dashboard", { run_id_or: "latest" });
       const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;
@@ -754,7 +754,7 @@ async function _loadGroups() {
   }
 
   try {
-    const res = await apiPost("check_duplicates", { run_id: runId, decisions: {} });
+    const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} });
     const data = _payload(res);
     if (data.ok === false) {
       _state.error = data.message || data.error || "Erreur de chargement.";

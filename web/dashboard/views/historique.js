@@ -909,7 +909,7 @@ function _bindEvents(container) {
 
 async function _doUndoApply(runId) {
   try {
-    const res = await apiPost("undo_last_apply", { run_id: runId, dry_run: false, atomic: true });
+    const res = await apiPost("run/undo_last_apply", { run_id: runId, dry_run: false, atomic: true });
     if (res && res.ok !== false) {
       showToast({ type: "success", text: "Apply annulé. Fichiers restaurés." });
       // Refresh dashboard + cache + UI.
@@ -950,7 +950,7 @@ async function _doDeleteRun(runId) {
 
 async function _refreshRuns() {
   try {
-    const res = await apiPost("get_dashboard", { run_id: "latest" });
+    const res = await apiPost("run/get_dashboard", { run_id: "latest" });
     if (res && res.ok !== false) {
       const data = res.data || res;
       _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
@@ -1111,7 +1111,7 @@ export async function initHistorique(container) {
 
   let res = null;
   try {
-    res = await apiPost("get_dashboard", { run_id: "latest" }, { signal });
+    res = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal });
   } catch (err) {
     if (err && err.name === "AbortError") return;
     container.innerHTML = _renderError(err ? String(err.message || err) : "Erreur réseau");

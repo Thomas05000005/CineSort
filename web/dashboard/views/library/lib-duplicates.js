@@ -42,7 +42,7 @@ async function _loadDuplicates() {
   groupsEl.innerHTML = '<p class="text-muted">Chargement...</p>';
 
   try {
-    const res = await apiPost("check_duplicates", {
+    const res = await apiPost("run/check_duplicates", {
       run_id: libState.runId,
       decisions: buildDecisionsPayload(),
     });

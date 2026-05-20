@@ -109,13 +109,13 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         }
 
         api_disk = self._configured_api()
-        saved = api_disk.save_validation(run_id, decisions)
+        saved = api_disk._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
         validation_json = self._run_dir(run_id) / "validation.json"
         self.assertEqual(saved.get("path"), str(validation_json))
         self.assertTrue(validation_json.exists(), validation_json)
 
-        loaded = api_disk.load_validation(run_id)
+        loaded = api_disk._load_validation_impl(run_id)
         self.assertTrue(loaded.get("ok"), loaded)
         normalized = loaded.get("decisions", {})
         self.assertEqual(set(normalized), {row["row_id"] for row in rows})
@@ -128,7 +128,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         disk_payload = json.loads(validation_json.read_text(encoding="utf-8"))
         self.assertEqual(disk_payload, normalized)
 
-        duplicates = api_disk.check_duplicates(run_id, normalized)
+        duplicates = api_disk._check_duplicates_impl(run_id, normalized)
         self.assertTrue(duplicates.get("ok"), duplicates)
         self.assertGreaterEqual(int(duplicates.get("total_groups") or 0), 1, duplicates)
         groups = duplicates.get("groups", [])
@@ -176,11 +176,11 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         summary_txt = run_dir / "summary.txt"
 
         api_validate = self._configured_api()
-        saved = api_validate.save_validation(run_id, decisions)
+        saved = api_validate._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         api_apply = self._configured_api()
-        applied = api_apply.apply(run_id, {}, False, False)
+        applied = api_apply._apply_impl(run_id, {}, False, False)
         self.assertTrue(applied.get("ok"), applied)
         self.assertTrue(applied.get("apply_batch_id"), applied)
         self.assertEqual(int((applied.get("result") or {}).get("errors") or 0), 0, applied)
@@ -222,7 +222,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.assertEqual(str(preview.get("batch_id") or ""), apply_batch_id)
         self.assertGreaterEqual(int((preview.get("counts") or {}).get("reversible") or 0), 1, preview)
 
-        undone = api_undo.undo_last_apply(run_id, False)
+        undone = api_undo._undo_last_apply_impl(run_id, False)
         self.assertTrue(undone.get("ok"), undone)
         self.assertIn(str(undone.get("status") or ""), {"UNDONE_DONE", "UNDONE_PARTIAL"})
 

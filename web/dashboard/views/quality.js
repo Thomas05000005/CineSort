@@ -33,10 +33,10 @@ async function _loadQuality(el) {
 
   // Audit ID-ROB-002 : Promise.allSettled pour qu'un echec sur probe_tools
   // n'empeche pas l'affichage des stats globales (et inversement).
-  const labels = ["get_global_stats", "get_probe_tools_status"];
+  const labels = ["run/get_global_stats", "get_probe_tools_status"];
   const results = await Promise.allSettled([
-    apiPost("get_global_stats", { limit_runs: 20 }),
-    apiPost("get_probe_tools_status"),
+    apiPost("run/get_global_stats", { limit_runs: 20 }),
+    apiPost("runtime/get_probe_tools_status"),
   ]);
   const _val = (r) => (r && r.status === "fulfilled" ? r.value : null);
   const [statsRes, probeRes] = results.map(_val);
@@ -74,7 +74,7 @@ async function _loadQuality(el) {
         btn.textContent = "Installation en cours...";
       }
       try {
-        const res = await apiPost("auto_install_probe_tools");
+        const res = await apiPost("runtime/auto_install_probe_tools");
         if (res?.data?.ok || res?.ok) {
           if (typeof window.toast === "function") {
             window.toast({ type: "success", text: "FFprobe + MediaInfo installes. Lancez un scan." });

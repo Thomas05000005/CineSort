@@ -80,7 +80,7 @@ async function _loadCleanupPreview() {
   const el = $("libCleanupPreview");
   if (!el || !libState.runId) return;
   try {
-    const res = await apiPost("get_cleanup_residual_preview", { run_id: libState.runId });
+    const res = await apiPost("run/get_cleanup_residual_preview", { run_id: libState.runId });
     const d = res.data || {};
     if (d.total_dirs || d.total_files) {
       el.innerHTML = `${d.total_dirs || 0} dossier(s), ${d.total_files || 0} fichier(s) seraient nettoyés.`;
@@ -139,7 +139,7 @@ async function _onApply() {
 
     if (!dryRun) {
       // Dry-run obligatoire d'abord
-      const dryRes = await apiPost("apply", { run_id: libState.runId, decisions, dry_run: true, quarantine_unapproved: quarantine });
+      const dryRes = await apiPost("run/apply", { run_id: libState.runId, decisions, dry_run: true, quarantine_unapproved: quarantine });
       const dryData = dryRes.data || {};
       const applied = dryData.applied ?? 0;
       const skipped = dryData.skipped ?? 0;
@@ -159,7 +159,7 @@ async function _onApply() {
     }
 
     // Execution
-    const res = await apiPost("apply", { run_id: libState.runId, decisions, dry_run: dryRun, quarantine_unapproved: quarantine });
+    const res = await apiPost("run/apply", { run_id: libState.runId, decisions, dry_run: dryRun, quarantine_unapproved: quarantine });
     const d = res.data || {};
     const applied = d.applied ?? 0;
     const skipped = d.skipped ?? 0;
@@ -247,7 +247,7 @@ async function _onUndoPreview() {
   const btn = $("libBtnUndoPreview");
   if (btn) btn.disabled = true;
   try {
-    const res = await apiPost("undo_last_apply", { run_id: libState.runId, dry_run: true });
+    const res = await apiPost("run/undo_last_apply", { run_id: libState.runId, dry_run: true });
     const d = res.data || {};
     if (!d.ok) {
       _showMsg("libUndoMsg", d.message || "Aucun apply à annuler.", true);
@@ -267,7 +267,7 @@ async function _onUndoExec() {
   if (btn) btn.disabled = true;
 
   try {
-    const res = await apiPost("undo_last_apply", { run_id: libState.runId, dry_run: dryRun });
+    const res = await apiPost("run/undo_last_apply", { run_id: libState.runId, dry_run: dryRun });
     const d = res.data || {};
     _showMsg("libUndoMsg", d.ok ? `${dryRun ? "[TEST] " : ""}Annulation réussie.` : (d.message || "Échec."), !d.ok);
     // Cf #92 quick win #2 : refresh sidebar badges (counters faux apres undo
@@ -291,7 +291,7 @@ async function _loadDiagnostic() {
     const rejectedCount = Object.values(decisions).filter(d => !d.ok).length;
 
     // Dry-run rapide pour la prevision
-    const dryRes = await apiPost("apply", { run_id: libState.runId, decisions, dry_run: true, quarantine_unapproved: false });
+    const dryRes = await apiPost("run/apply", { run_id: libState.runId, decisions, dry_run: true, quarantine_unapproved: false });
     const d = dryRes.data || {};
 
     el.innerHTML = `

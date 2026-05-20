@@ -138,11 +138,11 @@ class GoldenPathFlowTests(_GoldenFlowsBase):
                 "year": row["proposed_year"],
             }
         }
-        saved = api.save_validation(run_id, decisions)
+        saved = api._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         # 3) APPLY (reel, pas dry-run)
-        applied = api.apply(run_id, {}, False, False)
+        applied = api._apply_impl(run_id, {}, False, False)
         self.assertTrue(applied.get("ok"), applied)
         self.assertEqual(int((applied.get("result") or {}).get("errors") or 0), 0, applied)
         apply_batch_id = str(applied["apply_batch_id"])
@@ -166,7 +166,7 @@ class GoldenPathFlowTests(_GoldenFlowsBase):
         self.assertTrue(all(str(op["undo_status"]) == "PENDING" for op in ops))
 
         # 6) UNDO — rollback complet
-        undone = api.undo_last_apply(run_id, False)
+        undone = api._undo_last_apply_impl(run_id, False)
         self.assertTrue(undone.get("ok"), undone)
         self.assertIn(str(undone.get("status") or ""), {"UNDONE_DONE", "UNDONE_PARTIAL"})
 
@@ -194,12 +194,12 @@ class DuplicateConflictTests(_GoldenFlowsBase):
         self.assertEqual(len(decisions), 2)
 
         # Persistance des decisions
-        saved = api.save_validation(run_id, decisions)
+        saved = api._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         # check_duplicates : doit detecter le conflit (meme destination cible)
-        normalized = api.load_validation(run_id).get("decisions", {})
-        duplicates = api.check_duplicates(run_id, normalized)
+        normalized = api._load_validation_impl(run_id).get("decisions", {})
+        duplicates = api._check_duplicates_impl(run_id, normalized)
         self.assertTrue(duplicates.get("ok"), duplicates)
         self.assertGreaterEqual(int(duplicates.get("total_groups") or 0), 1, duplicates)
 
@@ -215,7 +215,7 @@ class DuplicateConflictTests(_GoldenFlowsBase):
         row_ids = sorted(normalized.keys())
         normalized[row_ids[0]] = {"ok": False, "title": "", "year": 0}
         # check_duplicates apres resolution : le conflit doit disparaitre
-        duplicates_after = api.check_duplicates(run_id, normalized)
+        duplicates_after = api._check_duplicates_impl(run_id, normalized)
         self.assertTrue(duplicates_after.get("ok"), duplicates_after)
         groups_after = duplicates_after.get("groups", [])
         plan_conflicts_after = [g for g in groups_after if g.get("plan_conflict")]
@@ -253,12 +253,12 @@ class ApplyPartialFailureTests(_GoldenFlowsBase):
         blocked_dest.write_bytes(b"BLOCKER")
 
         decisions = self._decisions_for_plan(api, run_id)
-        saved = api.save_validation(run_id, decisions)
+        saved = api._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         # APPLY : on s'attend a 1 erreur, 2 succes (le exact comportement
         # peut varier — on accepte errors>=1 OR moins de 3 ops successfully applied)
-        applied = api.apply(run_id, {}, False, False)
+        applied = api._apply_impl(run_id, {}, False, False)
         # ok=True meme avec partial errors (le batch existe et est trace)
         # OU ok=False si l'apply est aborte globalement.
         result = applied.get("result") or {}
@@ -276,7 +276,7 @@ class ApplyPartialFailureTests(_GoldenFlowsBase):
             batch_id = applied.get("apply_batch_id")
             self.assertTrue(batch_id, applied)
 
-            undone = api.undo_last_apply(run_id, False)
+            undone = api._undo_last_apply_impl(run_id, False)
             self.assertTrue(undone.get("ok"), undone)
 
             # Verifier : les sources restaurees correspondent au compte des ops undo done.

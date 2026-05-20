@@ -135,7 +135,7 @@ class ApplyPermissionErrorTests(_ApplyRobustnessBase):
             return orig_move(src, dst, *args, **kwargs)
 
         with mock.patch("shutil.move", side_effect=_flaky_move):
-            result = api.apply(run_id, decisions, False, False)
+            result = api._apply_impl(run_id, decisions, False, False)
 
         self.assertTrue(result.get("ok"), result)
         # Le rapport doit mentionner l'erreur (errors > 0 ou skip_reasons non vide)
@@ -199,7 +199,7 @@ class ApplyPersistsToDbTests(_ApplyRobustnessBase):
         api1 = CineSortApi()
         run_id = self._scan_to_done(api1)
         decisions = self._decisions_for_all(run_id, api1)
-        result = api1.apply(run_id, decisions, False, False)
+        result = api1._apply_impl(run_id, decisions, False, False)
         self.assertTrue(result.get("ok"), result)
         del api1  # detruire la session
 
@@ -207,7 +207,7 @@ class ApplyPersistsToDbTests(_ApplyRobustnessBase):
         api2 = CineSortApi()
         api2.settings.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
         # L'undo doit trouver le batch via la DB persistee
-        undo_result = api2.undo_last_apply(run_id)
+        undo_result = api2._undo_last_apply_impl(run_id)
         # Doit etre ok ou contenir un message explicatif (pas de crash)
         self.assertIsInstance(undo_result, dict)
         self.assertIn("ok", undo_result)
@@ -227,7 +227,7 @@ class ScanAfterPartialApplyTests(_ApplyRobustnessBase):
         api = CineSortApi()
         run_id1 = self._scan_to_done(api)
         decisions = self._decisions_for_all(run_id1, api)
-        api.apply(run_id1, decisions, False, False)
+        api._apply_impl(run_id1, decisions, False, False)
 
         # Nouveau scan
         run_id2 = self._scan_to_done(api)
@@ -331,7 +331,7 @@ class CaseOnlyRenameTests(_ApplyRobustnessBase):
             decisions[rid]["title"] = "film"
             decisions[rid]["year"] = 2020
 
-        result = api.apply(run_id, decisions, False, False)
+        result = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(result.get("ok"), result)
         # Pas de .__tmp_ren restant
         tmp_leftovers = list(self.root.glob("**/*.__tmp_ren*"))
@@ -363,7 +363,7 @@ class FileLockedTests(_ApplyRobustnessBase):
             return orig_move(src, dst, *args, **kwargs)
 
         with mock.patch("shutil.move", side_effect=_locked_on_first):
-            result = api.apply(run_id, decisions, False, False)
+            result = api._apply_impl(run_id, decisions, False, False)
 
         self.assertTrue(result.get("ok"), result)
         # Au moins certains fichiers doivent avoir ete deplaces

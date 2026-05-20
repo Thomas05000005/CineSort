@@ -117,7 +117,7 @@ async function _loadRunContext() {
     // Detecter le run courant
     libState.runId = healthData.active_run_id || null;
     if (!libState.runId) {
-      const statsRes = await apiPost("get_global_stats", { limit_runs: 1 }, { signal: navSig });
+      const statsRes = await apiPost("run/get_global_stats", { limit_runs: 1 }, { signal: navSig });
       const runs = statsRes.data?.runs_summary || [];
       if (runs.length > 0) libState.runId = runs[0].run_id;
     }

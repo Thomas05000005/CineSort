@@ -117,7 +117,7 @@ function _hookEvents() {
       const msg = $("libProbeInstallMsg");
       if (msg) msg.textContent = "Installation en cours...";
       try {
-        const res = await apiPost("auto_install_probe_tools", {});
+        const res = await apiPost("runtime/auto_install_probe_tools", {});
         if (res.data?.ok) {
           if (msg) { msg.textContent = "Outils installés !"; msg.className = "text-success"; }
           const banner = $("libProbeInstallBanner");
@@ -235,7 +235,7 @@ async function _pollRunStatus() {
         if (_state && finishedRunId) {
           _state.runId = finishedRunId;
         }
-        const statsRes = await apiPost("get_global_stats", { limit_runs: 1 });
+        const statsRes = await apiPost("run/get_global_stats", { limit_runs: 1 });
         if (statsRes?.data?.recent_runs?.[0]?.run_id && _state) {
           _state.runId = statsRes.data.recent_runs[0].run_id;
         }

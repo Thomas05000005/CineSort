@@ -75,9 +75,9 @@ async function _fetchAll() {
   const navSig = getNavSignal();
   const calls = [
     apiGet("/api/health"),
-    apiPost("get_global_stats", { limit_runs: 10 }, { signal: navSig }),
+    apiPost("run/get_global_stats", { limit_runs: 10 }, { signal: navSig }),
     apiPost("settings/get_settings", {}, { signal: navSig }),
-    apiPost("get_probe_tools_status", {}, { signal: navSig }),
+    apiPost("runtime/get_probe_tools_status", {}, { signal: navSig }),
     apiPost("library/get_library_podiums", { limit: 10 }, { signal: navSig }),
     apiPost("library/get_library_timeline", { months: 12 }, { signal: navSig }),
   ];
@@ -897,7 +897,7 @@ function _hookActions(settings) {
       const installMsg = $("dashProbeInstallMsg");
       if (installMsg) installMsg.textContent = "Installation en cours...";
       try {
-        const res = await apiPost("auto_install_probe_tools", {});
+        const res = await apiPost("runtime/auto_install_probe_tools", {});
         if (res.data?.ok) {
           if (installMsg) { installMsg.textContent = "Outils installés !"; installMsg.className = "text-success"; }
           // Force shell rerender pour faire disparaitre le banner

@@ -139,7 +139,7 @@ class DashboardCacheTests(unittest.TestCase):
         self._write_plan_rows(run_id, self._sample_rows())
         self._insert_reports_for_run(run_id)
 
-        first = self.api.get_dashboard(run_id)
+        first = self.api._get_dashboard_impl(run_id)
         self.assertTrue(first.get("ok"), first)
 
         cache_path = self.state_dir / "runs" / f"tri_films_{run_id}" / "dashboard_cache.json"
@@ -148,7 +148,7 @@ class DashboardCacheTests(unittest.TestCase):
         with mock.patch.object(
             self.store.quality, "list_quality_reports", side_effect=OSError("should not hit reports")
         ):
-            second = self.api.get_dashboard(run_id)
+            second = self.api._get_dashboard_impl(run_id)
 
         self.assertTrue(second.get("ok"), second)
         self.assertEqual(second.get("kpis"), first.get("kpis"))
@@ -163,7 +163,7 @@ class DashboardCacheTests(unittest.TestCase):
         self._write_plan_rows(run_id, self._sample_rows())
         self._insert_reports_for_run(run_id)
 
-        first = self.api.get_dashboard(run_id)
+        first = self.api._get_dashboard_impl(run_id)
         self.assertTrue(first.get("ok"), first)
 
         run_dir = self.state_dir / "runs" / f"tri_films_{run_id}"
@@ -172,7 +172,7 @@ class DashboardCacheTests(unittest.TestCase):
         plan_path.write_text(original + "\n", encoding="utf-8")
 
         with mock.patch.object(self.store.quality, "list_quality_reports", side_effect=OSError("cache invalidated")):
-            second = self.api.get_dashboard(run_id)
+            second = self.api._get_dashboard_impl(run_id)
 
         self.assertFalse(second.get("ok"), second)
         self.assertEqual(str(second.get("message") or ""), "Impossible de charger la synthese du run.")

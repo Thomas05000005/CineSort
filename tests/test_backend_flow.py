@@ -65,10 +65,10 @@ class CineSortApiFlowTests(unittest.TestCase):
         first_row_id = rows[0]["row_id"]
         decisions[first_row_id]["ok"] = False
 
-        sv = api.save_validation(run_id, decisions)
+        sv = api._save_validation_impl(run_id, decisions)
         self.assertTrue(sv.get("ok"), sv)
 
-        lv = api.load_validation(run_id)
+        lv = api._load_validation_impl(run_id)
         self.assertTrue(lv.get("ok"), lv)
         saved = lv.get("decisions", {})
         self.assertTrue(saved)
@@ -79,11 +79,11 @@ class CineSortApiFlowTests(unittest.TestCase):
             self.assertIn("year", d)
             self.assertIsInstance(d["year"], int)
 
-        dup = api.check_duplicates(run_id, decisions)
+        dup = api._check_duplicates_impl(run_id, decisions)
         self.assertTrue(dup.get("ok"), dup)
         self.assertIn("total_groups", dup)
 
-        dry = api.apply(run_id, decisions, True, False)
+        dry = api._apply_impl(run_id, decisions, True, False)
         self.assertTrue(dry.get("ok"), dry)
         dry_result = dry["result"]
         self.assertEqual(dry_result["errors"], 0, dry_result)
@@ -91,7 +91,7 @@ class CineSortApiFlowTests(unittest.TestCase):
         self.assertGreaterEqual(dry_result["moves"], 1, dry_result)
         self.assertGreaterEqual(int((dry_result.get("skip_reasons") or {}).get("skip_non_valide", 0)), 1, dry_result)
 
-        real = api.apply(run_id, decisions, False, True)
+        real = api._apply_impl(run_id, decisions, False, True)
         self.assertTrue(real.get("ok"), real)
         result = real["result"]
         self.assertEqual(result["errors"], 0, result)

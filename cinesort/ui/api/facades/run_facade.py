@@ -174,3 +174,64 @@ class RunFacade(_BaseFacade):
             {ok, group_key, winner_row_id, losers, decided_ts}.
         """
         return self._api._mark_duplicate_winner_impl(run_id, group_key, winner_row_id, notes)
+
+    # ---------- Pass 1 cleanup : 12 endpoints legacy migres vers /api/run/* ----------
+
+    def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
+        """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
+        return self._api._get_dashboard_impl(run_id)
+
+    def get_global_stats(self, limit_runs: int = 20) -> Dict[str, Any]:
+        """Global dashboard : statistiques multi-run pour la bibliotheque."""
+        return self._api._get_global_stats_impl(limit_runs)
+
+    def get_sidebar_counters(self) -> Dict[str, Any]:
+        """V3-04 : compteurs sidebar pour badges UI (validation/application/quality)."""
+        return self._api._get_sidebar_counters_impl()
+
+    def apply(
+        self,
+        run_id: str,
+        decisions: Dict[str, Dict[str, Any]],
+        dry_run: bool,
+        quarantine_unapproved: bool,
+    ) -> Dict[str, Any]:
+        """Applique les decisions de validation (deplacements/renommages reels ou dry-run)."""
+        return self._api._apply_impl(run_id, decisions, dry_run, quarantine_unapproved)
+
+    def save_validation(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Persiste les decisions de validation dans validation.json (atomique)."""
+        return self._api._save_validation_impl(run_id, decisions)
+
+    def load_validation(self, run_id: str) -> Dict[str, Any]:
+        """Recharge les decisions (approve/reject) persistees pour ce run."""
+        return self._api._load_validation_impl(run_id)
+
+    def check_duplicates(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Detecte les collisions de destination entre rows approuvees avant apply."""
+        return self._api._check_duplicates_impl(run_id, decisions)
+
+    def get_cleanup_residual_preview(self, run_id: str) -> Dict[str, Any]:
+        """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""
+        return self._api._get_cleanup_residual_preview_impl(run_id)
+
+    def undo_last_apply(self, run_id: str, dry_run: bool = True, atomic: bool = True) -> Dict[str, Any]:
+        """Annule le dernier batch apply reel (undo v1). `dry_run=True` ne touche rien."""
+        return self._api._undo_last_apply_impl(run_id, dry_run, atomic=atomic)
+
+    def export_run_nfo(self, run_id: str, overwrite: bool = False, dry_run: bool = True) -> Dict[str, Any]:
+        """Genere des fichiers .nfo (Kodi/Jellyfin) pour chaque film du run."""
+        return self._api._export_run_nfo_impl(run_id, overwrite=overwrite, dry_run=dry_run)
+
+    def export_apply_audit(
+        self,
+        run_id: str,
+        batch_id: Optional[str] = None,
+        as_format: str = "json",
+    ) -> Dict[str, Any]:
+        """P2.3 : journal d'audit JSONL d'un apply (complementaire a apply_operations)."""
+        return self._api._export_apply_audit_impl(run_id, batch_id, as_format=as_format)
+
+    def import_watchlist(self, csv_content: str, source: str) -> Dict[str, Any]:
+        """Importe une watchlist CSV (Letterboxd/IMDb) et compare avec la bibliotheque locale."""
+        return self._api._import_watchlist_impl(csv_content, source)

@@ -486,7 +486,7 @@ async function _initSidebarFeatures() {
 async function _loadSidebarCounters() {
   if (!hasToken()) return;
   try {
-    const res = await apiPost("get_sidebar_counters");
+    const res = await apiPost("run/get_sidebar_counters");
     const data = (res && res.data && res.data.data) || (res && res.data) || {};
     if (typeof sidebarV5.updateSidebarBadges === "function") {
       sidebarV5.updateSidebarBadges(data);
@@ -511,7 +511,7 @@ async function _checkIntegrationNav() {
 async function _checkUpdateBadge() {
   if (!hasToken()) return;
   try {
-    const res = await apiPost("get_update_info");
+    const res = await apiPost("runtime/get_update_info");
     const data = (res && res.data) || {};
     if (data.update_available && typeof sidebarV5.setUpdateBadge === "function") {
       sidebarV5.setUpdateBadge("settings", true, data.latest_version);
@@ -537,7 +537,7 @@ async function _initNotificationPolling() {
   _notificationFallbackInterval = setInterval(async () => {
     if (!hasToken()) return;
     try {
-      const res = await apiPost("get_notifications_unread_count");
+      const res = await apiPost("runtime/get_notifications_unread_count");
       const count = (res && res.data && res.data.count) || (res && res.count) || 0;
       if (typeof topBarV5.updateNotificationBadge === "function") {
         topBarV5.updateNotificationBadge(count);
@@ -570,7 +570,7 @@ async function _initDemoModeIfNeeded() {
   try {
     const settingsRes = await cachedGetSettings();
     const settings = (settingsRes && settingsRes.data) || {};
-    const statsRes = await apiPost("get_global_stats");
+    const statsRes = await apiPost("run/get_global_stats");
     const stats = (statsRes && statsRes.data) || {};
     const { showDemoWizardIfFirstRun, renderDemoBanner } = await import("./views/demo-wizard.js");
     await showDemoWizardIfFirstRun(settings, stats);

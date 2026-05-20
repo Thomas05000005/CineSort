@@ -109,9 +109,9 @@ async function _loadRunInfo() {
     // Phase 5 : si fragment #run-XXX présent, charge ce run précis.
     const targetId = _targetRunId;
     const params = targetId ? { run_id: targetId } : { run_id_or: "latest" };
-    const res = await apiPost("get_dashboard", params);
+    const res = await apiPost("run/get_dashboard", params);
     if (!res || res.ok === false) {
-    const res = await apiPost("get_dashboard", { run_id_or: "latest" });
+    const res = await apiPost("run/get_dashboard", { run_id_or: "latest" });
     if (!res || res.data?.ok === false) {
       _runInfo = null;
       return;
@@ -893,7 +893,7 @@ async function _handleApplyNow() {
   if (_applyOptions.dry_run) {
     // Dry-run direct sans confirmation
     try {
-      const res = await apiPost("apply", {
+      const res = await apiPost("run/apply", {
         run_id: _runInfo.runId,
         decisions,
         dry_run: true,
@@ -926,7 +926,7 @@ async function _handleApplyNow() {
     countdownSeconds: 3,
     onConfirm: async () => {
       try {
-        const res = await apiPost("apply", {
+        const res = await apiPost("run/apply", {
           run_id: _runInfo.runId,
           decisions,
           dry_run: false,
@@ -1049,7 +1049,7 @@ async function _handleSaveValidation() {
   if (!_runInfo?.runId) return;
   const decisions = _buildDecisions();
   try {
-    const res = await apiPost("save_validation", {
+    const res = await apiPost("run/save_validation", {
       run_id: _runInfo.runId,
       decisions,
     });

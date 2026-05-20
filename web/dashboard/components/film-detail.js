@@ -647,7 +647,7 @@ async function _validateFilm(btn, runId, rowId) {
   if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
   try {
     const decisions = { [rowId]: { ok: true } };
-    const res = await apiPost("save_validation", { run_id: runId, decisions });
+    const res = await apiPost("run/save_validation", { run_id: runId, decisions });
     const data = res && res.data ? res.data : res;
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Echec validation.");

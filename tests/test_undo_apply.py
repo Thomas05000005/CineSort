@@ -61,7 +61,7 @@ class UndoApplyTests(unittest.TestCase):
         self.assertTrue(rows)
         decisions = self._build_decisions(rows)
 
-        applied = api.apply(run_id, decisions, False, False)
+        applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
         self.assertTrue(applied.get("apply_batch_id"))
 
@@ -70,11 +70,11 @@ class UndoApplyTests(unittest.TestCase):
         self.assertTrue(preview.get("can_undo"), preview)
         self.assertGreaterEqual(int((preview.get("counts") or {}).get("reversible", 0)), 1)
 
-        dry_preview = api.undo_last_apply(run_id, True)
+        dry_preview = api._undo_last_apply_impl(run_id, True)
         self.assertTrue(dry_preview.get("ok"), dry_preview)
         self.assertEqual(dry_preview.get("status"), "PREVIEW_ONLY")
 
-        restored = api.undo_last_apply(run_id, False)
+        restored = api._undo_last_apply_impl(run_id, False)
         self.assertTrue(restored.get("ok"), restored)
         self.assertIn(restored.get("status"), {"UNDONE_DONE", "UNDONE_PARTIAL"})
         self.assertTrue(src_folder.exists(), f"Source folder should be restored: {src_folder}")
@@ -103,7 +103,7 @@ class UndoApplyTests(unittest.TestCase):
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
-        dry = api.apply(run_id, decisions, True, False)
+        dry = api._apply_impl(run_id, decisions, True, False)
         self.assertTrue(dry.get("ok"), dry)
 
         preview = api._undo_last_apply_preview_impl(run_id)
@@ -136,7 +136,7 @@ class UndoApplyTests(unittest.TestCase):
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
-        applied = api.apply(run_id, decisions, False, False)
+        applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
 
         cleanup_bucket = self.root / "_Dossier Nettoyage" / noise_folder.name
@@ -154,7 +154,7 @@ class UndoApplyTests(unittest.TestCase):
             summary_txt.read_text(encoding="utf-8"),
         )
 
-        restored = api.undo_last_apply(run_id, False)
+        restored = api._undo_last_apply_impl(run_id, False)
         self.assertTrue(restored.get("ok"), restored)
         restored_categories = restored.get("categories") or {}
         self.assertEqual(int(restored_categories.get("cleanup_residual_dirs_reversed") or 0), 1)
@@ -187,7 +187,7 @@ class UndoApplyTests(unittest.TestCase):
 
         with mock.patch.object(api, "_build_undo_preview_payload", side_effect=OSError("undo preview boom")):
             out = api._undo_last_apply_preview_impl(run_id)
-            out_real = api.undo_last_apply(run_id, False)
+            out_real = api._undo_last_apply_impl(run_id, False)
 
         self.assertFalse(out.get("ok"), out)
         self.assertEqual(str(out.get("message") or ""), "Impossible de preparer l'annulation.")
@@ -227,7 +227,7 @@ class UndoApplyTests(unittest.TestCase):
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 2)
         decisions = self._build_decisions(rows)
-        applied = api.apply(run_id, decisions, False, False)
+        applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
 
         preview = api._undo_by_row_preview_impl(run_id)
@@ -265,7 +265,7 @@ class UndoApplyTests(unittest.TestCase):
         rows = plan.get("rows", [])
         self.assertGreaterEqual(len(rows), 2)
         decisions = self._build_decisions(rows)
-        applied = api.apply(run_id, decisions, False, False)
+        applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)
 
         # Only undo the first film.
@@ -299,7 +299,7 @@ class UndoApplyTests(unittest.TestCase):
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
-        api.apply(run_id, decisions, False, False)
+        api._apply_impl(run_id, decisions, False, False)
 
         history = api.run.list_apply_history(run_id)
         self.assertTrue(history.get("ok"), history)
@@ -327,7 +327,7 @@ class UndoApplyTests(unittest.TestCase):
         plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         decisions = self._build_decisions(rows)
-        api.apply(run_id, decisions, False, False)
+        api._apply_impl(run_id, decisions, False, False)
 
         first_row_id = rows[0]["row_id"]
         result = api._undo_selected_rows_impl(run_id, [first_row_id], dry_run=True)

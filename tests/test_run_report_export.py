@@ -59,13 +59,13 @@ class RunReportExportTests(unittest.TestCase):
             }
             for row in rows
         }
-        saved = api.save_validation(run_id, decisions)
+        saved = api._save_validation_impl(run_id, decisions)
         self.assertTrue(saved.get("ok"), saved)
 
         score_one = api.quality.get_quality_report(run_id, rows[0]["row_id"], {"reuse_existing": False})
         self.assertTrue(score_one.get("ok"), score_one)
 
-        dry = api.apply(run_id, decisions, True, False)
+        dry = api._apply_impl(run_id, decisions, True, False)
         self.assertTrue(dry.get("ok"), dry)
 
         exported_json = api.run.export_run_report(run_id, "json")

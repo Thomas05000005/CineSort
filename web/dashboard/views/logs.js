@@ -49,10 +49,10 @@ async function _load() {
   // ne casse pas tout l'affichage logs (live et historique sont independants).
   // V2-C R4-MEM-6 : signal de nav pour abort si l'utilisateur navigate ailleurs.
   const navSig = getNavSignal();
-  const labels = ["/api/health", "get_global_stats"];
+  const labels = ["/api/health", "run/get_global_stats"];
   const results = await Promise.allSettled([
     apiGet("/api/health"),
-    apiPost("get_global_stats", { limit_runs: 50 }, { signal: navSig }),
+    apiPost("run/get_global_stats", { limit_runs: 50 }, { signal: navSig }),
   ]);
   const _val = (r) => (r && r.status === "fulfilled" && r.value ? r.value.data || {} : {});
   const [healthData, statsData] = results.map(_val);
@@ -203,7 +203,7 @@ async function _exportNfo() {
   if (!_selectedRunId) return;
   const msg = $("logExportMsg");
   try {
-    const res = await apiPost("export_run_nfo", { run_id: _selectedRunId, overwrite: false, dry_run: false });
+    const res = await apiPost("run/export_run_nfo", { run_id: _selectedRunId, overwrite: false, dry_run: false });
     if (msg) msg.textContent = res.data?.message || `${res.data?.created || 0} fichier(s) .nfo créés.`;
   } catch { if (msg) { msg.textContent = "Erreur."; msg.className = "status-msg error"; } }
 }

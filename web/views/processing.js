@@ -498,7 +498,7 @@ async function _initReviewStep(panel) {
 
   // Charger validation
   try {
-    const res = await apiPost("load_validation", { run_id: _state.currentRunId });
+    const res = await apiPost("run/load_validation", { run_id: _state.currentRunId });
     const body = panel.querySelector("#processing-review-body");
     if (!res.ok) {
       const msg = res.data?.message || res.error || "Aucune donnée de review.";
@@ -656,7 +656,7 @@ function _renderReviewRow(r) {
 
 async function _saveDecisions() {
   try {
-    const res = await apiPost("save_validation", { run_id: _state.currentRunId, decisions: _state.decisions });
+    const res = await apiPost("run/save_validation", { run_id: _state.currentRunId, decisions: _state.decisions });
     // V2-03 : si save serveur OK, le draft local est obsolete -> on le supprime.
     if (res.ok) _clearDraft(_state.currentRunId);
   } catch (e) {
@@ -732,7 +732,7 @@ async function _runApply() {
   const resultBox = root.querySelector("[data-v5-apply-result]");
   if (resultBox) resultBox.innerHTML = `<div class="v5u-text-muted">Apply en cours...</div>`;
   try {
-    const res = await apiPost("apply", { run_id: _state.currentRunId, dry_run: dry, quarantine });
+    const res = await apiPost("run/apply", { run_id: _state.currentRunId, dry_run: dry, quarantine });
     if (res.ok) {
       const msg = dry ? "Dry-run termine." : "Apply termine.";
       const done = res.data?.done || 0;
@@ -811,7 +811,7 @@ export function goToStep(stepId) {
 
 async function _fetchLastRunId() {
   try {
-    const res = await apiPost("get_dashboard", { run_id: "latest" });
+    const res = await apiPost("run/get_dashboard", { run_id: "latest" });
     if (res.ok && res.data?.run_id) _state.currentRunId = res.data.run_id;
   } catch (e) {
     /* no run yet */

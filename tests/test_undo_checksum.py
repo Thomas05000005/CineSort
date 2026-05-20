@@ -156,7 +156,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
 
         # 2. Appliquer pour de vrai
-        result = api.apply(
+        result = api._apply_impl(
             run_id=run_id,
             dry_run=False,
             decisions=decisions,
@@ -190,7 +190,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
             final_dst.write_bytes(b"CONTENU_DIFFERENT_UTILISATEUR" * 512)
 
         # 5. Tenter un undo atomique : doit être refusé
-        undo_res = api.undo_last_apply(run_id=run_id, dry_run=False, atomic=True)
+        undo_res = api._undo_last_apply_impl(run_id=run_id, dry_run=False, atomic=True)
         self.assertFalse(undo_res.get("ok"))
         self.assertEqual(undo_res.get("status"), "ABORTED_HASH_MISMATCH")
         self.assertIn("preverify", undo_res)
@@ -199,7 +199,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         self.assertTrue(final_dst.exists())
 
         # 6. Undo best-effort : le fichier modifié est skip, pas d'erreur globale
-        undo_res2 = api.undo_last_apply(run_id=run_id, dry_run=False, atomic=False)
+        undo_res2 = api._undo_last_apply_impl(run_id=run_id, dry_run=False, atomic=False)
         # aboutit : ok=True (undo_selective/standard), status peut être partial
         self.assertIn(undo_res2.get("status"), ("UNDONE_DONE", "UNDONE_PARTIAL"))
 
