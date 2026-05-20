@@ -1822,9 +1822,47 @@ class CineSortApi:
     def _get_film_full_impl(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
         """v7.6.0 Vague 4 : toutes les infos d'un film pour la page standalone.
 
-        Consolide : PlanRow, probe, perceptual V2, history, poster TMDb.
+        Consolide : PlanRow, probe, perceptual V2, history, poster TMDb, runtime,
+        director, overview (spec 06 §3.1).
         """
         return film_support.get_film_full(self, run_id, row_id)
+
+    # ---------- Spec 06 Modal Film : 3 actions de modification ----------
+    def _set_film_tmdb_candidate_impl(
+        self,
+        run_id: Optional[str],
+        row_id: str,
+        tmdb_id: int,
+    ) -> Dict[str, Any]:
+        """Spec 06 §3.4 : choisir un autre candidat TMDb pour un film.
+
+        Recalcul confidence + nouveau renommage propose. Reversible tant que
+        l'apply n'est pas faite.
+        """
+        return library_support.set_film_tmdb_candidate(self, run_id, row_id, tmdb_id)
+
+    def _mark_for_deletion_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.7 : marque un film pour le bucket `_user_marked_for_deletion/`.
+
+        Reversible via undo (clear). Le deplacement effectif sera applique
+        au prochain apply.
+        """
+        return library_support.mark_for_deletion(self, run_id, row_id)
+
+    def _mark_alert_ignored_impl(self, row_id: str, alert_code: str) -> Dict[str, Any]:
+        """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
+
+        L'alerte disparait visuellement pour ce film mais reste loggee en DB
+        pour les stats globales.
+        """
+        return library_support.mark_alert_ignored(self, row_id, alert_code)
+
+    def _rescan_row_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
+
+        Retourne le nouveau plan_row + scores quality/perceptual updated.
+        """
+        return run_flow_support.rescan_row(self, run_id, row_id)
 
     # ---------- film history ----------
     def _get_film_history_impl(self, film_id: str) -> Dict[str, Any]:

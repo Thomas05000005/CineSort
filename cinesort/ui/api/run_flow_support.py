@@ -907,6 +907,95 @@ def _enrich_groups_with_quality_comparison(
 
 
 @requires_valid_run_id
+def rescan_row(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
+    """Spec 06 §3.6 : relance probe + analyse perceptuelle pour un seul row.
+
+    Comportement pragmatique :
+      - Invalide les caches probe / quality_report / perceptual_report pour la
+        ligne.
+      - Reappelle `quality/get_quality_report` qui re-execute le probe et le
+        scoring.
+      - Reappelle `perceptual/get_perceptual_report` qui relance l'analyse V2.
+      - Retourne le plan_row courant + les nouveaux scores (quality.score + V2).
+
+    Note : le match TMDb n'est PAS re-execute (le plan complet n'est pas
+    rejoue ici — trop couteux pour 1 row). Les `candidates` existants restent
+    valides. Pour reforcer un match TMDb, l'utilisateur doit relancer le run
+    complet ou utiliser `set_film_tmdb_candidate` pour choisir manuellement.
+    """
+    rid_s = str(row_id or "").strip()
+    if not rid_s:
+        return _err_response("row_id manquant.", category="validation", level="info", log_module=__name__)
+
+    found = api._find_run_row(run_id)
+    if not found:
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+    _, store = found
+
+    # 1. Invalider les caches pour cette ligne
+    try:
+        with store._managed_conn() as conn:
+            conn.execute(
+                "DELETE FROM quality_reports WHERE run_id=? AND row_id=?",
+                (str(run_id), rid_s),
+            )
+            conn.execute(
+                "DELETE FROM perceptual_reports WHERE run_id=? AND row_id=?",
+                (str(run_id), rid_s),
+            )
+    except (OSError, KeyError, TypeError, ValueError, AttributeError) as exc:
+        _logger.warning("rescan_row: cache invalidation failed (%s)", exc)
+
+    # 2. Re-execute la pipeline quality (probe + score)
+    new_quality: Dict[str, Any] = {}
+    try:
+        from cinesort.ui.api import quality_report_support
+
+        qres = quality_report_support.get_quality_report(api, str(run_id), rid_s, options={"reuse_existing": False})
+        if isinstance(qres, dict) and qres.get("ok"):
+            new_quality = {
+                "score": int(qres.get("score") or 0),
+                "tier": str(qres.get("tier") or ""),
+            }
+    except (ImportError, OSError, KeyError, TypeError, ValueError) as exc:
+        _logger.warning("rescan_row: get_quality_report failed (%s)", exc)
+
+    # 3. Re-execute la pipeline perceptuelle V2
+    new_perceptual: Dict[str, Any] = {}
+    try:
+        from cinesort.ui.api import perceptual_support
+
+        pres = perceptual_support.get_perceptual_report(api, str(run_id), rid_s)
+        if isinstance(pres, dict) and pres.get("ok"):
+            payload = pres.get("perceptual") if isinstance(pres.get("perceptual"), dict) else {}
+            gv2 = payload.get("global_score_v2") or payload.get("global_score") or 0
+            new_perceptual = {
+                "global_score_v2": float(gv2 or 0),
+                "global_tier_v2": str(payload.get("global_tier_v2") or payload.get("global_tier") or ""),
+            }
+    except (ImportError, OSError, KeyError, TypeError, ValueError) as exc:
+        _logger.warning("rescan_row: get_perceptual_report failed (%s)", exc)
+
+    # 4. Recharger la plan_row a jour
+    plan = api.run.get_plan(str(run_id))
+    plan_row: Optional[Dict[str, Any]] = None
+    if plan and plan.get("ok"):
+        for r in plan.get("rows") or []:
+            if str(r.get("row_id") or "") == rid_s:
+                plan_row = r
+                break
+
+    return {
+        "ok": True,
+        "run_id": str(run_id),
+        "row_id": rid_s,
+        "plan_row": plan_row,
+        "quality": new_quality,
+        "perceptual": new_perceptual,
+    }
+
+
+@requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
         return _err_response(
