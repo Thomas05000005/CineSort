@@ -234,9 +234,14 @@ function _renderAlerts(data) {
   const rawFlags = [];
   if (Array.isArray(row.warning_flags)) rawFlags.push(...row.warning_flags);
   if (Array.isArray(gv2.warnings)) rawFlags.push(...gv2.warnings);
-  const alerts = labelsForFlags(rawFlags);
+  // Spec 06 §3.3 : filtre les alertes deja ignorees (persiste backend via
+  // film_modal.ignored_alerts ; get_film_full filtre deja row.warning_flags
+  // mais pas gv2.warnings -> filtrage redondant cote front pour les 2 sources).
+  const ignored = Array.isArray(row._ignored_alerts) ? new Set(row._ignored_alerts.map(String)) : null;
+  const filteredFlags = ignored ? rawFlags.filter((f) => !ignored.has(String(f))) : rawFlags;
+  const alerts = labelsForFlags(filteredFlags);
   if (alerts.length === 0) return "";
-  const counts = countBySeverity(rawFlags);
+  const counts = countBySeverity(filteredFlags);
   const headIcon = counts.critical > 0 ? "🛑" : (counts.warning > 0 ? "⚠️" : "ℹ️");
 
   return `
@@ -732,10 +737,51 @@ async function _handleAlertAction(kind, code) {
         if (!data || data.ok === false) {
           throw new Error((data && (data.message || data.error)) || "Echec ignore.");
         }
-        showToast({ type: "success", text: "Alerte ignorée." });
-        // Retire l'alerte du DOM
-        const li = _state.containerEl.querySelector(`[data-alert-code="${code}"]`);
-        if (li) li.remove();
+        const wasAlready = !!data.already_ignored;
+        showToast({
+          type: "success",
+          text: wasAlready ? "Alerte déjà ignorée." : "Alerte ignorée.",
+        });
+        // Persistance cote front : memorise l'alerte ignoree pour que les
+        // prochains _renderAlerts() ne la ré-affichent plus (et que le filtre
+        // backend via film_modal.list_ignored_alerts soit doublement protege).
+        if (_state.data && _state.data.row) {
+          const ignored = Array.isArray(_state.data.row._ignored_alerts)
+            ? _state.data.row._ignored_alerts.slice()
+            : [];
+          if (!ignored.includes(code)) ignored.push(code);
+          _state.data.row._ignored_alerts = ignored;
+          if (Array.isArray(_state.data.row.warning_flags)) {
+            _state.data.row.warning_flags = _state.data.row.warning_flags.filter((f) => f !== code);
+          }
+        }
+        // Retire l'alerte du DOM avec une transition fade-out + update du count.
+        const li = _state.containerEl && _state.containerEl.querySelector(`[data-alert-code="${code}"]`);
+        if (li) {
+          li.style.transition = "opacity 220ms ease, max-height 220ms ease, margin 220ms ease, padding 220ms ease";
+          li.style.opacity = "0";
+          li.style.maxHeight = "0";
+          li.style.marginTop = "0";
+          li.style.marginBottom = "0";
+          li.style.paddingTop = "0";
+          li.style.paddingBottom = "0";
+          li.style.overflow = "hidden";
+          setTimeout(() => {
+            const parent = li.parentNode;
+            li.remove();
+            if (parent) {
+              const remaining = parent.querySelectorAll("[data-alert-code]").length;
+              const section = parent.parentElement;
+              const titleEl = section && section.querySelector(".film-detail-section-title");
+              if (remaining === 0 && section) {
+                section.remove();
+              } else if (titleEl) {
+                const icon = titleEl.textContent.trim().split(" ")[0] || "ℹ️";
+                titleEl.innerHTML = `${icon} ${remaining} alerte${remaining > 1 ? "s" : ""}`;
+              }
+            }
+          }, 240);
+        }
       } catch (e) {
         showToast({ type: "error", text: `Erreur : ${e.message || e}` });
       }
