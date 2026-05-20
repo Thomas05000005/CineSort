@@ -53,6 +53,13 @@ export async function apiGet(path) {
   const resp = await fetch(`${baseUrl()}${path}`, { method: "GET", headers });
 
   if (resp.status === 401) {
+    // Mode pywebview desktop : un 401 ne doit JAMAIS purger le token ni
+    // rediriger vers /login (l'origine est garantie par le bridge natif).
+    // On remonte le 401 a l'appelant qui decidera (retry, message d'erreur, etc.).
+    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+      console.warn("[dash-api] GET %s -> 401 (mode natif : pas de redirect login)", path);
+      return { status: 401, data: { ok: false, message: "Authentification refusee par le backend." } };
+    }
     clearToken();
     window.location.hash = "#/login";
     return { status: 401, data: { ok: false, message: "Clé d'accès invalide." } };
@@ -124,6 +131,10 @@ export async function apiPost(method, params = {}, opts = {}) {
   }
 
   if (resp.status === 401) {
+    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+      console.warn("[dash-api] POST /api/%s -> 401 (mode natif : pas de redirect login)", method);
+      return { status: 401, data: { ok: false, message: "Authentification refusee par le backend." } };
+    }
     clearToken();
     window.location.hash = "#/login";
     return { status: 401, data: { ok: false, message: "Clé d'accès invalide." } };

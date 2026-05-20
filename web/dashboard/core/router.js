@@ -68,6 +68,8 @@ export function setNotFound(fn) {
 function currentHash() {
   const h = window.location.hash.replace(/^#/, "");
   if (h) return h;
+  // Mode natif desktop : jamais de fallback /login, on va sur /accueil.
+  if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) return "/accueil";
   return hasToken() ? "/accueil" : "/login";
 }
 
@@ -100,15 +102,21 @@ function resolve() {
   }
 
   if (!route) {
-    // Route inconnue : redirect login ou notFound
+    // Route inconnue : redirect login ou notFound (jamais login en mode natif).
     if (_notFoundHandler) _notFoundHandler(hash);
+    else if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) navigateTo("/accueil");
     else navigateTo("/login");
     return;
   }
 
-  // Guard : si la route necessite un token et qu'il n'y en a pas
+  // Guard : si la route necessite un token et qu'il n'y en a pas.
+  // Le mode natif (pywebview) bypass le guard via requireAuth() => true.
   if (route.guard && !route.guard()) {
-    navigateTo("/login");
+    if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) {
+      navigateTo("/accueil");
+    } else {
+      navigateTo("/login");
+    }
     return;
   }
 
@@ -227,8 +235,17 @@ function resolve() {
   }
 }
 
-/** Guard standard : necessite un token valide. */
+/** Guard standard : necessite un token valide.
+ *
+ * En mode pywebview desktop (`__CINESORT_NATIVE__`), l'origine est garantie
+ * par le bridge natif (127.0.0.1, fenetre webview2 sur la machine), donc
+ * pas besoin de bloquer sur l'absence de token : on laisse passer la vue
+ * et les appels API echoueront proprement avec 401 si vraiment le token
+ * manque, plutot que rediriger vers un ecran login qui n'a pas de sens
+ * en local.
+ */
 export function requireAuth() {
+  if (typeof window !== "undefined" && window.__CINESORT_NATIVE__) return true;
   return hasToken();
 }
 
