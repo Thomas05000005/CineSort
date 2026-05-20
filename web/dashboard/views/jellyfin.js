@@ -31,7 +31,7 @@ async function _load() {
         <h3>Jellyfin non configure</h3>
         <p class="text-muted mt-4">L'integration Jellyfin est desactivee dans les reglages CineSort.</p>
         <p class="text-muted mt-4">Pour l'activer, ouvrez les reglages et configurez la section Jellyfin (URL, cle API, refresh automatique).</p>
-        <a href="#/settings" class="btn btn-primary mt-4">Ouvrir les réglages Jellyfin</a>
+        <a href="#/parametres#integrations-jellyfin" class="btn btn-primary mt-4">Ouvrir les réglages Jellyfin</a>
       </div>`;
       return;
     }

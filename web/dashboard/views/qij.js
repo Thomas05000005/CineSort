@@ -537,9 +537,15 @@ function _integrationsRender() {
     });
   });
 
-  // Paramètres → settings
+  // Paramètres → /parametres avec deep-link sur la section de l'intégration
+  // (spec 11 §11) : "#/parametres#integrations-<id>" ouvre la catégorie
+  // Intégrations + scroll vers la sous-section Jellyfin/Plex/Radarr/etc.
   root.querySelectorAll("[data-integ-settings]").forEach((btn) => {
-    btn.addEventListener("click", () => { window.location.hash = "#/settings"; });
+    btn.addEventListener("click", () => {
+      const integId = btn.dataset.integSettings || "";
+      const fragment = integId ? `#integrations-${integId}` : "#integrations";
+      window.location.hash = `#/parametres${fragment}`;
+    });
   });
 }
 

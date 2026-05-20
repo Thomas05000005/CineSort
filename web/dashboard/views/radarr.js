@@ -25,7 +25,7 @@ async function _load() {
     if (!s.radarr_enabled) {
       el.innerHTML = `<div class="card"><h3>Radarr non configure</h3>
         <p class="text-muted mt-4">L'integration Radarr est desactivee. Pour l'activer, ouvrez les reglages et configurez la section Radarr (URL, cle API, candidats d'upgrade).</p>
-        <a href="#/settings" class="btn btn-primary mt-4">Ouvrir les réglages Radarr</a></div>`;
+        <a href="#/parametres#integrations-radarr" class="btn btn-primary mt-4">Ouvrir les réglages Radarr</a></div>`;
       return;
     }
 

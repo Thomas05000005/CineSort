@@ -25,7 +25,7 @@ async function _load() {
     if (!s.plex_enabled) {
       el.innerHTML = `<div class="card"><h3>Plex non configure</h3>
         <p class="text-muted mt-4">L'integration Plex est desactivee. Pour l'activer, ouvrez les reglages et configurez la section Plex (URL, token, refresh automatique).</p>
-        <a href="#/settings" class="btn btn-primary mt-4">Ouvrir les réglages Plex</a></div>`;
+        <a href="#/parametres#integrations-plex" class="btn btn-primary mt-4">Ouvrir les réglages Plex</a></div>`;
       return;
     }
 

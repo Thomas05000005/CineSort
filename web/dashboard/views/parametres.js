@@ -300,7 +300,84 @@ const _state = {
   profilesList: [],
   activeProfileId: "",
   profileDraft: null,  // { id, label, tiers: {...}, weights: {...} }
+  // Phase 6 (spec 11) : listener hashchange pour deep-link vers categorie/section.
+  // Format supporte : #/parametres#<categorie> ou #/parametres#<categorie>-<section>
+  // (ex: #/parametres#integrations-jellyfin ouvre Integrations + scroll jellyfin).
+  hashChangeHandler: null,
+  pendingScrollSection: null,
 };
+
+/**
+ * Parse le fragment du hash courant (ex: "integrations-jellyfin") et retourne
+ * { categoryId, sectionId } si la categorie existe. Le sectionId est optionnel.
+ * Retourne null si aucun fragment ou categorie inconnue.
+ *
+ * Le hash format SPA est "#/parametres#integrations-jellyfin" donc fragment
+ * = la partie apres le 2eme '#' (= split('#')[2]).
+ */
+function _parseHashFragment() {
+  try {
+    const raw = (typeof window !== "undefined" && window.location && window.location.hash) || "";
+    if (!raw) return null;
+    const parts = raw.split("#"); // ["", "/parametres", "integrations-jellyfin"]
+    const fragment = parts.slice(2).join("#");
+    if (!fragment) return null;
+    // Match longest categoryId prefix (au cas ou un categoryId contiendrait un '-')
+    const categories = PARAMETRES_GROUPS.map((g) => g.id);
+    // Tri par longueur decroissante pour matcher "nommage" avant "n" hypothetique
+    categories.sort((a, b) => b.length - a.length);
+    for (const cat of categories) {
+      if (fragment === cat) return { categoryId: cat, sectionId: null };
+      if (fragment.startsWith(cat + "-")) {
+        const sectionId = fragment.slice(cat.length + 1);
+        return { categoryId: cat, sectionId: sectionId || null };
+      }
+    }
+    return null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Applique le fragment d'URL : change la categorie active si necessaire et
+ * memorise la section a faire scroller apres le prochain render.
+ * Retourne true si quelque chose a change (categorie ou section).
+ */
+function _applyHashFragment() {
+  const parsed = _parseHashFragment();
+  if (!parsed) return false;
+  let changed = false;
+  if (parsed.categoryId !== _state.activeCategory) {
+    _state.activeCategory = parsed.categoryId;
+    _writeString(STORAGE_KEY_LAST_CATEGORY, parsed.categoryId);
+    changed = true;
+  }
+  if (parsed.sectionId) {
+    _state.pendingScrollSection = parsed.sectionId;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Si une section est en attente de scroll (pendingScrollSection), la scroller
+ * dans le viewport apres le render. No-op si la section n'existe pas.
+ */
+function _flushPendingScroll() {
+  const sectionId = _state.pendingScrollSection;
+  if (!sectionId || !_state.containerRef) return;
+  _state.pendingScrollSection = null;
+  // setTimeout pour laisser le DOM se peindre apres _refreshAll().
+  setTimeout(() => {
+    try {
+      const target = _state.containerRef?.querySelector(`[data-section-id="${sectionId}"]`);
+      if (target && typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } catch (_e) { /* noop */ }
+  }, 80);
+}
 
 const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
 const _DEFAULT_WEIGHTS = {
@@ -1501,6 +1578,10 @@ export async function initParametres(container) {
   const lastCat = _readString(STORAGE_KEY_LAST_CATEGORY, "sources");
   if (PARAMETRES_GROUPS.some((c) => c.id === lastCat)) _state.activeCategory = lastCat;
 
+  // Phase 6 (spec 11) : si l'URL contient un fragment "#/parametres#<categorie>"
+  // ou "#/parametres#<categorie>-<section>", il prend le pas sur lastCat.
+  _applyHashFragment();
+
   container.setAttribute("aria-busy", "true");
   container.innerHTML = `<section class="parametres-view parametres-view--loading"><p class="parametres-muted">Chargement des paramètres…</p></section>`;
 
@@ -1519,11 +1600,34 @@ export async function initParametres(container) {
 
   _refreshAll();
   _installCtrlK();
+  _flushPendingScroll();
+
+  // Listener hashchange : si on est deja sur /parametres et que l'utilisateur
+  // clique un lien #/parametres#integrations-jellyfin depuis un autre endroit
+  // (banniere demo, page jellyfin/plex/radarr...), on switch de categorie sans
+  // re-monter la vue.
+  if (typeof window !== "undefined") {
+    _state.hashChangeHandler = () => {
+      const hash = window.location.hash || "";
+      if (!hash.startsWith("#/parametres")) return;
+      const changed = _applyHashFragment();
+      if (changed) {
+        _refreshAll();
+        _flushPendingScroll();
+      }
+    };
+    window.addEventListener("hashchange", _state.hashChangeHandler);
+  }
 }
 
 export function unmountParametres() {
   if (_state.saveTimer) { clearTimeout(_state.saveTimer); _state.saveTimer = null; }
   _uninstallCtrlK();
+  if (_state.hashChangeHandler && typeof window !== "undefined") {
+    window.removeEventListener("hashchange", _state.hashChangeHandler);
+    _state.hashChangeHandler = null;
+  }
+  _state.pendingScrollSection = null;
   _state.containerRef = null;
   _state.searchQuery = "";
   _state.savedAt = null;

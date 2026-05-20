@@ -133,7 +133,7 @@ export async function renderDemoBanner() {
   banner.className = "demo-banner";
   banner.setAttribute("role", "status");
   banner.innerHTML = `
-    <span class="demo-banner__text">Mode démo actif — données fictives. Configure tes vrais dossiers dans <a href="#/settings">Paramètres</a>.</span>
+    <span class="demo-banner__text">Mode démo actif — données fictives. Configure tes vrais dossiers dans <a href="#/parametres#sources">Paramètres</a>.</span>
     <button type="button" class="btn demo-banner__btn" id="btnStopDemo">Sortir du mode démo</button>
     <button type="button" class="demo-banner__close" id="btnDismissDemoBanner" aria-label="Masquer la banniere demo" title="Masquer (sans sortir du mode demo)">×</button>
   `;
