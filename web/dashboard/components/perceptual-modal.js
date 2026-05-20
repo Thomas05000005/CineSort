@@ -29,6 +29,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { humanize, severityForTier, SCORE_V2_COMPONENTS } from "../core/perceptual-labels.js";
 import { setSections as rpSetSections, setExpandedWidth as rpSetExpandedWidth, isExpandedWidth as rpIsExpandedWidth } from "./right-panel.js";
+import { openDuplicateComparatorModal } from "./duplicate-comparator-modal.js";
 
 // Spec 02 §0 : vues qui affichent l'analyse perceptuelle dans l'inspecteur droit.
 // Le reste utilise l'overlay modal.
@@ -605,10 +606,16 @@ let _filterDebounceTimer = null;
 
 async function _loadCompareList() {
   if (!_state) return;
+  if (_state.compareLoaded) {
+    // Spec 02 §5 polish : la liste est deja en cache (pre-fetch au open) —
+    // on re-rend juste les items dans le DOM (pas de fetch en double).
+    _renderCompareListItems(_state.compareRows || []);
+    return;
+  }
+  if (_state.compareInFlight) return;
+  _state.compareInFlight = true;
   const { runId, rowId } = _state;
   const listEl = _modalEl && _modalEl.querySelector("[data-perceptual-compare-list]");
-  if (!listEl) return;
-  if (_state.compareLoaded) return;
   try {
     const res = await apiPost("library/get_library_filtered", {
       run_id: runId,
@@ -617,16 +624,23 @@ async function _loadCompareList() {
     });
     const payload = res && res.data != null ? res.data : res;
     if (!payload || payload.ok === false) {
-      listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml((payload && (payload.message || payload.error)) || "indisponible")}</li>`;
+      _state.compareInFlight = false;
+      if (listEl) {
+        listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml((payload && (payload.message || payload.error)) || "indisponible")}</li>`;
+      }
       return;
     }
     // Le contrat peut etre {rows: [...]} ou {items: [...]}
     const rows = payload.rows || payload.items || payload.films || [];
     _state.compareRows = rows.filter((r) => String(r.row_id || r.id) !== String(rowId));
     _state.compareLoaded = true;
+    _state.compareInFlight = false;
     _renderCompareListItems(_state.compareRows);
   } catch (err) {
-    listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml(err && err.message ? err.message : String(err))}</li>`;
+    _state.compareInFlight = false;
+    if (listEl) {
+      listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml(err && err.message ? err.message : String(err))}</li>`;
+    }
   }
 }
 
@@ -664,25 +678,38 @@ function _filterCompareList(query) {
 
 function _onPickCompare(otherRowId, otherTitle) {
   if (!_state) return;
-  // Tentative d'ouvrir le comparateur doublons (s'il est dispo)
-  if (typeof window !== "undefined") {
-    // Ferme la modal actuelle avant la navigation
-    const runId = _state.runId;
-    const rowId = _state.rowId;
-    closePerceptualModal();
-    // Si comparateur disponible (FE-DOUBLONS), on l'appelle.
-    // Sinon fallback : navigation vers /doublons avec params.
-    try {
-      // Stub : route vers /doublons. Au futur, ajouter window.openDuplicateComparatorModal({...}).
-      if (typeof window.openDuplicateComparatorModal === "function") {
-        window.openDuplicateComparatorModal({ runId, rowA: rowId, rowB: otherRowId });
-      } else {
-        window.location.hash = `#/doublons?compareA=${encodeURIComponent(rowId)}&compareB=${encodeURIComponent(otherRowId)}`;
-      }
-    } catch (e) {
-      console.warn("[perceptual-modal] openDuplicateComparatorModal indisponible", e);
+  // Spec 02 §5 : ouverture de la VRAIE Modal Comparateur Doublons (3 onglets
+  // Apercu/Frames/Audio), en mode readOnly puisque les 2 films ne forment pas
+  // forcement un groupe de doublons enregistre. Pas de decision Garder A/B
+  // ici : pour ca, l'utilisateur passe par la vue Doublons.
+  const runId = _state.runId;
+  const rowId = _state.rowId;
+  const rowTitle = _state.rowTitle;
+  // On ferme d'abord la Modal Perceptuelle pour eviter d'empiler 2 overlays
+  // (cleaner UX : la modal comparateur prend le relais).
+  closePerceptualModal();
+  try {
+    openDuplicateComparatorModal({
+      runId,
+      // groupKey synthetique : permet d'identifier la paire dans les logs,
+      // mais readOnly=true desactive l'appel a mark_duplicate_winner.
+      groupKey: `perceptual::${rowId}::${otherRowId}`,
+      rowA: rowId,
+      rowB: otherRowId,
+      title: rowTitle || otherTitle || "",
+      year: "",
+      // Pas de comparison.criteria : l'onglet Apercu affichera juste les en-tetes A/B
+      // et un message "Aucun critère détaillé disponible pour cette paire."
+      comparison: null,
+      readOnly: true,
+    });
+  } catch (e) {
+    console.warn("[perceptual-modal] openDuplicateComparatorModal a echoue", e);
+    // Fallback ultime : navigation vers /doublons (preserve l'ancien comportement
+    // si jamais le module comparateur est casse).
+    if (typeof window !== "undefined" && window.location) {
+      window.location.hash = `#/doublons?compareA=${encodeURIComponent(rowId)}&compareB=${encodeURIComponent(otherRowId)}`;
     }
-    void otherTitle;
   }
 }
 
@@ -761,6 +788,12 @@ function _bindEvents() {
       if (compareDetails.open) _loadCompareList();
     });
   }
+  // Si la liste est deja chargee (pre-fetch a l'ouverture, spec 02 §5 polish),
+  // on la re-rend immediatement apres rebind pour eviter de re-afficher
+  // "Chargement..." apres un _setModalContent.
+  if (_state && _state.compareLoaded && Array.isArray(_state.compareRows) && _state.compareRows.length > 0) {
+    _renderCompareListItems(_state.compareRows);
+  }
   const filterInput = _modalEl.querySelector("[data-perceptual-compare-filter]");
   if (filterInput) {
     filterInput.addEventListener("input", (ev) => {
@@ -811,6 +844,7 @@ export async function openPerceptualModal(opts) {
     mode,
     fullFingerprint: "",
     compareLoaded: false,
+    compareInFlight: false,
     compareRows: [],
   };
 
@@ -833,6 +867,10 @@ export async function openPerceptualModal(opts) {
   }
   _setModalContent(_renderLoading(rowTitle));
   await _loadAndRender();
+  // Spec 02 §5 polish : pre-charger la liste "Comparer avec un autre film"
+  // en arriere-plan pour eviter le "Chargement..." au moment du clic sur
+  // le dropdown. On ignore les erreurs (la liste re-tentera au toggle).
+  void _loadCompareList();
 }
 
 export function closePerceptualModal() {
