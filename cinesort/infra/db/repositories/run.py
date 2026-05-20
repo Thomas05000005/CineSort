@@ -158,6 +158,92 @@ class RunRepository(_BaseRepository):
                 (ts, stats_json, run_id),
             )
 
+    def mark_run_paused(self, run_id: str, *, saved: bool = False, paused_ts: Optional[float] = None) -> bool:
+        """Bascule le run en PAUSED (ou SAVED si `saved=True`) et enregistre `paused_at`.
+
+        V8-01 spec 08 Traitement : un run en cours peut etre suspendu (PAUSED)
+        ou sauvegarde pour plus tard (SAVED). La transition est autorisee
+        uniquement depuis un etat actif (PENDING, RUNNING, AWAITING_VALIDATION).
+        Retourne True si la transition a eu lieu, False sinon.
+        """
+        ts = float(paused_ts if paused_ts is not None else time.time())
+        target = "SAVED" if saved else "PAUSED"
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE runs
+                SET status=?, paused_at=?
+                WHERE run_id=? AND status IN ('PENDING', 'RUNNING', 'AWAITING_VALIDATION')
+                """,
+                (target, ts, run_id),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def mark_run_resumed(self, run_id: str, *, resumed_ts: Optional[float] = None) -> bool:
+        """Bascule un run PAUSED ou SAVED vers RUNNING.
+
+        V8-01 spec 08 : le complement de `mark_run_paused`. Efface `paused_at`
+        et restaure le statut RUNNING. Autorise uniquement depuis PAUSED ou SAVED.
+        Retourne True si la transition a eu lieu, False sinon.
+        """
+        ts = float(resumed_ts if resumed_ts is not None else time.time())
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE runs
+                SET status='RUNNING', paused_at=NULL, started_ts=COALESCE(started_ts, ?)
+                WHERE run_id=? AND status IN ('PAUSED', 'SAVED')
+                """,
+                (ts, run_id),
+            )
+            return int(cur.rowcount or 0) > 0
+
+    def list_pending_runs(self) -> List[Dict[str, Any]]:
+        """Retourne tous les runs en attente d'action utilisateur.
+
+        V8-01 spec 08 Traitement §5 : `run/list_pending_runs` doit lister
+        les runs PAUSED, SAVED ou AWAITING_VALIDATION pour permettre a l'UI
+        d'afficher les runs reprenables dans la sidebar / l'historique.
+
+        Format de chaque row :
+            run_id, status, created_at, total_rows, last_activity_at.
+
+        `last_activity_at` = `paused_at` si non null, sinon `started_ts`,
+        sinon `created_ts`.
+        """
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT run_id, status, created_ts, started_ts, ended_ts, paused_at,
+                       idx, total, stats_json
+                FROM runs
+                WHERE status IN ('PAUSED', 'SAVED', 'AWAITING_VALIDATION')
+                ORDER BY COALESCE(paused_at, started_ts, created_ts) DESC,
+                         created_ts DESC
+                """
+            )
+            out: List[Dict[str, Any]] = []
+            for row in cur.fetchall():
+                stats = self._decode_row_json(row, "stats_json", default={}, expected_type=dict)
+                total_rows = int(row["total"] or stats.get("planned_rows", 0) or 0)
+                created_at = float(row["created_ts"] or 0.0)
+                paused_at = float(row["paused_at"]) if row["paused_at"] is not None else None
+                started_at = float(row["started_ts"]) if row["started_ts"] is not None else None
+                last_activity_at = (
+                    paused_at if paused_at is not None else (started_at if started_at is not None else created_at)
+                )
+                out.append(
+                    {
+                        "run_id": str(row["run_id"]),
+                        "status": str(row["status"] or ""),
+                        "created_at": created_at,
+                        "total_rows": total_rows,
+                        "last_activity_at": last_activity_at,
+                    }
+                )
+            return out
+
     def mark_run_failed(self, run_id: str, *, error_message: str, ended_ts: Optional[float] = None) -> None:
         """Bascule le run en statut FAILED et enregistre le message d'erreur."""
         ts = float(ended_ts if ended_ts is not None else time.time())

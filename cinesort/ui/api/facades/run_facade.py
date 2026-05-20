@@ -78,6 +78,34 @@ class RunFacade(_BaseFacade):
         """
         return self._api._list_apply_history_impl(run_id)
 
+    # ---------- Run Control (V8-01 spec 08 Traitement §5) ----------
+    def pause_run(self, run_id: str) -> Dict[str, Any]:
+        """Suspend un run actif (signaling + DB PAUSED).
+
+        Cf CineSortApi._pause_run_impl pour la doc complete.
+        """
+        return self._api._pause_run_impl(run_id)
+
+    def resume_run(self, run_id: str) -> Dict[str, Any]:
+        """Reprend un run PAUSED ou SAVED (signaling + DB RUNNING).
+
+        Cf CineSortApi._resume_run_impl pour la doc complete.
+        """
+        return self._api._resume_run_impl(run_id)
+
+    def save_for_later(self, run_id: str) -> Dict[str, Any]:
+        """Sauvegarde un run pour plus tard (signaling + DB SAVED).
+
+        Cf CineSortApi._save_for_later_impl pour la doc complete.
+        """
+        return self._api._save_for_later_impl(run_id)
+
+    def list_pending_runs(self) -> Dict[str, Any]:
+        """Liste les runs PAUSED / SAVED / AWAITING_VALIDATION.
+
+        Cf CineSortApi._list_pending_runs_impl pour la doc complete.
+        """
+        return self._api._list_pending_runs_impl()
     # ---------- Phase 4 spec 07 + 06 : rescan single + bulk ----------
 
     def rescan_row(self, row_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:

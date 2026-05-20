@@ -76,6 +76,7 @@ from cinesort.ui.api import (
     quality_report_support,
     quality_support,
     reset_support,
+    run_control_support,
     run_data_support,
     run_flow_support,
     run_read_support,
@@ -2342,6 +2343,22 @@ class CineSortApi:
         """Demande l'annulation d'un run en cours (pose cancel_requested=1)."""
         return history_support.cancel_run(self, run_id)
 
+    # ---------- Run Control (V8-01 spec 08 Traitement) ----------
+    def _pause_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Suspend un run actif (signaling + DB PAUSED). Cf spec 08 §5."""
+        return run_control_support.pause_run(self, run_id)
+
+    def _resume_run_impl(self, run_id: str) -> Dict[str, Any]:
+        """Reprend un run PAUSED ou SAVED (signaling + DB RUNNING). Cf spec 08 §5."""
+        return run_control_support.resume_run(self, run_id)
+
+    def _save_for_later_impl(self, run_id: str) -> Dict[str, Any]:
+        """Sauvegarde un run pour plus tard (signaling + DB SAVED). Cf spec 08 §5."""
+        return run_control_support.save_for_later(self, run_id)
+
+    def _list_pending_runs_impl(self) -> Dict[str, Any]:
+        """Liste les runs PAUSED / SAVED / AWAITING_VALIDATION. Cf spec 08 §5."""
+        return run_control_support.list_pending_runs(self)
     # ---------- Historique (spec 09) ----------
     def _get_history_stats_impl(self, run_id: str) -> Dict[str, Any]:
         """Detail complet d'un run pour l'inspecteur Historique (spec 09)."""
