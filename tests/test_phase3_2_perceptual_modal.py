@@ -87,7 +87,14 @@ class PerceptualModalApiTests(unittest.TestCase):
 
     def test_renders_5_states(self) -> None:
         """Spec 02 §4 : normal / missing / disabled / no-ffmpeg / error/loading."""
-        for fn in ("_renderMissing", "_renderDisabled", "_renderNoFfmpeg", "_renderError", "_renderLoading", "_renderNormal"):
+        for fn in (
+            "_renderMissing",
+            "_renderDisabled",
+            "_renderNoFfmpeg",
+            "_renderError",
+            "_renderLoading",
+            "_renderNormal",
+        ):
             self.assertIn(f"function {fn}(", self.js, f"renderer {fn} manquant")
 
     def test_renders_6_sections(self) -> None:
