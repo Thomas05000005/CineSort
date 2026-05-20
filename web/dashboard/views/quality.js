@@ -172,7 +172,7 @@ function _render(el) {
   // --- Distribution technique ---
   const tech = d.technical_distribution || {};
   if (tech.resolutions || tech.hdr || tech.audio) {
-    html += `<div class="card bento-card bento-card--half"><div class="card__eyebrow">Distribution technique</div><div class="mt-2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--sp-4)">`;
+    html += `<div class="card bento-card bento-card--half"><div class="card__eyebrow">Distribution technique</div><div class="mt-2 quality-dist-grid">`;
     if (tech.resolutions) html += _statGrid("Résolutions", tech.resolutions);
     if (tech.hdr) html += _statGrid("HDR", tech.hdr);
     if (tech.audio) html += _statGrid("Audio", tech.audio);
@@ -181,11 +181,11 @@ function _render(el) {
 
   // --- Filtres qualité ---
   html += `<div class="flex gap-2 mb-4 flex-wrap">
-    <select class="input" id="qFilterState" style="max-width:140px">
+    <select class="input quality-filter-select" id="qFilterState">
       <option value="">État : Tous</option><option value="scored">Scoré</option><option value="unscored">Non scoré</option></select>
-    <select class="input" id="qFilterTier" style="max-width:140px">
+    <select class="input quality-filter-select" id="qFilterTier">
       <option value="">Tier : Tous</option><option value="premium">Premium</option><option value="bon">Bon</option><option value="moyen">Moyen</option><option value="mauvais">Mauvais</option></select>
-    <select class="input" id="qFilterScore" style="max-width:140px">
+    <select class="input quality-filter-select" id="qFilterScore">
       <option value="">Score : Tous</option><option value="80">≥80</option><option value="60-80">60-80</option><option value="40-60">40-60</option><option value="40">&lt;40</option></select>
   </div>`;
 
@@ -208,7 +208,7 @@ function _render(el) {
   // --- Timeline ---
   if (timeline.length > 1) {
     html += `<div class="card bento-card bento-card--wide"><div class="card__eyebrow">Évolution du score</div>
-      <div class="mt-2" style="overflow-x:auto">${_buildTimelineSvg(timeline)}</div></div>`;
+      <div class="mt-2 quality-timeline-wrap">${_buildTimelineSvg(timeline)}</div></div>`;
   }
 
   // --- Anomalies ---
@@ -343,7 +343,7 @@ async function _resetProfile() {
 /* --- Helpers -------------------------------------------------- */
 
 function _kpi(label, value, color) {
-  return `<div class="kpi-card" style="border-left:3px solid ${color}">
+  return `<div class="kpi-card quality-kpi-card-dyn" style="--kpi-color:${color}">
     <div class="kpi-label">${escapeHtml(label)}</div>
     <div class="kpi-value">${value}</div>
   </div>`;
@@ -351,12 +351,12 @@ function _kpi(label, value, color) {
 
 function _bar(label, count, total, color) {
   const pct = Math.round(count / total * 100);
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-    <span style="width:100px;font-size:var(--fs-sm);color:var(--text-secondary)">${escapeHtml(label)}</span>
-    <div style="flex:1;height:6px;background:var(--bg-raised);border-radius:999px;overflow:hidden">
-      <div style="width:${pct}%;height:100%;background:${color};border-radius:999px;transition:width 0.3s"></div>
+  return `<div class="quality-mini-bar-row">
+    <span class="quality-mini-bar-label">${escapeHtml(label)}</span>
+    <div class="quality-mini-bar-track">
+      <div class="quality-mini-bar-fill" style="--fill-width:${pct}%;--fill-color:${color}"></div>
     </div>
-    <span style="width:40px;text-align:right;font-size:var(--fs-xs);color:var(--text-muted)">${count}</span>
+    <span class="quality-mini-bar-count">${count}</span>
   </div>`;
 }
 
@@ -377,7 +377,7 @@ function _buildTimelineSvg(points) {
     const y = h - 10 - ((p.avg_score || 0) / 100) * (h - 20);
     return `${x},${y}`;
   });
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="width:100%;max-width:${w}px">
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="quality-timeline-svg-dyn" style="--max-w:${w}px">
     <polyline points="${coords.join(" ")}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
     ${coords.map(c => `<circle cx="${c.split(",")[0]}" cy="${c.split(",")[1]}" r="3" fill="var(--accent)"/>`).join("")}
   </svg>`;

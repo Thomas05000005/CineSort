@@ -345,7 +345,7 @@ function _renderField(field, value) {
   // V2-D (a11y, WCAG 3.3.2 Labels or Instructions) : aria-required + asterisque visuel.
   const reqAttr = field.required ? ' aria-required="true" required' : "";
   const reqMark = field.required
-    ? ' <span class="v5-settings-required" aria-hidden="true" style="color:var(--danger,#EF4444);font-weight:bold">*</span>'
+    ? ' <span class="v5-settings-required settings-required-mark" aria-hidden="true">*</span>'
     : "";
   const common = `id="${id}" data-field-key="${_esc(field.key)}"${reqAttr} ${field.livePreview ? `data-live-preview="${_esc(field.livePreview)}"` : ""}`;
   const advAttr = field.advanced ? ' data-advanced="true"' : "";
@@ -387,11 +387,11 @@ function _renderField(field, value) {
         : "";
       return `<div class="v5-settings-field"${advAttr}>
         <label class="v5-settings-field-label" for="${id}">${labelHtml}</label>
-        <div class="v5-settings-api-key-wrap" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <input type="password" class="v5-input" ${common} value="${_esc(value || "")}" autocomplete="off" style="flex:1;min-width:200px">
+        <div class="v5-settings-api-key-wrap settings-api-key-wrap">
+          <input type="password" class="v5-input settings-api-key-input" ${common} value="${_esc(value || "")}" autocomplete="off">
           <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-api-key-toggle="${id}" title="${_esc(t("common.show_hide"))}">👁</button>
           ${testBtn}
-          <span class="v5-test-result" data-test-result-for="${_esc(field.key)}" style="font-size:var(--fs-xs);color:var(--text-muted)"></span>
+          <span class="v5-test-result settings-test-result" data-test-result-for="${_esc(field.key)}"></span>
         </div>
       </div>`;
     }
@@ -400,12 +400,12 @@ function _renderField(field, value) {
       // V7-port : token REST avec show/copy/regen.
       return `<div class="v5-settings-field"${advAttr}>
         <label class="v5-settings-field-label" for="${id}">${labelHtml}</label>
-        <div class="v5-settings-api-key-wrap" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <input type="password" class="v5-input" ${common} value="${_esc(value || "")}" autocomplete="off" style="flex:1;min-width:200px">
+        <div class="v5-settings-api-key-wrap settings-api-key-wrap">
+          <input type="password" class="v5-input settings-api-key-input" ${common} value="${_esc(value || "")}" autocomplete="off">
           <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-api-key-toggle="${id}" title="${_esc(t("common.show_hide"))}">👁</button>
           <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-rest-token-copy title="${_esc(t("settings.rest_token_copy_title"))}">📋</button>
           <button type="button" class="v5-btn v5-btn--sm" data-rest-token-regen title="${_esc(t("settings.rest_token_regen_title"))}">🔄</button>
-          <span class="v5-rest-token-msg" data-rest-token-msg style="font-size:var(--fs-xs);color:var(--text-muted)"></span>
+          <span class="v5-rest-token-msg settings-rest-token-msg" data-rest-token-msg></span>
         </div>
       </div>`;
     }
@@ -424,10 +424,10 @@ function _renderField(field, value) {
       // V7-port : slider avec preview live des CSS custom properties.
       const v = (value != null && value !== "") ? value : (field.default || 50);
       return `<div class="v5-settings-field"${advAttr}>
-        <label class="v5-settings-field-label" for="${id}">${labelHtml}<span class="v5-range-value" style="float:right;color:var(--text-muted)" data-range-value-for="${_esc(field.key)}">${_esc(v)}</span></label>
+        <label class="v5-settings-field-label" for="${id}">${labelHtml}<span class="v5-range-value settings-range-value" data-range-value-for="${_esc(field.key)}">${_esc(v)}</span></label>
         <input type="range" class="v5-input" ${common}
                min="${_esc(field.min || 0)}" max="${_esc(field.max || 100)}" value="${_esc(v)}"
-               style="width:100%">
+               class="settings-range-input">
       </div>`;
     }
 
@@ -437,7 +437,7 @@ function _renderField(field, value) {
         <label class="v5-settings-field-label" for="${id}">${labelHtml}</label>
         <textarea class="v5-textarea" ${common} rows="4">${_esc(arr.join("\n"))}</textarea>
         ${field.hint ? `<span class="v5-settings-field-hint">${_esc(field.hint)}</span>` : ""}
-        ${field.required ? `<span class="v5-settings-field-hint" style="color:var(--danger,#EF4444)">${_esc(t("settings.fields.field_required_hint"))}</span>` : ""}
+        ${field.required ? `<span class="v5-settings-field-hint settings-field-hint--required">${_esc(t("settings.fields.field_required_hint"))}</span>` : ""}
       </div>`;
     }
 
@@ -445,7 +445,7 @@ function _renderField(field, value) {
       // V7-port : bouton standalone (restart, etc.).
       return `<div class="v5-settings-field"${advAttr}>
         <button type="button" class="v5-btn" data-action="${_esc(field.action)}">${_esc(field.buttonLabel || "Action")}</button>
-        <span class="v5-action-result" data-action-result-for="${_esc(field.action)}" style="font-size:var(--fs-xs);color:var(--text-muted);margin-left:var(--sp-3)"></span>
+        <span class="v5-action-result settings-action-result" data-action-result-for="${_esc(field.action)}"></span>
       </div>`;
 
     case "effects-preview":
@@ -500,7 +500,7 @@ function _renderField(field, value) {
       // V7-port : bloc QR + URL + token (chargement au mount).
       return `<div class="v5-settings-field"${advAttr}>
         <label class="v5-settings-field-label">${_esc(t("settings.qr.section_title"))}</label>
-        <div data-qr-dashboard style="display:flex;gap:var(--sp-4);align-items:flex-start;flex-wrap:wrap;background:var(--surface-1);padding:var(--sp-3);border-radius:var(--radius-md);border:1px solid var(--border-1)">
+        <div data-qr-dashboard class="settings-qr-block">
           <span class="v5-text-muted">${_esc(t("settings.qr.loading"))}</span>
         </div>
       </div>`;
@@ -598,7 +598,7 @@ async function _loadQrDashboard(container) {
     return;
   }
   if (!token) {
-    host.innerHTML = `<span style="color:var(--warning)">${_esc(t("settings.qr.no_token"))}</span>`;
+    host.innerHTML = `<span class="settings-qr-warning">${_esc(t("settings.qr.no_token"))}</span>`;
     return;
   }
   let qrSvg = "", url = "";
@@ -613,12 +613,12 @@ async function _loadQrDashboard(container) {
     } catch { /* noop */ }
   }
   host.innerHTML = `
-    ${qrSvg ? `<div style="min-width:140px">${qrSvg}</div>` : ""}
-    <div style="flex:1;min-width:240px">
-      <div class="v5u-text-muted" style="font-size:0.85em;margin-bottom:4px">${_esc(t("settings.qr.url_label"))}</div>
-      <code style="display:block;word-break:break-all;font-family:monospace;padding:6px 10px;background:var(--bg-raised);border-radius:var(--radius-sm);border:1px solid var(--border-1);margin-bottom:6px">${_esc(url || t("settings.qr.url_placeholder"))}</code>
+    ${qrSvg ? `<div class="settings-qr-img-wrap">${qrSvg}</div>` : ""}
+    <div class="settings-qr-col">
+      <div class="v5u-text-muted settings-qr-label">${_esc(t("settings.qr.url_label"))}</div>
+      <code class="settings-qr-code">${_esc(url || t("settings.qr.url_placeholder"))}</code>
       <button type="button" class="v5-btn v5-btn--sm" data-qr-copy-url="${_esc(url)}">${_esc(t("settings.qr.copy_url"))}</button>
-      <p class="v5u-text-muted" style="font-size:0.85em;margin-top:var(--sp-2)">${_esc(t("settings.qr.scan_hint"))}</p>
+      <p class="v5u-text-muted settings-qr-hint">${_esc(t("settings.qr.scan_hint"))}</p>
     </div>`;
   // Hook copy
   const copyBtn = host.querySelector("[data-qr-copy-url]");
@@ -1018,7 +1018,7 @@ function _updateSavedStateError(msg) {
   if (!root) return;
   const el = root.querySelector("[data-v5-saved-state]");
   if (!el) return;
-  el.innerHTML = `<span style="color:var(--danger)">${escapeHtml(t("settings.save_error", { msg: String(msg).slice(0, 80) }))}</span>`;
+  el.innerHTML = `<span class="settings-save-error">${escapeHtml(t("settings.save_error", { msg: String(msg).slice(0, 80) }))}</span>`;
 }
 
 function _updateSavedStateLabel() {
@@ -1029,7 +1029,7 @@ function _updateSavedStateLabel() {
   if (_state.savedAt) {
     const diff = Math.round((Date.now() - _state.savedAt.getTime()) / 1000);
     const when = diff < 5 ? t("settings.save_now") : t("settings.save_ago", { seconds: diff });
-    el.innerHTML = `<span class="v5u-text-muted" style="color:var(--success)">${escapeHtml(t("settings.save_success", { when }))}</span>`;
+    el.innerHTML = `<span class="v5u-text-muted settings-save-success">${escapeHtml(t("settings.save_success", { when }))}</span>`;
   } else {
     el.innerHTML = "";
   }
@@ -1086,11 +1086,11 @@ export async function initSettings(container, opts = {}) {
         <input type="checkbox" id="v5CkExpertMode" ${expertChecked} />
         <span>${t("settings.expert_mode.label_html")}</span>
       </label>
-      <p class="v5-text-muted" style="font-size:var(--fs-xs);color:var(--text-muted)">${_esc(t("settings.expert_mode.hint"))}</p>
+      <p class="v5-text-muted settings-expert-hint">${_esc(t("settings.expert_mode.hint"))}</p>
     </div>
-    <div class="v5-settings-shell" style="display:flex;gap:var(--sp-4);align-items:flex-start">
-      <aside data-v5-settings-sidebar style="flex:0 0 240px;position:sticky;top:0"></aside>
-      <section data-v5-settings-content class="v5-settings-main" style="flex:1;min-width:0"></section>
+    <div class="v5-settings-shell settings-shell">
+      <aside data-v5-settings-sidebar class="settings-shell-sidebar"></aside>
+      <section data-v5-settings-content class="v5-settings-main settings-shell-content"></section>
     </div>
   `;
   _refreshAll();
