@@ -422,7 +422,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const isNative = !!window.__CINESORT_NATIVE__;
   if (isNative) document.body.classList.add("is-native");
 
-  if (isNative && hasToken()) {
+  // Mode natif desktop (pywebview) : JAMAIS d'ecran login.
+  // Le token est passe via ?ntoken=XXX au boot (cf _detectNativeBoot).
+  // Si manquant, les appels API echoueront proprement avec 401 plutot
+  // que bloquer l'utilisateur sur un ecran de connexion qui n'a pas de
+  // sens en local (le bridge pywebview garantit deja l'origine).
+  if (isNative) {
     if (!window.location.hash || window.location.hash === "#" || window.location.hash.includes("/login")) {
       window.location.hash = "#/accueil";
     }
