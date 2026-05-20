@@ -451,8 +451,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   // V7-fix : bypass login DOIT etre evalue AVANT toute init suceptible de throw,
   // sinon une erreur d'init silencieuse empeche le bypass (et l'utilisateur voit
   // le login alors que le token est present).
-  const isNative = !!window.__CINESORT_NATIVE__;
-  if (isNative) document.body.classList.add("is-native");
+  // Detection 4 signaux (= router._isNativeMode / api._isNativeMode) :
+  //   1. window.__CINESORT_NATIVE__ (pose par l'IIFE _detectNativeBoot)
+  //   2. window.pywebview.api (signature pywebview FIABLE)
+  //   3. hostname 127.0.0.1 / localhost (signal local infaillible)
+  //   4. localStorage cinesort.native (persiste aux refresh)
+  // Une seule source suffit. Critique pour decider du mount du shell V5.
+  const _isNativeMode = () => {
+    if (window.__CINESORT_NATIVE__) return true;
+    if (window.pywebview && window.pywebview.api) return true;
+    const host = window.location && window.location.hostname;
+    if (host === "127.0.0.1" || host === "localhost") return true;
+    try { if (localStorage.getItem("cinesort.native") === "1") return true; } catch { /* no-op */ }
+    return false;
+  };
+  const isNative = _isNativeMode();
+  if (isNative) {
+    document.body.classList.add("is-native");
+    window.__CINESORT_NATIVE__ = true;  // homogeneise pour le router/api downstream
+  }
 
   // Mode natif desktop (pywebview) : JAMAIS d'ecran login.
   // Le token est passe via ?ntoken=XXX au boot (cf _detectNativeBoot).
