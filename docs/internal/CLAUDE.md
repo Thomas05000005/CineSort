@@ -84,6 +84,33 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 
 ## Sessions recentes
 
+### 21 mai 2026 — Audit complet 3 tiers (Tier 1 + Tier 2 + Tier 3 + docs) ✅
+
+Audit exhaustif lance par l'utilisateur sur tout le repo (v1.2.0-beta).
+
+**Tier 1 — Analyse statique (PR #339)** :
+- ruff --select ALL + vulture sur tout `cinesort/`
+- **22 occurrences fixees** sur 16 fichiers : F401, B904 x3 (perte chainage), B023 x4 (closure capture), B905 x6 (zip strict), RUF059 x5, vulture x2 (parametres vestigiaux dans `compare_duplicates` et `extract_aligned_frames`)
+- 308 tests verts, 0 regression
+
+**Tier 2 — Multi-agents par concern (PR #347 mergee)** :
+- 6 sous-agents en parallele (run, quality+settings, library+integrations, cycles, UI↔backend, migrations SQLite)
+- **2 HIGH** : race condition `set_active_profile` + `_tier_for` ordre invalide silencieux
+- 9 MEDIUM fixes (categorisation `_err_response`, `tmdb_id` manquant dans library timeline, wrap `_get_movie_detail_cached`, etc.)
+- 281 tests verts sur modules touches
+
+**8 methodes backend orphelines identifiees** (sans entry UI) :
+get_tmdb_posters, smart_playlists (CRUD), list_films_with_history, export_full_library, submit/delete_score_feedback. Issue tracker a creer pour roadmap UI.
+
+**Findings deferes a auditer plus tard** :
+- BLE001 blind-except (35) — pattern defensif systematique
+- SLF001 private-member-access (538) — analyse archi
+- S324 sha1 fingerprint (5) — annoter `usedforsecurity=False`
+- RUF013/RUF012 (5) — typing bugs mineurs
+- `audio_perceptual.py:221,277` rc ffmpeg ignore — risque silent failure quand `rc != 0` + stderr non-vide
+
+**Detail complet** : `docs/internal/BILAN_AUDIT_TIERS.md`.
+
 ### 16 mai 2026 (soir) — #83 phases A6-A8 terminees, #85 phases B1-B7 ✅
 
 **12 PRs mergees en cascade** apres la cassure du cycle (#193, #197, #202, #203) :
