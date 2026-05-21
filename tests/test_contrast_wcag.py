@@ -147,6 +147,19 @@ CRITICAL_PAIRS: list[tuple[str, str, float, str]] = [
     ("--accent", "--bg", 3.0, "Accent sur fond (UI control non-texte)"),
 ]
 
+# B5 — seuils WCAG niveau AAA pour le theme "aaa" (contraste eleve).
+# Texte normal : >= 7:1. Texte large / composants UI non textuels : >= 4.5:1.
+# Le focus ring est inclus car la spec exige un contraste maximal pour ce theme.
+AAA_PAIRS: list[tuple[str, str, float, str]] = [
+    ("--text-primary", "--bg", 7.0, "AAA: Texte primaire sur fond principal"),
+    ("--text-primary", "--bg-raised", 7.0, "AAA: Texte primaire sur carte elevee"),
+    ("--text-secondary", "--bg", 7.0, "AAA: Texte secondaire sur fond"),
+    ("--text-secondary", "--bg-raised", 7.0, "AAA: Texte secondaire sur carte elevee"),
+    ("--text-muted", "--bg", 4.5, "AAA: Texte muet sur fond (large text/UI)"),
+    ("--accent", "--bg", 4.5, "AAA: Accent sur fond (UI control)"),
+    ("--focus-ring", "--bg", 4.5, "AAA: Focus ring sur fond"),
+]
+
 THEMES = ["studio", "cinema", "luxe", "neon"]
 
 
@@ -179,15 +192,19 @@ class ContrastWcagTests(unittest.TestCase):
         cls.tokens_css = tokens_path.read_text(encoding="utf-8") if tokens_path.exists() else ""
         cls.global_tokens = parse_tokens(cls.tokens_css, theme=None)
 
-    def _check_theme(self, theme: str) -> tuple[list[str], list[tuple[str, float]]]:
-        """Retourne (violations, ratios_par_pair)."""
+    def _check_theme_with_pairs(
+        self,
+        theme: str,
+        pairs: list[tuple[str, str, float, str]],
+    ) -> tuple[list[str], list[tuple[str, float]]]:
+        """Retourne (violations, ratios_par_pair) pour une liste de paires donnee."""
         theme_tokens = parse_tokens(self.themes_css, theme=theme)
         merged: dict[str, str] = {**self.global_tokens, **theme_tokens}
 
         violations: list[str] = []
         ratios: list[tuple[str, float]] = []
 
-        for fg_tok, bg_tok, ratio_min, label in CRITICAL_PAIRS:
+        for fg_tok, bg_tok, ratio_min, label in pairs:
             fg_raw = merged.get(fg_tok)
             bg_raw = merged.get(bg_tok)
             if not fg_raw or not bg_raw:
@@ -204,6 +221,10 @@ class ContrastWcagTests(unittest.TestCase):
                 violations.append(f"  {label}: ratio {ratio:.2f} < {ratio_min} (fg={fg_r}, bg={bg_r})")
         return violations, ratios
 
+    def _check_theme(self, theme: str) -> tuple[list[str], list[tuple[str, float]]]:
+        """Retourne (violations, ratios_par_pair) avec seuils AA (CRITICAL_PAIRS)."""
+        return self._check_theme_with_pairs(theme, CRITICAL_PAIRS)
+
     def test_studio_contrast(self) -> None:
         v, _ = self._check_theme("studio")
         self.assertEqual(v, [], "Theme Studio violations:\n" + "\n".join(v))
@@ -219,6 +240,16 @@ class ContrastWcagTests(unittest.TestCase):
     def test_neon_contrast(self) -> None:
         v, _ = self._check_theme("neon")
         self.assertEqual(v, [], "Theme Neon violations:\n" + "\n".join(v))
+
+    def test_aaa_contrast_meets_aa(self) -> None:
+        """B5 — le theme aaa doit deja respecter les seuils AA des autres themes."""
+        v, _ = self._check_theme("aaa")
+        self.assertEqual(v, [], "Theme AAA violations (AA baseline):\n" + "\n".join(v))
+
+    def test_aaa_contrast_meets_aaa(self) -> None:
+        """B5 — le theme aaa doit en plus respecter WCAG AAA (>=7:1 texte, >=4.5:1 UI)."""
+        v, _ = self._check_theme_with_pairs("aaa", AAA_PAIRS)
+        self.assertEqual(v, [], "Theme AAA violations (AAA strict):\n" + "\n".join(v))
 
 
 if __name__ == "__main__":
@@ -239,6 +270,16 @@ if __name__ == "__main__":
                 print("  Violations:")
                 for v in violations:
                     print(v)
+        # B5 — rapport dedie pour le theme aaa avec seuils AAA stricts.
+        print("\n=== Theme AAA (seuils AAA stricts) ===")
+        violations, ratios = instance._check_theme_with_pairs("aaa", AAA_PAIRS)
+        for label, ratio in ratios:
+            tag = "AAA" if ratio >= 7.0 else ("AA" if ratio >= 4.5 else "FAIL")
+            print(f"  [{tag:4s}] {ratio:5.2f}:1 — {label}")
+        if violations:
+            print("  Violations:")
+            for v in violations:
+                print(v)
     else:
         runner = unittest.TextTestRunner(verbosity=2)
         runner.run(suite)
