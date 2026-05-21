@@ -47,6 +47,36 @@ _ort_lock = threading.Lock()
 # lors d'un batch d'analyses successives sur une installation sans le modele.
 _missing_model_warned: bool = False
 _missing_ort_warned: bool = False
+# Liste prioritaire de providers ONNX Runtime calculee UNE SEULE FOIS au
+# module load (pas a chaque inference). Sur Windows GPU DirectML-capable
+# (AMD/Intel/NVIDIA via DX12), DmlExecutionProvider apporte 2-5x sur le
+# CPU. Fallback CPUExecutionProvider toujours present pour les machines
+# sans GPU compatible ou sans onnxruntime-directml installe.
+_preferred_providers: List[str] = []
+
+
+def _compute_preferred_providers() -> List[str]:
+    """Calcule la liste prioritaire de providers ONNX selon les capacites.
+
+    Appele UNE SEULE FOIS au module load. Retourne une liste vide si
+    onnxruntime n'est pas installe (cas degrade : LPIPS desactive en amont
+    par `_is_ort_available()`).
+    """
+    try:
+        import onnxruntime
+    except ImportError:
+        return []
+    available = set(onnxruntime.get_available_providers())
+    preferred: List[str] = []
+    # DirectML sur Windows si dispo (GPU AMD/Intel/NVIDIA via DX12)
+    if "DmlExecutionProvider" in available:
+        preferred.append("DmlExecutionProvider")
+    # Fallback CPU toujours present
+    preferred.append("CPUExecutionProvider")
+    return preferred
+
+
+_preferred_providers = _compute_preferred_providers()
 
 # Message d'aide affiche quand le modele LPIPS est absent. Cible : utilisateur
 # qui a une installation incomplete (.exe corrompu, build amputee, modele
@@ -126,9 +156,18 @@ def _get_session(model_path: str = LPIPS_MODEL_PATH):
 
         _ort_session = ort.InferenceSession(
             str(resolved),
-            providers=["CPUExecutionProvider"],
+            providers=_preferred_providers,
         )
-        logger.info("LPIPS ONNX charge (%s)", resolved.name)
+        # Cf B2 (audit C16 P1) : log du provider effectivement selectionne
+        # par ONNX Runtime (peut etre Dml si dispo, sinon CPU fallback).
+        # Utile pour diagnostic perf et confirmation GPU sur Windows.
+        active_providers = _ort_session.get_providers()
+        active = active_providers[0] if active_providers else "unknown"
+        logger.info(
+            "LPIPS ONNX charge (%s) provider=%s",
+            resolved.name,
+            active,
+        )
     return _ort_session
 
 
