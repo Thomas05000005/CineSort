@@ -612,7 +612,7 @@ async function _handleAction(action, btn) {
       break;
 
     case "search-tmdb":
-      showToast({ type: "info", text: "Recherche manuelle TMDb : feature à venir." });
+      _openTmdbManualSearchModal(rowId, runId);
       break;
 
     default:
@@ -640,6 +640,194 @@ async function _chooseCandidate(tmdbId, btn) {
     console.error("[film-detail] choose-candidate:", e);
     showToast({ type: "error", text: `Erreur : ${e.message || e}` });
     if (btn) { btn.disabled = false; btn.textContent = "Choisir"; }
+  }
+}
+
+/* ===========================================================
+ * Recherche manuelle TMDb (Spec 06 3.4)
+ * =========================================================== */
+
+const TMDB_SEARCH_OVERLAY_ID = "tmdbManualSearchOverlay";
+
+function _closeTmdbManualSearchModal() {
+  const overlay = document.getElementById(TMDB_SEARCH_OVERLAY_ID);
+  if (!overlay) return;
+  if (overlay._escHandler) {
+    document.removeEventListener("keydown", overlay._escHandler);
+  }
+  const previous = overlay._previouslyFocused;
+  overlay.remove();
+  if (previous && typeof previous.focus === "function") {
+    try { previous.focus(); } catch (e) { /* noop */ }
+  }
+}
+
+function _renderTmdbSearchResults(results) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return `<p class="tmdb-manual-search-empty">Aucun résultat. Essayez avec un titre différent ou ajoutez l'année.</p>`;
+  }
+  return `
+    <ul class="tmdb-manual-search-results" role="list">
+      ${results.map((r) => {
+        const tid = parseInt(r.tmdb_id, 10);
+        if (!tid) return "";
+        const title = escapeHtml(r.title || "(sans titre)");
+        const year = r.year ? escapeHtml(String(r.year)) : "—";
+        const origTitle = r.original_title && r.original_title !== r.title
+          ? `<span class="tmdb-manual-search-orig">(${escapeHtml(r.original_title)})</span>`
+          : "";
+        const overview = r.overview ? escapeHtml(String(r.overview)) : "";
+        const overviewBlock = overview
+          ? `<p class="tmdb-manual-search-overview">${overview}</p>`
+          : "";
+        const vote = (r.vote_average && Number(r.vote_average) > 0)
+          ? `<span class="tmdb-manual-search-vote">★ ${Number(r.vote_average).toFixed(1)}</span>`
+          : "";
+        const posterUrl = r.poster_url ? escapeHtml(String(r.poster_url)) : "";
+        const posterBlock = posterUrl
+          ? `<img class="tmdb-manual-search-poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" width="92" height="138">`
+          : `<div class="tmdb-manual-search-poster tmdb-manual-search-poster--empty" aria-hidden="true">🎞</div>`;
+        return `
+          <li class="tmdb-manual-search-item" data-tmdb-id="${tid}">
+            ${posterBlock}
+            <div class="tmdb-manual-search-meta">
+              <div class="tmdb-manual-search-title">${title} <span class="tmdb-manual-search-year">(${year})</span> ${vote}</div>
+              ${origTitle}
+              ${overviewBlock}
+            </div>
+            <button type="button" class="v5-btn v5-btn--primary v5-btn--sm" data-tmdb-pick="${tid}">Choisir</button>
+          </li>
+        `;
+      }).join("")}
+    </ul>
+  `;
+}
+
+async function _runTmdbManualSearch(overlay) {
+  const input = overlay.querySelector("[data-tmdb-search-query]");
+  const yearInput = overlay.querySelector("[data-tmdb-search-year]");
+  const submitBtn = overlay.querySelector("[data-tmdb-search-submit]");
+  const resultsBox = overlay.querySelector("[data-tmdb-search-results]");
+  if (!input || !resultsBox) return;
+  const query = String(input.value || "").trim();
+  if (query.length < 2) {
+    resultsBox.innerHTML = `<p class="tmdb-manual-search-empty">Tapez au moins 2 caractères.</p>`;
+    return;
+  }
+  let year = null;
+  if (yearInput && yearInput.value) {
+    const y = parseInt(yearInput.value, 10);
+    if (!Number.isNaN(y) && y > 1870 && y < 2100) year = y;
+  }
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Recherche..."; }
+  resultsBox.innerHTML = `<p class="tmdb-manual-search-loading">Recherche en cours...</p>`;
+  try {
+    const res = await apiPost("library/search_tmdb", { query, year });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec recherche TMDb.");
+    }
+    resultsBox.innerHTML = _renderTmdbSearchResults(data.results || []);
+  } catch (e) {
+    console.error("[film-detail] search_tmdb:", e);
+    resultsBox.innerHTML = `<p class="tmdb-manual-search-error">Erreur : ${escapeHtml(e.message || String(e))}</p>`;
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "🔍 Rechercher"; }
+  }
+}
+
+async function _pickTmdbManualResult(tmdbId, btn) {
+  if (!tmdbId) return;
+  if (btn) { btn.disabled = true; btn.textContent = "..."; }
+  try {
+    await _chooseCandidate(tmdbId, null);
+    _closeTmdbManualSearchModal();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Choisir"; }
+  }
+}
+
+function _openTmdbManualSearchModal(_rowId, _runId) {
+  _closeTmdbManualSearchModal();
+  const row = (_state.data && _state.data.row) || {};
+  const defaultQuery = row.proposed_title || row.nfo_title || row.source_folder || "";
+  const defaultYear = row.proposed_year || row.nfo_year || "";
+
+  const overlay = document.createElement("div");
+  overlay.id = TMDB_SEARCH_OVERLAY_ID;
+  overlay.className = "modal-overlay tmdb-manual-search-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Recherche manuelle TMDb");
+  overlay.innerHTML = `
+    <div class="modal-card card tmdb-manual-search-card">
+      <div class="modal-header">
+        <h3>🔍 Recherche manuelle TMDb</h3>
+        <button type="button" class="modal-close-btn" data-tmdb-search-close aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body tmdb-manual-search-body">
+        <form data-tmdb-search-form class="tmdb-manual-search-form">
+          <label class="tmdb-manual-search-field">
+            <span>Titre du film</span>
+            <input type="text" data-tmdb-search-query value="${escapeHtml(String(defaultQuery))}" placeholder="Ex : Inception" autocomplete="off">
+          </label>
+          <label class="tmdb-manual-search-field tmdb-manual-search-field--year">
+            <span>Année (optionnel)</span>
+            <input type="number" data-tmdb-search-year min="1870" max="2100" value="${escapeHtml(String(defaultYear || ""))}" placeholder="2010">
+          </label>
+          <button type="submit" class="v5-btn v5-btn--primary v5-btn--sm" data-tmdb-search-submit>🔍 Rechercher</button>
+        </form>
+        <div class="tmdb-manual-search-results-box" data-tmdb-search-results>
+          <p class="tmdb-manual-search-hint">Tapez un titre puis cliquez sur Rechercher.</p>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-tmdb-search-close>Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay._previouslyFocused = document.activeElement;
+
+  overlay._escHandler = (ev) => {
+    if (ev.key === "Escape") {
+      ev.stopPropagation();
+      _closeTmdbManualSearchModal();
+    }
+  };
+  document.addEventListener("keydown", overlay._escHandler);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) _closeTmdbManualSearchModal();
+  });
+  overlay.querySelectorAll("[data-tmdb-search-close]").forEach((b) => {
+    b.addEventListener("click", _closeTmdbManualSearchModal);
+  });
+
+  const form = overlay.querySelector("[data-tmdb-search-form]");
+  if (form) {
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      _runTmdbManualSearch(overlay);
+    });
+  }
+
+  const resultsBox = overlay.querySelector("[data-tmdb-search-results]");
+  if (resultsBox) {
+    resultsBox.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-tmdb-pick]");
+      if (!btn) return;
+      ev.preventDefault();
+      const tid = parseInt(btn.dataset.tmdbPick, 10);
+      _pickTmdbManualResult(tid, btn);
+    });
+  }
+
+  const queryInput = overlay.querySelector("[data-tmdb-search-query]");
+  if (queryInput) {
+    try { queryInput.focus(); queryInput.select(); } catch (e) { /* noop */ }
+    if (String(queryInput.value || "").trim().length >= 2) {
+      _runTmdbManualSearch(overlay);
+    }
   }
 }
 

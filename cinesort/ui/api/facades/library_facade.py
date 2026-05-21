@@ -112,6 +112,13 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._set_film_tmdb_candidate_impl(run_id, row_id, tmdb_id)
 
+    def search_tmdb(self, query: str, year: Optional[int] = None) -> Dict[str, Any]:
+        """Spec 06 3.4 : recherche manuelle TMDb (sous-modal du Modal Film).
+
+        Cf CineSortApi._search_tmdb_impl pour la doc complete.
+        """
+        return self._api._search_tmdb_impl(query=query, year=year)
+
     def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
         """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
 

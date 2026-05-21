@@ -9172,3 +9172,138 @@ body.v5-notif-lock {
   width: 100%;
   max-width: var(--max-w, 800px);
 }
+
+
+/* =============================================================================
+ * Recherche manuelle TMDb (Spec 06 3.4) - sous-modal du Modal Film.
+ * ============================================================================= */
+.tmdb-manual-search-overlay { z-index: 10002; }
+.tmdb-manual-search-card {
+  max-width: 720px;
+  width: 90vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+.tmdb-manual-search-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow: hidden;
+  flex: 1 1 auto;
+}
+.tmdb-manual-search-form {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.tmdb-manual-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 240px;
+  min-width: 180px;
+}
+.tmdb-manual-search-field--year { flex: 0 0 120px; }
+.tmdb-manual-search-field > span {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.tmdb-manual-search-field input {
+  padding: 8px 10px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #111);
+  font-size: var(--fs-sm);
+}
+.tmdb-manual-search-results-box {
+  overflow-y: auto;
+  max-height: 60vh;
+  border-top: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  padding-top: var(--sp-2);
+}
+.tmdb-manual-search-hint,
+.tmdb-manual-search-empty,
+.tmdb-manual-search-loading {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: var(--sp-4) var(--sp-2);
+}
+.tmdb-manual-search-error {
+  color: var(--danger, #c0392b);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2);
+}
+.tmdb-manual-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.tmdb-manual-search-item {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  align-items: center;
+}
+.tmdb-manual-search-item:hover { border-color: var(--accent, #3a7afe); }
+.tmdb-manual-search-poster {
+  width: 92px;
+  height: 138px;
+  object-fit: cover;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-2);
+  display: block;
+}
+.tmdb-manual-search-poster--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+.tmdb-manual-search-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tmdb-manual-search-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.tmdb-manual-search-year { color: var(--text-muted); font-weight: 400; }
+.tmdb-manual-search-vote {
+  color: var(--accent, #f5c518);
+  font-weight: 500;
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+}
+.tmdb-manual-search-orig {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-style: italic;
+}
+.tmdb-manual-search-overview {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

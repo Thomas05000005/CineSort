@@ -1999,6 +1999,15 @@ class CineSortApi:
         """Retourne les URLs de posters TMDb pour les IDs demandes (cache local)."""
         return tmdb_support.get_tmdb_posters(self, tmdb_ids, size)
 
+    def _search_tmdb_impl(self, query: str, year: Optional[int] = None) -> Dict[str, Any]:
+        """Spec 06 3.4 : recherche manuelle TMDb depuis le Modal Film.
+
+        Retourne jusqu'a 10 resultats (tmdb_id, title, year, poster_url,
+        overview tronquee, votes). L'utilisateur peut ensuite appeler
+        `set_film_tmdb_candidate(row_id, tmdb_id)` pour appliquer son choix.
+        """
+        return tmdb_support.search_tmdb(self, query, year)
+
     # ---------- apply ----------
     def _build_undo_preview_payload(
         self,

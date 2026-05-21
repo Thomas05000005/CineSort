@@ -1085,10 +1085,31 @@ function _bindEvents(container) {
 
 /* --- Entrypoint -------------------------------------------------------- */
 
+// Phase 6 spec 05 100% : AbortController dédié à la vue Accueil pour pouvoir
+// abort tous les fetchs en cours quand on quitte la vue (cleanup propre).
+let _abortController = null;
+
+/**
+ * Cleanup callback de la vue Accueil. Appelé par le router à la navigation
+ * sortante (return value de init dans registerRoute). Idempotent.
+ * - Stoppe le polling de scan
+ * - Abort les fetchs en cours via _abortController
+ */
+export function unmountAccueil() {
+  _stopScanPolling();
+  if (_abortController) {
+    try { _abortController.abort(); } catch { /* no-op */ }
+    _abortController = null;
+  }
+}
+
 export async function initAccueil(container) {
   if (!container) return;
-  container.innerHTML = _renderSkeleton();
-  const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
+  // Re-entrance safety : si initAccueil est appelé alors qu'une vue précédente
+  // est encore active, cleanup d'abord (évite le double polling + listeners).
+  unmountAccueil();
+  _abortController = new AbortController();
+  const signal = _abortController.signal;
 
   // Phase 3.1-B : on charge en parallele les 3 sources (dashboard latest +
   // global stats + settings) pour avoir les donnees des 5 sections en un boot.

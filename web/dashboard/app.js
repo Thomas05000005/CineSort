@@ -127,7 +127,7 @@ import * as rightPanel from "./components/right-panel.js";
 import { initLogin } from "./views/login.js";
 // Phase 3.1 (spec 05-accueil.md) : nouvelle vue Accueil refondue. Active sur
 // /accueil ; les anciennes routes /home /status /qij redirigent vers /accueil.
-import { initAccueil } from "./views/accueil.js";        // /accueil (nouvelle UI)
+import { initAccueil, unmountAccueil } from "./views/accueil.js";        // /accueil (nouvelle UI)
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
 // Traitement "agir : scan/review/apply"). /processing reste fonctionnelle :
 // elle est utilisee en INTERNE par traitement.js et qij.js comme etape stepper.
@@ -241,7 +241,7 @@ registerRoute("/settings", { view: "view-settings", guard: requireAuth, init: _l
 // Les anciennes URLs (/home /library /processing /settings /help) restent en
 // alias rétrocompat pour les bookmarks et les liens externes deja partages.
 // Phase 3.1 : /accueil cable la nouvelle vue refondue (spec 05-accueil.md).
-registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: initAccueil });
+registerRoute("/accueil", { view: "view-status", guard: requireAuth, init: (el, opts) => { initAccueil(el, opts); return unmountAccueil; } });
 // Phase 3.3 : /traitement cable la nouvelle vue refondue (spec 08).
 registerRoute("/traitement", { view: "view-processing", guard: requireAuth, init: (el, opts) => { initTraitement(el, opts); return unmountTraitement; } });
 // Phase 3.2 : /bibliotheque cable la nouvelle grille refondue (spec 07).
