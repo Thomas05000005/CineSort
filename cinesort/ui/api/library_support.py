@@ -137,14 +137,16 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     # Perceptual reports indexes par row_id
     try:
         perc_list = store.perceptual.list_perceptual_reports(run_id=run_id)
-    except (OSError, AttributeError, TypeError, ValueError):
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("library_support cannot list perceptual reports: %s", exc)
         perc_list = []
     perc_by_row = {str(p.get("row_id", "")): p for p in perc_list}
 
     # Quality reports
     try:
         quality_list = store.quality.list_quality_reports(run_id=run_id)
-    except (AttributeError, OSError, TypeError, ValueError):
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.warning("library_support cannot list quality reports: %s", exc)
         quality_list = []
     quality_by_row = {str(q.get("row_id", "")): q for q in quality_list}
 
