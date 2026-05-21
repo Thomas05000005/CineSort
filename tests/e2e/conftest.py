@@ -5,6 +5,7 @@ Serveur REST auto-contenu, browser Playwright, authentification.
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import time
@@ -30,6 +31,7 @@ from create_test_data import (  # noqa: E402
     write_plan_file,
 )
 import contextlib
+import json as _json
 from tests._helpers import find_free_port as _find_free_port
 
 
@@ -56,11 +58,21 @@ def _wait_server_ready(port: int, timeout_s: float = 5.0) -> None:
 def e2e_server() -> Generator[Dict[str, Any], None, None]:
     """Demarre un serveur REST CineSort avec 15 films mock.
 
-    Yield un dict : {url, token, port, root, state_dir, run_id, rows}.
+    Yield un dict : {url, token, port, root, state_dir, run_id, rows, _api,
+    _baseline_settings}.
+
+    Note (audit C12 P0 / B6) : la fixture reste scope="session" pour eviter
+    le cout de redemarrage du serveur HTTP (~ tmpdir + DB SQLite + 15 films
+    + RestApiServer). L'isolation entre tests est assuree par la fixture
+    autouse `e2e_clean_state` (scope="function") qui reset l'etat mutable.
     """
     import cinesort.ui.api.cinesort_api as backend
     from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
     from cinesort.infra.rest_server import RestApiServer
+
+    # Active le mode E2E AVANT toute initialisation API : ainsi l'endpoint
+    # /api/test_reset est utilisable depuis la fixture clean state.
+    os.environ.setdefault("CINESORT_E2E", "1")
 
     tmp = tempfile.mkdtemp(prefix="cinesort_e2e_")
     root = Path(tmp) / "root"
@@ -71,6 +83,9 @@ def e2e_server() -> Generator[Dict[str, Any], None, None]:
     # API + settings
     api = backend.CineSortApi()
     api.settings.save_settings(get_settings_dict(root, state_dir))
+
+    # Snapshot settings de reference pour rollback entre tests
+    baseline_settings = _json.loads(_json.dumps(api.settings.get_settings()))
 
     # Base de donnees
     db_path = db_path_for_state_dir(state_dir)
@@ -100,6 +115,8 @@ def e2e_server() -> Generator[Dict[str, Any], None, None]:
         "old_run_id": info["old_run_id"],
         "rows": rows,
         "_server": server,
+        "_api": api,
+        "_baseline_settings": baseline_settings,
     }
 
     server.stop()
@@ -130,12 +147,47 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
 
 
 @pytest.fixture(autouse=True)
-def _reset_rate_limiter(e2e_server):
-    """Reset le rate limiter entre chaque test pour eviter les blocages."""
+def e2e_clean_state(e2e_server):
+    """Reset l'etat mutable du serveur entre chaque test (audit C12 P0 / B6).
+
+    Garantit l'isolation entre tests E2E meme si le serveur reste scope=session :
+    - rate limiter (failures) : reset (pour eviter blocages successifs)
+    - notifications store : clear via store.clear() direct
+    - smart_playlists (settings.json) : rollback vers le snapshot baseline
+    - runs en memoire : test_reset() endpoint (clear self._runs)
+
+    Cette fixture rend les tests insensibles a l'ordre d'execution et
+    permet la parallelisation (pytest-xdist) sans collisions inter-tests.
+    """
     server = e2e_server.get("_server")
+    api = e2e_server.get("_api")
+    baseline = e2e_server.get("_baseline_settings") or {}
+
+    # 1) Rate limiter : evite blocages cumules entre tests
     if server and hasattr(server, "_rate_limiter"):
-        with server._rate_limiter._lock:
-            server._rate_limiter._failures.clear()
+        with contextlib.suppress(AttributeError, TypeError):
+            with server._rate_limiter._lock:
+                server._rate_limiter._failures.clear()
+
+    # 2) Notifications : vide le store in-memory
+    if api is not None:
+        with contextlib.suppress(Exception):
+            from cinesort.ui.api import notifications_support
+
+            store = notifications_support._get_or_create_store(api)
+            store.clear()
+
+    # 3) Settings : rollback (efface smart_playlists ajoutees par les tests)
+    if api is not None and baseline:
+        with contextlib.suppress(Exception):
+            api.settings.save_settings(_json.loads(_json.dumps(baseline)))
+
+    # 4) Runs en memoire : test_reset endpoint officiel
+    if api is not None and hasattr(api, "test_reset"):
+        with contextlib.suppress(Exception):
+            api.test_reset()
+
+    yield
 
 
 @pytest.fixture(scope="function")
