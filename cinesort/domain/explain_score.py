@@ -82,16 +82,28 @@ def _compute_category_contribution(
     except (TypeError, ValueError):
         w_video = w_audio = w_extras = 0
 
-    total = max(1, w_video + w_audio + w_extras)
-
     weight_map = {"video": w_video, "audio": w_audio, "extras": w_extras}
     weight = weight_map.get(category, 0)
+
+    sum_weights = w_video + w_audio + w_extras
+    if sum_weights <= 0:
+        # Config invalide : tous les poids sont 0/negatifs. On retourne des
+        # contributions explicitement nulles plutot que de masquer l'erreur
+        # avec un clamp `max(1, ...)` qui donnerait weight_pct=100% pour
+        # weight=0. Cf audit Claude 2026-05-21 (categorie 2 - sentinel value
+        # confusion).
+        return {
+            "subscore": int(subscore),
+            "weight": int(weight),
+            "weight_pct": 0.0,
+            "contribution": 0.0,
+        }
 
     return {
         "subscore": int(subscore),
         "weight": int(weight),
-        "weight_pct": round(100.0 * weight / total, 1),
-        "contribution": round(float(subscore) * weight / total, 1),
+        "weight_pct": round(100.0 * weight / sum_weights, 1),
+        "contribution": round(float(subscore) * weight / sum_weights, 1),
     }
 
 

@@ -110,6 +110,19 @@ class CategoriesBreakdownTests(unittest.TestCase):
         self.assertEqual(r["categories"]["video"]["label"], "Vidéo")
         self.assertEqual(r["categories"]["audio"]["label"], "Audio")
 
+    def test_breakdown_all_weights_zero_returns_zero_pct(self):
+        # Audit Claude 2026-05-21 (categorie 2) : si tous les poids = 0,
+        # l'ancien `max(1, ...)` masquait l'erreur de config et retournait
+        # weight_pct=100% pour weight=0. On verifie maintenant 0.0 explicite.
+        r = _call(
+            50,
+            "Silver",
+            weights={"video": 0, "audio": 0, "extras": 0},
+        )
+        for cat in ("video", "audio", "extras"):
+            self.assertEqual(r["categories"][cat]["weight_pct"], 0.0)
+            self.assertEqual(r["categories"][cat]["contribution"], 0.0)
+
 
 class BaselineTests(unittest.TestCase):
     def test_next_tier_when_close_to_platinum(self):
