@@ -15,13 +15,9 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
-    # Ne pas spammer pour les patches mineurs (3.13.0 -> 3.13.1) sur les
-    # deps critiques bien testees ; uniquement minor + major et patches
-    # avec advisory securite.
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-patch"
+    # Laisser passer tous les patches : ils contiennent souvent des
+    # correctifs CVE silencieux (pas toujours flagges security advisory
+    # par GitHub). L'auto-merge gere le bruit cote CI.
     groups:
       # Groupe les bumps mineurs des libs HTTP en une seule PR pour
       # reduire le bruit.
