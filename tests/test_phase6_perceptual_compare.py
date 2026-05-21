@@ -50,7 +50,7 @@ class ImportIntegrationTests(unittest.TestCase):
         """_onPickCompare doit appeler openDuplicateComparatorModal directement."""
         idx = self.js.find("function _onPickCompare(")
         self.assertGreater(idx, 0, "_onPickCompare doit exister")
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         self.assertIn("openDuplicateComparatorModal({", body)
         # Pas de garde "typeof window.openDuplicateComparatorModal" dans le flow nominal
         self.assertNotIn("typeof window.openDuplicateComparatorModal", body)
@@ -69,13 +69,13 @@ class ReadOnlyParamTests(unittest.TestCase):
     def test_rowa_rowb_passed(self) -> None:
         """rowA et rowB sont les 2 rows compares."""
         idx = self.js.find("function _onPickCompare(")
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         self.assertIn("rowA: rowId", body)
         self.assertIn("rowB: otherRowId", body)
 
     def test_runid_passed(self) -> None:
         idx = self.js.find("function _onPickCompare(")
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         self.assertIn("runId", body)
 
 
@@ -93,7 +93,7 @@ class DuplicateModalReadOnlyTests(unittest.TestCase):
         """En readOnly, _renderFooter ne doit pas afficher les boutons Garder A/B."""
         idx = self.js.find("function _renderFooter(")
         self.assertGreater(idx, 0)
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         self.assertIn("readOnly", body)
         # Le marqueur CSS du footer readonly
         self.assertIn("duplicate-modal-footer--readonly", body)
@@ -108,7 +108,7 @@ class DuplicateModalReadOnlyTests(unittest.TestCase):
         self.assertIn("o.readOnly === true", self.js)
         # _state stocke aussi readOnly
         idx = self.js.find("export function openDuplicateComparatorModal")
-        body = self.js[idx:idx + 2000]
+        body = self.js[idx : idx + 2000]
         self.assertIn("readOnly,", body)
 
 
@@ -123,7 +123,7 @@ class PreloadCompareListTests(unittest.TestCase):
         """Apres _loadAndRender() dans openPerceptualModal, on doit appeler _loadCompareList."""
         idx = self.js.find("export async function openPerceptualModal")
         self.assertGreater(idx, 0)
-        body = self.js[idx:idx + 3500]
+        body = self.js[idx : idx + 3500]
         await_idx = body.find("await _loadAndRender()")
         preload_idx = body.find("_loadCompareList()")
         self.assertGreater(await_idx, 0, "appel a _loadAndRender introuvable")
@@ -142,7 +142,7 @@ class PreloadCompareListTests(unittest.TestCase):
         au lieu de re-fetch (sinon on verrait "Chargement..." apres rebind)."""
         idx = self.js.find("async function _loadCompareList(")
         self.assertGreater(idx, 0)
-        body = self.js[idx:idx + 1500]
+        body = self.js[idx : idx + 1500]
         # Si compareLoaded est true, on re-rend la liste depuis _state.compareRows
         self.assertIn("_renderCompareListItems(_state.compareRows || [])", body)
 
@@ -166,7 +166,7 @@ class NoNavigateToInNominalFlowTests(unittest.TestCase):
         """_onPickCompare doit envelopper l'appel comparateur dans try/catch
         avec le fallback hash dans le catch."""
         idx = self.js.find("function _onPickCompare(")
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         self.assertIn("try {", body)
         self.assertIn("} catch", body)
         # Le commentaire mentionne explicitement "fallback"
@@ -176,7 +176,7 @@ class NoNavigateToInNominalFlowTests(unittest.TestCase):
         """Le navigateTo (#/doublons) ne doit pas etre dans le chemin nominal
         de _onPickCompare. On verifie qu'il vient apres le `catch`."""
         idx = self.js.find("function _onPickCompare(")
-        body = self.js[idx:idx + 2500]
+        body = self.js[idx : idx + 2500]
         catch_idx = body.find("} catch")
         nav_idx = body.find("/doublons?compareA=")
         self.assertGreater(catch_idx, 0, "catch attendu dans _onPickCompare")

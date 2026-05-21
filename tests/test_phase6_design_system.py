@@ -65,8 +65,7 @@ class TypographyCssTests(unittest.TestCase):
 
     def test_color_utility_classes(self) -> None:
         css = _read(_TYPOGRAPHY_CSS)
-        for cls in (".text-primary", ".text-secondary", ".text-muted",
-                    ".text-disabled", ".text-inverse"):
+        for cls in (".text-primary", ".text-secondary", ".text-muted", ".text-disabled", ".text-inverse"):
             self.assertIn(cls, css, f"classe couleur manquante : {cls}")
 
     def test_tabular_and_truncate(self) -> None:
@@ -126,10 +125,8 @@ class ThemeAaaTests(unittest.TestCase):
         start = css.find('[data-theme="aaa"]')
         end = css.find("}", start)
         block = css[start:end]
-        self.assertNotIn("--tier-platinum-solid", block,
-                         "AAA ne doit pas redefinir tier colors")
-        self.assertNotIn("--sev-info-solid", block,
-                         "AAA ne doit pas redefinir severities")
+        self.assertNotIn("--tier-platinum-solid", block, "AAA ne doit pas redefinir tier colors")
+        self.assertNotIn("--sev-info-solid", block, "AAA ne doit pas redefinir severities")
 
     def test_topbar_lists_aaa_theme(self) -> None:
         js = _read(_TOPBAR_JS)

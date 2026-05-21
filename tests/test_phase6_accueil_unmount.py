@@ -31,13 +31,13 @@ class UnmountExportTests(unittest.TestCase):
         """unmountAccueil() doit appeler _stopScanPolling()."""
         idx = self.js.find("export function unmountAccueil(")
         self.assertGreater(idx, 0)
-        body = self.js[idx:idx + 600]
+        body = self.js[idx : idx + 600]
         self.assertIn("_stopScanPolling()", body)
 
     def test_unmount_aborts_pending_fetches(self) -> None:
         """unmountAccueil() doit abort le controller des fetchs en cours."""
         idx = self.js.find("export function unmountAccueil(")
-        body = self.js[idx:idx + 600]
+        body = self.js[idx : idx + 600]
         self.assertIn(".abort()", body)
         self.assertIn("_abortController", body)
 
@@ -55,13 +55,13 @@ class AbortControllerWiringTests(unittest.TestCase):
         """Re-entrant safety : initAccueil appelle unmountAccueil() en preambule."""
         idx = self.js.find("export async function initAccueil(")
         self.assertGreater(idx, 0)
-        body = self.js[idx:idx + 1500]
+        body = self.js[idx : idx + 1500]
         self.assertIn("unmountAccueil()", body)
 
     def test_abort_signal_passed_to_fetches(self) -> None:
         """Le signal AbortController est propage aux apiPost (run/get_dashboard, etc.)."""
         # On verifie que { signal } est passe en 3e arg d'apiPost.
-        self.assertIn("apiPost(\"run/get_dashboard\", { run_id: \"latest\" }, { signal })", self.js)
+        self.assertIn('apiPost("run/get_dashboard", { run_id: "latest" }, { signal })', self.js)
 
 
 class AppJsWiringTests(unittest.TestCase):
@@ -80,7 +80,7 @@ class AppJsWiringTests(unittest.TestCase):
         # On cherche le bloc complet : init handler retournant unmountAccueil.
         idx = self.js.find('registerRoute("/accueil"')
         self.assertGreater(idx, 0)
-        block = self.js[idx:idx + 400]
+        block = self.js[idx : idx + 400]
         self.assertIn("initAccueil(el", block)
         self.assertIn("return unmountAccueil", block)
 

@@ -2368,6 +2368,7 @@ class CineSortApi:
     def _list_pending_runs_impl(self) -> Dict[str, Any]:
         """Liste les runs PAUSED / SAVED / AWAITING_VALIDATION. Cf spec 08 §5."""
         return run_control_support.list_pending_runs(self)
+
     # ---------- Historique (spec 09) ----------
     def _get_history_stats_impl(self, run_id: str) -> Dict[str, Any]:
         """Detail complet d'un run pour l'inspecteur Historique (spec 09)."""

@@ -61,7 +61,7 @@ class HeaderRunTests(unittest.TestCase):
         self.assertIn("5000", self.js)
 
     def test_uses_run_get_status(self) -> None:
-        self.assertIn('run/get_status', self.js)
+        self.assertIn("run/get_status", self.js)
 
 
 class AnalyseStepTests(unittest.TestCase):

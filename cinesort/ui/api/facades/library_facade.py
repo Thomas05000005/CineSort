@@ -216,6 +216,7 @@ class LibraryFacade(_BaseFacade):
         Cf cinesort.ui.api.library_actions_support.export_films.
         """
         return library_actions_support.export_films(self._api, row_ids, fmt=format, run_id=run_id)
+
     # ---------- Vue Qualite — Audit (spec 10) ----------
 
     def get_films_by_decade(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

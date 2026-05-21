@@ -133,8 +133,12 @@ class DragSelectIntersectionTests(unittest.TestCase):
 
     def test_intersection_test_excludes_via_4_sides(self) -> None:
         # AABB classique : exclusion sur les 4 cotes (cardRight < rect.left, etc.).
-        for token in ("cardRight < rect.left", "cardLeft > rect.right",
-                      "cardBottom < rect.top", "cardTop > rect.bottom"):
+        for token in (
+            "cardRight < rect.left",
+            "cardLeft > rect.right",
+            "cardBottom < rect.top",
+            "cardTop > rect.bottom",
+        ):
             self.assertIn(token, self.js, f"intersection AABB : '{token}' manquant")
 
 
@@ -156,6 +160,7 @@ class DragSelectThresholdTests(unittest.TestCase):
     def test_threshold_value_at_least_3(self) -> None:
         # Capture la valeur numerique declaree.
         import re
+
         m = re.search(r"DRAG_THRESHOLD_PX\s*=\s*(\d+)", self.js)
         self.assertIsNotNone(m, "DRAG_THRESHOLD_PX doit avoir une valeur entiere")
         val = int(m.group(1))
@@ -204,8 +209,7 @@ class DragSelectCancellationTests(unittest.TestCase):
         end = self.js.find("\n}", idx)
         self.assertNotEqual(end, -1)
         body = self.js[idx:end]
-        self.assertIn("_resetDragSelect()", body,
-                      "unmountBibliotheque doit appeler _resetDragSelect()")
+        self.assertIn("_resetDragSelect()", body, "unmountBibliotheque doit appeler _resetDragSelect()")
 
 
 # ---------------------------------------------------------------------------

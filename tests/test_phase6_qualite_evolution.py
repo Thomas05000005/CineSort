@@ -34,8 +34,18 @@ class CaptionDatesTests(unittest.TestCase):
 
     def test_caption_uses_french_months(self) -> None:
         # Tous les mois doivent etre presents pour le formatage francais.
-        for month in ("janvier", "fevrier", "mars", "avril", "mai", "juin",
-                      "juillet", "septembre", "octobre", "novembre"):
+        for month in (
+            "janvier",
+            "fevrier",
+            "mars",
+            "avril",
+            "mai",
+            "juin",
+            "juillet",
+            "septembre",
+            "octobre",
+            "novembre",
+        ):
             # On accepte avec ou sans accent (l'editeur peut normaliser)
             pattern = month.replace("e", "[eé]").replace("u", "[uû]").replace("a", "[aâ]")
             self.assertRegex(self.js, pattern, f"Mois '{month}' manquant dans qualite.js")
@@ -46,7 +56,7 @@ class CaptionDatesTests(unittest.TestCase):
     def test_caption_replaces_legacy_text(self) -> None:
         # L'ancienne formulation brut "X points de mesure entre <date_iso> et <date_iso>"
         # ne doit plus etre presente : on doit passer par _buildEvolutionCaption.
-        self.assertNotIn("validPoints[0].date || \"\")} et ${escapeHtml(validPoints", self.js)
+        self.assertNotIn('validPoints[0].date || "")} et ${escapeHtml(validPoints', self.js)
 
     def test_format_date_fr_helper(self) -> None:
         self.assertIn("function _formatDateFr(", self.js)
@@ -74,7 +84,7 @@ class TooltipsTests(unittest.TestCase):
 
     def test_tooltip_uses_french_date(self) -> None:
         # Le tooltip est construit a partir de _formatDateFr (date complete avec annee)
-        self.assertIn("_formatDateFr(p.date || \"\", true)", self.js)
+        self.assertIn('_formatDateFr(p.date || "", true)', self.js)
 
     def test_circle_has_class_point(self) -> None:
         self.assertIn("qualite-evolution-point", self.js)

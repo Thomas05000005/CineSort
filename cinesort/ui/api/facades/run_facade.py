@@ -115,6 +115,7 @@ class RunFacade(_BaseFacade):
         Cf cinesort.ui.api.library_actions_support.rescan_rows_bulk.
         """
         return library_actions_support.rescan_rows_bulk(self._api, row_ids, run_id=run_id)
+
     # ----- Historique (spec 09) -----
     def get_history_stats(self, run_id: str) -> Dict[str, Any]:
         """Detail complet d'un run pour l'inspecteur Historique.
@@ -150,6 +151,7 @@ class RunFacade(_BaseFacade):
         Retourne `{ok, deleted_count, deleted_run_ids: [...], retention_days}`.
         """
         return self._api._cleanup_old_runs_impl(retention_days)
+
     def rescan_row(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
 

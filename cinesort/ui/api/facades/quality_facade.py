@@ -272,6 +272,7 @@ class QualityFacade(_BaseFacade):
         Cf CineSortApi._set_active_profile_impl pour la doc complete.
         """
         return self._api._set_active_profile_impl(profile_id)
+
     # ---------- Vue Qualite — Audit (spec 10) ----------
 
     def get_films_by_tier(self, tier: str, limit: int = 8) -> Dict[str, Any]:

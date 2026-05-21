@@ -23,7 +23,7 @@ class ProfilQualiteEditorTests(unittest.TestCase):
 
     def test_4_tier_inputs(self) -> None:
         # Phase 5 : les rows sont generes dynamiquement via data-tier-input="${name}".
-        self.assertIn('data-tier-input', self.js)
+        self.assertIn("data-tier-input", self.js)
         for tier in ("platinum", "gold", "silver", "bronze"):
             self.assertIn(tier, self.js, f"tier {tier} manquant")
 

@@ -50,7 +50,7 @@ class InspectorDelegatesToFilmDetailTests(unittest.TestCase):
         body = m.group(1)
         # L'appel renderFilmDetail mode A doit apparaitre dans cette fonction.
         self.assertIn("renderFilmDetail", body)
-        self.assertRegex(body, r'mode\s*:\s*[\"\']A[\"\']')
+        self.assertRegex(body, r"mode\s*:\s*[\"\']A[\"\']")
         # Le rowId doit etre passe.
         self.assertIn("rowId", body)
         # Le runId doit etre passe pour permettre au composant de re-charger

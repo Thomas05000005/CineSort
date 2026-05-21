@@ -250,7 +250,7 @@ class DoubleClickModeCTests(unittest.TestCase):
         # un navigateTo /film/:id (function non importee, ReferenceError au runtime).
         self.assertRegex(
             self.js,
-            r'renderFilmDetail\(\s*\{\s*mode\s*:\s*[\"\']C[\"\']',
+            r"renderFilmDetail\(\s*\{\s*mode\s*:\s*[\"\']C[\"\']",
         )
 
 

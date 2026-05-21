@@ -132,9 +132,7 @@ class RuntimeFacade(_BaseFacade):
         category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : liste les notifications en memoire (LIFO)."""
-        return self._api._get_notifications_impl(
-            unread_only=unread_only, limit=limit, category=category
-        )
+        return self._api._get_notifications_impl(unread_only=unread_only, limit=limit, category=category)
 
     def dismiss_notification(self, notification_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : supprime une notification du centre."""

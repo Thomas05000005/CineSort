@@ -69,8 +69,7 @@ class ComparatorModalPairsBarTests(unittest.TestCase):
         # Le rendu retourne "" si rows.length < 3 -> "if (!_state.rows || _state.rows.length < 3)"
         # ou variante : on cherche le seuil.
         self.assertTrue(
-            "_state.rows.length < 3" in self.js
-            or "rows.length < 3" in self.js,
+            "_state.rows.length < 3" in self.js or "rows.length < 3" in self.js,
             msg="le rendu de la barre paires doit verifier rows.length >= 3",
         )
 

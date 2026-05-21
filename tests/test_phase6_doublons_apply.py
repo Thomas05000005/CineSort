@@ -65,9 +65,7 @@ class DuplicatesUserDecidedApplyTests(unittest.TestCase):
             candidates=[core.Candidate(title=title, year=year, source="name", score=0.7)],
         )
 
-    def _collection_row(
-        self, row_id: str, folder: Path, video: str, title: str, year: int
-    ) -> core.PlanRow:
+    def _collection_row(self, row_id: str, folder: Path, video: str, title: str, year: int) -> core.PlanRow:
         return core.PlanRow(
             row_id=row_id,
             kind="collection",

@@ -153,8 +153,14 @@ class SearchTmdbSuccessTests(unittest.TestCase):
         client = MagicMock()
         client.search_movie.return_value = [
             TmdbResult(
-                id=1, title="T", year=2020, original_title=None,
-                popularity=0, vote_count=0, vote_average=0, poster_path=None,
+                id=1,
+                title="T",
+                year=2020,
+                original_title=None,
+                popularity=0,
+                vote_count=0,
+                vote_average=0,
+                poster_path=None,
             ),
         ]
         client._get_movie_detail_cached.return_value = {"overview": long_text}
