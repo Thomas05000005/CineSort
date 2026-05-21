@@ -40,8 +40,6 @@ def extract_aligned_frames(
     height_a: int,
     width_b: int,
     height_b: int,
-    bit_depth_a: int = 8,
-    bit_depth_b: int = 8,
     frames_count: int = 20,
     skip_percent: int = 5,
     timeout_s: float = 30.0,
@@ -152,7 +150,7 @@ def compare_histograms(hist_a: List[int], hist_b: List[int]) -> Dict[str, Any]:
         return {"divergence": 0.0, "levels_a": 0, "levels_b": 0, "detail_winner": "tie"}
 
     # Divergence normalisee
-    divergence = sum(abs(a / total_a - b / total_b) for a, b in zip(hist_a, hist_b)) / 2.0
+    divergence = sum(abs(a / total_a - b / total_b) for a, b in zip(hist_a, hist_b, strict=False)) / 2.0
 
     # Niveaux distincts (seuil bruit 0.001 %)
     thresh_a = total_a * 0.00001

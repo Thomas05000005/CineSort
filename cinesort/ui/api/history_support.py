@@ -261,7 +261,7 @@ def delete_run(api: Any, run_id: str) -> Dict[str, Any]:
     found = _store_for_run(api, run_id)
     if not found:
         return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id)
-    row, store = found
+    _row, store = found
     try:
         deleted = store.run.delete_run(run_id)
     except (OSError, AttributeError, TypeError, ValueError) as exc:

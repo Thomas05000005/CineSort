@@ -62,7 +62,7 @@ def _normalize_tiers_decreasing(tiers: Dict[str, Any]) -> Tuple[bool, List[str]]
         return False, errors
 
     # Verif strictement decroissant
-    for (name_a, v_a), (name_b, v_b) in zip(values, values[1:]):
+    for (name_a, v_a), (name_b, v_b) in zip(values, values[1:], strict=False):
         if v_a <= v_b:
             errors.append(f"Seuils non decroissants : {name_a} ({v_a}) doit etre > {name_b} ({v_b}).")
     return (len(errors) == 0), errors

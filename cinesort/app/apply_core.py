@@ -771,7 +771,7 @@ def move_duplicate_losers_to_user_decided(
         if record_op is not None:
             _rid_str = str(row.row_id or "")
 
-            def row_record_op(payload: Dict[str, Any]) -> None:
+            def row_record_op(payload: Dict[str, Any], _rid_str: str = _rid_str) -> None:
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _rid_str
                 record_op(payload)
@@ -784,9 +784,7 @@ def move_duplicate_losers_to_user_decided(
             if not video.exists():
                 # tolère case-insensitive : iter le dossier
                 try:
-                    matches = [
-                        p for p in folder.iterdir() if p.is_file() and p.name.lower() == video_name.lower()
-                    ]
+                    matches = [p for p in folder.iterdir() if p.is_file() and p.name.lower() == video_name.lower()]
                     video = matches[0] if matches else video
                 except (OSError, PermissionError):
                     pass
@@ -1025,7 +1023,7 @@ def apply_rows(
         if record_op is not None:
             _current_row_id = str(row.row_id or "")
 
-            def row_record_op(payload: Dict[str, Any]) -> None:
+            def row_record_op(payload: Dict[str, Any], _current_row_id: str = _current_row_id) -> None:
                 """Wrapper qui injecte `row_id` dans le payload pour la traçabilité Undo v5."""
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _current_row_id

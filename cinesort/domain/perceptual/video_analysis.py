@@ -632,4 +632,4 @@ def _weighted_mean(values: List[float], weights: List[float]) -> float:
     total_w = sum(weights)
     if total_w == 0:
         return sum(values) / len(values)
-    return sum(v * w for v, w in zip(values, weights)) / total_w
+    return sum(v * w for v, w in zip(values, weights, strict=True)) / total_w

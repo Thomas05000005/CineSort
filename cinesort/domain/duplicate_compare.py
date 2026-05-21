@@ -95,8 +95,6 @@ class ComparisonResult:
 def compare_duplicates(
     probe_a: Optional[Dict[str, Any]],
     probe_b: Optional[Dict[str, Any]],
-    quality_a: Optional[Dict[str, Any]] = None,
-    quality_b: Optional[Dict[str, Any]] = None,
     *,
     perceptual_score_a: Optional[int] = None,
     perceptual_score_b: Optional[int] = None,
@@ -137,7 +135,7 @@ def compare_duplicates(
             )
         )
 
-    winner, explanation = determine_winner(criteria)
+    winner, _explanation = determine_winner(criteria)
 
     size_a = _file_size(probe_a)
     size_b = _file_size(probe_b)

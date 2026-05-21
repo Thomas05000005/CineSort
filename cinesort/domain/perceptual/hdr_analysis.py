@@ -458,8 +458,8 @@ def extract_dv_configuration(side_data_list: List[Dict[str, Any]]) -> Optional[D
         except (ValueError, TypeError):
             compat_id = 0
 
-        def _flag(key: str) -> bool:
-            v = item.get(key)
+        def _flag(key: str, _item: Dict[str, Any] = item) -> bool:
+            v = _item.get(key)
             if v is None:
                 return False
             try:

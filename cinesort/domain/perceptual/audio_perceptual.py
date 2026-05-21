@@ -218,7 +218,7 @@ def analyze_astats(
         "info",
         "-",
     ]
-    rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
     if not stderr:
         return None
 
@@ -274,7 +274,7 @@ def analyze_clipping_segments(
         "info",
         "-",
     ]
-    rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
     if not stderr:
         return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
 

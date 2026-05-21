@@ -263,7 +263,7 @@ def compute_lpips_distance_pair(
         return None
 
     try:
-        inputs = {inp.name: arr for inp, arr in zip(session.get_inputs(), [frame_a, frame_b])}
+        inputs = {inp.name: arr for inp, arr in zip(session.get_inputs(), [frame_a, frame_b], strict=True)}
         outputs = session.run(None, inputs)
     except Exception as exc:
         logger.warning("LPIPS inference erreur : %s", exc)

@@ -340,7 +340,7 @@ def classify_grain_nature(
 
     # Autocorrelation spatiale (moyenne sur toutes les frames)
     lag_values = {1: [], 8: [], 16: []}
-    for frame, zones in zip(frames_y, zones_per_frame):
+    for frame, zones in zip(frames_y, zones_per_frame, strict=True):
         corrs = compute_spatial_autocorr_8dir(frame, zones, lags=[1, 8, 16])
         for lag in (1, 8, 16):
             lag_values[lag].append(corrs.get(lag, 0.0))
