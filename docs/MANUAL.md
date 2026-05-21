@@ -1,6 +1,6 @@
 # CineSort — Manuel utilisateur
 
-> Version v7.7.0 — Mai 2026
+> Version v1.2.0-beta — Mai 2026
 > Cible : utilisateur Windows non-développeur. Aucun jargon dev sauf section Concepts.
 
 ---

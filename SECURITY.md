@@ -6,8 +6,9 @@ Les correctifs de sécurité sont appliqués sur la dernière version stable.
 
 | Version | Supportée |
 |---------|-----------|
-| 7.6.x   | ✅ |
-| < 7.6   | ❌ |
+| 1.2.x   | ✅ |
+| 1.1.x   | ✅ |
+| < 1.1   | ❌ |
 
 ## Signaler une vulnérabilité
 

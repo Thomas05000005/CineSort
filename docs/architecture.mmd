@@ -7,10 +7,10 @@
 %%         ou utiliser le plugin Mermaid VS Code / les blocs ```mermaid``` Markdown.
 %%
 %% Conventions couleurs :
-%%   - UI       (bleu clair  #3B82F6) : web/, trifilms/ui/
-%%   - APP      (vert        #10B981) : trifilms/app/
-%%   - DOMAIN   (orange      #F59E0B) : trifilms/domain/
-%%   - INFRA    (gris        #6B7280) : trifilms/infra/
+%%   - UI       (bleu clair  #3B82F6) : web/, cinesort/ui/
+%%   - APP      (vert        #10B981) : cinesort/app/
+%%   - DOMAIN   (orange      #F59E0B) : cinesort/domain/
+%%   - INFRA    (gris        #6B7280) : cinesort/infra/
 %%
 %% Auteur : Vague 3 — mission V3-09 (résout R4-DOC-5)
 
@@ -21,7 +21,7 @@ graph TB
     subgraph UI_LAYER["UI Layer"]
         UI_DESKTOP[web/ pywebview frontend]
         UI_DASHBOARD[web/dashboard/ SPA distante]
-        UI_API[trifilms/ui/api/ JS bridge]
+        UI_API[cinesort/ui/api/ JS bridge]
     end
 
     subgraph APP_LAYER["Application Layer"]
