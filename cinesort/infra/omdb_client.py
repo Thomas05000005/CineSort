@@ -303,6 +303,9 @@ class OmdbClient:
                 lambda: self._session.get(OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
             )
             response.raise_for_status()
+            _body = getattr(response, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = response.json()
         except (requests.RequestException, CircuitOpenError, ValueError, KeyError, TypeError) as exc:
             logger.debug("omdb HTTP error: %s", exc)
@@ -460,6 +463,9 @@ class OmdbClient:
         # 2xx — parser le body. OMDb peut renvoyer 200 + Response=False
         # quand la clé est invalide (selon version). On gère ce cas.
         try:
+            _body = getattr(response, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = response.json()
         except ValueError:
             return {

@@ -117,6 +117,9 @@ class RadarrClient:
             return {"ok": False, "error": "Cle API non configuree"}
         try:
             resp = self._get("/api/v3/system/status")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = resp.json()
         except RadarrError as exc:
             return {"ok": False, "error": str(exc)}
@@ -132,6 +135,9 @@ class RadarrClient:
         """Retourne tous les films Radarr avec metadonnees et fichier."""
         try:
             resp = self._get("/api/v3/movie")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             items = resp.json()
         except RadarrError:
             raise
@@ -164,6 +170,9 @@ class RadarrClient:
         """Retourne les profils qualite Radarr."""
         try:
             resp = self._get("/api/v3/qualityprofile")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             items = resp.json()
         except RadarrError:
             raise

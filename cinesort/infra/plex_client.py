@@ -7,6 +7,7 @@ Symetrique a jellyfin_client.py.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,10 @@ _PLEX_HEADERS = {
     "X-Plex-Product": "CineSort",
     "X-Plex-Version": "1.0",
 }
+
+# Audit C5 P0 #3 : validation stricte du library section id (anti path injection)
+# avant interpolation dans /library/sections/{lid}/...
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
 from cinesort.infra.integration_errors import IntegrationError
@@ -75,7 +80,7 @@ class PlexClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, **kwargs)
+            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Plex: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -148,6 +153,8 @@ class PlexClient:
         lid = str(library_id or "").strip()
         if not lid:
             raise PlexError("library_id requis")
+        if not _SAFE_ID_RE.match(lid):
+            raise PlexError(f"Invalid library section id: {lid!r}")
         try:
             resp = self._get(f"/library/sections/{lid}/all", params={"type": "1"})
             data = resp.json()
@@ -196,6 +203,8 @@ class PlexClient:
         lid = str(library_id or "").strip()
         if not lid:
             return 0
+        if not _SAFE_ID_RE.match(lid):
+            raise PlexError(f"Invalid library section id: {lid!r}")
         try:
             resp = self._get(f"/library/sections/{lid}/all", params={"type": "1", "X-Plex-Container-Size": "0"})
             data = resp.json()
@@ -209,6 +218,8 @@ class PlexClient:
         lid = str(library_id or "").strip()
         if not lid:
             raise PlexError("library_id requis")
+        if not _SAFE_ID_RE.match(lid):
+            raise PlexError(f"Invalid library section id: {lid!r}")
         try:
             self._get(f"/library/sections/{lid}/refresh")
             _log.info("Plex : refresh section %s declenche", lid)
