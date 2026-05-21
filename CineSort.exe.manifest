@@ -4,7 +4,7 @@
   <assemblyIdentity
     type="win32"
     name="CineSort"
-    version="7.2.0.0"
+    version="1.2.0.0"
     processorArchitecture="*"/>
   <description>CineSort — Tri et organisation de bibliotheques films</description>
 
