@@ -103,6 +103,20 @@ class ScrubSecretsFunctionTests(unittest.TestCase):
                 self.assertNotIn("ZG1raWVycw==", result)
                 self.assertIn("[REDACTED]", result)
 
+    def test_json_value_with_escaped_quote_no_leak(self) -> None:
+        """CWE-532 #291 : regex value doit consommer les \\" echappes JSON.
+
+        Avant fix : pattern `[^"]+` s'arretait au 1er `"` brut. Avec un secret
+        contenant `\\"` (echappe JSON valide), le suffixe leakait dans les logs.
+        """
+        # Secret JSON-encode : la valeur reelle est ab"cd (avec une quote au milieu).
+        text = '{"tmdb_api_key": "ab\\"cd"}'
+        result = scrub_secrets(text)
+        self.assertIn("[REDACTED]", result)
+        # Le suffixe `cd` ne doit PAS apparaitre en clair.
+        self.assertNotIn("cd", result)
+        self.assertNotIn("ab", result)
+
     def test_full_settings_dump_no_leak_sec_h1(self) -> None:
         """SEC-H1 : dump complet d'un settings.json realiste ne fuit aucune cle."""
         import json
