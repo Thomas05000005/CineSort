@@ -13,6 +13,7 @@ import cinesort.domain.core as core
 import cinesort.infra.state as state
 from cinesort.app.export_support import export_html_report
 from cinesort.domain.conversions import to_bool, to_int
+from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
 from cinesort.infra.db import SQLiteStore
 from cinesort.ui.api import notifications_support
@@ -331,7 +332,7 @@ def _build_dashboard_section(
             add_anomaly(
                 "WARN",
                 "PROBE_FAILED",
-                "Analyse technique incomplete (probe FAILED).",
+                t("library.technical_analysis_incomplete"),
                 row_id=row_id,
                 path=path,
                 action="Verifier la disponibilite de MediaInfo/ffprobe.",
@@ -340,7 +341,7 @@ def _build_dashboard_section(
             add_anomaly(
                 "INFO",
                 "PROBE_PARTIAL",
-                "Analyse technique partielle (probe PARTIAL).",
+                t("library.technical_analysis_partial"),
                 row_id=row_id,
                 path=path,
                 action="Activer les deux outils probe pour plus de precision.",

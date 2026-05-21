@@ -906,7 +906,12 @@ class CineSortApi:
             svg_str = buf.getvalue().decode("utf-8")
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             _log.warning("api: echec generation QR — %s", exc)
-            return _err_response(f"Erreur generation QR: {exc}", category="runtime", level="error", log_module=__name__)
+            return _err_response(
+                t("errors.qr_generation_failed", detail=str(exc)),
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
 
         _log.info("api: QR code genere pour %s", url)
         return {"ok": True, "svg": svg_str, "url": url}
@@ -1460,6 +1465,9 @@ class CineSortApi:
             return client.test_connection()
         except (OSError, ValueError, KeyError) as exc:
             # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir cache_path/api_key).
+            # Resolution conflit rebase i18n : on garde la version #332 (safe) qui ne
+            # leak pas l'exception au client. La cle errors.omdb_test_failed reste
+            # disponible dans locales/ pour usage futur.
             return _safe_integration_error(exc, category="resource", log_module=__name__)
 
     def _get_naming_presets_impl(self) -> Dict[str, Any]:

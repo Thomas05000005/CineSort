@@ -488,7 +488,9 @@
     "search_placeholder": "Rechercher un film…",
     "filter_tier": "Filtrer par tier",
     "no_results": "Aucun film ne correspond aux filtres.",
-    "total_films": "{{count}} films au total"
+    "total_films": "{{count}} films au total",
+    "technical_analysis_incomplete": "Analyse technique incomplète (probe FAILED).",
+    "technical_analysis_partial": "Analyse technique partielle (probe PARTIAL)."
   },
   "processing": {
     "title": "Traitement",
@@ -580,7 +582,14 @@
     "scan_in_progress": "Un scan est déjà en cours.",
     "smtp_failed": "Échec d'envoi de l'e-mail : {{detail}}.",
     "tmdb_rate_limited": "Limite TMDb atteinte. Patiente quelques secondes.",
-    "generic": "Erreur : {{detail}}"
+    "generic": "Erreur : {{detail}}",
+    "qr_generation_failed": "Erreur génération QR : {{detail}}",
+    "omdb_test_failed": "Erreur test OMDb : {{detail}}",
+    "run_deletion_failed": "Erreur suppression run : {{detail}}",
+    "persistence_failed": "Erreur de persistance.",
+    "perceptual_disabled": "Analyse perceptuelle désactivée dans les réglages.",
+    "perceptual_file_a_failed": "Erreur fichier A : {{detail}}",
+    "perceptual_file_b_failed": "Erreur fichier B : {{detail}}"
   },
   "glossary": {
     "tier": "Niveau de qualité d'un film (Premium / Bon / Moyen / Mauvais).",

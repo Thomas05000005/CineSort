@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
+from cinesort.domain.i18n_messages import t
 from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual
 from cinesort.domain.perceptual.av1_grain_metadata import extract_av1_film_grain_params
 from cinesort.domain.perceptual.comparison import build_comparison_report, compare_per_frame
@@ -114,9 +115,7 @@ def _validate_and_load_context(
     """Valide les pre-requis et charge le contexte. Retourne un dict erreur ou un tuple contexte."""
     settings = api.settings.get_settings()
     if not settings.get("perceptual_enabled"):
-        return _err_response(
-            "Analyse perceptuelle desactivee dans les reglages.", category="state", level="info", log_module=__name__
-        )
+        return _err_response(t("errors.perceptual_disabled"), category="state", level="info", log_module=__name__)
 
     ffprobe_path = str(settings.get("ffprobe_path") or "")
     ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
@@ -566,7 +565,7 @@ def compare_perceptual(
         settings = api.settings.get_settings()
         if not settings.get("perceptual_enabled"):
             return _err_response(
-                "Analyse perceptuelle desactivee dans les reglages.",
+                t("errors.perceptual_disabled"),
                 category="state",
                 level="info",
                 log_module=__name__,
@@ -601,10 +600,20 @@ def compare_perceptual(
         ok_b, report_b = reports.get("b", (False, {"ok": False, "message": "non execute"}))
         if not ok_a or not isinstance(report_a, dict) or not report_a.get("ok"):
             msg = report_a.get("message", "") if isinstance(report_a, dict) else str(report_a)
-            return _err_response(f"Erreur fichier A: {msg}", category="validation", level="info", log_module=__name__)
+            return _err_response(
+                t("errors.perceptual_file_a_failed", detail=msg),
+                category="validation",
+                level="info",
+                log_module=__name__,
+            )
         if not ok_b or not isinstance(report_b, dict) or not report_b.get("ok"):
             msg = report_b.get("message", "") if isinstance(report_b, dict) else str(report_b)
-            return _err_response(f"Erreur fichier B: {msg}", category="validation", level="info", log_module=__name__)
+            return _err_response(
+                t("errors.perceptual_file_b_failed", detail=msg),
+                category="validation",
+                level="info",
+                log_module=__name__,
+            )
 
         perc_a = report_a.get("perceptual", {})
         perc_b = report_b.get("perceptual", {})
@@ -732,7 +741,7 @@ def get_perceptual_compare_frames(
         settings = api.settings.get_settings()
         if not settings.get("perceptual_enabled"):
             return _err_response(
-                "Analyse perceptuelle desactivee dans les reglages.",
+                t("errors.perceptual_disabled"),
                 category="state",
                 level="info",
                 log_module=__name__,
@@ -1067,7 +1076,7 @@ def get_perceptual_compare_audio(
         settings = api.settings.get_settings()
         if not settings.get("perceptual_enabled"):
             return _err_response(
-                "Analyse perceptuelle desactivee dans les reglages.",
+                t("errors.perceptual_disabled"),
                 category="state",
                 level="info",
                 log_module=__name__,
