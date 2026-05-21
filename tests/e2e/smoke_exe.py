@@ -119,6 +119,16 @@ def _terminate(proc: subprocess.Popen, *, grace_s: float = 3.0) -> None:
         return
     except subprocess.TimeoutExpired:
         _log(f"Process pas termine en {grace_s}s, kill force")
+    if sys.platform == "win32":
+        # taskkill /T tue l'arbre complet (enfants WebView2, etc.) sinon
+        # ils restent orphelins et consomment de la RAM jusqu'au reboot.
+        # /F force la terminaison, check=False car proc peut deja etre mort.
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
     proc.kill()
     try:
         proc.communicate(timeout=2.0)
