@@ -433,7 +433,9 @@
     "search_placeholder": "Search a movie…",
     "filter_tier": "Filter by tier",
     "no_results": "No movie matches the filters.",
-    "total_films": "{{count}} movies total"
+    "total_films": "{{count}} movies total",
+    "technical_analysis_incomplete": "Technical analysis incomplete (probe FAILED).",
+    "technical_analysis_partial": "Technical analysis partial (probe PARTIAL)."
   },
   "processing": {
     "title": "Processing",
@@ -525,7 +527,14 @@
     "cannot_load_plan": "Cannot load plan: {{detail}}",
     "unknown_error": "Unknown error.",
     "media_not_found_for_row": "Media file not found for this row.",
-    "generic": "Error: {{detail}}"
+    "generic": "Error: {{detail}}",
+    "qr_generation_failed": "QR code generation failed: {{detail}}",
+    "omdb_test_failed": "OMDb test failed: {{detail}}",
+    "run_deletion_failed": "Run deletion failed: {{detail}}",
+    "persistence_failed": "Persistence error.",
+    "perceptual_disabled": "Perceptual analysis is disabled in the settings.",
+    "perceptual_file_a_failed": "File A error: {{detail}}",
+    "perceptual_file_b_failed": "File B error: {{detail}}"
   },
   "danger_zone": {
     "title": "Danger zone",

@@ -17,6 +17,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.i18n_messages import t
 from cinesort.infra import state
 from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
@@ -584,7 +585,7 @@ def save_smart_playlist(
         playlist_id = new["id"]
 
     if not _write_playlists_to_settings(api, playlists):
-        return _err_response("Erreur de persistance.", category="runtime", level="error", log_module=__name__)
+        return _err_response(t("errors.persistence_failed"), category="runtime", level="error", log_module=__name__)
 
     return {"ok": True, "playlist_id": playlist_id}
 
@@ -601,7 +602,7 @@ def delete_smart_playlist(api: Any, playlist_id: str) -> Dict[str, Any]:
         return _err_response("Playlist introuvable.", category="resource", level="info", log_module=__name__)
 
     if not _write_playlists_to_settings(api, playlists):
-        return _err_response("Erreur de persistance.", category="runtime", level="error", log_module=__name__)
+        return _err_response(t("errors.persistence_failed"), category="runtime", level="error", log_module=__name__)
 
     return {"ok": True, "deleted_id": playlist_id}
 

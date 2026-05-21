@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cinesort.infra.state as state
+from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api._responses import err as _err_response
@@ -266,7 +267,7 @@ def delete_run(api: Any, run_id: str) -> Dict[str, Any]:
         deleted = store.run.delete_run(run_id)
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         return _err_response(
-            f"Erreur suppression run: {exc}",
+            t("errors.run_deletion_failed", detail=str(exc)),
             category="runtime",
             level="error",
             log_module=__name__,
