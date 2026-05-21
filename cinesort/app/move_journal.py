@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
@@ -75,7 +76,7 @@ def journaled_move(
                 src_size=src_size,
                 row_id=row_id,
             )
-        except Exception as exc:
+        except (sqlite3.Error, OSError, AttributeError) as exc:
             _logger.warning(
                 "journaled_move: insert_pending_move failed (op=%s, src=%s): %s",
                 op_type,
@@ -91,7 +92,7 @@ def journaled_move(
     if pending_id is not None:
         try:
             store.apply.delete_pending_move(pending_id)
-        except Exception as exc:
+        except (sqlite3.Error, OSError, AttributeError) as exc:
             _logger.warning(
                 "journaled_move: delete_pending_move(id=%d) failed: %s",
                 pending_id,

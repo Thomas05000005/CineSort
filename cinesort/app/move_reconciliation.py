@@ -22,6 +22,7 @@ le caller peut afficher dans l'UI / logs.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -83,7 +84,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
 
     try:
         pending = store.apply.list_pending_moves()
-    except Exception:
+    except (sqlite3.Error, OSError, AttributeError):
         _logger.exception("reconcile_pending_moves: list_pending_moves echoue")
         return report
 
@@ -141,7 +142,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         # une fois examinee (ou serait re-examinee a chaque boot).
         try:
             store.apply.delete_pending_move(int(entry.get("id", 0)))
-        except Exception:
+        except (sqlite3.Error, OSError, AttributeError):
             _logger.exception(
                 "reconcile: delete_pending_move(id=%s) echoue",
                 entry.get("id"),
@@ -174,6 +175,6 @@ def reconcile_at_boot(store: Any, *, notify: Optional[Any] = None) -> Dict[str, 
                 "Reconciliation apres crash",
                 f"{n_dup} conflit(s) et {n_lost} fichier(s) perdu(s) detectes. Verifiez les logs.",
             )
-        except Exception:
+        except (sqlite3.Error, OSError, AttributeError):
             _logger.exception("reconcile_at_boot: notify echoue")
     return report
