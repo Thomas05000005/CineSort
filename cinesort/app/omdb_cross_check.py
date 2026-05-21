@@ -19,6 +19,8 @@ Cf cinesort/ui/api/run_flow_support.py pour l'invocation.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from typing import Any, Callable, List, Optional, Tuple
 
 from cinesort.infra.omdb_client import OmdbClient, OmdbResult
@@ -37,22 +39,21 @@ _PENALTY_DIVERGENCE = -25  # title + year tous deux faux
 # Tolerance annee pour "convergence partielle"
 _YEAR_TOLERANCE = 1
 
+# Pre-compile : _normalize_title_for_compare est appele dans une boucle sur des
+# milliers de rows (cross_check_rows_with_omdb), evite N x recompilation.
+_NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]")
+
 
 def _normalize_title_for_compare(title: str) -> str:
     """Normalise un titre pour comparaison (lowercase, strip whitespace + punct)."""
     if not title:
         return ""
-    # Lowercase + retirer caracteres non-alphanum (espace inclus)
-    import re
-    import unicodedata
-
     s = title.lower().strip()
     # Strip accents
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
     # Retire articles + ponctuation
-    s = re.sub(r"[^a-z0-9]", "", s)
-    return s
+    return _NON_ALPHANUM_RE.sub("", s)
 
 
 def _compute_adjustment(
