@@ -102,17 +102,27 @@ def write_crash_file(
         )
 
 
+_UNIQUE_PATH_MAX_ATTEMPTS = 10_000
+
+
 def unique_path(base: Path) -> Path:
     if not base.exists():
         return base
     stem = base.stem
     suffix = base.suffix
-    idx = 1
-    while True:
+    # Cap defensif : si _MAX_ATTEMPTS collisions, on retombe sur un suffixe
+    # base d'horodatage pour eviter une boucle infinie en cas de FS verrouille
+    # ou attaquant local qui creerait des collisions en boucle.
+    # Cf audit Claude 2026-05-21 (categorie 8 - busy-wait infinite loop).
+    for idx in range(1, _UNIQUE_PATH_MAX_ATTEMPTS + 1):
         candidate = base.with_name(f"{stem}_{idx}{suffix}")
         if not candidate.exists():
             return candidate
-        idx += 1
+    # Fallback ultime : timestamp ns pour casser toute collision adversariale.
+    import time
+
+    fallback = base.with_name(f"{stem}_{time.time_ns()}{suffix}")
+    return fallback
 
 
 def write_summary_section(run_paths: Any, marker: str, section_body: str) -> None:

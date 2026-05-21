@@ -223,18 +223,27 @@ def files_identical_quick(
         return False
 
 
+# Cap defensif sur les boucles unique_path / unique_path_dup pour eviter
+# un busy-loop infini si le FS est verrouille ou si un attaquant local cree
+# des collisions en boucle. 10000 attempts couvre tous les cas reels.
+# Cf audit Claude 2026-05-21 (categorie 8 - busy-wait infinite loop).
+_UNIQUE_PATH_MAX_ATTEMPTS = 10_000
+
+
 def unique_path(base: Path) -> Path:
     """Retourne `base` ou la première variante `_2`, `_3`... non existante."""
     if not base.exists():
         return base
     stem = base.stem
     suffix = base.suffix
-    idx = 2
-    while True:
+    for idx in range(2, _UNIQUE_PATH_MAX_ATTEMPTS + 2):
         candidate = base.with_name(f"{stem}_{idx}{suffix}")
         if not candidate.exists():
             return candidate
-        idx += 1
+    # Fallback ultime : timestamp ns pour casser toute collision adversariale.
+    import time
+
+    return base.with_name(f"{stem}_{time.time_ns()}{suffix}")
 
 
 def unique_path_dup(base: Path) -> Path:
@@ -243,12 +252,14 @@ def unique_path_dup(base: Path) -> Path:
         return base
     stem = base.stem
     suffix = base.suffix
-    idx = 1
-    while True:
+    for idx in range(1, _UNIQUE_PATH_MAX_ATTEMPTS + 1):
         candidate = base.with_name(f"{stem}__DUP{idx}{suffix}")
         if not candidate.exists():
             return candidate
-        idx += 1
+    # Fallback ultime : timestamp ns.
+    import time
+
+    return base.with_name(f"{stem}__DUP{time.time_ns()}{suffix}")
 
 
 def mkdir_counted(
