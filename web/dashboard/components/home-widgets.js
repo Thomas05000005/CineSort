@@ -2,7 +2,7 @@
  * Parité exacte avec web/components/home-widgets.js desktop.
  */
 
-import { escapeHtml } from "../core/dom.js";
+import { escapeHtml, safeUrl } from "../core/dom.js";
 
 function _svg(pathContent, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${pathContent}</svg>`;
@@ -106,7 +106,7 @@ export function renderPosterCarousel(container, items, opts = {}) {
     const tier = String(it.tier || "unknown").toLowerCase();
     const score = it.score != null ? Math.round(Number(it.score)) : "?";
     const year = it.year ? ` (${escapeHtml(it.year)})` : "";
-    const posterStyle = it.poster_url ? `background-image: url('${escapeHtml(it.poster_url)}')` : "";
+    const posterStyle = it.poster_url ? `background-image: url('${safeUrl(it.poster_url)}')` : "";
     return `
       <article class="v5-poster-card stagger-item" role="listitem" style="--order: ${idx}"
                data-poster-film="${escapeHtml(it.row_id || "")}"
