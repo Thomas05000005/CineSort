@@ -18,7 +18,7 @@
 [![Tests](https://img.shields.io/badge/tests-4277%20passing-brightgreen.svg)](#tests-et-qualité)
 [![Architecture](https://img.shields.io/badge/architecture-import--linter-blue.svg)](#-architecture)
 
-> ⚠️ **v1.0.0-beta** — première publication publique. Le code est mature (~50 000 lignes, 4277 tests, audit complet, architecture en couches verrouillée), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. **Ne pas activer en production critique sans dry-run préalable.**
+> ⚠️ **v1.2.0-beta** — itération beta publique. Le code est mature (~50 000 lignes, 4277 tests, audit complet, architecture en couches verrouillée), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. **Ne pas activer en production critique sans dry-run préalable.**
 
 [Quick Start](#-quick-start) · [Fonctionnalités](#-fonctionnalités) · [Architecture](#-architecture) · [Captures](#-captures-décran) · [FAQ](#-faq) · [Contribuer](CONTRIBUTING.md)
 
@@ -234,7 +234,7 @@ Paramètres → API REST → activer + définir un token long (≥ 32 chars). Ac
 ### Quelle est la roadmap ?
 
 Voir [ROADMAP.md](docs/internal/ROADMAP.md). En résumé :
-- **v1.0** stable — après retours beta v1.0.0-beta
+- **v1.0** stable — après retours beta v1.2.0-beta
 - **v1.1** — features mineures, polish UI
 - **v2.0** — port Linux/Mac, i18n EN, plugin marketplace
 

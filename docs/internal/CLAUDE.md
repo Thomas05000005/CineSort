@@ -25,10 +25,12 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 ---
 
-## Etat actuel du projet (16 mai 2026)
+## Etat actuel du projet (21 mai 2026)
 
 ### Version
-- **v1.0.0-beta** (publique). Roadmap : v1.1 features, v2.0 port Linux/Mac.
+- **v1.2.0-beta** (publique). Iteration beta post-v1.0.0-beta : polish UI, corrections d'audit C19, alignement docs/realite. Roadmap : v1.0 stable apres retours beta, puis v1.1 features, v2.0 port Linux/Mac.
+
+> Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), pas de regression fonctionnelle vs l'état du 16 mai 2026 ci-dessous.
 
 ### Architecture en couches (verrouillee par import-linter en CI)
 
