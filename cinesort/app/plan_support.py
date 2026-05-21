@@ -6,6 +6,7 @@ import functools
 import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
@@ -490,15 +491,13 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
 
     # BUG 1 : Phase 1 — decouverte rapide (< 2s sur NAS SMB). UN SEUL scandir par
     # niveau au lieu de la recursion os.walk + iter_videos dans stream_scan_targets.
-    import time as _time
-
-    _discover_t0 = _time.monotonic()
+    _discover_t0 = time.monotonic()
     try:
         ctx.candidate_folders = discover_candidate_folders(ctx.cfg)
     except (OSError, PermissionError, FileNotFoundError) as exc:
         raise RuntimeError(f"Impossible de lister ROOT: {exc}") from exc
     discover_total = len(ctx.candidate_folders)
-    _discover_dt = _time.monotonic() - _discover_t0
+    _discover_dt = time.monotonic() - _discover_t0
     _log.info("scan: phase 1 decouverte = %d dossiers en %.2fs", discover_total, _discover_dt)
     ctx.log("INFO", f"Decouverte : {discover_total} dossiers trouves ({_discover_dt:.1f}s)")
     return True

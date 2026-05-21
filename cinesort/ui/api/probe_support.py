@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -333,9 +334,7 @@ def auto_install_probe_tools(
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Telecharge ffprobe + MediaInfo via HTTP et les installe dans tools/."""
-    import logging as _logging
-
-    _logger = _logging.getLogger(__name__)
+    _logger = logging.getLogger(__name__)
     try:
         result = install_all()
         installed = result.get("installed", {})

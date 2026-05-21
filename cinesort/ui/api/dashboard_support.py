@@ -1041,9 +1041,7 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     Renvoie une liste de 30 points (1 par jour) avec avg_score (None si pas de data),
     pour affichage dans line-chart.js de la Home.
     """
-    import time as _time
-
-    now = _time.time()
+    now = time.time()
     since = now - 30 * 86400.0
 
     try:
@@ -1059,7 +1057,7 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     points: List[Dict[str, Any]] = []
     for i in range(30, -1, -1):
         ts = now - i * 86400.0
-        date_str = _time.strftime("%Y-%m-%d", _time.localtime(ts))
+        date_str = time.strftime("%Y-%m-%d", time.localtime(ts))
         pt = by_date.get(date_str)
         points.append(
             {
@@ -1084,8 +1082,6 @@ def _compute_active_insights(
       [{type, severity, count, label, filter_hint, icon}]
     Max 5 insights.
     """
-    import time as _time
-
     insights: List[Dict[str, Any]] = []
 
     # 1. Run actif en cours
@@ -1165,7 +1161,7 @@ def _compute_active_insights(
 
     # 5. Nouveaux Platinum ce mois
     try:
-        month_ago = _time.time() - 30 * 86400.0
+        month_ago = time.time() - 30 * 86400.0
         plat_count = store.perceptual.count_v2_tier_since(tier="platinum", since_ts=month_ago)
         if plat_count > 0:
             insights.append(
