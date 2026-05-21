@@ -44,5 +44,5 @@ def get_mmap_size(conn: sqlite3.Connection) -> int:
         cur = conn.execute("PRAGMA mmap_size")
         row = cur.fetchone()
         return int(row[0]) if row else 0
-    except Exception:
+    except (sqlite3.Error, ValueError, TypeError):
         return 0
