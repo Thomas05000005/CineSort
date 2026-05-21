@@ -815,8 +815,16 @@ def get_perceptual_compare_frames(
         width = aligned[0]["width"]
         height = aligned[0]["height"]
         for mean_diff, diff, frame in top:
-            img_a = Image.frombytes("L", (width, height), bytes(frame["pixels_a"]))
-            img_b = Image.frombytes("L", (width, height), bytes(frame["pixels_b"]))
+            # B3 : pixels est desormais np.ndarray (sortie parse_raw_frame).
+            # bytes(ndarray) interprete ndarray comme un iterateur d'ints,
+            # ce qui est ~10x plus lent que .tobytes() (qui fait un memcpy).
+            # Fallback bytes() pour les List[int] legacy des fixtures.
+            pa = frame["pixels_a"]
+            pb = frame["pixels_b"]
+            data_a = pa.tobytes() if hasattr(pa, "tobytes") else bytes(pa)
+            data_b = pb.tobytes() if hasattr(pb, "tobytes") else bytes(pb)
+            img_a = Image.frombytes("L", (width, height), data_a)
+            img_b = Image.frombytes("L", (width, height), data_b)
             buf_a = io.BytesIO()
             buf_b = io.BytesIO()
             img_a.save(buf_a, format="PNG", optimize=True)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import struct
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -84,29 +83,41 @@ def compute_timestamps(
 # ---------------------------------------------------------------------------
 
 
-def parse_raw_frame(data: bytes, width: int, height: int, bit_depth: int = 8) -> List[int]:
-    """Parse les bytes bruts d'une frame Y en liste de pixels.
+def parse_raw_frame(data: bytes, width: int, height: int, bit_depth: int = 8) -> np.ndarray:
+    """Parse les bytes bruts d'une frame Y en ``np.ndarray`` 1D de pixels.
 
-    - 8-bit  (pix_fmt gray)    : chaque byte = valeur Y 0-255.
-    - 10-bit (pix_fmt gray16le): chaque paire = uint16 LE, shift >> 6 pour 0-1023.
-    Retourne une liste vide si les donnees sont tronquees.
+    - 8-bit  (pix_fmt gray)    : chaque byte = valeur Y 0-255 (``uint8``).
+    - 10-bit (pix_fmt gray16le): chaque paire = uint16 LE, shift >> 6 pour 0-1023
+      (``uint16``).
+
+    Cf B3 audit C16 P0 perf : ``np.frombuffer`` evite la double copie
+    bytes -> ``List[int]`` -> ``np.ndarray`` (gain ~40-200 MB par frame 1080p).
+
+    Retourne un array vide (``shape=(0,)``) si les donnees sont tronquees ou
+    si les dimensions sont invalides. Les callers verifient ``arr.size > 0``
+    (compatible aussi avec ``not arr`` via numpy's truthiness sur taille 0 ;
+    cf is_valid_frame qui utilise ``len(pixels)``).
     """
     w, h = int(width), int(height)
     if w <= 0 or h <= 0:
-        return []
+        return np.empty(0, dtype=np.uint8)
 
     if bit_depth >= 10:
         expected = w * h * 2
         if len(data) < expected:
-            return []
-        raw = struct.unpack(f"<{w * h}H", data[:expected])
-        return [min(v >> 6, 1023) for v in raw]
+            return np.empty(0, dtype=np.uint16)
+        # Lecture uint16 LE directe ; >> 6 pour mapper 16-bit -> 10-bit
+        raw = np.frombuffer(data, dtype="<u2", count=w * h)
+        # np.minimum garantit le clip sur 1023 (analogie avec min(v >> 6, 1023))
+        return np.minimum(raw >> np.uint16(6), np.uint16(1023))
 
     # 8-bit
     expected = w * h
     if len(data) < expected:
-        return []
-    return list(data[:expected])
+        return np.empty(0, dtype=np.uint8)
+    # np.frombuffer cree une vue zero-copy sur les bytes, puis .copy() pour
+    # decoupler du buffer source (les pixels sont mutables downstream).
+    return np.frombuffer(data, dtype=np.uint8, count=w * h).copy()
 
 
 # ---------------------------------------------------------------------------
@@ -114,17 +125,19 @@ def parse_raw_frame(data: bytes, width: int, height: int, bit_depth: int = 8) ->
 # ---------------------------------------------------------------------------
 
 
-def is_valid_frame(pixels: List[int], width: int, height: int, bit_depth: int = 8) -> bool:
+def is_valid_frame(pixels: Any, width: int, height: int, bit_depth: int = 8) -> bool:
     """Verifie qu'une frame n'est pas noire, vide ou tronquee.
 
     Cf issue #74 : vectorise via numpy (~30x speedup sur frame 1920x1080).
+    Accepte ``np.ndarray`` (preferable, zero-copy) ou ``List[int]`` (legacy).
     """
     expected_count = int(width) * int(height)
     if len(pixels) < int(expected_count * 0.9):
         return False
-    if not pixels:
+    if len(pixels) == 0:
         return False
 
+    # np.asarray sur un ndarray = zero-copy (vue avec cast dtype eventuel)
     arr = np.asarray(pixels, dtype=np.float64)
     variance = float(arr.var())
 
@@ -137,7 +150,7 @@ def is_valid_frame(pixels: List[int], width: int, height: int, bit_depth: int = 
 # ---------------------------------------------------------------------------
 
 
-def compute_inter_frame_diff(pixels_a: List[int], pixels_b: List[int]) -> float:
+def compute_inter_frame_diff(pixels_a: Any, pixels_b: Any) -> float:
     """Difference moyenne absolue entre deux frames (meme taille).
 
     Cf issue #47 : vectorise via numpy (np.abs + mean). Speedup ~30x sur
@@ -146,13 +159,16 @@ def compute_inter_frame_diff(pixels_a: List[int], pixels_b: List[int]) -> float:
 
     int8 -> int16 pour eviter wraparound sur abs(a-b) en uint8 (e.g.
     abs(255 - 0) doit donner 255, pas 1).
+
+    Accepte ``np.ndarray`` (preferable) ou ``List[int]`` (legacy).
     """
     n = min(len(pixels_a), len(pixels_b))
     if n == 0:
         return 0.0
-    # int16 suffit pour |diff| sur valeurs 0-255 (max diff = 255)
-    a = np.asarray(pixels_a[:n], dtype=np.int16)
-    b = np.asarray(pixels_b[:n], dtype=np.int16)
+    # Slicing ndarray = vue zero-copy ; pour list = copie. Le cast int16 evite
+    # le wraparound sur uint8 - uint8 (e.g. 0 - 255 = 1 en uint8, -255 en int16).
+    a = np.asarray(pixels_a[:n] if isinstance(pixels_a, list) else pixels_a[:n], dtype=np.int16)
+    b = np.asarray(pixels_b[:n] if isinstance(pixels_b, list) else pixels_b[:n], dtype=np.int16)
     return float(np.abs(a - b).mean())
 
 
@@ -325,7 +341,8 @@ def _try_extract_valid_frame(
             continue
 
         pixels = parse_raw_frame(raw, eff_w, eff_h, bit_depth)
-        if not pixels:
+        # parse_raw_frame retourne un ndarray vide en cas d'erreur
+        if pixels.size == 0:
             continue
 
         if not is_valid_frame(pixels, eff_w, eff_h, bit_depth):
@@ -335,8 +352,10 @@ def _try_extract_valid_frame(
         if _is_too_similar(pixels, already_accepted):
             continue
 
-        n = len(pixels)
-        y_avg = sum(pixels) / n if n > 0 else 0.0
+        n = int(pixels.size)
+        # pixels est un ndarray (uint8 ou uint16) ; .mean() en C est ~30x plus
+        # rapide que sum() Python et evite l'overflow uint8 (sum > 256*N).
+        y_avg = float(pixels.mean()) if n > 0 else 0.0
         return {
             "timestamp": round(ts, 3),
             "pixels": pixels,
@@ -348,7 +367,7 @@ def _try_extract_valid_frame(
     return None
 
 
-def _is_too_similar(pixels: List[int], accepted: List[Dict[str, Any]]) -> bool:
+def _is_too_similar(pixels: Any, accepted: List[Dict[str, Any]]) -> bool:
     """Verifie si une frame est trop similaire a celles deja acceptees."""
     for frame in accepted:
         diff = compute_inter_frame_diff(pixels, frame["pixels"])

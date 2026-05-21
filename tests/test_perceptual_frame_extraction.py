@@ -15,6 +15,8 @@ import struct
 import unittest
 from unittest import mock
 
+import numpy as np
+
 from cinesort.domain.perceptual.frame_extraction import (
     compute_inter_frame_diff,
     compute_timestamps,
@@ -89,31 +91,38 @@ class ParseRawFrameTests(unittest.TestCase):
     """Tests du parsing de frames brutes."""
 
     def test_8bit_correct(self) -> None:
-        """Parsing 8-bit : bytes directs → valeurs 0-255."""
+        """Parsing 8-bit : bytes directs → valeurs 0-255 (np.ndarray uint8)."""
         width, height = 4, 3
         data = bytes(range(12))  # 0, 1, 2, ..., 11
         pixels = parse_raw_frame(data, width, height, 8)
+        # B3 : parse_raw_frame retourne np.ndarray directement (suppression
+        # double copie bytes -> List[int] -> ndarray).
+        self.assertIsInstance(pixels, np.ndarray)
+        self.assertEqual(pixels.dtype, np.uint8)
         self.assertEqual(len(pixels), 12)
-        self.assertEqual(pixels[0], 0)
-        self.assertEqual(pixels[11], 11)
+        self.assertEqual(int(pixels[0]), 0)
+        self.assertEqual(int(pixels[11]), 11)
 
     def test_10bit_correct(self) -> None:
-        """Parsing 10-bit (gray16le) : uint16 LE >> 6 → valeurs 0-1023."""
+        """Parsing 10-bit (gray16le) : uint16 LE >> 6 → valeurs 0-1023 (ndarray uint16)."""
         width, height = 2, 2
         # Valeurs raw 16-bit : 64, 128, 256, 512 → apres >> 6 : 1, 2, 4, 8
         raw_values = [64, 128, 256, 512]
         data = struct.pack(f"<{len(raw_values)}H", *raw_values)
         pixels = parse_raw_frame(data, width, height, 10)
+        self.assertIsInstance(pixels, np.ndarray)
+        self.assertEqual(pixels.dtype, np.uint16)
         self.assertEqual(len(pixels), 4)
-        self.assertEqual(pixels[0], 1)  # 64 >> 6 = 1
-        self.assertEqual(pixels[1], 2)  # 128 >> 6 = 2
-        self.assertEqual(pixels[2], 4)  # 256 >> 6 = 4
-        self.assertEqual(pixels[3], 8)  # 512 >> 6 = 8
+        self.assertEqual(int(pixels[0]), 1)  # 64 >> 6 = 1
+        self.assertEqual(int(pixels[1]), 2)  # 128 >> 6 = 2
+        self.assertEqual(int(pixels[2]), 4)  # 256 >> 6 = 4
+        self.assertEqual(int(pixels[3]), 8)  # 512 >> 6 = 8
 
     def test_truncated_data_returns_empty(self) -> None:
-        """Donnees trop courtes → liste vide."""
+        """Donnees trop courtes → ndarray vide (size 0)."""
         pixels = parse_raw_frame(b"\x00\x01", 4, 3, 8)  # 2 bytes, attendu 12
-        self.assertEqual(pixels, [])
+        self.assertIsInstance(pixels, np.ndarray)
+        self.assertEqual(pixels.size, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +254,8 @@ class ExtractRepresentativeFramesTests(unittest.TestCase):
             self.assertIn("width", f)
             self.assertIn("height", f)
             self.assertIn("y_avg", f)
-            self.assertIsInstance(f["pixels"], list)
+            # B3 : pixels est desormais np.ndarray (zero-copy depuis bytes).
+            self.assertIsInstance(f["pixels"], np.ndarray)
             self.assertEqual(f["width"], w)
             self.assertEqual(f["height"], h)
 
