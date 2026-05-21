@@ -27,7 +27,17 @@ import threading
 import time
 from typing import Callable, TypeVar
 
+from requests.exceptions import ConnectionError as ReqConnectionError
+from requests.exceptions import HTTPError, Timeout
+
 T = TypeVar("T")
+
+# Statuts HTTP consideres comme "service en panne" : on ouvre le circuit dessus.
+# - 5xx : erreur cote serveur (panne, surcharge, bug)
+# - 429 : rate-limit (le serveur nous dit explicitement de ralentir)
+# Les 4xx (hors 429) sont des erreurs du caller (mauvais token, mauvais id,
+# requete malformee) : pas un signal pour fermer le robinet.
+_SERVER_DOWN_STATUSES = frozenset({429})
 
 
 class CircuitOpenError(Exception):
@@ -36,6 +46,25 @@ class CircuitOpenError(Exception):
     Le caller peut catch pour fallback (typiquement : skip TMDb, accepter
     confidence reduite, et continuer le scan) plutot que rebloquer 5 min.
     """
+
+
+def _is_server_down(exc: HTTPError) -> bool:
+    """True si l'HTTPError correspond a un serveur en panne (5xx ou 429).
+
+    Les 4xx (hors 429) signalent une erreur de la requete cote client
+    (auth, id inexistant, params invalides) : le serveur fonctionne, c'est
+    notre appel qui est mauvais — ne pas ouvrir le circuit dessus.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        # Pas de reponse attachee : on ne peut pas distinguer 4xx vs 5xx.
+        # Par defaut on considere ca comme un echec serveur (cas suspect,
+        # mieux vaut ouvrir le circuit que de masquer un probleme).
+        return True
+    status = getattr(response, "status_code", None)
+    if not isinstance(status, int):
+        return True
+    return status >= 500 or status in _SERVER_DOWN_STATUSES
 
 
 class CircuitBreaker:
@@ -79,9 +108,16 @@ class CircuitBreaker:
 
         - Si circuit ouvert : leve `CircuitOpenError` sans appeler `fn`.
         - Si `fn` reussit : reset `_failures` a 0 et retourne le resultat.
-        - Si `fn` leve `Exception` : incremente `_failures`, ouvre le
-          circuit si le seuil est atteint, puis re-leve l'exception
-          originale.
+        - Si `fn` leve une erreur "service down" (ConnectionError, Timeout,
+          HTTPError 5xx/429) : incremente `_failures`, ouvre le circuit
+          si le seuil est atteint, puis re-leve l'exception originale.
+        - Si `fn` leve une autre `Exception` (ValueError, JSONDecodeError,
+          KeyError, TypeError, HTTPError 4xx hors 429, ...) : remonte
+          telle quelle SANS toucher au compteur. Ces erreurs sont
+          applicatives (contrat client, parsing, mauvais identifiant) :
+          le service distant n'est pas en panne, ouvrir le circuit
+          bloquerait 5 min toute la chaine pour une raison invalide
+          (cf audit C5 P1).
         - Si `fn` leve `BaseException` non-`Exception` (`KeyboardInterrupt`,
           `SystemExit`, `GeneratorExit`) : remonte tel quel SANS toucher
           au compteur. Ces exceptions signalent un arret administre du
@@ -96,15 +132,31 @@ class CircuitBreaker:
                 raise CircuitOpenError(f"Circuit ouvert ({self._failures} echecs), retry dans {remaining:.0f}s")
         try:
             result = fn()
-        except Exception:
-            with self._lock:
-                self._failures += 1
-                if self._failures >= self._failure_threshold:
-                    self._open_until = time.time() + self._recovery_timeout
+        except (ReqConnectionError, Timeout):
+            self._record_failure()
             raise
+        except HTTPError as exc:
+            if _is_server_down(exc):
+                self._record_failure()
+            raise
+        # Autres Exception (ValueError, JSONDecodeError, KeyError, TypeError,
+        # HTTPError 4xx, ...) : erreurs applicatives, on ne touche pas au
+        # compteur — le service distant repond, c'est le contrat client qui
+        # est en cause.
         with self._lock:
             self._failures = 0
         return result
+
+    def _record_failure(self) -> None:
+        """Incremente le compteur d'echecs et ouvre le circuit si seuil atteint.
+
+        Helper interne extrait pour partager la logique entre les differentes
+        branches except.
+        """
+        with self._lock:
+            self._failures += 1
+            if self._failures >= self._failure_threshold:
+                self._open_until = time.time() + self._recovery_timeout
 
     def reset(self) -> None:
         """Force la fermeture du circuit (utile pour les tests + reconfig manuelle)."""
