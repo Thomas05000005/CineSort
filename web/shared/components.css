@@ -9494,3 +9494,76 @@ body.v5-notif-lock {
   font-size: var(--fs-sm);
   resize: vertical;
 }
+ * Historique — Films history modal (sprint orphelins #350)
+ *
+ * BEM prefix `historique-films-history*`. Modale invoquee depuis le header
+ * Historique (bouton 🎬). Affiche library/list_films_with_history sous forme
+ * d'un tableau scrollable avec lien vers /film/:id pour navigation cross-runs.
+ * =========================================================================== */
+.historique-films-history {
+  min-height: 240px;
+}
+.historique-films-history-loading,
+.historique-films-history-empty,
+.historique-films-history-error {
+  margin: var(--sp-3) 0;
+  color: var(--text-2);
+  text-align: center;
+}
+.historique-films-history-error {
+  color: var(--danger);
+}
+.historique-films-history-summary {
+  margin: 0 0 var(--sp-2) 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.historique-films-history-tablewrap {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-md);
+}
+.historique-films-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.historique-films-history-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  text-align: left;
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--surface-3);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.historique-films-history-table tbody td {
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--surface-3);
+}
+.historique-films-history-row:hover {
+  background: var(--surface-2);
+}
+.historique-films-history-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.historique-films-history-link:hover {
+  text-decoration: underline;
+}
+.historique-films-history-tier {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  text-transform: capitalize;
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.historique-films-history-tier--platinum { background: #b9f2ff; color: #003a4a; }
+.historique-films-history-tier--gold     { background: #ffd700; color: #4a3a00; }
+.historique-films-history-tier--silver   { background: #c0c0c0; color: #2a2a2a; }
+.historique-films-history-tier--bronze   { background: #cd7f32; color: #3a1a00; }
+.historique-films-history-tier--reject   { background: #f48fb1; color: #4a0010; }
