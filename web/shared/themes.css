@@ -1,8 +1,9 @@
 /* ============================================================================
  * CineSort Design System v5 — Themes
  * ============================================================================
- * 4 ambiances : Studio (technique, default) / Cinema (velours) / Luxe (or mat)
- * / Neon (cyber). Chaque theme redefinit UNIQUEMENT :
+ * 5 ambiances : Studio (technique, default) / Cinema (velours) / Luxe (or mat)
+ * / Neon (cyber) / AAA (contraste eleve WCAG AAA). Chaque theme redefinit
+ * UNIQUEMENT :
  *   - surfaces (--bg, --surface-1, --surface-2)
  *   - borders (--border-1, --border-2)
  *   - accent (--accent, --accent-hover, --accent-soft, --accent-glow, --accent-border)
@@ -11,8 +12,14 @@
  * Les tier colors (--tier-*) et severities (--sev-*) restent invariantes,
  * definies dans tokens.css.
  *
- * Activation : <html data-theme="studio|cinema|luxe|neon"> ou <body>.
+ * Activation : <html data-theme="studio|cinema|luxe|neon|aaa"> ou <body>.
  * Fallback par defaut : Studio.
+ *
+ * AAA : redefinit AUSSI les couleurs de texte (--text-primary / --text-secondary)
+ * pour atteindre un ratio de contraste WCAG AAA (>= 7:1 pour texte normal,
+ * >= 4.5:1 pour texte large >= 18px). Exception documentee aux invariants
+ * tokens.css : volontaire pour repondre a l'audit accessibilite « contraste
+ * eleve » (Spec transverse design system 100%).
  * ============================================================================
  */
 
@@ -201,3 +208,51 @@
   background-size: 300% 300%;
   animation: neonRotate 12s linear infinite;
 }
+
+/* ===========================================================
+ * Theme AAA (contraste eleve WCAG AAA, accessibilite)
+ * ===========================================================
+ * Cible : ratios de contraste WCAG niveau AAA :
+ *   - texte normal (< 18px) : >= 7:1
+ *   - texte large (>= 18px / >= 14px bold) : >= 4.5:1
+ *
+ * Calculs (https://webaim.org/resources/contrastchecker/) :
+ *   - fond #000000 vs --text-primary #FFFFFF : ratio 21:1  (AAA OK)
+ *   - fond #000000 vs --text-secondary #E5E5E5 : ratio 17.4:1 (AAA OK)
+ *   - fond #000000 vs --accent #FFFF00 (jaune vif) : ratio 19.6:1 (AAA OK)
+ *   - fond #000000 vs --focus-ring #00FFFF : ratio 16.7:1 (AAA OK)
+ * Exception : redefinit --text-primary/secondary (normalement invariants
+ * dans tokens.css) car c'est la seule maniere d'atteindre AAA. Les autres
+ * themes restent inchanges.
+ * =========================================================== */
+
+[data-theme="aaa"] {
+  --bg:        #000000;
+  --bg-raised: #0A0A0A;
+
+  --surface-1: rgba(255, 255, 255, 0.06);
+  --surface-2: rgba(255, 255, 255, 0.12);
+  --surface-3: rgba(255, 255, 255, 0.18);
+
+  --border-1: rgba(255, 255, 255, 0.45);
+  --border-2: rgba(255, 255, 0, 0.65);
+
+  --accent:        #FFFF00;
+  --accent-hover:  #FFFFFF;
+  --accent-soft:   rgba(255, 255, 0, 0.20);
+  --accent-glow:   rgba(255, 255, 0, 0.35);
+  --accent-border: rgba(255, 255, 0, 0.70);
+
+  --text-primary:   #FFFFFF;
+  --text-secondary: #E5E5E5;
+  --text-muted:     #C0C0C0;
+  --text-disabled:  #808080;
+  --text-inverse:   #000000;
+
+  --focus-ring: #00FFFF;
+  --focus-ring-rgb: 0, 255, 255;
+
+  --atmosphere-overlay: none;
+}
+
+/* AAA : pas d'overlay atmospherique (eviterait de baisser le contraste). */

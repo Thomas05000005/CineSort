@@ -4,11 +4,13 @@ import { escapeHtml } from "../core/dom.js";
 import { t, onLocaleChange } from "../core/i18n.js";
 
 // V6-02 : labels resolus via t() — l'id reste stable pour applique theme.
+// Spec transverse design 100% : ajout theme "aaa" (contraste eleve WCAG AAA).
 export const THEMES = [
   { id: "studio", labelKey: "topbar.themes.studio" },
   { id: "cinema", labelKey: "topbar.themes.cinema" },
   { id: "luxe",   labelKey: "topbar.themes.luxe" },
   { id: "neon",   labelKey: "topbar.themes.neon" },
+  { id: "aaa",    labelKey: "topbar.themes.aaa" },
 ];
 
 function _themeLabel(theme) {
