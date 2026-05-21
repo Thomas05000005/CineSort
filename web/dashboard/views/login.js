@@ -4,6 +4,7 @@ import { $, escapeHtml } from "../core/dom.js";
 import { setToken, isPersistent } from "../core/state.js";
 import { testConnection } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
+import { t } from "../core/i18n.js";
 
 /**
  * Detecte le mode pywebview desktop (4 signaux). Si on est en local,
@@ -50,7 +51,7 @@ export function initLogin() {
     e.preventDefault();
     const token = input.value.trim();
     if (!token) {
-      showMsg(msg, "Saisissez la clé d'accès.", true);
+      showMsg(msg, t("login.token_required"), true);
       return;
     }
 
@@ -66,10 +67,10 @@ export function initLogin() {
         showMsg(msg, "");
         navigateTo("/status");
       } else {
-        showMsg(msg, escapeHtml(result.message || "Connexion refusee."), true);
+        showMsg(msg, escapeHtml(result.message || t("login.connection_refused")), true);
       }
     } catch (err) {
-      showMsg(msg, "Erreur reseau. Verifiez l'adresse du serveur.", true);
+      showMsg(msg, t("login.network_error"), true);
       console.error("[login]", err);
     } finally {
       if (btn) btn.disabled = false;

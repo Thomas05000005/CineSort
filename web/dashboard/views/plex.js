@@ -4,6 +4,7 @@ import { $, escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { kpiGridHtml } from "../components/kpi-card.js";
 import { skeletonKpiGridHtml, skeletonLinesHtml } from "../components/skeleton.js";
+import { t } from "../core/i18n.js";
 
 export function initPlex() { _load(); }
 
@@ -23,9 +24,9 @@ async function _load() {
     const s = sRes.data || {};
 
     if (!s.plex_enabled) {
-      el.innerHTML = `<div class="card"><h3>Plex non configure</h3>
-        <p class="text-muted mt-4">L'integration Plex est desactivee. Pour l'activer, ouvrez les reglages et configurez la section Plex (URL, token, refresh automatique).</p>
-        <a href="#/parametres#integrations-plex" class="btn btn-primary mt-4">Ouvrir les réglages Plex</a></div>`;
+      el.innerHTML = `<div class="card"><h3>${escapeHtml(t("plex.not_configured_title"))}</h3>
+        <p class="text-muted mt-4">${escapeHtml(t("plex.not_configured_body"))}</p>
+        <a href="#/parametres#integrations-plex" class="btn btn-primary mt-4">${escapeHtml(t("plex.open_settings"))}</a></div>`;
       return;
     }
 
@@ -34,17 +35,17 @@ async function _load() {
     const ok = !!conn.ok;
 
     let html = kpiGridHtml([
-      { label: "Statut", value: ok ? "Connecte" : "Deconnecte", color: ok ? "var(--success)" : "var(--danger)" },
-      { label: "Serveur", value: conn.server_name || "—", color: "var(--accent)" },
-      { label: "Version", value: conn.version || "—", color: "var(--info)" },
+      { label: t("plex.kpi_status"), value: ok ? t("plex.status_connected") : t("plex.status_disconnected"), color: ok ? "var(--success)" : "var(--danger)" },
+      { label: t("plex.kpi_server"), value: conn.server_name || "—", color: "var(--accent)" },
+      { label: t("plex.kpi_version"), value: conn.version || "—", color: "var(--info)" },
     ]);
 
     html += '<div class="card mt-4">';
-    html += '<h3>Informations</h3>';
-    html += `<p class="mt-2 text-secondary">URL : ${escapeHtml(s.plex_url || "—")}</p>`;
-    html += `<p class="text-secondary">Refresh auto : ${s.plex_refresh_on_apply ? "Oui" : "Non"}</p>`;
-    html += `<div class="mt-4"><button class="btn btn--compact" id="btnPlexTest">Tester la connexion</button>`;
-    html += ` <button class="btn btn--compact" id="btnPlexSync">Validation croisee</button></div>`;
+    html += `<h3>${escapeHtml(t("plex.info_title"))}</h3>`;
+    html += `<p class="mt-2 text-secondary">${escapeHtml(t("plex.info_url", { url: s.plex_url || "—" }))}</p>`;
+    html += `<p class="text-secondary">${escapeHtml(t("plex.info_refresh", { value: s.plex_refresh_on_apply ? t("common.yes") : t("common.no") }))}</p>`;
+    html += `<div class="mt-4"><button class="btn btn--compact" id="btnPlexTest">${escapeHtml(t("plex.btn_test"))}</button>`;
+    html += ` <button class="btn btn--compact" id="btnPlexSync">${escapeHtml(t("plex.btn_sync"))}</button></div>`;
     html += '<div id="plexSyncResult" class="mt-4"></div>';
     html += '</div>';
 
@@ -52,26 +53,26 @@ async function _load() {
 
     $("btnPlexTest")?.addEventListener("click", async () => {
       const r = await apiPost("integrations/test_plex_connection", { url: s.plex_url, token: s.plex_token });
-      alert(r.data?.ok ? `OK — ${r.data.server_name}` : (r.data?.error || "Echec"));
+      alert(r.data?.ok ? t("plex.test_ok", { name: r.data.server_name }) : (r.data?.error || t("plex.test_fail")));
     });
 
     $("btnPlexSync")?.addEventListener("click", async () => {
       const container = $("plexSyncResult");
       if (!container) return;
-      container.innerHTML = '<p class="text-muted">Chargement...</p>';
+      container.innerHTML = `<p class="text-muted">${escapeHtml(t("plex.loading"))}</p>`;
       let r;
       try { r = await apiPost("integrations/get_plex_sync_report"); }
-      catch { container.innerHTML = '<p class="text-muted">Erreur reseau.</p>'; return; }
+      catch { container.innerHTML = `<p class="text-muted">${escapeHtml(t("plex.network_error"))}</p>`; return; }
       const d = r.data || {};
       if (!d.ok && d.message) { container.innerHTML = `<p class="text-muted">${escapeHtml(d.message)}</p>`; return; }
       container.innerHTML = `<div class="kpi-grid mt-2">
-        <div class="kpi-card" style="border-left:3px solid var(--success)"><div class="kpi-label">Matches</div><div class="kpi-value">${d.matched || 0}</div></div>
-        <div class="kpi-card" style="border-left:3px solid var(--warning)"><div class="kpi-label">Manquants</div><div class="kpi-value">${(d.missing_in_plex || []).length}</div></div>
-        <div class="kpi-card" style="border-left:3px solid var(--danger)"><div class="kpi-label">Fantomes</div><div class="kpi-value">${(d.ghost_in_plex || []).length}</div></div>
+        <div class="kpi-card" style="border-left:3px solid var(--success)"><div class="kpi-label">${escapeHtml(t("plex.kpi_matches"))}</div><div class="kpi-value">${d.matched || 0}</div></div>
+        <div class="kpi-card" style="border-left:3px solid var(--warning)"><div class="kpi-label">${escapeHtml(t("plex.kpi_missing"))}</div><div class="kpi-value">${(d.missing_in_plex || []).length}</div></div>
+        <div class="kpi-card" style="border-left:3px solid var(--danger)"><div class="kpi-label">${escapeHtml(t("plex.kpi_ghosts"))}</div><div class="kpi-value">${(d.ghost_in_plex || []).length}</div></div>
       </div>`;
     });
 
   } catch (err) {
-    el.innerHTML = `<p class="text-muted">Erreur : ${escapeHtml(err.message || String(err))}</p>`;
+    el.innerHTML = `<p class="text-muted">${escapeHtml(t("errors.generic", { detail: err.message || String(err) }))}</p>`;
   }
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "locale": "fr",
     "name": "Français",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "owner": "V6-01 + V6-02",
     "comment": "i18n CineSort v7.7.0. Catégories: settings, qij, library, processing, notifications, errors, common, glossary, help, sidebar, topbar, integrations, journal, danger_zone. Convention de clé: category.subcategory.detail. Interpolation: t('key', { var: 'value' }) -> '{{var}}' remplacé."
   },
@@ -39,7 +39,28 @@
     "score": "Score",
     "tier": "Tier",
     "code": "Code",
-    "count": "Nombre"
+    "count": "Nombre",
+    "all": "Tout",
+    "apply": "Appliquer",
+    "cancelled": "Annulé",
+    "completed": "Terminé",
+    "details": "Détails",
+    "empty": "Vide",
+    "info": "Info",
+    "less": "Moins",
+    "more": "Plus",
+    "none": "Aucun",
+    "open": "Ouvrir",
+    "preview": "Aperçu",
+    "retry": "Réessayer",
+    "running": "En cours",
+    "search": "Rechercher",
+    "see_details": "Voir les détails",
+    "see_more": "Voir plus",
+    "success": "Succès",
+    "undo": "Annuler",
+    "unknown": "Inconnu",
+    "warning": "Avertissement"
   },
   "sidebar": {
     "brand_name": "CineSort",
@@ -545,19 +566,199 @@
     "cannot_finish_quality_analysis": "Impossible de terminer l'analyse qualite.",
     "cannot_load_plan": "Impossible de charger le plan : {{detail}}",
     "unknown_error": "Erreur inconnue.",
-    "media_not_found_for_row": "Fichier média introuvable pour cette ligne."
+    "media_not_found_for_row": "Fichier média introuvable pour cette ligne.",
+    "apply_in_progress": "Une application est déjà en cours.",
+    "config_invalid": "Configuration invalide : {{detail}}.",
+    "disk_full": "Espace disque insuffisant pour effectuer cette opération.",
+    "file_locked": "Le fichier {{path}} est verrouillé par un autre processus.",
+    "jellyfin_unauthorized": "Authentification Jellyfin échouée (vérifier la clé API).",
+    "network_error": "Erreur réseau : {{detail}}",
+    "plex_unauthorized": "Authentification Plex échouée (vérifier le jeton).",
+    "radarr_unauthorized": "Authentification Radarr échouée (vérifier la clé API).",
+    "rest_unauthorized": "Authentification requise. Fournis un jeton Bearer valide.",
+    "scan_in_progress": "Un scan est déjà en cours.",
+    "smtp_failed": "Échec d'envoi de l'e-mail : {{detail}}.",
+    "tmdb_rate_limited": "Limite TMDb atteinte. Patiente quelques secondes.",
+    "generic": "Erreur : {{detail}}"
   },
   "glossary": {
     "tier": "Niveau de qualité d'un film (Premium / Bon / Moyen / Mauvais).",
     "tmdb": "The Movie Database — base de données collaborative de films et séries.",
     "perceptual_score": "Score qualité visuelle calculé par analyse d'images (luminance, grain, banding).",
     "dry_run": "Mode aperçu sans modification réelle des fichiers.",
-    "undo": "Annulation d'une opération apply (rollback complet du batch)."
+    "undo": "Annulation d'une opération apply (rollback complet du batch).",
+    "apply": "Apply — exécute le plan pour de vrai (modifie le disque). Crée une entrée dans le journal d'application pour permettre l'annulation ultérieure.",
+    "banding": "Banding — artefact visuel : bandes visibles dans les ciels et dégradés. Causé par une compression trop agressive. Détecté par le moteur perceptuel via analyse de variance par blocs.",
+    "chromaprint": "Chromaprint — empreinte audio générée par fpcalc. Détecte que deux versions d'un film (FR + EN) partagent la même bande son sans comparer les fichiers entiers.",
+    "composite_score_v2": "Composite Score V2 — moteur de scoring de seconde génération. Combine les catégories visuel (60 %), audio (35 %) et cohérence (5 %), avec 9 règles d'ajustement contextuelles et un scoring pondéré par la confiance. Coexiste avec V1 via le réglage `composite_score_version`.",
+    "confidence": "Niveau de certitude du match TMDb. 0.95+ = certain (.nfo + id IMDb). 0.7-0.95 = fort. 0.5-0.7 = moyen (à vérifier). <0.5 = faible (revue manuelle requise).",
+    "dolby_vision": "Dolby Vision (DV) — standard HDR premium avec métadonnées dynamiques par plan. Profils 5/7/8.1/8.2/8.4 détectés via l'enregistrement DOVI. Plus précis que HDR10 mais nécessite une chaîne de lecture compatible.",
+    "drc": "DRC (Dynamic Range Compression) — niveau de compression audio. Cinema = grande dynamique préservée (musique forte, dialogues doux). Standard = légèrement compressé. Broadcast = très compressé (TV, plus uniforme mais aplati).",
+    "ebu_r128": "EBU R128 (loudness) — standard européen de mesure du loudness audio. Mesure le loudness intégré (LUFS), la plage de loudness (LRA) et le true peak. Détecte les loudness wars et les normalisations broadcast.",
+    "edition": "Édition (Director's Cut, Extended, IMAX, etc.) — version particulière d'un film. CineSort la détecte depuis le nom de fichier ou le .nfo et la conserve dans le titre du dossier final. Déduplication consciente de l'édition : même film + éditions différentes ≠ doublons.",
+    "grain_v2": "Analyse de grain v2 — classification perceptuelle du grain de film par époque (16mm 1920+, 35mm classique 1950+, 35mm moderne 1990+, bruit numérique 2000+, numérique propre 2010+, UHD/Dolby Vision 2015+). Détecte le grain authentique vs. DNR excessif (lissage). Inclut des exceptions par réalisateur (Nolan, A24, Pixar).",
+    "hdr10": "HDR10 — standard High Dynamic Range de base, métadonnées statiques (une seule luminance pic pour tout le film). Compatibilité universelle.",
+    "jellyfin": "Jellyfin — serveur multimédia open source. CineSort peut déclencher le rafraîchissement de la bibliothèque Jellyfin après chaque application, et synchroniser le statut vu/non vu.",
+    "lpips": "LPIPS (Learned Perceptual Image Patch Similarity) — mesure scientifique de similarité visuelle utilisant un modèle ML AlexNet pré-entraîné. Plus fiable que SSIM ou PSNR pour la qualité perçue. Utilisé pour comparer les doublons.",
+    "multi_root": "Multi-racine — capacité à scanner plusieurs dossiers racines (SSD + NAS + disque externe) en une seule passe. Chaque racine a ses propres buckets (`_review`, `_Collection`, `_Empty`). Les doublons inter-racines sont détectés.",
+    "naming_preset": "Preset de nommage — modèle de renommage prédéfini. 5 presets fournis : default, plex, jellyfin, quality, custom. Les variables comme {title}, {year}, {resolution} sont remplies au moment de l'application.",
+    "nfo": "NFO — fichier de métadonnées XML (format Kodi/Jellyfin/Emby) placé à côté de la vidéo (titre, année, id IMDb/TMDb). CineSort le lit en source prioritaire (plus fiable que le nom de fichier) et peut aussi le générer.",
+    "perceptual": "Analyse perceptuelle — analyse la qualité réelle de l'image et de l'audio (pas seulement les métadonnées). Détecte les faux 4K (upscale), le DNR excessif, le faux HDR, l'audio mono déguisé en 5.1, etc. Activée dans Paramètres > Perceptuel.",
+    "plan": "Plan — liste des changements proposés (renommages + déplacements) générée à la fin d'un scan. Revisible avant application.",
+    "plex": "Plex — serveur multimédia propriétaire. CineSort se connecte via X-Plex-Token pour rafraîchir la bibliothèque Plex après une application.",
+    "plugin_hook": "Plugin hook — script externe (Python, .bat, .ps1) déclenché automatiquement après un événement (post_scan, post_apply, post_undo, post_error). Reçoit le contexte JSON via stdin et les variables d'environnement CINESORT_EVENT/CINESORT_RUN_ID.",
+    "probe": "Action d'analyser un fichier vidéo pour en extraire les caractéristiques techniques (codec, résolution, bitrate, pistes audio, HDR). Outils utilisés : ffprobe ou mediainfo, en parallèle.",
+    "quality_profile": "Profil qualité — ensemble de poids et de seuils pour le système de scoring (CinemaLux). Indique à CineSort ce qui compte le plus (résolution, codec, audio, sous-titres).",
+    "quarantine": "Quarantaine — le dossier `_review/` où les fichiers invalides sont déplacés : films sans match TMDb, doublons SHA1 (`_duplicates_identical/`), conflits (`_review/_conflicts`), fichiers corrompus. Tu peux les revoir et les rattraper manuellement.",
+    "radarr": "Radarr — gestionnaire automatisé de collection de films. CineSort peut proposer des montées en qualité pour les films monitorés via l'API Radarr.",
+    "reencode": "Ré-encodage (dégradé) — fichier ré-encodé avec un bitrate trop faible, causant une perte de qualité visible. Détecté via des heuristiques codec/bitrate dans `encode_analysis.py`.",
+    "run": "Run — exécution complète d'un scan (identifiant unique, journal dédié). Chaque scan crée un nouveau run avec ses propres logs et rapports.",
+    "saga_collection": "Saga / Collection (TMDb) — regroupement de films liés (par ex. Le Seigneur des Anneaux, Marvel Cinematic Universe). CineSort détecte les collections via TMDb et peut créer un dossier parent `_Collection/` pour les conserver ensemble.",
+    "score_v1": "Composite Score V1 — système de scoring legacy (pré-v7.5.0). Basé uniquement sur les métadonnées (résolution, codec, audio). Conservé pour les rapports créés avant la migration 011.",
+    "score_v2": "Composite Score V2 — note composite sur 100 (CinemaLux v2). Pondérations Vidéo 60 %, Audio 35 %, Cohérence 5 %. Inclut l'analyse perceptuelle si activée. Plus lisible que V1 (conservée pour compatibilité).",
+    "smart_playlist": "Smart playlist — filtre sauvegardé dans la vue bibliothèque (par ex. « tous les films de Nolan en 4K HDR »). Persisté entre sessions avec CRUD complet.",
+    "ssim": "SSIM (Structural Similarity Index) — compare deux images sur structure + luminance + contraste. Utilisé pour détecter les faux 4K (un upscale a un SSIM élevé avec sa version 1080p downscalée).",
+    "upscale": "Upscale (suspect) — fichier annoncé en 4K mais avec un bitrate trop faible pour sa résolution. Probablement une source 1080p étirée en 4K. Signalé par le module d'analyse d'encodage.",
+    "watch_folder": "Watch folder (auto-monitor) — mode de surveillance : CineSort scrute la racine toutes les N minutes (1-60) et déclenche un scan automatiquement quand de nouveaux fichiers sont détectés. Aucune dépendance externe, threading Python pur."
   },
   "help": {
     "faq_title": "Foire aux questions",
     "support": "Support",
     "shortcut_help": "Appuyez sur ? pour afficher les raccourcis clavier.",
-    "first_run": "Premier lancement ? Lancez le wizard depuis Réglages > Démarrer le wizard."
+    "first_run": "Premier lancement ? Lancez le wizard depuis Réglages > Démarrer le wizard.",
+    "copy_path_button": "Copier le chemin",
+    "diagnostic": "Diagnostic exportable : Paramètres > Logs > Exporter diagnostic. Les clés API et mots de passe SMTP sont automatiquement masqués du zip.",
+    "faq": {
+      "q_auto_approve": {
+        "answer": "Quand un film a un score élevé et une confiance forte (match TMDb exact + .nfo cohérent), CineSort le marque comme approuvé automatiquement. Tu peux manuellement décocher ceux que tu ne veux pas appliquer. Réglage : Paramètres > Validation > seuils de confiance.",
+        "question": "Comment fonctionne l'auto-approbation ?"
+      },
+      "q_configure_integrations": {
+        "answer": "Section Paramètres > Intégrations. Pour Jellyfin : URL du serveur + clé API (Profil > Clés API dans Jellyfin). Pour Plex : URL + X-Plex-Token (récupérable via plex.tv/account). Pour Radarr : URL + clé API (Paramètres > Général). Le bouton « Tester la connexion » valide immédiatement. Active l'auto-refresh pour déclencher un scan après chaque application.",
+        "question": "Comment configurer Jellyfin / Plex / Radarr ?"
+      },
+      "q_dashboard_connection": {
+        "answer": "Vérifie : (1) Paramètres > API REST est activée ; (2) tu utilises bien le token d'accès complet (au moins 32 caractères pour le binding LAN) ; (3) le pare-feu Windows autorise CineSort.exe sur le port 8642 ; (4) PC et téléphone sont sur le même Wi-Fi. La carte « Accès distant » sur la page Accueil affiche l'URL et un QR code à scanner.",
+        "question": "Le dashboard distant ne se connecte pas"
+      },
+      "q_decisions_lost": {
+        "answer": "Les décisions de validation sont persistées dans la base SQLite via Ctrl+S ou le bouton Sauvegarder. Si tu n'as pas sauvegardé avant un F5 ou un changement de vue, elles sont perdues. CineSort affiche un avertissement « décisions non sauvegardées » si tu navigues sans sauvegarder.",
+        "question": "Mes décisions ont disparu après rafraîchissement, pourquoi ?"
+      },
+      "q_dry_run": {
+        "answer": "Un dry-run simule l'application des changements sans rien déplacer ni renommer sur ton disque. Tu vois exactement ce qui serait fait. C'est l'option recommandée pour ta première passe : zéro risque de perdre un fichier. Décoche « Mode dry-run » dans l'écran Application uniquement quand tu es confiant.",
+        "question": "Qu'est-ce qu'un dry-run ?"
+      },
+      "q_export_report": {
+        "answer": "Après un scan : Bibliothèque > Application > bouton « Exporter ». Trois formats : HTML (rapport autonome avec graphiques, ouvrable dans n'importe quel navigateur, imprimable en PDF via Ctrl+P) ; CSV enrichi (30 colonnes, ouvrable dans Excel) ; .nfo XML (Kodi/Jellyfin/Emby, un fichier par film à côté de la vidéo).",
+        "question": "Comment exporter un rapport de mon analyse ?"
+      },
+      "q_first_scan": {
+        "answer": "Va dans Paramètres > Dossiers racine, ajoute le dossier contenant tes films (par ex. D:\\Films), sauvegarde, puis ouvre Bibliothèque > Scan. CineSort lit chaque fichier vidéo, récupère les infos depuis TMDb et génère une analyse complète. Au premier lancement, le wizard 5 étapes te guide automatiquement.",
+        "question": "Comment lancer mon premier scan ?"
+      },
+      "q_install_antivirus": {
+        "answer": "Faux positif courant pour les EXE Python compilés avec PyInstaller. CineSort est open source (code lisible sur GitHub) et signé. Solutions : (1) ajouter une exception pour CineSort.exe dans ton antivirus ; (2) vérifier la signature du binaire (clic droit > Propriétés > Signatures numériques) ; (3) compiler depuis les sources si tu préfères. Aucune télémétrie, aucun code réseau hors TMDb/Jellyfin/Plex/Radarr (que tu actives toi-même).",
+        "question": "Mon antivirus dit que CineSort est dangereux"
+      },
+      "q_install_ffmpeg": {
+        "answer": "Paramètres > Outils vidéo > bouton « Installer automatiquement ». CineSort télécharge les binaires officiels et les place dans le dossier de l'app, sans toucher au PATH système. Si tu préfères une install manuelle : ffmpeg.org et mediaarea.net/MediaInfo, puis fournis le chemin complet dans Paramètres.",
+        "question": "Comment installer ffmpeg / mediainfo ?"
+      },
+      "q_offline_mode": {
+        "answer": "Oui pour le scan et l'application locaux. Non pour l'enrichissement TMDb (titre original, année, poster, collection). Astuce : lance un premier scan en ligne pour remplir le cache TMDb local, ensuite tu peux travailler hors ligne. Les sous-titres sont détectés localement sans Internet. Jellyfin/Plex/Radarr fonctionnent tant que ton serveur est accessible (le LAN suffit).",
+        "question": "Puis-je utiliser CineSort sans connexion Internet ?"
+      },
+      "q_perceptual_mode": {
+        "answer": "L'analyse perceptuelle regarde la qualité réelle de l'image et de l'audio (pas seulement les métadonnées). Elle détecte les faux 4K (upscale), le DNR excessif (lissage qui efface le grain), la compression audio DRC (cinema/standard/broadcast), le HDR mal encodé, etc. Réglage : Paramètres > Perceptuel. Active-le si tu veux noter la qualité réelle, pas seulement la résolution affichée.",
+        "question": "Qu'est-ce que le mode perceptuel ?"
+      },
+      "q_scan_no_movies": {
+        "answer": "Vérifie dans cet ordre : (1) le dossier racine est-il accessible (pas de NAS déconnecté) ; (2) les extensions vidéo sont-elles supportées (mkv, mp4, avi, mov par défaut) ; (3) les fichiers sont-ils en lecture seule ou bloqués par antivirus ; (4) consulte la vue Logs pour le message d'erreur exact. Si rien ne fonctionne, exporte les logs et signale via GitHub Issues.",
+        "question": "Mon scan ne trouve aucun film, que faire ?"
+      },
+      "q_share_logs": {
+        "answer": "Paramètres > Logs > bouton « Exporter diagnostic ». Le fichier zip contient logs + version + config (sans tes clés API, automatiquement masquées : TMDb, Jellyfin, Plex, Radarr, mots de passe SMTP). Joins-le à une issue GitHub. Logs bruts : %LOCALAPPDATA%/CineSort/logs/cinesort.log (rotation 50 Mo x 5).",
+        "question": "Comment partager mes logs pour signaler un bug ?"
+      },
+      "q_tier_meaning": {
+        "answer": "C'est la note finale de qualité du film sur 5 niveaux. Platinum = excellence (4K HDR Dolby Atmos sans défaut). Gold = très bonne version (1080p ou 4K propre). Silver = correct (DVD ou 720p). Bronze = limité (faible résolution ou encode dégradant). Reject = à refaire (faux 4K, audio mono, fichier corrompu). Le calcul combine résolution, codec, audio, sous-titres et détection perceptuelle.",
+        "question": "Que signifient les tiers Platinum / Gold / Silver / Bronze / Reject ?"
+      },
+      "q_undo_apply": {
+        "answer": "CineSort tient un journal de chaque déplacement/renommage (table apply_operations). Va dans Application > Undo, choisis le batch à annuler, prévisualise en dry-run, puis confirme. L'undo peut être par batch complet ou par film (Undo v5). Les conflits (fichier modifié depuis) sont redirigés vers `_review/_undo_conflicts`.",
+        "question": "Comment annuler une application ?"
+      }
+    },
+    "full_docs": "Documentation complète",
+    "local_logs": "Logs locaux (à joindre à ton rapport)",
+    "no_results_faq": "Aucune question ne correspond à ta recherche.",
+    "no_results_glossary": "Aucun terme ne correspond à ta recherche.",
+    "open_logs_button": "Ouvrir le dossier des logs",
+    "report_bug": "Signaler un bug ou poser une question",
+    "report_button": "Signaler un bug sur GitHub",
+    "search_placeholder": "Rechercher une question, un terme…",
+    "shortcuts_global": "Actions globales",
+    "shortcuts_intro": "Mémorise ces combinaisons pour gagner du temps. Les raccourcis Alt+chiffre fonctionnent même dans les champs texte ; les chiffres seuls ne fonctionnent qu'en dehors d'un champ.",
+    "shortcuts_navigation": "Navigation",
+    "shortcuts_section_title": "Raccourcis clavier",
+    "shortcuts_validation": "Validation (vue Validation active)",
+    "support_intro": "Tu n'as pas trouvé ta réponse ? Plusieurs canaux sont disponibles :",
+    "support_title": "Besoin de plus d'aide ?"
+  },
+  "login": {
+    "token_required": "Saisis la clé d'accès.",
+    "connection_refused": "Connexion refusée.",
+    "network_error": "Erreur réseau. Vérifie l'adresse du serveur."
+  },
+  "plex": {
+    "not_configured_title": "Plex non configuré",
+    "not_configured_body": "L'intégration Plex est désactivée. Pour l'activer, ouvre les réglages et configure la section Plex (URL, token, refresh automatique).",
+    "open_settings": "Ouvrir les réglages Plex",
+    "kpi_status": "Statut",
+    "kpi_server": "Serveur",
+    "kpi_version": "Version",
+    "status_connected": "Connecté",
+    "status_disconnected": "Déconnecté",
+    "info_title": "Informations",
+    "info_url": "URL : {{url}}",
+    "info_refresh": "Refresh auto : {{value}}",
+    "btn_test": "Tester la connexion",
+    "btn_sync": "Validation croisée",
+    "loading": "Chargement…",
+    "network_error": "Erreur réseau.",
+    "test_ok": "OK — {{name}}",
+    "test_fail": "Échec",
+    "kpi_matches": "Matches",
+    "kpi_missing": "Manquants",
+    "kpi_ghosts": "Fantômes"
+  },
+  "radarr": {
+    "not_configured_title": "Radarr non configuré",
+    "not_configured_body": "L'intégration Radarr est désactivée. Pour l'activer, ouvre les réglages et configure la section Radarr (URL, clé API, candidats d'upgrade).",
+    "open_settings": "Ouvrir les réglages Radarr",
+    "kpi_status": "Statut",
+    "kpi_server": "Serveur",
+    "kpi_version": "Version",
+    "status_connected": "Connecté",
+    "status_disconnected": "Déconnecté",
+    "actions_title": "Actions",
+    "btn_test": "Tester la connexion",
+    "btn_status": "Voir le rapport",
+    "loading": "Chargement…",
+    "network_error": "Erreur réseau.",
+    "test_ok": "OK — {{name}}",
+    "test_fail": "Échec",
+    "kpi_matches": "Matches",
+    "kpi_not_in_radarr": "Pas dans Radarr",
+    "kpi_upgrades": "Upgrades",
+    "upgrade_candidates_title": "Candidats upgrade",
+    "col_title": "Titre",
+    "col_score": "Score",
+    "col_action": "Action",
+    "btn_upgrade": "Upgrade",
+    "btn_upgrade_running": "...",
+    "btn_upgrade_ok": "Lancé !",
+    "btn_upgrade_fail": "Échec"
   }
 }
