@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,9 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
+# SEC #240 : defense in depth, valider strictement owner/repo avant d'injecter
+# dans l'URL pour eviter path-traversal type "foo/bar/../../search".
+_GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 DEFAULT_CHECK_TIMEOUT_S = 5
 DEFAULT_CACHE_TTL_S = 3600  # 1h — respecte le rate limit GitHub 60/h non authentifie
 USER_AGENT = "CineSort-UpdateChecker/1.0"
@@ -127,6 +131,9 @@ def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
 
 
 def _fetch_latest_release(github_repo: str, timeout_s: int) -> Optional[dict]:
+    if not _GITHUB_REPO_PATTERN.fullmatch(github_repo or ""):
+        logger.warning("updater: format github_repo invalide (%r)", github_repo)
+        return None
     url = f"{GITHUB_API_BASE}/repos/{github_repo}/releases/latest"
     req = Request(
         url,
