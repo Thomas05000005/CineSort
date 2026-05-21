@@ -459,6 +459,7 @@
   "errors": {
     "run_not_found": "The requested run was not found.",
     "settings_invalid": "Provided settings are invalid.",
+    "integration_failed": "Integration failed. See server logs for details.",
     "tmdb_unavailable": "TMDb is unreachable (check your API key and connection).",
     "ffmpeg_missing": "ffmpeg not found. Install it from Settings > Video tools.",
     "permission_denied": "Permission denied for {{path}}.",
