@@ -8,6 +8,7 @@ import { badgeHtml } from "../components/badge.js";
 import { fmtDate as _fmtDate, fmtDuration as _fmtDuration } from "../core/format.js";
 import { skeletonLinesHtml } from "../components/skeleton.js";
 import { getNavSignal, isAbortError } from "../core/nav-abort.js";
+import { t } from "../core/i18n.js";
 
 /* --- Etat local ----------------------------------------------- */
 
@@ -19,14 +20,16 @@ let _mode = "live"; // "live" ou "history"
 
 /* --- Colonnes table runs -------------------------------------- */
 
-const _RUN_COLUMNS = [
-  { key: "started_at", label: "Date", sortable: true, render: v => _fmtDate(v) },
-  { key: "run_id", label: "Run ID", sortable: true, render: v => `<span class="text-mono">${escapeHtml(String(v || "").slice(0, 18))}</span>` },
-  { key: "total_rows", label: "Films", sortable: true },
-  { key: "avg_score", label: "Score", sortable: true, render: v => v ? `${Math.round(Number(v))}` : "—" },
-  { key: "status", label: "Statut", sortable: true, render: v => badgeHtml("status", v || "analysis") },
-  { key: "duration_s", label: "Durée", sortable: true, render: v => _fmtDuration(v) },
-];
+function _runColumns() {
+  return [
+    { key: "started_at", label: t("legacy.logs.col_date"), sortable: true, render: v => _fmtDate(v) },
+    { key: "run_id", label: t("legacy.logs.col_run_id"), sortable: true, render: v => `<span class="text-mono">${escapeHtml(String(v || "").slice(0, 18))}</span>` },
+    { key: "total_rows", label: t("legacy.logs.col_movies"), sortable: true },
+    { key: "avg_score", label: t("legacy.logs.col_score"), sortable: true, render: v => v ? `${Math.round(Number(v))}` : "—" },
+    { key: "status", label: t("legacy.logs.col_status"), sortable: true, render: v => badgeHtml("status", v || "analysis") },
+    { key: "duration_s", label: t("legacy.logs.col_duration"), sortable: true, render: v => _fmtDuration(v) },
+  ];
+}
 
 /* --- Point d'entree ------------------------------------------- */
 
@@ -73,8 +76,8 @@ function _render(container) {
 
   // Toggle live / historique
   html += `<div class="flex gap-2 mb-4">
-    <button class="btn btn--compact${_mode === "live" ? " active" : ""}" id="logModeLive">Logs en direct</button>
-    <button class="btn btn--compact${_mode === "history" ? " active" : ""}" id="logModeHistory">Historique runs</button>
+    <button class="btn btn--compact${_mode === "live" ? " active" : ""}" id="logModeLive">${escapeHtml(t("legacy.logs.mode_live"))}</button>
+    <button class="btn btn--compact${_mode === "history" ? " active" : ""}" id="logModeHistory">${escapeHtml(t("legacy.logs.mode_history"))}</button>
   </div>`;
 
   if (_mode === "live") {
@@ -99,13 +102,13 @@ function _renderLiveSection() {
   let html = "";
   if (_runId) {
     html += `<div class="flex justify-between items-center mb-4">
-      <h3>Run en cours : <span class="text-accent">${escapeHtml(_runId)}</span></h3>
-      <button id="btnLogsCancel" class="btn btn-danger btn--compact">Annuler</button>
+      <h3>${escapeHtml(t("legacy.logs.current_run_label"))} <span class="text-accent">${escapeHtml(_runId)}</span></h3>
+      <button id="btnLogsCancel" class="btn btn-danger btn--compact">${escapeHtml(t("legacy.logs.btn_cancel"))}</button>
     </div>`;
     html += '<div id="logsProgressBar" class="progress-bar"><div class="progress-fill" style="--progress:0"></div></div>';
     html += '<p id="logsProgressText" class="text-muted mt-2"></p>';
   } else {
-    html += '<div class="card"><p class="text-muted">Aucun run en cours. Les logs apparaîtront ici pendant un scan.</p></div>';
+    html += `<div class="card"><p class="text-muted">${escapeHtml(t("legacy.logs.no_active_run"))}</p></div>`;
   }
   html += '<div id="logsBox" class="logs-box mt-4" style="max-height:400px;overflow-y:auto"></div>';
   return html;
@@ -119,11 +122,11 @@ function _renderHistorySection() {
   // Export pour le run selectionne
   html += `<div class="card mb-4">
     <div class="flex gap-2 items-center flex-wrap">
-      <span>Run sélectionné : <strong id="logSelectedLabel">${_selectedRunId ? escapeHtml(String(_selectedRunId).slice(0, 20)) : "Aucun"}</strong></span>
+      <span>${escapeHtml(t("legacy.logs.selected_run_label"))} <strong id="logSelectedLabel">${_selectedRunId ? escapeHtml(String(_selectedRunId).slice(0, 20)) : escapeHtml(t("legacy.logs.none"))}</strong></span>
       <button class="btn btn--compact" data-export="json">JSON</button>
       <button class="btn btn--compact" data-export="csv">CSV</button>
       <button class="btn btn--compact" data-export="html">HTML</button>
-      <button class="btn btn--compact" id="btnLogExportNfo">.nfo</button>
+      <button class="btn btn--compact" id="btnLogExportNfo">${escapeHtml(t("legacy.logs.btn_export_nfo"))}</button>
       <span id="logExportMsg" class="status-msg"></span>
     </div>
   </div>`;
@@ -153,8 +156,9 @@ function _hookEvents(container) {
   if (_mode === "history") {
     const tableEl = $("logRunsTable");
     if (tableEl && _runs.length > 0) {
-      tableEl.innerHTML = tableHtml({ columns: _RUN_COLUMNS, rows: _runs, id: "logsRunsTbl", clickable: true, emptyText: "Aucun run." });
-      attachSort("logsRunsTbl", _runs, () => { tableEl.innerHTML = tableHtml({ columns: _RUN_COLUMNS, rows: _runs, id: "logsRunsTbl", clickable: true }); });
+      const cols = _runColumns();
+      tableEl.innerHTML = tableHtml({ columns: cols, rows: _runs, id: "logsRunsTbl", clickable: true, emptyText: t("legacy.logs.no_runs") });
+      attachSort("logsRunsTbl", _runs, () => { tableEl.innerHTML = tableHtml({ columns: cols, rows: _runs, id: "logsRunsTbl", clickable: true }); });
 
       // Clic sur un run → selectionner
       tableEl.querySelectorAll("tr[data-row-idx]").forEach(tr => {
@@ -183,7 +187,7 @@ function _hookEvents(container) {
 async function _exportRun(fmt) {
   if (!_selectedRunId) return;
   const msg = $("logExportMsg");
-  if (msg) { msg.textContent = "Export en cours..."; msg.className = "status-msg"; }
+  if (msg) { msg.textContent = t("legacy.logs.export_running"); msg.className = "status-msg"; }
   try {
     const res = await apiPost("run/export_run_report", { run_id: _selectedRunId, fmt });
     if (res.data?.content) {
@@ -192,11 +196,11 @@ async function _exportRun(fmt) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `${_selectedRunId}.${fmt}`; a.click();
       URL.revokeObjectURL(url);
-      if (msg) { msg.textContent = "Exporté !"; msg.className = "status-msg success"; }
+      if (msg) { msg.textContent = t("legacy.logs.export_ok"); msg.className = "status-msg success"; }
     } else {
-      if (msg) { msg.textContent = res.data?.message || "Aucune donnée."; msg.className = "status-msg error"; }
+      if (msg) { msg.textContent = res.data?.message || t("legacy.logs.export_no_data"); msg.className = "status-msg error"; }
     }
-  } catch { if (msg) { msg.textContent = "Erreur réseau."; msg.className = "status-msg error"; } }
+  } catch { if (msg) { msg.textContent = t("legacy.logs.network_error"); msg.className = "status-msg error"; } }
 }
 
 async function _exportNfo() {
@@ -204,8 +208,8 @@ async function _exportNfo() {
   const msg = $("logExportMsg");
   try {
     const res = await apiPost("run/export_run_nfo", { run_id: _selectedRunId, overwrite: false, dry_run: false });
-    if (msg) msg.textContent = res.data?.message || `${res.data?.created || 0} fichier(s) .nfo créés.`;
-  } catch { if (msg) { msg.textContent = "Erreur."; msg.className = "status-msg error"; } }
+    if (msg) msg.textContent = res.data?.message || t("legacy.logs.nfo_created", { count: res.data?.created || 0 });
+  } catch { if (msg) { msg.textContent = t("legacy.logs.generic_error"); msg.className = "status-msg error"; } }
 }
 
 /* --- Polling logs live ---------------------------------------- */
@@ -226,7 +230,7 @@ async function _pollLogs() {
         // B8 (fin sprint 4) : --progress (0..1) -> scaleX (compositor only, no reflow).
         if (progressFill) { progressFill.style.setProperty("--progress", String(pct / 100)); progressFill.classList.remove("progress-fill--shimmer"); }
       } else {
-        progressText.textContent = `${idx} films trouvés...`;
+        progressText.textContent = t("legacy.logs.scanning", { count: idx });
         if (progressFill) progressFill.classList.add("progress-fill--shimmer");
       }
     }
@@ -252,7 +256,7 @@ async function _pollLogs() {
       if (logsBox) {
         const end = document.createElement("div");
         end.className = "log-line log-end";
-        end.textContent = "=== Run terminé ===";
+        end.textContent = t("legacy.logs.run_finished");
         logsBox.appendChild(end);
         logsBox.scrollTop = logsBox.scrollHeight;
       }
