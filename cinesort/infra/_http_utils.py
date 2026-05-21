@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 DEFAULT_RETRY_STATUS_CODES: tuple[int, ...] = (429, 500, 502, 503, 504)
-DEFAULT_RETRY_METHODS: frozenset[str] = frozenset(("GET", "HEAD", "OPTIONS", "PUT", "DELETE", "POST"))
+DEFAULT_RETRY_METHODS: frozenset[str] = frozenset(("GET", "HEAD", "OPTIONS", "PUT", "DELETE"))
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_BACKOFF_BASE = 0.5
 DEFAULT_POOL_CONNECTIONS = 10
