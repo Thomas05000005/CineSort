@@ -41,6 +41,9 @@ import { showToast } from "./toast.js";
 let _overlayEl = null;
 let _modalEl = null;
 let _state = null;
+// Audit C17 P1 : AbortController pour cleanup centralise des listeners DOM
+// poses sur _modalEl/_overlayEl (idempotent + zero leak au close).
+let _eventsController = null;
 
 /* --- Helpers --- */
 
@@ -588,6 +591,13 @@ function _refreshFooter() {
 
 function _ensureOverlay() {
   if (_overlayEl) return;
+  // Audit C17 P1 : controller frais pour ce nouveau mount du modal.
+  if (_eventsController) {
+    try { _eventsController.abort(); } catch (_e) { /* noop */ }
+  }
+  _eventsController = new AbortController();
+  const opts = { signal: _eventsController.signal };
+
   _overlayEl = document.createElement("div");
   _overlayEl.className = "duplicate-modal-overlay";
   _overlayEl.setAttribute("role", "dialog");
@@ -595,12 +605,12 @@ function _ensureOverlay() {
   _overlayEl.setAttribute("aria-labelledby", "duplicate-modal-title");
   _overlayEl.addEventListener("click", (ev) => {
     if (ev.target === _overlayEl) closeDuplicateComparatorModal();
-  });
+  }, opts);
   _modalEl = document.createElement("div");
   _modalEl.className = "duplicate-modal";
   _overlayEl.appendChild(_modalEl);
   document.body.appendChild(_overlayEl);
-  document.addEventListener("keydown", _onKeydown);
+  document.addEventListener("keydown", _onKeydown, opts);
 }
 
 function _onKeydown(ev) {
@@ -609,22 +619,29 @@ function _onKeydown(ev) {
   }
 }
 
+// Audit C17 P1 : tous les listeners poses ici utilisent _eventsController.signal,
+// abort() au closeDuplicateComparatorModal -> zero leak meme si _renderModal()
+// est rappele plusieurs fois (switch pair / decide -> re-render).
+
 function _bindTabNavEvents() {
   if (!_modalEl) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
   _modalEl.querySelectorAll("[data-duplicate-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => _switchTab(btn.dataset.duplicateTab));
+    btn.addEventListener("click", () => _switchTab(btn.dataset.duplicateTab), opts);
   });
 }
 
 function _bindPairsBarEvents() {
   if (!_modalEl) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
   _modalEl.querySelectorAll("[data-duplicate-pair]").forEach((btn) => {
-    btn.addEventListener("click", () => _switchPair(btn.dataset.duplicatePair));
+    btn.addEventListener("click", () => _switchPair(btn.dataset.duplicatePair), opts);
   });
 }
 
 function _bindTabContentEvents() {
   if (!_modalEl) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
   const retryFrames = _modalEl.querySelector("[data-duplicate-retry-frames]");
   if (retryFrames) {
     retryFrames.addEventListener("click", () => {
@@ -633,7 +650,7 @@ function _bindTabContentEvents() {
       if (_state.framesLoadedByPair) _state.framesLoadedByPair[pairKey] = false;
       _replaceTabContent("frames", _renderFramesPlaceholder());
       void _loadFramesTab();
-    });
+    }, opts);
   }
   const retryAudio = _modalEl.querySelector("[data-duplicate-retry-audio]");
   if (retryAudio) {
@@ -643,24 +660,26 @@ function _bindTabContentEvents() {
       if (_state.audioLoadedByPair) _state.audioLoadedByPair[pairKey] = false;
       _replaceTabContent("audio", _renderAudioPlaceholder());
       void _loadAudioTab();
-    });
+    }, opts);
   }
 }
 
 function _bindFooterEvents() {
   if (!_modalEl) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
   _modalEl.querySelectorAll("[data-duplicate-decide]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const side = btn.dataset.duplicateDecide;
       void _decideWinner(side);
-    });
+    }, opts);
   });
 }
 
 function _bindEvents() {
   if (!_modalEl) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
   _modalEl.querySelectorAll("[data-duplicate-close]").forEach((btn) => {
-    btn.addEventListener("click", closeDuplicateComparatorModal);
+    btn.addEventListener("click", closeDuplicateComparatorModal, opts);
   });
   _bindTabNavEvents();
   _bindPairsBarEvents();
@@ -742,7 +761,15 @@ export function openDuplicateComparatorModal(opts) {
 }
 
 export function closeDuplicateComparatorModal() {
+  // Audit C17 P1 : abort() libere tous les listeners en une fois (overlay click,
+  // document keydown Escape, tab-nav, pair-bar, footer decide, tab-content retries).
+  if (_eventsController) {
+    try { _eventsController.abort(); } catch (_e) { /* noop */ }
+    _eventsController = null;
+  }
   if (_overlayEl) {
+    // removeEventListener garde pour compat ascendante au cas ou abort() ne
+    // serait pas supporte (browsers < 2022). Idempotent.
     document.removeEventListener("keydown", _onKeydown);
     _overlayEl.remove();
     _overlayEl = null;

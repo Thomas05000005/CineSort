@@ -164,7 +164,7 @@ function _renderDistributionSection(stats) {
       <div class="qualite-tier-row" data-qualite-tier="${escapeHtml(t)}" role="button" tabindex="0">
         <span class="qualite-tier-label">${escapeHtml(_TIER_LABELS[t])}</span>
         <div class="qualite-tier-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-          <span class="qualite-tier-fill qualite-tier-fill--${escapeHtml(t)}" style="width:${pct}%"></span>
+          <span class="qualite-tier-fill qualite-tier-fill--${escapeHtml(t)}" style="--progress:${pct / 100}"></span>
         </div>
         <span class="qualite-tier-count">${count}</span>
         <span class="qualite-tier-pct">${pct}%</span>
@@ -269,7 +269,7 @@ function _renderSagasSection() {
           <span class="qualite-saga-counts">${owned} / ${total} <span class="qualite-saga-missing-pill">${missing} manquant${missing > 1 ? "s" : ""}</span></span>
         </header>
         <div class="qualite-saga-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${pct}% complet">
-          <span class="qualite-saga-progress-fill" style="width:${pct}%"></span>
+          <span class="qualite-saga-progress-fill" style="--progress:${pct / 100}"></span>
         </div>
         ${missingPreview ? `
           <details class="qualite-saga-details">

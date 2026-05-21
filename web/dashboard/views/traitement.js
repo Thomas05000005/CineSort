@@ -391,7 +391,7 @@ function _renderAnalyseStep() {
       ${isRunning ? `
         <div class="traitement-scan-progress" role="status" aria-live="polite">
           <div class="traitement-scan-progress-bar">
-            <div class="traitement-scan-progress-fill" style="width: ${progressPct}%"></div>
+            <div class="traitement-scan-progress-fill" style="--progress: ${progressPct / 100}"></div>
           </div>
           <div class="traitement-scan-progress-meta">
             <span>${escapeHtml(String(idx))}/${escapeHtml(String(total))} films</span>

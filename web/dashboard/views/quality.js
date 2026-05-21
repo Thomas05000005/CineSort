@@ -354,7 +354,7 @@ function _bar(label, count, total, color) {
   return `<div class="quality-mini-bar-row">
     <span class="quality-mini-bar-label">${escapeHtml(label)}</span>
     <div class="quality-mini-bar-track">
-      <div class="quality-mini-bar-fill" style="--fill-width:${pct}%;--fill-color:${color}"></div>
+      <div class="quality-mini-bar-fill" style="--progress:${pct / 100};--fill-color:${color}"></div>
     </div>
     <span class="quality-mini-bar-count">${count}</span>
   </div>`;

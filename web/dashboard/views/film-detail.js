@@ -27,6 +27,9 @@ const _state = {
   data: null,
   activeTab: "overview",
   containerRef: null,
+  // Audit C17 P1 : AbortController partage pour cleanup des listeners DOM au unmount.
+  // Reinitialise a chaque _loadAndRender() puisque innerHTML detruit l'arbre.
+  eventsController: null,
 };
 
 function _svg(pathContent, size) {
@@ -444,6 +447,10 @@ function _renderComparisonTab(_data) {
  * =========================================================== */
 
 function _bindEvents(root) {
+  // Audit C17 P1 : tous les listeners poses ici utilisent _state.eventsController.signal
+  // pour etre cleanup au unmount via controller.abort().
+  const opts = _state.eventsController ? { signal: _state.eventsController.signal } : undefined;
+
   const backBtn = root.querySelector("[data-v5-film-back]");
   if (backBtn) {
     backBtn.addEventListener("click", () => {
@@ -452,7 +459,7 @@ function _bindEvents(root) {
       } else if (typeof window !== "undefined") {
         window.location.hash = "library";
       }
-    });
+    }, opts);
   }
 
   root.querySelectorAll("[data-v5-film-rescan]").forEach((btn) => {
@@ -472,7 +479,7 @@ function _bindEvents(root) {
         btn.disabled = false;
         btn.textContent = original;
       }
-    });
+    }, opts);
   });
 
   root.querySelectorAll("[data-v5-film-compare]").forEach((btn) => {
@@ -480,7 +487,7 @@ function _bindEvents(root) {
       _state.activeTab = "comparison";
       _renderTabs(root);
       _renderTabPanel();
-    });
+    }, opts);
   });
 
   root.querySelectorAll("[data-v5-film-tab]").forEach((btn) => {
@@ -489,7 +496,7 @@ function _bindEvents(root) {
       _state.activeTab = tabId;
       _renderTabs(root);
       _renderTabPanel();
-    });
+    }, opts);
     btn.addEventListener("keydown", (e) => {
       const tabs = Array.from(root.querySelectorAll("[data-v5-film-tab]"));
       const idx = tabs.indexOf(btn);
@@ -502,7 +509,7 @@ function _bindEvents(root) {
         tabs[idx - 1].focus();
         tabs[idx - 1].click();
       }
-    });
+    }, opts);
   });
 }
 
@@ -510,12 +517,13 @@ function _renderTabs(root) {
   const tabsWrap = root.querySelector(".v5-film-tabs-wrap");
   if (!tabsWrap) return;
   tabsWrap.innerHTML = _buildTabs(_state.activeTab);
+  const opts = _state.eventsController ? { signal: _state.eventsController.signal } : undefined;
   root.querySelectorAll("[data-v5-film-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       _state.activeTab = btn.dataset.v5FilmTab;
       _renderTabs(root);
       _renderTabPanel();
-    });
+    }, opts);
   });
 }
 
@@ -527,6 +535,14 @@ async function _loadAndRender(rowId) {
   _state.rowId = rowId;
   const container = _state.containerRef;
   if (!container) return;
+
+  // Audit C17 P1 : avant le innerHTML qui detruit les enfants, on abort l'ancien
+  // controller (cleanup de tous les listeners poses sur le rendu precedent) et
+  // on recree un controller frais pour le nouveau rendu.
+  if (_state.eventsController) {
+    try { _state.eventsController.abort(); } catch (_e) { /* noop */ }
+  }
+  _state.eventsController = new AbortController();
 
   _renderFilmDetailSkeleton(container);
   let data = null;
@@ -570,6 +586,12 @@ export async function initFilmDetail(container, opts) {
 
 /** Demonte la vue (libere les references DOM). */
 export function unmountFilmDetail() {
+  // Audit C17 P1 : abort des listeners poses via signal AbortController.
+  // Garantit zero leak meme si _bindEvents() a tourne plusieurs fois (re-render).
+  if (_state.eventsController) {
+    try { _state.eventsController.abort(); } catch (_e) { /* noop */ }
+    _state.eventsController = null;
+  }
   if (_state.containerRef) {
     _state.containerRef.innerHTML = "";
   }

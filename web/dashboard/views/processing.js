@@ -372,7 +372,7 @@ function _initScanStep(panel) {
       ${isRunning ? `
         <div class="v5-processing-running">
           <div class="v5-processing-progress">
-            <div class="v5-processing-progress-bar" style="width: ${progress}%"></div>
+            <div class="v5-processing-progress-bar" style="--progress: ${progress / 100}"></div>
           </div>
           <div class="v5-processing-progress-label">
             <span>Analyse en cours : ${Math.round(progress)}%</span>
