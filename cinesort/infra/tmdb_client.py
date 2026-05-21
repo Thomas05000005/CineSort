@@ -325,6 +325,9 @@ class TmdbClient:
             return False, f"Erreur reseau: {e}"
 
         try:
+            _body = getattr(r, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = r.json()
         except (KeyError, TypeError, ValueError):
             data = {}
@@ -375,6 +378,9 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
+            _body = getattr(r, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = r.json()
             logger.debug(
                 "TMDb: search '%s' (%s) -> %d resultats (%.1fs)",
@@ -452,6 +458,9 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
+            _body = getattr(r, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: GET /movie/%d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -583,6 +592,9 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
+            _body = getattr(r, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_tmdb_id %d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -636,6 +648,9 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
+            _body = getattr(r, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_imdb_id %s -> %d (%.1fs)", iid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -712,6 +727,9 @@ class TmdbClient:
                 params["first_air_date_year"] = int(year)
             resp = self._http_get(f"{TMDB_API_BASE}/search/tv", params=params)
             resp.raise_for_status()
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return []
@@ -769,6 +787,9 @@ class TmdbClient:
             url = f"{TMDB_API_BASE}/tv/{series_id}/season/{season_number}/episode/{episode_number}"
             resp = self._http_get(url, params=params)
             resp.raise_for_status()
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return None

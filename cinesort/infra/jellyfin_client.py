@@ -96,7 +96,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, **kwargs)
+            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -116,7 +116,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.post(url, timeout=self.timeout_s, **kwargs)
+            resp = self._session.post(url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: POST %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -153,6 +153,9 @@ class JellyfinClient:
         # Etape 1 : info serveur (endpoint public, pas d'auth requise)
         try:
             resp = self._get("/System/Info/Public")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             server_info = resp.json()
         except JellyfinError as exc:
             return {"ok": False, "error": str(exc)}
@@ -167,6 +170,9 @@ class JellyfinClient:
         # utilisateur. GET /Users fonctionne avec une API key admin.
         try:
             resp = self._get("/Users")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             users = resp.json()
         except JellyfinError as exc:
             return {
@@ -218,6 +224,9 @@ class JellyfinClient:
         """
         try:
             resp = self._get(f"/Users/{user_id}/Views")
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -241,6 +250,9 @@ class JellyfinClient:
                 f"/Users/{user_id}/Items",
                 params={"IncludeItemTypes": "Movie", "Limit": "0", "Recursive": "true"},
             )
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -301,6 +313,9 @@ class JellyfinClient:
                 params["ParentId"] = str(library_id)
             try:
                 resp = self._get(f"/Users/{user_id}/Items", params=params)
+                _body = getattr(resp, "content", b"")
+                if _body and len(_body) > 10_000_000:
+                    raise ValueError("Response too large")
                 data = resp.json()
             except JellyfinError:
                 raise
