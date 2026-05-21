@@ -10,6 +10,7 @@
  *  - Inspecteur droit (right-panel) : recap film(s) selectionne(s)
  *  - Double-clic carte/ligne -> Modal Detail (mode C, navigate /film/:id)
  *  - Drawer "Avance" : 10 filtres detailles (cf library-advanced-drawer.js)
+ *  - Smart Playlists (issue #350) : panneau discret save/list/delete des filtres
  *
  * Endpoints consommes (PR #299) :
  *   library/get_library_filtered(filters, sort, page, page_size)
@@ -18,6 +19,11 @@
  *   library/export_films(row_ids, format)
  *   run/rescan_rows_bulk(row_ids)
  *   quality/analyze_perceptual_batch(run_id, row_ids)  (fallback bulk)
+ *
+ * Endpoints consommes (sprint orphelins #350) :
+ *   library/get_smart_playlists()
+ *   library/save_smart_playlist(name, filters)
+ *   library/delete_smart_playlist(playlist_id)
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -148,6 +154,9 @@ function _initState() {
     loadingMore: false, // batch suivant (scroll infini)
     error: null,
     focusedRowId: null, // pour inspecteur droit
+    // Smart playlists (issue #350) : presets backend + custom utilisateur.
+    playlists: [],
+    playlistsLoaded: false,
   };
 }
 
@@ -309,6 +318,70 @@ function _renderBulkToolbar() {
   `;
 }
 
+/* --- Smart playlists (sprint orphelins #350) ---
+ *
+ * Panneau discret sous les chips qui :
+ *  - Liste les playlists presets backend + custom utilisateur (lecture seule
+ *    pour les presets, X pour supprimer les custom).
+ *  - Bouton "Enregistrer les filtres actuels" qui demande un nom et persiste
+ *    via save_smart_playlist(name, filters_current).
+ *  - Clic sur une playlist applique ses filtres (tier_v2 -> tierFilter,
+ *    warnings -> activeChips, year_min/max -> advanced).
+ *
+ * Pas un Drawer car les playlists sont fonctionnelles plus que prominentes :
+ * un summary collapsible suffit pour ne pas voler de pixels au workflow
+ * principal.
+ */
+
+function _renderPlaylistsPanel() {
+  const list = Array.isArray(_state.playlists) ? _state.playlists : [];
+  const itemsHtml = list.length === 0
+    ? `<li class="bibliotheque-playlist-empty">Aucune playlist enregistrée. Appliquez des filtres puis cliquez sur Enregistrer.</li>`
+    : list.map((p) => {
+        const id = String(p.id || "");
+        const name = String(p.name || "Sans nom");
+        const isPreset = !!p.preset || id.startsWith("_preset_");
+        const cls = `bibliotheque-playlist${isPreset ? " bibliotheque-playlist--preset" : " bibliotheque-playlist--custom"}`;
+        const deleteBtn = isPreset
+          ? ""
+          : `<button type="button"
+                       class="bibliotheque-playlist-delete"
+                       data-bibliotheque-playlist-delete="${escapeHtml(id)}"
+                       title="Supprimer cette playlist"
+                       aria-label="Supprimer ${escapeHtml(name)}">×</button>`;
+        return `
+          <li class="${cls}">
+            <button type="button"
+                    class="bibliotheque-playlist-apply"
+                    data-bibliotheque-playlist-apply="${escapeHtml(id)}"
+                    title="Appliquer les filtres de cette playlist">
+              ${isPreset ? "★" : "▸"} ${escapeHtml(name)}
+            </button>
+            ${deleteBtn}
+          </li>
+        `;
+      }).join("");
+  return `
+    <details class="bibliotheque-playlists" data-bibliotheque-playlists-panel>
+      <summary class="bibliotheque-playlists-summary">
+        <span class="bibliotheque-playlists-icon" aria-hidden="true">📌</span>
+        <span class="bibliotheque-playlists-label">Playlists enregistrées</span>
+        <span class="bibliotheque-playlists-count">(${list.length})</span>
+      </summary>
+      <div class="bibliotheque-playlists-body">
+        <ul class="bibliotheque-playlists-list" role="list">
+          ${itemsHtml}
+        </ul>
+        <div class="bibliotheque-playlists-actions">
+          <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-bibliotheque-playlist-save>
+            💾 Enregistrer les filtres actuels
+          </button>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
 function _renderFilmCard(row) {
   const rowId = String(row.row_id || "");
   const title = String(row.title || "Sans titre");
@@ -452,6 +525,7 @@ function _render() {
       ${_renderHeader()}
       ${_renderTierChips()}
       ${_renderNonTierChips()}
+      ${_renderPlaylistsPanel()}
       ${_renderBulkToolbar()}
       <section class="bibliotheque-section">${_renderBody()}</section>
     </section>
@@ -985,6 +1059,24 @@ function _bindEvents(container) {
       ev.stopPropagation();
       return;
     }
+    // Smart playlists (issue #350) : apply / delete / save
+    const applyPlaylistBtn = t.closest("[data-bibliotheque-playlist-apply]");
+    if (applyPlaylistBtn) {
+      _applyPlaylist(applyPlaylistBtn.dataset.bibliothequePlaylistApply);
+      return;
+    }
+    const deletePlaylistBtn = t.closest("[data-bibliotheque-playlist-delete]");
+    if (deletePlaylistBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _confirmDeletePlaylist(deletePlaylistBtn.dataset.bibliothequePlaylistDelete);
+      return;
+    }
+    if (t.closest("[data-bibliotheque-playlist-save]")) {
+      _promptSavePlaylist();
+      return;
+    }
+
     // Bulk action
     const bulkBtn = t.closest("[data-bibliotheque-bulk]");
     if (bulkBtn) {
@@ -1283,6 +1375,186 @@ function _confirmBulkDelete(rowIds) {
   });
 }
 
+/* --- Smart playlists data layer (sprint orphelins #350) --- */
+
+/** Construit l'objet filtres a partir de l'etat courant pour persister une playlist. */
+function _currentFiltersForPlaylist() {
+  const f = {};
+  if (_state.tierFilter && _state.tierFilter !== "all") {
+    f.tier_v2 = [_state.tierFilter];
+  }
+  const chips = Array.from(_state.activeChips || []);
+  if (chips.length > 0) {
+    f.chips = chips;
+  }
+  if (_state.search) {
+    f.search = _state.search;
+  }
+  // On embarque aussi les options "Avance" si elles ont ete touchees, pour
+  // garantir une restitution fidele a l'application.
+  if (_state.advancedActive && _state.advanced) {
+    f.advanced = { ..._state.advanced };
+  }
+  return f;
+}
+
+/** Applique les filtres d'une playlist (presets ou custom). */
+function _applyPlaylist(playlistId) {
+  const list = Array.isArray(_state.playlists) ? _state.playlists : [];
+  const p = list.find((pl) => String(pl.id) === String(playlistId));
+  if (!p || !p.filters || typeof p.filters !== "object") return;
+  const filters = p.filters;
+  // tier_v2 : on prend le premier tier (UI mono-tier).
+  if (Array.isArray(filters.tier_v2) && filters.tier_v2.length > 0) {
+    _state.tierFilter = String(filters.tier_v2[0] || "all");
+    try { localStorage.setItem(LS_TIER, _state.tierFilter); } catch (_e) { /* noop */ }
+  } else {
+    _state.tierFilter = "all";
+  }
+  // warnings / chips -> activeChips
+  _state.activeChips.clear();
+  if (Array.isArray(filters.warnings)) {
+    filters.warnings.forEach((w) => {
+      // Map des warnings backend vers les chip-keys frontend connus.
+      if (w === "dnr_partial") _state.activeChips.add("recently_modified"); // approximation
+    });
+  }
+  if (Array.isArray(filters.chips)) {
+    filters.chips.forEach((k) => _state.activeChips.add(String(k)));
+  }
+  // search
+  _state.search = String(filters.search || "");
+  // year_min/max via advanced
+  if (filters.advanced) {
+    _state.advanced = { ...ADVANCED_DRAWER_DEFAULTS, ...filters.advanced };
+    _state.advancedActive = true;
+    try { localStorage.setItem(LS_ADV, JSON.stringify(_state.advanced)); } catch (_e) { /* noop */ }
+  } else if (filters.year_min != null || filters.year_max != null) {
+    _state.advanced = {
+      ...ADVANCED_DRAWER_DEFAULTS,
+      year_min: filters.year_min ?? ADVANCED_DRAWER_DEFAULTS.year_min,
+      year_max: filters.year_max ?? ADVANCED_DRAWER_DEFAULTS.year_max,
+    };
+    _state.advancedActive = true;
+  }
+  showToast({ type: "success", text: `Playlist appliquée : ${p.name}` });
+  _fetchLibrary();
+}
+
+/** Prompt pour le nom + save_smart_playlist(name, filters). */
+function _promptSavePlaylist() {
+  const filters = _currentFiltersForPlaylist();
+  const filtersSummary = (() => {
+    const parts = [];
+    if (filters.tier_v2) parts.push(`Tier ${filters.tier_v2.join("/")}`);
+    if (filters.chips) parts.push(`${filters.chips.length} chip${filters.chips.length > 1 ? "s" : ""}`);
+    if (filters.search) parts.push(`recherche "${filters.search}"`);
+    if (filters.advanced) parts.push(`filtres avancés`);
+    return parts.length ? parts.join(" · ") : "aucun filtre actif";
+  })();
+  showModal({
+    title: "Enregistrer la playlist",
+    body: `
+      <p>Filtres capturés : <em>${escapeHtml(filtersSummary)}</em></p>
+      <label class="bibliotheque-playlist-form-field">
+        <span>Nom de la playlist</span>
+        <input type="text"
+               class="v5-input"
+               data-bibliotheque-playlist-name
+               maxlength="80"
+               placeholder="Ex : Films 2020+ à re-encoder">
+      </label>
+    `,
+    actions: [
+      { label: "Annuler", cls: "", onClick: () => {} },
+      {
+        label: "Enregistrer",
+        cls: "btn-primary",
+        onClick: () => {
+          const inp = document.querySelector("[data-bibliotheque-playlist-name]");
+          const name = inp && inp.value ? String(inp.value).trim() : "";
+          if (!name) {
+            showToast({ type: "warn", text: "Le nom est requis." });
+            return;
+          }
+          try { closeModal(); } catch (_e) { /* noop */ }
+          void _doSavePlaylist(name, filters);
+        },
+      },
+    ],
+  });
+}
+
+async function _doSavePlaylist(name, filters) {
+  try {
+    const res = await apiPost("library/save_smart_playlist", { name, filters });
+    if (res && res.ok !== false) {
+      showToast({ type: "success", text: `Playlist "${name}" enregistrée.` });
+      await _fetchPlaylists();
+      _render();
+    } else {
+      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur enregistrement." });
+    }
+  } catch (err) {
+    showToast({ type: "error", text: String(err && err.message ? err.message : err) });
+  }
+}
+
+function _confirmDeletePlaylist(playlistId) {
+  const list = Array.isArray(_state.playlists) ? _state.playlists : [];
+  const p = list.find((pl) => String(pl.id) === String(playlistId));
+  if (!p) return;
+  // Confirmation simple via showModal (suppression unitaire, pas bulk > 50).
+  showModal({
+    title: "Supprimer la playlist ?",
+    body: `<p>La playlist <strong>${escapeHtml(p.name || "Sans nom")}</strong> sera supprimée. Cette action est définitive.</p>`,
+    actions: [
+      { label: "Annuler", cls: "", onClick: () => {} },
+      {
+        label: "Supprimer",
+        cls: "btn-danger",
+        onClick: () => {
+          try { closeModal(); } catch (_e) { /* noop */ }
+          void _doDeletePlaylist(playlistId);
+        },
+      },
+    ],
+  });
+}
+
+async function _doDeletePlaylist(playlistId) {
+  try {
+    const res = await apiPost("library/delete_smart_playlist", { playlist_id: playlistId });
+    if (res && res.ok !== false) {
+      showToast({ type: "success", text: "Playlist supprimée." });
+      await _fetchPlaylists();
+      _render();
+    } else {
+      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur suppression." });
+    }
+  } catch (err) {
+    showToast({ type: "error", text: String(err && err.message ? err.message : err) });
+  }
+}
+
+async function _fetchPlaylists() {
+  try {
+    const res = await apiPost("library/get_smart_playlists", {});
+    if (res && res.ok !== false) {
+      _state.playlists = Array.isArray(res.playlists) ? res.playlists : [];
+      _state.playlistsLoaded = true;
+    } else {
+      _state.playlists = [];
+      _state.playlistsLoaded = true;
+    }
+  } catch (err) {
+    // Silencieux : la zone playlists tolere l'erreur, on log juste.
+    console.warn("[bibliotheque] get_smart_playlists ko :", err && err.message ? err.message : err);
+    _state.playlists = [];
+    _state.playlistsLoaded = true;
+  }
+}
+
 /* --- Entrypoint --- */
 
 export async function initBibliotheque(container) {
@@ -1301,6 +1573,9 @@ export async function initBibliotheque(container) {
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
   void signal;
+  // Issue #350 : fetch playlists en parallele du premier chargement library.
+  // En cas d'echec on continue : la zone playlists est tolerante a l'absence.
+  void _fetchPlaylists();
   await _fetchLibrary();
 }
 
