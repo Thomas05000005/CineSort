@@ -102,7 +102,7 @@ function _renderLiveSection() {
       <h3>Run en cours : <span class="text-accent">${escapeHtml(_runId)}</span></h3>
       <button id="btnLogsCancel" class="btn btn-danger btn--compact">Annuler</button>
     </div>`;
-    html += '<div id="logsProgressBar" class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>';
+    html += '<div id="logsProgressBar" class="progress-bar"><div class="progress-fill" style="--progress:0"></div></div>';
     html += '<p id="logsProgressText" class="text-muted mt-2"></p>';
   } else {
     html += '<div class="card"><p class="text-muted">Aucun run en cours. Les logs apparaîtront ici pendant un scan.</p></div>';
@@ -223,7 +223,8 @@ async function _pollLogs() {
       if (total > 0) {
         const pct = Math.round((idx / total) * 100);
         progressText.textContent = `${idx}/${total} (${pct}%)${d.eta_s > 0 ? ` — ETA ${_fmtDuration(d.eta_s)}` : ""}`;
-        if (progressFill) { progressFill.style.width = `${pct}%`; progressFill.classList.remove("progress-fill--shimmer"); }
+        // B8 (fin sprint 4) : --progress (0..1) -> scaleX (compositor only, no reflow).
+        if (progressFill) { progressFill.style.setProperty("--progress", String(pct / 100)); progressFill.classList.remove("progress-fill--shimmer"); }
       } else {
         progressText.textContent = `${idx} films trouvés...`;
         if (progressFill) progressFill.classList.add("progress-fill--shimmer");

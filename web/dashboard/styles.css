@@ -367,7 +367,7 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
 }
 .progress-fill {
-  height: 100%; border-radius: var(--radius-pill);
+  width: 100%; height: 100%; border-radius: var(--radius-pill);
   /* E9 : gradient bleu + accent dore traversant, anime en continu pour un effet "vitesse" */
   background: linear-gradient(90deg,
     var(--accent) 0%,
@@ -377,7 +377,11 @@ a:hover { text-decoration: underline; }
     var(--accent) 100%);
   background-size: 200% 100%;
   animation: progress-flow 2.4s linear infinite;
-  transition: width var(--dur-mid) var(--ease);
+  /* B8 (fin sprint 4) : transform: scaleX (compositor only) au lieu de width (reflow).
+   * Le JS doit ecrire --progress en decimal 0..1 (ex: 0.42 pour 42%). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform var(--dur-mid) var(--ease);
   box-shadow: 0 0 8px rgba(96, 165, 250, 0.4);
 }
 @keyframes progress-flow {
@@ -387,6 +391,9 @@ a:hover { text-decoration: underline; }
 body.is-background .progress-fill { animation-play-state: paused; }
 .progress-fill--shimmer {
   width: 100% !important;
+  /* B8 : forcer scaleX(1) car le parent .progress-fill applique scaleX(--progress)
+   * (qui vaut 0 par defaut en phase shimmer ou la barre doit etre pleine). */
+  transform: scaleX(1) !important;
   background: linear-gradient(90deg, var(--bg-raised) 0%, var(--accent) 40%, var(--accent-hover) 50%, var(--accent) 60%, var(--bg-raised) 100%);
   background-size: 200% 100%;
   animation: shimmer-bar 1.8s ease-in-out infinite;

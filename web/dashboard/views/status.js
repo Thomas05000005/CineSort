@@ -420,7 +420,7 @@ function _renderShell(vm, container) {
     html += `<div id="statusRunProgress" class="card bento-card bento-card--half">
       <h3><span class="live-dot"></span> ${glossaryTooltip("Run")} en cours : <span class="text-accent">${escapeHtml(vm.activeRunId || "")}</span></h3>
       <div id="statusProgressBar" class="progress-bar mt-4">
-        <div class="progress-fill progress-fill-dyn" data-stat="progress-fill" style="--fill-width:${vm.progressPct}%"></div>
+        <div class="progress-fill progress-fill-dyn" data-stat="progress-fill" style="--progress:${vm.progressPct / 100}"></div>
       </div>
       <p id="statusProgressText" class="text-muted mt-4" data-stat="progress-text">${escapeHtml(vm.progressText)}</p>
       <button id="btnCancelRun" class="btn btn-danger mt-4">Annuler</button>
@@ -694,8 +694,9 @@ function _patchDynamic(vm, container) {
   }
 
   // Run progress (si la card existe)
+  // B8 (fin sprint 4) : --progress (0..1) -> scaleX (compositor only, no reflow).
   const pf = container.querySelector('[data-stat="progress-fill"]');
-  if (pf) pf.style.width = `${vm.progressPct}%`;
+  if (pf) pf.style.setProperty("--progress", String(vm.progressPct / 100));
   _setText(container, '[data-stat="progress-text"]', vm.progressText);
 
   // Tier distribution
