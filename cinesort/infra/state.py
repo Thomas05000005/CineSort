@@ -25,8 +25,11 @@ def _debug_log_state(state_dir: Path, message: str) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "a", encoding="utf-8") as f:
             f.write(f"[{ts}] {message}\n")
-    except (ImportError, KeyError, OSError, PermissionError, TypeError, ValueError):
-        # Never break runtime maintenance on debug logging.
+    except OSError:
+        # Best-effort debug logging : mkdir / open / write peuvent lever OSError
+        # (PermissionError, FileNotFoundError, etc., qui en derivent). Les
+        # ImportError / KeyError / TypeError / ValueError historiques ici
+        # n'avaient pas de cause plausible et masquaient des bugs reels.
         return
 
 
@@ -85,10 +88,14 @@ def atomic_write_json(p: Path, obj) -> None:
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, p)
     finally:
+        # Best-effort cleanup : tmp.exists() / tmp.unlink() ne peuvent lever
+        # qu'OSError (PermissionError, FileNotFoundError en derivent). Les
+        # KeyError / TypeError / ValueError / JSONDecodeError historiques ici
+        # n'avaient pas de cause plausible sur ces 2 syscalls.
         try:
             if tmp.exists():
                 tmp.unlink()
-        except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError):
+        except OSError:
             pass
 
 
