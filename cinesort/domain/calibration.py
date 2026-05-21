@@ -15,7 +15,10 @@ Tout est pur — pas d'I/O, testable unitairement.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Ordre des tiers (du plus bas au plus haut), pour calculer les deltas ordinaux.
@@ -190,6 +193,12 @@ def suggest_weight_adjustment(
             diff -= adjusted - old
             new_weights[cat] = adjusted
         if diff != 0:
+            logger.debug(
+                "calibration.rebalance impossible: diff=%d apres clamp, total_before=%d, new_weights=%s",
+                diff,
+                total_before,
+                new_weights,
+            )
             return None
 
     direction_label = "augmenté" if actual_delta > 0 else "diminué"
