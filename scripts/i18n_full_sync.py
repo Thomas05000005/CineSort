@@ -12,11 +12,11 @@ Etapes :
 
 Usage : python scripts/i18n_full_sync.py
 """
+
 from __future__ import annotations
 
 import io
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -289,11 +289,7 @@ def set_nested(target: dict, dotted_key: str, value) -> None:
 
 def deep_merge(target: dict, source: dict) -> None:
     for key, value in source.items():
-        if (
-            key in target
-            and isinstance(target[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
             deep_merge(target[key], value)
         else:
             target[key] = value
