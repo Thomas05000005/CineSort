@@ -144,6 +144,8 @@
   <!-- Debug bootstrap : capture toutes les erreurs avant que app.js charge.
        Persiste dans localStorage pour inspection meme apres crash. -->
   <script src="./bootstrap-debug.js"></script>
+  <!-- Bisect : test chaque module individuellement pour identifier celui qui hang/throw -->
+  <script type="module" src="./bootstrap-bisect.js"></script>
   <script type="module" src="./app.js"></script>
   <!-- Modale "A propos" (V1-12) — auto-init via DOMContentLoaded -->
   <script type="module" src="./views/about.js"></script>
