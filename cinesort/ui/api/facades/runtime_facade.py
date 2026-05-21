@@ -13,7 +13,13 @@ Endpoints exposes :
           mark_all_notifications_read, clear_notifications,
           get_notifications_unread_count : notification center (v7.6 Vague 9)
         - validate_dropped_path : drag-and-drop UI
-        - get_probe_tools_status, auto_install_probe_tools : outils probe
+    Sprint 7 (api refactor, mai 2026) :
+        - get_probe_tools_status, get_tools_status (alias),
+          recheck_probe_tools, set_probe_tool_paths,
+          install_probe_tools, update_probe_tools,
+          auto_install_probe_tools, get_probe : 8 endpoints probe (ffprobe + MediaInfo)
+        - get_event_ts : timestamp dernier evenement (scan/apply/settings)
+        - reset_incremental_cache : purge totale du cache incremental
 
 Note : `open_path` reste hors facade. Il est exclu du dispatcher REST
 (prend un chemin arbitraire en parametre, vector path-traversal) et n'est
@@ -27,6 +33,8 @@ Usage frontend :
     api.runtime.get_diagnostic()
     api.runtime.get_update_info()
     api.runtime.get_notifications_unread_count()
+    api.runtime.get_probe_tools_status()
+    api.runtime.install_probe_tools({"scope": "user", "tools": ["ffprobe"]})
 """
 
 from __future__ import annotations
@@ -132,9 +140,7 @@ class RuntimeFacade(_BaseFacade):
         category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : liste les notifications en memoire (LIFO)."""
-        return self._api._get_notifications_impl(
-            unread_only=unread_only, limit=limit, category=category
-        )
+        return self._api._get_notifications_impl(unread_only=unread_only, limit=limit, category=category)
 
     def dismiss_notification(self, notification_id: str) -> Dict[str, Any]:
         """v7.6.0 Vague 9 : supprime une notification du centre."""
@@ -171,6 +177,63 @@ class RuntimeFacade(_BaseFacade):
         """Retourne le statut de detection de ffprobe + MediaInfo (version, chemin, dispo)."""
         return self._api._get_probe_tools_status_impl()
 
+    def get_tools_status(self) -> Dict[str, Any]:
+        """Alias historique de `get_probe_tools_status` (compat v7.0/v7.1)."""
+        return self._api._get_tools_status_impl()
+
+    def recheck_probe_tools(self) -> Dict[str, Any]:
+        """Force une redetection des outils probe (utile apres installation manuelle).
+
+        Cf CineSortApi._recheck_probe_tools_impl pour la doc complete.
+        """
+        return self._api._recheck_probe_tools_impl()
+
+    def set_probe_tool_paths(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Enregistre des chemins manuels vers ffprobe / MediaInfo (si hors PATH).
+
+        Cf CineSortApi._set_probe_tool_paths_impl pour la doc complete.
+        """
+        return self._api._set_probe_tool_paths_impl(payload)
+
+    def install_probe_tools(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Installe ffprobe + MediaInfo via winget (ou options fournies).
+
+        Cf CineSortApi._install_probe_tools_impl pour la doc complete.
+        """
+        return self._api._install_probe_tools_impl(options)
+
+    def update_probe_tools(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Met a jour ffprobe + MediaInfo via winget.
+
+        Cf CineSortApi._update_probe_tools_impl pour la doc complete.
+        """
+        return self._api._update_probe_tools_impl(options)
+
     def auto_install_probe_tools(self) -> Dict[str, Any]:
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return self._api._auto_install_probe_tools_impl()
+
+    def get_probe(self, run_id: str, row_id: str) -> Dict[str, Any]:
+        """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run.
+
+        Cf CineSortApi._get_probe_impl pour la doc complete.
+        """
+        return self._api._get_probe_impl(run_id, row_id)
+
+    # ---------- Sprint 7 : misc runtime ----------
+
+    def get_event_ts(self) -> Dict[str, Any]:
+        """Retourne le timestamp du dernier evenement significatif (scan/apply/settings).
+
+        Utilise par le desktop pour detecter les changements et rafraichir.
+        Cf CineSortApi._get_event_ts_impl pour la doc complete.
+        """
+        return self._api._get_event_ts_impl()
+
+    def reset_incremental_cache(self) -> Dict[str, Any]:
+        """Purge TOTALE du cache incremental (3 tables, tous roots confondus).
+
+        Utilise par le bouton "Forcer le rescan complet".
+        Cf CineSortApi._reset_incremental_cache_impl pour la doc complete.
+        """
+        return self._api._reset_incremental_cache_impl()
