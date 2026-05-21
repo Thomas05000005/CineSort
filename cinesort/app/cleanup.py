@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
 
+from cinesort.app._dir_utils import is_dir_empty
 from cinesort.app.move_journal import atomic_move
 from cinesort.domain.core import (
     RESIDUAL_IMAGE_EXTS,
@@ -21,17 +22,13 @@ if TYPE_CHECKING:
 
 
 def _collect_root_all_empty_dirs(cfg: "Config") -> List[Path]:
-    # Cf issue #83 phase 2 : import direct depuis l'origine app au lieu du
-    # re-export domain.core (qui creait un cycle domain -> app).
-    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
-
     out: List[Path] = []
     try:
         entries = [p for p in cfg.root.iterdir() if p.is_dir()]
     except (OSError, PermissionError, FileNotFoundError):
         return out
     for directory in entries:
-        if _is_dir_empty(directory):
+        if is_dir_empty(directory):
             out.append(directory)
     return out
 
@@ -68,13 +65,9 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
     Renvoie une étiquette utilisée par le preview et le move pour distinguer les dossiers
     sûrs à déplacer (`eligible`/`empty`) des dossiers à protéger (vidéos, symlinks).
     """
-    # Cf issue #83 phase 2 : import direct depuis l'origine app au lieu du
-    # re-export domain.core (qui creait un cycle domain -> app).
-    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
-
     if not path.exists() or not path.is_dir():
         return "invalid"
-    if _is_dir_empty(path):
+    if is_dir_empty(path):
         return "empty"
 
     allowed_exts = _residual_allowed_exts(cfg)
@@ -350,9 +343,6 @@ def _move_empty_top_level_dirs(
     No-op si l'option `move_empty_folders_enabled` est désactivée. Met à jour
     `res.empty_folders_moved_count`.
     """
-    # Cycle app.cleanup <-> app.apply_core : import tardif requis.
-    from cinesort.app.apply_core import is_dir_empty as _is_dir_empty
-
     if not cfg.move_empty_folders_enabled:
         return
 
@@ -386,7 +376,7 @@ def _move_empty_top_level_dirs(
 
     res.empty_folders_moved_count += _move_dirs_to_bucket(
         candidates,
-        is_eligible=_is_dir_empty,
+        is_eligible=is_dir_empty,
         bucket_root=bucket_root,
         dry_run=dry_run,
         log=log,
