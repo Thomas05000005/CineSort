@@ -142,7 +142,11 @@ def _validate_and_load_context(
     if not bool(opts.get("force")):
         existing = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
         if existing:
-            return {"ok": True, "cache_hit": True, "perceptual": existing.get("metrics", {})}
+            metrics = dict(existing.get("metrics", {}) or {})
+            for k in ("audio_fingerprint", "ssim_self_ref", "upscale_verdict", "spectral_cutoff_hz", "lossy_verdict"):
+                if k in existing and existing[k] is not None:
+                    metrics[k] = existing[k]
+            return {"ok": True, "cache_hit": True, "perceptual": metrics}
 
     state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
