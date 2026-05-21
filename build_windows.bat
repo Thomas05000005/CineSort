@@ -58,6 +58,8 @@ if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
 echo [5/5] Build PyInstaller...
+REM Audit C21 P0 : hash deterministe pour build reproductible
+set PYTHONHASHSEED=0
 "%PYTHON_EXE%" -m PyInstaller --clean --noconfirm CineSort.spec
 if errorlevel 1 (
   echo [ERREUR] Build PyInstaller echoue.
