@@ -302,3 +302,27 @@ class QualityFacade(_BaseFacade):
         Cf cinesort.ui.api.quality_audit_support.get_recompute_job_status.
         """
         return quality_audit_support.get_recompute_job_status(self._api, job_id=job_id)
+
+    # ---------- Shareable profile exchange (sprint C1 — refactor #84 suite) ----------
+    # Distinct de export/import_quality_profile (formats bruts) : le format
+    # "shareable" wrap le profil dans un schema avec metadata (name, author,
+    # description, exported_at) pour le partage inter-utilisateurs (P4.3).
+
+    def export_shareable_profile(
+        self,
+        name: str = "",
+        author: str = "",
+        description: str = "",
+    ) -> Dict[str, Any]:
+        """P4.3 : exporte le profil qualite actif au format communautaire.
+
+        Cf CineSortApi._export_shareable_profile_impl pour la doc complete.
+        """
+        return self._api._export_shareable_profile_impl(name=name, author=author, description=description)
+
+    def import_shareable_profile(self, content: str, activate: bool = True) -> Dict[str, Any]:
+        """P4.3 : importe un profil depuis un JSON communautaire (avec metadata).
+
+        Cf CineSortApi._import_shareable_profile_impl pour la doc complete.
+        """
+        return self._api._import_shareable_profile_impl(content, activate=activate)
