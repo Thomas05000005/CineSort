@@ -78,9 +78,11 @@ def extract_aligned_frames(
         if not raw_a or not raw_b:
             continue
 
+        # parse_raw_frame retourne directement un np.ndarray (B3, suppression
+        # double copie bytes -> List[int] -> ndarray pour gain memoire ~50%).
         pixels_a = parse_raw_frame(raw_a, common_w, common_h, bd)
         pixels_b = parse_raw_frame(raw_b, common_w, common_h, bd)
-        if not pixels_a or not pixels_b:
+        if pixels_a.size == 0 or pixels_b.size == 0:
             continue
 
         if not is_valid_frame(pixels_a, common_w, common_h, bd):
@@ -106,14 +108,17 @@ def extract_aligned_frames(
 # ---------------------------------------------------------------------------
 
 
-def compute_pixel_diff(pixels_a: List[int], pixels_b: List[int]) -> Optional[Dict[str, float]]:
+def compute_pixel_diff(pixels_a: Any, pixels_b: Any) -> Optional[Dict[str, float]]:
     """Difference pixel-a-pixel entre deux frames.
 
     Cf issue #74 : vectorise via numpy (~50x speedup sur frame 1920x1080).
     Les valeurs retournees sont strictement identiques a la version pure Python
     (memes arrondis, meme algo de mediane via tri partiel).
+
+    Accepte ``np.ndarray`` (preferable, zero-copy via parse_raw_frame B3) ou
+    ``List[int]`` (legacy, fixtures de tests).
     """
-    if len(pixels_a) != len(pixels_b) or not pixels_a:
+    if len(pixels_a) != len(pixels_b) or len(pixels_a) == 0:
         return None
 
     a = np.asarray(pixels_a, dtype=np.int64)

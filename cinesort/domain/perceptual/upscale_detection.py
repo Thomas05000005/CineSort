@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def compute_fft_hf_ratio(
-    pixels: List[int],
+    pixels: Any,
     width: int,
     height: int,
     hf_cutoff_ratio: float = FAKE_4K_FFT_HF_CUTOFF_RATIO,
@@ -41,7 +41,8 @@ def compute_fft_hf_ratio(
     """Calcule le ratio energie HF / totale via FFT 2D.
 
     Args:
-        pixels: liste de pixels luminance (Y plan) de longueur width * height.
+        pixels: pixels luminance (Y plan) de longueur width * height
+            (``np.ndarray`` preferable, ``List[int]`` accepte).
         width, height: dimensions de la frame.
         hf_cutoff_ratio: seuil frequentiel (0.25 = dernier quart de Nyquist).
 
@@ -52,7 +53,8 @@ def compute_fft_hf_ratio(
     if w <= 0 or h <= 0:
         return 0.0
     expected = w * h
-    if not pixels or len(pixels) < expected:
+    # ``not pixels`` est ambigu sur ndarray (ValueError) -> utiliser len().
+    if pixels is None or len(pixels) < expected:
         return 0.0
 
     try:
@@ -83,7 +85,7 @@ def compute_fft_hf_ratio(
 
 
 def is_frame_usable_for_fft(
-    pixels: List[int],
+    pixels: Any,
     width: int,
     height: int,
     y_avg: float,
@@ -95,12 +97,14 @@ def is_frame_usable_for_fft(
       - pixels tronques (len < width * height * 0.9)
       - frames trop sombres (y_avg < FAKE_4K_FFT_MIN_Y_AVG)
       - frames uniformes (variance < FAKE_4K_FFT_MIN_VARIANCE)
+
+    Accepte ``np.ndarray`` ou ``List[int]``.
     """
     w, h = int(width), int(height)
     if w <= 0 or h <= 0:
         return False
     expected = w * h
-    if not pixels or len(pixels) < int(expected * 0.9):
+    if pixels is None or len(pixels) < int(expected * 0.9):
         return False
     if float(y_avg) < FAKE_4K_FFT_MIN_Y_AVG:
         return False
@@ -131,7 +135,11 @@ def compute_fft_hf_ratio_median(
         if not isinstance(frame, dict):
             continue
         pixels = frame.get("pixels")
-        if not isinstance(pixels, list):
+        # B3 : pixels est desormais np.ndarray (sortie parse_raw_frame), mais
+        # on tolere encore list pour les fixtures de tests legacy.
+        if not isinstance(pixels, (list, np.ndarray)):
+            continue
+        if len(pixels) == 0:
             continue
         fw = int(frame.get("width") or video_width or 0)
         fh = int(frame.get("height") or video_height or 0)
