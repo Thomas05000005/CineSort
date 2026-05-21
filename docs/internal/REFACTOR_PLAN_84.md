@@ -1,10 +1,10 @@
 # Plan refactor #84 — God class CineSortApi → 5 façades par bounded context
 
-**Version** : 1.2 (Sprint 7 — extension RuntimeFacade probe tools)
-**Auteur** : Claude Code (session 2026-05-14, sprint 7 2026-05-21)
-**Statut** : ✅ Phase 1 (façades) + Phase 2 (callers JS) **TERMINÉES** — Sprint 7 : couverture probe tools completee sur RuntimeFacade
+**Version** : 1.3 (Sprint C1 — extraction 8 méthodes orphelines + input clamping audit C7)
+**Auteur** : Claude Code (session 2026-05-14, sprint 7 2026-05-21, sprint C1 2026-05-21)
+**Statut** : ✅ Phase 1 + Phase 2 + Sprint 7 + Sprint C1 **TERMINÉES** — Lot D restant (migration callers JS legacy)
 
-## Résumé d'avancement (au 2026-05-14)
+## Résumé d'avancement (au 2026-05-21)
 
 | PR | Bounded context | Méthodes | Tests | Commit | Statut |
 |----|-----------------|----------|-------|--------|--------|
@@ -19,56 +19,64 @@
 | PR 8 | Migration frontend JS | — | — | — | ✅ Mergée |
 | PR 9 | Migration REST dispatch | — | — | — | ✅ Mergée |
 | PR 10 | Suppression méthodes directes | — | — | — | ✅ Mergée (Pass 1 legacy mai 2026) |
-| Sprint 7 | RuntimeFacade probe tools (+ event_ts, reset_incremental_cache) | 10 | +12 | (cette PR) | 🟡 En cours |
+| Sprint 7 (#335) | RuntimeFacade probe tools | 10 | +12 | 68165fd | ✅ Mergée |
+| Sprint C1 | Extraction 8 méthodes orphelines + clamping C7 | 8 + 6 clamps | +17 | (cette PR) | 🟡 En cours |
 
-## Sprint 7 (mai 2026) — Extension RuntimeFacade
+## Sprint C1 (mai 2026) — Extraction des 8 méthodes orphelines + input clamping (audit C7 P1)
 
-**Contexte** : audit C24 a signalé que `cinesort_api.py` (2563 LoC) restait sur-dimensionné. Le sprint 7 finit la couverture façades pour les méthodes **probe tools** orphelines.
+**Contexte** : suite de PR #335 (Sprint 7) qui a terminé la couverture probe tools. Restent 8 méthodes `_X_impl` orphelines (non exposées par façade). Le sprint C1 :
+- les extrait toutes les 8 vers leur façade respective ;
+- ajoute le clamp d'entrée sur 5 endpoints `test_X_connection` + `test_reset` (audit C7 P1).
 
-**Avant sprint 7** (méthodes `_X_impl` SANS exposition façade) :
+### Partie 1 — Extraction Sprint C1 (8 méthodes orphelines)
 
-| Méthode `_impl` | Statut |
-|-----------------|--------|
-| `_get_probe_tools_status_impl` | ✅ déjà sur `RuntimeFacade.get_probe_tools_status` |
-| `_auto_install_probe_tools_impl` | ✅ déjà sur `RuntimeFacade.auto_install_probe_tools` |
-| `_get_tools_status_impl` | ❌ orpheline (alias historique de `get_probe_tools_status`) |
-| `_recheck_probe_tools_impl` | ❌ orpheline |
-| `_set_probe_tool_paths_impl` | ❌ orpheline |
-| `_install_probe_tools_impl` | ❌ orpheline |
-| `_update_probe_tools_impl` | ❌ orpheline |
-| `_get_probe_impl` | ❌ orpheline |
-| `_get_event_ts_impl` | ❌ orpheline |
-| `_reset_incremental_cache_impl` | ❌ orpheline |
+**Méthodes ajoutées** :
 
-**Après sprint 7** : 8 méthodes probe + 2 méthodes runtime ajoutées sur `RuntimeFacade`. Total `RuntimeFacade` passe de **17 à 27 méthodes**.
+| Méthode | Façade cible | Notes |
+|---------|--------------|-------|
+| `get_naming_presets()` | `SettingsFacade.get_naming_presets` | Liste presets renommage |
+| `preview_naming_template(template, sample_row_id)` | `SettingsFacade.preview_naming_template` | Preview template |
+| `export_shareable_profile(name, author, description)` | `QualityFacade.export_shareable_profile` | Export profil communautaire (P4.3) |
+| `import_shareable_profile(content, activate)` | `QualityFacade.import_shareable_profile` | Import profil communautaire (P4.3) |
+| `get_auto_approved_summary(run_id, threshold, enabled, quarantine_corrupted)` | `RunFacade.get_auto_approved_summary` | Résumé auto-approve batch |
+| `undo_last_apply_preview(run_id)` | `RunFacade.undo_last_apply_preview` | Preview undo v1 |
+| `undo_by_row_preview(run_id, batch_id)` | `RunFacade.undo_by_row_preview` | Preview undo v5 par row |
+| `undo_selected_rows(run_id, row_ids, dry_run, batch_id, atomic)` | `RunFacade.undo_selected_rows` | Undo v5 sélection |
 
-**Méthodes ajoutées sur RuntimeFacade** :
+**Pattern** : Strangler Fig identique aux PRs précédentes — la façade délègue vers `self._api._X_impl(...)`, l'`_impl` reste inchangé, backward-compat 100% préservée.
 
-- `get_tools_status()` (alias compat v7.0/v7.1)
-- `recheck_probe_tools()`
-- `set_probe_tool_paths(payload)`
-- `install_probe_tools(options)`
-- `update_probe_tools(options)`
-- `get_probe(run_id, row_id)`
-- `get_event_ts()`
-- `reset_incremental_cache()`
+### Partie 2 — Input clamping (audit C7 P1)
 
-**Couverture côté frontend** : aucune URL `runtime/...` n'est utilisée pour ces méthodes aujourd'hui (audit `grep` confirmé). Les nouveaux endpoints REST `/api/runtime/{method}` sont **disponibles** mais non encore appelés par le dashboard JS. Migration des appels JS = travail séparé pour une PR future.
+**Constat** : 5 endpoints `_test_X_connection_impl` acceptaient `timeout_s` sans aucune validation. Un caller (REST distant compromis, test E2E mal calibré, frontend buggué) pouvait passer `timeout_s=0` (division par zéro), `99999` (DoS thread API), `"abc"` (TypeError), `None` (TypeError), `NaN`, `Inf` — tous causant des crashes ou comportements imprévus.
 
-**Méthodes encore orphelines après sprint 7** (à traiter en PR suivantes) :
+**Solution** : helper centralisé dans `cinesort/ui/api/_validators.py`.
 
-| Méthode `_impl` | Façade candidate | Notes |
-|-----------------|------------------|-------|
-| `_get_naming_presets_impl` | `SettingsFacade` ou `QualityFacade` | Liste presets renommage |
-| `_preview_naming_template_impl` | `SettingsFacade` | Preview templates |
-| `_export_shareable_profile_impl` | `QualityFacade` | Export profil communautaire |
-| `_import_shareable_profile_impl` | `QualityFacade` | Import profil communautaire |
-| `_get_auto_approved_summary_impl` | `RunFacade` | Résumé auto-approve |
-| `_undo_by_row_preview_impl` | `RunFacade` | Preview undo par row |
-| `_undo_last_apply_preview_impl` | `RunFacade` | Preview undo last apply |
-| `_undo_selected_rows_impl` | `RunFacade` | Undo selection |
+```python
+def clamp_timeout(value, default=10.0, lo=1.0, hi=60.0) -> float:
+    """Borne `value` entre [lo, hi], fallback sur `default` si parsing
+    impossible (None, str non-numérique, NaN, inf)."""
+```
 
-**Reste : 8 méthodes orphelines à exposer en façades dans les sprints suivants** (estimées 1-2 PR séparées pour ne pas mélanger les bounded contexts).
+Appliqué à 5 méthodes :
+- `_test_tmdb_key_impl`
+- `_test_jellyfin_connection_impl`
+- `_test_plex_connection_impl` (remplace `max(1, min(30, timeout_s))` — range élargi à 60s)
+- `_test_radarr_connection_impl` (idem)
+- `_test_omdb_connection_impl` (idem)
+
+Plus `clamp_non_negative_int(value, default=0)` pour `test_reset(min_video_bytes)` : normalise vers `int >= 0`, fallback à 0 sur input invalide.
+
+**Tests** : +17 tests dans `tests/test_cinesort_api_facades.py` :
+- 8 tests délégation pour les 8 nouvelles méthodes (sanity + signature defaults).
+- 6 tests unitaires sur les helpers `clamp_timeout` / `clamp_non_negative_int`.
+- 7 tests d'intégration vérifiant que les 5 endpoints connexion + `test_reset` appellent bien le clamp.
+
+**Lot D restant** :
+
+Reste à faire dans des PRs séparées (non bloquant pour la prod) :
+- **Migration des callers JS legacy** : audit grep `pywebview.api.{method}(...)` pour les 8 méthodes ci-dessus, remplacement par `pywebview.api.{facade}.{method}(...)`.
+- **Audit C7 P2-P5** : autres opportunités de hardening des inputs (taille listes batch, longueur strings, etc.) — hors scope sprint C1.
+- **Nettoyage final REFACTOR_PLAN_84** : marquer Sprint C1 comme mergé, archiver les sections obsolètes (Phase 2 callers JS déjà terminée).
 
 **Backward-compat 100% préservée** : les 104 méthodes directes de `CineSortApi` coexistent avec les 5 façades. Les anciens call sites (`api.X(...)`) et les nouveaux (`api.context.X(...)`) fonctionnent en parallèle. La suppression des méthodes directes ne se fera qu'à la PR 10, après migration complète des callers JS et REST.
 

@@ -119,3 +119,19 @@ class SettingsFacade(_BaseFacade):
         Cf CineSortApi._get_dashboard_qr_impl pour la doc complete.
         """
         return self._api._get_dashboard_qr_impl()
+
+    # ---------- Naming presets & template preview (sprint C1 — refactor #84 suite) ----------
+
+    def get_naming_presets(self) -> Dict[str, Any]:
+        """Retourne la liste des presets de renommage disponibles.
+
+        Cf CineSortApi._get_naming_presets_impl pour la doc complete.
+        """
+        return self._api._get_naming_presets_impl()
+
+    def preview_naming_template(self, template: str = "", sample_row_id: str = "") -> Dict[str, Any]:
+        """Preview du resultat d'un template de renommage sur un film exemple.
+
+        Cf CineSortApi._preview_naming_template_impl pour la doc complete.
+        """
+        return self._api._preview_naming_template_impl(template, sample_row_id)

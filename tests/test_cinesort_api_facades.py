@@ -788,5 +788,297 @@ class LibraryFacadeFullMigrationTests(unittest.TestCase):
         self.assertEqual(result, sentinel)
 
 
+# ---------------------------------------------------------------------------
+# Sprint C1 (mai 2026) — extraction 8 methodes orphelines vers facades
+# (suite de PR #335 / refactor #84). Couvre :
+#   - SettingsFacade : get_naming_presets, preview_naming_template
+#   - QualityFacade  : export_shareable_profile, import_shareable_profile
+#   - RunFacade      : get_auto_approved_summary, undo_last_apply_preview,
+#                      undo_by_row_preview, undo_selected_rows
+# ---------------------------------------------------------------------------
+
+
+class SettingsFacadeNamingExtensionTests(unittest.TestCase):
+    """Sprint C1 : 2 methodes naming ajoutees sur SettingsFacade."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_get_naming_presets_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.settings, "get_naming_presets", None)))
+        sentinel = {"ok": True, "presets": [{"id": "kodi", "label": "Kodi"}]}
+        with patch.object(self.api, "_get_naming_presets_impl", return_value=sentinel) as mocked:
+            result = self.api.settings.get_naming_presets()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_preview_naming_template_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.settings, "preview_naming_template", None)))
+        sentinel = {"ok": True, "result": "Inception (2010)", "variables": {}}
+        with patch.object(self.api, "_preview_naming_template_impl", return_value=sentinel) as mocked:
+            result = self.api.settings.preview_naming_template("{title} ({year})", "row_42")
+        mocked.assert_called_once_with("{title} ({year})", "row_42")
+        self.assertEqual(result, sentinel)
+
+    def test_preview_naming_template_defaults(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_preview_naming_template_impl", return_value=sentinel) as mocked:
+            self.api.settings.preview_naming_template()
+        mocked.assert_called_once_with("", "")
+
+
+class QualityFacadeShareableExtensionTests(unittest.TestCase):
+    """Sprint C1 : 2 methodes shareable profile ajoutees sur QualityFacade."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_export_shareable_profile_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.quality, "export_shareable_profile", None)))
+        sentinel = {"ok": True, "content": "{}", "filename_suggestion": "x.cinesort.json"}
+        with patch.object(self.api, "_export_shareable_profile_impl", return_value=sentinel) as mocked:
+            result = self.api.quality.export_shareable_profile(name="MyProfile", author="me", description="hi")
+        mocked.assert_called_once_with(name="MyProfile", author="me", description="hi")
+        self.assertEqual(result, sentinel)
+
+    def test_export_shareable_profile_defaults(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_export_shareable_profile_impl", return_value=sentinel) as mocked:
+            self.api.quality.export_shareable_profile()
+        mocked.assert_called_once_with(name="", author="", description="")
+
+    def test_import_shareable_profile_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.quality, "import_shareable_profile", None)))
+        sentinel = {"ok": True, "meta": {}, "activated": True, "saved_profile_id": "x_1"}
+        with patch.object(self.api, "_import_shareable_profile_impl", return_value=sentinel) as mocked:
+            result = self.api.quality.import_shareable_profile('{"profile": {}}', activate=False)
+        mocked.assert_called_once_with('{"profile": {}}', activate=False)
+        self.assertEqual(result, sentinel)
+
+    def test_import_shareable_profile_default_activate(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_import_shareable_profile_impl", return_value=sentinel) as mocked:
+            self.api.quality.import_shareable_profile('{"profile": {}}')
+        mocked.assert_called_once_with('{"profile": {}}', activate=True)
+
+
+class RunFacadeAutoApproveUndoExtensionTests(unittest.TestCase):
+    """Sprint C1 : 4 methodes (auto_approve + 3 undo previews) ajoutees sur RunFacade."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_get_auto_approved_summary_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.run, "get_auto_approved_summary", None)))
+        sentinel = {"ok": True, "auto_approved_count": 3}
+        with patch.object(self.api, "_get_auto_approved_summary_impl", return_value=sentinel) as mocked:
+            result = self.api.run.get_auto_approved_summary(
+                "run_xyz", threshold=90, enabled=True, quarantine_corrupted=True
+            )
+        mocked.assert_called_once_with("run_xyz", threshold=90, enabled=True, quarantine_corrupted=True)
+        self.assertEqual(result, sentinel)
+
+    def test_get_auto_approved_summary_defaults(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_get_auto_approved_summary_impl", return_value=sentinel) as mocked:
+            self.api.run.get_auto_approved_summary("run_xyz")
+        mocked.assert_called_once_with("run_xyz", threshold=85, enabled=False, quarantine_corrupted=False)
+
+    def test_undo_last_apply_preview_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.run, "undo_last_apply_preview", None)))
+        sentinel = {"ok": True, "operations": []}
+        with patch.object(self.api, "_undo_last_apply_preview_impl", return_value=sentinel) as mocked:
+            result = self.api.run.undo_last_apply_preview("run_xyz")
+        mocked.assert_called_once_with("run_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_undo_by_row_preview_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.run, "undo_by_row_preview", None)))
+        sentinel = {"ok": True, "rows": []}
+        with patch.object(self.api, "_undo_by_row_preview_impl", return_value=sentinel) as mocked:
+            result = self.api.run.undo_by_row_preview("run_xyz", batch_id="b_99")
+        mocked.assert_called_once_with("run_xyz", batch_id="b_99")
+        self.assertEqual(result, sentinel)
+
+    def test_undo_by_row_preview_default_batch_id(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_undo_by_row_preview_impl", return_value=sentinel) as mocked:
+            self.api.run.undo_by_row_preview("run_xyz")
+        mocked.assert_called_once_with("run_xyz", batch_id=None)
+
+    def test_undo_selected_rows_exposed_and_delegates(self) -> None:
+        self.assertTrue(callable(getattr(self.api.run, "undo_selected_rows", None)))
+        sentinel = {"ok": True, "undone": 2}
+        with patch.object(self.api, "_undo_selected_rows_impl", return_value=sentinel) as mocked:
+            result = self.api.run.undo_selected_rows(
+                "run_xyz",
+                row_ids=["r1", "r2"],
+                dry_run=False,
+                batch_id="b_99",
+                atomic=False,
+            )
+        mocked.assert_called_once_with(
+            "run_xyz",
+            row_ids=["r1", "r2"],
+            dry_run=False,
+            batch_id="b_99",
+            atomic=False,
+        )
+        self.assertEqual(result, sentinel)
+
+    def test_undo_selected_rows_defaults(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_undo_selected_rows_impl", return_value=sentinel) as mocked:
+            self.api.run.undo_selected_rows("run_xyz")
+        mocked.assert_called_once_with(
+            "run_xyz",
+            row_ids=None,
+            dry_run=True,
+            batch_id=None,
+            atomic=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Sprint C1 — Input clamping (audit C7 P1)
+# Verifie que les 5 endpoints de test connexion + test_reset bornent les
+# inputs numeriques (timeout_s entre [1.0, 60.0], min_video_bytes >= 0).
+# ---------------------------------------------------------------------------
+
+
+class TimeoutClampingValidatorsTests(unittest.TestCase):
+    """Audit C7 P1 : helper clamp_timeout (range 1-60s + fallback)."""
+
+    def test_clamp_timeout_default_for_none(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        self.assertEqual(clamp_timeout(None), 10.0)
+
+    def test_clamp_timeout_clamps_low(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        self.assertEqual(clamp_timeout(0), 1.0)
+        self.assertEqual(clamp_timeout(-5), 1.0)
+
+    def test_clamp_timeout_clamps_high(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        self.assertEqual(clamp_timeout(99999), 60.0)
+        self.assertEqual(clamp_timeout(1000.5), 60.0)
+
+    def test_clamp_timeout_passes_through_valid(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        self.assertEqual(clamp_timeout(5.5), 5.5)
+        self.assertEqual(clamp_timeout(30), 30.0)
+
+    def test_clamp_timeout_handles_str(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        # str numerique : parsed comme float
+        self.assertEqual(clamp_timeout("15"), 15.0)
+        # str non-numerique : tombe sur default
+        self.assertEqual(clamp_timeout("abc"), 10.0)
+
+    def test_clamp_timeout_handles_nan_inf(self) -> None:
+        from cinesort.ui.api._validators import clamp_timeout
+
+        self.assertEqual(clamp_timeout(float("nan")), 10.0)
+        self.assertEqual(clamp_timeout(float("inf")), 10.0)
+        self.assertEqual(clamp_timeout(float("-inf")), 10.0)
+
+    def test_clamp_non_negative_int_handles_invalid(self) -> None:
+        from cinesort.ui.api._validators import clamp_non_negative_int
+
+        self.assertEqual(clamp_non_negative_int(None), 0)
+        self.assertEqual(clamp_non_negative_int("abc"), 0)
+        self.assertEqual(clamp_non_negative_int(-10), 0)
+        self.assertEqual(clamp_non_negative_int(42), 42)
+        self.assertEqual(clamp_non_negative_int(3.7), 3)
+        self.assertEqual(clamp_non_negative_int("100"), 100)
+
+
+class ApiInputClampingIntegrationTests(unittest.TestCase):
+    """Audit C7 P1 : verifie que les 5 endpoints connexion + test_reset bornent leurs inputs."""
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_tmdb_clamps_timeout(self) -> None:
+        """timeout_s extreme doit etre clampe avant d'arriver au support."""
+        with patch("cinesort.ui.api.cinesort_api.settings_support.test_tmdb_key") as mocked:
+            mocked.return_value = {"ok": True}
+            # Passe timeout_s=99999 (au-dessus de la borne max)
+            self.api._test_tmdb_key_impl("key", "C:/state", timeout_s=99999)
+        # Le 3eme arg positional (timeout_s) doit etre 60.0
+        args, kwargs = mocked.call_args
+        self.assertEqual(args[2], 60.0)
+
+    def test_jellyfin_clamps_timeout(self) -> None:
+        with patch("cinesort.ui.api.cinesort_api.settings_support.test_jellyfin_connection") as mocked:
+            mocked.return_value = {"ok": True}
+            self.api._test_jellyfin_connection_impl(url="http://j:8096", api_key="k", timeout_s=0)
+        args, kwargs = mocked.call_args
+        # 3eme arg = timeout clampe a 1.0
+        self.assertEqual(args[2], 1.0)
+
+    def test_plex_clamps_timeout(self) -> None:
+        """Plex utilise clamp_timeout pour creer le client."""
+        with patch("cinesort.ui.api.cinesort_api._plex_mod") as mocked_mod:
+            mocked_client = mocked_mod.PlexClient.return_value
+            mocked_client.validate_connection.return_value = {"ok": True}
+            self.api._test_plex_connection_impl(url="http://p:32400", token="t", timeout_s=99999)
+        # PlexClient appele avec timeout_s=60.0 (kwarg)
+        args, kwargs = mocked_mod.PlexClient.call_args
+        self.assertEqual(kwargs.get("timeout_s"), 60.0)
+
+    def test_radarr_clamps_timeout(self) -> None:
+        with patch("cinesort.ui.api.cinesort_api._radarr_mod") as mocked_mod:
+            mocked_client = mocked_mod.RadarrClient.return_value
+            mocked_client.validate_connection.return_value = {"ok": True}
+            self.api._test_radarr_connection_impl(url="http://r:7878", api_key="k", timeout_s=-1)
+        args, kwargs = mocked_mod.RadarrClient.call_args
+        self.assertEqual(kwargs.get("timeout_s"), 1.0)
+
+    def test_omdb_clamps_timeout(self) -> None:
+        with patch("cinesort.ui.api.cinesort_api.OmdbClient") as mocked_cls:
+            mocked_client = mocked_cls.return_value
+            mocked_client.test_connection.return_value = {"ok": True}
+            self.api._test_omdb_connection_impl(api_key="k", timeout_s="abc")  # type: ignore[arg-type]
+        # str non-numerique = fallback default 10.0
+        _, kwargs = mocked_cls.call_args
+        self.assertEqual(kwargs.get("timeout_s"), 10.0)
+
+    def test_reset_clamps_min_video_bytes_negative(self) -> None:
+        """test_reset accepte min_video_bytes negatif sans crasher (clamp >= 0)."""
+        import os as _os
+
+        prev = _os.environ.get("CINESORT_E2E")
+        _os.environ["CINESORT_E2E"] = "1"
+        try:
+            result = self.api.test_reset(min_video_bytes=-100)
+            self.assertTrue(result.get("ok"))
+        finally:
+            if prev is None:
+                _os.environ.pop("CINESORT_E2E", None)
+            else:
+                _os.environ["CINESORT_E2E"] = prev
+
+    def test_reset_clamps_min_video_bytes_invalid_str(self) -> None:
+        """test_reset accepte une str non-numerique (clamp -> 0)."""
+        import os as _os
+
+        prev = _os.environ.get("CINESORT_E2E")
+        _os.environ["CINESORT_E2E"] = "1"
+        try:
+            result = self.api.test_reset(min_video_bytes="abc")  # type: ignore[arg-type]
+            self.assertTrue(result.get("ok"))
+        finally:
+            if prev is None:
+                _os.environ.pop("CINESORT_E2E", None)
+            else:
+                _os.environ["CINESORT_E2E"] = prev
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

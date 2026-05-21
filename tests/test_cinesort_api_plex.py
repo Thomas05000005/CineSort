@@ -55,7 +55,9 @@ class TestPlexConnection(unittest.TestCase):
         mock_client_cls.return_value = client
         self.api.integrations.test_plex_connection(url="http://x", token="t", timeout_s=999.0)
         kwargs = mock_client_cls.call_args.kwargs
-        self.assertLessEqual(kwargs.get("timeout_s", 0), 30)
+        # Audit C7 P1 (sprint C1) : clamp_timeout borne a 60s
+        # (auparavant 30s, harmonisation avec les autres endpoints).
+        self.assertLessEqual(kwargs.get("timeout_s", 0), 60)
 
     @patch("cinesort.infra.plex_client.PlexClient")
     def test_timeout_clamped_low(self, mock_client_cls: MagicMock) -> None:

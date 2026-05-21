@@ -237,3 +237,57 @@ class RunFacade(_BaseFacade):
     def import_watchlist(self, csv_content: str, source: str) -> Dict[str, Any]:
         """Importe une watchlist CSV (Letterboxd/IMDb) et compare avec la bibliotheque locale."""
         return self._api._import_watchlist_impl(csv_content, source)
+
+    # ---------- Auto-approve & Undo (sprint C1 — refactor #84 suite) ----------
+
+    def get_auto_approved_summary(
+        self,
+        run_id: str,
+        threshold: int = 85,
+        enabled: bool = False,
+        quarantine_corrupted: bool = False,
+    ) -> Dict[str, Any]:
+        """Resume des rows auto-approuvees selon le seuil de confiance (mode batch).
+
+        Cf CineSortApi._get_auto_approved_summary_impl pour la doc complete.
+        """
+        return self._api._get_auto_approved_summary_impl(
+            run_id,
+            threshold=threshold,
+            enabled=enabled,
+            quarantine_corrupted=quarantine_corrupted,
+        )
+
+    def undo_last_apply_preview(self, run_id: str) -> Dict[str, Any]:
+        """Preview (dry) de l'annulation du dernier batch apply reel (undo v1).
+
+        Cf CineSortApi._undo_last_apply_preview_impl pour la doc complete.
+        """
+        return self._api._undo_last_apply_preview_impl(run_id)
+
+    def undo_by_row_preview(self, run_id: str, batch_id: str = None) -> Dict[str, Any]:
+        """Preview de l'annulation par film : resume par row_id du batch cible (undo v5).
+
+        Cf CineSortApi._undo_by_row_preview_impl pour la doc complete.
+        """
+        return self._api._undo_by_row_preview_impl(run_id, batch_id=batch_id)
+
+    def undo_selected_rows(
+        self,
+        run_id: str,
+        row_ids: list = None,
+        dry_run: bool = True,
+        batch_id: str = None,
+        atomic: bool = True,
+    ) -> Dict[str, Any]:
+        """Annule selectivement les rows choisies (undo v5). `dry_run=True` ne touche rien.
+
+        Cf CineSortApi._undo_selected_rows_impl pour la doc complete.
+        """
+        return self._api._undo_selected_rows_impl(
+            run_id,
+            row_ids=row_ids,
+            dry_run=dry_run,
+            batch_id=batch_id,
+            atomic=atomic,
+        )

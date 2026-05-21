@@ -86,6 +86,7 @@ from cinesort.ui.api import (
 )
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
+from cinesort.ui.api._validators import clamp_non_negative_int, clamp_timeout
 from cinesort.ui.api.facades import (
     IntegrationsFacade,
     LibraryFacade,
@@ -1081,6 +1082,10 @@ class CineSortApi:
     # ---------- TMDb ----------
     def _test_tmdb_key_impl(self, api_key: str, state_dir: str, timeout_s: float = 10.0) -> Dict[str, Any]:
         api_key = self._unmask_or_stored("tmdb_api_key", api_key)
+        # Audit C7 P1 : borner timeout_s entre 1s et 60s pour eviter qu'un
+        # caller (REST distant compromis) ne bloque le thread API ou ne crashe
+        # le client HTTP avec timeout_s=0/NaN/None/str.
+        timeout_s = clamp_timeout(timeout_s)
         return settings_support.test_tmdb_key(
             api_key,
             state_dir,
@@ -1095,6 +1100,8 @@ class CineSortApi:
     ) -> Dict[str, Any]:
         """Teste la connexion au serveur Jellyfin."""
         api_key = self._unmask_or_stored("jellyfin_api_key", api_key)
+        # Audit C7 P1 : borner timeout_s entre 1s et 60s.
+        timeout_s = clamp_timeout(timeout_s)
         return settings_support.test_jellyfin_connection(url, api_key, timeout_s)
 
     def _get_jellyfin_libraries_impl(self) -> Dict[str, Any]:
@@ -1264,8 +1271,10 @@ class CineSortApi:
         ptok = self._unmask_or_stored("plex_token", token)
         if not purl or not ptok:
             return _err_response("URL et token requis.", category="validation", level="info", log_module=__name__)
+        # Audit C7 P1 : remplace l'ancien max(1, min(30, timeout_s)) par le
+        # helper centralise (range 1-60s + fallback robuste sur None/str).
         # NB : module-style pour permettre patch("cinesort.infra.plex_client.PlexClient").
-        client = _plex_mod.PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
+        client = _plex_mod.PlexClient(purl, ptok, timeout_s=clamp_timeout(timeout_s))
         return client.validate_connection()
 
     def _get_plex_libraries_impl(self, url: str = "", token: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
@@ -1363,8 +1372,9 @@ class CineSortApi:
         rkey = self._unmask_or_stored("radarr_api_key", api_key)
         if not rurl or not rkey:
             return _err_response("URL et cle API requis.", category="validation", level="info", log_module=__name__)
+        # Audit C7 P1 : helper centralise (range 1-60s + fallback robuste).
         # NB : module-style pour permettre patch("cinesort.infra.radarr_client.RadarrClient").
-        client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=max(1, min(30, timeout_s)))
+        client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=clamp_timeout(timeout_s))
         return client.validate_connection()
 
     def _get_radarr_status_impl(self, run_id: str = "") -> Dict[str, Any]:
@@ -1460,8 +1470,9 @@ class CineSortApi:
             return _err_response("Cle OMDb requise.", category="validation", level="info", log_module=__name__)
         # Cache temporaire pour le test : pas de pollution du cache prod
         cache_path = Path(self._state_dir) / "omdb_cache_test.json"
+        # Audit C7 P1 : helper centralise (range 1-60s + fallback robuste).
         try:
-            client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=max(1.0, min(30.0, float(timeout_s))))
+            client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=clamp_timeout(timeout_s))
             return client.test_connection()
         except (OSError, ValueError, KeyError) as exc:
             # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir cache_path/api_key).
@@ -1708,13 +1719,16 @@ class CineSortApi:
             return _err_response(
                 "E2E mode not active", category="permission", level="info", log_module=__name__, key="error"
             )
+        # Audit C7 P1 : normaliser min_video_bytes -> int >= 0 (acceptait
+        # n'importe quoi : str, float negatif, None, etc.).
+        min_video_bytes = clamp_non_negative_int(min_video_bytes)
         try:
             # Reset du run courant
             with self._runs_lock:
                 self._runs.clear()
             # Abaisser le seuil de taille video si demande (fichiers factices E2E)
             if min_video_bytes > 0:
-                core.MIN_VIDEO_BYTES = int(min_video_bytes)
+                core.MIN_VIDEO_BYTES = min_video_bytes
             return {"ok": True, "message": "Reset E2E effectue."}
         except (OSError, KeyError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
