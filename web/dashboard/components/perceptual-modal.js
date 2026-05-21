@@ -61,7 +61,7 @@ function _fmtKhz(hz) {
 function _scoreBar(score, total = 100) {
   const n = Math.max(0, Math.min(total, Number(score) || 0));
   const pct = total > 0 ? Math.round((n / total) * 100) : 0;
-  return `<div class="perceptual-bar"><div class="perceptual-bar-fill" style="width:${pct}%"></div></div>`;
+  return `<div class="perceptual-bar"><div class="perceptual-bar-fill" style="--progress:${pct / 100}"></div></div>`;
 }
 
 /** Spec 02 §0 : decide le mode A/B selon la route active.

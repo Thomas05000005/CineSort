@@ -92,7 +92,9 @@ const TABLE_HEADER_SORTS = {
 let _state = null;
 let _searchDebounce = null;
 let _container = null;
-let _abortController = null;
+let _abortController = null;      // AbortController des fetchs library/* (lifecycle data)
+let _eventsController = null;     // AbortController des listeners DOM (lifecycle vue)
+let _eventsBound = false;         // garde idempotence delegation container-level
 let _scrollObserver = null;
 let _runId = null; // dernier run_id reçu (pour appel quality/analyze_perceptual_batch)
 
@@ -454,7 +456,11 @@ function _render() {
       <section class="bibliotheque-section">${_renderBody()}</section>
     </section>
   `;
+  // Audit C17 P0 #7 : _bindEvents() est idempotent (delegation sur container,
+  // les listeners survivent a innerHTML). Seul _bindGridDragSelect() est
+  // re-execute par render car la grille est recreee.
   _bindEvents(_container);
+  _bindGridDragSelect();
   _setupScrollObserver();
   _updateInspector();
 }
@@ -867,13 +873,42 @@ function _onDragSelectKey(ev) {
 
 /* --- Event handlers --- */
 
-function _bindEvents(container) {
-  const retryBtn = container.querySelector("[data-bibliotheque-retry]");
-  if (retryBtn) retryBtn.addEventListener("click", () => initBibliotheque(container));
+/* --- Event delegation (audit C17 P0 #7) ---
+ *
+ * Avant : 12 boucles container.querySelectorAll(...).forEach(addEventListener)
+ * a chaque _render() -> DOM thrashing sur 10k films.
+ *
+ * Apres : 6 listeners poses UNE SEULE FOIS sur container (lifecycle vue), qui
+ * dispatchent via evt.target.closest("[data-X]"). _render() recree le sous-arbre
+ * via innerHTML mais les listeners sur container survivent. Cleanup au unmount
+ * via _eventsController.abort().
+ *
+ * data-bibliotheque-search/sort restent direct (input/select uniques) car le
+ * gain de delegation est negligeable mais on les attache aussi au container
+ * pour beneficier de l'AbortController unique.
+ */
 
-  const resetBtn = container.querySelector("[data-bibliotheque-reset]");
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
+function _bindEvents(container) {
+  // Listeners sur container = poses 1 seule fois par mount (delegation).
+  // Sont conserves entre les _render() puisque _container.innerHTML ne touche
+  // que les enfants. Toggle via _eventsBound pour idempotence.
+  if (_eventsBound) return;
+  _eventsBound = true;
+
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
+
+  // --- click delegation ----------------------------------------------------
+  container.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+
+    // Retry button
+    if (t.closest("[data-bibliotheque-retry]")) {
+      initBibliotheque(container);
+      return;
+    }
+    // Reset filters
+    if (t.closest("[data-bibliotheque-reset]")) {
       _state.tierFilter = "all";
       _state.search = "";
       _state.activeChips.clear();
@@ -882,71 +917,50 @@ function _bindEvents(container) {
       localStorage.setItem(LS_TIER, "all");
       localStorage.removeItem(LS_ADV);
       _fetchLibrary();
-    });
-  }
-
-  const search = container.querySelector("[data-bibliotheque-search]");
-  if (search) {
-    search.addEventListener("input", (ev) => {
-      const val = ev.target.value || "";
-      if (_searchDebounce) clearTimeout(_searchDebounce);
-      _searchDebounce = setTimeout(() => {
-        _state.search = val.trim();
-        _fetchLibrary();
-      }, 250);
-    });
-  }
-
-  const sort = container.querySelector("[data-bibliotheque-sort]");
-  if (sort) {
-    sort.addEventListener("change", (ev) => {
-      _state.sort = ev.target.value || "title";
-      localStorage.setItem(LS_SORT, _state.sort);
-      _fetchLibrary();
-    });
-  }
-
-  container.querySelectorAll("[data-bibliotheque-view]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      _state.viewMode = btn.dataset.bibliothequeView;
+      return;
+    }
+    // Toggle vue grille/tableau
+    const viewBtn = t.closest("[data-bibliotheque-view]");
+    if (viewBtn) {
+      _state.viewMode = viewBtn.dataset.bibliothequeView;
       localStorage.setItem(LS_VIEW, _state.viewMode);
       _render();
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-tier]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      _state.tierFilter = btn.dataset.bibliothequeTier;
+      return;
+    }
+    // Filtre tier
+    const tierBtn = t.closest("[data-bibliotheque-tier]");
+    if (tierBtn) {
+      _state.tierFilter = tierBtn.dataset.bibliothequeTier;
       localStorage.setItem(LS_TIER, _state.tierFilter);
       _fetchLibrary();
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-chip]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.bibliothequeChip;
+      return;
+    }
+    // Chip non-tier
+    const chipBtn = t.closest("[data-bibliotheque-chip]");
+    if (chipBtn) {
+      const key = chipBtn.dataset.bibliothequeChip;
       if (_state.activeChips.has(key)) _state.activeChips.delete(key);
       else _state.activeChips.add(key);
       _fetchLibrary();
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-thsort]").forEach((th) => {
-    th.addEventListener("click", () => {
-      const col = th.dataset.bibliothequeThsort;
+      return;
+    }
+    // Tri colonne tableau
+    const thBtn = t.closest("[data-bibliotheque-thsort]");
+    if (thBtn) {
+      const col = thBtn.dataset.bibliothequeThsort;
       const pair = TABLE_HEADER_SORTS[col];
       if (!pair) return;
       const [asc, desc] = pair;
       _state.sort = _state.sort === asc ? desc : asc;
       localStorage.setItem(LS_SORT, _state.sort);
       _fetchLibrary();
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-action]").forEach((btn) => {
-    btn.addEventListener("click", (ev) => {
+      return;
+    }
+    // Action drawer (filtres avances)
+    const actBtn = t.closest("[data-bibliotheque-action]");
+    if (actBtn) {
       ev.preventDefault();
-      const action = btn.dataset.bibliothequeAction;
+      const action = actBtn.dataset.bibliothequeAction;
       if (action === "filters") {
         openLibraryAdvancedDrawer({
           initial: _state.advanced,
@@ -964,93 +978,135 @@ function _bindEvents(container) {
           },
         });
       }
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-select]").forEach((checkbox) => {
-    checkbox.addEventListener("click", (ev) => ev.stopPropagation());
-    checkbox.addEventListener("change", (ev) => {
-      const rowId = ev.target.dataset.bibliothequeSelect;
-      if (ev.target.checked) _state.selected.add(rowId);
-      else _state.selected.delete(rowId);
-      _render();
-    });
-  });
-
-  // Spec 06 : clic carte -> focus inspecteur (mode A via _updateInspector),
-  // double-clic -> overlay (mode C, geree par renderFilmDetail elle-meme).
-  container.querySelectorAll(".bibliotheque-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      const rowId = card.dataset.rowId;
-      if (rowId) {
-        _state.focusedRowId = rowId;
-        _updateInspector();
-      }
-    });
-    card.addEventListener("dblclick", (ev) => {
-      ev.preventDefault();
-      const rowId = card.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "C", rowId, runId: _runId || null });
-    });
-    card.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        const rowId = card.dataset.rowId;
-        if (rowId) {
-          _state.focusedRowId = rowId;
-          _updateInspector();
-        }
-      } else if (ev.key === " ") {
-        ev.preventDefault();
-        const rowId = card.dataset.rowId;
-        if (rowId) {
-          if (_state.selected.has(rowId)) _state.selected.delete(rowId);
-          else _state.selected.add(rowId);
-          _render();
-        }
-      }
-    });
-  });
-
-  container.querySelectorAll(".bibliotheque-table-row").forEach((tr) => {
-    tr.addEventListener("click", (ev) => {
-      if (ev.target.tagName === "INPUT") return;
-      const rowId = tr.dataset.rowId;
-      if (rowId) {
-        _state.focusedRowId = rowId;
-        _updateInspector();
-      }
-    });
-    tr.addEventListener("dblclick", (ev) => {
-      if (ev.target.tagName === "INPUT") return;
-      const rowId = tr.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "C", rowId, runId: _runId || null });
-    });
-    tr.addEventListener("mouseenter", () => {
-      const rowId = tr.dataset.rowId;
-      if (rowId) {
-        _state.focusedRowId = rowId;
-        _updateInspector();
-      }
-    });
-  });
-
-  container.querySelectorAll("[data-bibliotheque-bulk]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.dataset.bibliothequeBulk;
+      return;
+    }
+    // Checkbox selection : stopPropagation pour eviter le focus inspecteur
+    if (t.closest("[data-bibliotheque-select]")) {
+      ev.stopPropagation();
+      return;
+    }
+    // Bulk action
+    const bulkBtn = t.closest("[data-bibliotheque-bulk]");
+    if (bulkBtn) {
+      const action = bulkBtn.dataset.bibliothequeBulk;
       if (action === "clear") {
         _state.selected.clear();
         _render();
         return;
       }
       _handleBulkAction(action);
-    });
-  });
+      return;
+    }
+    // Carte film : focus inspecteur (Spec 06)
+    const card = t.closest(".bibliotheque-card");
+    if (card && card.dataset.rowId) {
+      _state.focusedRowId = card.dataset.rowId;
+      _updateInspector();
+      return;
+    }
+    // Ligne tableau : focus inspecteur (sauf clic sur input checkbox)
+    const tr = t.closest(".bibliotheque-table-row");
+    if (tr && t.tagName !== "INPUT" && tr.dataset.rowId) {
+      _state.focusedRowId = tr.dataset.rowId;
+      _updateInspector();
+    }
+  }, opts);
 
-  // Drag-select rectangulaire (spec 07 §5) : un seul listener sur la grille,
-  // les listeners window sont (re)installes au mousedown via _onDragSelectMouseDown.
-  const grid = container.querySelector(".bibliotheque-grid");
+  // --- dblclick delegation -------------------------------------------------
+  container.addEventListener("dblclick", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+    const card = t.closest(".bibliotheque-card");
+    if (card && card.dataset.rowId) {
+      ev.preventDefault();
+      renderFilmDetail({ mode: "C", rowId: card.dataset.rowId, runId: _runId || null });
+      return;
+    }
+    const tr = t.closest(".bibliotheque-table-row");
+    if (tr && t.tagName !== "INPUT" && tr.dataset.rowId) {
+      renderFilmDetail({ mode: "C", rowId: tr.dataset.rowId, runId: _runId || null });
+    }
+  }, opts);
+
+  // --- keydown delegation (cartes : Enter focus, Space toggle select) ------
+  container.addEventListener("keydown", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+    const card = t.closest(".bibliotheque-card");
+    if (!card || !card.dataset.rowId) return;
+    const rowId = card.dataset.rowId;
+    if (ev.key === "Enter") {
+      _state.focusedRowId = rowId;
+      _updateInspector();
+    } else if (ev.key === " ") {
+      ev.preventDefault();
+      if (_state.selected.has(rowId)) _state.selected.delete(rowId);
+      else _state.selected.add(rowId);
+      _render();
+    }
+  }, opts);
+
+  // --- mouseover delegation (table-row : hover focus inspecteur) -----------
+  // mouseenter ne bubble pas -> mouseover + closest gere le hover en delegation.
+  container.addEventListener("mouseover", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+    const tr = t.closest(".bibliotheque-table-row");
+    if (!tr || !tr.dataset.rowId) return;
+    // Anti-flood : ne refocus que si on change de ligne.
+    if (_state.focusedRowId === tr.dataset.rowId) return;
+    _state.focusedRowId = tr.dataset.rowId;
+    _updateInspector();
+  }, opts);
+
+  // --- input delegation (search debounced) ---------------------------------
+  container.addEventListener("input", (ev) => {
+    const inp = ev.target.closest && ev.target.closest("[data-bibliotheque-search]");
+    if (!inp) return;
+    const val = inp.value || "";
+    if (_searchDebounce) clearTimeout(_searchDebounce);
+    _searchDebounce = setTimeout(() => {
+      _state.search = val.trim();
+      _fetchLibrary();
+    }, 250);
+  }, opts);
+
+  // --- change delegation (sort select + checkbox selection) ----------------
+  container.addEventListener("change", (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== "function") return;
+    const sort = t.closest("[data-bibliotheque-sort]");
+    if (sort) {
+      _state.sort = sort.value || "title";
+      localStorage.setItem(LS_SORT, _state.sort);
+      _fetchLibrary();
+      return;
+    }
+    const check = t.closest("[data-bibliotheque-select]");
+    if (check) {
+      const rowId = check.dataset.bibliothequeSelect;
+      if (check.checked) _state.selected.add(rowId);
+      else _state.selected.delete(rowId);
+      _render();
+    }
+  }, opts);
+
+}
+
+/**
+ * Bind direct du listener mousedown sur .bibliotheque-grid (drag-select).
+ *
+ * La grille est recreee a chaque _render() (innerHTML), donc on re-bind. Mais
+ * grace au signal partage de _eventsController, tous les listeners poses entre
+ * deux renders sont abort()es au unmount (pas de leak).
+ * Pas un point chaud perf : 1 seul listener, pas une boucle sur N elements.
+ */
+function _bindGridDragSelect() {
+  if (!_container) return;
+  const opts = _eventsController ? { signal: _eventsController.signal } : undefined;
+  const grid = _container.querySelector(".bibliotheque-grid");
   if (grid) {
-    grid.addEventListener("mousedown", _onDragSelectMouseDown);
+    grid.addEventListener("mousedown", _onDragSelectMouseDown, opts);
   }
 }
 
@@ -1231,6 +1287,14 @@ function _confirmBulkDelete(rowIds) {
 
 export async function initBibliotheque(container) {
   if (!container) return;
+  // Si un mount precedent n'a pas ete proprement unmount, on nettoie ici pour
+  // garantir un controller frais et eviter les listeners stacks.
+  if (_eventsController) {
+    try { _eventsController.abort(); } catch (_e) { /* noop */ }
+  }
+  _eventsController = new AbortController();
+  _eventsBound = false;
+
   _container = container;
   _state = _initState();
   _state.loading = true;
@@ -1245,6 +1309,14 @@ export function unmountBibliotheque() {
     try { _abortController.abort(); } catch (_e) { /* noop */ }
     _abortController = null;
   }
+  // Audit C17 P0 #7 : abort des listeners DOM poses via signal (delegation
+  // sur container, drag-select grid, etc.). Empeche les leak quand la vue
+  // est demontee/remontee.
+  if (_eventsController) {
+    try { _eventsController.abort(); } catch (_e) { /* noop */ }
+    _eventsController = null;
+  }
+  _eventsBound = false;
   if (_searchDebounce) {
     clearTimeout(_searchDebounce);
     _searchDebounce = null;

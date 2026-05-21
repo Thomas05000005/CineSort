@@ -329,7 +329,7 @@ function _renderScanInProgress(progress) {
       <h2 id="accueil-cta-title" class="accueil-cta-scan-title">🔄 Scan en cours sur ${escapeHtml(String(total))} films</h2>
       <p class="accueil-cta-scan-phase">${escapeHtml(phaseLabel)} (${escapeHtml(String(current))}/${escapeHtml(String(total))})</p>
       <div class="accueil-cta-scan-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-        <span class="accueil-cta-scan-fill" style="width: ${pct}%"></span>
+        <span class="accueil-cta-scan-fill" style="--progress: ${pct / 100}"></span>
       </div>
       ${etaTxt ? `<p class="accueil-cta-scan-eta">${escapeHtml(etaTxt)}</p>` : ""}
       <div class="accueil-actions">
@@ -378,7 +378,7 @@ function _renderTierBar(tier, count, total) {
     <div class="accueil-health-row" data-tier="${escapeHtml(tier)}">
       <span class="accueil-health-label">${escapeHtml(_TIER_LABELS[tier] || tier)}</span>
       <div class="accueil-health-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(_TIER_LABELS[tier])} : ${count} films (${pct}%)">
-        <span class="accueil-health-fill accueil-health-fill--${escapeHtml(tier)}" style="width: ${pct}%"></span>
+        <span class="accueil-health-fill accueil-health-fill--${escapeHtml(tier)}" style="--progress: ${pct / 100}"></span>
       </div>
       <span class="accueil-health-count">${escapeHtml(String(count))}</span>
       <span class="accueil-health-pct">${pct}%</span>

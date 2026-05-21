@@ -791,7 +791,8 @@ function _journalRender() {
             const base = t("qij.journal.progress_pct", { idx, total, pct });
             const eta = etaS > 0 ? t("qij.journal.progress_eta", { eta: _fmtDuration(etaS) }) : "";
             txt.textContent = `${base}${eta}${current ? ` — ${current}` : ""}`;
-            if (fill) fill.style.width = `${pct}%`;
+            // Audit C17 P1 : --progress (0..1) -> scaleX (compositor only, no reflow).
+            if (fill) fill.style.setProperty("--progress", String(pct / 100));
           } else {
             txt.textContent = t("qij.journal.found_films", { count: idx });
           }
@@ -843,7 +844,7 @@ function _renderLiveSection() {
       <button type="button" class="v5-btn v5-btn--sm qij-cancel-btn" id="btnJournalCancel">${_esc(t("qij.journal.btn_cancel"))}</button>
     </div>
     <div class="progress-bar qij-progress-bar">
-      <div id="journal-progress-fill" class="qij-progress-fill" style="--progress-width:0%"></div>
+      <div id="journal-progress-fill" class="qij-progress-fill" style="--progress:0"></div>
     </div>
     <p id="journal-progress-text" class="v5u-text-muted qij-progress-text">${_esc(t("qij.journal.init"))}</p>
     <div id="journal-logs-box" class="logs-box qij-logs-box"></div>

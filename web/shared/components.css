@@ -2334,8 +2334,12 @@
 
 .v5-processing-progress-bar {
   height: 100%;
+  width: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-hover));
-  transition: width var(--dur-base) var(--ease-out);
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
 .v5-processing-progress-label {
@@ -4359,8 +4363,12 @@ body.v5-notif-lock {
 .accueil-health-fill {
   display: block;
   height: 100%;
+  width: 100%;
   border-radius: var(--radius-sm);
-  transition: width var(--dur-base) var(--ease-out);
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
 .accueil-health-fill--platinum { background: var(--tier-platinum-solid, #A78BFA); }
@@ -4605,9 +4613,13 @@ body.v5-notif-lock {
 .accueil-cta-scan-fill {
   display: block;
   height: 100%;
+  width: 100%;
   background: var(--accent);
   border-radius: var(--radius-sm);
-  transition: width var(--dur-base) var(--ease-out);
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
 .accueil-cta-scan-eta {
@@ -6181,7 +6193,9 @@ body.v5-notif-lock {
 .qualite-tier-row:hover { background: var(--surface-2); }
 .qualite-tier-label { font-size: var(--fs-sm); color: var(--text-2); }
 .qualite-tier-bar { background: var(--surface-2); height: 12px; border-radius: 6px; overflow: hidden; }
-.qualite-tier-fill { display: block; height: 100%; transition: width 0.3s; }
+/* Audit C17 P1 : transition: width -> transform: scaleX (compositor only, no reflow).
+ * width: 100% + transform-origin: left -> scaleX(0..1) via --progress. */
+.qualite-tier-fill { display: block; height: 100%; width: 100%; transform: scaleX(var(--progress, 0)); transform-origin: left center; transition: transform 0.3s; }
 .qualite-tier-fill--platinum { background: #8b5cf6; }
 .qualite-tier-fill--gold { background: #d4a017; }
 .qualite-tier-fill--silver { background: #94a3b8; }
@@ -6241,7 +6255,7 @@ body.v5-notif-lock {
 .qualite-saga-counts { font-size: var(--fs-sm); color: var(--text-2); }
 .qualite-saga-missing-pill { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--radius-pill, 999px); background: #b45309; color: #fff; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 .qualite-saga-progress { background: var(--surface-3, var(--surface-1)); height: 10px; border-radius: 5px; overflow: hidden; }
-.qualite-saga-progress-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #34d399); transition: width 0.3s; }
+.qualite-saga-progress-fill { display: block; height: 100%; width: 100%; transform: scaleX(var(--progress, 0)); transform-origin: left center; background: linear-gradient(90deg, var(--accent), #34d399); transition: transform 0.3s; }
 .qualite-saga-details { font-size: var(--fs-sm); color: var(--text-2); }
 .qualite-saga-details summary { cursor: pointer; color: var(--accent); margin-bottom: var(--sp-1); }
 .qualite-saga-list { list-style: none; padding-left: 0; margin: var(--sp-1) 0; display: flex; flex-direction: column; gap: 2px; }
@@ -6459,8 +6473,12 @@ body.v5-notif-lock {
 }
 .traitement-scan-progress-fill {
   height: 100%;
+  width: 100%;
   background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
-  transition: width 0.4s ease-out;
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.4s ease-out;
 }
 .traitement-scan-progress-meta {
   display: flex;
@@ -7050,7 +7068,7 @@ body.v5-notif-lock {
 .perceptual-score-value-sm { color: var(--text-2); font-size: var(--fs-xs); width: 60px; text-align: right; }
 .perceptual-score-tier { color: var(--accent); }
 .perceptual-bar { flex: 1; height: 10px; background: var(--border-1); border-radius: 5px; overflow: hidden; }
-.perceptual-bar-fill { height: 100%; background: var(--accent, #3b82f6); transition: width 0.3s; }
+.perceptual-bar-fill { height: 100%; width: 100%; transform: scaleX(var(--progress, 0)); transform-origin: left center; background: var(--accent, #3b82f6); transition: transform 0.3s; }
 .perceptual-verdict { font-style: italic; color: var(--text-2); margin: var(--sp-2) 0 0; padding-top: var(--sp-2); border-top: 1px solid var(--border-1); }
 .perceptual-dl { display: grid; grid-template-columns: 200px 1fr; gap: var(--sp-2) var(--sp-3); margin: 0; font-size: var(--fs-sm); }
 .perceptual-dl dt { color: var(--text-2); }
@@ -8734,10 +8752,15 @@ body.v5-notif-lock {
   margin-bottom: var(--sp-2);
 }
 .qij-progress-fill {
-  width: var(--progress-width, 0%);
+  /* Audit C17 P1 : --progress-width legacy (0..100%) -> --progress (0..1) via
+   * scaleX. Le JS qij.js continue d'ecrire --progress-width pour compat ; on
+   * lit aussi --progress en priorite quand fourni. */
+  width: 100%;
   height: 100%;
   background: var(--accent);
-  transition: width 0.3s;
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.3s;
 }
 .qij-progress-text { font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
 .qij-logs-box {
@@ -9156,11 +9179,15 @@ body.v5-notif-lock {
   overflow: hidden;
 }
 .quality-mini-bar-fill {
-  width: var(--fill-width, 0%);
+  /* Audit C17 P1 : --fill-width (0..100%) -> --progress (0..1) via scaleX.
+   * Le JS quality.js fournit les deux pour eviter une migration brutale. */
+  width: 100%;
   height: 100%;
   background: var(--fill-color, var(--accent));
   border-radius: 999px;
-  transition: width 0.3s;
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.3s;
 }
 .quality-mini-bar-count {
   width: 40px;
