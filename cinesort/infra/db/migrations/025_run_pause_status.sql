@@ -65,4 +65,4 @@ ALTER TABLE runs_new RENAME TO runs;
 
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 
-PRAGMA user_version = 23;
+PRAGMA user_version = 25;

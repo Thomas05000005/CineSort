@@ -190,6 +190,9 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "row_id": row_id,
             "title": r.get("proposed_title") or r.get("nfo_title") or "",
             "year": int(r.get("proposed_year") or 0),
+            # Issue audit Tier 2 : tmdb_id absent ici cassait le match Jellyfin
+            # DateCreated dans library_timeline_support (fallback toujours fs mtime).
+            "tmdb_id": r.get("tmdb_id"),
             "duration_s": duration_s,
             "duration_min": int(duration_s / 60) if duration_s > 0 else 0,
             "codec": _normalize_codec(probe_video.get("codec")),

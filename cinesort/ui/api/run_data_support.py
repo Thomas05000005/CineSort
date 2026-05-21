@@ -27,7 +27,7 @@ def candidate_from_json(data: Dict[str, Any]) -> core.Candidate:
     tmdb_id: int | None
     try:
         tmdb_id = int(data["tmdb_id"]) if data.get("tmdb_id") is not None else None
-    except (ImportError, KeyError, OSError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         tmdb_id = None
     year: int | None
     try:

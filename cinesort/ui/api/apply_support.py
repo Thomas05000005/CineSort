@@ -881,13 +881,11 @@ def _execute_and_finalize_undo(
         t("notifications.undo_done_body", done=done, failed=failed),
     )
     if done > 0:
-        import time as _time
-
         api._dispatch_plugin_hook(
             "post_undo",
             {
                 "run_id": run_id,
-                "ts": _time.time(),
+                "ts": time.time(),
                 "data": {"batch_id": batch_id, "done": done, "failed": failed, "skipped": skipped},
             },
         )
@@ -1809,11 +1807,9 @@ def apply_changes(
                     errors=result.errors,
                 ),
             )
-            import time as _time
-
             _hook_data = {
                 "run_id": run_id,
-                "ts": _time.time(),
+                "ts": time.time(),
                 "data": {
                     "renames": result.renames,
                     "moves": result.moves,

@@ -248,8 +248,10 @@ def _validate_and_init_plan_context(
         missing_message=t("errors.root_required_scan"),
     )
     if roots_error:
-        # Issue #103 : log structure via err() au lieu de return silencieux
-        return _err_response(roots_error, category="config", level="info", log_module=__name__), None
+        # Issue #103 : log structure via err() au lieu de return silencieux.
+        # category="validation" : roots manquantes dans le payload = erreur d'input
+        # utilisateur, pas une config systeme invalide.
+        return _err_response(roots_error, category="validation", level="info", log_module=__name__), None
     assert roots is not None and len(roots) > 0
     # Verifier qu'au moins un root existe
     accessible_roots = [r for r in roots if r.exists() and r.is_dir()]

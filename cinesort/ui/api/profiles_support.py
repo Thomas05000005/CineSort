@@ -384,6 +384,8 @@ def set_active_profile(api: Any, profile_id: str) -> Dict[str, Any]:
             )
 
         # 3) Persistance settings.active_quality_profile_id
+        # On garde l'ancienne valeur pour rollback si la DB echoue ensuite.
+        previous_active_id = settings.get("active_quality_profile_id")
         settings["active_quality_profile_id"] = pid
         save_result = _save_settings_dict(api, settings)
         if not save_result.get("ok"):
@@ -393,8 +395,22 @@ def set_active_profile(api: Any, profile_id: str) -> Dict[str, Any]:
                 level="error",
             )
 
-        # 4) Activation dans la DB (profil charge pour les prochains scorings)
-        api._save_active_quality_profile(normalized)
+        # 4) Activation dans la DB. Si la DB echoue apres la sauvegarde settings,
+        # on rollback settings pour eviter une divergence persistante entre
+        # settings.active_quality_profile_id et le profil charge en DB.
+        try:
+            api._save_active_quality_profile(normalized)
+        except (OSError, KeyError, TypeError, ValueError, AttributeError) as db_exc:
+            settings["active_quality_profile_id"] = previous_active_id
+            try:
+                _save_settings_dict(api, settings)
+            except (OSError, KeyError, TypeError, ValueError):
+                logger.exception("set_active_profile: rollback settings.active_quality_profile_id failed")
+            return err(
+                f"Echec activation DB (settings rollback effectue) : {db_exc}",
+                category="runtime",
+                level="error",
+            )
 
         return {
             "ok": True,

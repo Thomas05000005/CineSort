@@ -285,13 +285,34 @@ def _apply_weights(video: float, audio: float, extras: float, weights: Dict[str,
     return max(0, min(100, int(round(raw))))
 
 
+_DEFAULT_TIER_PLATINUM = 85
+_DEFAULT_TIER_GOLD = 68
+_DEFAULT_TIER_SILVER = 54
+_DEFAULT_TIER_BRONZE = 30
+
+
 def _tier_for(score: int, tiers: Dict[str, Any]) -> str:
     """Derive le tier depuis le score. Accepte les anciennes cles (premium/bon/moyen)
-    en plus des nouvelles (platinum/gold/silver/bronze) pour retro-compat."""
-    p = int(tiers.get("platinum") or tiers.get("premium") or 85)
-    g = int(tiers.get("gold") or tiers.get("bon") or 68)
-    s = int(tiers.get("silver") or tiers.get("moyen") or 54)
-    br = int(tiers.get("bronze") or 30)
+    en plus des nouvelles (platinum/gold/silver/bronze) pour retro-compat.
+
+    Si l'ordre p > g > s > br n'est pas respecte (UI envoie un dict invalide ou
+    incomplet), on log et on retombe sur les defaults pour eviter une derivation
+    de tier silencieusement incorrecte (ex. score 55 mappe en Platinum quand
+    platinum=50 < gold=60).
+    """
+    p = int(tiers.get("platinum") or tiers.get("premium") or _DEFAULT_TIER_PLATINUM)
+    g = int(tiers.get("gold") or tiers.get("bon") or _DEFAULT_TIER_GOLD)
+    s = int(tiers.get("silver") or tiers.get("moyen") or _DEFAULT_TIER_SILVER)
+    br = int(tiers.get("bronze") or _DEFAULT_TIER_BRONZE)
+    if not (p > g > s > br):
+        logger.warning(
+            "_tier_for: ordre tiers invalide p=%d g=%d s=%d br=%d (attendu p > g > s > br) — fallback defaults",
+            p,
+            g,
+            s,
+            br,
+        )
+        p, g, s, br = _DEFAULT_TIER_PLATINUM, _DEFAULT_TIER_GOLD, _DEFAULT_TIER_SILVER, _DEFAULT_TIER_BRONZE
     if score >= p:
         return "Platinum"
     if score >= g:

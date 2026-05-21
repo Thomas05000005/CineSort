@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
+
+logger = logging.getLogger(__name__)
 
 
 def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
@@ -146,7 +149,14 @@ def search_tmdb(
                         path = "/" + path
                     poster_url = f"https://image.tmdb.org/t/p/{_SEARCH_POSTER_SIZE}{path}"
             overview = ""
-            detail = tmdb._get_movie_detail_cached(int(r.id))
+            # Tier 2 audit : _get_movie_detail_cached peut lever (HTTP, timeout,
+            # rate limit). On degrade gracieusement plutot que de crasher toute
+            # la recherche pour un detail manquant.
+            try:
+                detail = tmdb._get_movie_detail_cached(int(r.id))
+            except (OSError, AttributeError, KeyError, TypeError, ValueError) as detail_exc:
+                logger.debug("search_tmdb: detail fetch failed for tmdb_id=%s: %s", r.id, detail_exc)
+                detail = None
             if isinstance(detail, dict):
                 overview = str(detail.get("overview") or "")
             if overview and len(overview) > 240:

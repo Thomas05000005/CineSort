@@ -1206,7 +1206,7 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     # qui utilisent des tokens custom courts en mode local-only.
     return {
         "rest_api_enabled": to_bool(payload.get("rest_api_enabled"), False),
-        "rest_api_port": max(1024, min(65535, int(payload.get("rest_api_port") or 8642))),
+        "rest_api_port": max(1024, min(65535, to_int(payload.get("rest_api_port"), 8642))),
         "rest_api_token": str(payload.get("rest_api_token") or "").strip(),
         "rest_api_cors_origin": str(payload.get("rest_api_cors_origin") or "").strip(),
         "rest_api_https_enabled": to_bool(payload.get("rest_api_https_enabled"), False),
