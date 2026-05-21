@@ -85,6 +85,7 @@ from cinesort.ui.api import (
     tmdb_support,
 )
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
 from cinesort.ui.api.facades import (
     IntegrationsFacade,
     LibraryFacade,
@@ -1118,7 +1119,8 @@ class CineSortApi:
             movies_count = client.get_movies_count(user_id)
             return {"ok": True, "libraries": libraries, "movies_count": movies_count}
         except _jellyfin_mod.JellyfinError as exc:
-            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
+            # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir URL/token/path).
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
     # ---------- Email ----------
     def _test_email_report_impl(self) -> Dict[str, Any]:
@@ -1276,7 +1278,8 @@ class CineSortApi:
             libs = client.get_libraries("movie")
             return {"ok": True, "libraries": libs}
         except _plex_mod.PlexError as exc:
-            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
+            # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir URL/token/path).
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
     def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Plex."""
@@ -1435,7 +1438,8 @@ class CineSortApi:
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
         except _radarr_mod.RadarrError as exc:
-            return _err_response(str(exc), category="resource", level="error", log_module=__name__)
+            # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir URL/api_key/path).
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
     # ---------- OMDb (Phase 6.2 — cross-check IMDb) ----------
     def _test_omdb_connection_impl(self, api_key: str = "", timeout_s: float = 10.0) -> Dict[str, Any]:
@@ -1455,7 +1459,8 @@ class CineSortApi:
             client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=max(1.0, min(30.0, float(timeout_s))))
             return client.test_connection()
         except (OSError, ValueError, KeyError) as exc:
-            return _err_response(f"Erreur test OMDb: {exc}", category="resource", level="error", log_module=__name__)
+            # Sprint 2 audit P0 #4 : ne pas leak exc string (peut contenir cache_path/api_key).
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
     def _get_naming_presets_impl(self) -> Dict[str, Any]:
         """Retourne la liste des presets de renommage disponibles."""

@@ -514,6 +514,7 @@
   "errors": {
     "run_not_found": "Le run demandé est introuvable.",
     "settings_invalid": "Les réglages fournis sont invalides.",
+    "integration_failed": "Échec de l'intégration. Consultez les logs serveur pour le détail.",
     "tmdb_unavailable": "TMDb est inaccessible (vérifiez votre clé API et votre connexion).",
     "ffmpeg_missing": "ffmpeg est introuvable. Installez-le depuis Réglages > Outils vidéo.",
     "permission_denied": "Permission refusée pour {{path}}.",

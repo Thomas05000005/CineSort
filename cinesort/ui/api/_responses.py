@@ -88,3 +88,44 @@ def ok(**fields: Any) -> Dict[str, Any]:
     info/debug le font deja explicitement.
     """
     return {"ok": True, **fields}
+
+
+def safe_integration_error(
+    exc: BaseException,
+    *,
+    category: str = "resource",
+    log_module: Optional[str] = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Retourne un message generique cote client + logge l'exception complete cote serveur.
+
+    Sprint 2 audit P0 #4 : plusieurs sites (Jellyfin / Plex / Radarr / OMDb) renvoyaient
+    `_err_response(str(exc))` au client, ce qui pouvait fuiter des chemins locaux,
+    URLs internes, tokens partiellement encodes, ou stack traces vers le JS.
+
+    Strategie : on logge l'exception complete avec `exc_info=True` (visible dans
+    les logs serveur pour diagnostic), mais on ne renvoie au client qu'un message
+    generique localise.
+
+    Args:
+        exc: Exception capturee.
+        category: Tag pour filtering logs et reponse JSON.
+        log_module: Nom du logger (defaut: "cinesort.ui.api").
+        **extra: champs additionnels fusionnes dans la reponse (ex: run_id=...).
+
+    Returns:
+        Dict `{"ok": False, "message": <message localise>, **extra}`.
+    """
+    # Import local pour eviter une dependance circulaire au chargement
+    # (_responses est importe tres tot, i18n_messages charge des fichiers JSON).
+    from cinesort.domain.i18n_messages import t as _translate
+
+    logger = logging.getLogger(log_module or "cinesort.ui.api")
+    logger.warning(
+        "integration_error [%s]: %s",
+        category,
+        exc.__class__.__name__,
+        exc_info=exc,
+    )
+    safe_message = _translate("errors.integration_failed")
+    return {"ok": False, "message": safe_message, **extra}

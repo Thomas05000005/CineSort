@@ -1142,9 +1142,33 @@ def apply_rows(
                         core_mod._mark_skip(res, core_mod.SKIP_REASON_VALIDATION_ABSENTE)
                     else:
                         core_mod._mark_skip(res, core_mod.SKIP_REASON_NON_VALIDE)
-        except (OSError, PermissionError, FileNotFoundError, FileExistsError, ValueError, TypeError) as exc:
+        except (FileNotFoundError, FileExistsError, PermissionError, OSError) as exc:
+            # Sprint 2 audit P0 #5 : separer FS errors (attendues, log warning) des
+            # state errors (bug logique, log error). Avant : tout etait swallow sans
+            # contexte. Le run continue (res.errors++) car un seul film en echec
+            # ne doit pas bloquer le reste du batch.
             res.errors += 1
             core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
+            _logger.warning(
+                "apply: fs_error row_id=%s folder=%s err=%s",
+                getattr(row, "row_id", "?"),
+                folder,
+                exc,
+            )
+            log("ERROR", f"Erreur application ({row.row_id}) : {exc}")
+        except (ValueError, TypeError) as exc:
+            # State error : indique un bug (row malformee, decision incompatible).
+            # On logge en error pour visibilite mais on n'arrete pas le batch :
+            # comme pour FS errors, on marque la row en erreur et on continue.
+            res.errors += 1
+            core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
+            _logger.error(
+                "apply: state_error row_id=%s folder=%s err=%s",
+                getattr(row, "row_id", "?"),
+                folder,
+                exc,
+                exc_info=exc,
+            )
             log("ERROR", f"Erreur application ({row.row_id}) : {exc}")
 
     cleanup_preview = preview_cleanup_residual_folders(cfg, ctx.touched_top_level_dirs)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from dataclasses import dataclass, replace
 from pathlib import Path
 import os
@@ -150,13 +151,47 @@ class JobRunner:
                 self._debug(f"start_job run_id collision for {run_id}, generating fallback id", run_debug)
                 run_id = normalize_or_generate_run_id(None)
 
-            self._store.run.insert_run_pending(
-                run_id=run_id,
-                root=str(root),
-                state_dir=str(state_dir),
-                config=dict(config or {}),
-                created_ts=created_ts,
-            )
+            # Sprint 2 audit P0 #6 : insert_run_pending peut encore lever IntegrityError
+            # malgre la pre-verification get_run() ci-dessus, en cas de race entre
+            # plusieurs threads (TOCTOU) ou si la generation _generate_current_format_run_id
+            # produit deux ID identiques dans la meme milliseconde. On retente une fois
+            # avec un run_id genere via normalize_or_generate_run_id(None) (uuid-style).
+            try:
+                self._store.run.insert_run_pending(
+                    run_id=run_id,
+                    root=str(root),
+                    state_dir=str(state_dir),
+                    config=dict(config or {}),
+                    created_ts=created_ts,
+                )
+            except sqlite3.IntegrityError as exc:
+                _logger.warning(
+                    "job: run_id collision on insert, regenerating run_id=%s err=%s",
+                    run_id,
+                    exc,
+                )
+                self._debug(
+                    f"start_job IntegrityError collision run_id={run_id}, regenerating uuid-style",
+                    run_debug,
+                )
+                run_id = normalize_or_generate_run_id(None)
+                try:
+                    self._store.run.insert_run_pending(
+                        run_id=run_id,
+                        root=str(root),
+                        state_dir=str(state_dir),
+                        config=dict(config or {}),
+                        created_ts=created_ts,
+                    )
+                except sqlite3.IntegrityError as exc2:
+                    # Si meme l'uuid-style se collide, il y a un probleme grave
+                    # (DB corrompue ?). On laisse remonter pour que le caller voie.
+                    _logger.error(
+                        "job: run_id collision still happening after regen run_id=%s err=%s",
+                        run_id,
+                        exc2,
+                    )
+                    raise
             self._debug(f"start_job insert_run_pending OK run_id={run_id}", run_debug)
 
             snapshot = RunSnapshot(
