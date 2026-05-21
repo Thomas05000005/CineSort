@@ -262,7 +262,7 @@ def _build_tool_status(
                 "message": f"{tool_name} detecte ({source}).",
                 "checked_ts": time.time(),
             }
-        ok_exec, first_line, full_text = _probe_version_line(tool_name=tool_name, tool_path=str(p), runner=runner)
+        ok_exec, first_line, _full_text = _probe_version_line(tool_name=tool_name, tool_path=str(p), runner=runner)
         if not ok_exec:
             continue
         parsed = _parse_version_tuple(first_line)

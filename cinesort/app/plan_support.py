@@ -496,7 +496,7 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     try:
         ctx.candidate_folders = discover_candidate_folders(ctx.cfg)
     except (OSError, PermissionError, FileNotFoundError) as exc:
-        raise RuntimeError(f"Impossible de lister ROOT: {exc}")
+        raise RuntimeError(f"Impossible de lister ROOT: {exc}") from exc
     discover_total = len(ctx.candidate_folders)
     _discover_dt = _time.monotonic() - _discover_t0
     _log.info("scan: phase 1 decouverte = %d dossiers en %.2fs", discover_total, _discover_dt)
@@ -2062,8 +2062,8 @@ def plan_multi_roots(
 
         cfg = build_cfg(root)
 
-        def multi_progress(idx: int, total: int, current: str) -> None:
-            progress(idx, total, f"[{root_label}] {current}")
+        def multi_progress(idx: int, total: int, current: str, _root_label: str = root_label) -> None:
+            progress(idx, total, f"[{_root_label}] {current}")
 
         rows_i, stats_i = plan_library(
             cfg,

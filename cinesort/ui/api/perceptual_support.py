@@ -199,7 +199,7 @@ def _execute_perceptual_analysis(
     §1 v7.5.0 : video et audio lances en parallele via ThreadPoolExecutor.
     Les 2 taches sont I/O-bound (ffmpeg subprocess), le GIL est libere.
     """
-    settings, ffmpeg_path, store, run_row, row, media_path, normalized, video_info = ctx
+    settings, ffmpeg_path, store, _run_row, row, media_path, normalized, video_info = ctx
     p_settings = _build_settings_dict(settings)
     timeout_s = p_settings["timeout_per_film_s"]
 
@@ -525,7 +525,7 @@ def analyze_perceptual_batch(
 
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
-    for rid, (ok, value) in zip(ids, raw_results):
+    for rid, (ok, value) in zip(ids, raw_results, strict=True):
         if ok and isinstance(value, dict) and value.get("ok"):
             results.append(
                 {

@@ -530,7 +530,7 @@ def main() -> None:
         import webview  # type: ignore[import-not-found]
     except ModuleNotFoundError:
         _startup_error("Dependance manquante: pywebview. Rebuild avec build_windows.bat (venv + dependencies).")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     import logging as _logging
     import time as _time

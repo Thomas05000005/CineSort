@@ -385,5 +385,131 @@ class HelperInternalsTests(unittest.TestCase):
         self.assertEqual(runtime_support._strip_ansi("\x1b[1;31mhi\x1b[0m"), "hi")
 
 
+# ---------------------------------------------------------------------------
+# Sprint 7 : RuntimeFacade — probe tools + event_ts + reset_incremental_cache
+# ---------------------------------------------------------------------------
+
+
+class RuntimeFacadeProbeToolsDelegationTests(unittest.TestCase):
+    """Sprint 7 : les 8 endpoints probe + 2 misc delegent vers les _X_impl du parent.
+
+    Couvre la liste exhaustive ajoutee sprint 7 :
+        - get_probe_tools_status (existait deja)
+        - get_tools_status (alias compat v7.0/v7.1)
+        - recheck_probe_tools
+        - set_probe_tool_paths
+        - install_probe_tools
+        - update_probe_tools
+        - auto_install_probe_tools (existait deja)
+        - get_probe
+        - get_event_ts
+        - reset_incremental_cache
+    """
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def test_runtime_facade_exposes_new_probe_methods(self) -> None:
+        """Sanity : toutes les nouvelles methodes ajoutees sprint 7 existent."""
+        expected = {
+            "get_probe_tools_status",
+            "get_tools_status",
+            "recheck_probe_tools",
+            "set_probe_tool_paths",
+            "install_probe_tools",
+            "update_probe_tools",
+            "auto_install_probe_tools",
+            "get_probe",
+            "get_event_ts",
+            "reset_incremental_cache",
+        }
+        for name in expected:
+            self.assertTrue(
+                hasattr(self.api.runtime, name),
+                f"RuntimeFacade.{name} manquante",
+            )
+            self.assertTrue(
+                callable(getattr(self.api.runtime, name)),
+                f"RuntimeFacade.{name} non callable",
+            )
+
+    def test_get_tools_status_delegates(self) -> None:
+        sentinel = {"ok": True, "ffprobe": {"present": True}}
+        with patch.object(self.api, "_get_tools_status_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.get_tools_status()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_recheck_probe_tools_delegates(self) -> None:
+        sentinel = {"ok": True, "rechecked": True}
+        with patch.object(self.api, "_recheck_probe_tools_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.recheck_probe_tools()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_set_probe_tool_paths_delegates(self) -> None:
+        sentinel = {"ok": True}
+        payload = {"ffprobe": "C:/Tools/ffprobe.exe", "mediainfo": "C:/Tools/mediainfo.exe"}
+        with patch.object(self.api, "_set_probe_tool_paths_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.set_probe_tool_paths(payload)
+        mocked.assert_called_once_with(payload)
+        self.assertEqual(result, sentinel)
+
+    def test_set_probe_tool_paths_default_none(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_set_probe_tool_paths_impl", return_value=sentinel) as mocked:
+            self.api.runtime.set_probe_tool_paths()
+        mocked.assert_called_once_with(None)
+
+    def test_install_probe_tools_delegates(self) -> None:
+        sentinel = {"ok": True, "installed": ["ffprobe", "mediainfo"]}
+        options = {"scope": "user", "tools": ["ffprobe"]}
+        with patch.object(self.api, "_install_probe_tools_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.install_probe_tools(options)
+        mocked.assert_called_once_with(options)
+        self.assertEqual(result, sentinel)
+
+    def test_install_probe_tools_default_none(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_install_probe_tools_impl", return_value=sentinel) as mocked:
+            self.api.runtime.install_probe_tools()
+        mocked.assert_called_once_with(None)
+
+    def test_update_probe_tools_delegates(self) -> None:
+        sentinel = {"ok": True, "updated": ["ffprobe"]}
+        options = {"scope": "system"}
+        with patch.object(self.api, "_update_probe_tools_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.update_probe_tools(options)
+        mocked.assert_called_once_with(options)
+        self.assertEqual(result, sentinel)
+
+    def test_update_probe_tools_default_none(self) -> None:
+        sentinel = {"ok": True}
+        with patch.object(self.api, "_update_probe_tools_impl", return_value=sentinel) as mocked:
+            self.api.runtime.update_probe_tools()
+        mocked.assert_called_once_with(None)
+
+    def test_get_probe_delegates(self) -> None:
+        sentinel = {"ok": True, "probe": {"width": 1920}}
+        with patch.object(self.api, "_get_probe_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.get_probe("run_abc", "row_xyz")
+        mocked.assert_called_once_with("run_abc", "row_xyz")
+        self.assertEqual(result, sentinel)
+
+    def test_get_event_ts_delegates(self) -> None:
+        sentinel = {"ok": True, "last_event_ts": 1234.5, "last_settings_ts": 1234.0}
+        with patch.object(self.api, "_get_event_ts_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.get_event_ts()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+    def test_reset_incremental_cache_delegates(self) -> None:
+        sentinel = {"ok": True, "purged_rows": 42}
+        with patch.object(self.api, "_reset_incremental_cache_impl", return_value=sentinel) as mocked:
+            result = self.api.runtime.reset_incremental_cache()
+        mocked.assert_called_once_with()
+        self.assertEqual(result, sentinel)
+
+
 if __name__ == "__main__":
     unittest.main()

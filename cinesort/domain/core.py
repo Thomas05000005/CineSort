@@ -378,7 +378,7 @@ def ensure_inside_root(cfg: Config, dst: Path) -> None:
     try:
         dst_pw.relative_to(root_pw)
     except ValueError:
-        raise RuntimeError(f"REFUS: destination hors ROOT: {dst}")
+        raise RuntimeError(f"REFUS: destination hors ROOT: {dst}") from None
 
 
 def windows_safe(name: str) -> str:
