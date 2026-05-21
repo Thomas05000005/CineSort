@@ -1,8 +1,8 @@
 # Plan refactor #84 — God class CineSortApi → 5 façades par bounded context
 
-**Version** : 1.1 (PRs 1-6 mergées 2026-05-14)
-**Auteur** : Claude Code (session 2026-05-14)
-**Statut** : ✅ Phase 1 (façades complètes) **TERMINÉE** — Phase 2 (migration callers) en attente
+**Version** : 1.2 (Sprint 7 — extension RuntimeFacade probe tools)
+**Auteur** : Claude Code (session 2026-05-14, sprint 7 2026-05-21)
+**Statut** : ✅ Phase 1 (façades) + Phase 2 (callers JS) **TERMINÉES** — Sprint 7 : couverture probe tools completee sur RuntimeFacade
 
 ## Résumé d'avancement (au 2026-05-14)
 
@@ -16,9 +16,59 @@
 | #134 (PR 6) | LibraryFacade complète | 9 | +16 | 7dafb5a | ✅ Mergée |
 | **Phase 1 total** | **5 façades, 54 méthodes** | **54** | **+91** | — | ✅ **TERMINÉE** |
 | PR 7 | Documentation finale | — | — | (cette PR) | 🟡 En cours |
-| PR 8 | Migration frontend JS | — | — | — | ⏳ Pending |
-| PR 9 | Migration REST dispatch | — | — | — | ⏳ Pending |
-| PR 10 | Suppression méthodes directes | — | — | — | ⏳ Pending |
+| PR 8 | Migration frontend JS | — | — | — | ✅ Mergée |
+| PR 9 | Migration REST dispatch | — | — | — | ✅ Mergée |
+| PR 10 | Suppression méthodes directes | — | — | — | ✅ Mergée (Pass 1 legacy mai 2026) |
+| Sprint 7 | RuntimeFacade probe tools (+ event_ts, reset_incremental_cache) | 10 | +12 | (cette PR) | 🟡 En cours |
+
+## Sprint 7 (mai 2026) — Extension RuntimeFacade
+
+**Contexte** : audit C24 a signalé que `cinesort_api.py` (2563 LoC) restait sur-dimensionné. Le sprint 7 finit la couverture façades pour les méthodes **probe tools** orphelines.
+
+**Avant sprint 7** (méthodes `_X_impl` SANS exposition façade) :
+
+| Méthode `_impl` | Statut |
+|-----------------|--------|
+| `_get_probe_tools_status_impl` | ✅ déjà sur `RuntimeFacade.get_probe_tools_status` |
+| `_auto_install_probe_tools_impl` | ✅ déjà sur `RuntimeFacade.auto_install_probe_tools` |
+| `_get_tools_status_impl` | ❌ orpheline (alias historique de `get_probe_tools_status`) |
+| `_recheck_probe_tools_impl` | ❌ orpheline |
+| `_set_probe_tool_paths_impl` | ❌ orpheline |
+| `_install_probe_tools_impl` | ❌ orpheline |
+| `_update_probe_tools_impl` | ❌ orpheline |
+| `_get_probe_impl` | ❌ orpheline |
+| `_get_event_ts_impl` | ❌ orpheline |
+| `_reset_incremental_cache_impl` | ❌ orpheline |
+
+**Après sprint 7** : 8 méthodes probe + 2 méthodes runtime ajoutées sur `RuntimeFacade`. Total `RuntimeFacade` passe de **17 à 27 méthodes**.
+
+**Méthodes ajoutées sur RuntimeFacade** :
+
+- `get_tools_status()` (alias compat v7.0/v7.1)
+- `recheck_probe_tools()`
+- `set_probe_tool_paths(payload)`
+- `install_probe_tools(options)`
+- `update_probe_tools(options)`
+- `get_probe(run_id, row_id)`
+- `get_event_ts()`
+- `reset_incremental_cache()`
+
+**Couverture côté frontend** : aucune URL `runtime/...` n'est utilisée pour ces méthodes aujourd'hui (audit `grep` confirmé). Les nouveaux endpoints REST `/api/runtime/{method}` sont **disponibles** mais non encore appelés par le dashboard JS. Migration des appels JS = travail séparé pour une PR future.
+
+**Méthodes encore orphelines après sprint 7** (à traiter en PR suivantes) :
+
+| Méthode `_impl` | Façade candidate | Notes |
+|-----------------|------------------|-------|
+| `_get_naming_presets_impl` | `SettingsFacade` ou `QualityFacade` | Liste presets renommage |
+| `_preview_naming_template_impl` | `SettingsFacade` | Preview templates |
+| `_export_shareable_profile_impl` | `QualityFacade` | Export profil communautaire |
+| `_import_shareable_profile_impl` | `QualityFacade` | Import profil communautaire |
+| `_get_auto_approved_summary_impl` | `RunFacade` | Résumé auto-approve |
+| `_undo_by_row_preview_impl` | `RunFacade` | Preview undo par row |
+| `_undo_last_apply_preview_impl` | `RunFacade` | Preview undo last apply |
+| `_undo_selected_rows_impl` | `RunFacade` | Undo selection |
+
+**Reste : 8 méthodes orphelines à exposer en façades dans les sprints suivants** (estimées 1-2 PR séparées pour ne pas mélanger les bounded contexts).
 
 **Backward-compat 100% préservée** : les 104 méthodes directes de `CineSortApi` coexistent avec les 5 façades. Les anciens call sites (`api.X(...)`) et les nouveaux (`api.context.X(...)`) fonctionnent en parallèle. La suppression des méthodes directes ne se fera qu'à la PR 10, après migration complète des callers JS et REST.
 
