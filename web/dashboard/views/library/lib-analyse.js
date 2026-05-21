@@ -189,7 +189,8 @@ async function _pollRunStatus() {
     } else {
       const pct = Math.round((idx / total) * 100);
       if (progText) progText.textContent = `Analyse : ${idx}/${total} (${pct}%)`;
-      if (progressFill) { progressFill.style.width = `${pct}%`; progressFill.classList.remove("progress-fill--shimmer"); }
+      // B8 (fin sprint 4) : --progress (0..1) -> scaleX (compositor only, no reflow).
+      if (progressFill) { progressFill.style.setProperty("--progress", String(pct / 100)); progressFill.classList.remove("progress-fill--shimmer"); }
     }
 
     if ($("libProgSpeed")) $("libProgSpeed").textContent = d.speed ? `${Number(d.speed).toFixed(1)} doss./s` : "—";
