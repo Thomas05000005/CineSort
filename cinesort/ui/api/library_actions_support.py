@@ -5,7 +5,7 @@ Endpoints :
     mark_for_deletion_bulk(row_ids, run_id)     — bulk (spec 07 Bibliotheque)
     rescan_row(run_id, row_id)                  — single (spec 06)
     rescan_rows_bulk(row_ids, run_id)           — bulk (spec 07)
-    export_films(row_ids, format, run_id)       — CSV / JSON
+    export_films(row_ids, format, run_id)       — CSV / JSON / NDJSON
 
 Persistance :
 - Les marqueurs de suppression sont stockes dans un fichier
@@ -523,20 +523,21 @@ def export_films(
     fmt: str = "csv",
     run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Export CSV/JSON des films selectionnes (spec 07 - 07.4.4).
+    """Export CSV / JSON / NDJSON des films selectionnes (spec 07 - 07.4.4).
 
     Args:
         row_ids: row_ids a exporter. Si vide, exporte tous les films du run.
-        fmt: "csv" | "json"
+        fmt: "csv" | "json" | "ndjson"
         run_id: run cible (None = dernier)
 
     Returns:
-        - format csv : {ok, file_path, count, format}
-        - format json : {ok, films: [...], count, format} (direct dans la reponse)
-          ET {ok, file_path} aussi pour persistance permanente
+        - format csv    : {ok, file_path, count, format}
+        - format json   : {ok, file_path, films: [...], count, format}
+        - format ndjson : {ok, file_path, count, format} (1 ligne JSON par film,
+          adapte aux gros exports streamables)
     """
     fmt_norm = str(fmt or "csv").strip().lower()
-    if fmt_norm not in ("csv", "json"):
+    if fmt_norm not in ("csv", "json", "ndjson"):
         return _err_response(f"Format inconnu: {fmt}", category="validation", level="info", log_module=__name__)
     if not isinstance(row_ids, list):
         return _err_response(
@@ -619,22 +620,37 @@ def export_films(
                 "run_id": resolved,
             }
 
-        # JSON : ecrire le fichier ET retourner les films dans la reponse
-        state.atomic_write_json(
-            file_path,
-            {
-                "run_id": resolved,
-                "exported_ts": time.time(),
-                "count": count,
+        if fmt_norm == "json":
+            # JSON : ecrire le fichier ET retourner les films dans la reponse
+            state.atomic_write_json(
+                file_path,
+                {
+                    "run_id": resolved,
+                    "exported_ts": time.time(),
+                    "count": count,
+                    "films": export_rows,
+                },
+            )
+            return {
+                "ok": True,
+                "file_path": str(file_path),
                 "films": export_rows,
-            },
-        )
+                "count": count,
+                "format": "json",
+                "run_id": resolved,
+            }
+
+        # NDJSON : 1 ligne JSON par film (newline-delimited JSON), streamable.
+        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as fp:
+            for row in export_rows:
+                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+        tmp_path.replace(file_path)
         return {
             "ok": True,
             "file_path": str(file_path),
-            "films": export_rows,
             "count": count,
-            "format": "json",
+            "format": "ndjson",
             "run_id": resolved,
         }
     except (OSError, PermissionError, TypeError, ValueError) as exc:

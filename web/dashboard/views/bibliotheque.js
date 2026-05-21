@@ -23,7 +23,7 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
-import { dangerConfirmModal } from "../components/modal.js";
+import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { renderFilmDetail } from "../components/film-detail.js";
 import { showToast } from "../components/toast.js";
 import {
@@ -496,7 +496,9 @@ function _updateInspector() {
     ]);
     return;
   }
-  // Cas selection mono : detail film focused
+  // Cas selection mono : delegue au composant FilmDetail mode A (spec 06).
+  // Le composant gere lui-meme : mount dans right-panel, poster + meta + score
+  // V2 + alertes + candidats TMDb + onglets + actions. Plus de rendu local.
   const focused = selectedIds[0] || _state.focusedRowId;
   if (!focused) {
     rightPanel.reset();
@@ -507,44 +509,14 @@ function _updateInspector() {
     rightPanel.reset();
     return;
   }
-  // Stub FilmDetail mode A : poster + meta + alertes (le composant FilmDetail
-  // est livre par un agent parallele ; en attendant on rend une carte resume).
-  const poster = row.poster_url
-    ? `<img class="bibliotheque-inspector-poster" src="${escapeHtml(row.poster_url)}" alt="${escapeHtml(row.title)}">`
-    : `<div class="bibliotheque-inspector-poster bibliotheque-inspector-poster--placeholder">🎬</div>`;
-  const warningsHtml = Array.isArray(row.warnings) && row.warnings.length > 0
-    ? `<ul class="bibliotheque-inspector-warnings">${row.warnings.map((w) => `<li>⚠ ${escapeHtml(w)}</li>`).join("")}</ul>`
-    : "<p class=\"bibliotheque-inspector-empty\">Aucune alerte.</p>";
-  rightPanel.setSections([
-    {
-      title: row.title || "Film",
-      html: `
-        ${poster}
-        <dl class="bibliotheque-inspector-meta">
-          <dt>Année</dt><dd>${row.year || "—"}</dd>
-          <dt>Tier</dt><dd>${_tierBadge(row.tier_v2)}</dd>
-          <dt>Score</dt><dd>${_formatScore(row.score_v2)}</dd>
-          <dt>Confiance</dt><dd>${_formatConfidence(row.confidence)}</dd>
-          <dt>Résolution</dt><dd>${escapeHtml(row.resolution || "—")}</dd>
-          <dt>Taille</dt><dd>${_formatSize(row.size_bytes)}</dd>
-          <dt>Durée</dt><dd>${row.duration_min ? `${row.duration_min} min` : "—"}</dd>
-          <dt>Source</dt><dd>${escapeHtml(_formatSource(row.proposed_source))}</dd>
-        </dl>
-        <button type="button" class="v5-btn v5-btn--primary" data-bibliotheque-inspect-open="${escapeHtml(String(row.row_id))}">Ouvrir le détail complet</button>
-      `,
-    },
-    {
-      title: "Alertes",
-      html: warningsHtml,
-    },
-  ]);
-  const openBtn = document.querySelector(`[data-bibliotheque-inspect-open]`);
-  if (openBtn) {
-    openBtn.addEventListener("click", () => {
-      const rid = openBtn.dataset.bibliothequeInspectOpen;
-      if (rid) navigateTo(`/film/${encodeURIComponent(rid)}`);
-    });
-  }
+  // renderFilmDetail mode A : pas besoin de container, le composant cree son
+  // propre mount data-film-detail-mount dans la section right-panel via
+  // setSections (cf components/film-detail.js::_ensureModeAContainer).
+  void renderFilmDetail({
+    mode: "A",
+    rowId: String(row.row_id),
+    runId: _runId || null,
+  });
 }
 
 /* --- Data --- */
@@ -1005,17 +977,12 @@ function _bindEvents(container) {
     });
   });
 
-  // Spec 06 : clic carte -> mode A (inspecteur droit), double-clic -> mode C (overlay).
+  // Spec 06 : clic carte -> focus inspecteur (mode A via _updateInspector),
+  // double-clic -> overlay (mode C, geree par renderFilmDetail elle-meme).
   container.querySelectorAll(".bibliotheque-card").forEach((card) => {
     card.addEventListener("click", () => {
       const rowId = card.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "A", rowId });
-    });
-    card.addEventListener("dblclick", () => {
-      const rowId = card.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "C", rowId });
       if (rowId) {
-        // Clic simple : focus inspecteur (cf spec 06 mode A)
         _state.focusedRowId = rowId;
         _updateInspector();
       }
@@ -1023,12 +990,11 @@ function _bindEvents(container) {
     card.addEventListener("dblclick", (ev) => {
       ev.preventDefault();
       const rowId = card.dataset.rowId;
-      if (rowId) _openFilmDetailModal(rowId);
+      if (rowId) renderFilmDetail({ mode: "C", rowId, runId: _runId || null });
     });
     card.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         const rowId = card.dataset.rowId;
-        if (rowId) renderFilmDetail({ mode: "A", rowId });
         if (rowId) {
           _state.focusedRowId = rowId;
           _updateInspector();
@@ -1049,20 +1015,15 @@ function _bindEvents(container) {
     tr.addEventListener("click", (ev) => {
       if (ev.target.tagName === "INPUT") return;
       const rowId = tr.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "A", rowId });
-    });
-    tr.addEventListener("dblclick", (ev) => {
-      if (ev.target.tagName === "INPUT") return;
-      const rowId = tr.dataset.rowId;
-      if (rowId) renderFilmDetail({ mode: "C", rowId });
       if (rowId) {
         _state.focusedRowId = rowId;
         _updateInspector();
       }
     });
-    tr.addEventListener("dblclick", () => {
+    tr.addEventListener("dblclick", (ev) => {
+      if (ev.target.tagName === "INPUT") return;
       const rowId = tr.dataset.rowId;
-      if (rowId) _openFilmDetailModal(rowId);
+      if (rowId) renderFilmDetail({ mode: "C", rowId, runId: _runId || null });
     });
     tr.addEventListener("mouseenter", () => {
       const rowId = tr.dataset.rowId;
@@ -1091,12 +1052,6 @@ function _bindEvents(container) {
   if (grid) {
     grid.addEventListener("mousedown", _onDragSelectMouseDown);
   }
-}
-
-function _openFilmDetailModal(rowId) {
-  // Mode C : overlay (Modal Film). Fallback navigate /film/:id si la modal n'est
-  // pas encore livree par l'agent parallele.
-  navigateTo(`/film/${encodeURIComponent(rowId)}`);
 }
 
 /* --- Bulk actions cablees --- */
@@ -1156,16 +1111,69 @@ async function _bulkRescan(rowIds) {
   }
 }
 
-async function _bulkExport(rowIds) {
+// Formats d'export proposes a l'utilisateur (Spec 07 §07.4.4). Le backend
+// (library_actions_support.export_films) accepte "csv" | "json" | "ndjson".
+const EXPORT_FORMATS = [
+  { value: "csv", label: "CSV (.csv) — tableur" },
+  { value: "json", label: "JSON (.json) — objet unique" },
+  { value: "ndjson", label: "NDJSON (.ndjson) — 1 film par ligne" },
+];
+
+function _openExportFormatPicker(rowIds) {
+  // Mini-modal selecteur de format (3 options) avant l'appel export_films.
+  // Utilise le composant showModal partage plutot qu'un window.prompt natif
+  // pour respecter le theme + la11y (focus trap, Esc, ARIA dialog).
+  const n = rowIds.length;
+  const optionsHtml = EXPORT_FORMATS.map(
+    (f, i) =>
+      `<label class="bibliotheque-export-format-option">
+         <input type="radio" name="bibliotheque-export-format" value="${escapeHtml(f.value)}"${i === 0 ? " checked" : ""}>
+         <span>${escapeHtml(f.label)}</span>
+       </label>`,
+  ).join("");
+  const body = `
+    <p>Choisir le format d'export pour <strong>${n}</strong> film${n > 1 ? "s" : ""} :</p>
+    <div class="bibliotheque-export-format-list" role="radiogroup" aria-label="Format d'export">
+      ${optionsHtml}
+    </div>
+  `;
+  showModal({
+    title: "Exporter la sélection",
+    body,
+    actions: [
+      { label: "Annuler", cls: "", onClick: () => {} },
+      {
+        label: "Exporter",
+        cls: "btn-primary",
+        onClick: () => {
+          const sel = document.querySelector(
+            'input[name="bibliotheque-export-format"]:checked',
+          );
+          const fmt = (sel && sel.value) || "csv";
+          // showModal ferme automatiquement apres onClick, mais on rappelle
+          // closeModal par securite (idempotent) au cas ou.
+          try { closeModal(); } catch (_e) { /* noop */ }
+          void _doExport(rowIds, fmt);
+        },
+      },
+    ],
+  });
+}
+
+async function _doExport(rowIds, fmt) {
+  const fmtUpper = String(fmt || "csv").toUpperCase();
   try {
-    const res = await apiPost("library/export_films", { row_ids: rowIds, format: "csv" });
+    const res = await apiPost("library/export_films", {
+      row_ids: rowIds,
+      format: fmt,
+    });
     if (res && res.ok !== false) {
       const filePath = res.file_path || (res.data && res.data.file_path);
       showToast({
         type: "success",
         text: filePath
-          ? `Export CSV de ${rowIds.length} films : ${filePath}`
-          : `Export CSV de ${rowIds.length} films terminé.`,
+          ? `Export ${fmtUpper} de ${rowIds.length} films : ${filePath}`
+          : `Export ${fmtUpper} de ${rowIds.length} films terminé.`,
         duration: 8000,
       });
     } else {
@@ -1174,6 +1182,13 @@ async function _bulkExport(rowIds) {
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
   }
+}
+
+async function _bulkExport(rowIds) {
+  // Spec 07 (Fix 100%) : selecteur format CSV / JSON / NDJSON avant l'export
+  // au lieu d'un format CSV hardcode.
+  if (!Array.isArray(rowIds) || rowIds.length === 0) return;
+  _openExportFormatPicker(rowIds);
 }
 
 function _confirmBulkDelete(rowIds) {
