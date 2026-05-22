@@ -90,6 +90,7 @@
   "email_smtp_user": "",
   "email_smtp_password": "",
   "email_smtp_tls": true,
+  "email_smtp_timeout_s": 30,
   "email_to": "",
   "email_on_scan": true,
   "email_on_apply": true,
