@@ -18,8 +18,13 @@
  *    /traitement), "Annuler l'apply" (undo_last_apply), "Supprimer" (run/delete_run)
  *  - Actions dangereuses confirmees via dangerConfirmModal (cf
  *    feedback-cinesort-actions-dangereuses)
+ *  - Modal "Vue par film" (issue #350) : list_films_with_history pour navigation
+ *    cross-runs depuis le header de la vue
  *
  * Route cible : /historique (Phase 2-B PR #261) + /run/:id (standalone).
+ *
+ * Endpoints consommes (sprint orphelins #350) :
+ *   library/list_films_with_history(limit) — overview films cross-runs
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -27,7 +32,7 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
-import { dangerConfirmModal } from "../components/modal.js";
+import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
 
 /* --- Format dates ----------------------------------------------------- */
@@ -335,6 +340,9 @@ function _renderHeader(stats) {
                   data-historique-view="timeline" title="Vue chronologique">📅</button>
           <button type="button" class="v5-btn v5-btn--ghost ${_viewMode === "table" ? "is-active" : ""}"
                   data-historique-view="table" title="Vue tableau">≡</button>
+          <button type="button" class="v5-btn v5-btn--ghost"
+                  data-historique-films-history-open
+                  title="Vue par film : historique cross-runs">🎬</button>
         </div>
       </div>
       ${_renderCustomDatePicker()}
@@ -905,6 +913,111 @@ function _bindEvents(container) {
   // Retry
   const retryBtn = container.querySelector("[data-historique-retry]");
   if (retryBtn) retryBtn.addEventListener("click", () => initHistorique(container));
+  // Issue #350 : ouverture de la modale "Vue par film" (list_films_with_history).
+  container.querySelectorAll("[data-historique-films-history-open]").forEach((btn) => {
+    btn.addEventListener("click", () => _openFilmsHistoryModal());
+  });
+}
+
+/* --- Sprint orphelins #350 : modale "Vue par film" ---
+ *
+ * Liste les films du dernier run avec un resume cross-runs (nombre de runs ou
+ * apparait le film, dernier statut, derniere modif). Click sur un film -> page
+ * /film/:id (deja existante).
+ *
+ * Pas un onglet additionnel dans l'inspecteur car list_films_with_history n'est
+ * pas scope-run mais cross-runs : c'est une vue alternative globale, mieux
+ * placee dans une modale invoquable depuis le header.
+ */
+
+const FILMS_HISTORY_MODAL_ID = "historiqueFilmsHistoryModal";
+
+async function _openFilmsHistoryModal() {
+  // Construire la modale skeleton puis fetch async.
+  showModal({
+    title: "🎬 Films avec historique (cross-runs)",
+    body: `
+      <div class="historique-films-history" data-historique-films-history-body>
+        <p class="historique-films-history-loading">Chargement…</p>
+      </div>
+    `,
+    actions: [
+      { label: "Fermer", cls: "", onClick: () => {} },
+    ],
+  });
+
+  try {
+    const res = await apiPost("library/list_films_with_history", { limit: 100 });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec chargement.");
+    }
+    const films = Array.isArray(data.films) ? data.films : [];
+    _renderFilmsHistoryModalBody(films);
+  } catch (err) {
+    const body = document.querySelector("[data-historique-films-history-body]");
+    if (body) {
+      body.innerHTML = `<p class="historique-films-history-error">Erreur : ${escapeHtml(String(err && err.message ? err.message : err))}</p>`;
+    }
+  }
+}
+
+function _renderFilmsHistoryModalBody(films) {
+  const body = document.querySelector("[data-historique-films-history-body]");
+  if (!body) return;
+  if (!films.length) {
+    body.innerHTML = `<p class="historique-films-history-empty">Aucun film avec historique disponible.</p>`;
+    return;
+  }
+  // Shape backend (cinesort.domain.film_history.list_films_overview) :
+  //   { film_id, title, year, edition, score, tier, row_id }
+  const itemsHtml = films.map((f) => {
+    const filmId = String(f.film_id || f.row_id || "");
+    const title = String(f.title || f.proposed_title || "Sans titre");
+    const year = f.year ? ` (${f.year})` : "";
+    const edition = f.edition ? ` · ${f.edition}` : "";
+    const score = (f.score != null && f.score !== 0) ? `${Math.round(Number(f.score))}/100` : "—";
+    const tier = String(f.tier || "").toLowerCase();
+    const tierBadge = tier
+      ? `<span class="historique-films-history-tier historique-films-history-tier--${escapeHtml(tier)}">${escapeHtml(tier)}</span>`
+      : "—";
+    const linkHref = filmId ? `#/film/${encodeURIComponent(filmId)}` : null;
+    const titleCell = linkHref
+      ? `<a href="${escapeHtml(linkHref)}" class="historique-films-history-link">${escapeHtml(title + year + edition)}</a>`
+      : escapeHtml(title + year + edition);
+    return `
+      <tr class="historique-films-history-row">
+        <td class="historique-films-history-title">${titleCell}</td>
+        <td class="historique-films-history-score">${escapeHtml(score)}</td>
+        <td class="historique-films-history-tier-cell">${tierBadge}</td>
+      </tr>
+    `;
+  }).join("");
+  body.innerHTML = `
+    <p class="historique-films-history-summary">
+      ${films.length} film${films.length > 1 ? "s" : ""} du dernier run. Cliquez sur un titre pour voir la timeline complète cross-runs.
+    </p>
+    <div class="historique-films-history-tablewrap">
+      <table class="historique-films-history-table">
+        <thead>
+          <tr>
+            <th>Titre</th>
+            <th>Score</th>
+            <th>Tier</th>
+          </tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+    </div>
+  `;
+  // Cliquer sur un lien doit fermer la modale puis naviguer (sinon le modal
+  // reste ouvert au-dessus de la page film).
+  body.querySelectorAll("[href^='#/film/']").forEach((a) => {
+    a.addEventListener("click", () => {
+      try { closeModal(); } catch (_e) { /* noop */ }
+      // Le navigate hash-change naturel se charge du reste.
+    });
+  });
 }
 
 async function _doUndoApply(runId) {
