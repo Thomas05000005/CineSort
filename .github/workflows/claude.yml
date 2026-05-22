@@ -23,9 +23,9 @@ on:
   pull_request:
     types: [opened, ready_for_review]
   schedule:
-    # Lundi 04h UTC : audit hebdomadaire automatique
-    # Coute ~5-10 prompts (audit complet ~50k LOC).
-    - cron: "0 4 * * 1"
+    # Tous les jours 04h UTC : audit quotidien automatique
+    # Coute ~5-10 prompts par run (audit complet ~50k LOC).
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       prompt:
