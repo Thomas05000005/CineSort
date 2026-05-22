@@ -51,7 +51,7 @@ _SECRET_PATTERNS: List[Pattern[str]] = [
     # Limite la longueur du nom de cle a 64 caracteres pour eviter les
     # ReDoS et matchs accidentels sur du texte libre.
     re.compile(
-        r'("[\w-]{1,64}(?:_api[_-]?key|_token|_password|_secret|api[_-]?key)"\s*:\s*")([^"]+)(")',
+        r'("[\w-]{1,64}(?:_api[_-]?key|_token|_password|_secret|api[_-]?key)"\s*:\s*")((?:\\.|[^"\\])+)(")',
         re.IGNORECASE,
     ),
 ]
