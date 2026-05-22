@@ -33,6 +33,7 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_BACKUPS = 5
 BACKUP_SUFFIX = ".bak"
+MAX_BACKUP_ATTEMPTS = 10000
 
 
 def _format_backup_name(stem: str, trigger: str, ts: Optional[float] = None) -> str:
@@ -152,12 +153,15 @@ def _resolve_unique_backup_path(backup_dir: Path, base_name: str) -> Path:
     else:
         stem_part = base_name
     counter = 1
-    while True:
+    while counter <= MAX_BACKUP_ATTEMPTS:
         alt_name = f"{stem_part}-{counter}{BACKUP_SUFFIX}"
         alt = Path(backup_dir) / alt_name
         if not alt.exists():
             return alt
         counter += 1
+    raise RuntimeError(
+        f"Aucun nom de backup libre apres {MAX_BACKUP_ATTEMPTS} essais dans {backup_dir}"
+    )
 
 
 def backup_db_with_rotation(
