@@ -2,7 +2,7 @@
 # Playwright + Pillow : utilises par tests/e2e/, tests/e2e_desktop/ et quelques
 # scripts (capture_readme_screenshots, test_axe_dashboard). Etaient anciennement
 # dans requirements-preview.txt avant la suppression du mode preview (PR #257).
-playwright>=1.40,<2
+playwright>=1.60.0,<2
 Pillow>=12.2
 ruff>=0.15.12,<0.16
 coverage>=7.14.0,<8
