@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
 
 import cinesort.domain.core as core_mod
+from cinesort.app._dir_utils import is_dir_empty  # noqa: F401 - backward compat re-export (cf issue #288)
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
@@ -311,19 +312,6 @@ def prune_empty_dirs(root: Path) -> bool:
     except (OSError, PermissionError) as exc:
         _logger.debug("prune_empty_dirs: skip root %s: %s", root, exc)
     return removed_any
-
-
-def is_dir_empty(path: Path) -> bool:
-    """True si `path` est un dossier existant et strictement vide."""
-    if not path.exists() or not path.is_dir():
-        return False
-    try:
-        next(path.iterdir())
-        return False
-    except StopIteration:
-        return True
-    except (OSError, PermissionError):
-        return False
 
 
 def legacy_collection_root(cfg: "Config") -> Path:
