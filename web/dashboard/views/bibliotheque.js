@@ -4,8 +4,8 @@
  *  - Grille de posters TMDb + chips tier (6) + chips non-tier (5)
  *  - Recherche fuzzy + 12 options de tri (6 criteres x 2 directions)
  *  - Toggle Grille / Tableau dense (headers triables + colonnes Confiance/Taille/Source)
- *  - Selection multi + 4 actions bulk reellement cablees (analyser perceptuel,
- *    re-scanner, exporter, marquer pour suppression avec dangerConfirmModal)
+ *  - Selection multi + 5 actions bulk reellement cablees (analyser perceptuel,
+ *    re-scanner, recharger posters TMDb, exporter, marquer pour suppression avec dangerConfirmModal)
  *  - Scroll infini (IntersectionObserver, batch 60) avec cache local par page
  *  - Inspecteur droit (right-panel) : recap film(s) selectionne(s)
  *  - Double-clic carte/ligne -> Modal Detail (mode C, navigate /film/:id)
@@ -24,6 +24,7 @@
  *   library/get_smart_playlists()
  *   library/save_smart_playlist(name, filters)
  *   library/delete_smart_playlist(playlist_id)
+ *   integrations/get_tmdb_posters(tmdb_ids, size) — recharger posters batch
  */
 
 import { escapeHtml } from "../core/dom.js";
@@ -311,6 +312,7 @@ function _renderBulkToolbar() {
       <span class="bibliotheque-bulk-count">✓ ${n} film${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}</span>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual">▶ Analyser perceptuel</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan">↻ Re-scanner</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Recharger les posters TMDb">🖼 Posters TMDb</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="export">📤 Exporter…</button>
       <button type="button" class="v5-btn v5-btn--danger" data-bibliotheque-bulk="delete">🗑 Marquer pour suppression</button>
       <button type="button" class="v5-btn v5-btn--ghost" data-bibliotheque-bulk="clear">Annuler sélection</button>
@@ -1222,6 +1224,74 @@ function _handleBulkAction(action) {
   if (action === "export") {
     void _bulkExport(ids);
     return;
+  }
+  if (action === "refresh-posters") {
+    void _bulkRefreshPosters(ids);
+    return;
+  }
+}
+
+/* Sprint orphelins #350 : recharger les posters TMDb des films selectionnes.
+ *
+ * On collecte les tmdb_id presents (les films non-identifies sont ignores), on
+ * appelle integrations/get_tmdb_posters(tmdb_ids, size="w185") et on patche les
+ * rows en memoire avec les nouveaux poster_url. Pas de re-fetch library.
+ *
+ * Pas d'UI gallery a ce stade (cf consigne issue #350 : un bouton simple suffit).
+ */
+async function _bulkRefreshPosters(rowIds) {
+  // Mapping rowId -> tmdb_id et inverse pour le patch d'apres reponse.
+  const tmdbByRow = new Map();
+  rowIds.forEach((rid) => {
+    const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+    if (r && r.tmdb_id) {
+      const tid = parseInt(r.tmdb_id, 10);
+      if (Number.isFinite(tid) && tid > 0) tmdbByRow.set(String(rid), tid);
+    }
+  });
+  if (tmdbByRow.size === 0) {
+    showToast({ type: "warn", text: "Aucun film identifié TMDb dans la sélection." });
+    return;
+  }
+  const tmdbIds = Array.from(new Set(Array.from(tmdbByRow.values())));
+  // Backend cap : 20 IDs max par appel (cf tmdb_support.get_tmdb_posters).
+  // On previent l'utilisateur si la selection depasse pour eviter l'illusion
+  // que tout a ete traite alors que seuls les 20 premiers le sont.
+  if (tmdbIds.length > 20) {
+    showToast({
+      type: "warn",
+      text: `Seuls les 20 premiers films identifiés sur ${tmdbIds.length} seront rechargés (limite TMDb).`,
+      duration: 6000,
+    });
+  }
+  try {
+    const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Erreur TMDb posters.");
+    }
+    // La reponse est typiquement {ok, posters: {<tmdb_id>: <url>}} (cf
+    // _get_tmdb_posters_impl dans cinesort/ui/api/tmdb_support.py). Tolere
+    // aussi `data.urls` au cas ou la shape change.
+    const map = data.posters || data.urls || {};
+    let patched = 0;
+    tmdbByRow.forEach((tid, rid) => {
+      const url = map[String(tid)] || map[tid];
+      if (!url) return;
+      const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+      if (r) {
+        r.poster_url = String(url);
+        patched += 1;
+      }
+    });
+    if (patched > 0) {
+      _render();
+      showToast({ type: "success", text: `${patched} poster${patched > 1 ? "s" : ""} TMDb rechargé${patched > 1 ? "s" : ""}.` });
+    } else {
+      showToast({ type: "warn", text: "Aucun poster reçu (TMDb a peut-être un cache vide pour ces IDs)." });
+    }
+  } catch (err) {
+    showToast({ type: "error", text: String(err && err.message ? err.message : err) });
   }
 }
 

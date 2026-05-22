@@ -278,6 +278,12 @@ export const PARAMETRES_GROUPS = [
         { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
           hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
+      // Sprint orphelins #350 : RGPD Art.20 export portable (library/export_full_library).
+      { id: "export-rgpd", label: "Export RGPD", fields: [
+        { key: "__export_full_library__", label: "Export portable complet (JSON)", type: "action",
+          action: "export_full_library", buttonLabel: "💾 Exporter toute la bibliothèque",
+          hint: "RGPD Art. 20 : exporte films + décisions + scores + paramètres (anonymisés) dans un fichier JSON v1.0 téléchargé localement." },
+      ]},
     ],
   },
 ];
@@ -699,11 +705,25 @@ function _renderField(field, value, query) {
         ${hintHtml}
       </div>`;
 
-    case "action":
+    case "action": {
+      // Sprint orphelins #350 : si la field declare label/hint, on les rend pour
+      // contextualiser l'action (utile pour export_full_library). Si seulement
+      // buttonLabel est present (cas restart_api existant), comportement
+      // historique inchange.
+      const hasContext = !!(field.label || field.hint);
+      const labelBlock = field.label
+        ? `<label class="parametres-field-label">${labelHtml}</label>`
+        : "";
+      const hintBlock = hasContext && field.hint
+        ? `<span class="parametres-field-hint">${_esc(field.hint)}</span>`
+        : "";
       return `<div class="parametres-field"${advAttr}>
+        ${labelBlock}
         <button type="button" class="v5-btn" data-action="${_esc(field.action)}">${_esc(field.buttonLabel || "Action")}</button>
         <span class="parametres-test-result" data-action-result-for="${_esc(field.action)}"></span>
+        ${hintBlock}
       </div>`;
+    }
 
     case "qr-dashboard":
       return `<div class="parametres-field parametres-field--qr"${advAttr}>
@@ -1568,6 +1588,45 @@ function _bindFields(container) {
       _scheduleSave();
     });
   }
+
+  // Sprint orphelins #350 : Export RGPD complet de la bibliotheque.
+  // Cf cinesort.ui.api.export_support.export_full_library + docs/EXPORT_FORMAT.md.
+  container.querySelectorAll('[data-action="export_full_library"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="export_full_library"]');
+      btn.disabled = true;
+      if (resultEl) { resultEl.textContent = "Export en cours…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
+      try {
+        const res = await apiPost("library/export_full_library", {});
+        const data = res && res.data ? res.data : res;
+        if (!data || data.ok === false) {
+          throw new Error((data && (data.message || data.error)) || "Echec export.");
+        }
+        // Le backend renvoie le payload JSON complet sous "export" (ou data directement).
+        // On serialise et declenche le download cote browser pour rester local.
+        const payload = data.export || data.payload || data;
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.href = url;
+        a.download = `cinesort-export-${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        if (resultEl) {
+          const sz = blob.size > 1024 * 1024 ? `${(blob.size / 1024 / 1024).toFixed(1)} Mo` : `${(blob.size / 1024).toFixed(0)} Ko`;
+          resultEl.textContent = `✓ Téléchargé (${sz})`;
+          resultEl.className = "parametres-test-result parametres-test-result--ok";
+        }
+      } catch (err) {
+        if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 
   // Action buttons (restart API)
   container.querySelectorAll('[data-action="restart_api"]').forEach((btn) => {
