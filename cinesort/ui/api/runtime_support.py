@@ -14,6 +14,7 @@ import platform
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -260,7 +261,7 @@ def generate_run_id() -> str:
 
 
 def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
-    while True:
+    for _ in range(100):
         run_id = generate_run_id()
         with api._runs_lock:
             if run_id in api._runs:
@@ -268,6 +269,8 @@ def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
         if store.run.get_run(run_id) is not None:
             continue
         return run_id
+    # fallback ultime : uuid4 pour eviter blocage definitif
+    return f"{generate_run_id()}-{uuid.uuid4().hex[:8]}"
 
 
 def find_run_row(api: Any, run_id: str) -> Optional[Tuple[Dict[str, Any], SQLiteStore]]:
