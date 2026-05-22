@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import shutil
 import time
@@ -1900,14 +1902,9 @@ def export_apply_audit(
 
     fmt = str(as_format or "json").lower()
     if fmt == "jsonl":
-        import json as _json
-
-        content = "\n".join(_json.dumps(e, ensure_ascii=False, sort_keys=True) for e in events)
+        content = "\n".join(json.dumps(e, ensure_ascii=False, sort_keys=True) for e in events)
         return {"ok": True, "format": "jsonl", "content": content, "count": len(events)}
     if fmt == "csv":
-        import csv as _csv
-        import io as _io
-
         keys = [
             "ts",
             "event",
@@ -1922,8 +1919,8 @@ def export_apply_audit(
             "sha1",
             "size",
         ]
-        buf = _io.StringIO()
-        writer = _csv.writer(buf)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
         writer.writerow(keys)
         for ev in events:
             writer.writerow([str(ev.get(k, "")) for k in keys])

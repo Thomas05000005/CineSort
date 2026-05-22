@@ -883,9 +883,8 @@ class CineSortApi:
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
         import io
-        import logging as _logging
 
-        _log = _logging.getLogger(__name__)
+        _log = logging.getLogger(__name__)
 
         info = self._get_server_info_impl()
         if not info.get("ok"):
@@ -955,9 +954,7 @@ class CineSortApi:
 
     def _restart_api_server_impl(self) -> Dict[str, Any]:
         """Arrete et relance le serveur REST avec les settings actuels."""
-        import logging as _logging
-
-        _log = _logging.getLogger(__name__)
+        _log = logging.getLogger(__name__)
 
         old_server = self._rest_server
         if old_server and hasattr(old_server, "stop"):
@@ -1007,9 +1004,7 @@ class CineSortApi:
         differait (normalisation de chemin), rien n'etait purge. La nouvelle
         version supprime TOUT le contenu des 3 tables en un seul DELETE.
         """
-        import logging as _logging
-
-        _log = _logging.getLogger(__name__)
+        _log = logging.getLogger(__name__)
 
         # BUG : CineSortApi n'a PAS d'attribut self.store — le store est
         # stocke dans self._infra_by_state_dir et recupere via
@@ -2160,9 +2155,7 @@ class CineSortApi:
             active = None
         if active and isinstance(active.get("profile_json"), str):
             try:
-                import json as _json
-
-                profile = _json.loads(active["profile_json"])
+                profile = json.loads(active["profile_json"])
             except (ValueError, TypeError):
                 profile = default_quality_profile()
         else:
@@ -2216,9 +2209,7 @@ class CineSortApi:
             clean_name = (
                 "".join(c for c in (meta.get("name") or "imported") if c.isalnum() or c in "_-")[:40] or "imported"
             )
-            import time as _time
-
-            pid = f"{clean_name}_{int(_time.time())}"
+            pid = f"{clean_name}_{int(time.time())}"
             profile["id"] = pid
         try:
             version = int(profile.get("version") or 1)
@@ -2354,9 +2345,7 @@ class CineSortApi:
             prof = None
         if prof and isinstance(prof.get("profile_json"), str):
             try:
-                import json as _json
-
-                payload = _json.loads(prof["profile_json"])
+                payload = json.loads(prof["profile_json"])
                 current_weights = payload.get("weights") or {}
             except (ValueError, TypeError):
                 current_weights = {}
