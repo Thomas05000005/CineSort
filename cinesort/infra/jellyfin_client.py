@@ -131,6 +131,26 @@ class JellyfinClient:
             _log.debug("Jellyfin: POST %s -> HTTP %s (%.1fs)", path, status, time.monotonic() - _t0)
             raise JellyfinError(f"Erreur HTTP {status} sur {path}") from exc
 
+    def _delete(self, path: str, **kwargs: Any) -> requests.Response:
+        """DELETE avec gestion d'erreurs standardisée (symetrique a _get/_post)."""
+        url = f"{self.base_url}{path}"
+        _t0 = time.monotonic()
+        try:
+            resp = self._session.delete(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp.raise_for_status()
+            _log.debug("Jellyfin: DELETE %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
+            return resp
+        except requests.ConnectionError as exc:
+            _log.debug("Jellyfin: DELETE %s -> connexion impossible (%.1fs)", path, time.monotonic() - _t0)
+            raise JellyfinError(f"Connexion impossible à {self.base_url} : {exc}") from exc
+        except requests.Timeout as exc:
+            _log.debug("Jellyfin: DELETE %s -> timeout (%.1fs)", path, time.monotonic() - _t0)
+            raise JellyfinError(f"Timeout après {self.timeout_s}s : {exc}") from exc
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "?"
+            _log.debug("Jellyfin: DELETE %s -> HTTP %s (%.1fs)", path, status, time.monotonic() - _t0)
+            raise JellyfinError(f"Erreur HTTP {status} sur {path}") from exc
+
     # ------------------------------------------------------------------
     # API publique
     # ------------------------------------------------------------------
@@ -483,17 +503,9 @@ class JellyfinClient:
 
     def mark_unplayed(self, user_id: str, item_id: str) -> bool:
         """Marque un film comme non vu. Retourne True si succès."""
-        url = f"{self.base_url}/Users/{user_id}/PlayedItems/{item_id}"
         try:
-            resp = self._session.delete(url, timeout=self.timeout_s)
-            resp.raise_for_status()
+            self._delete(f"/Users/{user_id}/PlayedItems/{item_id}")
             return True
-        except requests.ConnectionError as exc:
+        except JellyfinError as exc:
             _log.warning("Jellyfin : échec mark_unplayed(%s) — %s", item_id, exc)
-            return False
-        except requests.Timeout as exc:
-            _log.warning("Jellyfin : timeout mark_unplayed(%s) — %s", item_id, exc)
-            return False
-        except requests.HTTPError as exc:
-            _log.warning("Jellyfin : échec mark_unplayed(%s) — HTTP %s", item_id, exc)
             return False
