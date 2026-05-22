@@ -24,6 +24,10 @@
  *   save_validation(run_id, decisions)
  *   analyze_perceptual_single(run_id, row_id) (relais perceptuel)
  *
+ * Endpoints consommes (sprint orphelins #350) :
+ *   quality/submit_score_feedback(run_id, row_id, user_tier, comment)
+ *   quality/delete_score_feedback(feedback_id)
+ *
  * API publique :
  *   renderFilmDetail({ mode, rowId, runId, container?, onClose? })
  *     -> Promise<void>
@@ -33,7 +37,7 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
-import { dangerConfirmModal } from "./modal.js";
+import { dangerConfirmModal, showModal, closeModal } from "./modal.js";
 import { showToast } from "./toast.js";
 import { openPerceptualModal } from "./perceptual-modal.js";
 import * as rightPanel from "./right-panel.js";
@@ -53,6 +57,11 @@ const _state = {
   onClose: null,
   showAllCandidates: false,
   loading: false,
+  // sprint orphelins #350 : feedback utilisateur sur le scoring.
+  // Apres soumission, on retient le feedback_id pour permettre annulation
+  // (delete_score_feedback). Pas persiste cross-mount : la session courante
+  // suffit, le calibration report agrege cote serveur.
+  lastFeedback: null, // { id, user_tier, computed_tier } | null
 };
 
 /* ===========================================================
@@ -413,6 +422,68 @@ function _renderAnalysisTab(data) {
       <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-film-action="open-perceptual-modal">
         Voir l'analyse complète
       </button>
+      ${_renderScoreFeedbackBlock(tier)}
+    </div>
+  `;
+}
+
+/* ===========================================================
+ * Sprint orphelins #350 : Score feedback (thumbs up/down)
+ * =========================================================== */
+
+/**
+ * Bloc de feedback utilisateur sur le scoring. Si `lastFeedback` est present
+ * dans le state (apres soumission dans la session courante), affiche le tier
+ * choisi + bouton "Annuler ce feedback". Sinon affiche les 5 boutons tier qui
+ * declenchent submit_score_feedback.
+ *
+ * Design minimaliste (cf consigne issue #350) : pas de drawer, juste une rangee
+ * de boutons sous le score, et un toast confirme la soumission. La calibration
+ * report agregee est consultable en Parametres (deja existante).
+ */
+function _renderScoreFeedbackBlock(computedTier) {
+  const fb = _state.lastFeedback;
+  if (fb) {
+    return `
+      <div class="film-detail-feedback film-detail-feedback--submitted" role="region" aria-label="Feedback soumis">
+        <p class="film-detail-feedback-status">
+          ✓ Votre tier estimé : <strong>${escapeHtml(String(fb.user_tier || "—"))}</strong>
+          ${fb.computed_tier ? `· Score auto : <em>${escapeHtml(String(fb.computed_tier))}</em>` : ""}
+        </p>
+        <button type="button"
+                class="v5-btn v5-btn--ghost v5-btn--sm"
+                data-film-action="delete-score-feedback">
+          ↶ Annuler ce feedback
+        </button>
+      </div>
+    `;
+  }
+  const tiers = [
+    { v: "platinum", label: "Platinum", icon: "💎" },
+    { v: "gold",     label: "Gold",     icon: "🥇" },
+    { v: "silver",   label: "Silver",   icon: "🥈" },
+    { v: "bronze",   label: "Bronze",   icon: "🥉" },
+    { v: "reject",   label: "Reject",   icon: "✗" },
+  ];
+  const buttons = tiers.map((t) => {
+    const isComputed = String(computedTier).toLowerCase() === t.v;
+    return `<button type="button"
+                     class="v5-btn v5-btn--ghost v5-btn--sm film-detail-feedback-btn${isComputed ? " is-computed" : ""}"
+                     data-film-action="submit-score-feedback"
+                     data-feedback-tier="${t.v}"
+                     title="Selon vous, ce film mérite tier ${t.label}">
+              ${t.icon} ${escapeHtml(t.label)}
+            </button>`;
+  }).join("");
+  return `
+    <div class="film-detail-feedback" role="region" aria-label="Feedback scoring">
+      <p class="film-detail-feedback-prompt">
+        Le score auto vous semble juste ? Indiquez votre estimation pour calibrer
+        le scoring (votre feedback alimente le rapport de calibration).
+      </p>
+      <div class="film-detail-feedback-tiers" role="group" aria-label="Tier estime utilisateur">
+        ${buttons}
+      </div>
     </div>
   `;
 }
@@ -479,6 +550,18 @@ function _renderTabPanel() {
     case "rename":   panel.innerHTML = _renderRenameTab(_state.data); break;
     default:         panel.innerHTML = "";
   }
+  // Sprint orphelins #350 : _renderTabPanel remplace innerHTML donc les
+  // listeners precedents (data-film-action dans le panel) sont perdus. On
+  // re-bind uniquement le panel via une boucle ciblee pour ne pas double-bind
+  // les actions globales (footer, alerts) deja attachees dans _bindEvents.
+  panel.querySelectorAll("[data-film-action]").forEach((btn) => {
+    if (btn.__filmActionBound) return;
+    btn.__filmActionBound = true;
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      _handleAction(btn.dataset.filmAction, btn);
+    });
+  });
 }
 
 /* ===========================================================
@@ -615,8 +698,105 @@ async function _handleAction(action, btn) {
       _openTmdbManualSearchModal(rowId, runId);
       break;
 
+    case "submit-score-feedback": {
+      const userTier = btn && btn.dataset ? btn.dataset.feedbackTier : null;
+      if (!userTier) return;
+      await _submitScoreFeedback(userTier, runId, rowId, btn);
+      break;
+    }
+
+    case "delete-score-feedback":
+      await _deleteScoreFeedback(btn);
+      break;
+
     default:
       console.warn("[film-detail] action inconnue :", action);
+  }
+}
+
+/* ===========================================================
+ * Score feedback handlers (sprint orphelins #350)
+ * =========================================================== */
+
+async function _submitScoreFeedback(userTier, runId, rowId, btn) {
+  if (!runId || !rowId) {
+    showToast({ type: "warn", text: "Run ou film introuvable pour ce feedback." });
+    return;
+  }
+  // Petite modale optionnelle pour saisir un commentaire libre. Si l'utilisateur
+  // valide vide ou annule la modale, on soumet quand meme (le commentaire est
+  // optionnel cote backend).
+  const proceed = (comment) => _doSubmitScoreFeedback(userTier, runId, rowId, comment, btn);
+  showModal({
+    title: `Tier estimé : ${userTier}`,
+    body: `
+      <p>Optionnel : pourquoi pensez-vous que ce film mérite tier <strong>${escapeHtml(userTier)}</strong> ?</p>
+      <label class="film-detail-feedback-comment-field">
+        <span>Commentaire (max 500 caractères)</span>
+        <textarea data-film-feedback-comment rows="3" maxlength="500"
+                  placeholder="Ex : encodage suspect, mauvaise piste audio..."></textarea>
+      </label>
+    `,
+    actions: [
+      { label: "Annuler", cls: "", onClick: () => {} },
+      {
+        label: "Envoyer le feedback",
+        cls: "btn-primary",
+        onClick: () => {
+          const ta = document.querySelector("[data-film-feedback-comment]");
+          const comment = ta && ta.value ? String(ta.value).trim() : "";
+          try { closeModal(); } catch (_e) { /* noop */ }
+          void proceed(comment || null);
+        },
+      },
+    ],
+  });
+}
+
+async function _doSubmitScoreFeedback(userTier, runId, rowId, comment, btn) {
+  if (btn) { btn.disabled = true; }
+  try {
+    const params = { run_id: runId, row_id: rowId, user_tier: userTier };
+    if (comment) params.comment = comment;
+    const res = await apiPost("quality/submit_score_feedback", params);
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec envoi feedback.");
+    }
+    _state.lastFeedback = {
+      id: data.feedback_id != null ? Number(data.feedback_id) : null,
+      user_tier: String(data.user_tier || userTier),
+      computed_tier: String(data.computed_tier || ""),
+    };
+    showToast({ type: "success", text: "Feedback enregistré. Merci !" });
+    _renderTabPanel();
+  } catch (e) {
+    console.error("[film-detail] submit_score_feedback:", e);
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+async function _deleteScoreFeedback(btn) {
+  const fb = _state.lastFeedback;
+  if (!fb || fb.id == null) {
+    showToast({ type: "warn", text: "Aucun feedback à supprimer." });
+    return;
+  }
+  if (btn) { btn.disabled = true; }
+  try {
+    const res = await apiPost("quality/delete_score_feedback", { feedback_id: fb.id });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec suppression feedback.");
+    }
+    _state.lastFeedback = null;
+    showToast({ type: "success", text: "Feedback annulé." });
+    _renderTabPanel();
+  } catch (e) {
+    console.error("[film-detail] delete_score_feedback:", e);
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    if (btn) { btn.disabled = false; }
   }
 }
 
@@ -1092,6 +1272,8 @@ export async function renderFilmDetail(opts) {
   _state.activeTab = "overview";
   _state.showAllCandidates = false;
   _state.onClose = onClose || null;
+  // Reset feedback session par film charge (sprint orphelins #350).
+  _state.lastFeedback = null;
 
   if (mode === "A") {
     _state.containerEl = _ensureModeAContainer();

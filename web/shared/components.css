@@ -9382,7 +9382,26 @@ body.v5-notif-lock {
   list-style: none;
   padding: 0;
   margin: 0 0 var(--sp-2) 0;
-  display: flex;
+ * Film detail — Score feedback block (sprint orphelins #350)
+ *
+ * BEM prefix `film-detail-feedback*`. Affiche sous le score V2 dans l'onglet
+ * Analyse : un prompt + 5 boutons tier. Apres soumission : etat compresse avec
+ * bouton "Annuler ce feedback".
+ * =========================================================================== */
+.film-detail-feedback {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px dashed var(--surface-3);
+}
+.film-detail-feedback-prompt {
+  margin: 0 0 var(--sp-2) 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.film-detail-feedback-tiers {  display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
@@ -9439,8 +9458,39 @@ body.v5-notif-lock {
   margin-top: var(--sp-2);
 }
 .bibliotheque-playlist-form-field > span {
+.film-detail-feedback-btn.is-computed {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.film-detail-feedback-status {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+.film-detail-feedback--submitted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.film-detail-feedback-comment-field {
   display: block;
+  margin-top: var(--sp-2);
+}
+.film-detail-feedback-comment-field > span {  display: block;
   font-size: var(--fs-xs);
   color: var(--text-2);
   margin-bottom: 4px;
+}
+.film-detail-feedback-comment-field textarea {
+  width: 100%;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-3);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  resize: vertical;
 }
