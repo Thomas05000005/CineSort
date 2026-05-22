@@ -9334,3 +9334,113 @@ body.v5-notif-lock {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ===========================================================================
+ * Bibliotheque — Smart playlists panel (sprint orphelins #350)
+ *
+ * BEM prefix `bibliotheque-playlist*` : appartient au scope vue Bibliotheque.
+ * Panneau discret type <details> sous les chips. Quand ferme : une ligne. Quand
+ * ouvert : liste compacte (presets en gris, custom blancs) + bouton enregistrer.
+ * =========================================================================== */
+.bibliotheque-playlists {
+  margin: var(--sp-2) 0;
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.bibliotheque-playlists-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  list-style: none;
+  user-select: none;
+}
+.bibliotheque-playlists-summary::-webkit-details-marker { display: none; }
+.bibliotheque-playlists-summary:hover {
+  background: var(--surface-2);
+}
+.bibliotheque-playlists-icon {
+  font-size: var(--fs-md);
+}
+.bibliotheque-playlists-label {
+  font-weight: 600;
+  color: var(--text-1);
+}
+.bibliotheque-playlists-count {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.bibliotheque-playlists-body {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--surface-3);
+}
+.bibliotheque-playlists-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-2) 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.bibliotheque-playlist {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: var(--fs-xs);
+}
+.bibliotheque-playlist--preset {
+  opacity: 0.85;
+  border-style: dashed;
+}
+.bibliotheque-playlist-apply {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: inherit;
+}
+.bibliotheque-playlist-apply:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.bibliotheque-playlist-delete {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  line-height: 1;
+  padding: 0 4px;
+}
+.bibliotheque-playlist-delete:hover {
+  color: var(--danger);
+}
+.bibliotheque-playlist-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: var(--fs-xs);
+}
+.bibliotheque-playlists-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--sp-1);
+}
+.bibliotheque-playlist-form-field {
+  display: block;
+  margin-top: var(--sp-2);
+}
+.bibliotheque-playlist-form-field > span {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
