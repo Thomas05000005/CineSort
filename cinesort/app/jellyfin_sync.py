@@ -156,6 +156,16 @@ def restore_watched(
     if not snapshot:
         return RestoreResult()
 
+    if (
+        not client
+        or not hasattr(client, "mark_played")
+        or not hasattr(client, "get_all_movies_from_all_libraries")
+    ):
+        _log.warning(
+            "jellyfin_sync.restore_watched: client invalide ou methodes manquantes, no-op"
+        )
+        return RestoreResult(skipped=len(snapshot))
+
     path_mapping = _build_path_mapping(operations)
     if not path_mapping:
         _log.info("Jellyfin sync : aucune operation de deplacement, skip restore")
@@ -218,7 +228,7 @@ def restore_watched(
                 continue
 
             # Film trouve, restaurer le statut watched
-            ok = client.mark_played(user_id, item_id)
+            ok = bool(client.mark_played(user_id, item_id))
             if ok:
                 result.restored += 1
                 result.details.append(
