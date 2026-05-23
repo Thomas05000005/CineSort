@@ -121,12 +121,29 @@ def rotate_backups(
     to_delete = backups[max_count:]
     deleted: List[Path] = []
     for path in to_delete:
-        try:
-            path.unlink()
-            deleted.append(path)
-            _logger.info("rotate_backups: supprime %s", path.name)
-        except (OSError, PermissionError) as exc:
-            _logger.warning("rotate_backups: unlink %s echoue: %s", path, exc)
+        # Issue #382 : sur Windows, AV (Defender, Avast) ou Volume Shadow Copy
+        # peuvent tenir un handle transitoire sur le .bak. Retry court (3
+        # tentatives, 50/150/300 ms) couvre les fenetres typiques AV sans
+        # bloquer le scan. Au-dela, on log warning et on accepte que la
+        # rotation soit incomplete ce cycle (sera rejouee au prochain).
+        last_exc: Optional[BaseException] = None
+        for attempt, delay_s in enumerate((0.0, 0.05, 0.15, 0.3)):
+            if delay_s:
+                time.sleep(delay_s)
+            try:
+                path.unlink()
+                deleted.append(path)
+                _logger.info("rotate_backups: supprime %s", path.name)
+                last_exc = None
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                continue
+            except OSError as exc:
+                last_exc = exc
+                break
+        if last_exc is not None:
+            _logger.warning("rotate_backups: unlink %s echoue apres %d tentatives: %s", path, attempt + 1, last_exc)
     return len(backups) - len(deleted), deleted
 
 
