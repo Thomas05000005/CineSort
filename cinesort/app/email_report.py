@@ -5,6 +5,7 @@ L'envoi est non-bloquant (thread daemon) et ne doit jamais crasher le flow princ
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import smtplib
 import ssl
@@ -101,10 +102,8 @@ def send_email_report(
             # Garantit quit() meme si starttls/login/sendmail leve : sinon la
             # socket TCP restait ouverte sur erreur d'auth et fuyait des
             # connexions vers le serveur SMTP a chaque retry.
-            try:
+            with contextlib.suppress(smtplib.SMTPException):
                 smtp.quit()
-            except smtplib.SMTPException:
-                pass
         logger.info("[email] rapport envoye a %s (%s)", to_addr, event)
         return True
     except (smtplib.SMTPException, OSError, TimeoutError) as exc:
