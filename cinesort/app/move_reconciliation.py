@@ -175,6 +175,8 @@ def reconcile_at_boot(store: Any, *, notify: Optional[Any] = None) -> Dict[str, 
                 "Reconciliation apres crash",
                 f"{n_dup} conflit(s) et {n_lost} fichier(s) perdu(s) detectes. Verifiez les logs.",
             )
-        except (sqlite3.Error, OSError, AttributeError):
+        except Exception:
+            # Robustesse boot : un notify defaillant (RuntimeError, ValueError, etc.)
+            # ne doit JAMAIS empecher la suite du boot. On logge et on continue.
             _logger.exception("reconcile_at_boot: notify echoue")
     return report
