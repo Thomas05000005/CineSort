@@ -176,9 +176,7 @@ def _resolve_unique_backup_path(backup_dir: Path, base_name: str) -> Path:
         if not alt.exists():
             return alt
         counter += 1
-    raise RuntimeError(
-        f"Aucun nom de backup libre apres {MAX_BACKUP_ATTEMPTS} essais dans {backup_dir}"
-    )
+    raise RuntimeError(f"Aucun nom de backup libre apres {MAX_BACKUP_ATTEMPTS} essais dans {backup_dir}")
 
 
 def backup_db_with_rotation(
