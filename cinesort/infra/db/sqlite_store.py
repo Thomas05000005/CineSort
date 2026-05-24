@@ -563,21 +563,19 @@ class SQLiteStore(_StoreBase):
     """
     SQLite persistence for v7 foundations.
 
-    Cf issue #85 (phase pilote) : composition de 7 Repository ajoutee en
-    parallele des mixins historiques. Les Repository (accessibles via
-    `store.apply`, `store.quality`, etc.) delegent au meme store sous-jacent
-    et permettent d'instancier l'acces DB par bounded context.
+    Cf issue #85 (CLOSED phase B8a -> B8g) : tous les mixins legacy ont ete
+    supprimes. SQLiteStore expose desormais les 8 Repositories par composition :
+        store.apply, store.anomaly, store.perceptual, store.probe,
+        store.quality, store.run, store.scan, store.film_modal
+    Chaque Repository encapsule un bounded context SQL distinct et delegue
+    a `_StoreBase` pour la gestion de connexion / migrations / integrity.
 
-    Les mixins (heritage MRO) restent en place tant que les call sites n'ont
-    pas tous migre vers store.{repo}.{method}(). Phase D future supprimera
-    les mixins une fois la migration complete.
+    Pattern d'usage (obligatoire pour tout nouveau code) :
+        store.apply.insert_batch(...)
+        store.quality.get_report(...)
 
-    Pattern d'usage recommande pour les nouveaux call sites :
-        store.apply.insert_batch(...)      # au lieu de store.insert_apply_batch
-        store.quality.get_report(...)      # au lieu de store.get_quality_report
-
-    L'API publique historique (`store.insert_apply_batch`, etc.) reste
-    100% backward-compat via l'heritage des mixins.
+    Les anciennes methodes plates `store.insert_apply_batch(...)` n'existent
+    plus (B8 closed) ; tous les call sites internes ont migre.
     """
 
     def __init__(self, *args, **kwargs):
