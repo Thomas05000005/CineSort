@@ -733,7 +733,8 @@ async function _loadGroups() {
   let runId = _state.runId;
   if (!runId) {
     try {
-      const dash = await apiPost("run/get_dashboard", { run_id_or: "latest" });
+      // Fix audit 2026-05-24 : `run_id_or` n'existe pas dans la facade (cf traitement.js).
+      const dash = await apiPost("run/get_dashboard", { run_id: "latest" });
       const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;

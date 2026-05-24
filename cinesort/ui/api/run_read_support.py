@@ -14,7 +14,7 @@ from cinesort.ui.api._responses import err as _err_response
 def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
     rs = api._get_run(run_id)
     if rs and not rs.done:
-        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
+        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
 
     found = api._find_run_row(run_id)
     if not rs and not found:
@@ -23,7 +23,7 @@ def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
         row, _store = found
         status_text = str(row.get("status") or "")
         if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
+            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
 
     ctx = api._run_context_for_apply(run_id)
     if not ctx:
@@ -131,7 +131,7 @@ def get_auto_approved_summary(
     """
     rs = api._get_run(run_id)
     if not rs or not rs.done:
-        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
+        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
     rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
     if not rows:
         return {

@@ -479,6 +479,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (isNative) {
     document.body.classList.add("is-native");
     window.__CINESORT_NATIVE__ = true;  // homogeneise pour le router/api downstream
+
+    // Fix audit 2026-05-24 : WebView2 sans handler on_new_window_request bloque
+    // silencieusement target="_blank" et window.open(). Les boutons GitHub /
+    // TMDb / docs (aide.js, about.js, qualite.js) ne faisaient rien en natif.
+    // On intercepte tous les clicks sur liens externes et on les delegue au
+    // backend qui appelle webbrowser.open() pour ouvrir dans le navigateur OS.
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest("a[href]");
+      if (!a) return;
+      const href = a.getAttribute("href") || "";
+      // Liens externes uniquement (http/https hors notre origin)
+      if (!/^https?:\/\//i.test(href)) return;
+      try {
+        const url = new URL(href, window.location.href);
+        if (url.origin === window.location.origin) return; // lien interne, laisser
+      } catch { /* URL invalide -> laisser navigation naturelle */ return; }
+      e.preventDefault();
+      // Appel REST silencieux (pas de toast - juste ouvre)
+      apiPost("runtime/open_external_url", { url: href }).catch(() => { /* silent */ });
+    }, true);
   }
 
   // Mode natif desktop (pywebview) : JAMAIS d'ecran login.

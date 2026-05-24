@@ -534,10 +534,18 @@ class _StoreBase:
         expected_type: type,
     ) -> Any:
         raw = row[field_name]
+        # Fix audit 2026-05-24 : raw=NULL est un cas legitime (run pas encore
+        # termine, stats_json pas encore ecrit). Inutile de logger un warning
+        # bruyant - retourner silencieusement le default.
+        if raw is None:
+            return default
         try:
-            parsed = json.loads(str(raw or "null"))
+            parsed = json.loads(str(raw))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning("corrupt JSON in column %s: %s (raw=%r)", field_name, exc, raw)
+            return default
+        if parsed is None:
+            # JSON 'null' = donnee explicitement vide, comportement legitime
             return default
         if not isinstance(parsed, expected_type):
             logger.warning("unexpected type in column %s: expected %s, got %s", field_name, expected_type, type(parsed))

@@ -1185,6 +1185,18 @@ def _save_section_radarr(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _save_section_omdb(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # Fix audit 2026-05-24 : ce helper manquait du dispatcher save_settings_payload,
+    # ce qui faisait que omdb_api_key etait silencieusement droppee a chaque save.
+    # Toute la plomberie DPAPI etait correcte (read_settings/write_settings), juste
+    # le dispatcher de save n'incluait pas la section.
+    return {
+        "omdb_enabled": to_bool(payload.get("omdb_enabled"), False),
+        "omdb_api_key": str(payload.get("omdb_api_key") or "").strip(),
+        "omdb_min_confidence_for_call": max(0, min(100, to_int(payload.get("omdb_min_confidence_for_call"), 90))),
+    }
+
+
 def _save_section_notifications(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "notifications_enabled": to_bool(payload.get("notifications_enabled"), False),
@@ -1454,6 +1466,7 @@ def save_settings_payload(
     to_save.update(_save_section_jellyfin(settings))
     to_save.update(_save_section_plex(settings))
     to_save.update(_save_section_radarr(settings))
+    to_save.update(_save_section_omdb(settings))
     to_save.update(_save_section_notifications(settings))
     to_save.update(_save_section_rest_api(settings))
     to_save.update(_save_section_watch(settings))

@@ -117,6 +117,16 @@ class RuntimeFacade(_BaseFacade):
         """
         return self._api._open_logs_folder_impl()
 
+    def open_external_url(self, url: str = "") -> Dict[str, Any]:
+        """Fix audit 2026-05-24 — Ouvre une URL externe (http/https) dans le
+        navigateur OS via webbrowser.open(). Necessaire car WebView2 sans
+        handler bloque silencieusement target='_blank' et window.open().
+
+        Operation locale uniquement (refusee depuis client REST distant).
+        Scheme whitelist: http(s) uniquement.
+        """
+        return self._api._open_external_url_impl(url=url)
+
     # ---------- Mode demo (V3-05) ----------
 
     def is_demo_mode_active(self) -> Dict[str, Any]:

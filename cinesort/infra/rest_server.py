@@ -849,11 +849,26 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             logger.warning(
                 "REST POST /api/%s -> 400 params invalides (%.0fms)", method_name, (time.monotonic() - _t0) * 1000
             )
+        # Fix audit 2026-05-24 : ConnectionAbortedError/ConnectionResetError
+        # arrivent quand le client (WebView2) ferme la socket avant que le
+        # serveur ait fini d'ecrire la reponse (ex: utilisateur navigue vers
+        # une autre vue pendant qu'un get_library_filtered tourne). C'est un
+        # comportement client legitime, pas un bug serveur -> log debug, pas
+        # ERROR avec traceback complet inutile.
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+            logger.debug(
+                "REST POST /api/%s : client disconnect avant fin reponse (%s, %.0fms)",
+                method_name,
+                type(exc).__name__,
+                (time.monotonic() - _t0) * 1000,
+            )
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             # M8 : ne pas exposer le message d'exception au client (peut contenir des chemins, SQL, etc.)
             logger.exception("REST 500 method=%s (%.0fms): %s", method_name, (time.monotonic() - _t0) * 1000, exc)
-            self._respond_json(500, {"ok": False, "message": "Erreur interne"})
+            # Client deja parti -> on ne peut plus repondre, on ignore.
+            with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self._respond_json(500, {"ok": False, "message": "Erreur interne"})
 
 
 def _find_active_run_id(api: Any) -> Optional[str]:
