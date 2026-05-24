@@ -63,16 +63,16 @@ class ProcessingV5PortedTests(unittest.TestCase):
     def test_apipost_calls_use_kwargs(self):
         # apiPost utilise des kwargs (objet) — pas de positional args.
         # Issue #84 PR 9 : les methodes appartenant aux 5 facades ont leur
-        # path prefixe (run/, settings/, ...). load_validation, save_validation,
-        # apply et get_dashboard restent en path direct (pas dans une facade).
+        # path prefixe (run/, settings/, ...). Au final, load_validation,
+        # save_validation et apply ont aussi ete portees sur la facade run.
         self.assertIn('apiPost("run/get_status"', self.src)
         self.assertIn('apiPost("run/start_plan"', self.src)
-        self.assertIn('apiPost("load_validation"', self.src)
-        self.assertIn('apiPost("save_validation"', self.src)
-        self.assertIn('apiPost("apply"', self.src)
+        self.assertIn('apiPost("run/load_validation"', self.src)
+        self.assertIn('apiPost("run/save_validation"', self.src)
+        self.assertIn('apiPost("run/apply"', self.src)
         self.assertIn('apiPost("run/cancel_run"', self.src)
         self.assertIn('apiPost("settings/get_settings"', self.src)
-        self.assertIn('apiPost("get_dashboard"', self.src)
+        self.assertIn('apiPost("run/get_dashboard"', self.src)
 
 
 if __name__ == "__main__":

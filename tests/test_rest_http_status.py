@@ -11,6 +11,7 @@ clients existants qui lisent uniquement data.ok.
 from __future__ import annotations
 
 import json
+import os
 import time
 import unittest
 import urllib.request
@@ -61,9 +62,16 @@ def _post(server: RestApiServer, method: str, params: dict) -> tuple[int, dict]:
 
 class HttpStatusConventionTests(unittest.TestCase):
     server: RestApiServer
+    _prev_pass1_env: str | None = None
 
     @classmethod
     def setUpClass(cls) -> None:
+        # Pass 1 (methodes legacy directes /api/<method>) est desactivee par
+        # defaut depuis 2026-05 (P0 #233). Ce test verifie le mecanisme
+        # http_status sur des methodes du FakeApi sans prefix facade, donc on
+        # active Pass 1 pour la duree du test.
+        cls._prev_pass1_env = os.environ.get("CINESORT_REST_LEGACY_PASS1_ENABLED")
+        os.environ["CINESORT_REST_LEGACY_PASS1_ENABLED"] = "1"
         cls.server = RestApiServer(
             _FakeApi(),
             port=_find_free_port(),
@@ -76,6 +84,10 @@ class HttpStatusConventionTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.stop()
+        if cls._prev_pass1_env is None:
+            os.environ.pop("CINESORT_REST_LEGACY_PASS1_ENABLED", None)
+        else:
+            os.environ["CINESORT_REST_LEGACY_PASS1_ENABLED"] = cls._prev_pass1_env
 
     def test_default_status_is_200(self) -> None:
         status, body = _post(self.server, "get_ok_default", {})
