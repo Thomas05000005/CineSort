@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -795,7 +796,13 @@ def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     if not found:
         return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
     _row, store = found
-    batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=20)
+    # Fix audit 2026-05-24 : store.apply.list_apply_batches_for_run touche SQLite,
+    # peut lever sqlite3.Error (DB corrompue / verrouillee), AttributeError
+    # (store.apply absent sur vieux runs) ou OSError (FS) -> 500 UI. On wrappe.
+    try:
+        batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=20)
+    except (sqlite3.Error, AttributeError, OSError):
+        return _err_response("Historique apply indisponible.", category="state", level="warning", log_module=__name__)
     return {"ok": True, "run_id": run_id, "batches": batches}
 
 

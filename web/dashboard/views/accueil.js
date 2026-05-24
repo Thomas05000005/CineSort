@@ -246,20 +246,44 @@ function _pingCacheSet(key, ok) {
 async function _pingIntegration(key, settings) {
   const cached = _pingCacheGet(key);
   if (cached !== undefined) return cached;
+  // Fix audit 2026-05-24 : avant, les pings Jellyfin/Plex/Radarr passaient un
+  // objet vide {} aux facades integrations/test_*_connection. Or ces facades
+  // attendent { url, api_key, timeout_s } et retournent generalement une
+  // erreur "missing parameters" -> pastille bloquee sur "offline" meme quand
+  // l'integration etait OK. On lit maintenant les settings (url + api_key) et
+  // on les transmet explicitement. Si une cle attendue manque dans settings
+  // (ex: ancien install), on garde {} et le backend doit alors fallback sur
+  // ses propres settings persistes (cf doc facades).
+  const s = settings || {};
   try {
     let res = null;
     if (key === "tmdb") {
-      const apiKey = String((settings && settings.tmdb_api_key) || "");
+      const apiKey = String(s.tmdb_api_key || "");
       if (!apiKey) return null;
       res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 });
     } else if (key === "jellyfin") {
-      res = await apiPost("integrations/test_jellyfin_connection", {});
+      const url = String(s.jellyfin_url || "");
+      const apiKey = String(s.jellyfin_api_key || "");
+      const payload = (url || apiKey)
+        ? { url, api_key: apiKey, timeout_s: 5 }
+        : {}; // settings vides : backend doit lire ses propres settings persistes
+      res = await apiPost("integrations/test_jellyfin_connection", payload);
     } else if (key === "plex") {
-      res = await apiPost("integrations/test_plex_connection", {});
+      const url = String(s.plex_url || "");
+      const token = String(s.plex_token || "");
+      const payload = (url || token)
+        ? { url, api_key: token, timeout_s: 5 }
+        : {};
+      res = await apiPost("integrations/test_plex_connection", payload);
     } else if (key === "radarr") {
-      res = await apiPost("integrations/test_radarr_connection", {});
+      const url = String(s.radarr_url || "");
+      const apiKey = String(s.radarr_api_key || "");
+      const payload = (url || apiKey)
+        ? { url, api_key: apiKey, timeout_s: 5 }
+        : {};
+      res = await apiPost("integrations/test_radarr_connection", payload);
     } else if (key === "omdb") {
-      const apiKey = String((settings && settings.omdb_api_key) || "");
+      const apiKey = String(s.omdb_api_key || "");
       res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 });
     }
     const ok = !!(res && (res.ok === true || (res.data && res.data.ok === true) || (res.ok !== false && res.data && res.data.connected === true)));

@@ -241,7 +241,11 @@ function _buildVm(data) {
   const showProbeBanner = missing.length > 0;
 
   // Banner prudence
-  const isDryRunDefault = !!settings.dry_run_default;
+  // Fix audit 2026-05-24 : `settings.dry_run_default` n'existe pas dans la
+  // payload settings (cf cinesort/ui/api/settings_support.py qui expose
+  // `dry_run_apply`). On utilise la bonne cle pour ne pas toujours retomber
+  // sur isFirstRun.
+  const isDryRunDefault = !!settings.dry_run_apply;
   const isFirstRun = !global.total_runs;
   const showPrudent = isDryRunDefault || isFirstRun;
   const prudentMsg = isDryRunDefault ? "Dry-run actif par défaut" : "Premier lancement — dry-run recommandé";

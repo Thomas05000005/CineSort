@@ -267,10 +267,14 @@ function _renderRetentionBanner() {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffStr = cutoffDate.toLocaleDateString("fr-FR");
+  // Fix audit 2026-05-24 : ajout CTA "Modifier" -> ancre #retention dans
+  // Parametres pour permettre a l'utilisateur de changer la duree de retention
+  // sans avoir a chercher dans les onglets.
   return `
     <div class="historique-retention-banner" role="note">
       <span class="historique-retention-banner-icon" aria-hidden="true">ℹ️</span>
       <span>Les runs antérieurs au <strong>${escapeHtml(cutoffStr)}</strong> (rétention ${days} jours) sont supprimés automatiquement.</span>
+      <a href="#/parametres#retention" class="historique-retention-banner-cta">Modifier</a>
     </div>
   `;
 }
@@ -307,6 +311,9 @@ function _renderHeader(stats) {
             <option value="error" ${_filterStatus === "error" ? "selected" : ""}>Error</option>
             <option value="applied" ${_filterStatus === "applied" ? "selected" : ""}>Applied</option>
             <option value="undone" ${_filterStatus === "undone" ? "selected" : ""}>Undone</option>
+            <!-- Fix audit 2026-05-24 : ajout des statuts manquants (partial / awaiting_validation) -->
+            <option value="partial" ${_filterStatus === "partial" ? "selected" : ""}>Partiel</option>
+            <option value="awaiting_validation" ${_filterStatus === "awaiting_validation" ? "selected" : ""}>En validation</option>
           </select>
         </label>
         <label class="historique-filter">
@@ -740,9 +747,13 @@ async function _ensureHistoryStats(runId, { force = false } = {}) {
     // Endpoint backend PR #298 (run/get_history_stats). Si non encore mergé,
     // on retourne un fallback minimal a partir du run courant pour ne pas casser.
     const res = await apiPost("run/get_history_stats", { run_id: runId });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-24 : apiPost retourne {status, data}. res.ok = undefined
+    // -> la condition ancienne `res.ok !== false` etait TOUJOURS vraie meme
+    // si le backend retournait {ok: false, message: "..."}. Lire res.data.ok.
+    const _payload = (res && res.data) || res || {};
+    if (res && _payload.ok !== false) {
       // Le payload est `{ok, run: {...}}` ou `{ok, ...}` selon impl.
-      const data = res.run ? res.run : (res.data && res.data.run ? res.data.run : (res.data || {}));
+      const data = _payload.run || _payload || {};
       // Pour les logs : si pas dans payload, fallback via get_status.
       if (!Array.isArray(data.log_lines)) {
         try {
@@ -1023,13 +1034,15 @@ function _renderFilmsHistoryModalBody(films) {
 async function _doUndoApply(runId) {
   try {
     const res = await apiPost("run/undo_last_apply", { run_id: runId, dry_run: false, atomic: true });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-24 : res.ok = undefined (apiPost retourne {status, data}).
+    const _payload = (res && res.data) || res || {};
+    if (res && _payload.ok !== false) {
       showToast({ type: "success", text: "Apply annulé. Fichiers restaurés." });
       // Refresh dashboard + cache + UI.
       _historyStatsCache.delete(runId);
       await _refreshRuns();
     } else {
-      const msg = (res && (res.message || res.error)) || "Échec de l'annulation.";
+      const msg = _payload.message || _payload.error || "Échec de l'annulation.";
       showToast({ type: "error", text: msg });
     }
   } catch (err) {
@@ -1040,7 +1053,9 @@ async function _doUndoApply(runId) {
 async function _doDeleteRun(runId) {
   try {
     const res = await apiPost("run/delete_run", { run_id: runId });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-24 : voir _doUndoApply pour le pattern res.data.ok.
+    const _payload = (res && res.data) || res || {};
+    if (res && _payload.ok !== false) {
       showToast({ type: "success", text: `Run ${runId} supprimé.` });
       // Splice du tableau local sans refetch reseau.
       _runs = _runs.filter((r) => r.run_id !== runId);
@@ -1053,7 +1068,7 @@ async function _doDeleteRun(runId) {
       const root = container ? container.parentNode : document.querySelector("#view-qij") || document.querySelector("#view-historique");
       if (root) _rerender(root);
     } else {
-      const msg = (res && (res.message || res.error)) || "Échec de la suppression.";
+      const msg = _payload.message || _payload.error || "Échec de la suppression.";
       showToast({ type: "error", text: msg });
     }
   } catch (err) {
@@ -1064,8 +1079,9 @@ async function _doDeleteRun(runId) {
 async function _refreshRuns() {
   try {
     const res = await apiPost("run/get_dashboard", { run_id: "latest" });
-    if (res && res.ok !== false) {
-      const data = res.data || res;
+    // Fix audit 2026-05-24 : voir _doUndoApply.
+    const data = (res && res.data) || res || {};
+    if (res && data.ok !== false) {
       _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
       _retentionDays = Number(data.history_retention_days || _retentionDays || 90);
       const container = document.querySelector(".historique-view");
@@ -1231,8 +1247,10 @@ export async function initHistorique(container) {
     _bindEvents(container);
     return;
   }
-  if (!res || res.ok === false) {
-    container.innerHTML = _renderError((res && (res.message || res.error)) || "Erreur de chargement.");
+  // Fix audit 2026-05-24 : voir pattern res.data.ok dans _doUndoApply.
+  const _initPayload = (res && res.data) || res || {};
+  if (!res || _initPayload.ok === false) {
+    container.innerHTML = _renderError(_initPayload.message || _initPayload.error || "Erreur de chargement.");
     _bindEvents(container);
     return;
   }

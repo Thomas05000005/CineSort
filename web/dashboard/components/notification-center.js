@@ -275,8 +275,17 @@ export function closeNotifications() {
 export function toggleNotifications() { _isOpen ? closeNotifications() : openNotifications(); }
 
 export function getUnreadCount() {
+  // Fix audit 2026-05-24 : apiPost retourne soit { ok, data: { count } } selon
+  // la facade (la plupart des endpoints v7+), soit { ok, count } a plat selon
+  // d'autres (legacy). On normalise pour supporter les 2 shapes — avant on ne
+  // regardait que res.count et le compteur restait bloque a 0 quand le
+  // backend renvoyait { ok: true, data: { count: 12 } }.
   return apiPost("runtime/get_notifications_unread_count")
-    .then((res) => (res && res.ok) ? Number(res.count || 0) : 0)
+    .then((res) => {
+      const data = (res && res.data) || res || {};
+      const count = Number(data.count || 0);
+      return (res && res.ok !== false) ? count : 0;
+    })
     .catch(() => 0);
 }
 

@@ -37,6 +37,9 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { showToast } from "./toast.js";
+// Fix audit 2026-05-24 a11y : focus trap pour eviter que Tab/Shift+Tab sorte
+// du modal vers le DOM dessous. trapFocus est exporte par modal.js.
+import { trapFocus } from "./modal.js";
 
 let _overlayEl = null;
 let _modalEl = null;
@@ -44,6 +47,10 @@ let _state = null;
 // Audit C17 P1 : AbortController pour cleanup centralise des listeners DOM
 // poses sur _modalEl/_overlayEl (idempotent + zero leak au close).
 let _eventsController = null;
+// Fix audit 2026-05-24 a11y : handler retourne par trapFocus(), conserve pour
+// removeEventListener au closeDuplicateComparatorModal.
+let _focusTrapHandler = null;
+let _focusTrapTarget = null;
 
 /* --- Helpers --- */
 
@@ -611,6 +618,9 @@ function _ensureOverlay() {
   _overlayEl.appendChild(_modalEl);
   document.body.appendChild(_overlayEl);
   document.addEventListener("keydown", _onKeydown, opts);
+  // Fix audit 2026-05-24 a11y : capture Tab/Shift+Tab dans l'overlay.
+  _focusTrapTarget = _overlayEl;
+  _focusTrapHandler = trapFocus(_overlayEl);
 }
 
 function _onKeydown(ev) {
@@ -767,6 +777,13 @@ export function closeDuplicateComparatorModal() {
     try { _eventsController.abort(); } catch (_e) { /* noop */ }
     _eventsController = null;
   }
+  // Fix audit 2026-05-24 a11y : libere le focus trap installe par _ensureOverlay
+  // (handler retourne par trapFocus n'est pas couvert par _eventsController).
+  if (_focusTrapHandler && _focusTrapTarget) {
+    try { _focusTrapTarget.removeEventListener("keydown", _focusTrapHandler); } catch (_e) { /* noop */ }
+  }
+  _focusTrapHandler = null;
+  _focusTrapTarget = null;
   if (_overlayEl) {
     // removeEventListener garde pour compat ascendante au cas ou abort() ne
     // serait pas supporte (browsers < 2022). Idempotent.

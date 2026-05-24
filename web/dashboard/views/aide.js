@@ -116,6 +116,13 @@ let _searchQuery = "";
 let _searchDebounceId = null;
 let _activeDrawer = null;
 let _lastDiagnostic = null;
+// Fix audit 2026-05-24 : handlers nommes au scope module pour pouvoir les
+// removeEventListener proprement dans unmountAide() / _closeDrawer().
+// Avant : chaque initAide attachait un nouveau handler anonyme sur document
+// (click-outside dropdown search) sans cleanup -> cumul O(n) listeners
+// zombies apres N entrees/sorties de la vue Aide.
+let _onClickOutside = null;
+let _onDrawerKeydown = null;
 
 /* --- Renderers ---------------------------------------------------------- */
 
@@ -307,6 +314,11 @@ async function _fetchDiagnostic() {
  * Ex : "## 4. Le Score V2 (système de tiers)" -> "4-le-score-v2-systeme-de-tiers"
  */
 function _slugify(text) {
+  // Fix audit 2026-05-24 : le range ci-dessous est U+0300-U+036F (Combining
+  // Diacritical Marks). Ces caracteres sont invisibles dans la plupart des
+  // editeurs / outils diff, donc un copy-paste maladroit peut casser
+  // silencieusement la suppression des accents. Commentaire explicite pour
+  // que la prochaine personne ne se demande pas ce que fait ce regex.
   return String(text || "")
     .toLowerCase()
     .normalize("NFD")
@@ -489,6 +501,16 @@ function _closeDrawer() {
     _activeDrawer.parentNode.removeChild(_activeDrawer);
   }
   _activeDrawer = null;
+  // Fix audit 2026-05-24 : avant, le keydown handler etait retire UNIQUEMENT
+  // par lui-meme quand l'utilisateur pressait Escape. Une fermeture via le
+  // bouton ✕ ou un clic sur le backdrop laissait le listener attache sur
+  // document. Au N-ieme open/close, on cumulait N keydown listeners zombies
+  // qui pointaient vers un drawer DOM detruit. On centralise le cleanup ici
+  // pour garantir 1 listener actif maxi.
+  if (_onDrawerKeydown) {
+    document.removeEventListener("keydown", _onDrawerKeydown);
+    _onDrawerKeydown = null;
+  }
 }
 
 function _renderDrawerSkeleton(topicTitle) {
@@ -530,13 +552,19 @@ async function _openDocDrawer(topic) {
     });
   }
   // Esc -> close
-  const onKey = (ev) => {
+  // Fix audit 2026-05-24 : handler stocke au scope module pour permettre a
+  // _closeDrawer() de le retirer quel que soit le path de fermeture
+  // (Escape / clic bouton ✕ / clic backdrop / navigation hors vue).
+  // Si un keydown precedent traine, on le retire avant d'attacher le nouveau.
+  if (_onDrawerKeydown) {
+    document.removeEventListener("keydown", _onDrawerKeydown);
+  }
+  _onDrawerKeydown = (ev) => {
     if (ev.key === "Escape") {
       _closeDrawer();
-      document.removeEventListener("keydown", onKey);
     }
   };
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", _onDrawerKeydown);
 
   const contentEl = drawer.querySelector("[data-aide-drawer-content]");
 
@@ -780,13 +808,26 @@ function _bindEvents(container, diagnostic) {
       }
     });
     // Click hors -> ferme dropdown
-    document.addEventListener("click", (ev) => {
+    // Fix audit 2026-05-24 : avant, ce listener anonyme etait attache a CHAQUE
+    // initAide() sans aucun cleanup dans unmountAide() -> apres N navigations
+    // vers /aide, on accumulait N click handlers sur document, tous pointant
+    // sur le mauvais container (le precedent etait deja innerHTML='d, donc
+    // querySelector(".aide-search") retournait null et plantait silencieusement
+    // dans .contains()). On nomme le handler au scope module et on l'enleve
+    // dans unmountAide(). Si un handler precedent traine (init sans unmount),
+    // on le retire avant d'attacher le nouveau.
+    if (_onClickOutside) {
+      document.removeEventListener("click", _onClickOutside);
+    }
+    _onClickOutside = (ev) => {
       const dd = container.querySelector("[data-aide-search-results]");
       if (!dd || dd.hidden) return;
-      if (!container.querySelector(".aide-search").contains(ev.target)) {
+      const searchBox = container.querySelector(".aide-search");
+      if (searchBox && !searchBox.contains(ev.target)) {
         dd.hidden = true;
       }
-    });
+    };
+    document.addEventListener("click", _onClickOutside);
   }
 
   // Topics doc -> drawer markdown
@@ -896,6 +937,14 @@ export function unmountAide() {
     clearTimeout(_searchDebounceId);
     _searchDebounceId = null;
   }
+  // Fix audit 2026-05-24 : cleanup explicite du click-outside attache sur
+  // document au dernier initAide(). Sans ca, les listeners survivaient a la
+  // navigation hors vue et cumulaient des callbacks zombies a chaque retour.
+  if (_onClickOutside) {
+    document.removeEventListener("click", _onClickOutside);
+    _onClickOutside = null;
+  }
+  // _closeDrawer() s'occupe aussi du _onDrawerKeydown via le meme fix audit.
   _closeDrawer();
 }
 
