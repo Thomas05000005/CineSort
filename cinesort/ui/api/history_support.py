@@ -29,7 +29,11 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
             try:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             except (ImportError, OSError) as exc:
-                return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+                # Fix audit 2026-05-24 (v1.5.1) : "Plan introuvable" est un cas
+                # legitime (run cleanup orphelin, run FAILED dont le plan.jsonl
+                # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
+                # eviter la pollution des logs.
+                return _err_response(str(exc), category="state", level="debug", log_module=__name__)
         return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
 
     found = api._find_run_row(run_id)
@@ -46,7 +50,8 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
         rows = api._load_rows_from_plan_jsonl(run_paths)
         return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
     except (OSError, KeyError, TypeError, ValueError) as exc:
-        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+        # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
+        return _err_response(str(exc), category="state", level="debug", log_module=__name__)
 
 
 @requires_valid_run_id
