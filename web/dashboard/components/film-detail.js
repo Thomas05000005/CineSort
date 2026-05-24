@@ -1144,8 +1144,11 @@ async function _handleAlertAction(kind, code) {
               if (remaining === 0 && section) {
                 section.remove();
               } else if (titleEl) {
+                // CodeQL js/xss-through-dom : icon vient du DOM (textContent),
+                // donc on utilise textContent au lieu d'innerHTML pour eviter
+                // toute reinterpretation HTML d'un caractere accidentel.
                 const icon = titleEl.textContent.trim().split(" ")[0] || "ℹ️";
-                titleEl.innerHTML = `${icon} ${remaining} alerte${remaining > 1 ? "s" : ""}`;
+                titleEl.textContent = `${icon} ${remaining} alerte${remaining > 1 ? "s" : ""}`;
               }
             }
           }, 240);
