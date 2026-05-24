@@ -436,6 +436,53 @@ def _build_library_rows(rows: list, reports: list) -> list:
     return out
 
 
+# Spec 08 §3.5 : delai d'annulation post-apply propose par l'UI Traitement.
+_UNDO_DEADLINE_SECONDS = 24 * 3600
+
+
+def _build_pending_undo_payload(store: SQLiteStore, run_id: str) -> Optional[Dict[str, Any]]:
+    """Resume du dernier apply reversible : timestamp + deadline 24h.
+
+    Retourne None si aucun batch apply reel n'est associe au run, sinon un dict
+    consomme par la carte "Annulation possible" de la vue Traitement (spec 08
+    §3.5). Calcule en dehors du cache dashboard pour que le countdown reste
+    a jour a chaque get_dashboard.
+    """
+    try:
+        batch = store.apply.get_last_reversible_apply_batch(run_id)
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
+    if not batch:
+        return None
+
+    batch_id = str(batch.get("batch_id") or "")
+    apply_ts = float(batch.get("started_ts") or 0.0)
+    now = time.time()
+    deadline_ts = apply_ts + _UNDO_DEADLINE_SECONDS if apply_ts > 0 else 0.0
+    expired = bool(apply_ts > 0 and now >= deadline_ts)
+
+    reversible_count = 0
+    try:
+        ops = store.apply.list_apply_operations(batch_id=batch_id) if batch_id else []
+        reversible_count = sum(1 for op in ops if int(op.get("reversible") or 0) == 1)
+    except (OSError, AttributeError, TypeError, ValueError):
+        reversible_count = 0
+
+    if reversible_count <= 0:
+        # Aucun op reversible : on n'expose pas la carte (rien a annuler).
+        return None
+
+    return {
+        "batch_id": batch_id,
+        "apply_ts": apply_ts,
+        "deadline_ts": deadline_ts,
+        "deadline_seconds_total": _UNDO_DEADLINE_SECONDS,
+        "remaining_seconds": max(0, int(deadline_ts - now)) if deadline_ts > 0 else 0,
+        "expired": expired,
+        "reversible_count": int(reversible_count),
+    }
+
+
 def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
     target_run = str(run_id or "latest").strip()
     try:
@@ -473,6 +520,10 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             resolved_run_id,
             ensure_exists=False,
         )
+        # Spec 08 §3.5 : recalcul "live" du delai d'undo a chaque appel
+        # (hors cache dashboard) — countdown qui s'ecoule entre deux GET.
+        pending_undo = _build_pending_undo_payload(store, resolved_run_id)
+
         cached_payload = api._load_dashboard_cache(run_row=run_row, run_paths=run_paths, store=store)
         if isinstance(cached_payload, dict):
             return {
@@ -482,6 +533,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 "run_dir": str(run_paths.run_dir),
                 **cached_payload,
                 "runs_history": runs_history,
+                "pending_undo": pending_undo,
             }
 
         run_state = api._get_run(resolved_run_id)
@@ -513,6 +565,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             "run_dir": str(run_paths.run_dir),
             **cached_section,
             "runs_history": runs_history,
+            "pending_undo": pending_undo,
         }
     except (OSError, TypeError, ValueError) as exc:
         api.log_api_exception(
