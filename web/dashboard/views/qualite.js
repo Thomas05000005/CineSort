@@ -57,6 +57,9 @@ const _state = {
   inspectorPayload: null,  // payload spécifique (tier / film / saga / décennie)
   recomputeJobId: null,
   recomputePollTimer: null,
+  // Fix audit 2026-05-24 : timestamp du dernier toast de progression recompute
+  // pour throttler les notifications (5s minimum entre 2 toasts identiques).
+  recomputeLastToastTs: 0,
 };
 
 /* --- Normalize helpers ----------------------------------------------- */
@@ -114,10 +117,13 @@ function _renderError(message) {
 }
 
 function _renderHeader(stats) {
-  const total = (stats && stats.summary && stats.summary.total_films) || 0;
   const avgScore = (stats && stats.summary && stats.summary.avg_score) || 0;
   const dist = _resolveTierDist(stats);
   const totalScored = _TIER_ORDER.reduce((s, t) => s + (dist[t] || 0), 0);
+  // Fix audit 2026-05-24 : `summary.total_films` compte TOUS les films du run
+  // (y compris ceux sans tier calcule), pas "X films classes". On utilise la
+  // somme par tier pour afficher le vrai nombre de films classes.
+  const total = totalScored;
   const healthPct = totalScored > 0
     ? Math.round(((dist.platinum + dist.gold + dist.silver) / totalScored) * 100)
     : 0;
@@ -888,10 +894,17 @@ function _openFiltersDrawer(container) {
       _state.filters = newFilters;
       const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
       // Re-charger les sections impactees par les filtres
+      // Fix audit 2026-05-24 : Reject + Sagas etaient absents -> filtres ignores
+      // pour ces 2 podiums. _loadRejectFilms/_loadSagas n'acceptent que (signal)
+      // aujourd'hui, mais on les inclut pour re-fetch coherent au prochain
+      // appel apres maj des filtres globaux (la signature backend pourra
+      // accepter les filtres plus tard sans changer l'appelant).
       try {
         await Promise.all([
           _loadByDecade(signal, newFilters),
           _loadHistory(signal, newFilters.period_days || 30),
+          _loadRejectFilms(signal),
+          _loadSagas(signal),
         ]);
       } catch (_e) { /* abort */ }
       _rerender(container);
@@ -962,7 +975,14 @@ function _pollRecompute(jobId, total) {
     const progress = Number(data.progress || 0);
     const totalJob = Number(data.total || total || 0);
     if (status === "running" || status === "pending") {
-      showToast({ type: "info", text: `Re-calcul ${progress}/${totalJob}…`, duration: 1500 });
+      // Fix audit 2026-05-24 : avant, on emettait un toast à chaque tick (2s)
+      // -> spam visuel pour un re-calcul de plusieurs minutes. On throttle à
+      // 5s minimum entre deux toasts de progression.
+      const now = Date.now();
+      if (!_state.recomputeLastToastTs || now - _state.recomputeLastToastTs >= 5000) {
+        _state.recomputeLastToastTs = now;
+        showToast({ type: "info", text: `Re-calcul ${progress}/${totalJob}…`, duration: 1500 });
+      }
       return;
     }
     // Terminé

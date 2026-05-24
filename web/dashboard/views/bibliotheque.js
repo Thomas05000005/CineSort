@@ -1142,15 +1142,23 @@ function _bindEvents(container) {
 
   // --- mouseover delegation (table-row : hover focus inspecteur) -----------
   // mouseenter ne bubble pas -> mouseover + closest gere le hover en delegation.
+  // Fix audit 2026-05-24 : throttle via requestAnimationFrame pour eviter le
+  // flood d'updates inspector quand la souris balaye rapidement la table
+  // (mouseover fire a chaque pixel). 1 update / frame max suffit largement.
+  let _hoverRaf = null;
   container.addEventListener("mouseover", (ev) => {
+    if (_hoverRaf) return;
     const t = ev.target;
     if (!t || typeof t.closest !== "function") return;
-    const tr = t.closest(".bibliotheque-table-row");
-    if (!tr || !tr.dataset.rowId) return;
-    // Anti-flood : ne refocus que si on change de ligne.
-    if (_state.focusedRowId === tr.dataset.rowId) return;
-    _state.focusedRowId = tr.dataset.rowId;
-    _updateInspector();
+    _hoverRaf = requestAnimationFrame(() => {
+      _hoverRaf = null;
+      const tr = t.closest(".bibliotheque-table-row");
+      if (!tr || !tr.dataset.rowId) return;
+      // Anti-flood : ne refocus que si on change de ligne.
+      if (_state.focusedRowId === tr.dataset.rowId) return;
+      _state.focusedRowId = tr.dataset.rowId;
+      _updateInspector();
+    });
   }, opts);
 
   // --- input delegation (search debounced) ---------------------------------
@@ -1209,26 +1217,46 @@ function _bindGridDragSelect() {
 function _handleBulkAction(action) {
   const ids = Array.from(_state.selected);
   if (ids.length === 0) return;
+  // Fix audit 2026-05-24 : avant aucun disable -> double-clic = 2 appels backend
+  // en parallele (perceptual lance 2x, posters refresh 2x, delete affiche 2 modales).
+  // Maintenant : disable tous les boutons bulk pendant l'action async, restore au fin.
+  if (_state.bulkInFlight) {
+    return; // ignore le 2eme click pendant que le 1er est en cours
+  }
+  _state.bulkInFlight = true;
+  const bulkBtns = Array.from(document.querySelectorAll("[data-biblio-bulk-action]"));
+  bulkBtns.forEach((b) => { b.disabled = true; b.dataset.bulkPending = "1"; });
+  const release = () => {
+    _state.bulkInFlight = false;
+    bulkBtns.forEach((b) => { b.disabled = false; delete b.dataset.bulkPending; });
+  };
+
+  const wrap = (promise) => promise.finally(release);
+
   if (action === "delete") {
-    _confirmBulkDelete(ids);
+    // delete passe par une modale + confirmation ; le release est fait dans
+    // _confirmBulkDelete via onConfirm/onCancel (cf signature).
+    _confirmBulkDelete(ids, release);
     return;
   }
   if (action === "perceptual") {
-    void _bulkPerceptual(ids);
+    void wrap(_bulkPerceptual(ids));
     return;
   }
   if (action === "rescan") {
-    void _bulkRescan(ids);
+    void wrap(_bulkRescan(ids));
     return;
   }
   if (action === "export") {
-    void _bulkExport(ids);
+    void wrap(_bulkExport(ids));
     return;
   }
   if (action === "refresh-posters") {
-    void _bulkRefreshPosters(ids);
+    void wrap(_bulkRefreshPosters(ids));
     return;
   }
+  // Action inconnue : release immediat pour eviter blocage permanent.
+  release();
 }
 
 /* Sprint orphelins #350 : recharger les posters TMDb des films selectionnes.
@@ -1409,10 +1437,11 @@ async function _bulkExport(rowIds) {
   _openExportFormatPicker(rowIds);
 }
 
-function _confirmBulkDelete(rowIds) {
+function _confirmBulkDelete(rowIds, releaseBulkLock = null) {
   // P0 #233 : dangerConfirmModal (au lieu de window.confirm legacy + alert > 50).
   // La modale gere elle-meme : items 5 max visibles + "et N autres", countdown
   // anti-clic-reflexe 3s si bulk > 50.
+  // Fix audit 2026-05-24 : countdownSeconds: 3 minimum (feedback actions_dangereuses).
   const n = rowIds.length;
   const items = rowIds.map((id) => {
     const r = _state.rows.find((row) => String(row.row_id) === String(id));
@@ -1423,12 +1452,13 @@ function _confirmBulkDelete(rowIds) {
     items,
     consequence:
       "Ils seront déplacés vers _user_marked_for_deletion/ au prochain apply (réversible via Undo).",
-    countdownSeconds: n > 50 ? 3 : 0,
+    countdownSeconds: 3,
     confirmLabel: "✗ Confirmer la suppression",
     onConfirm: async () => {
       try {
         const res = await apiPost("library/mark_for_deletion_bulk", { row_ids: rowIds });
-        if (res && res.ok !== false) {
+        const _payload = (res && res.data) || res || {};
+        if (res && _payload.ok !== false) {
           showToast({
             type: "success",
             text: `${n} film${n > 1 ? "s" : ""} marqué${n > 1 ? "s" : ""} pour suppression.`,
@@ -1436,11 +1466,16 @@ function _confirmBulkDelete(rowIds) {
           _state.selected.clear();
           _fetchLibrary();
         } else {
-          showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur marquage." });
+          showToast({ type: "error", text: _payload.message || _payload.error || "Erreur marquage." });
         }
       } catch (err) {
         showToast({ type: "error", text: String(err && err.message ? err.message : err) });
+      } finally {
+        if (typeof releaseBulkLock === "function") releaseBulkLock();
       }
+    },
+    onCancel: () => {
+      if (typeof releaseBulkLock === "function") releaseBulkLock();
     },
   });
 }
@@ -1484,9 +1519,11 @@ function _applyPlaylist(playlistId) {
   // warnings / chips -> activeChips
   _state.activeChips.clear();
   if (Array.isArray(filters.warnings)) {
-    filters.warnings.forEach((w) => {
-      // Map des warnings backend vers les chip-keys frontend connus.
-      if (w === "dnr_partial") _state.activeChips.add("recently_modified"); // approximation
+    filters.warnings.forEach((_w) => {
+      // Fix audit 2026-05-24 : mapping `dnr_partial` -> `recently_modified`
+      // etait faux semantiquement (dnr_partial = warning DNR partiel, sans
+      // rapport avec une modif recente). Aucun mapping exact n'existe a ce
+      // jour ; on ne fait plus rien tant qu'on n'a pas de correspondance sure.
     });
   }
   if (Array.isArray(filters.chips)) {

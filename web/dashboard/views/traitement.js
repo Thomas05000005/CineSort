@@ -29,6 +29,9 @@ import { dangerConfirmModal, showModal, closeModal } from "../components/modal.j
 import { showToast } from "../components/toast.js";
 import { formatRelative, formatDuration } from "../core/format.js";
 import { initDoublons, unmountDoublons } from "./doublons.js";
+// Fix audit 2026-05-24 : import renderFilmDetail pour brancher les actions
+// "rename" (Vérification) et "inspect" (Validation) qui étaient inertes.
+import { renderFilmDetail } from "../components/film-detail.js";
 
 const STEPS = [
   { id: "analyse", label: "Analyse", desc: "Scan des dossiers racines" },
@@ -74,6 +77,15 @@ let _doublonsMounted = false;
 let _verifFilter = "all";
 let _validationPlan = null; // { rows: [...] }
 let _applyOptions = { dry_run: true, export_csv: false, sync_jellyfin: false, quarantine: false };
+// Fix audit 2026-05-24 : AbortController scope module pour annuler tous les
+// apiPost en vol au unmount (navigation, fermeture vue). Sans ça les fetch
+// continuent et appellent _renderInPlace/_loadXxx après remise à null du
+// container -> NPE silencieux dans la console + fuite mémoire.
+let _abortController = null;
+
+function _signal() {
+  return _abortController ? _abortController.signal : undefined;
+}
 
 /* --- Step nav helpers --- */
 
@@ -115,12 +127,20 @@ async function _loadRunInfo() {
     // get_status jamais armé -> barre de progress + logs scan invisibles
     // dans l'UI alors que le scan tourne en backend.
     const params = targetId ? { run_id: targetId } : { run_id: "latest" };
-    const res = await apiPost("run/get_dashboard", params);
+    const res = await apiPost("run/get_dashboard", params, { signal: _signal() });
     if (!res || res.data?.ok === false) {
       _runInfo = null;
       return;
     }
     const data = res.data || res;
+    // Fix audit 2026-05-24 : si le run actif change (nouveau scan lancé,
+    // navigation #run-XXX), les logs accumulés du run précédent restaient
+    // dans _logsState et étaient injectés en haut du log live du nouveau run
+    // -> confusion utilisateur + nextIndex pointait dans la timeline du run
+    // précédent -> get_status renvoyait des logs déjà vus (ou rien).
+    if (data.run_id && _runInfo && _runInfo.runId && data.run_id !== _runInfo.runId) {
+      _logsState = { items: [], nextIndex: 0 };
+    }
     const k = data.kpis || {};
     const history = Array.isArray(data.runs_history) ? data.runs_history : [];
     const current = history.find((r) => r.run_id === data.run_id) || history[0] || {};
@@ -162,7 +182,7 @@ async function _loadRunStatus() {
     const res = await apiPost("run/get_status", {
       run_id: _runInfo.runId,
       last_log_index: _logsState.nextIndex || 0,
-    });
+    }, { signal: _signal() });
     const data = res?.data || res;
     if (!data || data.ok === false) {
       _runStatus = null;
@@ -203,9 +223,12 @@ function _startPolling() {
   _stopPolling();
   const interval = _currentStep === "analyse" ? POLL_INTERVAL_ANALYSE : POLL_INTERVAL_RUNNING;
   _pollTimer = setInterval(async () => {
-    if (!_runStatus || !_runStatus.running) {
-      // Plus rien a poll si le run est termine, on continue tout de meme
-      // pour rafraichir get_dashboard (utile apres apply)
+    // Fix audit 2026-05-24 : avant on poll-ait infiniment meme apres run done
+    // -> 1 call/2-5s a vie tant que vue montee. Arret propre quand run termine.
+    // Un refresh manuel ou un nouveau scan re-arme via _startPolling().
+    if (_runStatus && _runStatus.done) {
+      _stopPolling();
+      return;
     }
     await _loadRunStatus();
     await _loadRunInfo();
@@ -553,9 +576,11 @@ function _renderValidationStep() {
         <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="preset-no-alert">
           Approuver sans alerte
         </button>
-        <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="preset-reject-reject">
-          Rejeter tier Reject
-        </button>
+        <!-- Fix audit 2026-05-24 : bouton "Rejeter tier Reject" supprimé.
+             L'action n'était branchée que sur un showToast "non disponible"
+             (cf _bindEvents preset-reject-reject) -> UI mensongère qui
+             cassait la confiance utilisateur. À ré-ajouter quand bulk reject
+             via run/save_validation sera spécifié. -->
         <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="preset-platinum-gold">
           Approuver Platinum + Gold
         </button>
@@ -738,7 +763,7 @@ async function _onUndoPreview() {
   if (!_runInfo?.runId) return;
   if (!_runInfo?.pendingUndo) return;
   try {
-    const res = await apiPost("run/undo_last_apply_preview", { run_id: _runInfo.runId });
+    const res = await apiPost("run/undo_last_apply_preview", { run_id: _runInfo.runId }, { signal: _signal() });
     const data = res?.data || res;
     if (!data || data.ok === false) {
       showToast({ type: "error", text: "Impossible de préparer l'annulation." });
@@ -786,7 +811,7 @@ function _onUndoExecute() {
     countdownSeconds: 3,
     onConfirm: async () => {
       try {
-        const res = await apiPost("run/undo_last_apply", { run_id: _runInfo.runId, dry_run: false });
+        const res = await apiPost("run/undo_last_apply", { run_id: _runInfo.runId, dry_run: false }, { signal: _signal() });
         const data = res?.data || res;
         if (!data || data.ok === false) {
           showToast({ type: "error", text: data?.error || "Échec de l'annulation." });
@@ -948,7 +973,7 @@ async function _handleHeaderAction(action) {
 
   if (action === "pause") {
     try {
-      const res = await apiPost("run/pause_run", { run_id: runId });
+      const res = await apiPost("run/pause_run", { run_id: runId }, { signal: _signal() });
       if (res?.data?.ok) {
         showToast({ type: "info", text: "Run mis en pause." });
         await _loadRunStatus();
@@ -961,7 +986,7 @@ async function _handleHeaderAction(action) {
     }
   } else if (action === "resume") {
     try {
-      const res = await apiPost("run/resume_run", { run_id: runId });
+      const res = await apiPost("run/resume_run", { run_id: runId }, { signal: _signal() });
       if (res?.data?.ok) {
         showToast({ type: "success", text: "Run repris." });
         await _loadRunStatus();
@@ -974,7 +999,7 @@ async function _handleHeaderAction(action) {
     }
   } else if (action === "save") {
     try {
-      const res = await apiPost("run/save_for_later", { run_id: runId });
+      const res = await apiPost("run/save_for_later", { run_id: runId }, { signal: _signal() });
       if (res?.data?.ok) {
         showToast({ type: "success", text: "Run sauvegardé. Retrouvez-le dans l'Historique." });
       } else {
@@ -993,7 +1018,7 @@ async function _handleHeaderAction(action) {
       countdownSeconds: 3,
       onConfirm: async () => {
         try {
-          const res = await apiPost("run/cancel_run", { run_id: runId });
+          const res = await apiPost("run/cancel_run", { run_id: runId }, { signal: _signal() });
           if (res?.data?.ok) {
             showToast({ type: "success", text: "Run annulé." });
             await _loadRunInfo();
@@ -1019,7 +1044,7 @@ async function _handleScanStart() {
       nfo: _scanOptions.nfo,
       parallelism: _scanOptions.parallelism,
     };
-    const res = await apiPost("run/start_plan", { settings });
+    const res = await apiPost("run/start_plan", { settings }, { signal: _signal() });
     if (res?.data?.ok) {
       showToast({ type: "success", text: "Scan démarré." });
       await _loadRunInfo();
@@ -1037,7 +1062,7 @@ async function _handleScanStart() {
 async function _loadPlan() {
   if (!_runInfo?.runId) return;
   try {
-    const res = await apiPost("run/get_plan", { run_id: _runInfo.runId });
+    const res = await apiPost("run/get_plan", { run_id: _runInfo.runId }, { signal: _signal() });
     const data = res?.data || res;
     if (data?.ok !== false) {
       _validationPlan = { rows: Array.isArray(data.rows) ? data.rows : (Array.isArray(data) ? data : []) };
@@ -1115,7 +1140,7 @@ async function _handleApplyNow() {
         decisions,
         dry_run: true,
         quarantine_unapproved: _applyOptions.quarantine,
-      });
+      }, { signal: _signal() });
       if (res?.data?.ok !== false) {
         showToast({ type: "success", text: "Dry-run terminé. Aucun fichier modifié.", duration: 5000 });
         await _loadRunInfo();
@@ -1148,7 +1173,7 @@ async function _handleApplyNow() {
           decisions,
           dry_run: false,
           quarantine_unapproved: _applyOptions.quarantine,
-        });
+        }, { signal: _signal() });
         if (res?.data?.ok !== false) {
           showToast({ type: "success", text: "Apply terminé · Undo possible 24h", duration: 7000 });
           await _loadRunInfo();
@@ -1224,8 +1249,6 @@ function _bindEvents(container) {
         _handleBulkApprove("no-alert");
       } else if (action === "preset-platinum-gold") {
         _handleBulkApprove("platinum-gold");
-      } else if (action === "preset-reject-reject") {
-        showToast({ type: "info", text: "Rejet tier Reject - non disponible (preset)." });
       } else if (action === "apply-now") {
         _handleApplyNow();
       } else if (action === "undo-preview") {
@@ -1262,6 +1285,62 @@ function _bindEvents(container) {
       _renderInPlace();
     });
   });
+
+  // Fix audit 2026-05-24 : handlers Vérification (rescan / rename / ignore)
+  // déclarés dans le HTML (data-traitement-verif-action) mais aucun listener
+  // ne les écoutait -> boutons inertes, utilisateur cliquait sans effet
+  // ni feedback (pas même un toast).
+  container.querySelectorAll("[data-traitement-verif-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.traitementVerifAction;
+      const rowId = btn.dataset.rowId;
+      const runId = _runInfo?.runId;
+      if (!runId || !rowId) return;
+      if (action === "rescan") {
+        try {
+          const res = await apiPost("run/rescan_row", { run_id: runId, row_id: rowId }, { signal: _signal() });
+          if (res?.data?.ok !== false) {
+            showToast({ type: "success", text: "Ligne re-scannée." });
+            await _loadPlan();
+            _renderInPlace();
+          } else {
+            showToast({ type: "error", text: "Échec du re-scan." });
+          }
+        } catch {
+          showToast({ type: "error", text: "Erreur lors du re-scan." });
+        }
+      } else if (action === "rename") {
+        renderFilmDetail({ mode: "C", rowId, runId });
+      } else if (action === "ignore") {
+        try {
+          const res = await apiPost("run/mark_alert_ignored", { run_id: runId, row_id: rowId }, { signal: _signal() });
+          if (res?.data?.ok !== false) {
+            showToast({ type: "info", text: "Alerte ignorée." });
+            await _loadPlan();
+            _renderInPlace();
+          } else {
+            showToast({ type: "error", text: "Échec de l'ignorance." });
+          }
+        } catch {
+          showToast({ type: "error", text: "Erreur lors de l'ignorance." });
+        }
+      }
+    });
+  });
+
+  // Fix audit 2026-05-24 : bouton inspect (œil) de l'étape Validation
+  // déclaré data-traitement-validation-action="inspect" mais aucun listener
+  // -> impossible d'ouvrir le détail d'une ligne avant de la valider.
+  container.querySelectorAll("[data-traitement-validation-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.traitementValidationAction;
+      const rowId = btn.dataset.rowId;
+      const runId = _runInfo?.runId;
+      if (action === "inspect" && runId && rowId) {
+        renderFilmDetail({ mode: "C", rowId, runId });
+      }
+    });
+  });
 }
 
 async function _handleSaveValidation() {
@@ -1271,7 +1350,7 @@ async function _handleSaveValidation() {
     const res = await apiPost("run/save_validation", {
       run_id: _runInfo.runId,
       decisions,
-    });
+    }, { signal: _signal() });
     if (res?.data?.ok !== false) {
       showToast({ type: "success", text: "Décisions sauvegardées." });
       await _loadRunInfo();
@@ -1299,14 +1378,16 @@ function _onHashChange() {
     changed = true;
     // Recharge les données du nouveau run cible.
     if (_activeContainer) {
+      // Fix audit 2026-05-24 : _rerender n'existe pas (ReferenceError silencieux
+      // a chaque hashchange -> back/forward navigateur cassé). Utiliser
+      // _renderInPlace() qui re-rend a partir du container actif.
       _loadRunInfo().then(() => {
-        if (_activeContainer) _rerender(_activeContainer);
+        if (_activeContainer) _renderInPlace();
       });
       return;
     }
   }
   if (changed && _activeContainer) {
-    _rerender(_activeContainer);
     _renderInPlace();
   }
 }
@@ -1323,6 +1404,9 @@ export async function initTraitement(container) {
     _currentStep = "validation";
   }
   _logsState = { items: [], nextIndex: 0 };
+  // Fix audit 2026-05-24 : nouveau AbortController par mount, abort au
+  // unmount pour interrompre tous les apiPost en vol (cf _signal()).
+  _abortController = new AbortController();
   container.innerHTML = _renderTraitement();
   window.addEventListener("hashchange", _onHashChange);
   await _loadRunInfo();
@@ -1339,6 +1423,13 @@ export async function initTraitement(container) {
 export function unmountTraitement() {
   _stopPolling();
   _stopUndoCountdown();
+  // Fix audit 2026-05-24 : abort tous les apiPost en vol avant remise à null
+  // du container (sinon le .then() qui suit appelle _renderInPlace sur un
+  // _activeContainer null -> NPE silencieux + state set sur ancien run).
+  if (_abortController) {
+    try { _abortController.abort(); } catch { /* noop */ }
+    _abortController = null;
+  }
   if (_doublonsMounted) {
     unmountDoublons();
     _doublonsMounted = false;

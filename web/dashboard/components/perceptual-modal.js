@@ -30,6 +30,9 @@ import { apiPost } from "../core/api.js";
 import { humanize, severityForTier, SCORE_V2_COMPONENTS } from "../core/perceptual-labels.js";
 import { setSections as rpSetSections, setExpandedWidth as rpSetExpandedWidth, isExpandedWidth as rpIsExpandedWidth } from "./right-panel.js";
 import { openDuplicateComparatorModal } from "./duplicate-comparator-modal.js";
+// Fix audit 2026-05-24 a11y : reutilisation du trapFocus exporte par modal.js
+// (auparavant : aucun trap -> Tab pouvait sortir du modal vers le DOM dessous).
+import { trapFocus } from "./modal.js";
 
 // Spec 02 §0 : vues qui affichent l'analyse perceptuelle dans l'inspecteur droit.
 // Le reste utilise l'overlay modal.
@@ -38,6 +41,10 @@ const _VIEWS_INSPECTOR = ["/bibliotheque", "/library", "/doublons", "/qualite", 
 let _overlayEl = null;
 let _modalEl = null;
 let _state = null;
+// Fix audit 2026-05-24 a11y : handler retourne par trapFocus(), conserve pour
+// removeEventListener au close (zero leak + focus trap propre).
+let _focusTrapHandler = null;
+let _focusTrapTarget = null;
 
 /* --- Helpers --- */
 
@@ -730,6 +737,9 @@ function _ensureOverlay() {
   _overlayEl.appendChild(_modalEl);
   document.body.appendChild(_overlayEl);
   document.addEventListener("keydown", _onKeydown);
+  // Fix audit 2026-05-24 a11y : capture le Tab/Shift+Tab dans l'overlay.
+  _focusTrapTarget = _overlayEl;
+  _focusTrapHandler = trapFocus(_overlayEl);
 }
 
 function _onKeydown(ev) {
@@ -874,6 +884,13 @@ export async function openPerceptualModal(opts) {
 }
 
 export function closePerceptualModal() {
+  // Fix audit 2026-05-24 a11y : libere le focus trap installe par _ensureOverlay
+  // (removeEventListener du handler retourne par trapFocus()).
+  if (_focusTrapHandler && _focusTrapTarget) {
+    try { _focusTrapTarget.removeEventListener("keydown", _focusTrapHandler); } catch (_e) { /* noop */ }
+  }
+  _focusTrapHandler = null;
+  _focusTrapTarget = null;
   if (_overlayEl) {
     document.removeEventListener("keydown", _onKeydown);
     _overlayEl.remove();

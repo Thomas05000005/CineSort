@@ -32,6 +32,13 @@ let _filmCache = new Map();   // row_id -> {poster_url, overview, candidates}
 let _keyboardHandler = null;
 const _SELECTED_KEY_STORAGE = "cinesort.doublons.selectedGroupKey";
 
+// Fix audit 2026-05-24 : getNavSignal était importé puis assigné dans une
+// variable locale `signal` jamais utilisée (void signal). On centralise un
+// getter de signal pour le passer en 3e arg de tous les apiPost.
+function _signal() {
+  return typeof getNavSignal === "function" ? getNavSignal() : undefined;
+}
+
 function _initState() {
   return {
     groups: [],
@@ -44,7 +51,12 @@ function _initState() {
     error: null,
     filter: "all", // all | conflict | pending | decided
     bulkInFlight: false,
-    decisionInFlight: false,
+    // Fix audit 2026-05-24 : avant decisionInFlight était un seul booléen
+    // global -> dès qu'on cliquait "Garder A" sur le groupe X, TOUS les
+    // boutons "Garder A/B" de tous les autres groupes passaient disabled.
+    // Désormais : Set des groupKeys en vol -> seuls les boutons du groupe
+    // concerné se désactivent, l'utilisateur peut décider en parallèle.
+    decisionInFlightByGroup: new Set(),
   };
 }
 
@@ -105,7 +117,7 @@ async function _fetchFilmFull(rowId) {
   // Pose un placeholder pour eviter de relancer pendant le fetch
   _filmCache.set(rowId, { _loading: true });
   try {
-    const res = await apiPost("library/get_film_full", { run_id: _state ? _state.runId : null, row_id: rowId });
+    const res = await apiPost("library/get_film_full", { run_id: _state ? _state.runId : null, row_id: rowId }, { signal: _signal() });
     const data = _payload(res);
     if (data.ok === false) {
       _filmCache.set(rowId, { poster_url: null, overview: null, candidates: [] });
@@ -267,7 +279,8 @@ function _renderGroupCard(group) {
   // Ids row pour les boutons Garder A/B (sur la carte)
   const rowAId = group.rows && group.rows[0] ? group.rows[0].row_id : null;
   const rowBId = group.rows && group.rows[1] ? group.rows[1].row_id : null;
-  const inflight = _state.decisionInFlight ? "disabled" : "";
+  // Fix audit 2026-05-24 : disable uniquement les boutons du groupe en vol.
+  const inflight = _state.decisionInFlightByGroup.has(groupKey) ? "disabled" : "";
 
   return `
     <article class="doublons-card${isSelected ? " is-selected" : ""}${decided ? " is-decided" : ""}"
@@ -428,7 +441,8 @@ function _renderRightPanel() {
     }
     const alerts = labelsForFlags(allFlags);
 
-    const inflight = _state.decisionInFlight ? "disabled" : "";
+    // Fix audit 2026-05-24 : disable uniquement si décision en vol pour CE groupe.
+    const inflight = _state.decisionInFlightByGroup.has(_groupKey(group)) ? "disabled" : "";
 
     sections.push({
       title: "📌 Groupe sélectionné",
@@ -553,8 +567,9 @@ function _openComparator(group) {
 /* --- Decision (mark_duplicate_winner) --- */
 
 async function _decideFromCard(groupKey, side, winnerRowId) {
-  if (!_state || _state.decisionInFlight) return;
-  _state.decisionInFlight = true;
+  // Fix audit 2026-05-24 : check + add + delete par groupKey (per-group lock).
+  if (!_state || _state.decisionInFlightByGroup.has(groupKey)) return;
+  _state.decisionInFlightByGroup.add(groupKey);
   _render();
   try {
     const res = await apiPost("run/mark_duplicate_winner", {
@@ -562,24 +577,35 @@ async function _decideFromCard(groupKey, side, winnerRowId) {
       group_key: groupKey,
       winner_row_id: winnerRowId,
       notes: null,
-    });
+    }, { signal: _signal() });
+    // Fix audit 2026-05-24 : si _state a été vidé pendant le fetch (unmount),
+    // ne pas continuer (NPE sur _state.decisionInFlightByGroup.delete).
+    if (!_state) return;
     const data = _payload(res);
     if (data.ok === false) {
       showToast({ type: "error", text: data.message || data.error || "Échec décision" });
-      _state.decisionInFlight = false;
+      _state.decisionInFlightByGroup.delete(groupKey);
       _render();
       return;
     }
+    // Fix audit 2026-05-24 : avant on mettait juste à jour le groupe local,
+    // mais size_savings_total et decidedCount peuvent diverger côté backend
+    // (recalcul tier, recouvrement) -> total affiché en header devenait stale.
+    // Round-trip _loadGroups() pour resynchroniser depuis la source de vérité.
+    _state.decisionInFlightByGroup.delete(groupKey);
     _handleDecision(groupKey, side, winnerRowId, data);
+    await _loadGroups();
   } catch (err) {
+    if (!_state) return;
     showToast({ type: "error", text: err && err.message ? err.message : String(err) });
-    _state.decisionInFlight = false;
+    _state.decisionInFlightByGroup.delete(groupKey);
     _render();
   }
 }
 
 function _handleDecision(groupKey, side, winnerRowId, payload) {
-  // Met a jour le groupe en local pour eviter un round-trip a check_duplicates.
+  // Met a jour le groupe en local pour feedback immédiat (le _loadGroups()
+  // qui suit dans _decideFromCard resync le total fiable).
   const group = _findGroupByKey(groupKey);
   if (group) {
     group.winner_decided = true;
@@ -590,7 +616,8 @@ function _handleDecision(groupKey, side, winnerRowId, payload) {
   // Compteurs
   _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
   _state.pendingCount = _state.groups.length - _state.decidedCount;
-  _state.decisionInFlight = false;
+  // Fix audit 2026-05-24 : decisionInFlight global supprimé au profit du Set.
+  _state.decisionInFlightByGroup.delete(groupKey);
   const sideLabel = side === "a" ? "A" : "B";
   showToast({ type: "success", text: `✓ Décidé : Garder ${sideLabel}` });
   _render();
@@ -622,7 +649,7 @@ async function _bulkPerceptual() {
   showToast({ type: "info", text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…` });
 
   try {
-    const res = await apiPost("quality/queue_perceptual_analyses", { pairs, options: {} });
+    const res = await apiPost("quality/queue_perceptual_analyses", { pairs, options: {} }, { signal: _signal() });
     const data = _payload(res);
     if (data.ok === false) {
       showToast({ type: "error", text: data.message || data.error || "Échec queue analyses" });
@@ -649,8 +676,15 @@ async function _bulkPerceptual() {
 
 async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
   for (let i = 0; i < maxAttempts; i++) {
+    // Fix audit 2026-05-24 : si l'utilisateur navigue hors de la vue Doublons
+    // pendant un bulk perceptual, unmountDoublons met _state à null. Avant
+    // ce guard, la boucle continuait, faisait des apiPost zombies et tentait
+    // de showToast/render sur un container détruit -> NPE silencieux + fuite
+    // 1 fetch/2s pendant 1 min.
+    if (!_state) return;
     try {
-      const res = await apiPost("quality/get_perceptual_job_status", { job_id: jobId });
+      const res = await apiPost("quality/get_perceptual_job_status", { job_id: jobId }, { signal: _signal() });
+      if (!_state) return;
       const data = _payload(res);
       if (data.ok === false) {
         showToast({ type: "error", text: data.message || data.error || "Polling job échoué" });
@@ -672,11 +706,15 @@ async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
         showToast({ type: "info", text: `⏳ ${done}/${total} analyses…` });
       }
     } catch (err) {
+      if (!_state) return;
       showToast({ type: "error", text: err && err.message ? err.message : String(err) });
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
+    // Fix audit 2026-05-24 : re-check après le sleep (même iteration suivante).
+    if (!_state) return;
   }
+  if (!_state) return;
   showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs." });
 }
 
@@ -734,7 +772,7 @@ async function _loadGroups() {
   if (!runId) {
     try {
       // Fix audit 2026-05-24 : `run_id_or` n'existe pas dans la facade (cf traitement.js).
-      const dash = await apiPost("run/get_dashboard", { run_id: "latest" });
+      const dash = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal: _signal() });
       const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;
@@ -750,7 +788,7 @@ async function _loadGroups() {
   }
 
   try {
-    const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} });
+    const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} }, { signal: _signal() });
     const data = _payload(res);
     if (data.ok === false) {
       _state.error = data.message || data.error || "Erreur de chargement.";
@@ -797,7 +835,15 @@ async function _loadGroups() {
 function _bindEvents() {
   if (!_container) return;
   const retryBtn = _container.querySelector("[data-doublons-retry]");
-  if (retryBtn) retryBtn.addEventListener("click", () => initDoublons(_container));
+  if (retryBtn) retryBtn.addEventListener("click", () => {
+    // Fix audit 2026-05-24 : avant on appelait initDoublons sans unmount,
+    // donc l'ancien _keyboardHandler restait attaché (double handler), le
+    // _state précédent leakait et le right-panel gardait les sections de
+    // l'instance morte. Unmount avant re-init = reset propre.
+    const target = _container;
+    unmountDoublons();
+    initDoublons(target);
+  });
 
   _container.querySelectorAll("[data-doublons-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -857,8 +903,10 @@ export async function initDoublons(container) {
   _state = _initState();
   _filmCache = new Map();
   container.innerHTML = _renderSkeleton();
-  const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
-  void signal;
+  // Fix audit 2026-05-24 : avant on récupérait getNavSignal() puis on faisait
+  // `void signal` -> import inutile, abort jamais relié. Le helper _signal()
+  // au scope module est passé à chaque apiPost ci-dessus pour vraiment
+  // annuler les requêtes en cas de nav.
   // Keyboard nav
   if (_keyboardHandler) {
     document.removeEventListener("keydown", _keyboardHandler);

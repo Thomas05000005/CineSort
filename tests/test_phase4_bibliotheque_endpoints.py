@@ -375,7 +375,8 @@ class MarkForDeletionBulkTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             api = _make_mock_api_with_rows(Path(tmp))
-            res = library_actions_support.mark_for_deletion(api, "f1", run_id="r1")
+            # Fix audit 2026-05-24 : mark_for_deletion renomme en mark_single_for_deletion
+            res = library_actions_support.mark_single_for_deletion(api, "f1", run_id="r1")
             self.assertTrue(res["ok"])
             self.assertEqual(res["row_id"], "f1")
 
@@ -384,7 +385,8 @@ class MarkForDeletionBulkTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             api = _make_mock_api_with_rows(Path(tmp))
-            res = library_actions_support.mark_for_deletion(api, "", run_id="r1")
+            # Fix audit 2026-05-24 : mark_for_deletion renomme en mark_single_for_deletion
+            res = library_actions_support.mark_single_for_deletion(api, "", run_id="r1")
             self.assertFalse(res["ok"])
 
 

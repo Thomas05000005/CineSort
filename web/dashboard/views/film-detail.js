@@ -471,7 +471,9 @@ function _bindEvents(root) {
       try {
         const runId = _state.data.run_id;
         const rowId = _state.data.row_id || _state.rowId;
-        await apiPost("analyze_perceptual_single", { run_id: runId, row_id: rowId });
+        // Fix audit 2026-05-24 : analyze_perceptual_single n'existe pas backend.
+        // Utiliser quality/analyze_perceptual_batch avec row_ids: [rowId].
+        await apiPost("quality/analyze_perceptual_batch", { run_id: runId, row_ids: [rowId] });
         await _loadAndRender(_state.rowId);
       } catch (e) {
         console.error("[film-detail] rescan:", e);

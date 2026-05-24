@@ -738,7 +738,11 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     ("perceptual_audio_mel_enabled", True),
     ("perceptual_lpips_enabled", True),
     # --- Apparence ---
-    ("theme", "studio"),
+    # Fix audit 2026-05-24 : default theme etait "studio" ici mais "luxe" dans
+    # _save_section_appearance (fallback _normalize_enum). Incoherence : un user
+    # qui clear le theme via API recevait "luxe", mais un nouveau settings.json
+    # avait "studio". Aligne sur "luxe" (default UI documente).
+    ("theme", "luxe"),
     ("animation_level", "moderate"),
     ("effect_speed", 50),
     ("glow_intensity", 30),
@@ -1341,6 +1345,97 @@ def _coerce_appearance_int(payload: Dict[str, Any], key: str, default: int) -> i
     return default
 
 
+def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fix audit 2026-05-24 : section Nommage manquait totalement du dispatcher.
+    6 champs (`naming_template`, `windows_safe`, `lowercase_extensions`, `separator`,
+    `naming_movie_template`, `naming_tv_template`) etaient silencieusement droppes
+    a chaque save. Meme pattern que bug OMDb.
+
+    Note : `_apply_naming_preset` (deja appele dans le dispatcher) gere uniquement
+    la mecanique du preset selecteur ; ce helper gere les champs templates + regles.
+    """
+    out: Dict[str, Any] = {}
+    if "naming_template" in payload:
+        out["naming_template"] = str(payload.get("naming_template") or "").strip()
+    if "naming_movie_template" in payload:
+        out["naming_movie_template"] = str(payload.get("naming_movie_template") or "").strip()
+    if "naming_tv_template" in payload:
+        out["naming_tv_template"] = str(payload.get("naming_tv_template") or "").strip()
+    if "windows_safe" in payload:
+        out["windows_safe"] = to_bool(payload.get("windows_safe"), True)
+    if "lowercase_extensions" in payload:
+        out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
+    if "separator" in payload:
+        sep = str(payload.get("separator") or ".")
+        out["separator"] = sep if sep in {".", " ", "_", "-"} else "."
+    return out
+
+
+def _save_section_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fix audit 2026-05-24 : exclusions et extensions personnalisees etaient
+    silencieusement droppees a chaque save.
+    """
+    out: Dict[str, Any] = {}
+    if "excluded_patterns" in payload:
+        raw = payload.get("excluded_patterns")
+        if isinstance(raw, list):
+            out["excluded_patterns"] = [str(p).strip() for p in raw if str(p).strip()]
+        elif isinstance(raw, str):
+            out["excluded_patterns"] = [p.strip() for p in raw.split(",") if p.strip()]
+    if "file_extensions" in payload:
+        raw = payload.get("file_extensions")
+        if isinstance(raw, list):
+            out["file_extensions"] = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]
+        elif isinstance(raw, str):
+            out["file_extensions"] = [e.strip().lower().lstrip(".") for e in raw.split(",") if e.strip()]
+    return out
+
+
+def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fix audit 2026-05-24 : retention, updater, parallelism advanced settings
+    etaient silencieusement droppees.
+    """
+    out: Dict[str, Any] = {}
+    if "history_retention_days" in payload:
+        out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
+    if "retention_days" in payload:
+        out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    if "auto_check_updates" in payload:
+        out["auto_check_updates"] = to_bool(payload.get("auto_check_updates"), True)
+    if "update_check_enabled" in payload:
+        out["update_check_enabled"] = to_bool(payload.get("update_check_enabled"), True)
+    if "update_github_repo" in payload:
+        repo = str(payload.get("update_github_repo") or "").strip()
+        # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
+        import re as _re
+
+        if not repo or _re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+            out["update_github_repo"] = repo
+    if "worker_count" in payload:
+        out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
+    if "perceptual_workers_count" in payload:
+        # Fix audit 2026-05-24 : mismatch nom UI (perceptual_workers_count) vs
+        # backend (perceptual_workers). On normalise vers le nom backend.
+        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers_count"), 4)))
+    if "perceptual_workers" in payload:
+        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers"), 4)))
+    if "desktop_notifications_enabled" in payload:
+        out["desktop_notifications_enabled"] = to_bool(payload.get("desktop_notifications_enabled"), False)
+    if "animations_enabled" in payload:
+        out["animations_enabled"] = to_bool(payload.get("animations_enabled"), True)
+    if "cleanup_orphans" in payload:
+        out["cleanup_orphans"] = to_bool(payload.get("cleanup_orphans"), False)
+    if "cleanup_empty_folders" in payload:
+        out["cleanup_empty_folders"] = to_bool(payload.get("cleanup_empty_folders"), False)
+    if "subtitle_lang_priority" in payload:
+        raw = payload.get("subtitle_lang_priority")
+        if isinstance(raw, list):
+            out["subtitle_lang_priority"] = [str(c).strip().lower()[:3] for c in raw if str(c).strip()]
+        elif isinstance(raw, str):
+            out["subtitle_lang_priority"] = [c.strip().lower()[:3] for c in raw.split(",") if c.strip()]
+    return out
+
+
 def _save_section_appearance(payload: Dict[str, Any], *, debug_enabled: bool) -> Dict[str, Any]:
     # V3-04 polish v7.7.0 : persiste log_level normalise (DEBUG/INFO/...).
     return {
@@ -1467,6 +1562,11 @@ def save_settings_payload(
     to_save.update(_save_section_plex(settings))
     to_save.update(_save_section_radarr(settings))
     to_save.update(_save_section_omdb(settings))
+    # Fix audit 2026-05-24 (v1.5.0) : 3 sections ajoutees pour persister 16 champs UI
+    # qui etaient silencieusement droppes (meme bug pattern que OMDb).
+    to_save.update(_save_section_naming(settings))
+    to_save.update(_save_section_sources(settings))
+    to_save.update(_save_section_advanced(settings))
     to_save.update(_save_section_notifications(settings))
     to_save.update(_save_section_rest_api(settings))
     to_save.update(_save_section_watch(settings))

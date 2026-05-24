@@ -25,7 +25,14 @@ def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
         if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
             return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
 
-    ctx = api._run_context_for_apply(run_id)
+    # Fix audit 2026-05-24 : _run_context_for_apply peut lever FileNotFoundError
+    # quand plan.jsonl est absent (run nettoye, FS desynchronise) -> 500 cote UI.
+    # On capture les exceptions classiques d'acces fichiers/state pour renvoyer
+    # un err_response propre (categorie state, niveau info).
+    try:
+        ctx = api._run_context_for_apply(run_id)
+    except (OSError, FileNotFoundError, KeyError, TypeError, ValueError):
+        return _err_response("Plan introuvable.", category="state", level="info", log_module=__name__)
     if not ctx:
         return _err_response("Plan indisponible.", category="state", level="info", log_module=__name__)
 

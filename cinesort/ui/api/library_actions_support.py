@@ -1,7 +1,7 @@
 """Phase 4 spec 07 + spec 06 — Actions Library (mark_for_deletion, rescan, export).
 
 Endpoints :
-    mark_for_deletion(run_id, row_id)           — single (spec 06 Modal Film)
+    mark_single_for_deletion(row_id, run_id)    — single (spec 06 Modal Film) [renomme audit 2026-05-24]
     mark_for_deletion_bulk(row_ids, run_id)     — bulk (spec 07 Bibliotheque)
     rescan_row(run_id, row_id)                  — single (spec 06)
     rescan_rows_bulk(row_ids, run_id)           — bulk (spec 07)
@@ -91,11 +91,14 @@ def _persist_marks(api: Any, run_id: str, new_row_ids: List[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Endpoint : mark_for_deletion (single + bulk)
+# Endpoint : mark_single_for_deletion (single) + mark_for_deletion_bulk (bulk)
 # ---------------------------------------------------------------------------
 
 
-def mark_for_deletion(
+# Fix audit 2026-05-24 : renomme `mark_for_deletion` -> `mark_single_for_deletion`
+# pour eviter l'ambiguite avec `library_support.mark_for_deletion(api, run_id, row_id)`
+# qui a une signature *inversee* (run_id, row_id) vs (row_id, run_id) ici.
+def mark_single_for_deletion(
     api: Any,
     row_id: str,
     run_id: Optional[str] = None,

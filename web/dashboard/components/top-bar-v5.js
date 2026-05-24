@@ -165,11 +165,31 @@ function _bindEvents(root, opts) {
         setMenuOpen(false);
       });
     });
-    document.addEventListener("click", () => {
-      if (themeMenu.classList.contains("is-open")) {
-        setMenuOpen(false);
-      }
-    });
+    // Fix audit 2026-05-24 : garde idempotente. Avant, un anonyme etait ajoute
+    // sur document a chaque appel de render() (locale change, re-render, etc).
+    // Apres N re-renders : N handlers click qui appellent setMenuOpen(false)
+    // sur des themeMenu DOM-detached -> exception silencieuse + cumul de
+    // listeners. On installe le handler une seule fois au scope module et on
+    // resolve themeMenu dynamiquement via querySelector pour pointer toujours
+    // sur le menu courant.
+    if (!_clickOutsideBound) {
+      _clickOutsideBound = true;
+      document.addEventListener("click", _closeThemeMenuOnClickOutside);
+    }
+  }
+}
+
+// Fix audit 2026-05-24 : flag + handler nommes au scope module pour la garde
+// idempotente du click-outside theme menu (cf _bindEvents).
+let _clickOutsideBound = false;
+function _closeThemeMenuOnClickOutside() {
+  const menu = document.querySelector("[data-v5-theme-menu]");
+  if (!menu) return;
+  if (menu.classList.contains("is-open")) {
+    menu.classList.remove("is-open");
+    menu.setAttribute("aria-hidden", "true");
+    const btn = document.querySelector("[data-v5-theme-trigger]");
+    if (btn) btn.setAttribute("aria-expanded", "false");
   }
 }
 
@@ -207,28 +227,12 @@ export function setTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   document.body.setAttribute("data-theme", theme);
   try { localStorage.setItem("cinesort.theme", theme); } catch (e) { /* noop */ }
-  // V7-debug : surveille pendant 2s qui ecrase data-theme apres notre set.
-  // Si quelqu'un revert vers cinema/studio juste apres le click sur luxe/neon,
-  // on aura le stack trace et la valeur reverted.
-  try {
-    const _watch = (target, label) => {
-      const obs = new MutationObserver((muts) => {
-        for (const m of muts) {
-          if (m.attributeName === "data-theme") {
-            const cur = target.getAttribute("data-theme");
-            if (cur !== theme) {
-              console.warn(`[v5-topbar][THEME-OVERRIDE] ${label} data-theme changed from "${theme}" to "${cur}" — caller stack:`);
-              console.trace();
-            }
-          }
-        }
-      });
-      obs.observe(target, { attributes: true, attributeFilter: ["data-theme"] });
-      setTimeout(() => obs.disconnect(), 2000);
-    };
-    _watch(document.documentElement, "<html>");
-    _watch(document.body, "<body>");
-  } catch (e) { /* noop */ }
+  // Fix audit 2026-05-24 : suppression des 2 MutationObserver "V7-debug" qui
+  // surveillaient data-theme et logaient un stack trace pendant 2s a chaque
+  // setTheme(). C'etait du code de debug temporaire (chasse au bug
+  // "Luxe/Neon ne s'applique pas") oublie en prod. Cout : 2 observers + 2
+  // setTimeout actifs sur 2s a chaque switch de theme, plus du spam console
+  // si un autre listener ecrit data-theme dans la fenetre (false positives).
   const root = document.querySelector("[data-v5-top-bar]");
   if (root) {
     root.querySelectorAll(".v5-top-bar-theme-item").forEach((it) => {
