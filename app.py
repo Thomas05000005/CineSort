@@ -770,15 +770,50 @@ def main() -> None:
                 # que le DOM soit parse avant d injecter (token + native flag).
                 # Retry x5 avec backoff ; main_window est initialisee mais le
                 # dashboard distant peut prendre 1-2s a finir de charger.
+                _inject_succeeded = False
                 if _pending_native_inject:
                     for _attempt in range(5):
                         _time.sleep(0.4)
                         try:
                             main_window.evaluate_js(_pending_native_inject)
                             _log.info("splash: token + native bootstrap injecte (attempt=%d)", _attempt + 1)
+                            _inject_succeeded = True
                             break
                         except Exception as _ie:
                             _log.warning("splash: inject attempt %d echouee — %s", _attempt + 1, _ie)
+
+                # FIX 2026-05-24 ecran noir post-v1.3.0 : si TOUS les attempts
+                # echouent (typiquement ~100s timeout), c'est que le cache
+                # WebView2 (%LOCALAPPDATA%/CineSort/webview/EBWebView) est
+                # corrompu/incompatible avec cette version d'EXE. On purge
+                # automatiquement le cache et on demande un redemarrage : sans
+                # ca l'utilisateur a un ecran noir indefini.
+                if _pending_native_inject and not _inject_succeeded:
+                    _log.error("splash: 5 attempts inject echouees -> auto-purge cache WebView2")
+                    try:
+                        import shutil as _shutil
+                        _eb_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview" / "EBWebView"
+                        if _eb_dir.exists():
+                            _shutil.rmtree(str(_eb_dir), ignore_errors=True)
+                            _log.info("splash: cache EBWebView purge (%s)", _eb_dir)
+                    except Exception as _purge_exc:
+                        _log.warning("splash: purge cache echouee — %s", _purge_exc)
+                    # On affiche un message dans le splash avant de quitter
+                    try:
+                        _update_splash(
+                            splash,
+                            7,
+                            "Cache WebView2 corrompu - relancez l'application",
+                            100,
+                        )
+                    except Exception:
+                        pass
+                    _time.sleep(3.0)
+                    with contextlib.suppress(Exception):
+                        splash.destroy()
+                    with contextlib.suppress(Exception):
+                        main_window.destroy()
+                    os._exit(1)
 
                 _log.info("splash: fenetre principale affichee, splash detruit")
                 with contextlib.suppress(Exception):
