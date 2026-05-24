@@ -42,7 +42,7 @@ class CompareFramesValidationTests(unittest.TestCase):
         _write_settings(self._tmp, perceptual_enabled=False)
         r = self.api.quality.get_perceptual_compare_frames("run1", "a", "b")
         self.assertFalse(r["ok"])
-        self.assertIn("desactivee", r["message"].lower())
+        self.assertIn("désactivée", r["message"].lower())
 
     def test_no_ffmpeg_returns_missing_tool(self) -> None:
         _write_settings(self._tmp, perceptual_enabled=True, ffprobe_path="")

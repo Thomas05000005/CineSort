@@ -104,7 +104,8 @@ class TestGetPlexLibraries(unittest.TestCase):
         mock_client_cls.return_value = client
         result = self.api.integrations.get_plex_libraries(url="http://x", token="t")
         self.assertFalse(result["ok"])
-        self.assertIn("server unreachable", result["message"])
+        # Sprint 2 audit P0 #4 : message generique cote client (pas de leak exc).
+        self.assertIn("logs serveur", result["message"])
 
     @patch.object(backend.CineSortApi, "_get_settings_impl")
     @patch("cinesort.infra.plex_client.PlexClient")
@@ -199,14 +200,14 @@ class TestGetPlexSyncReport(unittest.TestCase):
         # Crée une fausse runs_summary entry → on patch le store
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
-            store.run.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
+            store.run.get_runs_summary.return_value = [{"run_id": "run1", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
 
             # Crée un fichier plan.jsonl factice (vide → renverra "Aucun film")
-            (self.state_dir / "runs" / "r1").mkdir(parents=True)
-            (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
+            (self.state_dir / "runs" / "run1").mkdir(parents=True)
+            (self.state_dir / "runs" / "run1" / "plan.jsonl").write_text("", encoding="utf-8")
 
-            result = self.api.integrations.get_plex_sync_report(run_id="r1")
+            result = self.api.integrations.get_plex_sync_report(run_id="run1")
             self.assertFalse(result["ok"])
             self.assertIn("Aucun film", result["message"])
 

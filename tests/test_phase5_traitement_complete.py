@@ -292,7 +292,8 @@ class EndpointsConsumedTests(unittest.TestCase):
 
     def test_consumes_apply(self) -> None:
         # Le mot apply apparait beaucoup, on cible l'apiPost
-        self.assertRegex(self.js, r'apiPost\(\s*"apply"')
+        # PR #84 : apply migre vers la facade run (run/apply).
+        self.assertRegex(self.js, r'apiPost\(\s*"run/apply"')
 
 
 class LifecycleTests(unittest.TestCase):

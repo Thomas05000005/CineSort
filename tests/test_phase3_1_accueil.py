@@ -187,11 +187,13 @@ class AppJsWiringTests(unittest.TestCase):
     def test_route_accueil_uses_init_accueil(self) -> None:
         # La route /accueil doit cabler initAccueil (et pas l'ancienne initStatus).
         # On extrait la ligne de la registration de /accueil et on verifie le init.
+        # Accepte les 2 formes : `init: initAccueil` (direct) ou
+        # `init: (el, opts) => { initAccueil(el, opts); ... }` (wrapped pour unmount).
         line_start = self.js.find('registerRoute("/accueil"')
         self.assertNotEqual(line_start, -1, "route /accueil manquante")
         line_end = self.js.find("\n", line_start)
         snippet = self.js[line_start:line_end]
-        self.assertIn("init: initAccueil", snippet)
+        self.assertIn("initAccueil", snippet, "initAccueil doit etre cable dans la route /accueil")
 
 
 class CssTests(unittest.TestCase):

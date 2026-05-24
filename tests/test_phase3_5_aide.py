@@ -124,7 +124,8 @@ class ActionsTests(unittest.TestCase):
 
     def test_open_logs_action(self) -> None:
         self.assertIn('data-aide-action="open-logs"', self.js)
-        self.assertIn('"open_logs_folder"', self.js)
+        # Accepte `"open_logs_folder"` ou `"runtime/open_logs_folder"` (prefix REST).
+        self.assertIn("open_logs_folder", self.js)
 
     def test_github_issues_link(self) -> None:
         self.assertIn("https://github.com/Thomas05000005/CineSort/issues/new", self.js)
