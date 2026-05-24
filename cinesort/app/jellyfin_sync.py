@@ -156,14 +156,8 @@ def restore_watched(
     if not snapshot:
         return RestoreResult()
 
-    if (
-        not client
-        or not hasattr(client, "mark_played")
-        or not hasattr(client, "get_all_movies_from_all_libraries")
-    ):
-        _log.warning(
-            "jellyfin_sync.restore_watched: client invalide ou methodes manquantes, no-op"
-        )
+    if not client or not hasattr(client, "mark_played") or not hasattr(client, "get_all_movies_from_all_libraries"):
+        _log.warning("jellyfin_sync.restore_watched: client invalide ou methodes manquantes, no-op")
         return RestoreResult(skipped=len(snapshot))
 
     path_mapping = _build_path_mapping(operations)

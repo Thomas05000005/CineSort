@@ -89,9 +89,20 @@ class SidebarCountersApiTests(unittest.TestCase):
 
     def test_endpoint_exposed_on_api(self) -> None:
         from cinesort.ui.api.cinesort_api import CineSortApi
+        from cinesort.ui.api.facades.run_facade import RunFacade
 
-        self.assertTrue(hasattr(CineSortApi, "get_sidebar_counters"))
-        self.assertTrue(callable(getattr(CineSortApi, "get_sidebar_counters")))
+        # Issue #84 PR 9 : get_sidebar_counters a ete porte sur la facade run.
+        # Verifie soit l'expose direct (compat) soit la presence sur la facade.
+        direct_exposed = hasattr(CineSortApi, "get_sidebar_counters") and callable(
+            getattr(CineSortApi, "get_sidebar_counters", None)
+        )
+        facade_exposed = hasattr(RunFacade, "get_sidebar_counters") and callable(
+            getattr(RunFacade, "get_sidebar_counters", None)
+        )
+        self.assertTrue(
+            direct_exposed or facade_exposed,
+            "get_sidebar_counters doit etre expose sur CineSortApi ou sur RunFacade",
+        )
 
 
 class SidebarCountersFrontendTests(unittest.TestCase):

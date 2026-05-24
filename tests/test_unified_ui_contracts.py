@@ -50,9 +50,13 @@ class UnifiedUiContractTests(unittest.TestCase):
         self.assertIn("is-native", self.dash_app_js)
 
     def test_dashboard_bypasses_login_in_native(self):
-        # V5B-01 : redirection native vers #/home (au lieu de #/status).
-        self.assertIn("isNative && hasToken()", self.dash_app_js)
-        self.assertIn("#/home", self.dash_app_js)
+        # V5B-01 : en mode natif desktop, JAMAIS d'ecran login. Redirection vers
+        # #/accueil (refonte FR, ex-#/home). Le contrat est exprime via la
+        # branche `if (isNative)` qui set window.location.hash = "#/accueil",
+        # et `else if (!hasToken() && ...)` pour les autres cas.
+        self.assertIn("isNative", self.dash_app_js)
+        self.assertIn("hasToken()", self.dash_app_js)
+        self.assertIn("#/accueil", self.dash_app_js)
 
     # --- Composants portes ---
     def test_drop_js_exists_and_native_guard(self):
