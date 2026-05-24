@@ -55,6 +55,10 @@ _file_description = (
 )
 
 _vi_template = Path("version_info.txt").read_text(encoding="utf-8")
+# Fix audit 2026-05-24 : appliquer VS_FF_PRERELEASE (flags=0x2) sur builds
+# beta/rc/alpha/dev. Permet a Windows de signaler officiellement la build
+# comme non-release (eg. dans Get-FileMetadata, Process Explorer, etc.).
+_vi_flags = "0x2" if _is_prerelease else "0x0"
 _vi_content = (
     _vi_template
     .replace("{major}", str(_major))
@@ -62,10 +66,21 @@ _vi_content = (
     .replace("{patch}", str(_patch))
     .replace("{version_str}", _version_raw)
     .replace("{file_description}", _file_description)
+    .replace("flags=0x0", f"flags={_vi_flags}")
 )
 _vi_path = Path("build/_version_info_generated.txt")
 _vi_path.parent.mkdir(parents=True, exist_ok=True)
 _vi_path.write_text(_vi_content, encoding="utf-8")
+
+# Fix audit 2026-05-24 : templatise le manifest Windows pour synchroniser
+# assemblyIdentity@version avec VERSION (avant: hardcode 1.2.0.0 divergent).
+_manifest_template = Path("CineSort.exe.manifest").read_text(encoding="utf-8")
+# Le manifest accepte uniquement format MAJOR.MINOR.BUILD.REVISION (4 entiers).
+# Pour les beta/rc, on utilise major.minor.patch.0.
+_manifest_version = f"{_major}.{_minor}.{_patch}.0"
+_manifest_content = _manifest_template.replace("{manifest_version}", _manifest_version)
+_manifest_path = Path("build/_manifest_generated.xml")
+_manifest_path.write_text(_manifest_content, encoding="utf-8")
 
 # ---------------------------------------------------------------------------
 # Hidden imports for pywebview / pythonnet / cffi
@@ -230,8 +245,10 @@ excludes = [
     "xmlrpc", "ftplib", "imaplib", "poplib", "telnetlib", "nntplib",
     # Dev/build tools
     "lib2to3", "ensurepip", "pip", "setuptools",
-    # Pillow (build-time only, not runtime)
-    "PIL", "Pillow",
+    # NB Pillow (PIL) reste BUNDLED : utilise a runtime par
+    # cinesort/ui/api/perceptual_support.py:825 (`from PIL import Image`)
+    # pour encoder PNG des frames diff dans la modale comparateur perceptuelle.
+    # Exclure cause ImportError sur cette feature - cf audit 2026-05-24.
     # Other unused stdlib
     "curses", "turtledemo", "turtle", "idlelib",
 ]
@@ -251,7 +268,10 @@ a = Analysis(
     runtime_hooks=["runtime_hooks/splash_hook.py"],
     excludes=excludes,
     noarchive=False,
-    optimize=0,
+    # Fix audit 2026-05-24 : optimize=1 enleve les asserts + reduit taille bytecode.
+    # Pas de optimize=2 (qui retire les docstrings : certains modules en dependent
+    # pour leur autodoc REST / introspection).
+    optimize=1,
 )
 
 pyz = PYZ(a.pure)
@@ -280,7 +300,7 @@ qa_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    manifest="CineSort.exe.manifest",
+    manifest=str(_manifest_path),
 )
 
 coll = COLLECT(
@@ -318,5 +338,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    manifest="CineSort.exe.manifest",
+    manifest=str(_manifest_path),
 )

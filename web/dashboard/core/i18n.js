@@ -200,11 +200,21 @@ export async function initI18n() {
     // Toujours pre-charger FR (fallback). En meme temps, charger la locale stored.
     const tasks = [_fetchLocale(DEFAULT_LOCALE)];
     if (stored !== DEFAULT_LOCALE) tasks.push(_fetchLocale(stored));
-    const results = await Promise.all(tasks);
-    _state.messages[DEFAULT_LOCALE] = results[0];
-    if (stored !== DEFAULT_LOCALE) _state.messages[stored] = results[1];
-    _state.locale = stored;
-    return _state.locale;
+    try {
+      const results = await Promise.all(tasks);
+      _state.messages[DEFAULT_LOCALE] = results[0];
+      if (stored !== DEFAULT_LOCALE) _state.messages[stored] = results[1];
+      _state.locale = stored;
+      return _state.locale;
+    } catch (err) {
+      // Fix audit 2026-05-24 : si le fetch echoue (reseau lent, fichier absent,
+      // timeout 1500ms cote app.js), on reset bootPromise pour permettre un
+      // retry au prochain appel a initI18n. Sinon toutes les t() retournent
+      // les cles brutes ('sidebar.nav.home' au lieu de 'Accueil') jusqu'au
+      // refresh page.
+      _state.bootPromise = null;
+      throw err;
+    }
   })();
   return _state.bootPromise;
 }
