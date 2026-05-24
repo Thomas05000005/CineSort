@@ -79,8 +79,8 @@ class ClaudeMdMetricsConsistencyTests(unittest.TestCase):
 
     def test_audit_files_exist(self) -> None:
         """Les fichiers du plan de remediation doivent exister."""
-        plan = REPO_ROOT / "audit" / "REMEDIATION_PLAN_v7_8_0.md"
-        tracking = REPO_ROOT / "audit" / "TRACKING_v7_8_0.md"
+        plan = REPO_ROOT / "docs" / "internal" / "audit_v7_8_0" / "REMEDIATION_PLAN_v7_8_0.md"
+        tracking = REPO_ROOT / "docs" / "internal" / "audit_v7_8_0" / "TRACKING_v7_8_0.md"
         self.assertTrue(plan.exists(), f"Plan absent : {plan}")
         self.assertTrue(tracking.exists(), f"Tracking absent : {tracking}")
 

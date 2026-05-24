@@ -56,7 +56,9 @@ def _extract_t_keys(js_text: str) -> Set[str]:
 V6_02_FILES = [
     DASHBOARD_DIR / "components" / "sidebar-v5.js",
     DASHBOARD_DIR / "components" / "top-bar-v5.js",
-    DASHBOARD_DIR / "views" / "settings.js",
+    # settings.js renomme en parametres.js + i18n inline supprime au profit
+    # du schema declaratif PARAMETRES_GROUPS (Phase 5 spec 11). Plus d'import
+    # i18n a verifier ici. qij.js reste pertinent.
     DASHBOARD_DIR / "views" / "qij.js",
 ]
 

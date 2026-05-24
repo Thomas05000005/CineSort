@@ -1283,7 +1283,9 @@ class CineSortApi:
         if not purl or not ptok:
             return _err_response("URL et token Plex requis.", category="validation", level="info", log_module=__name__)
         try:
-            client = _plex_mod.PlexClient(purl, ptok, timeout_s=max(1, min(30, timeout_s)))
+            # Audit C7 P1 (suite) : symetrie avec _test_plex_connection_impl/_test_radarr_connection_impl
+            # qui utilisent clamp_timeout (range 1-60s + fallback robuste sur None/str/NaN).
+            client = _plex_mod.PlexClient(purl, ptok, timeout_s=clamp_timeout(timeout_s))
             libs = client.get_libraries("movie")
             return {"ok": True, "libraries": libs}
         except _plex_mod.PlexError as exc:

@@ -19,10 +19,14 @@ from pathlib import Path
 from unittest import mock
 
 from cinesort.app.email_report import (
-    _build_subject,
+    _DEFAULT_SMTP_TIMEOUT_S,
+    _MAX_SMTP_TIMEOUT_S,
+    _MIN_SMTP_TIMEOUT_S,
     _build_body,
-    send_email_report,
+    _build_subject,
+    _resolve_smtp_timeout,
     dispatch_email,
+    send_email_report,
 )
 
 # Migration B (PR #257) : legacy frontend supprime.
@@ -137,6 +141,48 @@ class SmtpSendTests(unittest.TestCase):
         ok = send_email_report(s, "post_scan", {"run_id": "r1", "ts": 1, "data": {}})
         self.assertTrue(ok)
         mock_ssl_cls.assert_called_once()
+
+    @mock.patch("cinesort.app.email_report.smtplib.SMTP")
+    def test_timeout_default_used_when_setting_absent(self, mock_smtp_cls) -> None:
+        """Sans setting email_smtp_timeout_s, le defaut _DEFAULT_SMTP_TIMEOUT_S est applique."""
+        mock_smtp = mock.MagicMock()
+        mock_smtp_cls.return_value = mock_smtp
+        send_email_report(self._base_settings(), "post_scan", {"run_id": "r", "ts": 0, "data": {}})
+        _args, kwargs = mock_smtp_cls.call_args
+        self.assertEqual(kwargs.get("timeout"), _DEFAULT_SMTP_TIMEOUT_S)
+
+    @mock.patch("cinesort.app.email_report.smtplib.SMTP")
+    def test_timeout_custom_value_used(self, mock_smtp_cls) -> None:
+        """Setting email_smtp_timeout_s valide -> propage a smtplib.SMTP(timeout=...)."""
+        mock_smtp = mock.MagicMock()
+        mock_smtp_cls.return_value = mock_smtp
+        s = self._base_settings()
+        s["email_smtp_timeout_s"] = 60
+        send_email_report(s, "post_scan", {"run_id": "r", "ts": 0, "data": {}})
+        _args, kwargs = mock_smtp_cls.call_args
+        self.assertEqual(kwargs.get("timeout"), 60)
+
+
+class SmtpTimeoutResolveTests(unittest.TestCase):
+    """Tests du resolver de timeout SMTP (clamp, defaut, invalide)."""
+
+    def test_default_when_absent(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({}), _DEFAULT_SMTP_TIMEOUT_S)
+
+    def test_default_when_none(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({"email_smtp_timeout_s": None}), _DEFAULT_SMTP_TIMEOUT_S)
+
+    def test_default_when_invalid_str(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({"email_smtp_timeout_s": "abc"}), _DEFAULT_SMTP_TIMEOUT_S)
+
+    def test_clamp_too_low(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({"email_smtp_timeout_s": 1}), _MIN_SMTP_TIMEOUT_S)
+
+    def test_clamp_too_high(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({"email_smtp_timeout_s": 9999}), _MAX_SMTP_TIMEOUT_S)
+
+    def test_valid_value_unchanged(self) -> None:
+        self.assertEqual(_resolve_smtp_timeout({"email_smtp_timeout_s": 45}), 45)
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ALERT_LABELS = _ROOT / "web" / "dashboard" / "core" / "alert-labels.js"
-_FILM_DETAIL = _ROOT / "web" / "views" / "film-detail.js"
+_FILM_DETAIL = _ROOT / "web" / "dashboard" / "views" / "film-detail.js"
 _COMPONENTS_CSS = _ROOT / "web" / "shared" / "components.css"
 
 

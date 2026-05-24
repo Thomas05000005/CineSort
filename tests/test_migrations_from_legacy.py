@@ -73,9 +73,7 @@ def _copy_migrations_up_to(target_version: int, dest: Path) -> None:
 def _list_tables(conn: sqlite3.Connection) -> set[str]:
     return {
         str(r[0])
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        )
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     }
 
 
@@ -180,9 +178,7 @@ class MigrationFromV1Tests(_LegacyMigrationBase):
             self.assertEqual(row[0], "LEGACY_V1_R1")
             self.assertEqual(row[1], "DONE")
             self.assertEqual(row[2], "/old/root")
-            err = conn.execute(
-                "SELECT code, message FROM errors WHERE run_id='LEGACY_V1_R1'"
-            ).fetchone()
+            err = conn.execute("SELECT code, message FROM errors WHERE run_id='LEGACY_V1_R1'").fetchone()
             self.assertIsNotNone(err, "error legacy v1 perdue apres migration")
             self.assertEqual(err[0], "OLD-E1")
             # Integrity OK
@@ -232,8 +228,7 @@ class MigrationFromV5Tests(_LegacyMigrationBase):
             )
             # quality_reports avec un tier 'Bon' legacy (sera renomme par mig 011)
             conn.execute(
-                "INSERT INTO quality_reports VALUES "
-                "('LEGACY_V5_R1', 'row_v5_a', 75, 'Bon', '[]', '{}', 'p1', 1, ?)",
+                "INSERT INTO quality_reports VALUES ('LEGACY_V5_R1', 'row_v5_a', 75, 'Bon', '[]', '{}', 'p1', 1, ?)",
                 (ts,),
             )
             # quality_reports avec tier 'Premium' legacy
@@ -249,8 +244,7 @@ class MigrationFromV5Tests(_LegacyMigrationBase):
             )
             # apply_batches existe en v5
             conn.execute(
-                "INSERT INTO apply_batches VALUES "
-                "('LEGACY_V5_B1', 'LEGACY_V5_R1', ?, NULL, 0, 0, 'DONE', '{}', '7.2')",
+                "INSERT INTO apply_batches VALUES ('LEGACY_V5_B1', 'LEGACY_V5_R1', ?, NULL, 0, 0, 'DONE', '{}', '7.2')",
                 (ts,),
             )
             # apply_operations v5 : pas de row_id (ajoute mig 007), pas de src_sha1 (mig 013)
@@ -271,28 +265,20 @@ class MigrationFromV5Tests(_LegacyMigrationBase):
 
         with closing(connect_sqlite(str(self.db_path))) as conn:
             # Donnees runs preservees
-            run = conn.execute(
-                "SELECT run_id, root FROM runs WHERE run_id='LEGACY_V5_R1'"
-            ).fetchone()
+            run = conn.execute("SELECT run_id, root FROM runs WHERE run_id='LEGACY_V5_R1'").fetchone()
             self.assertIsNotNone(run)
             self.assertEqual(run[1], "/v5/root")
 
             # quality_reports preserves
             qr_count = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM quality_reports WHERE run_id='LEGACY_V5_R1'"
-                ).fetchone()[0]
+                conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='LEGACY_V5_R1'").fetchone()[0]
             )
             self.assertEqual(qr_count, 2)
 
             # Renommage de tiers verifiable : 'Bon' -> 'Gold', 'Premium' -> 'Platinum'
-            tier_a = conn.execute(
-                "SELECT tier FROM quality_reports WHERE row_id='row_v5_a'"
-            ).fetchone()[0]
+            tier_a = conn.execute("SELECT tier FROM quality_reports WHERE row_id='row_v5_a'").fetchone()[0]
             self.assertEqual(tier_a, "Gold", "mig 011 n'a pas renomme 'Bon' -> 'Gold'")
-            tier_b = conn.execute(
-                "SELECT tier FROM quality_reports WHERE row_id='row_v5_b'"
-            ).fetchone()[0]
+            tier_b = conn.execute("SELECT tier FROM quality_reports WHERE row_id='row_v5_b'").fetchone()[0]
             self.assertEqual(tier_b, "Platinum", "mig 011 n'a pas renomme 'Premium' -> 'Platinum'")
 
             # apply_operations preservees, avec colonnes ajoutees a NULL
@@ -310,9 +296,7 @@ class MigrationFromV5Tests(_LegacyMigrationBase):
             self.assertIsNone(ops[0][5])
 
             # probe_cache preserve
-            probe = conn.execute(
-                "SELECT path FROM probe_cache WHERE path='/v5/film.mkv'"
-            ).fetchone()
+            probe = conn.execute("SELECT path FROM probe_cache WHERE path='/v5/film.mkv'").fetchone()
             self.assertIsNotNone(probe)
 
             # Integrity
@@ -330,9 +314,7 @@ class MigrationFromV5Tests(_LegacyMigrationBase):
             conn.execute("DELETE FROM runs WHERE run_id='LEGACY_V5_R1'")
             conn.commit()
             qr_after = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM quality_reports WHERE run_id='LEGACY_V5_R1'"
-                ).fetchone()[0]
+                conn.execute("SELECT COUNT(*) FROM quality_reports WHERE run_id='LEGACY_V5_R1'").fetchone()[0]
             )
             self.assertEqual(qr_after, 0, "FK CASCADE non operationnelle sur donnees legacy v5")
 
@@ -365,8 +347,7 @@ class MigrationFromV10Tests(_LegacyMigrationBase):
             ]
             for row_id, score, tier in tier_seeds:
                 conn.execute(
-                    "INSERT INTO quality_reports VALUES "
-                    "(?, ?, ?, ?, '[]', '{}', 'p1', 1, ?)",
+                    "INSERT INTO quality_reports VALUES (?, ?, ?, ?, '[]', '{}', 'p1', 1, ?)",
                     ("LEGACY_V10_R1", row_id, score, tier, ts),
                 )
             # anomaly avec code, pour valider l'index ajoute par mig 010
@@ -419,10 +400,7 @@ class MigrationFromV10Tests(_LegacyMigrationBase):
             self.assertIn("schema_migrations", tables)
             # Les migrations >= 12 (creation de schema_migrations) sont tracees
             tracked = [
-                int(r[0])
-                for r in conn.execute(
-                    "SELECT version FROM schema_migrations ORDER BY version ASC"
-                ).fetchall()
+                int(r[0]) for r in conn.execute("SELECT version FROM schema_migrations ORDER BY version ASC").fetchall()
             ]
             # Au moins 12, 13, 14, ... jusqu'a latest
             self.assertIn(12, tracked)
@@ -442,10 +420,7 @@ class MigrationFromV10Tests(_LegacyMigrationBase):
 
         with closing(connect_sqlite(str(self.db_path))) as conn:
             indexes = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='anomalies'"
-                )
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='anomalies'")
             }
             self.assertIn("idx_anomalies_code", indexes)
 
@@ -478,8 +453,7 @@ class MigrationFromV22Tests(_LegacyMigrationBase):
                 (ts,),
             )
             conn.execute(
-                "INSERT INTO quality_reports VALUES "
-                "('LEGACY_V22_R1', 'row_v22', 80, 'Gold', '[]', '{}', 'p1', 1, ?)",
+                "INSERT INTO quality_reports VALUES ('LEGACY_V22_R1', 'row_v22', 80, 'Gold', '[]', '{}', 'p1', 1, ?)",
                 (ts,),
             )
             conn.execute(
@@ -536,21 +510,15 @@ class MigrationFromV22Tests(_LegacyMigrationBase):
 
             # Verif critique : les enfants FK CASCADE ne doivent PAS avoir ete supprimes
             # par la recreation de runs (le marker @manager: disable_fk a fonctionne).
-            err = conn.execute(
-                "SELECT code FROM errors WHERE run_id='LEGACY_V22_R1'"
-            ).fetchone()
+            err = conn.execute("SELECT code FROM errors WHERE run_id='LEGACY_V22_R1'").fetchone()
             self.assertIsNotNone(err, "errors casacade-deleted pendant mig 023 — flag disable_fk casse !")
             self.assertEqual(err[0], "E_V22")
 
-            qr = conn.execute(
-                "SELECT score FROM quality_reports WHERE run_id='LEGACY_V22_R1'"
-            ).fetchone()
+            qr = conn.execute("SELECT score FROM quality_reports WHERE run_id='LEGACY_V22_R1'").fetchone()
             self.assertIsNotNone(qr, "quality_reports cascade-deleted pendant mig 023 !")
             self.assertEqual(qr[0], 80)
 
-            anom = conn.execute(
-                "SELECT code FROM anomalies WHERE run_id='LEGACY_V22_R1'"
-            ).fetchone()
+            anom = conn.execute("SELECT code FROM anomalies WHERE run_id='LEGACY_V22_R1'").fetchone()
             self.assertIsNotNone(anom, "anomalies cascade-deleted pendant mig 023 !")
             self.assertEqual(anom[0], "A_V22")
 
@@ -564,8 +532,9 @@ class MigrationFromV22Tests(_LegacyMigrationBase):
 
             # FK CASCADE toujours operationnelle apres recreation
             fks = list(conn.execute("PRAGMA foreign_key_list(errors)"))
-            self.assertTrue(any(str(fk[6]).upper() == "CASCADE" for fk in fks),
-                            "FK CASCADE perdue apres recreation runs")
+            self.assertTrue(
+                any(str(fk[6]).upper() == "CASCADE" for fk in fks), "FK CASCADE perdue apres recreation runs"
+            )
 
             # PRAGMA foreign_keys = ON apres migration (le manager doit l'avoir restaure)
             self.assertEqual(int(conn.execute("PRAGMA foreign_keys").fetchone()[0]), 1)
@@ -644,13 +613,9 @@ class MigrationFromVNMinus1Tests(_LegacyMigrationBase):
         self.assertEqual(final_version, latest)
 
         with closing(connect_sqlite(str(self.db_path))) as conn:
-            run = conn.execute(
-                "SELECT run_id FROM runs WHERE run_id='LEGACY_VN1_R1'"
-            ).fetchone()
+            run = conn.execute("SELECT run_id FROM runs WHERE run_id='LEGACY_VN1_R1'").fetchone()
             self.assertIsNotNone(run)
-            qr = conn.execute(
-                "SELECT score, tier FROM quality_reports WHERE row_id='row_vn1'"
-            ).fetchone()
+            qr = conn.execute("SELECT score, tier FROM quality_reports WHERE row_id='row_vn1'").fetchone()
             self.assertIsNotNone(qr)
             self.assertEqual(qr[0], 90)
             self.assertEqual(qr[1], "Platinum")
@@ -673,15 +638,15 @@ class LegacyVersionCoverageMetaTests(unittest.TestCase):
             ("v22", MigrationFromV22Tests.LEGACY_VERSION),
             # v(N-1) calcule a la volee
         ]
-        self.assertGreaterEqual(
-            len({v for _, v in legacy_classes}), 3, "moins de 3 versions de depart distinctes"
-        )
+        self.assertGreaterEqual(len({v for _, v in legacy_classes}), 3, "moins de 3 versions de depart distinctes")
 
     def test_v_n_minus_1_is_strictly_below_latest(self) -> None:
         latest = _latest_real_version()
-        n_minus_1 = MigrationFromVNMinus1Tests.LEGACY_VERSION if hasattr(
-            MigrationFromVNMinus1Tests, "LEGACY_VERSION"
-        ) else latest - 1
+        n_minus_1 = (
+            MigrationFromVNMinus1Tests.LEGACY_VERSION
+            if hasattr(MigrationFromVNMinus1Tests, "LEGACY_VERSION")
+            else latest - 1
+        )
         self.assertEqual(n_minus_1, latest - 1)
         self.assertGreaterEqual(latest, 25)  # On a au moins 25 migrations
 

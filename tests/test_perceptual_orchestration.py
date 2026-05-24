@@ -127,7 +127,7 @@ class GetPerceptualReportTests(unittest.TestCase):
         api = _mock_api(perceptual_enabled=False)
         result = get_perceptual_report(api, "run1", "r1")
         self.assertFalse(result["ok"])
-        self.assertIn("desactivee", result["message"])
+        self.assertIn("désactivée", result["message"])
 
     @mock.patch("cinesort.ui.api.perceptual_support.resolve_ffmpeg_path", return_value=None)
     def test_ffmpeg_not_found(self, _mock_resolve) -> None:

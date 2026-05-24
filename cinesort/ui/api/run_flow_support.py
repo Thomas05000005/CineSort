@@ -25,7 +25,7 @@ from cinesort.domain.run_models import RunStatus
 from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 
@@ -661,6 +661,10 @@ def _compute_speed_and_eta(
 
 @requires_valid_run_id
 def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
+    # Audit 2026-05-23 : last_log_index < 0 ferait rs.logs[-N:] = tail des N derniers
+    # logs (contournement de la pagination + valeur retournee dans next_log_index incoherente).
+    # clamp_non_negative_int gere aussi None / str non-numerique / NaN proprement.
+    last_log_index = clamp_non_negative_int(last_log_index)
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
