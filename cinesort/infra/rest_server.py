@@ -791,11 +791,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                         "message": "Use /api/<facade>/<method> instead",
                     },
                 )
-                logger.warning("REST POST legacy method 410 Gone: %s", method_name)
+                # CodeQL py/log-injection : method_name vient de l'URL HTTP.
+                # repr() escape automatiquement \n, \r et caracteres de controle
+                # qui pourraient forger de fausses entrees de log.
+                logger.warning("REST POST legacy method 410 Gone: %r", method_name)
                 return
             # M9 : ne pas refleter method_name dans la reponse
             self._respond_json(404, {"ok": False, "message": "Methode inconnue"})
-            logger.warning("REST POST method inconnue: %s", method_name)
+            logger.warning("REST POST method inconnue: %r", method_name)
             return
 
         # Parse body
