@@ -34,6 +34,17 @@ const MODULES = [
   "./views/traitement.js",
   "./views/bibliotheque.js",
   "./views/film-detail.js",
+  // Fix audit 2026-05-24 : ajout des modules omis (decouvertes audit Agent 3).
+  // Si un import casse dans ces fichiers, le bisect detecte maintenant.
+  "./views/qij.js",
+  "./views/about.js",
+  "./core/nav-abort.js",
+  "./core/cache.js",
+  "./core/format.js",
+  "./components/shortcut-tooltip.js",
+  "./components/confetti.js",
+  "./components/empty-state.js",
+  "./components/toast.js",
 ];
 
 window.__BISECT_STARTED = true;

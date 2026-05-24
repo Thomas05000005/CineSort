@@ -261,13 +261,17 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     from cinesort.infra.rest_server import RestApiServer
 
     s = settings or api.settings.get_settings()
-    token = str(s.get("rest_api_token") or "").strip()
-    # Auto-persistance : `apply_settings_defaults` genere un token aleatoire si
-    # absent du settings.json, mais ne le persiste pas (= NOUVEAU token a chaque
-    # appel get_settings, ce qui casse le bypass login pywebview car le serveur
-    # REST utilise un token, l'URL pywebview en utilise un autre). Pour eviter
-    # ce mismatch, on persiste immediatement le token courant si le settings.json
-    # le contient vide.
+    # Fix audit 2026-05-24 : token atomique.
+    # Avant : `s.get("rest_api_token")` pouvait differer entre 2 lectures
+    # consecutives (apply_settings_defaults regenere un nouveau token aleatoire
+    # a chaque appel s'il est vide dans settings.json sans le persister) ->
+    # le serveur REST utilisait un token, le main_url un autre, bypass login
+    # casse silencieusement.
+    #
+    # Maintenant : verifier le settings.json brut. Si le token y est vide,
+    # on persiste IMMEDIATEMENT le token de `s` (ainsi tout get_settings ulterieur
+    # renvoie la meme valeur). Si non vide, on reutilise celui du disque pour
+    # eviter toute divergence.
     try:
         import json as _json
         from pathlib import Path as _Path
@@ -275,10 +279,26 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
         settings_path = _Path(api._state_dir) / "settings.json" if hasattr(api, "_state_dir") else None
         if settings_path and settings_path.is_file():
             raw = _json.loads(settings_path.read_text(encoding="utf-8"))
-            if not str(raw.get("rest_api_token") or "").strip() and token:
-                api.settings.save_settings({**s, "rest_api_token": token})
+            persisted_token = str(raw.get("rest_api_token") or "").strip()
+            in_memory_token = str(s.get("rest_api_token") or "").strip()
+            if persisted_token:
+                # Source de verite = disque. Synchronise s en cas de drift.
+                token = persisted_token
+                if persisted_token != in_memory_token:
+                    s = {**s, "rest_api_token": persisted_token}
+            elif in_memory_token:
+                # Disque vide mais memoire a un token (auto-gen) : persister maintenant
+                # AVANT de demarrer le serveur, pour eviter qu'un autre get_settings
+                # ulterieur ne genere un autre token.
+                api.settings.save_settings({**s, "rest_api_token": in_memory_token})
+                token = in_memory_token
                 print("[REST] Token persiste dans settings.json (auto-gen).", file=sys.stderr)
+            else:
+                token = ""  # cas exotique : pas de token nulle part
+        else:
+            token = str(s.get("rest_api_token") or "").strip()
     except Exception as exc:
+        token = str(s.get("rest_api_token") or "").strip()
         print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
     port = int(s.get("rest_api_port") or 8642)
     is_public = bool(s.get("rest_api_enabled"))
@@ -662,7 +682,17 @@ def main() -> None:
         try:
             main_window.events.loaded += _on_main_loaded
         except Exception as _evt_exc:
-            _log.warning("main_window: impossible d'attacher events.loaded — %s", _evt_exc)
+            # Fix audit 2026-05-24 : si l'attachement events.loaded echoue
+            # (backend pywebview incompatible, etc.), le _loaded_event.wait()
+            # plus loin attendrait 20s inutilement puis declencherait l'auto-purge
+            # alors que l'app peut tres bien fonctionner via l'URL ntoken seule.
+            # On set immediatement l'event pour eviter ce faux positif :
+            # l'IIFE _detectNativeBoot du frontend fera tout le bootstrap natif.
+            _log.warning(
+                "main_window: impossible d'attacher events.loaded (%s) - fallback URL ntoken",
+                _evt_exc,
+            )
+            _loaded_event.set()
 
         # --- 3. Fonction de startup (tourne dans le thread webview) ---
         def _startup() -> None:
@@ -745,10 +775,14 @@ def main() -> None:
                 _log.info("splash: etape finale — Pret")
                 _update_splash(splash, 7, "Pret !", 100)
 
-                # Attendre que le dashboard ait fini de charger (soft 20s).
-                # Si timeout : cache WebView2 corrompu -> auto-purge + exit.
-                if not _loaded_event.wait(timeout=20):
-                    _log.error("main_window: events.loaded n'a pas firing dans 20s -> auto-purge cache WebView2")
+                # Attendre que le dashboard ait fini de charger (soft 60s).
+                # Si timeout : cache WebView2 corrompu -> auto-purge + exit propre.
+                # 60s est large : tests reels montrent qu'apres purge cache,
+                # WebView2 met 20-30s a reconstruire son profil (CSP, ServiceWorker,
+                # IndexedDB origins). Mesure : ~3s avec cache propre, ~21s apres
+                # purge, parfois 30-45s sur premieres ouvertures post-update.
+                if not _loaded_event.wait(timeout=60):
+                    _log.error("main_window: events.loaded n'a pas firing dans 60s -> auto-purge cache WebView2")
                     try:
                         import shutil as _shutil
 
@@ -768,11 +802,16 @@ def main() -> None:
                     except Exception:
                         pass
                     _time.sleep(3.0)
+                    # Fix audit 2026-05-24 : main_window.destroy() declenche la fin
+                    # de webview.start() qui retourne au main(), permettant au
+                    # finally L808-833 de liberer InstanceLock, fermer REST,
+                    # arreter notify, fermer stores. Le precedent os._exit(1)
+                    # bypass-ait tout ce cleanup -> lock orphelin au prochain run.
                     with contextlib.suppress(Exception):
                         splash.destroy()
                     with contextlib.suppress(Exception):
                         main_window.destroy()
-                    os._exit(1)
+                    return  # quitte _startup; webview event loop terminera proprement
 
                 _log.info("splash: fenetre principale chargee, splash detruit")
                 with contextlib.suppress(Exception):
