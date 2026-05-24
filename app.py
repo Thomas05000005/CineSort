@@ -773,7 +773,14 @@ def main() -> None:
                 # depuis l'URL. Plus aucun evaluate_js ici - on attend
                 # juste events.loaded comme signal de chargement reussi.
                 _log.info("splash: etape finale — Pret")
-                _update_splash(splash, 7, "Pret !", 100)
+                # Fix audit 2026-05-24 (v1.5.1) : message honnete - le splash
+                # restait visible avec "Pret !" pendant 5-30s d'attente
+                # events.loaded (cache WebView2 a chauffer apres update EXE),
+                # main_window noire pendant ce temps -> user voit "2 fenetres
+                # et la grande reste noire" avec un message qui ment.
+                # Si events.loaded firing rapidement (cache chaud), aucun delai
+                # visible. Si lent, le user comprend que ca charge encore.
+                _update_splash(splash, 7, "Chargement du dashboard...", 100)
 
                 # Attendre que le dashboard ait fini de charger (soft 60s).
                 # Si timeout : cache WebView2 corrompu -> auto-purge + exit propre.
