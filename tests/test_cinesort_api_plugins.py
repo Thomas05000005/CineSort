@@ -143,10 +143,10 @@ class TestImportWatchlist(unittest.TestCase):
             patch.object(self.api, "_get_or_create_infra") as mock_infra,
         ):
             store = MagicMock()
-            store.run.get_runs_summary.return_value = [{"run_id": "r1", "status": "DONE"}]
+            store.run.get_runs_summary.return_value = [{"run_id": "run0001", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
-            (self.state_dir / "runs" / "r1").mkdir(parents=True)
-            (self.state_dir / "runs" / "r1" / "plan.jsonl").write_text("", encoding="utf-8")
+            (self.state_dir / "runs" / "run0001").mkdir(parents=True)
+            (self.state_dir / "runs" / "run0001" / "plan.jsonl").write_text("", encoding="utf-8")
 
             result = self.api._import_watchlist_impl(csv_content="x", source="letterboxd")
             self.assertTrue(result["ok"])

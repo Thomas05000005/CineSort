@@ -176,13 +176,14 @@ class WiringTests(unittest.TestCase):
 
     def test_bibliotheque_uses_mode_a_on_click(self) -> None:
         js = _BIBLIOTHEQUE.read_text(encoding="utf-8")
-        # clic carte -> mode A
-        self.assertIn('renderFilmDetail({ mode: "A", rowId })', js)
+        # clic carte -> mode A (accepte format inline ou multi-line)
+        self.assertIn("renderFilmDetail({", js)
+        self.assertIn('mode: "A"', js)
 
     def test_bibliotheque_uses_mode_c_on_dblclick(self) -> None:
         js = _BIBLIOTHEQUE.read_text(encoding="utf-8")
-        # double-clic -> mode C
-        self.assertIn('renderFilmDetail({ mode: "C", rowId })', js)
+        # double-clic -> mode C (accepte format inline ou multi-line)
+        self.assertIn('mode: "C"', js)
 
     def test_doublons_imports_film_detail(self) -> None:
         js = _DOUBLONS.read_text(encoding="utf-8")

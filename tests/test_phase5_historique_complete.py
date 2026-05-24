@@ -123,7 +123,8 @@ class UndoApplyWiredTests(unittest.TestCase):
         cls.js = _HISTORIQUE_JS.read_text(encoding="utf-8")
 
     def test_undo_calls_backend(self) -> None:
-        self.assertIn('apiPost("undo_last_apply"', self.js)
+        # PR #84 : undo_last_apply migre vers la facade run (run/undo_last_apply).
+        self.assertIn('apiPost("run/undo_last_apply"', self.js)
 
     def test_undo_uses_danger_modal(self) -> None:
         # Verifie que undo-apply est dans un onConfirm callback de dangerConfirmModal.

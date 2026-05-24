@@ -69,7 +69,11 @@ class StatusDerivationTests(unittest.TestCase):
     def test_derives_status_from_errors_and_applied(self) -> None:
         # runs_history[] n'expose pas un champ "status". On le derive :
         # ERROR si errors_count > 0, PARTIAL si applied < total, DONE sinon.
-        self.assertIn("derivedStatus", self.js)
+        # Accepte la fonction `_deriveRunStatus` (nouveau nom) ou `derivedStatus` (ancien).
+        self.assertTrue(
+            "_deriveRunStatus" in self.js or "derivedStatus" in self.js,
+            "Le code doit avoir une fonction de derivation du status",
+        )
         self.assertIn("errors_count", self.js)
         self.assertIn("applied_rows", self.js)
 
