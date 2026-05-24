@@ -641,6 +641,29 @@ def main() -> None:
             min_size=(1000, 700),
         )
 
+        # Fix 2026-05-24 ecran noir post-v1.3.0 :
+        # On utilise main_window.events.loaded comme signal de synchronisation
+        # propre, au lieu d'un retry aveugle sleep(0.4)+evaluate_js. L'event est
+        # firing par pywebview/WebView2 quand le dashboard a fini de charger,
+        # garantissant que le bus JS-Python est pret avant toute manipulation.
+        #
+        # NB : l'inject_js precedent etait REDONDANT avec l'IIFE _detectNativeBoot
+        # (web/dashboard/app.js:75-112) qui lit deja `?ntoken=...&native=1` depuis
+        # l'URL et fait tout le bootstrap (setToken, localStorage native, force
+        # hash #/accueil, etc.). On le supprime completement.
+        import threading as _threading_evt
+
+        _loaded_event = _threading_evt.Event()
+
+        def _on_main_loaded() -> None:
+            _loaded_event.set()
+            _log.info("main_window: dashboard charge (events.loaded firing)")
+
+        try:
+            main_window.events.loaded += _on_main_loaded
+        except Exception as _evt_exc:
+            _log.warning("main_window: impossible d'attacher events.loaded — %s", _evt_exc)
+
         # --- 3. Fonction de startup (tourne dans le thread webview) ---
         def _startup() -> None:
             try:
@@ -713,92 +736,28 @@ def main() -> None:
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
                     _log.warning("spec 09: retention cron init echouee — %s", _ret_exc)
 
-                # Injecter le token dans le sessionStorage du dashboard avant l'affichage
-                # pour bypass automatique de la page login (mode desktop natif).
-                # Cle 'cinesort.dashboard.token' lue par web/dashboard/core/state.js
-                # (priorite sessionStorage > localStorage).
-                if _desktop_dashboard_token:
-                    try:
-                        # Cf issue #64 : json.dumps echappe correctement le token
-                        # (peut contenir des chars exotiques selon settings user).
-                        # L'escape manuel precedent ratait \\n, </script>, U+2028/2029.
-                        # Cf issue #65 : mode desktop natif → sessionStorage only
-                        # (token regenere/relu cote serveur a chaque demarrage,
-                        # pas besoin de persister entre sessions). Reduit la
-                        # surface d'exfiltration en cas de XSS futur — un token
-                        # en localStorage survit a la fermeture du browser,
-                        # sessionStorage non.
-                        import json as _json
-
-                        tk_js = _json.dumps(_desktop_dashboard_token)
-                        # Bypass complet du login en mode pywebview desktop.
-                        # Cf 2026-05-20 fix : ce evaluate_js doit s executer APRES
-                        # main_window.show() ; sinon la window etant hidden + le bus
-                        # JS-Python pas pret, evaluate_js leve "Main window failed to
-                        # start" et toute l injection est perdue silencieusement
-                        # (token, native flag, hash, body class) -> ecran noir total.
-                        inject_js = (
-                            "try {"
-                            f"  sessionStorage.setItem('cinesort.dashboard.token', {tk_js});"
-                            f"  localStorage.setItem('cinesort.dashboard.token', {tk_js});"
-                            "  localStorage.setItem('cinesort.dashboard.persist', '1');"
-                            "  localStorage.setItem('cinesort.native', '1');"
-                            "  window.__CINESORT_NATIVE__ = true;"
-                            "  if (document.body) document.body.classList.add('is-native');"
-                            "  var h = window.location.hash;"
-                            "  if (!h || h === '#' || h.indexOf('/login') !== -1) {"
-                            "    window.location.hash = '#/accueil';"
-                            "  }"
-                            "  var appShell = document.getElementById('app-shell');"
-                            "  if (appShell) appShell.classList.remove('hidden');"
-                            "  var loginView = document.getElementById('view-login');"
-                            "  if (loginView) loginView.classList.add('hidden');"
-                            "} catch (e) { console.warn('native bootstrap inject fail', e); }"
-                        )
-                        # Le inject_js sera execute APRES show() ci-dessous.
-                        _pending_native_inject = inject_js
-                    except Exception as exc:
-                        _log.warning("splash: preparation inject token echouee — %s", exc)
-                        _pending_native_inject = None
-                else:
-                    _pending_native_inject = None
-
+                # Fix 2026-05-24 ecran noir post-v1.3.0 :
+                # Le bootstrap natif (token, mode native, force #/accueil) est
+                # entierement gere par l'IIFE _detectNativeBoot dans
+                # web/dashboard/app.js:75-112 qui lit `?ntoken=XXX&native=1`
+                # depuis l'URL. Plus aucun evaluate_js ici - on attend
+                # juste events.loaded comme signal de chargement reussi.
                 _log.info("splash: etape finale — Pret")
                 _update_splash(splash, 7, "Pret !", 100)
 
-                # main_window est deja visible (plus de hidden=True). Attendre
-                # que le DOM soit parse avant d injecter (token + native flag).
-                # Retry x5 avec backoff ; main_window est initialisee mais le
-                # dashboard distant peut prendre 1-2s a finir de charger.
-                _inject_succeeded = False
-                if _pending_native_inject:
-                    for _attempt in range(5):
-                        _time.sleep(0.4)
-                        try:
-                            main_window.evaluate_js(_pending_native_inject)
-                            _log.info("splash: token + native bootstrap injecte (attempt=%d)", _attempt + 1)
-                            _inject_succeeded = True
-                            break
-                        except Exception as _ie:
-                            _log.warning("splash: inject attempt %d echouee — %s", _attempt + 1, _ie)
-
-                # FIX 2026-05-24 ecran noir post-v1.3.0 : si TOUS les attempts
-                # echouent (typiquement ~100s timeout), c'est que le cache
-                # WebView2 (%LOCALAPPDATA%/CineSort/webview/EBWebView) est
-                # corrompu/incompatible avec cette version d'EXE. On purge
-                # automatiquement le cache et on demande un redemarrage : sans
-                # ca l'utilisateur a un ecran noir indefini.
-                if _pending_native_inject and not _inject_succeeded:
-                    _log.error("splash: 5 attempts inject echouees -> auto-purge cache WebView2")
+                # Attendre que le dashboard ait fini de charger (soft 20s).
+                # Si timeout : cache WebView2 corrompu -> auto-purge + exit.
+                if not _loaded_event.wait(timeout=20):
+                    _log.error("main_window: events.loaded n'a pas firing dans 20s -> auto-purge cache WebView2")
                     try:
                         import shutil as _shutil
+
                         _eb_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview" / "EBWebView"
                         if _eb_dir.exists():
                             _shutil.rmtree(str(_eb_dir), ignore_errors=True)
-                            _log.info("splash: cache EBWebView purge (%s)", _eb_dir)
+                            _log.info("main_window: cache EBWebView purge (%s)", _eb_dir)
                     except Exception as _purge_exc:
-                        _log.warning("splash: purge cache echouee — %s", _purge_exc)
-                    # On affiche un message dans le splash avant de quitter
+                        _log.warning("main_window: purge cache echouee — %s", _purge_exc)
                     try:
                         _update_splash(
                             splash,
@@ -815,7 +774,7 @@ def main() -> None:
                         main_window.destroy()
                     os._exit(1)
 
-                _log.info("splash: fenetre principale affichee, splash detruit")
+                _log.info("splash: fenetre principale chargee, splash detruit")
                 with contextlib.suppress(Exception):
                     splash.destroy()
 
