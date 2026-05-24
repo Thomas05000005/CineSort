@@ -23,7 +23,7 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
+            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
         rows = rs.rows
         if not rows:
             try:
@@ -38,7 +38,7 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
     row, _store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__)
+        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir), run_id, ensure_exists=False
     )

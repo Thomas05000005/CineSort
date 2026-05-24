@@ -692,7 +692,7 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
     if ctx is None:
         run_state = api._get_run(run_id)
         if run_state and not run_state.done:
-            return _err_response("Plan pas pret.", category="state", level="info", log_module=__name__), None
+            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__), None
         return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__), None
     store, run_paths, rows, run_state, cfg_root, run_row = ctx
 

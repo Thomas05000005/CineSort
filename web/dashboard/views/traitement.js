@@ -110,7 +110,11 @@ async function _loadRunInfo() {
   try {
     // Phase 5 : si fragment #run-XXX présent, charge ce run précis.
     const targetId = _targetRunId;
-    const params = targetId ? { run_id: targetId } : { run_id_or: "latest" };
+    // Fix audit 2026-05-24 : avant `run_id_or` (n'existe pas dans la facade)
+    // -> get_dashboard renvoyait 400 -> _runInfo restait null -> polling
+    // get_status jamais armé -> barre de progress + logs scan invisibles
+    // dans l'UI alors que le scan tourne en backend.
+    const params = targetId ? { run_id: targetId } : { run_id: "latest" };
     const res = await apiPost("run/get_dashboard", params);
     if (!res || res.data?.ok === false) {
       _runInfo = null;

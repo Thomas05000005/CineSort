@@ -2522,6 +2522,45 @@ class CineSortApi:
                 str(exc), category="runtime", level="error", log_module=__name__, key="error", log_dir=log_dir
             )
 
+    def _open_external_url_impl(self, url: str = "") -> Dict[str, Any]:
+        """Fix audit 2026-05-24 : ouvre une URL externe dans le navigateur par defaut OS.
+
+        WebView2 sans handler `on_new_window_request` bloque silencieusement
+        `target="_blank"` et `window.open()` -> les boutons GitHub / TMDb /
+        documentation dans aide.js / about.js / qualite.js ne faisaient rien.
+        Ce endpoint permet au frontend de demander explicitement une ouverture
+        externe via webbrowser.open() Python.
+
+        Securite : autorise uniquement les schemes http(s) + bloque request
+        REST distant pour eviter DoS UX (spam d'ouvertures sur le PC server).
+        """
+        if is_remote_request():
+            return _err_response(
+                "Operation locale uniquement.",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
+        u = str(url or "").strip()
+        if not u:
+            return _err_response("URL vide.", category="validation", level="info", log_module=__name__)
+        # Whitelist scheme http(s) uniquement (evite file://, javascript:, data:, etc.)
+        u_lower = u.lower()
+        if not (u_lower.startswith("https://") or u_lower.startswith("http://")):
+            return _err_response(
+                "Schemes autorises : http, https.",
+                category="validation",
+                level="info",
+                log_module=__name__,
+            )
+        try:
+            import webbrowser as _webbrowser
+
+            _webbrowser.open(u)
+            return {"ok": True, "opened": u}
+        except (OSError, RuntimeError) as exc:
+            return _err_response(str(exc), category="runtime", level="warning", log_module=__name__)
+
     # ---------- Spec 12-aide.md (Phase 4 — ecran Aide) ----------
     # 4 endpoints exposes via la facade api.runtime.X(). Les methodes _impl
     # delegent au module runtime_support pour garder cinesort_api.py mince.

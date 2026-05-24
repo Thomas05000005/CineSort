@@ -148,9 +148,11 @@ def get_or_create_infra(
     with api._runs_lock:
         existing = api._infra_by_state_dir.get(key)
         if existing:
-            store_existing, _runner_existing = existing
-            version = store_existing.initialize()
-            _sqlite_debug(f"SQLite initialized at {store_existing.db_path}, schema version={version}")
+            # Fix audit 2026-05-24 : avant on rappelait .initialize() a chaque
+            # endpoint, ce qui retriggerait _backup_before_migrations() ->
+            # spam de backups (9 backups DB en 13s observe en prod).
+            # initialize() est idempotent et a deja ete appele au premier
+            # create. On retourne directement le cache.
             return existing
 
     store = SQLiteStore(

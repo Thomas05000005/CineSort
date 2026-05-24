@@ -599,6 +599,22 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
                 run_id_hint=run_id,
                 debug_log=(lambda message: dlog(f"jobrunner: {message}")) if debug_enabled else None,
             )
+        except RuntimeError as exc:
+            # Fix audit 2026-05-24 : job_runner.start_job() leve RuntimeError
+            # "Un run est deja en cours" en cas de double-click utilisateur ou
+            # de race frontend. Avant : exception non catchee -> REST 500 +
+            # traceback. Maintenant : 409 Conflict avec message clair, plus
+            # robuste cote UX (le frontend peut afficher un toast info).
+            with api._runs_lock:
+                api._runs.pop(run_id, None)
+            dlog(f"start_plan rejete : {exc}")
+            return _err_response(
+                str(exc),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
         except (OSError, KeyError, TypeError, ValueError) as exc:
             with api._runs_lock:
                 api._runs.pop(run_id, None)
