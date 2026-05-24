@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List
 
 TEMPLATE_TRASH: List[Dict[str, Any]] = [
@@ -173,8 +174,6 @@ def get_template(name: str) -> Dict[str, Any]:
     if not tpl:
         return {}
     # Copie defensive
-    import copy
-
     return {
         "id": name,
         "name": tpl["name"],
@@ -185,8 +184,6 @@ def get_template(name: str) -> Dict[str, Any]:
 
 def list_templates() -> list:
     """Retourne les 3 templates pour l'endpoint API."""
-    import copy
-
     return [
         {
             "id": tid,

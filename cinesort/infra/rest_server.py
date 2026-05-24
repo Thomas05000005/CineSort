@@ -8,6 +8,7 @@ Static files: GET /dashboard/* (web dashboard distant).
 
 from __future__ import annotations
 
+import hmac
 import inspect
 import json
 import logging
@@ -431,8 +432,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return False
-        import hmac
-
         return hmac.compare_digest(auth[7:].strip().encode(), self.auth_token.encode())
 
     def _client_ip(self) -> str:

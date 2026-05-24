@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import threading
@@ -82,8 +83,6 @@ def atomic_write_json(p: Path, obj) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp_name = f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.{uuid.uuid4().hex[:8]}"
     tmp = p.with_name(tmp_name)
-    import json
-
     try:
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, p)
