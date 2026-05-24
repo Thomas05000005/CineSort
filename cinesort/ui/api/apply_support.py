@@ -265,10 +265,26 @@ def build_undo_preview_payload(
         except ValueError:
             pass
 
+    # Spec 08 §3.5 : echantillon d'operations (max 20) pour la modale preview
+    # de l'annulation post-apply cote UI Traitement. On retourne avant/apres
+    # pour chaque op (dst_path = etat actuel sur disque, src_path = cible undo).
+    samples: List[Dict[str, Any]] = []
+    for op in reversible_ops[:20]:
+        samples.append(
+            {
+                "op_type": str(op.get("op_type") or ""),
+                "current_path": str(op.get("dst_path") or ""),
+                "restore_path": str(op.get("src_path") or ""),
+            }
+        )
+
+    apply_ts = float(batch.get("started_ts") or 0.0) if batch else 0.0
+
     payload = {
         "ok": True,
         "run_id": run_id,
         "batch_id": batch_id,
+        "apply_ts": apply_ts,
         "can_undo": bool(reversible_ops),
         "counts": {
             "total": int(len(ops)),
@@ -284,6 +300,7 @@ def build_undo_preview_payload(
             "empty_folder_bucket": str(empty_bucket),
             "cleanup_residual_bucket": str(residual_bucket),
         },
+        "samples": samples,
         "message": t("errors.preview_undo_ready") if reversible_ops else t("errors.no_reversible_op_available"),
     }
     return payload, store, run_paths, batch, reversible_ops

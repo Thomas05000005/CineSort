@@ -25,7 +25,7 @@
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
-import { dangerConfirmModal } from "../components/modal.js";
+import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
 import { formatRelative, formatDuration } from "../core/format.js";
 import { initDoublons, unmountDoublons } from "./doublons.js";
@@ -52,6 +52,7 @@ const STATUS_COLORS = {
 
 const POLL_INTERVAL_RUNNING = 5000; // 5s pendant RUNNING (header)
 const POLL_INTERVAL_ANALYSE = 2000; // 2s pendant scan en cours (etape 1)
+const UNDO_COUNTDOWN_INTERVAL_MS = 60_000; // Spec 08 §3.5 : refresh carte undo / 60s
 
 let _currentStep = "analyse";
 let _runInfo = null;
@@ -59,6 +60,7 @@ let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
 let _loading = false;
 let _targetRunId = null; // Phase 5 spec §2 : fragment #run-XXX = run cible à afficher.
 let _pollTimer = null;
+let _undoCountdownTimer = null; // Spec 08 §3.5 : refresh carte annulation post-apply.
 let _logsState = { items: [], nextIndex: 0 };
 let _scanOptions = {
   perceptual: true,
@@ -118,6 +120,7 @@ async function _loadRunInfo() {
     const k = data.kpis || {};
     const history = Array.isArray(data.runs_history) ? data.runs_history : [];
     const current = history.find((r) => r.run_id === data.run_id) || history[0] || {};
+    const pendingUndoRaw = data.pending_undo && typeof data.pending_undo === "object" ? data.pending_undo : null;
     _runInfo = {
       runId: data.run_id,
       total: Number(k.total_movies || k.total_rows || 0),
@@ -132,6 +135,16 @@ async function _loadRunInfo() {
       endedTs: Number(current.ended_ts || 0),
       duration: Number(current.duration_s || 0),
       errorsCount: Number(current.errors_count || 0),
+      // Spec 08 §3.5 : carte annulation post-apply (24h).
+      pendingUndo: pendingUndoRaw
+        ? {
+            batchId: String(pendingUndoRaw.batch_id || ""),
+            applyTs: Number(pendingUndoRaw.apply_ts || 0),
+            deadlineTs: Number(pendingUndoRaw.deadline_ts || 0),
+            reversibleCount: Number(pendingUndoRaw.reversible_count || 0),
+            expired: Boolean(pendingUndoRaw.expired),
+          }
+        : null,
     };
   } catch (_err) {
     _runInfo = null;
@@ -585,6 +598,206 @@ function _renderDoublonsStep() {
   `;
 }
 
+/* --- Spec 08 §3.5 : Carte "Annulation possible" post-apply --- */
+
+function _formatUndoRemaining(remainingSeconds) {
+  // Forme courte FR : "23h 12min", "45min", "30s". Pas de zero-pad pour rester court.
+  const r = Math.max(0, Math.floor(Number(remainingSeconds) || 0));
+  if (r <= 0) return "0s";
+  const h = Math.floor(r / 3600);
+  const m = Math.floor((r % 3600) / 60);
+  const s = r % 60;
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}min`;
+  if (m > 0) return `${m}min ${s.toString().padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+function _renderUndoCard() {
+  const undo = _runInfo?.pendingUndo;
+  if (!undo || !undo.applyTs) return "";
+
+  const now = Date.now() / 1000;
+  const remaining = Math.max(0, Math.floor(undo.deadlineTs - now));
+  const expired = undo.expired || remaining <= 0;
+  const appliedAt = undo.applyTs > 0
+    ? `Apply réalisé ${formatRelative(undo.applyTs)}`
+    : "Apply récent";
+
+  if (expired) {
+    return `
+      <aside class="traitement-undo-card traitement-undo-card--expired" data-traitement-undo-card>
+        <header class="traitement-undo-card-head">
+          <strong>Annulation post-apply</strong>
+          <span class="traitement-undo-card-badge traitement-undo-card-badge--expired">Délai dépassé</span>
+        </header>
+        <p class="traitement-undo-card-body">
+          Délai d'annulation dépassé (24h). ${escapeHtml(appliedAt)}.
+        </p>
+        <div class="traitement-undo-card-actions">
+          <button type="button" class="v5-btn v5-btn--ghost" disabled title="Délai 24h dépassé">
+            Prévisualiser annulation
+          </button>
+        </div>
+      </aside>
+    `;
+  }
+
+  return `
+    <aside class="traitement-undo-card" data-traitement-undo-card>
+      <header class="traitement-undo-card-head">
+        <strong>Annulation possible</strong>
+        <span class="traitement-undo-card-badge">
+          ${escapeHtml(_formatUndoRemaining(remaining))} restant
+        </span>
+      </header>
+      <p class="traitement-undo-card-body">
+        ${escapeHtml(String(undo.reversibleCount))} opération${undo.reversibleCount > 1 ? "s" : ""} réversible${undo.reversibleCount > 1 ? "s" : ""}.
+        ${escapeHtml(appliedAt)}. Tu peux encore restaurer l'état d'avant l'apply.
+      </p>
+      <div class="traitement-undo-card-actions">
+        <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="undo-preview">
+          Prévisualiser annulation
+        </button>
+      </div>
+    </aside>
+  `;
+}
+
+function _updateUndoCountdownLabels() {
+  if (!_activeContainer) return;
+  const undo = _runInfo?.pendingUndo;
+  if (!undo || !undo.applyTs) return;
+  const card = _activeContainer.querySelector("[data-traitement-undo-card]");
+  if (!card) return;
+  const now = Date.now() / 1000;
+  const remaining = Math.max(0, Math.floor(undo.deadlineTs - now));
+  if (remaining <= 0 && !card.classList.contains("traitement-undo-card--expired")) {
+    // Bascule passive sur "Délai dépassé" : on re-rend tout l'étape Apply.
+    _renderInPlace();
+    return;
+  }
+  const badge = card.querySelector(".traitement-undo-card-badge");
+  if (badge && !badge.classList.contains("traitement-undo-card-badge--expired")) {
+    badge.textContent = `${_formatUndoRemaining(remaining)} restant`;
+  }
+}
+
+function _startUndoCountdown() {
+  _stopUndoCountdown();
+  _undoCountdownTimer = setInterval(_updateUndoCountdownLabels, UNDO_COUNTDOWN_INTERVAL_MS);
+}
+
+function _stopUndoCountdown() {
+  if (_undoCountdownTimer) {
+    clearInterval(_undoCountdownTimer);
+    _undoCountdownTimer = null;
+  }
+}
+
+function _renderUndoPreviewModalBody(preview) {
+  const counts = preview?.counts || {};
+  const reversible = Number(counts.reversible || 0);
+  const irreversible = Number(counts.irreversible || 0);
+  const conflicts = Number(counts.conflicts_predicted || 0);
+  const samples = Array.isArray(preview?.samples) ? preview.samples : [];
+
+  const summary = `
+    <div class="traitement-undo-modal-summary">
+      <ul>
+        <li><strong>${escapeHtml(String(reversible))}</strong> opération${reversible > 1 ? "s" : ""} réversible${reversible > 1 ? "s" : ""}</li>
+        <li><strong>${escapeHtml(String(irreversible))}</strong> non réversible${irreversible > 1 ? "s" : ""}</li>
+        <li><strong>${escapeHtml(String(conflicts))}</strong> conflit${conflicts > 1 ? "s" : ""} prévu${conflicts > 1 ? "s" : ""}</li>
+      </ul>
+    </div>
+  `;
+
+  if (!samples.length) {
+    return `${summary}<p class="traitement-undo-modal-empty">Aucun fichier réversible à afficher.</p>`;
+  }
+
+  const rows = samples.map((s) => `
+    <li class="traitement-undo-modal-row">
+      <code class="traitement-undo-modal-before">${escapeHtml(String(s.current_path || ""))}</code>
+      <span class="traitement-undo-modal-arrow">↩</span>
+      <code class="traitement-undo-modal-after">${escapeHtml(String(s.restore_path || ""))}</code>
+    </li>
+  `).join("");
+
+  return `
+    ${summary}
+    <p class="traitement-undo-modal-note">Aperçu (${samples.length} première${samples.length > 1 ? "s" : ""} opération${samples.length > 1 ? "s" : ""}) :</p>
+    <ul class="traitement-undo-modal-list">${rows}</ul>
+  `;
+}
+
+async function _onUndoPreview() {
+  if (!_runInfo?.runId) return;
+  if (!_runInfo?.pendingUndo) return;
+  try {
+    const res = await apiPost("run/undo_last_apply_preview", { run_id: _runInfo.runId });
+    const data = res?.data || res;
+    if (!data || data.ok === false) {
+      showToast({ type: "error", text: "Impossible de préparer l'annulation." });
+      return;
+    }
+    if (!data.can_undo) {
+      showToast({ type: "info", text: data.message || "Aucune opération réversible." });
+      return;
+    }
+    showModal({
+      title: "Prévisualisation de l'annulation",
+      body: _renderUndoPreviewModalBody(data),
+      actions: [
+        { label: "Fermer", cls: "v5-btn v5-btn--ghost", onClick: () => {} },
+        {
+          label: "Exécuter annulation",
+          cls: "v5-btn v5-btn--danger",
+          onClick: () => _onUndoExecute(),
+        },
+      ],
+    });
+  } catch {
+    showToast({ type: "error", text: "Erreur lors de la prévisualisation." });
+  }
+}
+
+function _onUndoExecute() {
+  if (!_runInfo?.runId) return;
+  const undo = _runInfo?.pendingUndo;
+  if (!undo) return;
+
+  // Spec 08 §3.5 : confirmation supplementaire + countdown 3s (memo
+  // utilisateur "actions dangereuses CineSort").
+  closeModal();
+  dangerConfirmModal({
+    title: "Confirmer l'annulation du dernier apply ?",
+    items: [
+      `${undo.reversibleCount} opération${undo.reversibleCount > 1 ? "s" : ""} sera${undo.reversibleCount > 1 ? "ont" : ""} annulée${undo.reversibleCount > 1 ? "s" : ""}`,
+      `Batch ID : ${undo.batchId || "—"}`,
+    ],
+    consequence:
+      "Les fichiers seront restaurés à leur emplacement et nom d'origine. Cette opération elle-même n'est PAS réversible automatiquement.",
+    confirmLabel: "↩ Exécuter l'annulation",
+    cancelLabel: "Annuler",
+    countdownSeconds: 3,
+    onConfirm: async () => {
+      try {
+        const res = await apiPost("run/undo_last_apply", { run_id: _runInfo.runId, dry_run: false });
+        const data = res?.data || res;
+        if (!data || data.ok === false) {
+          showToast({ type: "error", text: data?.error || "Échec de l'annulation." });
+          return;
+        }
+        showToast({ type: "success", text: "Annulation appliquée. Restauration effectuée.", duration: 6000 });
+        await _loadRunInfo();
+        _renderInPlace();
+      } catch {
+        showToast({ type: "error", text: "Erreur lors de l'annulation." });
+      }
+    },
+  });
+}
+
 /* --- Etape 5 : Apply (spec §3.5) --- */
 
 function _renderApplyStep() {
@@ -648,6 +861,8 @@ function _renderApplyStep() {
           ${_applyOptions.dry_run ? "▶ Lancer le dry-run" : "✅ Appliquer maintenant"}
         </button>
       </div>
+
+      ${_renderUndoCard()}
     </section>
   `;
 }
@@ -1009,6 +1224,8 @@ function _bindEvents(container) {
         showToast({ type: "info", text: "Rejet tier Reject - non disponible (preset)." });
       } else if (action === "apply-now") {
         _handleApplyNow();
+      } else if (action === "undo-preview") {
+        _onUndoPreview();
       }
     });
   });
@@ -1111,11 +1328,13 @@ export async function initTraitement(container) {
   // Demarre le polling si on a un run actif
   if (_runInfo?.runId) {
     _startPolling();
+    _startUndoCountdown();
   }
 }
 
 export function unmountTraitement() {
   _stopPolling();
+  _stopUndoCountdown();
   if (_doublonsMounted) {
     unmountDoublons();
     _doublonsMounted = false;
