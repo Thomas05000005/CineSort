@@ -16,6 +16,30 @@ from typing import Any, Dict
 
 logger = logging.getLogger("cinesort.email")
 
+# Timeout TCP de la session SMTP (connect + chaque commande). 30 s couvre les
+# serveurs lents (NAS, instances cloud overcommitted) tout en restant en-deca
+# du delai standard d'un thread daemon de notification (l'utilisateur ne doit
+# pas voir l'app figee). Override possible via la settings "email_smtp_timeout_s".
+_DEFAULT_SMTP_TIMEOUT_S = 30
+_MIN_SMTP_TIMEOUT_S = 5
+_MAX_SMTP_TIMEOUT_S = 120
+
+
+def _resolve_smtp_timeout(settings: Dict[str, Any]) -> int:
+    """Clamp la valeur settings dans [_MIN, _MAX]. Defaut si absent/invalide."""
+    raw = settings.get("email_smtp_timeout_s")
+    if raw is None:
+        return _DEFAULT_SMTP_TIMEOUT_S
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_SMTP_TIMEOUT_S
+    if value < _MIN_SMTP_TIMEOUT_S:
+        return _MIN_SMTP_TIMEOUT_S
+    if value > _MAX_SMTP_TIMEOUT_S:
+        return _MAX_SMTP_TIMEOUT_S
+    return value
+
 
 def _build_subject(event: str, data: Dict[str, Any]) -> str:
     """Construit le sujet de l'email selon l'evenement."""
@@ -83,15 +107,16 @@ def send_email_report(
     msg["From"] = from_addr
     msg["To"] = to_addr
 
+    timeout_s = _resolve_smtp_timeout(settings)
     try:
         # Cf issue #66 : SSL context strict avec verification hostname + chaine
         # certificats. Sans cela, smtplib accepte les certs auto-signes/invalides
         # et MITM LAN pourrait intercepter le password SMTP.
         ssl_ctx = ssl.create_default_context()
         if port == 465:
-            smtp = smtplib.SMTP_SSL(host, port, timeout=15, context=ssl_ctx)
+            smtp = smtplib.SMTP_SSL(host, port, timeout=timeout_s, context=ssl_ctx)
         else:
-            smtp = smtplib.SMTP(host, port, timeout=15)
+            smtp = smtplib.SMTP(host, port, timeout=timeout_s)
         try:
             if port != 465 and use_tls:
                 smtp.starttls(context=ssl_ctx)
