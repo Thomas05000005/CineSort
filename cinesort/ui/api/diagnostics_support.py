@@ -119,8 +119,6 @@ def unique_path(base: Path) -> Path:
         if not candidate.exists():
             return candidate
     # Fallback ultime : timestamp ns pour casser toute collision adversariale.
-    import time
-
     fallback = base.with_name(f"{stem}_{time.time_ns()}{suffix}")
     return fallback
 

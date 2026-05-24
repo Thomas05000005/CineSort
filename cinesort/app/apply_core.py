@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
 
@@ -92,8 +93,6 @@ def record_apply_op(
     le move pour permettre a l'undo de verifier que le fichier n'a pas ete
     remplace manuellement entre temps.
     """
-    import time
-
     if record_op is None:
         return True
     try:
@@ -242,8 +241,6 @@ def unique_path(base: Path) -> Path:
         if not candidate.exists():
             return candidate
     # Fallback ultime : timestamp ns pour casser toute collision adversariale.
-    import time
-
     return base.with_name(f"{stem}_{time.time_ns()}{suffix}")
 
 
@@ -258,8 +255,6 @@ def unique_path_dup(base: Path) -> Path:
         if not candidate.exists():
             return candidate
     # Fallback ultime : timestamp ns.
-    import time
-
     return base.with_name(f"{stem}__DUP{time.time_ns()}{suffix}")
 
 

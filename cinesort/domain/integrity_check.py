@@ -7,6 +7,7 @@ d'apres l'extension. Detecte les fichiers tronques, corrompus ou renommes.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -159,8 +160,6 @@ def check_tail(path: Path) -> Tuple[bool, str]:
     - MKV : verifie que le fichier ne se termine pas par des octets nuls
     - Autres formats : skip (retourne True)
     """
-    import os
-
     ext = path.suffix.lower()
     fmt = _EXT_TO_FORMAT.get(ext)
     if fmt not in ("mp4", "mkv"):

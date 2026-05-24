@@ -418,8 +418,6 @@ def _migrate_root_to_roots(data: Dict[str, Any]) -> None:
 
 def validate_roots(roots: list) -> Dict[str, Any]:
     """Valide une liste de roots. Retourne {roots, warnings, errors}."""
-    import os
-
     clean: list = []
     seen: set = set()
     warnings: list = []
