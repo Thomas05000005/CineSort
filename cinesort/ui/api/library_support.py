@@ -157,6 +157,38 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         return []
     plan_rows = plan_result.get("rows") or []
 
+    # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
+    # batch via integrations.get_tmdb_posters(). Avant : `r.get("poster_url")`
+    # retournait toujours None car PlanRow n'a PAS de champ poster_url plat (le
+    # poster vit sur les Candidate enfants, pas sur le row) -> les 853 cartes
+    # affichaient toutes le placeholder clapper. Maintenant : on collecte tous
+    # les tmdb_id non nuls, on appelle 1 fois get_tmdb_posters([...], "w342")
+    # et on mappe poster par tmdb_id. Cache TMDb local evite la re-frappe HTTP
+    # entre 2 appels. Films non identifies (tmdb_id=None) gardent leur
+    # placeholder coté UI avec lien "Identifier manuellement".
+    tmdb_ids: List[int] = []
+    for r in plan_rows:
+        tid_raw = r.get("tmdb_id")
+        if tid_raw is None or tid_raw == "":
+            continue
+        try:
+            tid = int(tid_raw)
+        except (TypeError, ValueError):
+            continue
+        if tid > 0 and tid not in tmdb_ids:
+            tmdb_ids.append(tid)
+    posters_by_tmdb: Dict[str, str] = {}
+    if tmdb_ids:
+        try:
+            poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
+            if poster_res and poster_res.get("ok"):
+                raw_map = poster_res.get("posters") or {}
+                # Normaliser cles en str (l'API retourne str(int) deja, mais on
+                # protege contre les eventuels int).
+                posters_by_tmdb = {str(k): v for k, v in raw_map.items() if v}
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("library_support poster batch fetch error: %s", exc)
+
     out: List[Dict[str, Any]] = []
     for r in plan_rows:
         row_id = str(r.get("row_id") or "")
@@ -184,10 +216,59 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
                     if lang and lang not in audio_langs:
                         audio_langs.append(lang)
 
-        subtitle_languages = [str(s).lower() for s in (r.get("subtitle_languages") or [])]
-        subtitle_missing_langs = [str(s).lower() for s in (r.get("subtitle_missing_langs") or [])]
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 2 — la PlanRow ne capture pas
+        # les pistes subtitle EMBARQUEES (scan sans probe). On enrichit ici depuis
+        # `quality_reports.metrics.subtitles_embedded` (persiste par _probe_and_score
+        # apres get_quality_report), pour aligner le compte "sans subs FR" entre la
+        # vue Bibliotheque et le rapport Qualite. Si pas de quality_report disponible,
+        # fallback transparent sur les langues externes detectees au scan.
+        scan_subtitle_languages = [str(s).lower() for s in (r.get("subtitle_languages") or [])]
+        embedded_subs_raw = metrics.get("subtitles_embedded") if isinstance(metrics, dict) else None
+        embedded_langs: List[str] = []
+        if isinstance(embedded_subs_raw, list):
+            try:
+                from cinesort.domain.subtitle_helpers import _normalize_iso639
+
+                for track in embedded_subs_raw:
+                    if not isinstance(track, dict):
+                        continue
+                    raw_lang = (track.get("language") or "").strip().lower()
+                    if not raw_lang:
+                        continue
+                    normalized = _normalize_iso639(raw_lang)
+                    if normalized and normalized not in embedded_langs:
+                        embedded_langs.append(normalized)
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError):
+                embedded_langs = []
+        # Union langues externes (PlanRow) + langues embarquees (quality_report metrics)
+        merged_langs = list(scan_subtitle_languages)
+        for lang in embedded_langs:
+            if lang not in merged_langs:
+                merged_langs.append(lang)
+        subtitle_languages = merged_langs
+        # Recalcul missing_langs en filtrant les langues finalement presentes
+        scan_missing = [str(s).lower() for s in (r.get("subtitle_missing_langs") or [])]
+        subtitle_missing_langs = [lang for lang in scan_missing if lang not in subtitle_languages]
         proposed_source = str(r.get("proposed_source") or "").strip().lower()
         confidence = int(r.get("confidence") or 0)
+
+        # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : resolve poster_url via
+        # le batch posters_by_tmdb pre-calcule en haut de fonction. Fallback sur
+        # le 1er candidat TMDb avec poster_url si tmdb_id direct absent (cas des
+        # rows non encore identifies mais avec candidats suggeres).
+        poster_url: Optional[str] = None
+        tid_for_poster = r.get("tmdb_id")
+        if tid_for_poster:
+            try:
+                poster_url = posters_by_tmdb.get(str(int(tid_for_poster)))
+            except (TypeError, ValueError):
+                poster_url = None
+        if not poster_url:
+            for cand in (r.get("candidates") or []):
+                cand_poster = cand.get("poster_url") if isinstance(cand, dict) else None
+                if cand_poster:
+                    poster_url = cand_poster
+                    break
 
         row = {
             "row_id": row_id,
@@ -203,14 +284,25 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "width": width,
             "height": height,
             "hdr": _classify_hdr(probe_video),
-            "tier_v2": str((perc or {}).get("global_tier_v2") or "unknown").lower(),
-            "score_v2": (perc or {}).get("global_score_v2"),
+            # Fix audit 2026-05-25 (v1.5.4) Vague I : fallback tier V1 si perceptual V2
+            # pas calcule (V2 coute ~1h pour 853 films en ffmpeg, lance manuellement).
+            # quality_reports.tier (V1, peu couteux) est calcule en post-scan auto et donne
+            # deja Platinum/Gold/Silver/Bronze/Reject base sur les metrics du probe.
+            # Sans ce fallback, l'utilisateur voit 853 "Non identifie" jusqu'a ce qu'il
+            # lance manuellement l'analyse perceptuelle. Avec fallback : tier visible
+            # immediatement apres scan, V2 viendra raffiner si lance plus tard.
+            "tier_v2": str(
+                (perc or {}).get("global_tier_v2")
+                or (qual or {}).get("tier")
+                or "unknown"
+            ).lower(),
+            "score_v2": (perc or {}).get("global_score_v2") or (qual or {}).get("score"),
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
             "added_ts": float(r.get("mtime") or 0),
             "path": r.get("source_path") or "",
-            "poster_url": r.get("poster_url"),
+            "poster_url": poster_url,
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),
             "edition": r.get("edition"),

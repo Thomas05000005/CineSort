@@ -136,6 +136,56 @@ def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
     return rows
 
 
+# Fix audit 2026-05-25 (v1.5.4) Vague I : source unique de verite pour le
+# compteur "nombre de films d'un run". Le bug 853 vs 855 venait du fait que
+# - dashboard / library / apply : utilisaient stats.planned_rows (snapshot DB
+#   fige au scan, potentiellement obsolete si plan.jsonl reecrit)
+# - validation / doublons : utilisaient len(rows) charge live depuis plan.jsonl
+# On aligne tout le monde sur count_plan_rows() = nombre de PlanRow non-null
+# valides dans plan.jsonl, source faisant autorite. Si plan.jsonl est
+# inaccessible, fallback sur stats.planned_rows pour ne pas casser l'UI.
+def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
+    """Retourne le nombre de PlanRow valides dans plan.jsonl.
+
+    Source unique de verite pour tous les compteurs de films de l'UI.
+
+    Args:
+        run_paths: RunPaths avec .plan_jsonl.
+        fallback: valeur si plan.jsonl absent ou illisible (defaut 0).
+
+    Returns:
+        Nombre de lignes JSONL non-vides qui contiennent un dict (1 PlanRow).
+    """
+    try:
+        plan_path = run_paths.plan_jsonl
+    except AttributeError:
+        return int(fallback or 0)
+    try:
+        if not plan_path.exists():
+            return int(fallback or 0)
+    except (OSError, AttributeError):
+        return int(fallback or 0)
+    count = 0
+    try:
+        with plan_path.open("r", encoding="utf-8") as file_obj:
+            for line in file_obj:
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                try:
+                    data = json.loads(line_s)
+                except (ValueError, json.JSONDecodeError):
+                    # Ligne malformee : ignoree (cohere avec
+                    # load_rows_from_plan_jsonl qui leve, mais ici on veut
+                    # robustesse pour le compteur).
+                    continue
+                if isinstance(data, dict) and data.get("row_id"):
+                    count += 1
+    except (OSError, PermissionError):
+        return int(fallback or 0)
+    return count
+
+
 def load_decisions_from_validation(api: Any, run_paths: Any, *, env_truthy_fn: Any) -> Dict[str, Dict[str, Any]]:
     validation_path = run_paths.validation_json
     if not validation_path.exists():

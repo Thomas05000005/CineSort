@@ -10,7 +10,6 @@ Ce test echoue si :
 - Une cle existe en EN mais pas en FR (l'utilisateur FR verra la cle brute)
 - Une cle existe en FR mais pas en EN (l'utilisateur EN verra la cle brute)
 """
-
 from __future__ import annotations
 
 import json
@@ -49,17 +48,24 @@ def fr_keys() -> set[str]:
 def test_en_keys_present_in_fr(en_keys: set[str], fr_keys: set[str]) -> None:
     """Toute cle EN doit avoir un equivalent FR."""
     missing = sorted(en_keys - fr_keys)
-    assert not missing, f"{len(missing)} cles EN sans equivalent FR (fallback FR echoue) : {missing[:10]}..."
+    assert not missing, (
+        f"{len(missing)} cles EN sans equivalent FR (fallback FR echoue) : "
+        f"{missing[:10]}..."
+    )
 
 
 def test_fr_keys_present_in_en(en_keys: set[str], fr_keys: set[str]) -> None:
     """Toute cle FR doit avoir un equivalent EN."""
     missing = sorted(fr_keys - en_keys)
-    assert not missing, f"{len(missing)} cles FR sans equivalent EN (fallback EN echoue) : {missing[:10]}..."
+    assert not missing, (
+        f"{len(missing)} cles FR sans equivalent EN (fallback EN echoue) : "
+        f"{missing[:10]}..."
+    )
 
 
 def test_parity_count(en_keys: set[str], fr_keys: set[str]) -> None:
     """Symetrie complete : meme nombre de cles dans les deux langues."""
     assert len(en_keys) == len(fr_keys), (
-        f"FR={len(fr_keys)} vs EN={len(en_keys)} : ecart de {abs(len(en_keys) - len(fr_keys))} cles."
+        f"FR={len(fr_keys)} vs EN={len(en_keys)} : ecart de "
+        f"{abs(len(en_keys) - len(fr_keys))} cles."
     )

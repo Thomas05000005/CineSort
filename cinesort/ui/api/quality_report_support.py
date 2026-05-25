@@ -116,13 +116,20 @@ def _probe_and_score(
         release_name=str(row.video or ""),
         tmdb_genres=tmdb_genres or None,
     )
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : persister les pistes subtitle EMBARQUEES
+    # dans metrics pour que `_build_library_rows` puisse aligner le compte "sans subs FR"
+    # entre la page Bibliotheque et le rapport Qualite (BUG 2 : 853 films flagges a tort).
+    metrics_out = dict(report.get("metrics") or {})
+    embedded_subs_raw = normalized.get("subtitles") if isinstance(normalized, dict) else None
+    if isinstance(embedded_subs_raw, list):
+        metrics_out["subtitles_embedded"] = list(embedded_subs_raw)
     store.quality.upsert_quality_report(
         run_id=run_id,
         row_id=row_id,
         score=int(report.get("score") or 0),
         tier=str(report.get("tier") or "Reject"),
         reasons=list(report.get("reasons") or []),
-        metrics=dict(report.get("metrics") or {}),
+        metrics=metrics_out,
         profile_id=active_profile_id,
         profile_version=active_profile_version,
     )

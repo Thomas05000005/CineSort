@@ -491,6 +491,26 @@ def _build_plan_job_fn(
             api._dispatch_plugin_hook("post_scan", _hook_data)
             api._dispatch_email("post_scan", _hook_data)
 
+            # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 1 — apres scan, aucun
+            # quality_report n'existe en BDD donc la page Qualite affiche
+            # "0 films classes". On declenche en background le calcul des
+            # scores V1 (tier) pour tous les films, best-effort. L'utilisateur
+            # peut aussi cliquer "Re-calculer" manuellement. Controle par
+            # setting `auto_recompute_quality_on_scan` (default True).
+            try:
+                auto_recompute = to_bool(settings.get("auto_recompute_quality_on_scan"), True)
+                if auto_recompute and rows:
+                    from cinesort.ui.api import quality_audit_support
+
+                    dlog("job_fn launching auto quality recompute background job")
+                    result = quality_audit_support.recompute_all_scores(api)
+                    if isinstance(result, dict) and result.get("ok"):
+                        dlog(f"job_fn auto recompute started job_id={result.get('job_id')}")
+                    else:
+                        dlog(f"job_fn auto recompute skipped: {result}")
+            except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+                dlog(f"job_fn auto recompute warning: {exc}")
+
             _save_plan_artifacts(rs, rows, stats, root, state_dir, dlog)
 
             # Capturer le snapshot sante bibliotheque dans les stats

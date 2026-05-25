@@ -155,6 +155,9 @@ async function _hydrateGroupsWithPosters() {
   }
   if (tasks.length === 0) return;
   await Promise.allSettled(tasks);
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await pour
+  // eviter NPE dans _render() / _renderRightPanel() si la vue a ete demontee.
+  if (!_state) return;
   // Re-render pour afficher les posters
   _render();
   _renderRightPanel();
@@ -945,6 +948,12 @@ function _onKeydown(ev) {
 /* --- Data --- */
 
 async function _loadGroups() {
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garde contre _state null. Le module
+  // remet _state = null dans unmountDoublons(). Quand on navigue rapidement
+  // entre Apply (qui appelle initDoublons) et une autre vue, un _loadGroups()
+  // pending peut tenter d'ecrire _state.error apres demontage :
+  //   "Cannot set properties of null (setting 'error')" -> banniere rouge.
+  if (!_state) return;
   _state.loading = true;
   _state.error = null;
   _render();
@@ -955,11 +964,16 @@ async function _loadGroups() {
     try {
       // Fix audit 2026-05-24 : `run_id_or` n'existe pas dans la facade (cf traitement.js).
       const dash = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal: _signal() });
+      // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await.
+      if (!_state) return;
       const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;
     } catch (_e) { /* on continuera meme sans runId */ }
   }
+
+  // Re-garde apres bloc await ci-dessus (catch peut nous laisser passer).
+  if (!_state) return;
 
   if (!runId) {
     _state.error = "Aucun run actif. Lance un scan d'abord.";
@@ -971,6 +985,8 @@ async function _loadGroups() {
 
   try {
     const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} }, { signal: _signal() });
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : await termine -> revérifier _state.
+    if (!_state) return;
     const data = _payload(res);
     if (data.ok === false) {
       _state.error = data.message || data.error || "Erreur de chargement.";
@@ -1005,6 +1021,8 @@ async function _loadGroups() {
     // Hydrater posters en background
     void _hydrateGroupsWithPosters();
   } catch (err) {
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     _state.error = err && err.message ? err.message : String(err);
     _state.loading = false;
     _render();

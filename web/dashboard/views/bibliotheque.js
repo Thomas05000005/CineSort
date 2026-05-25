@@ -394,9 +394,26 @@ function _renderFilmCard(row) {
   const warningBadge = warningsCount > 0
     ? `<span class="bibliotheque-card-warn" title="${warningsCount} alerte(s)">⚠ ${warningsCount}</span>`
     : "";
-  const poster = row.poster_url
-    ? `<img class="bibliotheque-card-poster-img" src="${escapeHtml(row.poster_url)}" alt="${escapeHtml(title)}" loading="lazy">`
-    : `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true">🎬</div>`;
+  // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : placeholder enrichi pour
+  // les films sans poster TMDb. Si tmdb_id existe (poster pas encore charge ou
+  // 404 TMDb) -> placeholder simple. Si pas de tmdb_id (film non identifie) ->
+  // CTA "Identifier" pour rediriger l'utilisateur vers le modal candidats TMDb.
+  // Avant : tous les films sans poster_url affichaient le meme clapper muet,
+  // aucun feedback "non identifie" -> capture 5/6 du rapport audit montraient
+  // 853 cartes identiques sans differenciation.
+  let poster;
+  if (row.poster_url) {
+    poster = `<img class="bibliotheque-card-poster-img" src="${escapeHtml(row.poster_url)}" alt="${escapeHtml(title)}" loading="lazy">`;
+  } else if (row.tmdb_id) {
+    poster = `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true">🎬</div>`;
+  } else {
+    poster = `<div class="bibliotheque-card-poster-placeholder bibliotheque-card-poster-placeholder--unidentified"
+                   data-bibliotheque-unidentified="${escapeHtml(rowId)}"
+                   title="Film non identifié — clic pour identifier manuellement">
+                <span aria-hidden="true">🎬</span>
+                <span class="bibliotheque-card-unidentified-cta">Identifier</span>
+              </div>`;
+  }
   const selected = _state.selected.has(rowId);
   return `
     <article class="bibliotheque-card${selected ? " is-selected" : ""}"
@@ -657,6 +674,9 @@ async function _fetchCounters() {
   delete filters.chips;
   try {
     const res = await apiPost("library/get_library_counters_by_chip", { filters });
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
+    // (unmount entre temps -> NPE sur _state.counters).
+    if (!_state) return;
     // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
     const _payload = (res && res.data) || res || {};
     if (!res || _payload.ok === false) return;
@@ -668,6 +688,11 @@ async function _fetchCounters() {
 }
 
 async function _fetchLibrary({ append = false } = {}) {
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garde contre _state null. Le module
+  // remet _state = null au unmount(). Si _fetchLibrary() est rappele depuis un
+  // timer/promise residuel apres demontage de la vue, on aurait :
+  //   "Cannot set properties of null (setting 'error')" -> banniere rouge.
+  if (!_state) return;
   if (_abortController && !append) {
     _abortController.abort();
   }
@@ -712,6 +737,9 @@ async function _fetchLibrary({ append = false } = {}) {
       },
       { signal },
     );
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : la requete await a pu terminer
+    // APRES le unmount() de la vue (navigation rapide). _state est alors null.
+    if (!_state) return;
     // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
     const _payload = (res && res.data) || res || {};
     if (!res || _payload.ok === false) {
@@ -740,10 +768,12 @@ async function _fetchLibrary({ append = false } = {}) {
     _render();
 
     if (!append) {
-      void _fetchCounters().then(() => _render());
+      void _fetchCounters().then(() => { if (_state) _render(); });
     }
   } catch (err) {
     if (err && err.name === "AbortError") return;
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     _state.error = err ? String(err.message || err) : "Erreur réseau";
     _state.loading = false;
     _state.loadingMore = false;
@@ -1102,6 +1132,16 @@ function _bindEvents(container) {
       _handleBulkAction(action);
       return;
     }
+    // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : clic sur placeholder
+    // "Identifier" -> ouvre le mode C (modal Detail) qui permet de selectionner
+    // un candidat TMDb manuellement via run/refine_row.
+    const unidBtn = t.closest("[data-bibliotheque-unidentified]");
+    if (unidBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      renderFilmDetail({ mode: "C", rowId: unidBtn.dataset.bibliothequeUnidentified, runId: _runId || null });
+      return;
+    }
     // Carte film : focus inspecteur (Spec 06)
     const card = t.closest(".bibliotheque-card");
     if (card && card.dataset.rowId) {
@@ -1305,6 +1345,9 @@ async function _bulkRefreshPosters(rowIds) {
   }
   try {
     const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
+    // (unmount entre temps -> NPE sur _state.rows).
+    if (!_state) return;
     const data = res && res.data ? res.data : res;
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Erreur TMDb posters.");
@@ -1668,6 +1711,9 @@ async function _doDeletePlaylist(playlistId) {
 async function _fetchPlaylists() {
   try {
     const res = await apiPost("library/get_smart_playlists", {});
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
+    // (unmount entre temps -> NPE sur _state.playlists).
+    if (!_state) return;
     // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
     const _payload = (res && res.data) || res || {};
     if (_payload.ok !== false) {
@@ -1678,6 +1724,8 @@ async function _fetchPlaylists() {
       _state.playlistsLoaded = true;
     }
   } catch (err) {
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     // Silencieux : la zone playlists tolere l'erreur, on log juste.
     console.warn("[bibliotheque] get_smart_playlists ko :", err && err.message ? err.message : err);
     _state.playlists = [];

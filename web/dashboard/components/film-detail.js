@@ -349,9 +349,24 @@ function _renderCandidates(data) {
   const candidates = Array.isArray(row.candidates) ? row.candidates : [];
   if (candidates.length === 0) return "";
 
-  // Le premier candidat est par convention le "chosen" (top score).
-  // Si row.chosen_tmdb_id est defini, on l'utilise pour determiner le choisi.
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garantir qu'UN SEUL candidat
+  // est marque "Choisi" dans l'UI. Cause racine du bug "Avatar : De feu et
+  // de cendres + Avatar 3 tous deux ✓ Choisi" : si deux candidates avaient
+  // le meme tmdb_id ou si chosenId matchait plusieurs (cas degrade), tous
+  // etaient highlightes. Priorite :
+  //  1. cand.chosen === true (annotation backend canonique, Vague I)
+  //  2. premier candidat dont tmdb_id matche row.chosen_tmdb_id / row.tmdb_id
+  //  3. premier candidat (top score) en fallback
+  // Une fois UN candidat marque, les suivants sont forces a NON choisis.
   const chosenId = row.chosen_tmdb_id || row.tmdb_id || (candidates[0] && candidates[0].tmdb_id);
+  const backendMarkedIdx = candidates.findIndex((c) => c && c.chosen === true);
+  let firstChosenIdx = backendMarkedIdx;
+  if (firstChosenIdx < 0) {
+    firstChosenIdx = candidates.findIndex((c) => c && String(c.tmdb_id) === String(chosenId));
+  }
+  if (firstChosenIdx < 0 && candidates.length > 0) {
+    firstChosenIdx = 0; // fallback safe : premier candidat
+  }
 
   const visibleCount = _state.showAllCandidates ? candidates.length : Math.min(3, candidates.length);
   const visible = candidates.slice(0, visibleCount);
@@ -361,7 +376,7 @@ function _renderCandidates(data) {
     <section class="film-detail-candidates">
       <h3 class="film-detail-section-title">🏷 Candidats TMDb (${candidates.length})</h3>
       <div class="film-detail-candidates-list">
-        ${visible.map((c) => _renderCandidate(c, String(c.tmdb_id) === String(chosenId))).join("")}
+        ${visible.map((c, idx) => _renderCandidate(c, idx === firstChosenIdx)).join("")}
       </div>
       ${more > 0
         ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-film-action="expand-candidates">▾ Voir ${more} autre${more > 1 ? "s" : ""} candidat${more > 1 ? "s" : ""}</button>`

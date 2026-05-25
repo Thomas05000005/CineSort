@@ -34,7 +34,9 @@ window.__APP_JS_LOADED = "imports-done";
       const label = document.createElement("strong");
       label.textContent = "Erreur JS :";
       banner.appendChild(label);
-      banner.appendChild(document.createTextNode(" " + String(msg || "Erreur inconnue").substring(0, 200) + " "));
+      // Fix audit 2026-05-25 (v1.5.4) Vague I : limite portee a 400 chars
+      // pour laisser passer message + location (file:line:col).
+      banner.appendChild(document.createTextNode(" " + String(msg || "Erreur inconnue").substring(0, 400) + " "));
 
       const closeBtn = document.createElement("button");
       closeBtn.style.cssText = "float:right;background:transparent;border:1px solid #fff;color:#fff;padding:2px 8px;border-radius:4px;cursor:pointer";
@@ -51,13 +53,39 @@ window.__APP_JS_LOADED = "imports-done";
       setTimeout(() => { _errorBannerShown = false; }, 5000);
     } catch (e) { /* dernier recours : console */ console.error("[error-banner failed]", e); }
   }
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : enrichir la banniere avec
+  // filename:line:col (et 1ere frame de stack quand dispo). En mode natif
+  // pywebview, DevTools est inaccessible, donc le seul moyen de pinpoint
+  // le site coupable d'une erreur est de l'inscrire dans la banniere.
+  function _formatLocation(ev) {
+    try {
+      const stackFirstFrame = (ev && ev.error && typeof ev.error.stack === "string")
+        ? (ev.error.stack.split("\n").find((l) => l && l.trim() && !/^Error/i.test(l)) || "").trim()
+        : "";
+      if (stackFirstFrame) return stackFirstFrame.substring(0, 180);
+      const file = (ev && ev.filename) ? String(ev.filename).split("/").pop() : "?";
+      const line = (ev && ev.lineno != null) ? ev.lineno : "?";
+      const col = (ev && ev.colno != null) ? ev.colno : "?";
+      return `${file}:${line}:${col}`;
+    } catch (_e) { return ""; }
+  }
   window.addEventListener("error", (ev) => {
     console.error("[window.onerror]", ev.message, ev.filename, ev.lineno, ev.colno, ev.error);
-    _showErrorBanner(ev.message);
+    const loc = _formatLocation(ev);
+    _showErrorBanner(loc ? `${ev.message} | ${loc}` : ev.message);
   });
   window.addEventListener("unhandledrejection", (ev) => {
     console.error("[unhandledrejection]", ev.reason);
-    _showErrorBanner(String(ev.reason));
+    const reason = ev.reason;
+    let loc = "";
+    try {
+      if (reason && typeof reason.stack === "string") {
+        const frame = reason.stack.split("\n").find((l) => l && l.trim() && !/^Error/i.test(l)) || "";
+        loc = frame.trim().substring(0, 180);
+      }
+    } catch (_e) { /* noop */ }
+    const msg = String(reason && reason.message ? reason.message : reason);
+    _showErrorBanner(loc ? `${msg} | ${loc}` : msg);
   });
 })();
 

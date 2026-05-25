@@ -13,6 +13,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +212,23 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
         except (ValueError, json.JSONDecodeError) as exc:
             logger.debug("get_history_stats: stats_json invalide run_id=%s err=%s", run_id, exc)
 
-    total_rows = int(row.get("total") or stats_obj.get("planned_rows", 0) or 0)
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : aligner total_rows sur la
+    # source unique de verite = nombre de PlanRow dans plan.jsonl. Le
+    # snapshot DB (run_row.total ou stats.planned_rows) peut etre obsolete.
+    from cinesort.ui.api.run_data_support import count_plan_rows as _count_plan_rows
+
+    try:
+        _hist_run_paths = api._run_paths_for(
+            normalize_user_path(row.get("state_dir"), api._state_dir),
+            run_id,
+            ensure_exists=False,
+        )
+        total_rows = _count_plan_rows(
+            _hist_run_paths,
+            fallback=int(row.get("total") or stats_obj.get("planned_rows", 0) or 0),
+        )
+    except (AttributeError, OSError, TypeError, ValueError):
+        total_rows = int(row.get("total") or stats_obj.get("planned_rows", 0) or 0)
     applied_rows = int(stats_obj.get("applied_count") or 0)
 
     # Quality reports : count + tier distribution + score moyen.

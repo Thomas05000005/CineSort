@@ -1039,6 +1039,13 @@ function _renderStepPanel(stepId) {
 /* --- Main render --- */
 
 function _renderTraitement() {
+  // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 4) : si aucun run actif, on
+  // masque le breadcrumb pour eviter l'incoherence visuelle "etape 3 Validation
+  // en violet active" + message "Aucun run actif detecte" simultanes
+  // (capture 11 du rapport audit). Le breadcrumb reapparait des qu'un run est
+  // detecte via _loadRunInfo(). Note : on garde le step panel qui affiche un
+  // CTA "Lancer un scan" — l'utilisateur sait quoi faire ensuite.
+  const showBreadcrumb = Boolean(_runInfo && _runInfo.runId);
   return `
     <section class="traitement-view">
       <header class="traitement-header">
@@ -1048,7 +1055,7 @@ function _renderTraitement() {
         <p class="traitement-subtitle">Workflow d'un scan : analyse → validation → apply</p>
       </header>
       ${_renderHeaderRun()}
-      ${_renderBreadcrumb(_currentStep)}
+      ${showBreadcrumb ? _renderBreadcrumb(_currentStep) : ""}
       ${_renderStepPanel(_currentStep)}
     </section>
   `;
@@ -1061,7 +1068,16 @@ function _renderInPlace() {
   // Si on est sur l'etape doublons, monte la vue Doublons dans son container
   if (_currentStep === "doublons") {
     const mount = _activeContainer.querySelector("#traitement-doublons-mount");
-    if (mount && !_doublonsMounted) {
+    // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 1) : avant on ne re-montait
+    // Doublons QUE si !_doublonsMounted. Mais _renderInPlace() est appele par
+    // le polling toutes les 5s (POLL_INTERVAL_RUNNING) -> ecrase mount.innerHTML
+    // -> Doublons reste mount=true mais le DOM est vide -> zone blanche entre
+    // titre et bouton "Passer a l'application" (capture 8 du rapport audit).
+    // Solution : detecter mount vide (re-mount necessaire) OU !_doublonsMounted
+    // (1er passage). Le re-mount est idempotent (initDoublons reset son _state
+    // et _filmCache, puis relance _loadGroups). Pas de double fetch en pratique
+    // car le polling 5s laisse le temps au fetch precedent de finir.
+    if (mount && (!_doublonsMounted || mount.children.length === 0)) {
       _doublonsMounted = true;
       initDoublons(mount);
     }

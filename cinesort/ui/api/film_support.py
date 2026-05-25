@@ -151,6 +151,37 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
     return out
 
 
+def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]]) -> int:
+    """Fix audit 2026-05-25 (v1.5.4) Vague I : resolution canonique du candidat
+    "chosen" pour le modal film.
+
+    Priorite (high -> low) :
+      1. row.chosen_tmdb_id (override utilisateur via set_film_tmdb_candidate)
+      2. row.tmdb_id (TMDb match auto principal)
+      3. candidates[0].tmdb_id (top match par defaut)
+    Retourne 0 si aucun candidate exploitable.
+    """
+    for source_key in ("chosen_tmdb_id", "tmdb_id"):
+        try:
+            raw = row.get(source_key) if isinstance(row, dict) else None
+        except AttributeError:
+            raw = None
+        if raw is None:
+            continue
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0:
+            return val
+    if candidates:
+        try:
+            return int(candidates[0].get("tmdb_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
 def _film_identity_key(row: Dict[str, Any]) -> str:
     """Reproduit film_identity_key depuis film_history module (tmdb ou title+year)."""
     ed = str(row.get("edition") or "").strip().lower()
@@ -276,6 +307,48 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     if candidates:
         tmdb_id = int(candidates[0].get("tmdb_id") or 0)
     poster_url = _fetch_poster_url(api, tmdb_id, size="w500") if tmdb_id > 0 else None
+
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : garantir UN SEUL candidat marque
+    # comme "chosen" pour eviter le bug du double "Choisi" dans le modal film.
+    # Cause racine : le frontend utilisait `candidates[0].tmdb_id` comme fallback
+    # alors que l'override TMDb stocke peut ne pas etre le premier de la liste.
+    # Si plusieurs candidats partageaient le meme tmdb_id (cas degrade), les
+    # deux etaient highlightes. On expose desormais un seul `chosen_tmdb_id`
+    # canonique cote backend, et on annote chaque candidate avec `chosen: bool`
+    # (un seul True garanti). Log warning si etat incoherent detecte.
+    chosen_tmdb_id = _resolve_chosen_tmdb_id(row, candidates)
+    if isinstance(row, dict) and chosen_tmdb_id:
+        row = dict(row)  # copie defensive (deja peut-etre copiee plus haut)
+        row["chosen_tmdb_id"] = int(chosen_tmdb_id)
+        # Annoter les candidates : marquer le PREMIER candidat dont tmdb_id
+        # matche chosen_tmdb_id (et un seul). Les doublons tmdb_id eventuels
+        # voient leur chosen=False -> evite le double "Choisi" cote UI.
+        new_candidates: List[Dict[str, Any]] = []
+        already_marked = False
+        multiple_match_count = 0
+        for cand in candidates:
+            try:
+                cand_tid = int(cand.get("tmdb_id") or 0)
+            except (TypeError, ValueError):
+                cand_tid = 0
+            is_chosen = False
+            if not already_marked and cand_tid > 0 and cand_tid == int(chosen_tmdb_id):
+                is_chosen = True
+                already_marked = True
+            elif already_marked and cand_tid > 0 and cand_tid == int(chosen_tmdb_id):
+                multiple_match_count += 1
+            new_cand = dict(cand)
+            new_cand["chosen"] = is_chosen
+            new_candidates.append(new_cand)
+        if multiple_match_count > 0:
+            logger.warning(
+                "get_film_full: %d candidat(s) duplique(s) avec tmdb_id=%s "
+                "pour row_id=%s — un seul marque chosen=True",
+                multiple_match_count,
+                chosen_tmdb_id,
+                row_id,
+            )
+        row["candidates"] = new_candidates
 
     # Spec 06 §3.1 : enrichissement runtime + director + overview depuis TMDb
     extras = _fetch_tmdb_extras(api, tmdb_id) if tmdb_id > 0 else {}

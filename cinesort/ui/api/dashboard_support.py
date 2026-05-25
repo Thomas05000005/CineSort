@@ -19,6 +19,7 @@ from cinesort.infra.db import SQLiteStore
 from cinesort.ui.api import notifications_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api.run_data_support import count_plan_rows
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,19 @@ def _runs_history_payload(
         duration_s = 0
         if started_ts > 0 and ended_ts > 0 and ended_ts >= started_ts:
             duration_s = int(round(ended_ts - started_ts))
-        total_rows = int(stats_obj.get("planned_rows") or run_row.get("total") or 0)
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : source unique de verite =
+        # count_plan_rows(plan.jsonl). Fallback sur stats.planned_rows /
+        # run_row.total uniquement si plan.jsonl absent (run en cours, run
+        # FAILED avant ecriture du plan).
+        run_paths_for_count = api._run_paths_for(
+            normalize_user_path(run_row.get("state_dir"), state_dir),
+            run_id,
+            ensure_exists=False,
+        )
+        total_rows = count_plan_rows(
+            run_paths_for_count,
+            fallback=int(stats_obj.get("planned_rows") or run_row.get("total") or 0),
+        )
         applied_rows = int(stats_obj.get("applied_count") or 0)
         qstats = quality_counts.get(run_id, {})
         history.append(
@@ -208,7 +221,11 @@ def _build_dashboard_section(
     premium_count = sum(1 for score in scores if score >= 85)
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
     stats_obj = _parse_stats_json(run_row.get("stats_json"))
-    total_movies = int(stats_obj.get("planned_rows") or len(rows) or 0)
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : prioriser len(rows) (charge depuis
+    # plan.jsonl) sur stats.planned_rows (snapshot DB potentiellement obsolete
+    # apres re-ecriture du plan). Aligne le compteur Accueil/Qualite sur celui
+    # de Validation/Doublons (qui utilisent rows.length).
+    total_movies = int(len(rows) or stats_obj.get("planned_rows") or 0)
 
     score_bins = [0 for _ in range(10)]
     resolutions = {"2160p": 0, "1080p": 0, "720p": 0, "other": 0}

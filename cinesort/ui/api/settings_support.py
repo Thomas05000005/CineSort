@@ -706,6 +706,11 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # --- Subtitles ---
     ("subtitle_detection_enabled", True),
     ("subtitle_expected_languages", ["fr"]),
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 1 — declenche le calcul des
+    # scores qualite V1 (tier) automatiquement en background apres chaque scan.
+    # Sans ce flag les rows restent "Non identifie" tant que l'utilisateur ne
+    # clique pas sur "Re-calculer les scores" dans la page Qualite.
+    ("auto_recompute_quality_on_scan", True),
     # --- Naming ---
     ("naming_preset", "default"),
     ("naming_movie_template", "{title} ({year})"),
@@ -1271,6 +1276,9 @@ def _save_section_subtitles(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "subtitle_detection_enabled": to_bool(payload.get("subtitle_detection_enabled"), True),
         "subtitle_expected_languages": _normalize_lang_list(payload.get("subtitle_expected_languages")),
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 1 — declenche le calcul
+        # auto des scores qualite apres scan (default True).
+        "auto_recompute_quality_on_scan": to_bool(payload.get("auto_recompute_quality_on_scan"), True),
     }
 
 

@@ -25,11 +25,29 @@ const ICON_SEARCH = _svg('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x
 const ICON_BELL   = _svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>');
 const ICON_SUN    = _svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>');
 
+// Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 3) : detection plateforme pour
+// afficher "Ctrl+K" sur Windows/Linux et "Cmd+K" sur macOS. Avant : "Cmd+K"
+// affiche en dur partout, raccourci faux sur Windows (capture 2 du rapport
+// audit). navigator.platform est deprecated mais reste le moyen le plus
+// fiable encore aujourd'hui sur tous les navigateurs evergreen. Fallback
+// navigator.userAgentData.platform pour les browsers recents qui retournent
+// "" sur navigator.platform.
+function _detectPaletteShortcutLabel() {
+  try {
+    const ua = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    if (/Mac|iPhone|iPad|iPod/i.test(String(ua))) return "Cmd+K";
+    return "Ctrl+K";
+  } catch (_e) {
+    return "Ctrl+K";
+  }
+}
+
 function _buildHtml(opts) {
   const title = opts.title || "";
   const subtitle = opts.subtitle || "";
   const currentTheme = opts.theme || "studio";
   const notifCount = Number(opts.notificationCount) || 0;
+  const paletteShortcut = _detectPaletteShortcutLabel();
 
   return `
     <div class="v5-top-bar" data-v5-top-bar role="banner">
@@ -42,7 +60,7 @@ function _buildHtml(opts) {
                 aria-label="${escapeHtml(t("topbar.search_aria"))}">
           <span class="v5-top-bar-search-icon">${ICON_SEARCH}</span>
           <span class="v5-top-bar-search-label">${escapeHtml(t("topbar.search_label"))}</span>
-          <kbd class="v5-top-bar-search-shortcut">Cmd+K</kbd>
+          <kbd class="v5-top-bar-search-shortcut">${escapeHtml(paletteShortcut)}</kbd>
         </button>
         <button type="button" class="v5-btn v5-btn--icon v5-btn--ghost"
                 data-v5-notif-trigger
