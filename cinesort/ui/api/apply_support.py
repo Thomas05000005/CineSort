@@ -38,6 +38,8 @@ from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 import contextlib
 
+logger = logging.getLogger(__name__)
+
 _log = logging.getLogger(__name__)
 
 
@@ -807,6 +809,22 @@ def undo_selected_rows(
 @requires_valid_run_id
 def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     """Historique de tous les applies d'un run."""
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'historique.
+    try:
+        return _list_apply_history_impl(api, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("list_apply_history failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "apply_history_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger l'historique d'application.",
+        }
+
+
+def _list_apply_history_impl(api: Any, run_id: str) -> Dict[str, Any]:
+    """Implementation reelle de list_apply_history, sans wrap global (Vague G)."""
     found = api._find_run_row(run_id)
     if not found:
         return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
@@ -1033,16 +1051,21 @@ def _validate_apply(
     dry_run: bool,
     quarantine_unapproved: bool,
 ) -> Dict[str, Any]:
+    """Valide le contexte d'apply (rows, decisions, disk space).
+
+    Fix audit 2026-05-25 (v1.5.3) Vague H : l'acquisition/release du
+    ``_apply_slot`` n'est plus geree ici — c'est la responsabilite du caller
+    via ``api._apply_slot_guard(run_id)`` (context manager qui libere le
+    slot meme en cas d'exception). Cf ``apply_changes`` et
+    ``build_apply_preview``.
+    """
     if not isinstance(decisions, dict):
         return _err_response(
             t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
         )
-    if not api._acquire_apply_slot(run_id):
-        return _err_response(t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__)
     try:
         ctx = api._run_context_for_apply(run_id)
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
-        api._release_apply_slot(run_id)
         api.log_api_exception(
             "apply",
             exc,
@@ -1057,12 +1080,10 @@ def _validate_apply(
         return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
 
     if not ctx:
-        api._release_apply_slot(run_id)
         return _err_response(t("errors.plan_unavailable"), category="state", level="warning", log_module=__name__)
     cfg, run_paths, rows, log_fn, store = ctx
 
     if not rows:
-        api._release_apply_slot(run_id)
         return _err_response(t("errors.plan_empty_or_missing"), category="state", level="warning", log_module=__name__)
 
     incoming = decisions if isinstance(decisions, dict) else {}
@@ -1082,7 +1103,6 @@ def _validate_apply(
     if not dry_run:
         ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, decision_presence)
         if not ok_disk:
-            api._release_apply_slot(run_id)
             _disk_msg = disk_info.get("message") or t("errors.disk_space_insufficient")
             log_fn("ERROR", _disk_msg)
             return {
@@ -1783,6 +1803,40 @@ def apply_changes(
     cleanup_reason_label: Callable[[str], str],
 ) -> Dict[str, Any]:
     _log.info("api: apply run_id=%s dry_run=%s", run_id, dry_run)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : context manager pour garantir
+    # le release du slot meme si une exception se propage au-dela des except
+    # locaux (avant ce fix, un crash inattendu laissait le slot bloque).
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__
+            )
+        return _apply_changes_body(
+            api,
+            run_id,
+            decisions,
+            dry_run,
+            quarantine_unapproved,
+            cleanup_scope_label=cleanup_scope_label,
+            cleanup_status_label=cleanup_status_label,
+            cleanup_reason_label=cleanup_reason_label,
+        )
+
+
+def _apply_changes_body(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    dry_run: bool,
+    quarantine_unapproved: bool,
+    *,
+    cleanup_scope_label: Callable[[str], str],
+    cleanup_status_label: Callable[..., str],
+    cleanup_reason_label: Callable[[str], str],
+) -> Dict[str, Any]:
+    """Corps de ``apply_changes`` une fois le slot apply acquis (cf
+    ``_apply_slot_guard``). Le release est gere par le context manager
+    parent — pas de ``finally`` ici."""
     validation = _validate_apply(api, run_id, decisions, dry_run, quarantine_unapproved)
     if not validation.get("ok"):
         return validation
@@ -1919,8 +1973,9 @@ def apply_changes(
             },
         )
         return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
-    finally:
-        api._release_apply_slot(run_id)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : plus de `finally:
+    # api._release_apply_slot(run_id)` ici — gere par `_apply_slot_guard`
+    # dans `apply_changes`.
 
 
 @requires_valid_run_id
@@ -2031,6 +2086,35 @@ def build_apply_preview(
         }
     """
     _log.info("api: build_apply_preview run_id=%s", run_id)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : utilise le context manager
+    # pour eviter qu'un crash laisse le slot bloque (le code precedent
+    # acquerait le slot via _validate_apply mais ne le liberait JAMAIS
+    # — leak permanent du run_id).
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__
+            )
+        return _build_apply_preview_body(
+            api,
+            run_id,
+            decisions,
+            cleanup_scope_label=cleanup_scope_label,
+            cleanup_status_label=cleanup_status_label,
+            cleanup_reason_label=cleanup_reason_label,
+        )
+
+
+def _build_apply_preview_body(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    *,
+    cleanup_scope_label: Callable[[str], str],
+    cleanup_status_label: Callable[..., str],
+    cleanup_reason_label: Callable[[str], str],
+) -> Dict[str, Any]:
+    """Corps de ``build_apply_preview`` une fois le slot acquis."""
     validation = _validate_apply(api, run_id, decisions, dry_run=True, quarantine_unapproved=False)
     if not validation.get("ok"):
         return validation
@@ -2084,11 +2168,55 @@ def build_apply_preview(
                 "main_from": None,
                 "main_to": None,
             }
+        # Fix audit 2026-05-25 (v1.5.3) Vague F : enrichissement de chaque op
+        # avec une decomposition dossier/fichier pour eviter d'afficher dans
+        # l'UI un src->dst brut qui suggere a tort un renommage du fichier
+        # video. apply_core.py ne renomme JAMAIS les fichiers video : seul
+        # le dossier parent est renomme/deplace.
+        src_path = str(op.get("src_path") or "")
+        dst_path = str(op.get("dst_path") or "")
+        op_type = str(op.get("op_type") or "")
+        try:
+            src_p = Path(src_path) if src_path else None
+            dst_p = Path(dst_path) if dst_path else None
+        except (ValueError, OSError):  # chemins malformes : best-effort
+            src_p = None
+            dst_p = None
+        folder_old_name = src_p.parent.name if src_p is not None else ""
+        folder_new_name = dst_p.parent.name if dst_p is not None else ""
+        video_filename = src_p.name if src_p is not None else ""
+        dst_filename = dst_p.name if dst_p is not None else ""
+        # Determiner le type d'action pour le rendu UI
+        if op_type == "MOVE_DIR":
+            # Renommage de dossier : on deplace le dossier lui-meme,
+            # les fichiers video a l'interieur conservent leur nom.
+            action_summary = "folder_rename"
+            # Pour un MOVE_DIR, src/dst sont des dossiers : folder_old/new_name
+            # est le nom du dossier lui-meme (pas du parent).
+            folder_old_name = src_p.name if src_p is not None else folder_old_name
+            folder_new_name = dst_p.name if dst_p is not None else folder_new_name
+            video_filename = ""  # un MOVE_DIR ne concerne pas un fichier specifique
+        elif op_type == "MOVE_FILE":
+            # Deplacement de fichier : nom de fichier conserve par apply_core,
+            # seul le dossier parent change. Si le nom change quand meme
+            # (TV episodes), on l'indique distinctement.
+            if video_filename and dst_filename and video_filename != dst_filename:
+                action_summary = "video_rename_tv"
+            elif folder_old_name != folder_new_name:
+                action_summary = "folder_rename_and_video_move"
+            else:
+                action_summary = "video_move"
+        else:
+            action_summary = op_type.lower() or "unknown"
         slim_op = {
-            "op_type": str(op.get("op_type") or ""),
-            "src_path": str(op.get("src_path") or ""),
-            "dst_path": str(op.get("dst_path") or ""),
+            "op_type": op_type,
+            "src_path": src_path,  # preserve pour retro-compat
+            "dst_path": dst_path,  # preserve pour retro-compat
             "reversible": bool(op.get("reversible")),
+            "folder_old_name": folder_old_name,
+            "folder_new_name": folder_new_name,
+            "video_filename": video_filename,
+            "action_summary": action_summary,
         }
         films_map[rid]["ops"].append(slim_op)
         if slim_op["op_type"] == "MOVE_DIR" and not films_map[rid]["has_move_dir"]:

@@ -93,6 +93,14 @@ let _customPeriodTo = null;     // ISO date string or null
 let _visibleCount = BATCH_SIZE; // scroll infini : nombre de runs affiches
 let _retentionDays = 90;
 let _scrollObserver = null;
+// Fix audit 2026-05-25 (v1.5.3) Vague F : debounce search ID au niveau module
+// pour pouvoir l'annuler dans unmountHistorique() (le let local survivait au
+// demontage et declenchait un _rerender sur un container detache).
+let _searchDebounceId = null;
+// Fix audit 2026-05-25 (v1.5.3) Vague F : flag pour eviter le double attachement
+// du listener document.click (initHistorique + initRunDetailPage attachaient
+// tous les deux le meme _onActionClick, et un seul removeEventListener restait).
+let _documentListenerAttached = false;
 // Cache des appels get_history_stats par run_id (evite refetch a chaque switch onglet).
 const _historyStatsCache = new Map();
 // Cache des films par run_id (lookup pour recherche par nom).
@@ -604,14 +612,27 @@ function _renderFilmsList(runStats, runId) {
   `;
 }
 
+// Fix audit 2026-05-25 (v1.5.3) Vague F : separer dossier/fichier pour ne
+// pas suggerer un renommage du fichier video. apply_core ne renomme JAMAIS
+// les fichiers video, seul le dossier parent est renomme/deplace.
 function _opLabel(op) {
   const t = String(op.op_type || "").toLowerCase();
   const src = String(op.src_path || "");
   const dst = String(op.dst_path || "");
   const srcShort = src.split(/[\\/]/).pop() || src;
   const dstShort = dst.split(/[\\/]/).pop() || dst;
-  if (t === "rename") return { icon: "→", text: `Renommé ${srcShort} → ${dstShort}` };
-  if (t === "move") return { icon: "→", text: `Déplacé ${srcShort} → ${dst}` };
+  if (t === "rename" || t === "move_dir") {
+    // Renommage de dossier : le fichier video conserve son nom.
+    return { icon: "→", text: `Dossier renommé : ${srcShort} → ${dstShort} (fichier conservé)` };
+  }
+  if (t === "move" || t === "move_file") {
+    // Deplacement de fichier : nom conserve si srcShort == dstShort, sinon
+    // c'est un renommage TV (episodes).
+    if (srcShort === dstShort) {
+      return { icon: "→", text: `Vidéo déplacée : ${srcShort} (nom conservé)` };
+    }
+    return { icon: "→", text: `Vidéo renommée (TV) : ${srcShort} → ${dstShort}` };
+  }
   if (t === "quarantine") return { icon: "⚠", text: `Quarantaine bucket _review/ — ${srcShort}` };
   if (t === "delete_mark" || t === "mark_delete") return { icon: "🗑", text: `Marqué suppression — ${srcShort}` };
   return { icon: "•", text: `${op.op_type || "Op"} : ${srcShort}${dst ? " → " + dstShort : ""}` };
@@ -838,6 +859,13 @@ function _attachScrollObserver(container) {
   if (!sentinel) return;
   if (typeof IntersectionObserver === "undefined") return;
   _scrollObserver = new IntersectionObserver((entries) => {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : guard isConnected pour eviter
+    // _rerender sur un container detache du DOM (apres unmount). On disconnecte
+    // l'observer immediatement pour libérer la reference.
+    if (!container || !container.isConnected) {
+      if (_scrollObserver) { try { _scrollObserver.disconnect(); } catch { /* noop */ } _scrollObserver = null; }
+      return;
+    }
     for (const e of entries) {
       if (e.isIntersecting) {
         _visibleCount += BATCH_SIZE;
@@ -889,11 +917,14 @@ function _bindEvents(container) {
   // Recherche
   const searchInput = container.querySelector("[data-historique-search]");
   if (searchInput) {
-    let debounce;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : _searchDebounceId au niveau module
+    // (cf declaration en tete) pour pouvoir annuler le setTimeout dans
+    // unmountHistorique() — sinon le _rerender s'execute sur un container detache.
     searchInput.addEventListener("input", (ev) => {
       const value = String(ev.target.value || "");
-      clearTimeout(debounce);
-      debounce = setTimeout(() => {
+      if (_searchDebounceId) clearTimeout(_searchDebounceId);
+      _searchDebounceId = setTimeout(() => {
+        _searchDebounceId = null;
         _searchQuery = value;
         _visibleCount = BATCH_SIZE;
         _rerender(container);
@@ -919,8 +950,15 @@ function _bindEvents(container) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); }
     });
   });
-  // Actions (depuis l'inspector ou ailleurs : delegation globale)
-  document.addEventListener("click", _onActionClick);
+  // Actions (depuis l'inspector ou ailleurs : delegation globale).
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag _documentListenerAttached pour
+  // eviter le double attachement (le rerender + initRunDetailPage attachaient
+  // tous deux le meme handler, et un seul removeEventListener n'en detachait
+  // qu'une seule reference).
+  if (!_documentListenerAttached) {
+    document.addEventListener("click", _onActionClick);
+    _documentListenerAttached = true;
+  }
   // Retry
   const retryBtn = container.querySelector("[data-historique-retry]");
   if (retryBtn) retryBtn.addEventListener("click", () => initHistorique(container));
@@ -1215,12 +1253,21 @@ export async function initRunDetailPage(container, opts) {
   // Charge le detail si pas en cache.
   await _ensureHistoryStats(runId);
   _refreshStandaloneIfActive();
-  // Attach action click delegation (idempotent grace au listener au boot).
-  document.addEventListener("click", _onActionClick);
+  // Attach action click delegation (idempotent grace au flag module-level).
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : cf _bindEvents — le flag empeche
+  // le double attachement avec initHistorique().
+  if (!_documentListenerAttached) {
+    document.addEventListener("click", _onActionClick);
+    _documentListenerAttached = true;
+  }
 }
 
 export function unmountRunDetailPage() {
-  document.removeEventListener("click", _onActionClick);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag pour ne detacher qu'une fois.
+  if (_documentListenerAttached) {
+    document.removeEventListener("click", _onActionClick);
+    _documentListenerAttached = false;
+  }
   _standaloneRunId = null;
   _standaloneContainer = null;
 }
@@ -1266,8 +1313,20 @@ export async function initHistorique(container) {
 }
 
 export function unmountHistorique() {
-  document.removeEventListener("click", _onActionClick);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag _documentListenerAttached pour
+  // ne detacher qu'une fois (vs double attachement avec initRunDetailPage).
+  if (_documentListenerAttached) {
+    document.removeEventListener("click", _onActionClick);
+    _documentListenerAttached = false;
+  }
   _detachScrollObserver();
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : annuler le debounce search en cours,
+  // sinon le setTimeout survivait au demontage et declenchait _rerender sur un
+  // container detache du DOM.
+  if (_searchDebounceId) {
+    clearTimeout(_searchDebounceId);
+    _searchDebounceId = null;
+  }
   _runs = [];
   _selectedRunId = null;
 }

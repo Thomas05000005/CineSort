@@ -13,6 +13,8 @@ from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_probe_backend, normalize_user_path
 
+logger = logging.getLogger(__name__)
+
 
 def probe_settings_from_dict(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     raw = cfg if isinstance(cfg, dict) else {}
@@ -364,7 +366,9 @@ def auto_install_probe_tools(
         _logger.info("auto_install_probe_tools: ok=%s installed=%s errors=%s", ok, list(installed), errors)
         return {"ok": ok, "installed": installed, "errors": errors, "message": msg, "status": status}
     except (OSError, FileNotFoundError) as exc:
-        _logger.error("auto_install_probe_tools: %s", exc)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+        # (auto_install est optionnel : l'utilisateur peut installer manuellement les outils)
+        _logger.warning("auto_install_probe_tools: %s", exc)
         return {"ok": False, "message": f"Echec de l'installation : {exc}", "errors": [str(exc)]}
 
 
@@ -376,6 +380,32 @@ def get_probe(
     *,
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint diagnostic. Utilise l'implementation interne pour
+    # preserver les retours d'erreurs typees existants (_err_response).
+    try:
+        return _get_probe_impl(api, run_id, row_id, detect_probe_tools_fn=detect_probe_tools_fn)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_probe failed for run_id=%s row_id=%s", run_id, row_id)
+        return {
+            "ok": False,
+            "error": "probe_unavailable",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de recuperer la probe du fichier. Le scan est "
+                "peut-etre obsolete."
+            ),
+        }
+
+
+def _get_probe_impl(
+    api: Any,
+    run_id: str,
+    row_id: str,
+    *,
+    detect_probe_tools_fn: Callable[..., Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Implementation reelle de get_probe, sans wrap global (Vague G)."""
     if not run_id or not row_id:
         return _err_response(
             "Les identifiants run_id et row_id sont requis.", category="validation", level="info", log_module=__name__

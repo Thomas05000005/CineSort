@@ -113,7 +113,17 @@ class PlexClient:
         except (ValueError, KeyError) as exc:
             return {"ok": False, "error": f"Reponse serveur invalide : {exc}"}
 
-        mc = data.get("MediaContainer") or data
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : guard sur le fallback
+        # data->mc. Si la reponse n'est pas un dict (ex: serveur renvoie une
+        # liste ou un None), on retourne un payload structure plutot que de
+        # KeyError sur .get("version").
+        mc_raw = data.get("MediaContainer") if isinstance(data, dict) else None
+        if isinstance(mc_raw, dict):
+            mc = mc_raw
+        elif isinstance(data, dict):
+            mc = data
+        else:
+            return {"ok": False, "error": "Reponse serveur invalide : structure inattendue"}
         return {
             "ok": True,
             "server_name": mc.get("friendlyName") or mc.get("machineIdentifier") or "Plex",
@@ -206,7 +216,17 @@ class PlexClient:
         if not _SAFE_ID_RE.match(lid):
             raise PlexError(f"Invalid library section id: {lid!r}")
         try:
-            resp = self._get(f"/library/sections/{lid}/all", params={"type": "1", "X-Plex-Container-Size": "0"})
+            # Fix audit 2026-05-25 (v1.5.3) Vague H : X-Plex-Container-Size
+            # est un HEADER HTTP cote Plex, pas un query param. En le passant
+            # via params il etait silencieusement ignore -> Plex renvoyait la
+            # liste complete (100 par defaut) et `totalSize` restait juste,
+            # mais la requete tirait gratuitement tout le payload films au
+            # lieu d'un comptage rapide. On le passe en header desormais.
+            resp = self._get(
+                f"/library/sections/{lid}/all",
+                params={"type": "1"},
+                headers={"X-Plex-Container-Size": "0"},
+            )
             data = resp.json()
             mc = data.get("MediaContainer") or {}
             return int(mc.get("totalSize") or mc.get("size") or 0)

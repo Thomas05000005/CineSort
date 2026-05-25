@@ -34,16 +34,30 @@ function _icon(type) {
   return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
 }
 
+// Fix audit 2026-05-25 (v1.5.3) Vague H : durees differenciees par type pour UX/A11Y.
+// Les erreurs doivent rester visibles plus longtemps (l'utilisateur doit pouvoir lire le
+// message technique et eventuellement l'aria-live). Les info/success sont volatiles.
+const _DEFAULT_DURATIONS = {
+  info: 4000,
+  success: 4000,
+  warning: 7000,
+  error: 10000,
+};
+
 /**
  * Affiche un toast bottom-right.
  * @param {{type?:"info"|"success"|"warning"|"warn"|"error", text:string, duration?:number}} opts
  */
 export function showToast(opts) {
-  const { type = "info", text = "", duration = 4000 } = opts || {};
+  const { type = "info", text = "" } = opts || {};
   if (!text) return;
   // Fix audit 2026-05-24 : "warn" mappe sur "warning" pour aligner avec le
   // reste de la dashboard (notification-center, css .toast--warning, etc).
   const normalizedType = _normalizeType(type);
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : duree par defaut selon type, override possible
+  const duration = (opts && opts.duration != null)
+    ? opts.duration
+    : (_DEFAULT_DURATIONS[normalizedType] || 4000);
   const root = _ensureContainer();
   const node = document.createElement("div");
   node.className = `toast toast--${normalizedType}`;

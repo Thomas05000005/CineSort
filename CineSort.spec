@@ -182,6 +182,19 @@ hiddenimports += [
 # mais collect_submodules garantit une couverture exhaustive sans maintenance manuelle.
 hiddenimports += collect_submodules("cinesort.domain.perceptual")
 
+# Fix audit 2026-05-25 (v1.5.3) Vague H : hiddenimports complementaires
+# - PIL : utilise dynamiquement par perceptual_support.py (encodage PNG frames)
+# - requests.packages.urllib3 / urllib3 : http clients TMDb/Jellyfin/Plex/Radarr
+# - onnxruntime.capi : runtime C natif requis par LPIPS ONNX (§11)
+# - cryptography.hazmat.bindings : bindings natifs requis pour HTTPS REST
+hiddenimports += collect_submodules("PIL")
+hiddenimports += [
+    "requests.packages.urllib3",
+    "urllib3",
+    "onnxruntime.capi",
+    "cryptography.hazmat.bindings",
+]
+
 # ---------------------------------------------------------------------------
 # Data files: web/, migrations SQL, deps dynamiques
 # ---------------------------------------------------------------------------

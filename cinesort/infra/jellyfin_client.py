@@ -171,6 +171,9 @@ class JellyfinClient:
             return {"ok": False, "error": "Clé API non configurée"}
 
         # Etape 1 : info serveur (endpoint public, pas d'auth requise)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : on passe imperativement par
+        # self._get() qui applique timeout=self.timeout_s. Ne JAMAIS appeler
+        # requests.get directement ici sinon hang infini si le serveur freeze.
         try:
             resp = self._get("/System/Info/Public")
             _body = getattr(resp, "content", b"")

@@ -60,8 +60,19 @@ def pause_run(api: Any, run_id: str) -> Dict[str, Any]:
        RUNNING / AWAITING_VALIDATION).
     3. Retourne `{ok, run_id, status: "PAUSED"}` ou un `_err_response`.
     """
-    logger.debug("api: pause_run run_id=%s", run_id)
-    return _pause_or_save(api, run_id, saved=False, status_label=RunStatus.PAUSED.value)
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint critique de pilotage du run.
+    try:
+        logger.debug("api: pause_run run_id=%s", run_id)
+        return _pause_or_save(api, run_id, saved=False, status_label=RunStatus.PAUSED.value)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("pause_run failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "pause_run_failed",
+            "message": str(exc),
+            "user_message": "Impossible de mettre le run en pause.",
+        }
 
 
 @requires_valid_run_id

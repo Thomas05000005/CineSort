@@ -477,6 +477,22 @@ def get_diagnostic(api: Any) -> Dict[str, Any]:
          roots: [...], lib_total, lib_scored, log_path, settings_path,
          last_run_id, last_run_status, timestamp}}
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint diagnostique appele depuis l'ecran Aide.
+    try:
+        return _get_diagnostic_impl(api)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        _logger.exception("get_diagnostic failed")
+        return {
+            "ok": False,
+            "error": "diagnostic_failed",
+            "message": str(exc),
+            "user_message": "Impossible de generer le diagnostic.",
+        }
+
+
+def _get_diagnostic_impl(api: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_diagnostic, sans wrap global (Vague G)."""
     settings = _safe_read_settings_for_diag(api)
 
     # db_schema_version : on essaie de lire la valeur via le store, sinon ""

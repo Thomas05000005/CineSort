@@ -341,6 +341,7 @@ def main_api() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
+        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -351,6 +352,8 @@ def main_api() -> None:
     install_global_scrubber()
     # V3-04 polish v7.7.0 : injecter run_id + request_id dans tous les logs.
     install_log_context_filter()
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min)
+    install_repeated_exception_dedup(max_per_minute=5)
 
     # V3-04 : niveau de log configurable. Valeur lue depuis env vars
     # CINESORT_LOG_LEVEL > CINESORT_DEBUG > defaut INFO. Le setting
@@ -495,6 +498,14 @@ def _check_dpapi_availability() -> None:
 
 
 def main() -> None:
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : requis pour PyInstaller +
+    # ProcessPoolExecutor. Safety net : si un module quelconque (current ou futur)
+    # spawn un subprocess via multiprocessing dans le bundle frozen, freeze_support()
+    # evite que l'enfant ne re-execute main() en boucle infinie (fork-bomb classique
+    # sur Windows). Doit etre appele au TOUT debut, avant toute init lourde.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     # H-3 audit QA 20260428 : installer le scrubber AVANT toute creation
     # d'API/logger pour capturer les premiers logs de boot eux-memes.
     # H-6 audit QA 20260429 : installer aussi un RotatingFileHandler pour
@@ -505,6 +516,7 @@ def main() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
+        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -526,6 +538,10 @@ def main() -> None:
     # Empeche 2 CineSort.exe simultanees sur le meme state_dir (corruption DB
     # via apply_rows concurrents). Le lock est libere automatiquement par l'OS
     # a la mort du process — pas de stale lock meme apres kill -9.
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : InstanceLock confirme avant
+    # SQLite (CineSortApi() plus bas declenche SQLiteStore.initialize()).
+    # L'ordre acquire() -> CineSortApi() ne doit PAS etre modifie : inverser
+    # casserait la garantie anti-corruption multi-instance.
     from cinesort.infra.single_instance import InstanceLock
 
     instance_lock = InstanceLock(state_dir)

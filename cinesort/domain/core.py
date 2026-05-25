@@ -1293,6 +1293,12 @@ class ApplyResult:
     total_rows: int = 0
     considered_rows: int = 0
     skip_reasons: Dict[str, int] = field(default_factory=dict)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : messages contextualises remontes
+    # a l'UI (ex : "FICHIER VERROUILLE : 'Film.mkv' est ouvert dans VLC...")
+    # quand un PermissionError empeche le move/rename. Liste vide si aucune
+    # erreur visible n'est a remonter ; res.errors reste le compteur faisant
+    # foi pour l'agregation.
+    error_messages: list = field(default_factory=list)
 
 
 @dataclass

@@ -427,6 +427,40 @@ def get_library_filtered(
         }
       }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500
+    # quand le run est obsolete / la base inaccessible / la facade leve.
+    try:
+        return _get_library_filtered_impl(api, run_id, filters, sort, page, page_size)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level pour endpoint UI
+        logger.exception(
+            "get_library_filtered failed for run_id=%s page=%s", run_id, page
+        )
+        return {
+            "ok": False,
+            "error": "library_load_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger la bibliotheque (run obsolete ou base "
+                "inaccessible). Relance un scan ou redemarre l'app."
+            ),
+            "rows": [],
+            "total": 0,
+            "page": int(page or 1),
+            "pages": 0,
+            "page_size": int(page_size or 50),
+            "stats": {"by_tier": {}},
+        }
+
+
+def _get_library_filtered_impl(
+    api: Any,
+    run_id: Optional[str],
+    filters: Optional[Dict[str, Any]],
+    sort: str,
+    page: int,
+    page_size: int,
+) -> Dict[str, Any]:
+    """Implementation reelle de get_library_filtered, sans wrap global (Vague F)."""
     filters = filters or {}
     page = max(1, int(page or 1))
     page_size = max(1, min(500, int(page_size or 50)))
@@ -1030,6 +1064,21 @@ def mark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str,
 
     Retourne : { ok, marked, run_id, row_id, source_path, marked_at }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _mark_for_deletion_impl(api, run_id, row_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("mark_for_deletion failed for run_id=%s row_id=%s", run_id, row_id)
+        return {
+            "ok": False,
+            "error": "mark_for_deletion_failed",
+            "message": str(exc),
+            "user_message": "Impossible de marquer ce film. Verifie l'etat du run et reessaie.",
+        }
+
+
+def _mark_for_deletion_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """Implementation reelle de mark_for_deletion, sans wrap global (Vague F)."""
     rid = _resolve_run_id(api, run_id)
     if not rid:
         return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
@@ -1078,6 +1127,21 @@ def mark_alert_ignored(api: Any, row_id: str, alert_code: str) -> Dict[str, Any]
 
     Retourne : { ok, ignored, row_id, alert_code, ignored_at }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _mark_alert_ignored_impl(api, row_id, alert_code)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("mark_alert_ignored failed for row_id=%s alert_code=%s", row_id, alert_code)
+        return {
+            "ok": False,
+            "error": "mark_alert_ignored_failed",
+            "message": str(exc),
+            "user_message": "Impossible d'ignorer cette alerte. Reessaie dans quelques instants.",
+        }
+
+
+def _mark_alert_ignored_impl(api: Any, row_id: str, alert_code: str) -> Dict[str, Any]:
+    """Implementation reelle de mark_alert_ignored, sans wrap global (Vague F)."""
     rid_s = str(row_id or "").strip()
     code_s = str(alert_code or "").strip()
     if not rid_s:

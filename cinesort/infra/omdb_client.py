@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -244,12 +245,33 @@ class OmdbClient:
             self._cache = {}
 
     def _save_cache_atomic(self) -> None:
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : pattern atomic safe
+        # 1. Ecrire dans le .tmp via write() + flush() + fsync() pour forcer
+        #    la donnee a disque avant le rename (sinon crash systeme entre
+        #    write et replace -> tmp vide promu en cache officiel -> perte).
+        # 2. Verifier que le tmp existe ET a une taille non nulle avant
+        #    replace. Sinon, garder l'ancien cache et logguer un warning.
+        # 3. Sur toute exception en cours d'ecriture, nettoyer le .tmp pour
+        #    eviter d'accumuler des fichiers orphelins.
+        tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
         try:
-            tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(self._cache, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.cache_path)
-        except (OSError, PermissionError) as exc:
+            payload = json.dumps(self._cache, ensure_ascii=False)
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())  # force write to disk avant rename
+            if tmp.exists() and tmp.stat().st_size > 0:
+                tmp.replace(self.cache_path)
+            else:
+                logger.warning("omdb cache tmp write failed, keeping previous cache")
+                if tmp.exists():
+                    with contextlib.suppress(OSError):
+                        tmp.unlink()
+        except (OSError, PermissionError, ValueError) as exc:
             logger.debug("omdb cache save warning: %s", exc)
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
 
     def _cache_get(self, key: str) -> Optional[Dict[str, Any]]:
         entry = self._cache.get(key)

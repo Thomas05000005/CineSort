@@ -57,8 +57,11 @@ async function _loadFilmFull(filmId) {
   const histRes = results[1];
 
   if (fullRes.status !== "fulfilled" || !fullRes.value.ok) {
-    const reason = fullRes.status === "fulfilled"
-      ? (fullRes.value.error || fullRes.value.data?.message || "Film introuvable")
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : utilise user_message du backend
+    // (contrat film_load_failed) avant de retomber sur error/message brut.
+    const fv = fullRes.status === "fulfilled" ? fullRes.value : null;
+    const reason = fv
+      ? (fv.data?.user_message || fv.error || fv.data?.message || fv.message || "Impossible de charger le film. Reessaye dans quelques instants.")
       : String(fullRes.reason);
     throw new Error(reason);
   }

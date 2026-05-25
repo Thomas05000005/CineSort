@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -128,6 +129,12 @@ class RunState:
         self.runner = runner
         self.store = store
         self.lock = threading.Lock()
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : lock dedie au file append
+        # ui_log.txt. Sans ce lock, les writes multi-thread produisaient des
+        # lignes interleavees ([HH:MM:SS] partiel + autre ligne). On garde un
+        # lock distinct de self.lock pour ne pas bloquer la mutation
+        # in-memory pendant l'I/O fichier.
+        self._file_log_lock = threading.Lock()
         self.running = False
         self.done = False
         self.error: Optional[str] = None
@@ -151,16 +158,20 @@ class RunState:
             if len(self.logs) > MAX_RUN_LOG_ITEMS:
                 self.logs = self.logs[-MAX_RUN_LOG_ITEMS:]
         # best-effort UI log persistence
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : file append protege par
+        # _file_log_lock pour eviter les lignes interleavees multi-thread.
         try:
             self.paths.ui_log_txt.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.paths.ui_log_txt, "a", encoding="utf-8") as f:
-                f.write(f"[{ts}] {level}: {msg}\n")
+            with self._file_log_lock:
+                with open(self.paths.ui_log_txt, "a", encoding="utf-8") as f:
+                    f.write(f"[{ts}] {level}: {msg}\n")
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             if _env_truthy("CINESORT_DEBUG"):
                 try:
-                    with open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f:
-                        f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
+                    with self._file_log_lock:
+                        with open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f:
+                            f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
                 except (OSError, PermissionError):
                     return
 
@@ -331,7 +342,7 @@ class CineSortApi:
         return bool(RUN_ID_RE.fullmatch(rid))
 
     def _resolve_payload_state_dir(self, settings: Dict[str, Any]) -> Tuple[Path, bool]:
-        return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._state_dir)
+        return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._get_state_dir())
 
     def _resolve_root_from_payload(
         self,
@@ -345,7 +356,7 @@ class CineSortApi:
             settings,
             state_dir=state_dir,
             state_dir_present=state_dir_present,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             missing_message=missing_message,
         )
@@ -363,10 +374,23 @@ class CineSortApi:
             settings,
             state_dir=state_dir,
             state_dir_present=state_dir_present,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             missing_message=missing_message,
         )
+
+    def _get_state_dir(self) -> Path:
+        """Fix audit 2026-05-25 (v1.5.3) Vague H : lecture atomique de _state_dir.
+
+        Les mutations de ``self._state_dir`` (dans ``_save_settings_impl``) sont
+        protegees par ``self._state_dir_lock``. Sans helper, les lectures
+        directes ``self._state_dir`` pouvaient observer un Path mid-mutation
+        (rare mais possible quand un endpoint REST parallele tourne pendant
+        un ``save_settings``). On retourne une reference atomique sous le
+        lock — Path etant immutable, le snapshot reste valide hors lock.
+        """
+        with self._state_dir_lock:
+            return self._state_dir
 
     def _acquire_apply_slot(self, run_id: str) -> bool:
         with self._apply_guard_lock:
@@ -378,6 +402,30 @@ class CineSortApi:
     def _release_apply_slot(self, run_id: str) -> None:
         with self._apply_guard_lock:
             self._apply_inflight_run_ids.discard(run_id)
+
+    @contextmanager
+    def _apply_slot_guard(self, run_id: str):
+        """Fix audit 2026-05-25 (v1.5.3) Vague H : libere le slot meme en cas d'exception.
+
+        Remplace le pattern manuel ``_acquire_apply_slot`` / ``_release_apply_slot``
+        eparpille (5 sites dans apply_support.py) ou un crash du caller laissait
+        le slot occupe indefiniment. Les callers DOIVENT utiliser ce CM :
+
+            with api._apply_slot_guard(run_id) as acquired:
+                if not acquired:
+                    return _err_response(t("errors.apply_already_in_progress"), ...)
+                # ... reste de la logique apply ...
+
+        Yield ``True`` si le slot a ete acquis (run_id pas deja in-flight),
+        ``False`` sinon. Dans tous les cas le slot est libere a la sortie du
+        ``with`` (succes, return early, exception).
+        """
+        acquired = self._acquire_apply_slot(run_id)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._release_apply_slot(run_id)
 
     def _acquire_quality_batch_slot(self, run_id: str) -> bool:
         with self._quality_batch_guard_lock:
@@ -451,7 +499,7 @@ class CineSortApi:
         endpoint = str(context or "unknown")
         rid = str(run_id or "").strip()
         safe_extra = self._sanitize_log_extra(extra)
-        resolved_state_dir = state_dir if isinstance(state_dir, Path) else self._state_dir
+        resolved_state_dir = state_dir if isinstance(state_dir, Path) else self._get_state_dir()
         resolved_store = store
 
         if rid and self._is_valid_run_id(rid):
@@ -728,7 +776,7 @@ class CineSortApi:
     # ---------- settings ----------
     def _get_settings_impl(self) -> Dict[str, Any]:
         return settings_support.get_settings_payload(
-            state_dir=self._state_dir,
+            state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             default_state_dir_example=DEFAULT_STATE_DIR_EXAMPLE,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
@@ -741,7 +789,7 @@ class CineSortApi:
     def _save_settings_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         state_dir, result = settings_support.save_settings_payload(
             settings,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
             default_empty_folders_folder_name=DEFAULT_EMPTY_FOLDERS_FOLDER_NAME,
@@ -933,7 +981,7 @@ class CineSortApi:
                 log_module=__name__,
                 data=_updater.info_to_dict(None, self._app_version),
             )
-        cache_path = _updater.default_cache_path(self._state_dir)
+        cache_path = _updater.default_cache_path(self._get_state_dir())
         info = _updater.force_check(self._app_version, repo, cache_path=cache_path)
         try:
             settings["update_last_check_ts"] = time.time()
@@ -956,7 +1004,7 @@ class CineSortApi:
         """
         if force_refresh:
             return self._check_for_updates_impl()
-        cache_path = _updater.default_cache_path(self._state_dir)
+        cache_path = _updater.default_cache_path(self._get_state_dir())
         info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
@@ -1020,7 +1068,7 @@ class CineSortApi:
         # → AttributeError non catchee → pywebview remontait l'exception au JS
         # → fallback "Purge du cache impossible".
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except Exception as exc:
             _log.exception("api: reset_incremental_cache echec init store")
             return _err_response(
@@ -1078,7 +1126,7 @@ class CineSortApi:
         """
 
         if str(value or "").strip() == _SECRET_MASK:
-            data = _read_settings(self._state_dir)
+            data = _read_settings(self._get_state_dir())
             return str(data.get(field) or "").strip()
         return str(value or "").strip()
 
@@ -1109,7 +1157,7 @@ class CineSortApi:
 
     def _get_jellyfin_libraries_impl(self) -> Dict[str, Any]:
         """Retourne les bibliothèques Jellyfin configurées."""
-        data = _read_settings(self._state_dir)
+        data = _read_settings(self._get_state_dir())
         url = str(data.get("jellyfin_url") or "").strip()
         api_key = str(data.get("jellyfin_api_key") or "").strip()
         user_id = str(data.get("jellyfin_user_id") or "").strip()
@@ -1172,7 +1220,7 @@ class CineSortApi:
             )
 
         # Charger les PlanRows du dernier run
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1240,7 +1288,7 @@ class CineSortApi:
             return _err_response("Aucun film trouve dans le CSV.", category="state", level="info", log_module=__name__)
 
         # Charger les PlanRows du dernier run
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1313,7 +1361,7 @@ class CineSortApi:
                 "URL, token ou library Plex manquant.", category="validation", level="info", log_module=__name__
             )
 
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1394,7 +1442,7 @@ class CineSortApi:
                 "URL ou cle API Radarr manquante.", category="validation", level="info", log_module=__name__
             )
 
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1474,7 +1522,7 @@ class CineSortApi:
         if not okey:
             return _err_response("Cle OMDb requise.", category="validation", level="info", log_module=__name__)
         # Cache temporaire pour le test : pas de pollution du cache prod
-        cache_path = Path(self._state_dir) / "omdb_cache_test.json"
+        cache_path = Path(self._get_state_dir()) / "omdb_cache_test.json"
         # Audit C7 P1 : helper centralise (range 1-60s + fallback robuste).
         try:
             client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=clamp_timeout(timeout_s))
@@ -1520,8 +1568,8 @@ class CineSortApi:
         rid = str(sample_row_id or "").strip()
         if rid:
             try:
-                settings = _read_settings(self._state_dir)
-                state_dir = self._state_dir
+                state_dir = self._get_state_dir()
+                settings = _read_settings(state_dir)
                 store, _ = self._get_or_create_infra(state_dir, settings)
                 # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
                 probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
@@ -2156,7 +2204,7 @@ class CineSortApi:
         """
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError):
             store = None
         try:
@@ -2203,7 +2251,7 @@ class CineSortApi:
             return _err_response(msg, category="validation", level="info", log_module=__name__, meta=meta)
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(
                 f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__, meta=meta
@@ -2316,7 +2364,7 @@ class CineSortApi:
         Retourne `{ok, deleted_count}`.
         """
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if not store:
@@ -2336,7 +2384,7 @@ class CineSortApi:
         """
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if store is None:

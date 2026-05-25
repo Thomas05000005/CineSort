@@ -101,8 +101,11 @@ async function _loadFilmFull(rowId, runId) {
   const res = await apiPost("library/get_film_full", params);
   const data = res && res.data ? res.data : res;
   if (!data || data.ok === false) {
-    const err = (data && (data.message || data.error)) || "Film introuvable.";
-    throw new Error(err);
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : prefere user_message (message UX clair)
+    // avant de retomber sur message technique ou error. Evite l'affichage de
+    // "Serveur indisponible (HTTP 500)" quand le backend a fourni un contrat propre.
+    const userMsg = (data && data.user_message) || (data && data.message) || (data && data.error) || "Impossible de charger le film. Reessaye dans quelques instants.";
+    throw new Error(userMsg);
   }
   return data;
 }
@@ -214,7 +217,7 @@ function _renderHero(data) {
     <header class="film-detail-hero">
       ${posterHtml}
       <div class="film-detail-meta">
-        <h2 class="film-detail-title">
+        <h2 id="film-detail-title" class="film-detail-title">
           ${escapeHtml(title)}${year ? ` <span class="film-detail-year">(${escapeHtml(String(year))})</span>` : ""}
         </h2>
         ${metaLine ? `<div class="film-detail-meta-line">${metaLine}</div>` : ""}
@@ -602,8 +605,14 @@ function _renderActions() {
 function _renderAll() {
   if (!_state.containerEl || !_state.data) return;
   const data = _state.data;
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : role="dialog"+aria-modal sur l'article
+  // (mode C overlay) pour annoncer la modale aux AT. Mode A/B = embed donc juste region.
+  const isOverlay = _state.mode === "C";
+  const dlgAttrs = isOverlay
+    ? 'role="dialog" aria-modal="true" aria-labelledby="film-detail-title"'
+    : 'role="region" aria-labelledby="film-detail-title"';
   _state.containerEl.innerHTML = `
-    <article class="film-detail film-detail--mode-${escapeHtml(_state.mode || "B")}">
+    <article class="film-detail film-detail--mode-${escapeHtml(_state.mode || "B")}" ${dlgAttrs}>
       ${_renderHero(data)}
       ${_renderSynopsis(data)}
       ${_renderAlerts(data)}
@@ -1319,10 +1328,29 @@ function _ensureModeCOverlay() {
   overlay._previouslyFocused = document.activeElement;
 
   // Esc + clic backdrop ferment
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : focus trap Tab/Shift+Tab pour conformite WCAG 2.4.3
+  // Le keydown handler gere Escape (deja existant) ET le piegeage du focus dans la modale.
+  const _focusableSel = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   overlay._escHandler = (ev) => {
     if (ev.key === "Escape") {
       ev.stopPropagation();
       closeFilmDetail();
+      return;
+    }
+    if (ev.key === "Tab") {
+      const focusables = Array.from(overlay.querySelectorAll(_focusableSel))
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (ev.shiftKey && active === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && active === last) {
+        ev.preventDefault();
+        first.focus();
+      }
     }
   };
   document.addEventListener("keydown", overlay._escHandler);

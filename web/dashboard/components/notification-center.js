@@ -212,9 +212,13 @@ export function refreshNotifications() {
   const drawer = _ensureDrawer();
   return apiPost("runtime/get_notifications", { unread_only: false, limit: 100 })
     .then((res) => {
-      if (!res || !res.ok) return;
-      _cache.items = res.notifications || [];
-      _cache.unread = res.unread_count || 0;
+      // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+      const _payload = (res && res.data) || res || {};
+      if (!_payload.ok) return;
+      // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+      _cache.items = _payload.notifications || [];
+      // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+      _cache.unread = _payload.unread_count || 0;
       if (_isOpen) {
         drawer.innerHTML = _buildHtml(_cache.items, _cache.unread);
       }

@@ -563,6 +563,26 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
 
 def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
     """Lance l'analyse d'une bibliotheque. Orchestre validation, init et lancement du job."""
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint critique (lancement scan). Si une exception inattendue
+    # remonte (par ex. ImportError d'un sous-module, RuntimeError du runner),
+    # l'UI doit recevoir un user_message clair plutot qu'une 500.
+    try:
+        return _start_plan_impl(api, settings, run_state_cls=run_state_cls)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        _logger.exception("start_plan failed")
+        return {
+            "ok": False,
+            "error": "start_plan_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de lancer le scan. Verifie les sources et reessaie."
+            ),
+        }
+
+
+def _start_plan_impl(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
+    """Implementation reelle de start_plan, sans wrap global (Vague G)."""
     if not isinstance(settings, dict):
         return _err_response(
             t("errors.payload_settings_invalid"), category="validation", level="info", log_module=__name__
@@ -677,6 +697,25 @@ def _compute_speed_and_eta(
 
 @requires_valid_run_id
 def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500
+    # sur cet endpoint critique appele en polling depuis l'UI Traitement.
+    try:
+        return _get_status_impl(api, run_id, last_log_index=last_log_index)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        _logger.exception("get_status failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "run_status_unavailable",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de recuperer l'etat du run. Relance un scan ou "
+                "redemarre l'app."
+            ),
+        }
+
+
+def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
+    """Implementation reelle de get_status, sans wrap global (Vague F)."""
     # Audit 2026-05-23 : last_log_index < 0 ferait rs.logs[-N:] = tail des N derniers
     # logs (contournement de la pagination + valeur retournee dans next_log_index incoherente).
     # clamp_non_negative_int gere aussi None / str non-numerique / NaN proprement.

@@ -111,7 +111,9 @@ def record_apply_op(
         record_op(payload)
         return True
     except (TypeError, ValueError, OSError) as e:
-        _logger.error("record_apply_op: echec journalisation %s src=%s: %s", op_type, src_path, e, exc_info=True)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+        # (l'op physique a deja reussi cote FS, on n'arrive juste pas a journaliser pour rollback)
+        _logger.warning("record_apply_op: echec journalisation %s src=%s: %s", op_type, src_path, e, exc_info=True)
         return False
 
 
@@ -161,22 +163,48 @@ def find_main_video_in_folder(folder: Path, cfg: "Config") -> Optional[Path]:
     return best
 
 
-def sha1_quick(path: Path) -> str:
-    """Fast fingerprint: SHA-1 of the first 8 MB + last 8 MB (or full file if smaller)."""
+def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
+    """Fast fingerprint: SHA-1 of the first 8 MB + last 8 MB (or full file if smaller).
+
+    Fix audit 2026-05-25 (v1.5.3) Vague H : timeout pour eviter blocage indefini
+    sur SMB lent / disque qui spin-down / NAS deconnecte. Si la lecture depasse
+    ``max_seconds`` (defaut 30s, largement suffisant pour 16 MB sur LAN saine),
+    on logue un warning et on retourne "" (interprete par les callers comme
+    "pas de hash fiable" : ``files_identical_quick`` renverra False, donc on
+    bascule sur le bucket conflits plutot que de bloquer toute la batch).
+    Les autres OSError sont egalement capturees (NAS deconnecte en cours de
+    lecture, ENOSPC sur cible, etc.).
+
+    NB : la signature publique reste retro-compatible (``max_seconds`` est
+    kwarg-only avec un defaut), les callers existants ne changent pas.
+    """
+    import time as _time_mod  # local pour eviter shadow du module ``time`` haut
+
     digest = hashlib.sha1()
-    size = path.stat().st_size
+    start = _time_mod.monotonic()
     chunk_8m = 8 * 1024 * 1024
-    with path.open("rb") as file_obj:
-        if size < (2 * chunk_8m):
-            while True:
-                block = file_obj.read(1024 * 1024)
-                if not block:
-                    break
-                digest.update(block)
-        else:
-            digest.update(file_obj.read(chunk_8m))
-            file_obj.seek(max(0, size - chunk_8m))
-            digest.update(file_obj.read(chunk_8m))
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as file_obj:
+            if size < (2 * chunk_8m):
+                while True:
+                    if _time_mod.monotonic() - start > max_seconds:
+                        raise TimeoutError(f"sha1_quick timeout ({max_seconds}s) on {path}")
+                    block = file_obj.read(1024 * 1024)
+                    if not block:
+                        break
+                    digest.update(block)
+            else:
+                if _time_mod.monotonic() - start > max_seconds:
+                    raise TimeoutError(f"sha1_quick timeout head ({max_seconds}s) on {path}")
+                digest.update(file_obj.read(chunk_8m))
+                file_obj.seek(max(0, size - chunk_8m))
+                if _time_mod.monotonic() - start > max_seconds:
+                    raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
+                digest.update(file_obj.read(chunk_8m))
+    except (OSError, TimeoutError) as exc:
+        _logger.warning("sha1_quick failed for %s: %s", path, exc)
+        return ""
     return digest.hexdigest()
 
 
@@ -218,7 +246,17 @@ def files_identical_quick(
     try:
         if src.stat().st_size != dst.stat().st_size:
             return False
-        return sha1_quick_cached(src, hash_cache) == sha1_quick_cached(dst, hash_cache)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : sha1_quick peut maintenant
+        # retourner "" si lecture echoue (timeout SMB, NAS deconnecte). Sans
+        # cette garde, "" == "" -> True declencherait une fusion incorrecte
+        # de deux fichiers dont on n'a pas pu verifier l'identite.
+        src_hash = sha1_quick_cached(src, hash_cache)
+        if not src_hash:
+            return False
+        dst_hash = sha1_quick_cached(dst, hash_cache)
+        if not dst_hash:
+            return False
+        return src_hash == dst_hash
     except (OSError, PermissionError):
         return False
 
@@ -1123,7 +1161,32 @@ def apply_rows(
                         core_mod._mark_skip(res, core_mod.SKIP_REASON_VALIDATION_ABSENTE)
                     else:
                         core_mod._mark_skip(res, core_mod.SKIP_REASON_NON_VALIDE)
-        except (FileNotFoundError, FileExistsError, PermissionError, OSError) as exc:
+        except PermissionError as exc:
+            # Fix audit 2026-05-25 (v1.5.3) Vague H : message clair Windows file lock.
+            # Avant : le catch fourre-tout ci-dessous loguait seulement "fs_error" sans
+            # indiquer a l'utilisateur que le film etait probablement ouvert dans VLC
+            # (cas Windows tres frequent : fichier .mkv lu/probe par un autre process).
+            err_msg = (
+                f"FICHIER VERROUILLE : '{folder.name}' est ouvert dans un autre logiciel "
+                f"(VLC ? lecteur video ? indexeur Windows ?). Ferme-le et relance l'apply "
+                f"pour ce film."
+            )
+            res.errors += 1
+            # Remonter le message a l'UI via ApplyResult.error_messages (cf core.py).
+            try:
+                res.error_messages.append(err_msg)
+            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+                pass
+            core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
+            _logger.error(
+                "apply: PermissionError row_id=%s folder=%s err=%s",
+                getattr(row, "row_id", "?"),
+                folder,
+                exc,
+            )
+            log("ERROR", err_msg)
+            continue
+        except (FileNotFoundError, FileExistsError, OSError) as exc:
             # Sprint 2 audit P0 #5 : separer FS errors (attendues, log warning) des
             # state errors (bug logique, log error). Avant : tout etait swallow sans
             # contexte. Le run continue (res.errors++) car un seul film en echec
@@ -1317,7 +1380,9 @@ def apply_single(
                     tmp.rename(folder)
                 except OSError as rollback_err:
                     # M4 : ne plus masquer silencieusement — le dossier reste en .__tmp_ren
-                    _logger.error(
+                    # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+                    # (l'exception originale est re-raise apres : le caller decidera de l'impact)
+                    _logger.warning(
                         "apply: rollback rename echoue %s -> %s: %s (dossier en etat .__tmp_ren)",
                         tmp,
                         folder,

@@ -94,6 +94,22 @@ def get_films_by_decade(api: Any, filters: Optional[Dict[str, Any]] = None) -> D
             "total": N,
         }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_films_by_decade_impl(api, filters)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_films_by_decade failed for filters=%s", filters)
+        return {
+            "ok": False,
+            "error": "films_by_decade_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger la distribution par decennie.",
+        }
+
+
+def _get_films_by_decade_impl(api: Any, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Implementation reelle de get_films_by_decade, sans wrap global (Vague G)."""
     resolved_rid = _resolve_latest_run_id(api)
     if not resolved_rid:
         return {"ok": True, "run_id": None, "by_decade": {}, "total": 0}

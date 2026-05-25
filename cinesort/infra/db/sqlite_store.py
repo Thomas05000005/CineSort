@@ -277,6 +277,22 @@ class _StoreBase:
             return "ok"
         try:
             with closing(self._connect()) as conn:
+                # Fix audit 2026-05-25 (v1.5.3) Vague H : flush WAL avant
+                # integrity_check. Sans checkpoint, des pages encore dans le
+                # WAL pouvaient masquer une corruption (ou en signaler une
+                # fantome) selon l'etat du -wal/-shm. RESTART force le merge
+                # complet vers le main file et reinitialise le WAL, donnant
+                # un check fiable et reproductible. Best-effort : si le
+                # checkpoint echoue (DB read-only, lock concurrent), on
+                # continue avec un warning plutot que de skip l'integrity.
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(RESTART)")
+                except sqlite3.OperationalError as exc:
+                    logger.warning(
+                        "wal_checkpoint failed before integrity_check (%s) — "
+                        "integrity check may use stale WAL pages",
+                        exc,
+                    )
                 row = conn.execute("PRAGMA integrity_check").fetchone()
                 status = str(row[0]) if row else "unknown"
         except sqlite3.DatabaseError as exc:

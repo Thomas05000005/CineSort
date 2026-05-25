@@ -1101,10 +1101,20 @@ def _save_section_cleanup(
     default_empty_folders_folder_name: str,
     default_residual_cleanup_folder_name: str,
 ) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : alias UI collection_folder -> backend collection_folder_name.
+    # L'UI envoie historiquement la cle "collection_folder" mais le backend lit
+    # "collection_folder_name", donc le champ etait silencieusement ecrase par
+    # le defaut (_Collection) a chaque save.
+    collection_folder_value = payload.get("collection_folder")
+    if collection_folder_value is None:
+        collection_folder_value = payload.get("collection_folder_name")
+    collection_folder_name = (
+        str(collection_folder_value or default_collection_folder_name).strip()
+        or default_collection_folder_name
+    )
     return {
         "collection_folder_enabled": to_bool(payload.get("collection_folder_enabled"), True),
-        "collection_folder_name": str(payload.get("collection_folder_name") or default_collection_folder_name).strip()
-        or default_collection_folder_name,
+        "collection_folder_name": collection_folder_name,
         "empty_folders_folder_name": str(
             payload.get("empty_folders_folder_name") or default_empty_folders_folder_name
         ).strip()

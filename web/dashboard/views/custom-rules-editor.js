@@ -240,7 +240,9 @@ async function _loadTemplates() {
   if (state.templates) return state.templates;
   try {
     const res = await apiPost("quality/get_custom_rules_templates");
-    state.templates = (res && res.templates) || [];
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+    const _payload = (res && res.data) || res || {};
+    state.templates = _payload.templates || [];
   } catch { state.templates = []; }
   return state.templates;
 }
@@ -284,13 +286,20 @@ function _importJson(file) {
 async function _saveRules() {
   const rules = _gatherAll();
   const v = await apiPost("quality/validate_custom_rules", { rules });
-  if (!v || !v.ok) { _setMsg("Règles invalides : " + ((v && v.errors) || []).join(" ; "), "error"); return; }
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+  const _vPayload = (v && v.data) || v || {};
+  if (!_vPayload.ok) { _setMsg("Règles invalides : " + (_vPayload.errors || []).join(" ; "), "error"); return; }
   const profRes = await apiPost("quality/get_quality_profile");
-  if (!profRes || !profRes.ok) { _setMsg("Profil qualité introuvable.", "error"); return; }
-  const profile = profRes.profile_json || {};
-  profile.custom_rules = v.normalized || rules;
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+  const _profPayload = (profRes && profRes.data) || profRes || {};
+  if (!_profPayload.ok) { _setMsg("Profil qualité introuvable.", "error"); return; }
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+  const profile = _profPayload.profile_json || {};
+  profile.custom_rules = _vPayload.normalized || rules;
   const save = await apiPost("quality/save_quality_profile", { profile_json: profile });
-  if (!save || !save.ok) { _setMsg("Sauvegarde impossible.", "error"); return; }
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+  const _savePayload = (save && save.data) || save || {};
+  if (!_savePayload.ok) { _setMsg("Sauvegarde impossible.", "error"); return; }
   _setMsg(`${rules.length} règles enregistrées.`, "success");
 }
 

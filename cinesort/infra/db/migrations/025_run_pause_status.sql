@@ -1,3 +1,8 @@
+-- @manager: disable_fk
+-- Fix audit 2026-05-25 (v1.5.3) Vague H : disable_fk pour eviter CASCADE des FK runs->enfants
+-- (marker en TETE du fichier — le manager le detecte aussi dans les commentaires plus bas,
+--  mais on le place ici pour visibilite immediate et robustesse a un futur nettoyage de doc.)
+--
 -- Migration 023 (V8-01 spec 08 Traitement) : etend la contrainte CHECK sur runs.status
 -- pour supporter PAUSED, SAVED, AWAITING_VALIDATION + ajoute colonne paused_at.
 --

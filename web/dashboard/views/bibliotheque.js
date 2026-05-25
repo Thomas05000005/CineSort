@@ -509,7 +509,14 @@ function _renderInfiniteSentinel() {
 
 function _renderBody() {
   if (_state.loading && _state.rows.length === 0) {
-    return `<div class="bibliotheque-section bibliotheque-loading">Chargement…</div>`;
+    // Fix audit 2026-05-25 (v1.5.3) Vague G : harmonise avec doublons.js,
+    // skeleton + header dedie pour lever l'ambiguite avec liste vide.
+    return `
+      <div class="bibliotheque-section">
+        <div class="bibliotheque-loading-header">⏳ Chargement de la bibliothèque…</div>
+        ${[1,2,3,4,5].map(() => `<div class="v5-skeleton" style="height:64px;margin:8px 0;"></div>`).join("")}
+      </div>
+    `;
   }
   if (_state.error) {
     return `<div class="bibliotheque-section bibliotheque-error">${escapeHtml(_state.error)}</div>`;
@@ -650,7 +657,9 @@ async function _fetchCounters() {
   delete filters.chips;
   try {
     const res = await apiPost("library/get_library_counters_by_chip", { filters });
-    if (!res || res.ok === false) return;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (!res || _payload.ok === false) return;
     const data = res.data || res;
     _state.counters = data.counts || {};
   } catch (_e) {
@@ -703,8 +712,10 @@ async function _fetchLibrary({ append = false } = {}) {
       },
       { signal },
     );
-    if (!res || res.ok === false) {
-      _state.error = (res && (res.message || res.error)) || "Erreur de chargement.";
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (!res || _payload.ok === false) {
+      _state.error = (res && (res.message || res.error)) || _payload.message || _payload.error || "Erreur de chargement.";
       _state.loading = false;
       _state.loadingMore = false;
       _render();
@@ -1333,10 +1344,12 @@ async function _bulkPerceptual(rowIds) {
       run_id: _runId,
       row_ids: rowIds,
     });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
       showToast({ type: "success", text: `Analyse perceptuelle lancée sur ${rowIds.length} films.` });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur perceptuelle." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur perceptuelle." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1346,11 +1359,13 @@ async function _bulkPerceptual(rowIds) {
 async function _bulkRescan(rowIds) {
   try {
     const res = await apiPost("run/rescan_rows_bulk", { row_ids: rowIds });
-    if (res && res.ok !== false) {
-      const jobId = res.job_id || (res.data && res.data.job_id) || "?";
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      const jobId = _payload.job_id || res.job_id || "?";
       showToast({ type: "success", text: `Re-scan lancé (job ${jobId}) sur ${rowIds.length} films.` });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur re-scan." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur re-scan." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1413,8 +1428,10 @@ async function _doExport(rowIds, fmt) {
       row_ids: rowIds,
       format: fmt,
     });
-    if (res && res.ok !== false) {
-      const filePath = res.file_path || (res.data && res.data.file_path);
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      const filePath = _payload.file_path || res.file_path;
       showToast({
         type: "success",
         text: filePath
@@ -1423,7 +1440,7 @@ async function _doExport(rowIds, fmt) {
         duration: 8000,
       });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur export." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur export." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1595,12 +1612,14 @@ function _promptSavePlaylist() {
 async function _doSavePlaylist(name, filters) {
   try {
     const res = await apiPost("library/save_smart_playlist", { name, filters });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
       showToast({ type: "success", text: `Playlist "${name}" enregistrée.` });
       await _fetchPlaylists();
       _render();
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur enregistrement." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur enregistrement." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1632,12 +1651,14 @@ function _confirmDeletePlaylist(playlistId) {
 async function _doDeletePlaylist(playlistId) {
   try {
     const res = await apiPost("library/delete_smart_playlist", { playlist_id: playlistId });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
       showToast({ type: "success", text: "Playlist supprimée." });
       await _fetchPlaylists();
       _render();
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur suppression." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur suppression." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1647,8 +1668,10 @@ async function _doDeletePlaylist(playlistId) {
 async function _fetchPlaylists() {
   try {
     const res = await apiPost("library/get_smart_playlists", {});
-    if (res && res.ok !== false) {
-      _state.playlists = Array.isArray(res.playlists) ? res.playlists : [];
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      _state.playlists = Array.isArray(_payload.playlists) ? _payload.playlists : (Array.isArray(res.playlists) ? res.playlists : []);
       _state.playlistsLoaded = true;
     } else {
       _state.playlists = [];

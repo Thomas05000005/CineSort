@@ -567,7 +567,11 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             "runs_history": runs_history,
             "pending_undo": pending_undo,
         }
-    except (OSError, TypeError, ValueError) as exc:
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter
+    # HTTP 500 sur RuntimeError/MemoryError/etc (cas run obsolete + DB locked).
+    # On preserve le message historique (test_dashboard verifie l'egalite stricte)
+    # et on ajoute user_message + error pour le contrat homogene Vague F.
+    except Exception as exc:  # noqa: BLE001 - boundary top-level pour endpoint accueil
         api.log_api_exception(
             "get_dashboard",
             exc,
@@ -576,9 +580,17 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             store=store if "store" in locals() else None,
             extra={"requested_run_id": target_run},
         )
-        return _err_response(
-            "Impossible de charger la synthese du run.", category="runtime", level="warning", log_module=__name__
-        )
+        logger.exception("get_dashboard failed for run_id=%s", target_run)
+        return {
+            "ok": False,
+            "error": "dashboard_load_failed",
+            "message": "Impossible de charger la synthese du run.",
+            "user_message": (
+                "Impossible de charger la synthese du run. Relance un scan ou "
+                "redemarre l'app."
+            ),
+            "detail": str(exc),
+        }
 
 
 def _load_report_context(api: Any, run_id: str) -> Optional[Tuple[Any, Any, list, Any, str, Dict[str, Any]]]:

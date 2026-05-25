@@ -1484,12 +1484,30 @@ def _apply_subtitle_detection(
     result_row: "PlanRow",
     *,
     subtitle_expected_languages: Optional[List[str]],
+    normalized_probe: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Enrichit la PlanRow avec les infos sous-titres + warning flags associes."""
+    """Enrichit la PlanRow avec les infos sous-titres + warning flags associes.
+
+    Fix Vague F 2026-05-25 (v1.5.3) : si un `normalized_probe` est fourni
+    (NormalizedProbe.to_dict() ou dict equivalent), ses pistes `subtitles`
+    embarquees sont prises en compte → plus de faux "subtitle_missing_fr"
+    pour les MKV avec FR embarque.
+    """
     if subtitle_expected_languages is None:
         return
 
-    sub_report = build_subtitle_report(folder, video, subtitle_expected_languages)
+    embedded_subs: Optional[List[Dict[str, Any]]] = None
+    if isinstance(normalized_probe, dict):
+        raw_subs = normalized_probe.get("subtitles")
+        if isinstance(raw_subs, list):
+            embedded_subs = raw_subs
+
+    sub_report = build_subtitle_report(
+        folder,
+        video,
+        subtitle_expected_languages,
+        embedded_subtitles=embedded_subs,
+    )
     result_row.subtitle_count = sub_report.count
     result_row.subtitle_languages = list(sub_report.languages)
     result_row.subtitle_formats = list(sub_report.formats)

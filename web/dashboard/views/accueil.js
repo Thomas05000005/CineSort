@@ -243,9 +243,12 @@ function _pingCacheSet(key, ok) {
 /** Ping une seule intégration. Retourne true (ok) / false (offline) ou null
  *  si on ne peut pas la tester (ex : pas d'endpoint dispo, ou pas configurée).
  */
-async function _pingIntegration(key, settings) {
+async function _pingIntegration(key, settings, signal) {
   const cached = _pingCacheGet(key);
   if (cached !== undefined) return cached;
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : si la vue est deja detached avant
+  // de meme lancer la requete, on annule (evite fetch inutile + DOM detached).
+  if (signal && signal.aborted) return null;
   // Fix audit 2026-05-24 : avant, les pings Jellyfin/Plex/Radarr passaient un
   // objet vide {} aux facades integrations/test_*_connection. Or ces facades
   // attendent { url, api_key, timeout_s } et retournent generalement une
@@ -256,37 +259,44 @@ async function _pingIntegration(key, settings) {
   // ses propres settings persistes (cf doc facades).
   const s = settings || {};
   try {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : signal abort propage a apiPost
+    // pour annuler les pings en cours si la vue est demontee pendant l'attente.
+    const _opts = signal ? { signal } : {};
     let res = null;
     if (key === "tmdb") {
       const apiKey = String(s.tmdb_api_key || "");
       if (!apiKey) return null;
-      res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 });
+      res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 }, _opts);
     } else if (key === "jellyfin") {
       const url = String(s.jellyfin_url || "");
       const apiKey = String(s.jellyfin_api_key || "");
       const payload = (url || apiKey)
         ? { url, api_key: apiKey, timeout_s: 5 }
         : {}; // settings vides : backend doit lire ses propres settings persistes
-      res = await apiPost("integrations/test_jellyfin_connection", payload);
+      res = await apiPost("integrations/test_jellyfin_connection", payload, _opts);
     } else if (key === "plex") {
       const url = String(s.plex_url || "");
       const token = String(s.plex_token || "");
       const payload = (url || token)
         ? { url, api_key: token, timeout_s: 5 }
         : {};
-      res = await apiPost("integrations/test_plex_connection", payload);
+      res = await apiPost("integrations/test_plex_connection", payload, _opts);
     } else if (key === "radarr") {
       const url = String(s.radarr_url || "");
       const apiKey = String(s.radarr_api_key || "");
       const payload = (url || apiKey)
         ? { url, api_key: apiKey, timeout_s: 5 }
         : {};
-      res = await apiPost("integrations/test_radarr_connection", payload);
+      res = await apiPost("integrations/test_radarr_connection", payload, _opts);
     } else if (key === "omdb") {
       const apiKey = String(s.omdb_api_key || "");
-      res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 });
+      res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 }, _opts);
     }
-    const ok = !!(res && (res.ok === true || (res.data && res.data.ok === true) || (res.ok !== false && res.data && res.data.connected === true)));
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+    // apiPost retourne { ok, status, data: {...payload backend...} }. Le ok du
+    // payload backend est dans res.data.ok ; res.ok est le ok HTTP de l'enveloppe.
+    const _payload = (res && res.data) || res || {};
+    const ok = !!(_payload.ok === true || _payload.connected === true);
     _pingCacheSet(key, ok);
     return ok;
   } catch (_err) {
@@ -298,7 +308,7 @@ async function _pingIntegration(key, settings) {
 /** Lance les pings en arrière-plan, met à jour le DOM au fil des résultats.
  *  N'attend pas que les pings se terminent (fire-and-forget).
  */
-function _runEnvironmentPingsBackground(container, settings) {
+function _runEnvironmentPingsBackground(container, settings, signal) {
   for (const it of _INTEGRATIONS) {
     const val = (settings || {})[it.settingKey];
     const configured = (typeof val === "string" && val.trim() !== "") || val === true;
@@ -309,15 +319,21 @@ function _runEnvironmentPingsBackground(container, settings) {
       _applyPingResultToDom(container, it.key, cached);
       continue;
     }
-    // Fire-and-forget : on update le DOM quand le ping retourne.
-    _pingIntegration(it.key, settings).then((ok) => {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : fire-and-forget AVEC signal abort.
+    // Si l'utilisateur navigue avant la fin du ping, _abortController.abort()
+    // annule la requete ; _applyPingResultToDom verifie isConnected en plus.
+    _pingIntegration(it.key, settings, signal).then((ok) => {
       if (ok === null) return;
+      if (signal && signal.aborted) return;
       _applyPingResultToDom(container, it.key, ok);
-    }).catch(() => { /* déjà cache à false */ });
+    }).catch(() => { /* deja cache a false, ou abort */ });
   }
 }
 
 function _applyPingResultToDom(container, key, ok) {
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : guard DOM detache. Sans ce check,
+  // un ping fire-and-forget qui revient apres navigation manipulerait un
+  // conteneur orphelin (querySelector OK mais aucun effet visible + warnings).
   if (!container || !container.isConnected) return;
   const pill = container.querySelector(`[data-accueil-env-bar] [data-integration="${key}"]`);
   if (!pill) return;
@@ -928,9 +944,13 @@ async function _triggerStartPlan(container, btn) {
   }
   try {
     const res = await apiPost("run/start_plan", { settings: _currentSettings });
-    const data = res && (res.data || res);
-    if (res && res.ok === false) {
-      const msg = (res.message || res.error || "Échec du démarrage.").toString();
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+    // L'enveloppe apiPost a un res.ok HTTP (toujours true sur 2xx) ; le ok
+    // metier du backend est dans res.data.ok. Avant, on confondait les deux
+    // et un start_plan en erreur metier (res.data.ok=false) passait silencieux.
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok === false) {
+      const msg = (_payload.message || _payload.error || "Échec du démarrage.").toString();
       _showErrorBanner(container, msg);
       if (btn) {
         btn.disabled = false;
@@ -938,7 +958,7 @@ async function _triggerStartPlan(container, btn) {
       }
       return;
     }
-    const runId = data && (data.run_id || data.runId);
+    const runId = _payload.run_id || _payload.runId;
     if (runId) {
       // Démarrer le polling pour transitionner la card vers "scan en cours".
       _startScanPolling(container);
@@ -959,6 +979,7 @@ async function _triggerStartPlan(container, btn) {
 }
 
 function _showErrorBanner(container, msg) {
+  if (!container || !container.isConnected) return;
   try {
     let banner = container.querySelector(".accueil-scan-error-banner");
     if (!banner) {
@@ -988,8 +1009,11 @@ function _startScanPolling(container) {
     }
     try {
       const res = await apiPost("run/get_dashboard", { run_id: "latest" });
-      if (!res || res.ok === false) return;
-      const payload = res.data || res;
+      // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+      // Le polling get_dashboard peut renvoyer ok=false metier (run perdu, db
+      // inaccessible) alors que l'HTTP est 200. On lit le ok du payload.
+      const payload = (res && res.data) || res || {};
+      if (payload.ok === false) return;
       const scanProgress = _extractScanProgress(payload);
       const ctaSection = _pollContainer.querySelector(".accueil-cta-scan");
       if (!ctaSection) return;
@@ -1001,8 +1025,12 @@ function _startScanPolling(container) {
         _rebindCtaScanEvents(_pollContainer);
       } else {
         // Run terminé : full re-render via initAccueil.
+        // Fix audit 2026-05-25 (v1.5.3) Vague F : sauve reference DOM avant nullification
+        const _savedContainer = _pollContainer;
         _stopScanPolling();
-        initAccueil(_pollContainer);
+        if (_savedContainer && _savedContainer.isConnected) {
+          initAccueil(_savedContainer);
+        }
       }
     } catch (_err) { /* silencieux */ }
   };
@@ -1264,7 +1292,9 @@ export async function initAccueil(container) {
 
   // Phase 5 : lance les pings en arrière-plan pour détecter les intégrations
   // hors-ligne. Les pastilles passent à ⚠ orange au fil des résultats.
-  _runEnvironmentPingsBackground(container, settings);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : on transmet signal pour cancel
+  // propre en cas de navigation pendant l'attente d'un ping reseau.
+  _runEnvironmentPingsBackground(container, settings, signal);
 
   // Phase 5 : si un scan est actif au boot, démarrer le polling pour refresh.
   const initialScan = _extractScanProgress(dashboardData);

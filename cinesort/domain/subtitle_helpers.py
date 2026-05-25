@@ -1,14 +1,17 @@
 """Detection et inventaire des sous-titres externes a cote des videos.
 
 Pas de renommage — les sous-titres suivent le dossier lors du move/rename.
-Detection de langue par suffixe de nom de fichier uniquement (pas de lecture interne).
+Detection de langue par suffixe de nom de fichier (sous-titres EXTERNES) OU
+via les pistes EMBARQUEES dans le conteneur (MKV/MP4) si un probe normalise
+est fourni — fix Vague F 2026-05-25 (v1.5.3) : 853 films flagges a tort en
+"subtitle_missing_fr" parce que la detection ignorait les pistes embarquees.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 
 # -- Extensions sous-titres -------------------------------------------
@@ -219,18 +222,36 @@ def match_subtitles_to_video(
     return matched
 
 
+def _normalize_iso639(raw: str) -> str:
+    """Normalise un tag de langue ISO 639-1/-2/-3 vers ISO 639-1.
+
+    Vague F 2026-05-25 (v1.5.3) : utilise _LANG_MAP pour aligner la detection
+    des pistes embarquees (ex: ffprobe expose `fra`, `fre`, MediaInfo `fr`).
+    Renvoie "" si non resolvable ou tag special (forced/sdh/...).
+    """
+    return _LANG_MAP.get((raw or "").strip().lower(), "")
+
+
 def build_subtitle_report(
     folder: Path,
     video: Path,
     expected_languages: Optional[List[str]] = None,
+    *,
+    embedded_subtitles: Optional[List[Dict[str, Any]]] = None,
 ) -> SubtitleReport:
     """Construit le rapport sous-titres pour une video dans un dossier.
 
-    1. Trouve tous les sous-titres du dossier
-    2. Matche ceux qui correspondent a la video
-    3. Detecte les langues
-    4. Verifie les langues attendues
-    5. Detecte les orphelins et doublons
+    1. Trouve tous les sous-titres EXTERNES (fichiers .srt/.ass/.sub a cote)
+    2. Matche ceux qui correspondent a la video (par stem)
+    3. Detecte les langues EXTERNES (suffixe) + EMBARQUEES (probe ffprobe/mediainfo)
+    4. Verifie les langues attendues vs union(externes, embarquees)
+    5. Detecte les orphelins (externes) et doublons (externes)
+
+    Fix Vague F 2026-05-25 (v1.5.3) : `embedded_subtitles` (optionnel, default
+    None pour backward-compat) est la liste `normalized_probe["subtitles"]`,
+    chaque item est `{"index": int, "language": str|None, "forced": bool}`.
+    Les langues embarquees fusionnent avec les externes pour le calcul des
+    langues manquantes — fixant les 853 films flagges a tort.
     """
     all_subs = find_subtitles_in_folder(folder)
     video_stem = video.stem
@@ -240,15 +261,36 @@ def build_subtitle_report(
     matched_filenames = {s.filename.lower() for s in matched}
     orphan_count = sum(1 for s in all_subs if s.filename.lower() not in matched_filenames)
 
-    # Langues et formats
-    languages = sorted({s.language for s in matched if s.language})
+    # Langues externes (fichiers .srt/.ass/... a cote du .mkv)
+    external_languages: Set[str] = {s.language for s in matched if s.language}
+
+    # Langues embarquees (pistes subtitle dans le conteneur)
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : auparavant ignorees → faux
+    # positifs "subtitle_missing_fr" sur 853 films avec FR embarque.
+    embedded_languages: Set[str] = set()
+    if embedded_subtitles:
+        for track in embedded_subtitles:
+            if not isinstance(track, dict):
+                continue
+            raw_lang = (track.get("language") or "").strip().lower()
+            if not raw_lang:
+                # piste sans tag de langue → ignoree (ne pas inventer)
+                continue
+            normalized = _normalize_iso639(raw_lang)
+            if normalized:
+                embedded_languages.add(normalized)
+
+    all_languages = external_languages | embedded_languages
+
+    languages = sorted(all_languages)
     formats = sorted({s.ext for s in matched})
 
-    # Langues attendues manquantes
+    # Langues attendues manquantes : verifiees sur l'UNION externes+embarquees
     expected = [lang.lower().strip() for lang in (expected_languages or []) if lang]
-    missing = [lang for lang in expected if lang not in languages]
+    missing = [lang for lang in expected if lang not in all_languages]
 
-    # Doublons de langue
+    # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
+    # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).
     lang_counts: Dict[str, int] = {}
     for s in matched:
         if s.language:

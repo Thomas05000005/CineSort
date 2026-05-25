@@ -181,6 +181,29 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
         tmdb_id: int,
       }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500
+    # quand le run devient obsolete ou la base inaccessible. On retourne un
+    # contrat JSON {ok: False, error, user_message} que le frontend peut afficher.
+    try:
+        return _get_film_full_impl(api, run_id, row_id)
+    except Exception as exc:  # noqa: BLE001 - on doit attraper tout pour eviter HTTP 500
+        logger.exception("get_film_full failed for run_id=%s row_id=%s", run_id, row_id)
+        return {
+            "ok": False,
+            "error": "film_load_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger ce film (run obsolete ou base inaccessible). "
+                "Relance un scan ou redemarre l'app."
+            ),
+        }
+
+
+def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """Implementation reelle de get_film_full, sans wrap global.
+
+    Extrait pour faciliter le wrap try/except dans get_film_full (Vague F Fix 3).
+    """
     resolved_rid = _resolve_run_id(api, run_id)
     if not resolved_rid:
         return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)

@@ -19,6 +19,24 @@ logger = logging.getLogger(__name__)
 
 @requires_valid_run_id
 def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint appele par la vue Traitement (step Apply / validation).
+    try:
+        return _get_plan_impl(api, run_id, normalize_user_path=normalize_user_path)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_plan failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "plan_load_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger le plan du run. Le fichier est peut-etre corrompu."
+            ),
+        }
+
+
+def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
     logger.debug("api: get_plan run_id=%s", run_id)
     rs = api._get_run(run_id)
     if rs:
@@ -102,19 +120,34 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
 
 @requires_valid_run_id
 def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
-    rs = api._get_run(run_id)
-    if not rs:
-        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id)
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : action destructive non-protegee
+    # provoquait HTTP 500 + run zombie. Wrap global pour garantir une reponse.
+    try:
+        rs = api._get_run(run_id)
+        if not rs:
+            return _err_response(
+                "Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id
+            )
 
-    accepted = rs.runner.request_cancel(run_id)
-    snap = rs.runner.get_status(run_id)
-    return {
-        "ok": bool(accepted),
-        "run_id": run_id,
-        "status": snap.status.value if snap else None,
-        "cancel_requested": bool(snap.cancel_requested) if snap else bool(accepted),
-        "done": bool(snap.done) if snap else False,
-    }
+        accepted = rs.runner.request_cancel(run_id)
+        snap = rs.runner.get_status(run_id)
+        return {
+            "ok": bool(accepted),
+            "run_id": run_id,
+            "status": snap.status.value if snap else None,
+            "cancel_requested": bool(snap.cancel_requested) if snap else bool(accepted),
+            "done": bool(snap.done) if snap else False,
+        }
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("cancel_run failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "cancel_run_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible d'annuler le run. Il continuera en arriere-plan."
+            ),
+        }
 
 
 def _store_for_run(api: Any, run_id: str) -> Tuple[Dict[str, Any], Any] | None:
@@ -138,6 +171,24 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
     Fallback gracieux : si certaines tables/JSON ne sont pas disponibles, les
     champs concernes valent 0 / [] / None plutot que d'echouer.
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _get_history_stats_impl(api, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_history_stats failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "history_stats_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger les details du run. Verifie l'historique "
+                "ou redemarre l'app."
+            ),
+        }
+
+
+def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
+    """Implementation reelle de get_history_stats, sans wrap global (Vague F)."""
     logger.debug("api: get_history_stats run_id=%s", run_id)
     found = _store_for_run(api, run_id)
     if not found:
@@ -355,15 +406,44 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if not candidate.exists():
             return _err_response("Chemin introuvable.", category="resource", level="warning", log_module=__name__)
 
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser les symlinks pour
+        # eviter path traversal. Sans ce check, candidate (non-resolu) servait
+        # a os.startfile() alors que la verification d'autorisation portait
+        # sur resolved_path : un symlink dans une base autorisee permettait
+        # d'ouvrir n'importe quel chemin du systeme.
+        if candidate.is_symlink():
+            logger.warning("open_path refuse : symlink detecte %s", candidate)
+            return _err_response(
+                "Les liens symboliques ne sont pas autorises.",
+                category="permission",
+                level="warning",
+                log_module=__name__,
+            )
+
         settings = api.settings.get_settings()
         root_raw = str(settings.get("root") or "").strip()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        open_target = candidate
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
+        # contient un symlink dans son chemin (ex: parent symlink).
+        if str(resolved_path) != str(candidate.absolute()):
+            logger.warning(
+                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
+                candidate,
+                resolved_path,
+            )
+            return _err_response(
+                "Les liens symboliques ne sont pas autorises.",
+                category="permission",
+                level="warning",
+                log_module=__name__,
+            )
+
+        open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
-            open_target = candidate.parent
+            open_target = resolved_path.parent
             resolved_to_check = resolved_path.parent
         elif not resolved_path.is_dir():
             return _err_response(
@@ -385,6 +465,9 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if not allowed:
             return _err_response("Chemin non autorise.", category="permission", level="warning", log_module=__name__)
 
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : utiliser le chemin resolu
+        # (deja valide ci-dessus) plutot que candidate, pour eviter qu'un
+        # symlink contourne la verification d'autorisation.
         os.startfile(str(open_target))  # type: ignore[attr-defined]
         return {"ok": True}
     except (OSError, TypeError, ValueError) as exc:

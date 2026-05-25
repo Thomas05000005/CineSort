@@ -1860,11 +1860,14 @@ function _bindFields(container) {
       }
       try {
         const res = await apiPost("runtime/get_update_info", { force_refresh: true });
-        const ok = !!(res && res.ok !== false);
-        const data = (res && res.data) || {};
+        // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+        const _payload = (res && res.data) || res || {};
+        const ok = !!(_payload.ok !== false);
+        const data = _payload;
         if (!ok) {
           if (resultEl) {
-            resultEl.textContent = `✗ ${res?.message || res?.error || "Echec du check"}`;
+            // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+            resultEl.textContent = `✗ ${_payload?.message || res?.error || "Echec du check"}`;
             resultEl.className = "parametres-test-result parametres-test-result--error";
           }
           return;

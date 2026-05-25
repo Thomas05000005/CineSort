@@ -157,6 +157,21 @@ def _generate_month_range(latest_month: str, n_months: int) -> List[str]:
 
 
 def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_library_timeline_impl(api, months, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_library_timeline failed for months=%s run_id=%s", months, run_id)
+        return {
+            "ok": False,
+            "error": "timeline_load_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger la timeline.",
+        }
+
+
+def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
     """Retourne le nombre de films ajoutes par mois pour les N derniers mois.
 
     Args:

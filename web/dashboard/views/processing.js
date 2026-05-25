@@ -500,14 +500,20 @@ async function _initReviewStep(panel) {
   try {
     const res = await apiPost("run/load_validation", { run_id: _state.currentRunId });
     const body = panel.querySelector("#processing-review-body");
-    if (!res.ok) {
-      const msg = res.data?.message || res.error || "Aucune donnée de review.";
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+    const _payload = (res && res.data) || res || {};
+    if (!_payload.ok) {
+      const msg = _payload.message || res.error || "Aucune donnée de review.";
       if (body) {
         // V2-07 : EmptyState pour les erreurs / donnees manquantes.
+        // Fix audit 2026-05-25 (v1.5.3) Vague H : ne pas pre-echapper msg car
+        // buildEmptyState() echappe deja chaque champ via escapeHtml() (cf.
+        // components/empty-state.js). Double-echappement -> affichage corrompu
+        // (ex: "<" devient "&amp;lt;"). XSS toujours bloque par escapeHtml().
         body.innerHTML = buildEmptyState({
           icon: "alert",
           title: "Donnees indisponibles",
-          message: _esc(msg),
+          message: String(msg ?? ""),
         });
       }
       return;

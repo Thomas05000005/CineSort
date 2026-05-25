@@ -74,6 +74,15 @@ let _scanOptions = {
 };
 let _activeContainer = null;
 let _doublonsMounted = false;
+// Fix audit 2026-05-25 (v1.5.3) Vague G Fix 2 : flag d'idempotence du binding.
+// Avant : _bindEvents() rattachait addEventListener() à chaque _renderInPlace()
+// (polling 2-5s + chaque action UI) -> N listeners accumulés sur les MÊMES
+// boutons (Pause, Cancel, Apply…) -> 1 clic = N appels API -> doubles annulations,
+// doubles toasts, race conditions sur les state setters. Avec event delegation
+// (un seul listener sur _container qui dispatch via event.target.closest),
+// _renderInPlace() peut innerHTML= toute la vue sans risque : le listener vit
+// sur le container parent, pas sur les enfants recrées.
+let _eventsBound = false;
 let _verifFilter = "all";
 let _validationPlan = null; // { rows: [...] }
 let _applyOptions = { dry_run: true, export_csv: false, sync_jellyfin: false, quarantine: false };
@@ -722,6 +731,13 @@ function _updateUndoCountdownLabels() {
   }
 }
 
+// Fix audit 2026-05-25 (v1.5.3) Vague G Fix 1 : idempotence du countdown undo.
+// Sans le _stopUndoCountdown() initial, un appel répété à _startUndoCountdown()
+// (ex. remount, hashchange brutal, re-binding) lancerait un 2eme setInterval
+// alors que le 1er continue de tourner -> double tick -> badge "X restant" se
+// rafraichit 2 fois par cycle + leak. Le guard ci-dessous clear l'ancien
+// timer avant d'en créer un nouveau. Le cleanup au unmount est déjà couvert
+// dans unmountTraitement() ligne ~1510 via _stopUndoCountdown().
 function _startUndoCountdown() {
   _stopUndoCountdown();
   _undoCountdownTimer = setInterval(_updateUndoCountdownLabels, UNDO_COUNTDOWN_INTERVAL_MS);
@@ -858,6 +874,48 @@ function _onUndoExecute() {
 
 /* --- Etape 5 : Apply (spec §3.5) --- */
 
+// Fix audit 2026-05-25 (v1.5.3) Vague F : formattage explicite des entries
+// preview apply. apply_core.py ne renomme JAMAIS les fichiers video : il
+// renomme uniquement le dossier parent. Affichage src->dst brut suggerait
+// a tort un renommage du fichier.
+function _formatPreviewEntry(entry) {
+  const action = String(entry?.action_summary || "");
+  const folderOld = escapeHtml(String(entry?.folder_old_name || ""));
+  const folderNew = escapeHtml(String(entry?.folder_new_name || ""));
+  const videoName = escapeHtml(String(entry?.video_filename || ""));
+  if (action === "folder_rename") {
+    return `<div class="apply-preview-entry">
+      <span>Dossier renomme :</span>
+      <code>${folderOld}</code> -> <code>${folderNew}</code>
+      <div class="apply-preview-note">Fichier conserve : <code>${videoName}</code></div>
+    </div>`;
+  }
+  if (action === "video_move" || action === "folder_rename_and_video_move") {
+    return `<div class="apply-preview-entry">
+      <span>Video deplacee :</span>
+      <code>${folderOld}/${videoName}</code> -> <code>${folderNew}/${videoName}</code>
+      <div class="apply-preview-note">Nom du fichier conserve.</div>
+    </div>`;
+  }
+  if (action === "video_rename_tv") {
+    return `<div class="apply-preview-entry">
+      <span>Episode TV renomme :</span>
+      <code>${folderOld}/${videoName}</code> -> <code>${folderNew}/${escapeHtml(String(entry?.dst_filename || ""))}</code>
+    </div>`;
+  }
+  // Retro-compat : si l'entry n'a pas d'action_summary (ex. row simple),
+  // on affiche le titre/annee comme fallback prudent en signalant que le
+  // fichier video conserve son nom.
+  const src = escapeHtml(String(entry?.src_path || entry?.video || ""));
+  const dst = escapeHtml(String(entry?.dst_path || ""));
+  if (src && dst) {
+    return `<div class="apply-preview-entry">
+      <code>${src}</code> -> <code>${dst}</code>
+    </div>`;
+  }
+  return `<div class="apply-preview-entry">${src || dst || "&mdash;"}</div>`;
+}
+
 function _renderApplyStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= 85);
@@ -865,13 +923,27 @@ function _renderApplyStep() {
   const moves = (_runInfo?.duplicatesGroups || 0) * 2;
   const deletions = 0; // placeholder pour reject deletions
 
-  const preview = approved.slice(0, 3).map((r) => `
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : afficher dossier_avant -> dossier_apres
+  // et indiquer explicitement que le nom du fichier video est conserve par
+  // apply_core (contrainte projet : "JAMAIS modifier le titre des films").
+  const preview = approved.slice(0, 3).map((r) => {
+    const videoName = String(r.video || "");
+    const folderOld = String(r.folder || r.path || "");
+    const proposedTitle = String(r.proposed_title || "");
+    const proposedYear = String(r.proposed_year || "");
+    const folderNew = proposedTitle ? `${proposedTitle}${proposedYear ? " (" + proposedYear + ")" : ""}` : folderOld;
+    return `
     <li>
-      <code class="traitement-apply-before">${escapeHtml(r.video || r.path || r.proposed_title || "—")}</code>
-      <span class="traitement-apply-arrow">→</span>
-      <code class="traitement-apply-after">${escapeHtml(r.proposed_title || "—")} (${escapeHtml(String(r.proposed_year || ""))})</code>
+      <div class="apply-preview-entry">
+        <span>Dossier renomme :</span>
+        <code class="traitement-apply-before">${escapeHtml(folderOld)}</code>
+        <span class="traitement-apply-arrow">-></span>
+        <code class="traitement-apply-after">${escapeHtml(folderNew)}</code>
+        ${videoName ? `<div class="apply-preview-note">Fichier conserve : <code>${escapeHtml(videoName)}</code></div>` : ""}
+      </div>
     </li>
-  `).join("");
+  `;
+  }).join("");
 
   return `
     <section class="traitement-panel" aria-labelledby="traitement-panel-title">
@@ -929,9 +1001,14 @@ function _renderApplyStep() {
 
 function _renderStepPanel(stepId) {
   if (_loading) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague G Fix 3 : loading visible avec skeleton.
+    // Avant : "Chargement de l'état du run…" sur une ligne -> écran quasi-vide
+    // pendant 3-5s -> utilisateur confus (vue cassée ? backend lent ?). Pattern
+    // emprunté à doublons.js:393 qui combine header + skeletons + détail attente.
     return `
       <section class="traitement-panel">
-        <p class="traitement-placeholder">Chargement de l'état du run…</p>
+        <div class="traitement-loading-header">⏳ Chargement de l'état du run…</div>
+        ${[1, 2, 3].map(() => `<div class="v5-skeleton" style="height:48px;margin:8px 0;"></div>`).join("")}
       </section>
     `;
   }
@@ -1219,157 +1296,205 @@ async function _handleApplyNow() {
 
 /* --- Event binding --- */
 
-function _bindEvents(container) {
-  // Breadcrumb
-  container.querySelectorAll("[data-traitement-step]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      const stepId = btn.dataset.traitementStep;
-      _currentStep = stepId;
-      _writeStep(stepId);
-      _renderInPlace();
-    });
-  });
+// Fix audit 2026-05-25 (v1.5.3) Vague G Fix 2 : event delegation centralisée.
+// Avant : 7 boucles forEach(addEventListener) à chaque _renderInPlace() ->
+// listeners empilés sur les boutons recréés (innerHTML replace ne nettoie pas
+// les anciens handlers de leurs ancêtres si on rattache à chaque tour).
+// Maintenant : 2 listeners (click + change) attachés UNE seule fois au container
+// parent. Le dispatch utilise event.target.closest() qui survit aux re-renders
+// puisque le container lui-même n'est jamais détruit avant unmount.
+function _onContainerClick(event) {
+  const container = _activeContainer;
+  if (!container) return;
 
-  // Copy run ID
-  const copyBtn = container.querySelector("[data-traitement-copy-runid]");
-  if (copyBtn) {
-    copyBtn.addEventListener("click", async () => {
-      if (!_runInfo?.runId) return;
-      try {
-        await navigator.clipboard.writeText(_runInfo.runId);
-        showToast({ type: "info", text: "Run ID copié dans le presse-papier." });
-      } catch {
-        /* ignore */
-      }
-    });
+  // Breadcrumb (étapes du workflow)
+  const stepBtn = event.target.closest("[data-traitement-step]");
+  if (stepBtn && container.contains(stepBtn)) {
+    if (stepBtn.disabled) return;
+    const stepId = stepBtn.dataset.traitementStep;
+    _currentStep = stepId;
+    _writeStep(stepId);
+    _renderInPlace();
+    return;
   }
 
-  // Header actions
-  container.querySelectorAll("[data-traitement-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.dataset.traitementAction;
-      if (["pause", "resume", "save", "cancel"].includes(action)) {
-        _handleHeaderAction(action);
-      } else if (action === "start-scan") {
-        _handleScanStart();
-      } else if (action === "view-logs") {
-        showToast({ type: "info", text: "Ouverture du journal complet…" });
-        window.location.hash = "#/logs";
-      } else if (action === "go-validation") {
-        _currentStep = "validation";
-        _writeStep("validation");
-        _renderInPlace();
-      } else if (action === "go-doublons") {
-        _currentStep = "doublons";
-        _writeStep("doublons");
-        _renderInPlace();
-      } else if (action === "go-apply") {
-        _currentStep = "apply";
-        _writeStep("apply");
-        _renderInPlace();
-      } else if (action === "reload-plan") {
-        _loadPlan().then(() => _renderInPlace());
-      } else if (action === "save-validation") {
-        _handleSaveValidation();
-      } else if (action === "bulk-approve-sure") {
-        _handleBulkApprove("sure");
-      } else if (action === "preset-no-alert") {
-        _handleBulkApprove("no-alert");
-      } else if (action === "preset-platinum-gold") {
-        _handleBulkApprove("platinum-gold");
-      } else if (action === "apply-now") {
-        _handleApplyNow();
-      } else if (action === "undo-preview") {
-        _onUndoPreview();
-      }
-    });
-  });
+  // Copy run ID
+  const copyBtn = event.target.closest("[data-traitement-copy-runid]");
+  if (copyBtn && container.contains(copyBtn)) {
+    if (!_runInfo?.runId) return;
+    navigator.clipboard.writeText(_runInfo.runId).then(
+      () => showToast({ type: "info", text: "Run ID copié dans le presse-papier." }),
+      () => { /* ignore */ },
+    );
+    return;
+  }
 
-  // Scan options
-  container.querySelectorAll("[data-scan-opt]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const key = input.dataset.scanOpt;
-      if (input.type === "checkbox") _scanOptions[key] = input.checked;
-      else if (input.type === "range") {
-        _scanOptions[key] = Number(input.value);
-        const lbl = container.querySelector("[data-scan-parallelism-label]");
-        if (lbl) lbl.textContent = String(_scanOptions[key]);
+  // Header + step generic actions (data-traitement-action)
+  const actionBtn = event.target.closest("[data-traitement-action]");
+  if (actionBtn && container.contains(actionBtn)) {
+    const action = actionBtn.dataset.traitementAction;
+    if (["pause", "resume", "save", "cancel"].includes(action)) {
+      _handleHeaderAction(action);
+    } else if (action === "start-scan") {
+      _handleScanStart();
+    } else if (action === "view-logs") {
+      showToast({ type: "info", text: "Ouverture du journal complet…" });
+      window.location.hash = "#/logs";
+    } else if (action === "go-validation") {
+      _currentStep = "validation";
+      _writeStep("validation");
+      _renderInPlace();
+    } else if (action === "go-doublons") {
+      _currentStep = "doublons";
+      _writeStep("doublons");
+      _renderInPlace();
+    } else if (action === "go-apply") {
+      // Fix audit 2026-05-25 (v1.5.3) Vague G Fix 4 : confirmation si doublons
+      // non décidés. Avant : transition Doublons->Apply silencieuse -> appliquait
+      // les "défauts" (le 1er fichier de chaque groupe gagne par convention) sans
+      // que l'utilisateur en soit informé -> suppressions non voulues sur des
+      // groupes qu'il n'avait pas encore arbitrés.
+      // L'état pendingCount est local au module doublons.js (non exporté), on
+      // lit donc le DOM du mount : le badge ".doublons-decided-count" affiche
+      // "X décidés / Y" => on calcule pending depuis le DOM si présent.
+      const pendingDups = _readDoublonsPendingFromDom();
+      if (pendingDups > 0) {
+        const confirmed = window.confirm(
+          `Il reste ${pendingDups} doublon${pendingDups > 1 ? "s" : ""} non décidé${pendingDups > 1 ? "s" : ""}. ` +
+          `Les choix par défaut seront appliqués. Continuer ?`,
+        );
+        if (!confirmed) return;
       }
-    });
-  });
+      _currentStep = "apply";
+      _writeStep("apply");
+      _renderInPlace();
+    } else if (action === "reload-plan") {
+      _loadPlan().then(() => _renderInPlace());
+    } else if (action === "save-validation") {
+      _handleSaveValidation();
+    } else if (action === "bulk-approve-sure") {
+      _handleBulkApprove("sure");
+    } else if (action === "preset-no-alert") {
+      _handleBulkApprove("no-alert");
+    } else if (action === "preset-platinum-gold") {
+      _handleBulkApprove("platinum-gold");
+    } else if (action === "apply-now") {
+      _handleApplyNow();
+    } else if (action === "undo-preview") {
+      _onUndoPreview();
+    }
+    return;
+  }
 
   // Verification filters
-  container.querySelectorAll("[data-traitement-verif-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      _verifFilter = btn.dataset.traitementVerifFilter;
-      _renderInPlace();
-    });
-  });
+  const verifFilterBtn = event.target.closest("[data-traitement-verif-filter]");
+  if (verifFilterBtn && container.contains(verifFilterBtn)) {
+    _verifFilter = verifFilterBtn.dataset.traitementVerifFilter;
+    _renderInPlace();
+    return;
+  }
 
-  // Apply options
-  container.querySelectorAll("[data-apply-opt]").forEach((input) => {
-    input.addEventListener("change", () => {
-      _applyOptions[input.dataset.applyOpt] = input.checked;
-      _renderInPlace();
-    });
-  });
-
-  // Fix audit 2026-05-24 : handlers Vérification (rescan / rename / ignore)
-  // déclarés dans le HTML (data-traitement-verif-action) mais aucun listener
-  // ne les écoutait -> boutons inertes, utilisateur cliquait sans effet
-  // ni feedback (pas même un toast).
-  container.querySelectorAll("[data-traitement-verif-action]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const action = btn.dataset.traitementVerifAction;
-      const rowId = btn.dataset.rowId;
-      const runId = _runInfo?.runId;
-      if (!runId || !rowId) return;
-      if (action === "rescan") {
-        try {
-          const res = await apiPost("run/rescan_row", { run_id: runId, row_id: rowId }, { signal: _signal() });
+  // Verification actions (rescan / rename / ignore)
+  const verifActionBtn = event.target.closest("[data-traitement-verif-action]");
+  if (verifActionBtn && container.contains(verifActionBtn)) {
+    const action = verifActionBtn.dataset.traitementVerifAction;
+    const rowId = verifActionBtn.dataset.rowId;
+    const runId = _runInfo?.runId;
+    if (!runId || !rowId) return;
+    if (action === "rescan") {
+      apiPost("run/rescan_row", { run_id: runId, row_id: rowId }, { signal: _signal() })
+        .then((res) => {
           if (res?.data?.ok !== false) {
             showToast({ type: "success", text: "Ligne re-scannée." });
-            await _loadPlan();
-            _renderInPlace();
-          } else {
-            showToast({ type: "error", text: "Échec du re-scan." });
+            return _loadPlan().then(() => _renderInPlace());
           }
-        } catch {
-          showToast({ type: "error", text: "Erreur lors du re-scan." });
-        }
-      } else if (action === "rename") {
-        renderFilmDetail({ mode: "C", rowId, runId });
-      } else if (action === "ignore") {
-        try {
-          const res = await apiPost("run/mark_alert_ignored", { run_id: runId, row_id: rowId }, { signal: _signal() });
+          showToast({ type: "error", text: "Échec du re-scan." });
+        })
+        .catch(() => showToast({ type: "error", text: "Erreur lors du re-scan." }));
+    } else if (action === "rename") {
+      renderFilmDetail({ mode: "C", rowId, runId });
+    } else if (action === "ignore") {
+      apiPost("run/mark_alert_ignored", { run_id: runId, row_id: rowId }, { signal: _signal() })
+        .then((res) => {
           if (res?.data?.ok !== false) {
             showToast({ type: "info", text: "Alerte ignorée." });
-            await _loadPlan();
-            _renderInPlace();
-          } else {
-            showToast({ type: "error", text: "Échec de l'ignorance." });
+            return _loadPlan().then(() => _renderInPlace());
           }
-        } catch {
-          showToast({ type: "error", text: "Erreur lors de l'ignorance." });
-        }
-      }
-    });
-  });
+          showToast({ type: "error", text: "Échec de l'ignorance." });
+        })
+        .catch(() => showToast({ type: "error", text: "Erreur lors de l'ignorance." }));
+    }
+    return;
+  }
 
-  // Fix audit 2026-05-24 : bouton inspect (œil) de l'étape Validation
-  // déclaré data-traitement-validation-action="inspect" mais aucun listener
-  // -> impossible d'ouvrir le détail d'une ligne avant de la valider.
-  container.querySelectorAll("[data-traitement-validation-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const action = btn.dataset.traitementValidationAction;
-      const rowId = btn.dataset.rowId;
-      const runId = _runInfo?.runId;
-      if (action === "inspect" && runId && rowId) {
-        renderFilmDetail({ mode: "C", rowId, runId });
-      }
-    });
-  });
+  // Validation inspect (œil)
+  const validationActionBtn = event.target.closest("[data-traitement-validation-action]");
+  if (validationActionBtn && container.contains(validationActionBtn)) {
+    const action = validationActionBtn.dataset.traitementValidationAction;
+    const rowId = validationActionBtn.dataset.rowId;
+    const runId = _runInfo?.runId;
+    if (action === "inspect" && runId && rowId) {
+      renderFilmDetail({ mode: "C", rowId, runId });
+    }
+    return;
+  }
+}
+
+function _onContainerChange(event) {
+  const container = _activeContainer;
+  if (!container) return;
+
+  // Scan options (checkbox + range)
+  const scanInput = event.target.closest("[data-scan-opt]");
+  if (scanInput && container.contains(scanInput)) {
+    const key = scanInput.dataset.scanOpt;
+    if (scanInput.type === "checkbox") {
+      _scanOptions[key] = scanInput.checked;
+    } else if (scanInput.type === "range") {
+      _scanOptions[key] = Number(scanInput.value);
+      const lbl = container.querySelector("[data-scan-parallelism-label]");
+      if (lbl) lbl.textContent = String(_scanOptions[key]);
+    }
+    return;
+  }
+
+  // Apply options
+  const applyInput = event.target.closest("[data-apply-opt]");
+  if (applyInput && container.contains(applyInput)) {
+    _applyOptions[applyInput.dataset.applyOpt] = applyInput.checked;
+    _renderInPlace();
+    return;
+  }
+}
+
+// Fix Vague G Fix 4 helper : lit le nombre de doublons en attente depuis le DOM
+// du mount doublons (état interne du module non exporté). Fallback à 0 si la
+// vue Doublons n'a jamais été montée ou si le selector n'est pas trouvé.
+function _readDoublonsPendingFromDom() {
+  if (!_activeContainer) return 0;
+  const mount = _activeContainer.querySelector("#traitement-doublons-mount");
+  if (!mount) return 0;
+  // doublons.js rend "<strong>${pendingCount}</strong> en attente" dans le header.
+  const candidates = mount.querySelectorAll("strong");
+  for (const el of candidates) {
+    const next = (el.nextSibling && el.nextSibling.textContent) || "";
+    if (next.includes("en attente")) {
+      const n = Number((el.textContent || "0").replace(/[^\d]/g, ""));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return 0;
+}
+
+function _bindEvents(container) {
+  // Idempotent : un seul jeu de listeners par mount, attachés au container parent.
+  // _renderInPlace() peut réécrire innerHTML sans recréer les listeners car ils
+  // vivent sur le container, pas sur les boutons enfants.
+  if (_eventsBound) return;
+  if (!container) return;
+  container.addEventListener("click", _onContainerClick);
+  container.addEventListener("change", _onContainerChange);
+  _eventsBound = true;
 }
 
 async function _handleSaveValidation() {
@@ -1436,6 +1561,10 @@ export async function initTraitement(container) {
   // Fix audit 2026-05-24 : nouveau AbortController par mount, abort au
   // unmount pour interrompre tous les apiPost en vol (cf _signal()).
   _abortController = new AbortController();
+  // Fix audit 2026-05-25 (v1.5.3) Vague G Fix 2 : reset flag binding au mount
+  // pour qu'un re-mount (navigation back/forward) attache à nouveau les
+  // listeners sur le nouveau container.
+  _eventsBound = false;
   container.innerHTML = _renderTraitement();
   window.addEventListener("hashchange", _onHashChange);
   await _loadRunInfo();
@@ -1463,6 +1592,14 @@ export function unmountTraitement() {
     unmountDoublons();
     _doublonsMounted = false;
   }
+  // Fix audit 2026-05-25 (v1.5.3) Vague G Fix 2 : retirer les listeners délégués
+  // du container avant de le détacher. removeEventListener avec la même référence
+  // de fonction module-level fonctionne car les handlers sont stables.
+  if (_activeContainer && _eventsBound) {
+    _activeContainer.removeEventListener("click", _onContainerClick);
+    _activeContainer.removeEventListener("change", _onContainerChange);
+  }
+  _eventsBound = false;
   window.removeEventListener("hashchange", _onHashChange);
   _currentStep = "analyse";
   _runInfo = null;

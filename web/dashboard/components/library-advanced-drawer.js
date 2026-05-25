@@ -109,11 +109,18 @@ function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix) {
 function _renderDateRange(initial) {
   const after = initial.added_after || "";
   const before = initial.added_before || "";
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : ajout label HTML pour a11y (aria-label seul ne suffit pas)
   return `
     <div class="bibliotheque-drawer-range bibliotheque-drawer-date-range">
-      <input type="date" class="v5-input" name="added_after" value="${escapeHtml(after)}" aria-label="Date d'ajout apres">
+      <label class="bibliotheque-drawer-range-field">
+        <span class="bibliotheque-drawer-range-field-label visually-hidden">Date d'ajout apres</span>
+        <input type="date" id="bibliotheque-added-after" class="v5-input" name="added_after" value="${escapeHtml(after)}" aria-label="Date d'ajout apres">
+      </label>
       <span class="bibliotheque-drawer-range-sep">—</span>
-      <input type="date" class="v5-input" name="added_before" value="${escapeHtml(before)}" aria-label="Date d'ajout avant">
+      <label class="bibliotheque-drawer-range-field">
+        <span class="bibliotheque-drawer-range-field-label visually-hidden">Date d'ajout avant</span>
+        <input type="date" id="bibliotheque-added-before" class="v5-input" name="added_before" value="${escapeHtml(before)}" aria-label="Date d'ajout avant">
+      </label>
     </div>
   `;
 }

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from cinesort.domain import compute_quality_score, default_quality_profile
 from cinesort.domain.audio_analysis import analyze_audio
@@ -297,5 +300,17 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         )
         enrich_quality_report_with_perceptual(store, run_id, row_id, result, composite_score_version=score_version)
         return result
-    except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
-        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter HTTP 500.
+    except Exception as exc:  # noqa: BLE001 - boundary top-level endpoint quality
+        logger.exception(
+            "get_quality_report failed for run_id=%s row_id=%s", run_id, row_id
+        )
+        return {
+            "ok": False,
+            "error": "quality_report_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de generer le rapport qualite. Relance un scan ou "
+                "verifie l'etat du run."
+            ),
+        }

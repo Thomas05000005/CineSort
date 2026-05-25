@@ -81,6 +81,22 @@ def get_films_by_tier(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[
             "total": N
         }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'audit Qualite.
+    try:
+        return _get_films_by_tier_impl(api, tier, limit)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_films_by_tier failed for tier=%s limit=%s", tier, limit)
+        return {
+            "ok": False,
+            "error": "films_by_tier_failed",
+            "message": str(exc),
+            "user_message": "Impossible de recuperer la liste des films par tier.",
+        }
+
+
+def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[str, Any]:
+    """Implementation reelle de get_films_by_tier, sans wrap global (Vague G)."""
     tier_norm = str(tier or "").strip().lower()
     if tier_norm not in _VALID_TIERS:
         return _err_response(
@@ -338,6 +354,25 @@ def recompute_all_scores(api: Any) -> Dict[str, Any]:
     Returns:
         {"ok": True, "job_id": "...", "total": N, "run_id": "..."}
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur ce trigger background. La fonction lance un thread Daemon donc on
+    # protege la phase synchrone (validation + insertion job registry).
+    try:
+        return _recompute_all_scores_impl(api)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("recompute_all_scores failed")
+        return {
+            "ok": False,
+            "error": "recompute_scores_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de recalculer les scores. Reessaie ou redemarre."
+            ),
+        }
+
+
+def _recompute_all_scores_impl(api: Any) -> Dict[str, Any]:
+    """Implementation reelle de recompute_all_scores, sans wrap global (Vague G)."""
     resolved_rid = _resolve_latest_run_id(api)
     if not resolved_rid:
         return _err_response(

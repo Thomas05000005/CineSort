@@ -391,8 +391,18 @@ function _renderGroupCard(group) {
 }
 
 function _renderBody() {
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : loading visible avec skeleton + message
+  // d'attente explicite. Avant : "Chargement des doublons…" sur une ligne -> barre
+  // noire vide -> l'utilisateur ne savait pas si la recherche tournait ou s'il
+  // n'y avait simplement rien. Skeletons + détail durée rassurent.
   if (_state.loading) {
-    return `<div class="doublons-section doublons-loading">Chargement des doublons…</div>`;
+    return `
+      <div class="doublons-section">
+        <div class="doublons-loading-header">🔍 Recherche de doublons en cours…</div>
+        <div class="doublons-loading-detail" style="opacity:0.7;text-align:center;padding:8px 0;">Peut prendre plusieurs minutes sur 5000 films</div>
+        ${[1,2,3,4].map(() => `<div class="v5-skeleton doublons-section-skel" style="height:60px;margin:8px 0;"></div>`).join("")}
+      </div>
+    `;
   }
   if (_state.error) {
     return `<div class="doublons-section doublons-error">${escapeHtml(_state.error)}</div>`;
@@ -783,6 +793,14 @@ async function _autoDecideAll() {
 // workflow Traitement. Utilise navigateTo pour rester dans le router SPA et
 // déclencher l'init du workflow Traitement sur la bonne étape.
 function _goToApply() {
+  // Fix audit 2026-05-25 (v1.5.3) Vague G : verifier que les doublons sont decides
+  // avant de naviguer vers Apply. Sans ce garde-fou, l'utilisateur pouvait
+  // perdre ses decisions de doublons en partant prematurement.
+  const pending = _state.groups.filter((g) => !g.winner_decided).length;
+  if (pending > 0) {
+    const confirmed = confirm(`Il reste ${pending} groupes de doublons non decides. Les fichiers en doublon seront conserves tels quels. Continuer ?`);
+    if (!confirmed) return;
+  }
   // navigateTo préfixe avec "#" -> on passe sans le "#" initial.
   // Le fragment "#step-apply" est lu par traitement.js _readStep().
   navigateTo("/traitement#step-apply");
