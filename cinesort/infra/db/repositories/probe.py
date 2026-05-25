@@ -109,6 +109,23 @@ class ProbeRepository(_BaseRepository):
 
         self._with_schema_group("probe_cache", op)
 
+    def clear_probe_cache(self) -> int:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utilise par l'endpoint UI "Purger le cache probe" en cas de cache pollue
+        (paths obsoletes -> tous les films en FAILED). Apres purge, le prochain
+        scan relance les probes proprement (avec fallback PATH si necessaire).
+
+        Returns:
+            Nombre de lignes supprimees.
+        """
+
+        def op(conn: Any) -> int:
+            cur = conn.execute("DELETE FROM probe_cache")
+            return int(cur.rowcount or 0)
+
+        return self._with_schema_group("probe_cache", op)
+
     def prune_probe_cache(self, *, retention_days: int = 90) -> int:
         """DB2 audit : supprime les entrees probe_cache non-touchees depuis `retention_days`.
 

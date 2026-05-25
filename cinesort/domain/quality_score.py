@@ -13,6 +13,9 @@ from cinesort.domain.genre_rules import (
     compute_genre_adjustments,
     detect_primary_genre as _detect_pg,
 )
+# Fix audit 2026-05-25 (v1.5.5) Vague K : parser nom de release pour fallback
+# quand le probe est PARTIAL/FAILED (ex: SMB obsolete, fichier corrompu).
+from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_name
 
 logger = logging.getLogger(__name__)
 
@@ -1344,6 +1347,150 @@ def _build_quality_metrics_helper(
     }
 
 
+# Fix audit 2026-05-25 (v1.5.5) Vague K : map codec name parser -> codec normalise
+# pour alignement avec _codec_bonus() (qui attend "hevc", "h264", "av1", ...).
+_NAME_CODEC_TO_PROBE_CODEC = {
+    "hevc": "hevc",
+    "h264": "h264",
+    "av1": "av1",
+    "vp9": "vp9",
+    "mpeg2": "mpeg2video",
+    "xvid": "mpeg4",
+}
+
+# Fix audit 2026-05-25 (v1.5.5) Vague K : map codec audio parser -> codec normalise
+# pour alignement avec _audio_codec_bonus() (qui matche sur substrings : "truehd",
+# "atmos", "dts-hd", "dts", "aac"). On choisit la representation qui s'auto-match.
+_NAME_AUDIO_CODEC_TO_PROBE = {
+    "truehd": "truehd",
+    "atmos": "truehd",  # atmos sans precision -> TrueHD Atmos (cas dominant)
+    "dts_x": "dts",
+    "dts_hd_ma": "dts-hd ma",
+    "dts_hd_hra": "dts-hd hra",
+    "dts_hd": "dts-hd",
+    "dts": "dts",
+    "flac": "flac",
+    "pcm": "pcm",
+    "eac3": "eac3",
+    "ac3": "ac3",
+    "aac": "aac",
+    "mp3": "mp3",
+}
+
+
+def _channels_str_to_int(channels_str: str) -> int:
+    """Convertit '5.1' -> 6, '7.1' -> 8, '2.0' -> 2, '2.1' -> 3."""
+    if not channels_str:
+        return 0
+    txt = channels_str.strip()
+    if "." not in txt:
+        try:
+            return int(txt)
+        except ValueError:
+            return 0
+    try:
+        main_str, lfe_str = txt.split(".", 1)
+        return max(0, int(main_str)) + max(0, int(lfe_str))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _merge_probe_with_name_hints(
+    normalized_probe: Dict[str, Any],
+    name_info: ReleaseNameInfo,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Fusionne le probe avec les hints du nom de release.
+
+    Le probe (ffprobe/MediaInfo) gagne TOUJOURS quand il a une valeur :
+    c'est la source de verite la plus fiable. Le nom de release ne sert
+    qu'a combler les trous (PARTIAL) ou se substituer (FAILED).
+
+    Retourne (probe_enrichi, liste_des_champs_combles_par_nom).
+    """
+    if not isinstance(normalized_probe, dict):
+        normalized_probe = {}
+    # Copie defensive pour ne pas muter le dict d'entree (utilise ailleurs).
+    enriched = copy.deepcopy(normalized_probe)
+    enriched.setdefault("video", {})
+    enriched.setdefault("audio_tracks", [])
+    enriched.setdefault("sources", {})
+    video = enriched["video"] if isinstance(enriched["video"], dict) else {}
+    enriched["video"] = video
+    sources_video = enriched["sources"].get("video") if isinstance(enriched["sources"], dict) else {}
+    if not isinstance(sources_video, dict):
+        sources_video = {}
+    enriched["sources"]["video"] = sources_video
+
+    filled_from_name: List[str] = []
+
+    # Video dimensions : on NE remplit PAS video.width/height dans le dict probe
+    # pour preserver le contrat de _resolution_label() qui distingue "probe"
+    # (mesure) vs "name_fallback" (deduit du nom). Le `release_name` passe
+    # directement a _score_video. On indique juste filled_from_name pour info.
+    if _to_int(video.get("width"), 0) <= 0 and name_info.width_hint > 0:
+        filled_from_name.append("width")
+    if _to_int(video.get("height"), 0) <= 0 and name_info.height_hint > 0:
+        filled_from_name.append("height")
+
+    # Codec video
+    if not str(video.get("codec") or "").strip() and name_info.codec_hint:
+        video["codec"] = _NAME_CODEC_TO_PROBE_CODEC.get(name_info.codec_hint, name_info.codec_hint)
+        sources_video["codec"] = "name_fallback"
+        filled_from_name.append("codec")
+
+    # Bit depth
+    if _to_int(video.get("bit_depth"), 0) <= 0 and name_info.bit_depth_hint > 0:
+        video["bit_depth"] = name_info.bit_depth_hint
+        sources_video["bit_depth"] = "name_fallback"
+        filled_from_name.append("bit_depth")
+
+    # HDR : on ne touche que si AUCUN flag HDR n'est dispo dans le probe.
+    has_any_hdr_probe = bool(
+        video.get("hdr_dolby_vision") or video.get("hdr10_plus") or video.get("hdr10") or video.get("hlg")
+    )
+    if not has_any_hdr_probe and name_info.hdr_hint:
+        if name_info.hdr_hint == "dv":
+            video["hdr_dolby_vision"] = True
+            filled_from_name.append("hdr_dolby_vision")
+        elif name_info.hdr_hint == "hdr10_plus":
+            video["hdr10_plus"] = True
+            filled_from_name.append("hdr10_plus")
+        elif name_info.hdr_hint == "hdr10":
+            video["hdr10"] = True
+            filled_from_name.append("hdr10")
+        elif name_info.hdr_hint == "hlg":
+            video["hlg"] = True
+            filled_from_name.append("hlg")
+        sources_video["hdr"] = "name_fallback"
+
+    # Audio : si aucune piste exploitable dans le probe et qu'on a un hint codec,
+    # on synthetise une piste virtuelle pour permettre le scoring audio.
+    audio_tracks = enriched["audio_tracks"]
+    if not audio_tracks and name_info.audio_codec_hint:
+        synth_codec = _NAME_AUDIO_CODEC_TO_PROBE.get(name_info.audio_codec_hint, name_info.audio_codec_hint)
+        # Si atmos detecte, on enrichit le nom du codec pour que _audio_codec_bonus
+        # capture le label "atmos" (matche sur substring).
+        if name_info.audio_is_atmos and "atmos" not in synth_codec:
+            synth_codec = f"{synth_codec} atmos"
+        channels_int = _channels_str_to_int(name_info.audio_channels_hint)
+        if channels_int <= 0:
+            # Defaut sage : codec lossless multicanal supposes 5.1, sinon 2.0.
+            channels_int = 6 if name_info.audio_is_lossless else 2
+        synth_track = {
+            "codec": synth_codec,
+            "channels": channels_int,
+            # Pas de bitrate (le scoring le tolere). Pas de language : on perdra
+            # le bonus VO/VF mais c'est le tradeoff acceptable d'un fallback.
+            "bitrate": 0,
+            "language": "",
+            "_source": "name_fallback",
+        }
+        audio_tracks.append(synth_track)
+        filled_from_name.append("audio_track_synth")
+
+    return enriched, filled_from_name
+
+
 def compute_quality_score(
     *,
     normalized_probe: Dict[str, Any],
@@ -1376,14 +1523,33 @@ def compute_quality_score(
 
     # --- Setup contexte ---
     probe = normalized_probe if isinstance(normalized_probe, dict) else {}
+    probe_quality = str(probe.get("probe_quality") or "FAILED")
+
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : enrichir le probe avec les hints
+    # du nom de release. Le probe garde la priorite quand il a une valeur ;
+    # les hints comblent les trous (PARTIAL) ou se substituent (FAILED).
+    name_info = parse_release_name(release_name) if release_name else ReleaseNameInfo()
+    probe, name_filled_fields = _merge_probe_with_name_hints(probe, name_info)
+
     video = probe.get("video") if isinstance(probe.get("video"), dict) else {}
     audio_tracks = probe.get("audio_tracks") if isinstance(probe.get("audio_tracks"), list) else []
     sources = probe.get("sources") if isinstance(probe.get("sources"), dict) else {}
-    probe_quality = str(probe.get("probe_quality") or "FAILED")
     toggles = prof["toggles"]
 
     reasons: List[str] = []
     factors: List[Dict[str, Any]] = []
+
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : trace dans les factors quand
+    # on a comble des champs depuis le nom de release.
+    if name_filled_fields:
+        factors.append(
+            {
+                "category": "probe",
+                "delta": 0,
+                "label": f"Specs deduites du nom: {', '.join(name_filled_fields)}",
+            }
+        )
+        reasons.append(f"+0 Specs deduites du nom de release: {', '.join(name_filled_fields)}")
 
     # --- Subscores (3 helpers historiques) ---
     # P4.2 : détecter le genre tôt pour ajuster les seuils de bitrate dans _score_video.
@@ -1415,8 +1581,105 @@ def compute_quality_score(
         factors=factors,
     )
 
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : bonus de source (REMUX, BluRay,
+    # WEBDL, ...) deduite du nom de release. Cette info est absente du probe.
+    if name_info.source_hint:
+        source_bonus_map = {
+            "remux": (+7, "Source REMUX (nom)"),
+            "bluray": (+5, "Source BluRay (nom)"),
+            "webdl": (+3, "Source WEB-DL (nom)"),
+            "webrip": (+2, "Source WEBRip (nom)"),
+            "hdtv": (+1, "Source HDTV (nom)"),
+            "dvd": (0, "Source DVD (nom)"),
+            "cam": (-10, "Source CAM (nom)"),
+        }
+        if name_info.source_hint in source_bonus_map:
+            src_delta, src_label = source_bonus_map[name_info.source_hint]
+            if src_delta != 0:
+                video_sub = max(0.0, min(100.0, float(video_sub) + src_delta))
+                factors.append({"category": "video", "delta": src_delta, "label": src_label})
+                sign = "+" if src_delta >= 0 else ""
+                reasons.append(f"{sign}{src_delta} {src_label}")
+
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : bonus Atmos/DTS:X depuis le nom
+    # de release quand le probe ne les a pas detectes (ex: piste TrueHD sans
+    # side-data Atmos exposee). On n'ajoute que si l'audio sub n'a pas deja
+    # capture ces formats.
+    if name_info.audio_is_atmos or name_info.audio_is_dts_x:
+        # Verifier qu'on n'a pas deja un bonus atmos via le probe (best_audio)
+        best_codec_lower = str(best_audio.get("codec") or "").lower()
+        if ("atmos" not in best_codec_lower) and ("dts:x" not in best_codec_lower) and ("dts-x" not in best_codec_lower):
+            atmos_bonus = +3
+            atmos_label = (
+                "Atmos detecte dans le nom" if name_info.audio_is_atmos else "DTS:X detecte dans le nom"
+            )
+            audio_sub = max(0.0, min(100.0, float(audio_sub) + atmos_bonus))
+            factors.append({"category": "audio", "delta": atmos_bonus, "label": atmos_label})
+            reasons.append(f"+{atmos_bonus} {atmos_label}")
+
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : quand on s'appuie sur le nom
+    # (probe FAILED ou PARTIAL), certaines penalites du scoring V1 sont
+    # injustifiees (debit video non mesure, langue audio inconnue, metadata
+    # absente) car elles refletent les LIMITES DU PROBE et non la qualite
+    # reelle du fichier. On compense ces penalites pour que le score
+    # reflete les hints du nom de release.
+    if probe_quality == "FAILED" and name_filled_fields:
+        # Compensation video : -8 "Debit non detecte" + base trop basse (8.0)
+        # par rapport au cas normal ou le bitrate aurait ajoute ~10-18 pts.
+        # On compense pour reconstituer un "bitrate correct" equivalent.
+        video_sub = min(100.0, float(video_sub) + 28)
+        # Compensation audio : la base de 10 ne reflete pas un fichier de
+        # qualite. Si l'audio est lossless ET multicanal, on ajoute +32 pour
+        # equivalent "TrueHD/DTS-HD MA + 7.1 + debit eleve". Sinon proportionnel.
+        if "audio_track_synth" in name_filled_fields:
+            if name_info.audio_is_lossless and name_info.audio_channels_hint in {"5.1", "7.1", "5.0", "6.1"}:
+                audio_sub = min(100.0, float(audio_sub) + 32)
+            elif name_info.audio_is_lossless:
+                audio_sub = min(100.0, float(audio_sub) + 22)
+            elif name_info.audio_channels_hint in {"5.1", "7.1"}:
+                audio_sub = min(100.0, float(audio_sub) + 18)
+            else:
+                audio_sub = min(100.0, float(audio_sub) + 12)
+        # Compensation extras : -18 (-10 metadata indisponibles + -8 extras
+        # bonus FULL manquant). On annule entierement car le nom comble
+        # une bonne partie des metadata.
+        extras_sub = min(100.0, float(extras_sub) + 24)
+        factors.append(
+            {
+                "category": "probe",
+                "delta": 0,
+                "label": "Compensation penalites probe (donnees du nom)",
+            }
+        )
+        reasons.append("+0 Compensation penalites probe (subscores ajustes)")
+        # Penalite d'incertitude residuelle (le nom n'est pas le probe).
+        uncertainty_penalty = 5
+        video_sub = max(0.0, float(video_sub) - uncertainty_penalty)
+        factors.append(
+            {"category": "probe", "delta": -uncertainty_penalty, "label": "Incertitude : probe absent"}
+        )
+        reasons.append(f"-{uncertainty_penalty} Incertitude : score base sur le nom de fichier seul")
+    elif probe_quality == "PARTIAL" and name_filled_fields:
+        # Compensation partielle : le probe a quand meme apporte qqch.
+        if "audio_track_synth" in name_filled_fields:
+            audio_sub = min(100.0, float(audio_sub) + 6)
+            factors.append(
+                {"category": "probe", "delta": 6, "label": "Compensation audio (synthese nom)"}
+            )
+            reasons.append("+6 Compensation audio (synthese depuis le nom)")
+        # Compense le debit non mesure quand on n'a pas de bitrate.
+        if not _to_int(video.get("bitrate"), 0):
+            video_sub = min(100.0, float(video_sub) + 8)
+            factors.append({"category": "probe", "delta": 8, "label": "Compensation debit non probe"})
+            reasons.append("+8 Compensation debit video non mesure (probe partiel)")
+
     # --- Bonus/malus V4 contextuels (ere, encode, commentary) ---
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : derive la hauteur effective depuis
+    # la resolution label (qui integre deja le fallback nom) pour que les
+    # bonus d'ere s'appliquent meme sans probe.
     height = _to_int(video.get("height"), 0)
+    if height <= 0 and vr.get("resolution_label"):
+        height = _resolution_rank(vr["resolution_label"])
     video_codec_v4 = str(video.get("codec") or "").strip().lower()
     video_sub = _apply_era_bonuses_helper(
         film_year=film_year,

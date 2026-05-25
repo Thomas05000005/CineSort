@@ -1702,6 +1702,44 @@ class CineSortApi:
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return probe_support.auto_install_probe_tools(self, detect_probe_tools_fn=detect_probe_tools)
 
+    def _purge_probe_cache_impl(self) -> Dict[str, Any]:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utile quand un settings.json obsolete a pollue le cache avec des
+        resultats FAILED dus a un path ffprobe/mediainfo introuvable. Apres
+        purge, le prochain scan relance toutes les probes proprement.
+        """
+        _log = logging.getLogger(__name__)
+        try:
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
+        except Exception as exc:  # noqa: BLE001 - boundary top-level
+            _log.exception("api: purge_probe_cache echec init store")
+            return _err_response(
+                f"Store indisponible : {type(exc).__name__}: {exc}",
+                category="state",
+                level="error",
+                log_module=__name__,
+            )
+        try:
+            deleted = int(store.probe.clear_probe_cache())
+        except Exception as exc:  # noqa: BLE001 - boundary top-level
+            _log.exception("api: purge_probe_cache echec purge")
+            return _err_response(
+                f"Purge cache probe echouee : {type(exc).__name__}: {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+        _log.info("api: purge_probe_cache entries_deleted=%d", deleted)
+        return {
+            "ok": True,
+            "entries_deleted": deleted,
+            "message": (
+                f"Cache probe purge : {deleted} entrees supprimees. "
+                "Relance un scan pour re-probe les films."
+            ),
+        }
+
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run."""
         return probe_support.get_probe(self, run_id, row_id, detect_probe_tools_fn=detect_probe_tools)

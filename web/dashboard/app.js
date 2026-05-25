@@ -614,6 +614,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     await _initNotificationPolling();
     await _initDemoModeIfNeeded();
     await _checkUpdateBadge();
+    // Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 3) : detecter ffprobe absent
+    // au boot et afficher un banner persistant. Sans ffprobe le scoring est
+    // casse -> l'utilisateur doit le savoir AVANT de lancer un scan qui sera
+    // 100% en FAILED. Best-effort : try/catch silent.
+    try { await _checkProbeToolsBoot(); } catch (e) { console.warn("[boot] probe tools check", e); }
   }
 });
 
@@ -657,6 +662,51 @@ async function _checkIntegrationNav() {
       sidebarV5.markIntegrationState("radarr", !!s.radarr_enabled, "Radarr");
     }
   } catch { /* silencieux */ }
+}
+
+/** Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 3) : banner persistant si
+ * ffprobe est introuvable au boot. Sans ffprobe, le scoring est casse :
+ * probe.duration_s manquant -> tous les films en confidence basse -> UX HS.
+ *
+ * Le banner est non bloquant (icone + texte + bouton Paramètres) et se
+ * dissimule des qu'on quitte la page ou via la croix. Idempotent : si deja
+ * affiche, on ne re-cree pas.
+ */
+async function _checkProbeToolsBoot() {
+  if (!hasToken() && !window.__CINESORT_NATIVE__) return;
+  if (document.getElementById("ffprobe-missing-banner")) return; // deja affiche
+  let payload = null;
+  try {
+    const res = await apiPost("runtime/get_probe_tools_status", {});
+    payload = (res && res.data) || {};
+  } catch { return; /* silencieux : si l'endpoint est KO on ne bloque rien */ }
+  const tools = (payload && payload.tools) || {};
+  const ffprobe = tools.ffprobe || {};
+  if (ffprobe.available) return; // tout va bien
+  try {
+    const banner = document.createElement("div");
+    banner.id = "ffprobe-missing-banner";
+    banner.setAttribute("role", "alert");
+    banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:#F59E0B;color:#1F2937;padding:10px 16px;z-index:9998;font-family:sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;gap:12px;";
+    const icon = document.createElement("strong");
+    icon.textContent = "⚠ ffprobe introuvable.";
+    banner.appendChild(icon);
+    const msg = document.createElement("span");
+    msg.textContent = " Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Parametres > Outils > Auto-install.";
+    msg.style.flex = "1";
+    banner.appendChild(msg);
+    const settingsBtn = document.createElement("a");
+    settingsBtn.href = "#/parametres";
+    settingsBtn.textContent = "Ouvrir Parametres";
+    settingsBtn.style.cssText = "background:#1F2937;color:#F59E0B;padding:4px 10px;border-radius:4px;text-decoration:none;font-weight:600;";
+    banner.appendChild(settingsBtn);
+    const closeBtn = document.createElement("button");
+    closeBtn.style.cssText = "background:transparent;border:1px solid #1F2937;color:#1F2937;padding:2px 8px;border-radius:4px;cursor:pointer;";
+    closeBtn.textContent = "Fermer";
+    closeBtn.addEventListener("click", () => { banner.remove(); });
+    banner.appendChild(closeBtn);
+    document.body.appendChild(banner);
+  } catch (e) { console.warn("[ffprobe banner] failed", e); }
 }
 
 /** V1-13 : badge "•" sur item Settings si MAJ disponible (cache backend). */

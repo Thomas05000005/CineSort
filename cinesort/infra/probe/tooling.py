@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from cinesort.infra.probe.constants import VERSION_PROBE_TIMEOUT_S
 from cinesort.infra.subprocess_safety import tracked_run
+
+logger = logging.getLogger(__name__)
 
 RunnerFn = Callable[[List[str], float], Tuple[int, str, str]]
 WhichFn = Callable[[str], Optional[str]]
@@ -63,7 +67,22 @@ def default_runner(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
 def _resolve_tool_path(explicit_value: str, tool_name: str, which_fn: WhichFn) -> str:
     explicit = str(explicit_value or "").strip()
     if explicit:
-        return explicit
+        # Fix audit 2026-05-25 (v1.5.5) Vague K : verifier que le path explicit
+        # existe sur disque AVANT de l'utiliser. Sinon fallback PATH winget.
+        # Sans ce check, un settings.json obsolete (relique d'ancien build)
+        # cause 100% des probes en FAILED sans aucun feedback utilisateur :
+        # subprocess leve WinError 2 (file not found) sur chaque appel.
+        try:
+            if Path(explicit).is_file():
+                return explicit
+        except (OSError, ValueError):
+            # Path mal forme (ex: caracteres invalides Windows) -> fallback PATH
+            pass
+        logger.warning(
+            "Tool %s configure (%s) introuvable sur disque, fallback PATH",
+            tool_name,
+            explicit,
+        )
     return str(which_fn(tool_name) or "")
 
 

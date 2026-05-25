@@ -227,6 +227,17 @@ class RuntimeFacade(_BaseFacade):
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return self._api._auto_install_probe_tools_impl()
 
+    def purge_probe_cache(self) -> Dict[str, Any]:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utile en cas de pollution (paths obsoletes -> FAILED massif). Apres
+        purge, le prochain scan relance les probes proprement. A exposer sous
+        Parametres > Outils > "Purger le cache probe".
+
+        Cf CineSortApi._purge_probe_cache_impl pour la doc complete.
+        """
+        return self._api._purge_probe_cache_impl()
+
     def get_probe(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run.
 

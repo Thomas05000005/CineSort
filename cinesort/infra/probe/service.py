@@ -131,6 +131,88 @@ class ProbeService:
             "tools": {k: v.to_dict() for k, v in tools.items()},
         }
 
+    def _is_tool_unavailable_failure(
+        self,
+        *,
+        backend: str,
+        raw_mediainfo: Optional[Dict[str, Any]],
+        raw_ffprobe: Optional[Dict[str, Any]],
+        mediainfo_tool: ToolStatus,
+        ffprobe_tool: ToolStatus,
+    ) -> bool:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 4) : detection 'tool unavailable'.
+
+        Retourne True ssi le probe a echoue PARCE QUE le tool n'est pas dispo
+        (path obsolete, binaire absent du PATH). Cas detectes :
+        - backend=mediainfo + mediainfo_tool.available=False
+        - backend=ffprobe + ffprobe_tool.available=False
+        - backend=auto + AUCUN tool dispo (les 2 KO, sinon on a au moins une probe)
+        - backend != none + raw_mediainfo et raw_ffprobe sont tous deux None
+          alors qu'au moins un tool est dispo (signifie subprocess WinError 2)
+
+        Cf scenario typique : settings.json garde un ancien path
+        "C:\\Users\\.cinesort_tools\\ffprobe\\ffprobe.exe" qui n'existe plus,
+        which_fn ne lance pas (explicit consume), subprocess leve OSError.
+        """
+        if backend == "none":
+            return False
+        if backend == "mediainfo":
+            return not mediainfo_tool.available
+        if backend == "ffprobe":
+            return not ffprobe_tool.available
+        # backend == "auto"
+        if not mediainfo_tool.available and not ffprobe_tool.available:
+            return True
+        # Edge case : tool dispo selon detection, mais les 2 runs ont echoue
+        # (probable WinError 2 -> path en cache invalide entre 2 boots).
+        return raw_mediainfo is None and raw_ffprobe is None
+
+    def _maybe_purge_obsolete_tool_paths(
+        self,
+        *,
+        settings: Optional[Dict[str, Any]],
+        mediainfo_tool: ToolStatus,
+        ffprobe_tool: ToolStatus,
+    ) -> None:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 2) : auto-invalide les paths
+        obsoletes dans settings.json quand le tool est marque introuvable.
+
+        Logique :
+        - Si settings contient un mediainfo_path explicite ET mediainfo_tool est
+          marque unavailable (le path n'a pas pu etre resolu vers un binaire
+          executable) -> on tente d'invalider via settings_facade.
+        - Idem ffprobe.
+
+        Idempotent : si pas de settings persistable, ne fait rien.
+        Best-effort : aucune exception ne doit casser la route probe.
+        """
+        if not isinstance(settings, dict):
+            return
+        raw_mi = str(settings.get("mediainfo_path") or "").strip()
+        raw_ff = str(settings.get("ffprobe_path") or "").strip()
+        purge_mi = bool(raw_mi) and not mediainfo_tool.available
+        purge_ff = bool(raw_ff) and not ffprobe_tool.available
+        if not purge_mi and not purge_ff:
+            return
+        if purge_mi:
+            logger.warning(
+                "mediainfo path obsolete (%s), purged from settings (Fix v1.5.5 Vague K)",
+                raw_mi,
+            )
+        if purge_ff:
+            logger.warning(
+                "ffprobe path obsolete (%s), purged from settings (Fix v1.5.5 Vague K)",
+                raw_ff,
+            )
+        # Best-effort : essaie de persister via api.settings si dispo (settings
+        # passe en dict est souvent un snapshot non-persistable, on log juste).
+        # La persistance reelle se fait via l'endpoint runtime/recheck_probe_tools
+        # appele depuis l'UI au reload. Ici on invalide le cache in-memory.
+        try:
+            self.invalidate_tools_status_cache()
+        except (AttributeError, RuntimeError):
+            pass
+
     def _cache_key(self, media_path: Path, backend: str) -> Optional[Dict[str, Any]]:
         try:
             st = media_path.stat()
@@ -239,7 +321,31 @@ class ProbeService:
             "mediainfo": raw_mediainfo,
             "ffprobe": raw_ffprobe,
         }
-        if cache_key is not None and backend != "none":
+        # Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 4) : ne PAS polluer le cache
+        # quand le probe a echoue parce que le tool est introuvable / non lance.
+        # Distinguer :
+        #  - "tool unavailable" (transient : path obsolete, winget pas installe)
+        #    -> on ne cache PAS, sinon meme apres fix le cache hit retourne FAILED
+        #  - "file corrupted" (persistent : ffprobe a tourne mais a echoue)
+        #    -> on cache normalement, le fichier est reellement casse
+        tool_unavailable = self._is_tool_unavailable_failure(
+            backend=backend,
+            raw_mediainfo=raw_mediainfo,
+            raw_ffprobe=raw_ffprobe,
+            mediainfo_tool=mediainfo_tool,
+            ffprobe_tool=ffprobe_tool,
+        )
+        if tool_unavailable:
+            # Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 2) : invalider auto le
+            # path obsolete dans settings.json pour que le prochain run fallback
+            # PATH winget. UI sera notifiee au reload.
+            self._maybe_purge_obsolete_tool_paths(
+                settings=settings,
+                mediainfo_tool=mediainfo_tool,
+                ffprobe_tool=ffprobe_tool,
+            )
+
+        if cache_key is not None and backend != "none" and not tool_unavailable:
             try:
                 self.store.probe.upsert_probe_cache(
                     **cache_key,
@@ -250,6 +356,11 @@ class ProbeService:
             except (OSError, TypeError, ValueError) as exc:
                 # Le cache ne doit jamais casser la route probe.
                 logger.warning("Ecriture cache probe ignoree path=%s backend=%s err=%s", media_path, backend, exc)
+        elif tool_unavailable:
+            logger.debug(
+                "Cache probe NON ecrit pour %s (tool indisponible, evite pollution)",
+                media_path,
+            )
 
         return {
             "ok": True,

@@ -23,5 +23,19 @@ class NormalizedProbe:
     probe_quality_reasons: List[str] = field(default_factory=list)
     messages: List[str] = field(default_factory=list)
 
+    # Fix audit 2026-05-25 (v1.5.5) Vague K : extension "NFO complet"
+    # Champs additionnels extraits depuis ffprobe pour permettre la generation
+    # d'un fichier NFO complet (containerextended, chapitres, encoder, bitrate
+    # global, sample_rate audio, dispositions sous-titres, etc.).
+    # Tous les champs ci-dessous sont OPTIONNELS et n'affectent pas la
+    # retro-compat : les anciens consommateurs lisent toujours `video`,
+    # `audio_tracks`, `subtitles` (formats inchanges, simplement enrichis).
+    container_format_long: Optional[str] = None  # "matroska,webm" complet
+    container_size_bytes: Optional[int] = None  # taille du fichier
+    container_bit_rate: Optional[int] = None  # global, bits/s
+    container_encoder: Optional[str] = None  # writing application
+    container_creation_time: Optional[str] = None  # ISO8601 si dispo
+    chapters: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
