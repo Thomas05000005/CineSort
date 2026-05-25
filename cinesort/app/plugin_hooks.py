@@ -127,7 +127,13 @@ def _run_plugin(
     CINESORT_* explicites.
     """
     payload = json.dumps({"event": event, **data}, ensure_ascii=False, default=str)
-    # Vars essentielles pour Python + Windows shell + locale
+    # Vars essentielles pour Python + Windows shell + locale.
+    # Audit 2026-05-25 : PYTHONPATH/PYTHONHOME RETIRES — fuitaient le chemin
+    # d'installation dev (ex: /home/dev/cinesort/lib) aux plugins user.
+    # Un plugin malveillant pouvait en deduire l'architecture et cibler des
+    # libs custom. PyInstaller bundle Python en interne, donc ces deux vars
+    # ne sont pas necessaires pour l'execution des plugins .py.
+    # PYTHONIOENCODING reste (juste encoding stdout/stderr, pas de path).
     _ENV_WHITELIST = (
         "PATH",
         "PATHEXT",
@@ -144,8 +150,6 @@ def _run_plugin(
         "HOMEPATH",
         "OS",
         "PROCESSOR_ARCHITECTURE",
-        "PYTHONPATH",
-        "PYTHONHOME",
         "PYTHONIOENCODING",
         "LANG",
         "LC_ALL",
