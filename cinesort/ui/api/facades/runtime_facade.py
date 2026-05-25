@@ -90,12 +90,16 @@ class RuntimeFacade(_BaseFacade):
 
     # ---------- Updater (V3-12) ----------
 
-    def get_update_info(self) -> Dict[str, Any]:
+    def get_update_info(self, force_refresh: bool = False) -> Dict[str, Any]:
         """V3-12 — Retourne le dernier resultat connu (cache).
+
+        Fix audit 2026-05-24 (v1.5.2) Vague E : accepte ``force_refresh=True``
+        pour forcer un check reseau immediat (delegue a ``check_for_updates``).
+        Permet a l'UI Parametres > Mises a jour d'avoir un seul endpoint.
 
         Cf CineSortApi._get_update_info_impl pour la doc complete.
         """
-        return self._api._get_update_info_impl()
+        return self._api._get_update_info_impl(force_refresh=force_refresh)
 
     def check_for_updates(self) -> Dict[str, Any]:
         """V3-12 — Force un check MAJ immediat (bouton "Verifier maintenant").

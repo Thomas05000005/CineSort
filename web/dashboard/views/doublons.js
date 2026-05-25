@@ -25,6 +25,11 @@ import { renderFilmDetail } from "../components/film-detail.js";
 import { openDuplicateComparatorModal } from "../components/duplicate-comparator-modal.js";
 import { showToast } from "../components/toast.js";
 import { setSections as setRightPanelSections } from "../components/right-panel.js";
+// Fix audit 2026-05-24 (v1.5.2) : import dangerConfirmModal pour la
+// confirmation du bouton "Auto-décider tous" (action irréversible cote UI :
+// les décisions sont persistées immédiatement en DB via mark_duplicate_winner).
+import { dangerConfirmModal } from "../components/modal.js";
+import { navigateTo } from "../core/router.js";
 
 let _state = null;
 let _container = null;
@@ -202,6 +207,15 @@ function _renderHeader() {
   const savings = _fmtSize(_state.sizeSavingsTotal);
   const pendingForBulk = _visibleGroups().filter((g) => !g.winner_decided).length;
   const bulkBtnDisabled = (_state.bulkInFlight || pendingForBulk === 0) ? "disabled" : "";
+  // Fix audit 2026-05-24 (v1.5.2) : compter les groupes avec un winner score
+  // déterministe ("a" ou "b" et pas "tie/unknown") pour activer le bouton
+  // Auto-décider. Si aucun groupe n'a de winner clair -> bouton désactivé.
+  const autoDecidable = _state.groups.filter((g) => {
+    if (g.winner_decided) return false;
+    const w = String((g.comparison && g.comparison.winner) || "").toLowerCase();
+    return w === "a" || w === "b";
+  }).length;
+  const autoBtnDisabled = (_state.bulkInFlight || autoDecidable === 0) ? "disabled" : "";
   return `
     <header class="doublons-header">
       <div class="doublons-header-top">
@@ -223,6 +237,10 @@ function _renderHeader() {
         </select>
         <button type="button" class="v5-btn v5-btn--primary" data-doublons-action="bulk-perceptual" ${bulkBtnDisabled}>
           ▾ Analyser perceptuel sur ${pendingForBulk} groupe${pendingForBulk > 1 ? "s" : ""}
+        </button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-doublons-action="auto-decide-all" ${autoBtnDisabled}
+                title="Choisit automatiquement le winner par score qualité pour tous les groupes non décidés">
+          🤖 Auto-décider tous (${autoDecidable})
         </button>
       </div>
     </header>
@@ -386,6 +404,42 @@ function _renderBody() {
   return `
     <div class="doublons-list">
       ${list.map(_renderGroupCard).join("")}
+    </div>
+    ${_renderApplyCta()}
+  `;
+}
+
+// Fix audit 2026-05-24 (v1.5.2) : CTA "Passer à Apply" en bas. Quand tous les
+// groupes sont décidés -> bouton primary visible. Sinon : afficher un compteur
+// de progression "X / Y décidés" pour guider l'utilisateur. Sans ce CTA, après
+// avoir cliqué "Garder A/B" sur tous les groupes, l'utilisateur restait coincé
+// sur la vue Doublons sans savoir comment passer à l'étape Apply.
+function _renderApplyCta() {
+  const total = _state.groups.length;
+  if (total === 0) return "";
+  const decided = _state.decidedCount;
+  if (decided >= total) {
+    return `
+      <div class="doublons-apply-cta doublons-apply-cta--ready">
+        <p class="doublons-apply-cta-msg">
+          ✓ Tous les groupes sont décidés (${decided}/${total}).
+        </p>
+        <button type="button" class="v5-btn v5-btn--primary v5-btn--lg" data-doublons-action="go-apply">
+          → Passer à Apply
+        </button>
+      </div>
+    `;
+  }
+  return `
+    <div class="doublons-apply-cta doublons-apply-cta--progress">
+      <p class="doublons-apply-cta-msg">
+        ${decided} / ${total} groupe${total > 1 ? "s" : ""} décidé${decided > 1 ? "s" : ""}.
+        Décide les ${total - decided} restant${(total - decided) > 1 ? "s" : ""} pour passer à Apply.
+      </p>
+      <button type="button" class="v5-btn v5-btn--ghost v5-btn--lg" disabled
+              title="Tous les groupes doivent être décidés avant Apply">
+        → Passer à Apply (${decided}/${total})
+      </button>
     </div>
   `;
 }
@@ -624,6 +678,116 @@ function _handleDecision(groupKey, side, winnerRowId, payload) {
   _renderRightPanel();
 }
 
+/* --- Auto-décider tous (par score qualité) --- */
+
+// Fix audit 2026-05-24 (v1.5.2) : auto-décide tous les groupes non décidés en
+// utilisant comparison.winner ("a" ou "b") calculé par le backend (winner score
+// qualité). Pas d'endpoint bulk -> boucle séquentielle d'appels
+// mark_duplicate_winner avec mutex per-group + progress toast tous les 5
+// groupes. dangerConfirmModal car action irréversible côté UI (rollback
+// nécessite de re-cliquer sur chaque carte).
+async function _autoDecideAll() {
+  if (!_state || _state.bulkInFlight) return;
+  const candidates = _state.groups.filter((g) => {
+    if (g.winner_decided) return false;
+    const w = String((g.comparison && g.comparison.winner) || "").toLowerCase();
+    return w === "a" || w === "b";
+  });
+  if (candidates.length === 0) {
+    showToast({ type: "info", text: "Aucun groupe à auto-décider (winners ambigus)." });
+    return;
+  }
+
+  dangerConfirmModal({
+    title: `Auto-décider ${candidates.length} groupe${candidates.length > 1 ? "s" : ""} ?`,
+    items: [
+      `${candidates.length} décision${candidates.length > 1 ? "s" : ""} seront posée${candidates.length > 1 ? "s" : ""} d'un coup`,
+      `Critère : winner du score qualité (codec + résolution + bitrate)`,
+      `Les "losers" iront en _review/_duplicates_user_decided/ à l'apply`,
+    ],
+    consequence:
+      "Les décisions sont persistées immédiatement en base. Pour annuler, il faudra rouvrir chaque groupe et changer le winner manuellement.",
+    confirmLabel: `🤖 Auto-décider ${candidates.length}`,
+    cancelLabel: "Annuler",
+    countdownSeconds: candidates.length > 50 ? 3 : 0,
+    onConfirm: async () => {
+      if (!_state) return;
+      _state.bulkInFlight = true;
+      _render();
+      showToast({
+        type: "info",
+        text: `⏳ Auto-décision en cours sur ${candidates.length} groupe${candidates.length > 1 ? "s" : ""}…`,
+      });
+
+      let ok = 0;
+      let ko = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        if (!_state) return; // unmount pendant la boucle
+        const g = candidates[i];
+        const groupKey = _groupKey(g);
+        const side = String(g.comparison.winner).toLowerCase();
+        const winnerIdx = side === "a" ? 0 : 1;
+        const winnerRow = (g.rows || [])[winnerIdx];
+        const winnerRowId = winnerRow ? winnerRow.row_id : null;
+        if (!winnerRowId) { ko += 1; continue; }
+        try {
+          const res = await apiPost("run/mark_duplicate_winner", {
+            run_id: _state.runId,
+            group_key: groupKey,
+            winner_row_id: winnerRowId,
+            notes: "auto-decide:score_v2",
+          }, { signal: _signal() });
+          if (!_state) return;
+          const data = _payload(res);
+          if (data.ok === false) { ko += 1; }
+          else {
+            ok += 1;
+            g.winner_decided = true;
+            g.winner_side = side;
+            g.winner_row_id = winnerRowId;
+            if (data.losers) g.losers = data.losers;
+          }
+        } catch (_e) {
+          if (!_state) return;
+          ko += 1;
+        }
+        // Progress feedback tous les 5 groupes
+        if ((i + 1) % 5 === 0 && _state) {
+          _state.decidedCount = _state.groups.filter((x) => x.winner_decided).length;
+          _state.pendingCount = _state.groups.length - _state.decidedCount;
+          _render();
+        }
+      }
+
+      if (!_state) return;
+      _state.bulkInFlight = false;
+      // Resync depuis le backend pour les totaux (size_savings, decidedCount).
+      await _loadGroups();
+      if (!_state) return;
+      if (ko === 0) {
+        showToast({ type: "success", text: `✓ ${ok} groupe${ok > 1 ? "s" : ""} auto-décidé${ok > 1 ? "s" : ""}.` });
+      } else {
+        showToast({
+          type: "warn",
+          text: `${ok} décidé${ok > 1 ? "s" : ""}, ${ko} échec${ko > 1 ? "s" : ""}. Vérifie les groupes restants.`,
+          duration: 6000,
+        });
+      }
+    },
+  });
+}
+
+/* --- Navigation vers étape Apply --- */
+
+// Fix audit 2026-05-24 (v1.5.2) : navigation directe vers la step Apply du
+// workflow Traitement. Utilise navigateTo pour rester dans le router SPA et
+// déclencher l'init du workflow Traitement sur la bonne étape.
+function _goToApply() {
+  // navigateTo préfixe avec "#" -> on passe sans le "#" initial.
+  // Le fragment "#step-apply" est lu par traitement.js _readStep().
+  navigateTo("/traitement#step-apply");
+}
+
 /* --- Bulk perceptual --- */
 
 async function _bulkPerceptual() {
@@ -850,6 +1014,9 @@ function _bindEvents() {
       const action = btn.dataset.doublonsAction;
       if (action === "refresh") _loadGroups();
       else if (action === "bulk-perceptual") void _bulkPerceptual();
+      // Fix audit 2026-05-24 (v1.5.2) : nouveaux handlers auto-décide + go-apply.
+      else if (action === "auto-decide-all") void _autoDecideAll();
+      else if (action === "go-apply") _goToApply();
     });
   });
 

@@ -41,6 +41,15 @@ import contextlib
 _log = logging.getLogger(__name__)
 
 
+# Fix audit 2026-05-24 (v1.5.2) : delai d'annulation post-apply enforce
+# cote backend. La promesse "Annulation possible pendant 24h" (Spec 08 §3.5,
+# PR #394) etait cosmetique : la carte UI affichait un countdown mais le
+# backend acceptait toujours l'undo. On refuse desormais avec 410 Gone une
+# fois passe ce delai. Constante en miroir de dashboard_support._UNDO_DEADLINE_SECONDS
+# pour eviter une dependance circulaire entre modules ui.api.
+_UNDO_DEADLINE_SECONDS = 24 * 3600
+
+
 class _DuplicateCheckError(Exception):
     pass
 
@@ -280,12 +289,18 @@ def build_undo_preview_payload(
         )
 
     apply_ts = float(batch.get("started_ts") or 0.0) if batch else 0.0
+    # Fix audit 2026-05-24 (v1.5.2) : expose `expired` aussi dans la reponse
+    # de la preview undo, pas seulement dans le dashboard. La carte UI peut
+    # ainsi rejeter localement un click utilisateur tardif sans aller-retour.
+    now_ts = time.time()
+    expired = bool(apply_ts > 0 and (now_ts - apply_ts) > _UNDO_DEADLINE_SECONDS)
 
     payload = {
         "ok": True,
         "run_id": run_id,
         "batch_id": batch_id,
         "apply_ts": apply_ts,
+        "expired": expired,
         "can_undo": bool(reversible_ops),
         "counts": {
             "total": int(len(ops)),
@@ -961,6 +976,20 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
         }
 
     uctx = _extract_undo_context(preview, batch)
+
+    # Fix audit 2026-05-24 (v1.5.2) : enforcement backend du delai 24h.
+    # On refuse l'execution reelle apres _UNDO_DEADLINE_SECONDS — la dry_run
+    # reste autorisee pour que l'UI puisse afficher l'apercu meme expire.
+    if not bool(dry_run):
+        apply_ts = float(batch.get("started_ts") or 0.0)
+        if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+            return _err_response(
+                "L'annulation n'est plus possible (delai 24h depasse).",
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=410,
+            )
 
     if bool(dry_run):
         return {

@@ -166,5 +166,117 @@ class RuntimeOpenExternalUrlTests(unittest.TestCase):
         )
 
 
+# Fix audit 2026-05-24 (v1.5.2) : Vague E — flow update manuel
+# Ajout bouton "Verifier maintenant" + carte "Nouvelle version disponible" sur
+# Accueil + support `force_refresh` cote backend pour reutiliser le meme
+# endpoint `runtime/get_update_info`.
+class ParametresUpdateSectionTests(unittest.TestCase):
+    """Vague E : Parametres > Avance > Mises a jour expose le bouton manuel."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = (_ROOT / "web" / "dashboard" / "views" / "parametres.js").read_text(encoding="utf-8")
+
+    def test_parametres_has_update_section(self):
+        """La sous-section 'updates' doit exister avec son label 'Mises a jour'."""
+        self.assertIn('id: "updates"', self.js, "Sous-section 'updates' absente de parametres.js")
+        self.assertIn('"Mises à jour"', self.js, "Label de la sous-section 'updates' absent")
+
+    def test_parametres_has_check_updates_button(self):
+        """Le bouton manuel 'Verifier maintenant' doit etre present."""
+        self.assertIn(
+            'action: "check_updates_now"',
+            self.js,
+            "Action 'check_updates_now' absente — bouton manuel non declare",
+        )
+        self.assertIn(
+            "Vérifier maintenant",
+            self.js,
+            "Label du bouton 'Verifier maintenant' absent",
+        )
+
+    def test_parametres_check_updates_calls_get_update_info_with_force_refresh(self):
+        """Le handler doit appeler runtime/get_update_info avec force_refresh: true."""
+        self.assertIn(
+            'apiPost("runtime/get_update_info", { force_refresh: true })',
+            self.js,
+            "Le handler du bouton doit forcer le check via force_refresh=true",
+        )
+
+    def test_parametres_check_updates_uses_open_external_url(self):
+        """Les boutons 'Voir' / 'Telecharger' doivent ouvrir l'URL via runtime."""
+        self.assertIn(
+            'apiPost("runtime/open_external_url"',
+            self.js,
+            "Les boutons Voir/Telecharger doivent passer par runtime/open_external_url",
+        )
+
+
+class GetUpdateInfoForceRefreshTests(unittest.TestCase):
+    """Vague E : `runtime/get_update_info` accepte `force_refresh` (delegate)."""
+
+    def test_facade_signature_accepts_force_refresh(self):
+        sig = inspect.signature(runtime_facade.RuntimeFacade.get_update_info)
+        self.assertIn(
+            "force_refresh",
+            sig.parameters,
+            "RuntimeFacade.get_update_info doit accepter `force_refresh`",
+        )
+        # Defaut a False pour preserver la backward-compat (cache only).
+        self.assertEqual(
+            sig.parameters["force_refresh"].default,
+            False,
+            "force_refresh doit defaut a False (backward-compat)",
+        )
+
+    def test_impl_signature_accepts_force_refresh(self):
+        sig = inspect.signature(CineSortApi._get_update_info_impl)
+        self.assertIn(
+            "force_refresh",
+            sig.parameters,
+            "_get_update_info_impl doit accepter `force_refresh`",
+        )
+
+    def test_get_update_info_supports_force_refresh(self):
+        """Avec force_refresh=True, l'impl delegue a _check_for_updates_impl."""
+        # On utilise un MagicMock pour eviter le boot complet de CineSortApi.
+        from unittest.mock import MagicMock
+
+        api = CineSortApi.__new__(CineSortApi)
+        api._check_for_updates_impl = MagicMock(return_value={"ok": True, "data": {"update_available": True}})
+        # Appel avec force_refresh -> delegate.
+        result = api._get_update_info_impl(force_refresh=True)
+        api._check_for_updates_impl.assert_called_once()
+        self.assertEqual(result, {"ok": True, "data": {"update_available": True}})
+
+
+class AccueilUpdateCardTests(unittest.TestCase):
+    """Vague E : Accueil affiche une carte discrete si update detectee."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = (_ROOT / "web" / "dashboard" / "views" / "accueil.js").read_text(encoding="utf-8")
+
+    def test_accueil_fetches_update_info(self):
+        """initAccueil doit recuperer runtime/get_update_info au boot."""
+        self.assertIn(
+            'apiPost("runtime/get_update_info"',
+            self.js,
+            "Accueil doit fetcher runtime/get_update_info pour la carte update",
+        )
+
+    def test_accueil_render_update_card_helper_present(self):
+        self.assertIn(
+            "_renderUpdateCard",
+            self.js,
+            "Helper _renderUpdateCard absent",
+        )
+
+    def test_accueil_update_card_only_when_available(self):
+        """La carte n'est rendue que si update_available et latest_version."""
+        self.assertIn("update_available", self.js)
+        self.assertIn("data-accueil-update-url", self.js)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
