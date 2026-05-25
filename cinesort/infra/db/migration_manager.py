@@ -31,22 +31,31 @@ def _split_sql_statements(sql: str) -> List[str]:
     Ignore les commentaires `-- ...` et les instructions vides.
     Filtre les `PRAGMA user_version = X` qui sont gerees separement par le manager.
 
+    Fix audit 2026-05-25 (v1.5.3) Vague H+ : on RETIRE d'abord les commentaires
+    `-- ...` ligne-par-ligne AVANT de split sur `;`. L'ancienne implementation
+    splitait d'abord sur `;` puis retirait les commentaires — donc un `;` au
+    milieu d'un commentaire produisait deux fragments dont le second commencait
+    par du SQL non-commente et plantait avec `syntax error`. Bug latent sur les
+    futures migrations qui auraient un `;` dans un commentaire descriptif.
+
     NB: cette fonction ne supporte PAS les triggers `CREATE TRIGGER ... BEGIN ... END;`
     qui contiennent plusieurs `;` — aucune migration n'en utilise actuellement.
+    NB: ne gere pas non plus les `--` a l'interieur d'une string SQL ('--'),
+    mais aucune migration n'en utilise non plus.
     """
+    cleaned_lines: List[str] = []
+    for line in sql.splitlines():
+        idx = line.find("--")
+        if idx >= 0:
+            line = line[:idx]
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines)
+
     out: List[str] = []
-    for raw in sql.split(";"):
-        # Retirer les commentaires ligne a ligne
-        lines = []
-        for line in raw.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("--"):
-                continue
-            lines.append(line)
-        stmt = "\n".join(lines).strip()
+    for raw in cleaned.split(";"):
+        stmt = raw.strip()
         if not stmt:
             continue
-        # PRAGMA user_version est gere explicitement par apply() — ne pas double-executer
         if stmt.upper().startswith("PRAGMA USER_VERSION"):
             continue
         out.append(stmt)
