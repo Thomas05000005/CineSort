@@ -219,6 +219,15 @@ def analyze_astats(
         "-",
     ]
     _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    if _rc != 0:
+        logger.warning(
+            "ffmpeg astats rc=%s media=%s track=%s stderr_head=%r",
+            _rc,
+            media_path,
+            track_index,
+            (stderr or "")[:200],
+        )
+        return None
     if not stderr:
         return None
 
@@ -275,6 +284,15 @@ def analyze_clipping_segments(
         "-",
     ]
     _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    if _rc != 0:
+        logger.warning(
+            "ffmpeg clipping_segments rc=%s media=%s track=%s stderr_head=%r",
+            _rc,
+            media_path,
+            track_index,
+            (stderr or "")[:200],
+        )
+        return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
     if not stderr:
         return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
 

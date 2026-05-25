@@ -150,6 +150,13 @@ class AstatsTests(unittest.TestCase):
         self.assertIsNone(result["noise_floor"])
         self.assertIsNone(result["dynamic_range"])
 
+    @mock.patch("cinesort.domain.perceptual.audio_perceptual.run_ffmpeg_text")
+    def test_nonzero_rc_returns_none(self, mock_run) -> None:
+        """rc != 0 ffmpeg → None (échec ne doit pas masquer un stderr non-vide)."""
+        mock_run.return_value = (1, "", "Overall RMS level: -28.4 dB\nERROR\n")
+        result = analyze_astats("/usr/bin/ffmpeg", "film.mkv", 0)
+        self.assertIsNone(result)
+
 
 # ---------------------------------------------------------------------------
 # analyze_clipping_segments (2 tests)
@@ -181,6 +188,14 @@ class ClippingTests(unittest.TestCase):
         self.assertEqual(result["total_segments"], 13)
         self.assertGreater(result["clipping_pct"], 20.0)
         self.assertEqual(result["verdict"], "critical")
+
+    @mock.patch("cinesort.domain.perceptual.audio_perceptual.run_ffmpeg_text")
+    def test_nonzero_rc_returns_unknown(self, mock_run) -> None:
+        """rc != 0 ffmpeg → verdict 'unknown' (échec doit pas être interprété comme pas-de-clipping)."""
+        mock_run.return_value = (255, "", "Peak level: 0.5 dB\nERROR\n")
+        result = analyze_clipping_segments("/usr/bin/ffmpeg", "film.mkv", 0)
+        self.assertEqual(result["verdict"], "unknown")
+        self.assertEqual(result["clipping_segments"], 0)
 
 
 # ---------------------------------------------------------------------------
