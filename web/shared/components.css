@@ -6734,6 +6734,45 @@ body.v5-notif-lock {
 .bibliotheque-card-poster { position: relative; aspect-ratio: 2/3; background: var(--surface-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .bibliotheque-card-poster-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bibliotheque-card-poster-placeholder { font-size: 48px; color: var(--text-3); }
+/* Fix audit 2026-05-25 (v1.5.5) Vague J : la variante "non identifié" contenait
+ * un <span class="bibliotheque-card-unidentified-cta">Identifier</span> qui
+ * heritait du font-size: 48px de .bibliotheque-card-poster-placeholder. Combine
+ * a overflow:hidden du parent .bibliotheque-card-poster, le mot "Identifier"
+ * debordait et apparaissait tronque ("dentifie") par-dessus le clapper SVG.
+ * Fix : layout flex vertical, taille du clapper preservee a 48px, CTA en text
+ * de taille normale avec wrapping geree. */
+.bibliotheque-card-poster-placeholder--unidentified {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  padding: var(--sp-2);
+  box-sizing: border-box;
+  text-align: center;
+}
+.bibliotheque-card-poster-placeholder--unidentified > span[aria-hidden="true"] {
+  font-size: 48px;
+  line-height: 1;
+}
+.bibliotheque-card-unidentified-cta {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bibliotheque-card-poster-placeholder--unidentified:hover .bibliotheque-card-unidentified-cta {
+  background: rgba(99, 102, 241, 0.22);
+}
 .bibliotheque-card-check { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.5); border-radius: var(--radius-sm); padding: 2px 4px; }
 .bibliotheque-card-check input { cursor: pointer; }
 .bibliotheque-card-warn { position: absolute; top: 6px; right: 6px; background: var(--warning, #d97706); color: #fff; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }

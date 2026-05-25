@@ -166,17 +166,60 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     # et on mappe poster par tmdb_id. Cache TMDb local evite la re-frappe HTTP
     # entre 2 appels. Films non identifies (tmdb_id=None) gardent leur
     # placeholder coté UI avec lien "Identifier manuellement".
+    #
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : root cause des 853 cartes sans
+    # poster. PlanRow.tmdb_id est TOUJOURS None apres scan (le linker ecrit le
+    # tmdb_id sur les Candidate enfants, pas au top-level du row). Resultat
+    # Vague I.D collectait tmdb_ids=[] -> aucun batch poster lance -> 853
+    # placeholders. Fix : extraire tmdb_id depuis candidates[0] (best score) en
+    # plus du top-level. Persiste en `chosen_tmdb_id` dans la row Library pour
+    # exposer au frontend et permettre identification implicite.
+    def _resolve_tmdb_id(row_dict: Dict[str, Any]) -> Optional[int]:
+        """Resoud le tmdb_id effectif d'une PlanRow : top-level d'abord, puis
+        candidat de meilleur score (>=0.7), sinon None."""
+        tid_top = row_dict.get("tmdb_id")
+        if tid_top:
+            try:
+                v = int(tid_top)
+                if v > 0:
+                    return v
+            except (TypeError, ValueError):
+                pass
+        # Fallback : best candidate avec tmdb_id (la liste est deja ordonnee par
+        # score desc cote linker domain).
+        best: Optional[int] = None
+        best_score = -1.0
+        for cand in (row_dict.get("candidates") or []):
+            if not isinstance(cand, dict):
+                continue
+            cid = cand.get("tmdb_id")
+            if not cid:
+                continue
+            try:
+                score = float(cand.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score < 0.7:
+                # Confiance candidat insuffisante : on n'auto-resolve pas.
+                continue
+            if score > best_score:
+                try:
+                    best = int(cid)
+                    best_score = score
+                except (TypeError, ValueError):
+                    continue
+        return best
+
+    # Map row_id -> tmdb_id resolu (pour eviter de recalculer dans la boucle out)
+    resolved_tmdb_by_row: Dict[str, int] = {}
     tmdb_ids: List[int] = []
     for r in plan_rows:
-        tid_raw = r.get("tmdb_id")
-        if tid_raw is None or tid_raw == "":
-            continue
-        try:
-            tid = int(tid_raw)
-        except (TypeError, ValueError):
-            continue
-        if tid > 0 and tid not in tmdb_ids:
-            tmdb_ids.append(tid)
+        rid = str(r.get("row_id") or "")
+        tid = _resolve_tmdb_id(r)
+        if tid and tid > 0:
+            resolved_tmdb_by_row[rid] = tid
+            if tid not in tmdb_ids:
+                tmdb_ids.append(tid)
     posters_by_tmdb: Dict[str, str] = {}
     if tmdb_ids:
         try:
@@ -256,13 +299,15 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         # le batch posters_by_tmdb pre-calcule en haut de fonction. Fallback sur
         # le 1er candidat TMDb avec poster_url si tmdb_id direct absent (cas des
         # rows non encore identifies mais avec candidats suggeres).
+        #
+        # Fix audit 2026-05-25 (v1.5.5) Vague J : utilise tmdb_id RESOLU (top-level
+        # OU best candidate) au lieu du seul top-level. Sans ca, 853/853 PlanRows
+        # avaient tmdb_id=None donc poster_url=None malgre des candidats avec
+        # tmdb_id valide.
         poster_url: Optional[str] = None
-        tid_for_poster = r.get("tmdb_id")
-        if tid_for_poster:
-            try:
-                poster_url = posters_by_tmdb.get(str(int(tid_for_poster)))
-            except (TypeError, ValueError):
-                poster_url = None
+        resolved_tid = resolved_tmdb_by_row.get(row_id)
+        if resolved_tid:
+            poster_url = posters_by_tmdb.get(str(resolved_tid))
         if not poster_url:
             for cand in (r.get("candidates") or []):
                 cand_poster = cand.get("poster_url") if isinstance(cand, dict) else None
@@ -276,7 +321,13 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "year": int(r.get("proposed_year") or 0),
             # Issue audit Tier 2 : tmdb_id absent ici cassait le match Jellyfin
             # DateCreated dans library_timeline_support (fallback toujours fs mtime).
-            "tmdb_id": r.get("tmdb_id"),
+            # Fix audit 2026-05-25 (v1.5.5) Vague J : expose le tmdb_id RESOLU
+            # (top-level OU best candidate score>=0.7) pour que le frontend
+            # affiche un poster + un libelle "identifie" plutot que "Identifier"
+            # quand la confidence est forte. Sans ca : 836 films avec candidats
+            # haute confiance affichaient quand meme le placeholder "Identifier"
+            # parce que PlanRow.tmdb_id top-level reste None apres scan.
+            "tmdb_id": resolved_tmdb_by_row.get(row_id) or r.get("tmdb_id"),
             "duration_s": duration_s,
             "duration_min": int(duration_s / 60) if duration_s > 0 else 0,
             "codec": _normalize_codec(probe_video.get("codec")),

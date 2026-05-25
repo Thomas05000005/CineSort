@@ -571,14 +571,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Charge fr.json + locale stockee, sans bloquer >500ms.
   // Promise.race avec timeout : si initI18n hang (network/file), on continue
   // sans bloquer le rendu du shell.
+  // Fix audit 2026-05-25 (v1.5.5) Vague J : meme si on continue apres timeout
+  // 1500ms, on garde la reference a la promesse pour qu'elle resolve en
+  // arriere-plan et notify les observers (sidebar re-render avec les vrais
+  // labels FR). Sans ca, en cas de boot lent, la sidebar restait avec les
+  // cles brutes (sidebar.brand_name) jusqu'a un refresh manuel.
+  const _i18nBoot = initI18n();
   try {
     await Promise.race([
-      initI18n(),
+      _i18nBoot,
       new Promise((resolve) => setTimeout(resolve, 1500)),
     ]);
   } catch (e) {
     console.warn("[boot] initI18n", e);
   }
+  // Continue en arriere-plan : si timeout 1500ms expire mais le fetch finit
+  // par reussir, _notifyObservers() dans initI18n re-render les composants.
+  _i18nBoot.catch((e) => console.warn("[boot] initI18n background", e));
 
   // Si on est authentifie OU en mode natif desktop, monter le shell v5.
   // Le mode natif n'a pas besoin de token UI : le bridge pywebview garantit

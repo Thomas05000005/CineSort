@@ -24,6 +24,35 @@ const DEFAULT_LOCALE = "fr";
 const STORAGE_KEY = "cinesort_locale";
 const INTERPOLATION_RE = /\{\{\s*([A-Za-z0-9_\-]+)\s*\}\}/g;
 
+// Fix audit 2026-05-25 (v1.5.5) Vague J : fallback hardcode minimal pour les
+// cles critiques de la sidebar/topbar. Si fetch des locales JSON foire (404,
+// timeout, bundle PyInstaller sans dossier locales/), on affiche au moins
+// un texte humain au lieu de cles brutes type "sidebar.brand_name".
+// Cle = chemin dotted complet, valeur = traduction FR.
+const _FALLBACK_FR = Object.freeze({
+  "sidebar.brand_name": "CineSort",
+  "sidebar.brand_desc": "Organisation de films",
+  "sidebar.nav.home": "Accueil",
+  "sidebar.nav.processing": "Traitement",
+  "sidebar.nav.library": "Bibliotheque",
+  "sidebar.nav.quality": "Qualite",
+  "sidebar.nav.history": "Historique",
+  "sidebar.nav.qij": "QIJ",
+  "sidebar.nav.settings": "Parametres",
+  "sidebar.nav.help": "Aide",
+  "sidebar.aria_label": "Navigation CineSort",
+  "sidebar.about": "A propos",
+  "sidebar.about_aria": "A propos de CineSort",
+  "sidebar.collapse": "Reduire",
+  "sidebar.expand": "Deployer",
+  "sidebar.collapse_expand": "{{action}} la sidebar",
+  "sidebar.title_with_shortcut": "{{label}} ({{shortcut}})",
+  "sidebar.counter_aria": "Compteur {{label}}",
+  "sidebar.integration_disabled_title": "{{label}} desactive",
+  "sidebar.update_badge_title": "MAJ disponible : {{version}}",
+  "topbar.search_label": "Rechercher",
+});
+
 // Etat module — un singleton par window. Les sous-vues importent toutes le meme.
 const _state = {
   locale: DEFAULT_LOCALE,
@@ -125,6 +154,14 @@ export function t(key, params) {
   if (template == null && _state.locale !== DEFAULT_LOCALE) {
     template = _lookupDotted(_state.messages[DEFAULT_LOCALE], key);
   }
+  // Fix audit 2026-05-25 (v1.5.5) Vague J : si rien charge encore (race au
+  // boot : sidebar render avant que /locales/fr.json soit fetched) OU si
+  // fetch a echoue (404, timeout, bundle sans locales/), on consulte le
+  // dictionnaire FR minimal hardcode. Empeche d'afficher "sidebar.brand_name"
+  // brut a l'utilisateur, meme dans le pire scenario reseau.
+  if (template == null && Object.prototype.hasOwnProperty.call(_FALLBACK_FR, key)) {
+    template = _FALLBACK_FR[key];
+  }
   if (template == null) return key;
   return _interpolate(template, params || null);
 }
@@ -205,6 +242,14 @@ export async function initI18n() {
       _state.messages[DEFAULT_LOCALE] = results[0];
       if (stored !== DEFAULT_LOCALE) _state.messages[stored] = results[1];
       _state.locale = stored;
+      // Fix audit 2026-05-25 (v1.5.5) Vague J : notifier les observers au boot
+      // egalement (pas seulement dans setLocale). Sinon, si app.js timeout sur
+      // initI18n (Promise.race 1500ms) et mount la sidebar avec les fallbacks
+      // hardcodes/cles brutes, la promesse de fetch peut resoudre APRES le
+      // mount et la sidebar reste avec le rendu degrade jusqu'au prochain
+      // setLocale(). Avec ce notify, les composants observers re-render avec
+      // les vrais messages des JSON des qu'ils arrivent.
+      _notifyObservers();
       return _state.locale;
     } catch (err) {
       // Fix audit 2026-05-24 : si le fetch echoue (reseau lent, fichier absent,

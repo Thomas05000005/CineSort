@@ -740,6 +740,9 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # logs (contournement de la pagination + valeur retournee dans next_log_index incoherente).
     # clamp_non_negative_int gere aussi None / str non-numerique / NaN proprement.
     last_log_index = clamp_non_negative_int(last_log_index)
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : import local pour eviter cycle
+    # run_flow <-> run_data lors du chargement du module.
+    from cinesort.ui.api.run_data_support import count_plan_rows
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -753,6 +756,23 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         running = status_text in {RunStatus.PENDING.value, RunStatus.RUNNING.value}
         done = status_text in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
         err = str(run_row.get("error_message") or "") or None
+        # Fix audit 2026-05-25 (v1.5.5) Vague J : pour les runs termines hors
+        # memoire (DB-only), total stocke = discover_total (855 dossiers
+        # explores) au lieu de len(plan.jsonl) (853 PlanRow valides). On
+        # recompte depuis plan.jsonl pour aligner sur la meme source de verite
+        # que dashboard/history/library. Fallback sur total DB si plan.jsonl
+        # inaccessible.
+        if done:
+            try:
+                run_paths = api._run_paths_for(
+                    normalize_user_path(run_row.get("state_dir"), api._state_dir),
+                    run_id,
+                    ensure_exists=False,
+                )
+                total = count_plan_rows(run_paths, fallback=total)
+            except (OSError, AttributeError, KeyError, TypeError, ValueError):
+                # En cas d'erreur, on garde le total DB (best-effort)
+                pass
         return {
             "ok": True,
             "running": running,
@@ -780,6 +800,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         started = rs.started_ts
         samples = list(rs.progress_samples)
         ewma = rs.speed_ewma
+        paths_snapshot = rs.paths
 
     snap = rs.runner.get_status(run_id)
     status_text = "RUNNING"
@@ -800,6 +821,20 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
             status_text = RunStatus.RUNNING.value
         else:
             status_text = RunStatus.PENDING.value
+
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : une fois le scan termine, rs.total
+    # vaut encore discover_total (nombre de dossiers explores, ex. 855) alors
+    # que len(rs.rows) = nombre de PlanRow finaux (ex. 853, certains dossiers
+    # sans video ont ete ignores). L'etape Doublons / barre de progression
+    # affichait donc "855 films" alors que la Bibliotheque/Qualite affichaient
+    # 853. On recompte depuis plan.jsonl (source unique de verite Vague I.C)
+    # une fois le scan done. Pendant le scan (running), on garde rs.total =
+    # discover_total comme cible attendue de la barre de progression.
+    if done and not running:
+        try:
+            total = count_plan_rows(paths_snapshot, fallback=total)
+        except (OSError, AttributeError, KeyError, TypeError, ValueError):
+            pass
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 

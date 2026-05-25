@@ -1318,6 +1318,19 @@ def apply_single(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
 
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : guard explicite src == dst.
+    # _single_folder_is_conform peut retourner False sur des cas subtils
+    # (Unicode NFC vs NFD, espaces speciaux, template avec edition vide) alors
+    # que folder.name == dst.name caractere par caractere. Sans ce guard, on
+    # genere un faux rename "X -> X" dans la preview (et un rename inutile en
+    # apply reel via le bloc tmp_ren pour case-change Windows).
+    # NB : on compare les Path resolus pour gerer aussi les separateurs et
+    # la casse Windows (folder.samefile() echouerait si dst n'existe pas).
+    if str(folder) == str(dst):
+        log("INFO", f"NOOP rename: src == dst ({folder})")
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
+        return
+
     if dst.exists():
         if not dst.is_dir():
             log("WARN", f"Rename destination invalid (not directory), skip: {dst}")

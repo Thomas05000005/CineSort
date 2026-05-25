@@ -124,9 +124,13 @@ function _renderHeader(stats) {
   // (y compris ceux sans tier calcule), pas "X films classes". On utilise la
   // somme par tier pour afficher le vrai nombre de films classes.
   const total = totalScored;
-  const healthPct = totalScored > 0
-    ? Math.round(((dist.platinum + dist.gold + dist.silver) / totalScored) * 100)
-    : 0;
+  // Fix audit 2026-05-25 (v1.5.5) Vague J : NaN% quand dist n'a aucun
+  // platinum/gold/silver (ex: 853 films tous en Reject -> dist={reject:853}).
+  // `undefined + 0 + 0 = NaN`. On garde toutes les valeurs en `|| 0` ET on
+  // verifie `Number.isFinite` en sortie pour blinder contre divisions douteuses.
+  const _healthy = (dist.platinum || 0) + (dist.gold || 0) + (dist.silver || 0);
+  const _healthRaw = totalScored > 0 ? (_healthy / totalScored) * 100 : 0;
+  const healthPct = Number.isFinite(_healthRaw) ? Math.round(_healthRaw) : 0;
 
   const activeFilterCount = (_state.filters.decades.length
     + _state.filters.genres.length

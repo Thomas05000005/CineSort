@@ -25,7 +25,13 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
                 continue
             if value > 0:
                 ids.append(value)
-        ids = sorted(set(ids))[:20]
+        # Fix audit 2026-05-25 (v1.5.5) Vague J : ancien cap [:20] truncait
+        # silencieusement les batchs > 20 IDs (catastrophique pour
+        # _build_library_rows qui appelle avec 853 IDs -> 833 silently dropped).
+        # On garde un cap defensif mais large (2000) pour ne pas exploser TMDb
+        # en cas d'appel pathologique. Les posters sont servis depuis le cache
+        # local (tmdb_cache.json) donc le cout reel est minime apres le 1er run.
+        ids = sorted(set(ids))[:2000]
         if not ids:
             return {"ok": True, "posters": {}}
 

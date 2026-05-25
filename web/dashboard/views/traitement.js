@@ -1268,10 +1268,27 @@ async function _handleApplyNow() {
         await _loadRunInfo();
         _renderInPlace();
       } else {
-        showToast({ type: "error", text: "Échec du dry-run." });
+        // Fix audit 2026-05-25 (v1.5.5) Vague J : remonter le vrai message
+        // backend (user_message Vague G / message _err_response) au lieu
+        // d'un toast generique qui masque le diag. (res.data || res) car
+        // certains endpoints renvoient le payload a plat, d'autres sous .data.
+        const data = res?.data || res || {};
+        const backendMsg = data.user_message || data.message || data.error;
+        showToast({
+          type: "error",
+          text: backendMsg ? `Echec du dry-run : ${backendMsg}` : "Echec du dry-run.",
+          duration: 8000,
+        });
       }
-    } catch {
-      showToast({ type: "error", text: "Erreur lors du dry-run." });
+    } catch (err) {
+      // Fix audit 2026-05-25 (v1.5.5) Vague J : meme exception, on tente de
+      // remonter le message si l'erreur porte un payload (apiPost levee).
+      const exMsg = err?.data?.user_message || err?.data?.message || err?.message;
+      showToast({
+        type: "error",
+        text: exMsg ? `Erreur lors du dry-run : ${exMsg}` : "Erreur lors du dry-run.",
+        duration: 8000,
+      });
     }
     return;
   }

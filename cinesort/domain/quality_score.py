@@ -80,10 +80,21 @@ def default_quality_profile() -> Dict[str, Any]:
             # Nouveaux noms (v7.2.0-dev, audit AUDIT_20260422 U1).
             # Anciens alias acceptes pour retro-compat lecture :
             #   Premium->Platinum, Bon->Gold, Moyen->Silver, Faible->Bronze/Reject.
-            "platinum": 85,
-            "gold": 68,
-            "silver": 54,
-            "bronze": 30,
+            # Fix audit 2026-05-25 (v1.5.5) Vague J : recalibrage des seuils.
+            # Avant : 85/68/54/30 -> sur une bibliotheque reelle (853 films),
+            # la moyenne ponderee tournait autour de 22-40 (probe partielle,
+            # bitrates 5-8 Mbps frequents, 1080p AVC majoritaire), ce qui
+            # placait 100% des films en Reject (< 30). Les nouveaux seuils
+            # sont calibres pour une distribution realiste :
+            #   Platinum 75+ : UHD HDR Remux haut debit
+            #   Gold 58+     : 1080p BluRay propre ou UHD light
+            #   Silver 42+   : 1080p web/DVD HD standard
+            #   Bronze 25+   : 720p, encodes leger, probe partielle
+            #   Reject < 25  : echec probe ou tres faible qualite reelle
+            "platinum": 75,
+            "gold": 58,
+            "silver": 42,
+            "bronze": 25,
         },
     }
 
@@ -122,7 +133,8 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
     equilibre["id"] = "CinemaLux_Equilibre_v1"
     equilibre["weights"].update({"video": 60, "audio": 30, "extras": 10})
     equilibre["toggles"].update({"enable_4k_light": True, "include_metadata": False, "include_naming": False})
-    equilibre["tiers"].update({"premium": 85, "bon": 68, "moyen": 54})
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : equilibre suit le default recalibre.
+    equilibre["tiers"].update({"platinum": 75, "gold": 58, "silver": 42, "bronze": 25})
 
     light = copy.deepcopy(base)
     light["id"] = "CinemaLux_Light_v1"
@@ -359,14 +371,16 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     # (premium/bon/moyen) ou les nouvelles (platinum/gold/silver/bronze). On lit
     # les deux et on normalise vers les nouveaux noms apres validation.
     base_tiers = base["tiers"]
-    raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 85)))
-    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 68)))
-    raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 54)))
-    raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 30))
-    tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 85)))
-    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 68)))
-    tiers["silver"] = max(0, min(100, _to_int(raw_silver, 54)))
-    tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 30)))
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults recalibres (voir
+    # default_quality_profile()).
+    raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 75)))
+    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 58)))
+    raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 42)))
+    raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 25))
+    tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 75)))
+    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 58)))
+    tiers["silver"] = max(0, min(100, _to_int(raw_silver, 42)))
+    tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 25)))
     # Retirer les vieilles cles pour n'avoir qu'une source de verite apres normalisation
     for _legacy in ("premium", "bon", "moyen"):
         tiers.pop(_legacy, None)
@@ -891,10 +905,13 @@ def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
     sauvegardes avant la migration 011. Les nouveaux profils utilisent
     platinum/gold/silver/bronze.
     """
-    plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 85)), 85)
-    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 68)), 68)
-    silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 54)), 54)
-    bronze_seuil = _to_int(tiers.get("bronze", 30), 30)
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults alignes sur
+    # default_quality_profile() (75/58/42/25) pour distribution realiste
+    # quand les seuils ne sont pas explicitement fournis par le profil.
+    plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 75)), 75)
+    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 58)), 58)
+    silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 42)), 42)
+    bronze_seuil = _to_int(tiers.get("bronze", 25), 25)
 
     if score >= plat_seuil:
         return "Platinum"
