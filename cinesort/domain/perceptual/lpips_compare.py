@@ -308,10 +308,14 @@ def compute_lpips_distance_pair(
         logger.warning("LPIPS inference erreur : %s", exc)
         return None
 
-    raw = outputs[0]
     try:
+        # outputs peut etre [] (run partiel) -> IndexError
+        # outputs[0] peut etre None (legacy onnxruntime sur certaines versions)
+        # -> np.asarray(None) renvoie array(None, dtype=object), reshape OK,
+        # mais float(None) -> TypeError. Couvrir les 3 cas.
+        raw = outputs[0]
         return float(np.asarray(raw).reshape(-1)[0])
-    except (IndexError, ValueError):
+    except (IndexError, ValueError, TypeError):
         return None
 
 
