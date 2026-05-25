@@ -586,13 +586,20 @@ def main() -> None:
         api = CineSortApi()
 
         # --- 1. Creer le splash HTML (visible immediatement) ---
+        # Fix audit 2026-05-25 (v1.5.4) : splash AGRANDI pour masquer la main
+        # window noire pendant que WebView2 initialise (20s typique avant que
+        # events.loaded ne firing). Avant : splash 520x320 et main 1250x820 ->
+        # l'utilisateur voyait la main noire DEPASSER autour du splash centre.
+        # Le contenu du splash (logo+barre) reste centre grace au flex CSS et au
+        # max-width:440px applique sur .splash dans web/splash.html. on_top=True
+        # garantit que le splash reste au premier plan tant que pas detruit.
         splash_url = Path(resource_path("web/splash.html")).resolve().as_uri()
         splash = webview.create_window(
             "CineSort",
             url=splash_url,
             frameless=True,
-            width=520,
-            height=320,
+            width=1400,
+            height=900,
             on_top=True,
             resizable=False,
             text_select=False,
@@ -668,6 +675,11 @@ def main() -> None:
         # Sans hidden, la window est initialisee des create_window et evaluate_js
         # fonctionne tout de suite. Le splash frameless reste sur on_top pour
         # masquer le boot visuel.
+        # Fix audit 2026-05-25 (v1.5.4) : background_color cohérent avec le
+        # thème luxe (#0a0a0f matche le gradient du splash) au lieu du blanc/
+        # noir par défaut. Si jamais la main window deborde du splash pendant
+        # le chargement WebView2, l'utilisateur voit du dark cohérent, pas du
+        # noir choquant.
         main_window = webview.create_window(
             title,
             url=main_url,
@@ -675,6 +687,7 @@ def main() -> None:
             width=1250,
             height=820,
             min_size=(1000, 700),
+            background_color="#0a0a0f",
         )
 
         # Fix 2026-05-24 ecran noir post-v1.3.0 :
