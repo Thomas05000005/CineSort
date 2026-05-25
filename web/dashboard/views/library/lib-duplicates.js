@@ -7,6 +7,7 @@ import { libState } from "./library.js";
 import { buildDecisionsPayload } from "./lib-validation.js";
 import { renderScoreV2CompareHtml } from "../../components/score-v2.js";
 import { fmtBytes as _fmtBytesShared } from "../../core/format.js";
+import { markDuplicatesChecked } from "./lib-apply.js";
 
 /* --- Point d'entree ------------------------------------------- */
 
@@ -76,6 +77,10 @@ async function _loadDuplicates() {
     groupsEl.querySelectorAll("[data-compare-a]").forEach(btn => {
       btn.addEventListener("click", () => _comparePerceptual(btn.dataset.compareA, btn.dataset.compareB));
     });
+    // Fix audit 2026-05-24 (v1.5.2) : checklist Apply etait cosmetique. On
+    // flagge l'etat "dupsChecked" quand le chargement reussit (peu importe
+    // qu'il y ait 0 ou N groupes : le check a ete fait). Voir lib-apply.js.
+    try { markDuplicatesChecked(); } catch (_e) { /* lib-apply pas monte */ }
   } catch (err) {
     groupsEl.innerHTML = `<p class="status-msg error">Erreur : ${escapeHtml(String(err))}</p>`;
   }

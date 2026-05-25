@@ -17,6 +17,25 @@ export function initApply(state) {
   _render(el);
 }
 
+// Fix audit 2026-05-24 (v1.5.2) : la checklist Sécurité etait cosmetique
+// (les 3 cases jamais cochees) et le bouton Appliquer cliquable meme sans
+// avoir sauvegarde la validation ni verifie les doublons. On expose des
+// setters pour que lib-validation.js (apres save_validation OK) et
+// lib-duplicates.js (apres _loadDuplicates) puissent flagger l'etat. Le
+// bouton Appliquer est alors disabled tant que !(saved && dupsChecked).
+// Le dry-run reste sans gating (utile pour iterer avant save).
+export function markValidationSaved() {
+  _checklistState.saved = true;
+  _updateChecklist();
+  _updateApplyButtonGating();
+}
+
+export function markDuplicatesChecked() {
+  _checklistState.dupsChecked = true;
+  _updateChecklist();
+  _updateApplyButtonGating();
+}
+
 /* --- Rendu ---------------------------------------------------- */
 
 function _render(el) {
@@ -72,6 +91,21 @@ function _render(el) {
   `;
   _hookEvents();
   _loadCleanupPreview();
+  // Fix audit 2026-05-24 (v1.5.2) : appliquer le gating initial au mount.
+  _updateApplyButtonGating();
+}
+
+// Fix audit 2026-05-24 (v1.5.2) : centralise la logique de gating du bouton
+// Appliquer. Disabled tant que validation pas sauvegardee OU doublons pas
+// verifies. Tooltip explicite pour l'operateur.
+function _updateApplyButtonGating() {
+  const btn = $("libBtnApply");
+  if (!btn) return;
+  const ready = _checklistState.saved && _checklistState.dupsChecked;
+  btn.disabled = !ready;
+  btn.title = ready
+    ? ""
+    : "Sauvegardez votre validation et vérifiez les doublons d'abord.";
 }
 
 /* --- Cleanup preview ------------------------------------------ */
@@ -195,7 +229,13 @@ async function _onApply() {
     }
 
   } catch { _showMsg("libApplyMsg", "Erreur réseau.", true); }
-  finally { if (btn) btn.disabled = false; }
+  finally {
+    if (btn) btn.disabled = false;
+    // Fix audit 2026-05-24 (v1.5.2) : reappliquer le gating apres restauration
+    // (sinon le bouton serait reactive meme si la checklist n'est plus valide,
+    // par ex. apres un undo qui invalide les decisions sauvegardees).
+    _updateApplyButtonGating();
+  }
 }
 
 /* --- Refresh Jellyfin/Plex manuel post-apply (#92 quick win #1) -- */

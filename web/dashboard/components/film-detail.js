@@ -168,9 +168,24 @@ function _renderHero(data) {
 
   // Poster
   const posterUrl = data.poster_url || topCand.poster_url || null;
-  const posterHtml = posterUrl
-    ? `<img class="film-detail-poster" src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)}" loading="eager">`
+  // Fix audit 2026-05-24 (v1.5.2) : bouton refresh poster TMDb unitaire. Le
+  // refresh bulk existait deja (vague A integrations) mais aucun moyen unitaire
+  // depuis la fiche film. On greffe un bouton 🔄 absolument positionne au coin
+  // du poster (mode A et B et C, layout identique via classe partagee).
+  // tmdb_id resolu en priorite depuis le row puis topCand : sans tmdb_id on
+  // n'affiche pas le bouton (impossible de cibler l'API).
+  const tmdbIdForRefresh = row.chosen_tmdb_id || row.tmdb_id || topCand.tmdb_id || null;
+  const refreshBtnHtml = tmdbIdForRefresh
+    ? `<button type="button" class="film-detail-poster-refresh-btn"
+              data-film-action="refresh-poster"
+              data-tmdb-id="${escapeHtml(String(tmdbIdForRefresh))}"
+              title="Rafraîchir le poster depuis TMDb"
+              aria-label="Rafraîchir le poster depuis TMDb">🔄</button>`
+    : "";
+  const posterInner = posterUrl
+    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)}" loading="eager">`
     : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
+  const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 
   // Chemin + fichier
   const sourcePath = row.source_path || row.source_folder || "";
@@ -709,6 +724,14 @@ async function _handleAction(action, btn) {
       await _deleteScoreFeedback(btn);
       break;
 
+    case "refresh-poster": {
+      // Fix audit 2026-05-24 (v1.5.2) : refresh poster TMDb unitaire.
+      const tid = btn && btn.dataset ? btn.dataset.tmdbId : null;
+      if (!tid) return;
+      await _refreshPosterUnit(parseInt(tid, 10), btn);
+      break;
+    }
+
     default:
       console.warn("[film-detail] action inconnue :", action);
   }
@@ -797,6 +820,66 @@ async function _deleteScoreFeedback(btn) {
     console.error("[film-detail] delete_score_feedback:", e);
     showToast({ type: "error", text: `Erreur : ${e.message || e}` });
     if (btn) { btn.disabled = false; }
+  }
+}
+
+// Fix audit 2026-05-24 (v1.5.2) : refresh poster TMDb unitaire. Appelle
+// integrations/get_tmdb_posters avec force_refresh:true pour bypass le cache,
+// puis met a jour <img src> in-place sans full reload de la fiche. Loading
+// state via opacity sur l'img + spin sur le bouton.
+async function _refreshPosterUnit(tmdbId, btn) {
+  if (!tmdbId || Number.isNaN(tmdbId)) return;
+  const root = _state.containerEl;
+  const img = root ? root.querySelector("[data-film-poster-img]") : null;
+  const originalLabel = btn ? btn.textContent : "🔄";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳";
+    btn.setAttribute("aria-busy", "true");
+  }
+  if (img) img.style.opacity = "0.5";
+  try {
+    const res = await apiPost("integrations/get_tmdb_posters", {
+      tmdb_ids: [tmdbId],
+      size: "w185",
+      force_refresh: true,
+    });
+    const data = res && res.data ? res.data : res;
+    if (!data || data.ok === false) {
+      throw new Error((data && (data.message || data.error)) || "Echec refresh poster.");
+    }
+    // La facade peut retourner soit { posters: { "<id>": "<url>" } }, soit
+    // { results: [ { tmdb_id, poster_url } ] }. On gere les 2 shapes.
+    let newUrl = null;
+    if (data.posters && typeof data.posters === "object") {
+      newUrl = data.posters[String(tmdbId)] || data.posters[tmdbId] || null;
+    }
+    if (!newUrl && Array.isArray(data.results)) {
+      const match = data.results.find((r) => Number(r && r.tmdb_id) === Number(tmdbId));
+      if (match) newUrl = match.poster_url || match.url || null;
+    }
+    if (!newUrl) {
+      throw new Error("Poster introuvable dans la réponse.");
+    }
+    // Cache-bust pour forcer le rechargement visuel meme si l'URL est identique.
+    const bust = newUrl + (newUrl.includes("?") ? "&" : "?") + "_ts=" + Date.now();
+    if (img) {
+      img.src = bust;
+      img.style.opacity = "1";
+    }
+    // Memorise pour les re-renders ulterieurs (changement d'onglet, etc.).
+    if (_state.data) _state.data.poster_url = newUrl;
+    showToast({ type: "success", text: "Poster rafraîchi depuis TMDb." });
+  } catch (e) {
+    console.error("[film-detail] refresh-poster:", e);
+    if (img) img.style.opacity = "1";
+    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalLabel || "🔄";
+      btn.removeAttribute("aria-busy");
+    }
   }
 }
 

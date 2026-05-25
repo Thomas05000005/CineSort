@@ -942,12 +942,20 @@ class CineSortApi:
             pass  # ne pas bloquer le check si la persistence echoue
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
-    def _get_update_info_impl(self) -> Dict[str, Any]:
+    def _get_update_info_impl(self, force_refresh: bool = False) -> Dict[str, Any]:
         """V3-12 — Retourne le dernier resultat connu (cache).
 
         Sert l'info instantanement apres le check au boot. Si le cache est
         absent ou expire, ``data.update_available`` vaut False.
+
+        Fix audit 2026-05-24 (v1.5.2) Vague E : si ``force_refresh=True``, on
+        delegue a ``_check_for_updates_impl`` pour forcer un appel reseau
+        immediat (ignore le cache TTL). Ainsi l'UI peut utiliser un seul
+        endpoint ``runtime/get_update_info`` que ce soit pour servir le cache
+        (boot) ou pour declencher un check manuel (bouton "Verifier maintenant").
         """
+        if force_refresh:
+            return self._check_for_updates_impl()
         cache_path = _updater.default_cache_path(self._state_dir)
         info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}

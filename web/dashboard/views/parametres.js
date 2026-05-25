@@ -66,6 +66,13 @@ export const PARAMETRES_GROUPS = [
           hint: "Laisser vide pour utiliser mediainfo du PATH système.", advanced: true },
         { key: "probe_timeout_s", label: "Timeout probe (s)", type: "number", min: 5, max: 300, advanced: true },
       ]},
+      // VAGUE D : Section "Outils externes" — etat/version/path de ffprobe,
+      // mediainfo (parametrables), fpcalc et LPIPS (bundled). Reutilise le
+      // pattern OmdbStatus : panneau extra dans la section, refresh dedie
+      // sans full re-render. Cf runtime/get_probe_tools_status.
+      { id: "outils", label: "Outils externes", fields: [
+        { key: "__probe_tools__", label: "", type: "probe-tools" },
+      ]},
       { id: "perceptual", label: "Analyse perceptuelle", fields: [
         { key: "perceptual_enabled", label: "Activer l'analyse perceptuelle", type: "toggle" },
         { key: "perceptual_auto_on_scan", label: "Auto-lancer sur scan", type: "toggle" },
@@ -271,6 +278,12 @@ export const PARAMETRES_GROUPS = [
         { key: "auto_check_updates", label: "Vérification auto au démarrage", type: "toggle", advanced: true },
         { key: "update_github_repo", label: "Dépôt GitHub (owner/repo)", type: "text", placeholder: "user/cinesort",
           hint: "Vide = check désactivé", advanced: true },
+        // Fix audit 2026-05-24 (v1.5.2) : Vague E — bouton manuel "Vérifier maintenant"
+        // Force un appel reseau immediat via runtime/get_update_info (force_refresh=true),
+        // affiche le resultat inline + boutons "Voir / Télécharger" si MAJ dispo.
+        { key: "__check_updates_now__", label: "Vérification manuelle", type: "action",
+          action: "check_updates_now", buttonLabel: "🔄 Vérifier maintenant",
+          hint: "Force un appel à GitHub Releases pour détecter une nouvelle version." },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
@@ -316,6 +329,12 @@ const _state = {
   // ok / ko-401 / ko-429 / ko-reseau). Null = aucun test effectue cette session.
   // Forme : { ok, error_code, message, quota_remaining, quota_limit, ts }
   omdbLastTest: null,
+  // VAGUE D : dernier snapshot retourne par runtime/get_probe_tools_status
+  // ou recheck_probe_tools. Forme : { tools: { ffprobe, mediainfo, fpcalc,
+  // lpips }, hybrid_ready, degraded_mode, installer, ... }. Null = pas encore
+  // charge cette session (premier render = "Chargement..." puis fetch).
+  probeToolsStatus: null,
+  probeToolsLoading: false,
 };
 
 /**
@@ -607,6 +626,175 @@ function _refreshOmdbStatusPanel(container) {
   if (next) host.replaceWith(next);
 }
 
+/* =============================================================
+ * 4-bis) RENDERERS — OUTILS EXTERNES (VAGUE D)
+ * Pattern adapte de _renderOmdbStatus : table 4 lignes (ffprobe,
+ * mediainfo, fpcalc, lpips) + boutons globaux (Recheck, Installer
+ * auto, MAJ). Refresh in-place via _refreshProbeToolsPanel.
+ * Endpoints :
+ *   runtime/get_probe_tools_status  -> chargement initial (cache 90s)
+ *   runtime/recheck_probe_tools     -> force recheck (boutton Tester)
+ *   runtime/auto_install_probe_tools -> HTTP download winget-free
+ *   runtime/update_probe_tools       -> winget upgrade
+ * ============================================================= */
+
+function _formatBundledSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return "";
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} Mo`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} Ko`;
+  return `${n} o`;
+}
+
+/**
+ * Rend une ligne du tableau outils. `info` = entree status.tools[key].
+ * `kind` : "managed" (ffprobe/mediainfo : actions Tester+Reinstaller)
+ *        | "bundled-exe" (fpcalc : Tester uniquement)
+ *        | "bundled-asset" (LPIPS : pas d'action, juste affichage).
+ */
+function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
+  const i = info || {};
+  // "found" est le flag VAGUE D ; on retombe sur "available" pour ffprobe/mediainfo.
+  const found = (typeof i.found === "boolean") ? i.found : !!i.available;
+  const compatible = (typeof i.compatible === "boolean") ? i.compatible : found;
+  let statusHtml = "";
+  if (!found) {
+    statusHtml = `<span class="parametres-tool-status parametres-tool-status--ko">✗ Manquant</span>`;
+  } else if (!compatible) {
+    statusHtml = `<span class="parametres-tool-status parametres-tool-status--warn">⚠ Trop ancien</span>`;
+  } else {
+    statusHtml = `<span class="parametres-tool-status parametres-tool-status--ok">✓ Installé</span>`;
+  }
+  const version = i.version ? _esc(i.version) : (kind === "bundled-asset" ? "—" : "?");
+  // Pour LPIPS : afficher taille au lieu de version.
+  const versionCell = (kind === "bundled-asset" && found)
+    ? _esc(_formatBundledSize(i.size_bytes) || "—")
+    : version;
+  const path = String(i.path || "").trim();
+  const pathHtml = path
+    ? `<code class="parametres-tool-path" title="${_esc(path)}">${_esc(path)}</code>`
+    : `<span class="parametres-muted">—</span>`;
+  let actionsHtml = "";
+  if (kind === "managed") {
+    actionsHtml = `
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tool-action="test" data-probe-tool="${_esc(toolKey)}">Tester</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-probe-tool-action="reinstall" data-probe-tool="${_esc(toolKey)}">Réinstaller</button>
+    `;
+  } else if (kind === "bundled-exe") {
+    actionsHtml = `<span class="parametres-muted">(bundled)</span>`;
+  } else {
+    actionsHtml = `<span class="parametres-muted">(bundled)</span>`;
+  }
+  return `<tr class="parametres-tools-row" data-probe-tool-row="${_esc(toolKey)}">
+    <td class="parametres-tools-cell parametres-tools-cell--label">${_esc(displayLabel)}</td>
+    <td class="parametres-tools-cell parametres-tools-cell--status">${statusHtml}</td>
+    <td class="parametres-tools-cell parametres-tools-cell--version">${versionCell}</td>
+    <td class="parametres-tools-cell parametres-tools-cell--path">${pathHtml}</td>
+    <td class="parametres-tools-cell parametres-tools-cell--actions">${actionsHtml}</td>
+  </tr>`;
+}
+
+/**
+ * Rend la table complete des outils externes. `status` = payload retourne
+ * par runtime/get_probe_tools_status. Si null/loading, on affiche un placeholder.
+ */
+function _renderProbeToolsTable(status) {
+  if (_state.probeToolsLoading) {
+    return `<div class="parametres-tools-loading parametres-muted">Vérification des outils externes…</div>`;
+  }
+  if (!status || typeof status !== "object") {
+    return `<div class="parametres-tools-loading parametres-muted">Statut non disponible. Cliquez sur « Tester » pour vérifier.</div>`;
+  }
+  const tools = (status.tools && typeof status.tools === "object") ? status.tools : {};
+  const rows = [
+    _renderProbeToolRow("ffprobe", "ffprobe", tools.ffprobe, "managed"),
+    _renderProbeToolRow("mediainfo", "MediaInfo", tools.mediainfo, "managed"),
+    _renderProbeToolRow("fpcalc", "fpcalc (Chromaprint)", tools.fpcalc, "bundled-exe"),
+    _renderProbeToolRow("lpips", "LPIPS (modèle ONNX)", tools.lpips, "bundled-asset"),
+  ].join("");
+  const mode = String(status.degraded_mode || "");
+  const modeBadge = mode === "hybrid"
+    ? `<span class="parametres-tools-mode parametres-tools-mode--ok">Mode hybride (ffprobe + MediaInfo)</span>`
+    : mode === "partial"
+      ? `<span class="parametres-tools-mode parametres-tools-mode--warn">Mode dégradé (un seul outil disponible)</span>`
+      : mode === "disabled"
+        ? `<span class="parametres-tools-mode parametres-tools-mode--muted">Probe désactivée</span>`
+        : `<span class="parametres-tools-mode parametres-tools-mode--ko">Aucun outil probe disponible</span>`;
+  return `<div class="parametres-tools-panel">
+    ${modeBadge}
+    <table class="parametres-tools-table" data-probe-tools-table>
+      <thead>
+        <tr>
+          <th>Outil</th><th>Statut</th><th>Version</th><th>Chemin</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="parametres-tools-actions">
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck">↻ Recheck (force)</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install">⬇ Installer auto (ffprobe + MediaInfo)</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update">⇧ Mettre à jour (winget)</button>
+    </div>
+    <p class="parametres-tools-message" data-probe-tools-message></p>
+  </div>`;
+}
+
+/**
+ * Swap in-place le panneau outils (sans full re-render de la categorie).
+ * Reutilise le pattern _refreshOmdbStatusPanel.
+ */
+function _refreshProbeToolsPanel(container) {
+  const host = container && container.querySelector('[data-section-id="outils"] .parametres-section-body');
+  if (!host) return;
+  // On cible le wrapper qui contient soit le placeholder loading, soit la table.
+  const fieldWrapper = host.querySelector(".parametres-field--probe-tools");
+  if (!fieldWrapper) return;
+  const html = `<div class="parametres-field parametres-field--probe-tools">${_renderProbeToolsTable(_state.probeToolsStatus)}</div>`;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const next = tmp.firstElementChild;
+  if (next) {
+    fieldWrapper.replaceWith(next);
+    _bindProbeToolsActions(container);
+  }
+}
+
+function _setProbeToolsMessage(container, msg, level) {
+  const el = container && container.querySelector("[data-probe-tools-message]");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = "parametres-tools-message";
+  if (level === "error") el.classList.add("parametres-tools-message--error");
+  else if (level === "ok") el.classList.add("parametres-tools-message--ok");
+  else if (level === "info") el.classList.add("parametres-tools-message--info");
+}
+
+/**
+ * Charge le statut initial (cache 90s cote backend, donc tres rapide).
+ * Appele apres le premier render de la categorie "analyse".
+ */
+async function _loadProbeToolsStatus(container, { force } = { force: false }) {
+  _state.probeToolsLoading = true;
+  _refreshProbeToolsPanel(container);
+  try {
+    const method = force ? "runtime/recheck_probe_tools" : "runtime/get_probe_tools_status";
+    const res = await apiPost(method, {});
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.probeToolsStatus = data;
+    } else {
+      _state.probeToolsStatus = null;
+      _setProbeToolsMessage(container, `Erreur : ${data?.message || "statut indisponible"}`, "error");
+    }
+  } catch (err) {
+    _state.probeToolsStatus = null;
+    _setProbeToolsMessage(container, `Erreur réseau : ${err?.message || err}`, "error");
+  } finally {
+    _state.probeToolsLoading = false;
+    _refreshProbeToolsPanel(container);
+  }
+}
+
 function _renderField(field, value, query) {
   const id = `prm_${_esc(field.key)}`;
   const advAttr = field.advanced ? ' data-advanced="true"' : "";
@@ -735,6 +923,11 @@ function _renderField(field, value, query) {
 
     case "profils-qualite":
       return _renderProfilsQualite();
+
+    case "probe-tools":
+      // VAGUE D : tableau des outils externes (ffprobe, mediainfo, fpcalc, LPIPS).
+      // Le contenu reel est rendu apres apiPost("runtime/get_probe_tools_status").
+      return `<div class="parametres-field parametres-field--probe-tools">${_renderProbeToolsTable(_state.probeToolsStatus)}</div>`;
 
     default:
       return `<div class="parametres-field">[type ${_esc(field.type)} non supporté pour « ${_esc(field.label)} »]</div>`;
@@ -1650,13 +1843,183 @@ function _bindFields(container) {
     });
   });
 
+  // Fix audit 2026-05-24 (v1.5.2) : Vague E — bouton manuel "Vérifier maintenant"
+  // Force un check via runtime/get_update_info {force_refresh: true} (le backend
+  // delegue a check_for_updates). En cas de MAJ disponible, on affiche le numero
+  // de version et deux boutons "Voir sur GitHub" + "Telecharger" qui ouvrent
+  // l'URL en externe via runtime/open_external_url (WebView2 sans handler bloque
+  // target="_blank" et window.open silencieusement).
+  container.querySelectorAll('[data-action="check_updates_now"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="check_updates_now"]');
+      btn.disabled = true;
+      if (resultEl) {
+        resultEl.innerHTML = "";
+        resultEl.textContent = "Vérification…";
+        resultEl.className = "parametres-test-result parametres-test-result--info";
+      }
+      try {
+        const res = await apiPost("runtime/get_update_info", { force_refresh: true });
+        const ok = !!(res && res.ok !== false);
+        const data = (res && res.data) || {};
+        if (!ok) {
+          if (resultEl) {
+            resultEl.textContent = `✗ ${res?.message || res?.error || "Echec du check"}`;
+            resultEl.className = "parametres-test-result parametres-test-result--error";
+          }
+          return;
+        }
+        if (data.update_available && data.latest_version) {
+          // Nouvelle version disponible : afficher version + boutons Voir / Télécharger.
+          if (resultEl) {
+            const versionTxt = _esc(String(data.latest_version));
+            const releaseUrl = data.release_url ? String(data.release_url) : "";
+            const downloadUrl = data.download_url ? String(data.download_url) : releaseUrl;
+            const viewBtn = releaseUrl
+              ? `<button type="button" class="v5-btn v5-btn--sm" data-update-open-url="${_esc(releaseUrl)}">Voir sur GitHub</button>`
+              : "";
+            const dlBtn = downloadUrl
+              ? `<button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-update-open-url="${_esc(downloadUrl)}">Télécharger</button>`
+              : "";
+            resultEl.innerHTML = `<span class="parametres-update-banner">⬆ Nouvelle version disponible : v${versionTxt}</span> ${viewBtn} ${dlBtn}`;
+            resultEl.className = "parametres-test-result parametres-test-result--ok";
+            // Bind click sur les boutons "Voir" / "Télécharger" -> ouvre URL externe via runtime.
+            resultEl.querySelectorAll("[data-update-open-url]").forEach((b) => {
+              b.addEventListener("click", async () => {
+                const u = b.getAttribute("data-update-open-url") || "";
+                if (!u) return;
+                try { await apiPost("runtime/open_external_url", { url: u }); } catch { /* silencieux */ }
+              });
+            });
+          }
+        } else {
+          if (resultEl) {
+            resultEl.textContent = `✓ À jour (v${_esc(String(data.current_version || ""))})`;
+            resultEl.className = "parametres-test-result parametres-test-result--ok";
+          }
+        }
+      } catch (err) {
+        if (resultEl) {
+          resultEl.textContent = `✗ Erreur : ${err?.message || err}`;
+          resultEl.className = "parametres-test-result parametres-test-result--error";
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
   // Profils Qualité
   _bindProfilsQualite(container);
+
+  // VAGUE D : Outils externes (ffprobe/mediainfo/fpcalc/LPIPS)
+  _bindProbeToolsActions(container);
+  // Auto-load au premier rendu de la section "outils" (categorie analyse).
+  if (container.querySelector('[data-section-id="outils"]') && _state.probeToolsStatus === null && !_state.probeToolsLoading) {
+    _loadProbeToolsStatus(container, { force: false });
+  }
 
   // QR dashboard auto-load
   if (container.querySelector("[data-qr-dashboard]")) {
     _loadQrDashboard(container);
   }
+}
+
+/**
+ * Bind des boutons globaux + par ligne du tableau outils externes.
+ * Idempotent (peut etre appele plusieurs fois apres un refresh).
+ */
+function _bindProbeToolsActions(container) {
+  // Boutons globaux (recheck / auto_install / update)
+  container.querySelectorAll("[data-probe-tools-action]").forEach((btn) => {
+    if (btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.probeToolsAction;
+      const all = container.querySelectorAll("[data-probe-tools-action], [data-probe-tool-action]");
+      all.forEach((b) => { b.disabled = true; });
+      try {
+        if (action === "recheck") {
+          _setProbeToolsMessage(container, "Recheck en cours…", "info");
+          await _loadProbeToolsStatus(container, { force: true });
+          _setProbeToolsMessage(container, "✓ Statut rafraîchi.", "ok");
+        } else if (action === "auto_install") {
+          _setProbeToolsMessage(container, "Installation auto en cours… (téléchargement HTTP, ~30-60s)", "info");
+          const res = await apiPost("runtime/auto_install_probe_tools", {});
+          const data = res && res.data ? res.data : res;
+          if (data && data.ok) {
+            _setProbeToolsMessage(container, "✓ Installation terminée.", "ok");
+          } else {
+            const errs = Array.isArray(data?.errors) ? data.errors.join(" ; ") : "";
+            _setProbeToolsMessage(container, `Erreur : ${data?.message || "installation impossible"}${errs ? ` (${errs})` : ""}`, "error");
+          }
+          if (data && data.status) {
+            _state.probeToolsStatus = { ok: true, ...data.status };
+            _refreshProbeToolsPanel(container);
+          } else {
+            await _loadProbeToolsStatus(container, { force: true });
+          }
+        } else if (action === "update") {
+          _setProbeToolsMessage(container, "Mise à jour winget en cours…", "info");
+          const res = await apiPost("runtime/update_probe_tools", {});
+          const data = res && res.data ? res.data : res;
+          if (data && data.ok) {
+            _setProbeToolsMessage(container, "✓ Mise à jour réussie.", "ok");
+          } else {
+            _setProbeToolsMessage(container, `Erreur : ${data?.message || "MAJ impossible"}`, "error");
+          }
+          if (data && data.status) {
+            _state.probeToolsStatus = { ok: true, ...data.status };
+            _refreshProbeToolsPanel(container);
+          }
+        }
+      } catch (err) {
+        _setProbeToolsMessage(container, `Erreur réseau : ${err?.message || err}`, "error");
+      } finally {
+        const all2 = container.querySelectorAll("[data-probe-tools-action], [data-probe-tool-action]");
+        all2.forEach((b) => { b.disabled = false; });
+      }
+    });
+  });
+
+  // Boutons par ligne (test / reinstall ; seulement pour ffprobe/mediainfo)
+  container.querySelectorAll("[data-probe-tool-action]").forEach((btn) => {
+    if (btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", async () => {
+      const tool = btn.dataset.probeTool;
+      const action = btn.dataset.probeToolAction;
+      if (!tool) return;
+      const all = container.querySelectorAll("[data-probe-tools-action], [data-probe-tool-action]");
+      all.forEach((b) => { b.disabled = true; });
+      try {
+        if (action === "test") {
+          _setProbeToolsMessage(container, `Test ${tool}…`, "info");
+          await _loadProbeToolsStatus(container, { force: true });
+        } else if (action === "reinstall") {
+          _setProbeToolsMessage(container, `Réinstallation de ${tool} (winget)…`, "info");
+          const res = await apiPost("runtime/install_probe_tools", { options: { tools: [tool], scope: "user" } });
+          const data = res && res.data ? res.data : res;
+          if (data && data.ok) {
+            _setProbeToolsMessage(container, `✓ ${tool} réinstallé.`, "ok");
+          } else {
+            _setProbeToolsMessage(container, `Erreur : ${data?.message || "réinstallation impossible"}`, "error");
+          }
+          if (data && data.status) {
+            _state.probeToolsStatus = { ok: true, ...data.status };
+            _refreshProbeToolsPanel(container);
+          } else {
+            await _loadProbeToolsStatus(container, { force: true });
+          }
+        }
+      } catch (err) {
+        _setProbeToolsMessage(container, `Erreur réseau : ${err?.message || err}`, "error");
+      } finally {
+        const all2 = container.querySelectorAll("[data-probe-tools-action], [data-probe-tool-action]");
+        all2.forEach((b) => { b.disabled = false; });
+      }
+    });
+  });
 }
 
 function _bindProfilsQualite(container) {

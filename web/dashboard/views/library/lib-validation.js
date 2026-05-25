@@ -6,6 +6,7 @@ import { tableHtml, attachSort } from "../../components/table.js";
 import { badgeHtml } from "../../components/badge.js";
 import { showModal } from "../../components/modal.js";
 import { refreshVerification } from "./lib-verification.js";
+import { markValidationSaved } from "./lib-apply.js";
 import { getNavSignal, isAbortError } from "../../core/nav-abort.js";
 
 let _state = null;
@@ -543,7 +544,14 @@ function _hookValidationEvents() {
     if (btn) btn.disabled = true;
     try {
       const res = await apiPost("run/save_validation", { run_id: _state.runId, decisions: buildDecisionsPayload() });
-      _showMsg(res.data?.ok !== false ? "Décisions sauvegardées." : (res.data?.message || "Échec."), res.data?.ok === false);
+      const ok = res.data?.ok !== false;
+      _showMsg(ok ? "Décisions sauvegardées." : (res.data?.message || "Échec."), !ok);
+      // Fix audit 2026-05-24 (v1.5.2) : checklist Apply etait cosmetique. On
+      // flagge l'etat "saved" pour debloquer le bouton Appliquer (combine avec
+      // dupsChecked via markDuplicatesChecked). Voir lib-apply.js.
+      if (ok) {
+        try { markValidationSaved(); } catch (_e) { /* lib-apply pas monte */ }
+      }
     } catch { _showMsg("Erreur réseau.", true); }
     finally { if (btn) btn.disabled = false; }
   });

@@ -737,7 +737,80 @@ function _resolveLatestRun(payload) {
   return runs.length > 0 ? runs[0] : null;
 }
 
-function _renderAccueil(payload, stats, settings) {
+// Fix audit 2026-05-24 (v1.5.2) : first-run setup incomplet — l'utilisateur ne
+// sait pas pourquoi rien ne marche quand TMDb n'est pas configure. On ajoute
+// une banniere jaune en tete d'Accueil pour TMDb (alert, bloquant) et une
+// banniere info plus discrete listant les integrations secondaires non
+// configurees (Jellyfin / Plex / Radarr). La pastille env-bar restait trop
+// silencieuse pour un onboarding decouverte.
+function _renderSetupBanner(settings) {
+  const s = settings || {};
+  const tmdbKey = typeof s.tmdb_api_key === "string" ? s.tmdb_api_key.trim() : "";
+  const tmdbEnabled = s.tmdb_enabled !== false; // par defaut on suppose enabled
+  const tmdbMissing = !tmdbKey || tmdbEnabled === false;
+
+  const secondaryMissing = [];
+  if (!s.jellyfin_enabled && !(typeof s.jellyfin_api_key === "string" && s.jellyfin_api_key.trim())) {
+    secondaryMissing.push("Jellyfin");
+  }
+  if (!s.plex_enabled && !(typeof s.plex_token === "string" && s.plex_token.trim())) {
+    secondaryMissing.push("Plex");
+  }
+  if (!s.radarr_enabled && !(typeof s.radarr_api_key === "string" && s.radarr_api_key.trim())) {
+    secondaryMissing.push("Radarr");
+  }
+
+  let html = "";
+  if (tmdbMissing) {
+    html += `
+      <div class="accueil-setup-banner accueil-setup-banner--alert" role="alert">
+        ⚠️ Configuration incomplète : TMDb n'est pas configuré.
+        <a href="#/parametres#integrations">Configurer maintenant →</a>
+      </div>
+    `;
+  }
+  if (secondaryMissing.length > 0) {
+    html += `
+      <div class="accueil-setup-banner accueil-setup-banner--info" role="status">
+        ℹ️ Intégrations optionnelles non configurées : ${escapeHtml(secondaryMissing.join(", "))}.
+        <a href="#/parametres#integrations">Configurer →</a>
+      </div>
+    `;
+  }
+  return html;
+}
+
+// Fix audit 2026-05-24 (v1.5.2) : Vague E — carte discrete "Nouvelle version
+// disponible" sous le hero, visible uniquement si update detectee. Le badge
+// sidebar reste affiche en parallele (deja gere par app.js:_checkUpdateBadge).
+// La donnee provient du cache backend (runtime/get_update_info) fetchee en
+// parallele du dashboard au init.
+function _renderUpdateCard(updateInfo) {
+  if (!updateInfo || !updateInfo.update_available || !updateInfo.latest_version) {
+    return "";
+  }
+  const version = escapeHtml(String(updateInfo.latest_version));
+  const releaseUrl = updateInfo.release_url ? String(updateInfo.release_url) : "";
+  const downloadUrl = updateInfo.download_url ? String(updateInfo.download_url) : releaseUrl;
+  const viewAttr = releaseUrl ? `data-accueil-update-url="${escapeHtml(releaseUrl)}"` : "";
+  const dlAttr = downloadUrl && downloadUrl !== releaseUrl
+    ? `data-accueil-update-url="${escapeHtml(downloadUrl)}"`
+    : "";
+  const dlBtn = dlAttr
+    ? `<button type="button" class="v5-btn v5-btn--sm v5-btn--primary" ${dlAttr}>Télécharger</button>`
+    : "";
+  return `
+    <div class="accueil-update-card" role="status" aria-label="Mise à jour disponible">
+      <span class="accueil-update-card-msg">⬆ Nouvelle version v${version} disponible.</span>
+      <span class="accueil-update-card-actions">
+        ${releaseUrl ? `<button type="button" class="v5-btn v5-btn--sm" ${viewAttr}>Voir</button>` : ""}
+        ${dlBtn}
+      </span>
+    </div>
+  `;
+}
+
+function _renderAccueil(payload, stats, settings, updateInfo) {
   const latestRun = _resolveLatestRun(payload);
   const recentRuns = Array.isArray(payload && payload.runs_history) ? payload.runs_history : [];
   const insights = Array.isArray(stats && stats.insights) ? stats.insights : [];
@@ -762,8 +835,10 @@ function _renderAccueil(payload, stats, settings) {
   }
   return `
     <section class="accueil-view">
+      ${_renderSetupBanner(settings)}
       ${_renderEnvironmentBar(roots, settings, pingSnapshot)}
       ${_renderHero(heroState)}
+      ${_renderUpdateCard(updateInfo)}
       ${_renderLastRunCard(latestRun, payload && payload.kpis)}
       ${_renderCtaScan(roots, scanProgress)}
       ${_renderSuggestions(stats || {})}
@@ -1105,6 +1180,18 @@ function _bindEvents(container) {
   if (retryBtn) {
     retryBtn.addEventListener("click", () => initAccueil(container));
   }
+
+  // Fix audit 2026-05-24 (v1.5.2) : Vague E — clic sur "Voir" / "Telecharger"
+  // dans la carte update sous le hero -> ouvre l'URL externe via runtime
+  // (WebView2 sans handler bloque window.open silencieusement).
+  container.querySelectorAll("[data-accueil-update-url]").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const url = btn.getAttribute("data-accueil-update-url") || "";
+      if (!url) return;
+      try { await apiPost("runtime/open_external_url", { url }); } catch { /* silencieux */ }
+    });
+  });
 }
 
 /* --- Entrypoint -------------------------------------------------------- */
@@ -1137,14 +1224,20 @@ export async function initAccueil(container) {
 
   // Phase 3.1-B : on charge en parallele les 3 sources (dashboard latest +
   // global stats + settings) pour avoir les donnees des 5 sections en un boot.
+  // Fix audit 2026-05-24 (v1.5.2) Vague E : on ajoute un 4e fetch (update_info
+  // cache uniquement, donc instantane) pour la carte "Nouvelle version
+  // disponible" sous le hero. Pas d'appel reseau ici, juste lecture du cache
+  // alimente au boot par le hook updater.
   let dashRes = null;
   let statsRes = null;
   let settingsRes = null;
+  let updateRes = null;
   try {
-    [dashRes, statsRes, settingsRes] = await Promise.all([
+    [dashRes, statsRes, settingsRes, updateRes] = await Promise.all([
       apiPost("run/get_dashboard", { run_id: "latest" }, { signal }),
       apiPost("run/get_global_stats", {}, { signal }).catch(() => null),
       apiPost("settings/get_settings", {}, { signal }).catch(() => null),
+      apiPost("runtime/get_update_info", {}, { signal }).catch(() => null),
     ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;
@@ -1163,9 +1256,10 @@ export async function initAccueil(container) {
   const dashboardData = dashRes.data || dashRes;
   const stats = (statsRes && statsRes.ok !== false) ? (statsRes.data || statsRes) : {};
   const settings = (settingsRes && settingsRes.ok !== false) ? (settingsRes.data || settingsRes) : {};
+  const updateInfo = (updateRes && updateRes.ok !== false) ? (updateRes.data || updateRes) : null;
   _currentSettings = settings;
 
-  container.innerHTML = _renderAccueil(dashboardData, stats, settings);
+  container.innerHTML = _renderAccueil(dashboardData, stats, settings, updateInfo);
   _bindEvents(container);
 
   // Phase 5 : lance les pings en arrière-plan pour détecter les intégrations

@@ -228,6 +228,17 @@ function _startPolling() {
     // Un refresh manuel ou un nouveau scan re-arme via _startPolling().
     if (_runStatus && _runStatus.done) {
       _stopPolling();
+      // Fix audit 2026-05-24 (v1.5.2) : auto-transition Analyse -> Verification
+      // quand le scan vient de se terminer. Avant : utilisateur restait sur
+      // l'ecran Analyse avec uniquement le bouton "Lancer scan", aucun CTA
+      // pour passer a l'etape suivante -> impasse UX. Le workflow est lineaire
+      // et deterministe, pas de raison de rester sur Analyse quand done. Le
+      // breadcrumb permet de revenir d'un clic au besoin.
+      if (_currentStep === "analyse") {
+        _currentStep = "verification";
+        _writeStep("verification");
+      }
+      _renderInPlace(); // render final manquant (avant return)
       return;
     }
     await _loadRunStatus();
@@ -773,17 +784,28 @@ async function _onUndoPreview() {
       showToast({ type: "info", text: data.message || "Aucune opération réversible." });
       return;
     }
+    // Fix audit 2026-05-24 (v1.5.2) : si le backend signale `expired`, on
+    // retire l'action "Exécuter annulation" du modal — le call serait refuse
+    // avec un 410 Gone. La preview reste consultable pour info.
+    const expired = Boolean(data.expired);
+    const actions = expired
+      ? [
+          { label: "Fermer", cls: "v5-btn v5-btn--ghost", onClick: () => {} },
+        ]
+      : [
+          { label: "Fermer", cls: "v5-btn v5-btn--ghost", onClick: () => {} },
+          {
+            label: "Exécuter annulation",
+            cls: "v5-btn v5-btn--danger",
+            onClick: () => _onUndoExecute(),
+          },
+        ];
     showModal({
-      title: "Prévisualisation de l'annulation",
+      title: expired
+        ? "Prévisualisation de l'annulation (délai 24h dépassé)"
+        : "Prévisualisation de l'annulation",
       body: _renderUndoPreviewModalBody(data),
-      actions: [
-        { label: "Fermer", cls: "v5-btn v5-btn--ghost", onClick: () => {} },
-        {
-          label: "Exécuter annulation",
-          cls: "v5-btn v5-btn--danger",
-          onClick: () => _onUndoExecute(),
-        },
-      ],
+      actions,
     });
   } catch {
     showToast({ type: "error", text: "Erreur lors de la prévisualisation." });
@@ -814,7 +836,14 @@ function _onUndoExecute() {
         const res = await apiPost("run/undo_last_apply", { run_id: _runInfo.runId, dry_run: false }, { signal: _signal() });
         const data = res?.data || res;
         if (!data || data.ok === false) {
-          showToast({ type: "error", text: data?.error || "Échec de l'annulation." });
+          // Fix audit 2026-05-24 (v1.5.2) : message dedie quand le backend
+          // refuse pour delai 24h depasse (cas race ou client a un cache
+          // d'`expired=false` perime). On rafraichit aussi le dashboard pour
+          // synchroniser la carte.
+          const msg = data?.message || data?.error || "Échec de l'annulation.";
+          showToast({ type: "error", text: msg });
+          await _loadRunInfo();
+          _renderInPlace();
           return;
         }
         showToast({ type: "success", text: "Annulation appliquée. Restauration effectuée.", duration: 6000 });

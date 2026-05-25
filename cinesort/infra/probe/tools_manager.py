@@ -26,6 +26,14 @@ _TOOL_EXECUTABLES = {
     "mediainfo": ["MediaInfo.exe", "mediainfo.exe", "mediainfo"] if os.name == "nt" else ["mediainfo"],
 }
 
+# VAGUE D : nom de fichier du modele LPIPS embarque dans le bundle (cf
+# cinesort.domain.perceptual.constants.LPIPS_MODEL_PATH). Pas de version
+# extractable (fichier .onnx binaire) -> on expose juste path + size_bytes.
+_LPIPS_MODEL_FILENAME = "lpips_alexnet.onnx"
+# Nom du binaire fpcalc embarque dans assets/tools/. fpcalc supporte
+# l'option -version qui imprime "fpcalc version 1.5.1 (FFmpeg ...)" sur stdout.
+_FPCALC_EXECUTABLES = ["fpcalc.exe"] if os.name == "nt" else ["fpcalc"]
+
 _WINGET_IDS = {
     "ffprobe": ["Gyan.FFmpeg", "BtbN.FFmpeg"],
     "mediainfo": ["MediaArea.MediaInfo", "MediaArea.MediaInfo.GUI"],
@@ -320,6 +328,133 @@ def _build_tool_status(
     }
 
 
+def _bundle_roots() -> List[Path]:
+    """Repertoires candidats pour les binaires/assets embarques.
+
+    Mode .exe PyInstaller (sys.frozen) : sys._MEIPASS + dossier de l'exe.
+    Mode dev : racine du repo (4 niveaux au-dessus de ce fichier).
+    Utilise pour fpcalc (assets/tools/) et LPIPS (assets/models/).
+    """
+    import sys as _sys
+
+    roots: List[Path] = []
+    meipass = getattr(_sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass))
+    if getattr(_sys, "frozen", False):
+        roots.append(Path(_sys.executable).parent)
+    else:
+        # cinesort/infra/probe/tools_manager.py -> remonter de 4 = repo root
+        roots.append(Path(__file__).resolve().parent.parent.parent.parent)
+    return roots
+
+
+def _build_fpcalc_status(
+    *,
+    runner: RunnerFn,
+    which_fn,
+    check_versions: bool,
+) -> Dict[str, Any]:
+    """Statut fpcalc (Chromaprint) : bundled dans assets/tools/, fallback PATH.
+
+    fpcalc -version imprime "fpcalc version 1.5.1 (FFmpeg ...)". Robuste a
+    l'absence (feature audio fingerprint optionnelle).
+    """
+    found_path = ""
+    source = "none"
+    for root in _bundle_roots():
+        for exe in _FPCALC_EXECUTABLES:
+            cand = root / "assets" / "tools" / exe
+            if cand.is_file():
+                found_path = str(cand)
+                source = "bundled"
+                break
+        if found_path:
+            break
+    if not found_path:
+        for exe in _FPCALC_EXECUTABLES:
+            w = which_fn(exe)
+            if w:
+                found_path = str(w)
+                source = "path"
+                break
+
+    if not found_path:
+        return {
+            "name": "fpcalc",
+            "status": _STATUS_MISSING,
+            "available": False,
+            "found": False,
+            "path": "",
+            "version": "",
+            "source": "none",
+            "message": "fpcalc manquant (fingerprint audio Chromaprint desactive).",
+            "checked_ts": time.time(),
+        }
+
+    version_text = ""
+    if check_versions:
+        ok_exec, first_line, _full = _probe_version_line(tool_name="fpcalc", tool_path=found_path, runner=runner)
+        # fpcalc -version : "fpcalc version 1.5.1 ..."
+        if ok_exec and first_line:
+            parsed = _parse_version_tuple(first_line)
+            version_text = _version_to_text(parsed)
+    return {
+        "name": "fpcalc",
+        "status": _STATUS_OK,
+        "available": True,
+        "found": True,
+        "path": found_path,
+        "version": version_text,
+        "source": source,
+        "message": f"fpcalc detecte ({source}).",
+        "checked_ts": time.time(),
+    }
+
+
+def _build_lpips_status() -> Dict[str, Any]:
+    """Statut du modele LPIPS (lpips_alexnet.onnx ~9.4 Mo embarque).
+
+    Pas de version extractable d'un fichier ONNX -> on retourne uniquement
+    found/path/size_bytes. Cherche dans assets/models/ (bundle ou repo).
+    """
+    found_path = ""
+    size_bytes = 0
+    for root in _bundle_roots():
+        cand = root / "assets" / "models" / _LPIPS_MODEL_FILENAME
+        if cand.is_file():
+            found_path = str(cand)
+            try:
+                size_bytes = int(cand.stat().st_size)
+            except (OSError, PermissionError):
+                size_bytes = 0
+            break
+
+    if not found_path:
+        return {
+            "name": "lpips",
+            "status": _STATUS_MISSING,
+            "available": False,
+            "found": False,
+            "path": "",
+            "size_bytes": 0,
+            "source": "none",
+            "message": "Modele LPIPS introuvable (analyse perceptuelle LPIPS desactivee).",
+            "checked_ts": time.time(),
+        }
+    return {
+        "name": "lpips",
+        "status": _STATUS_OK,
+        "available": True,
+        "found": True,
+        "path": found_path,
+        "size_bytes": int(size_bytes),
+        "source": "bundled",
+        "message": f"Modele LPIPS present ({size_bytes // 1024} Ko).",
+        "checked_ts": time.time(),
+    }
+
+
 def detect_probe_tools(
     *,
     settings: Dict[str, Any],
@@ -352,7 +487,13 @@ def detect_probe_tools(
         check_versions=check_versions,
         scan_winget_packages=scan_winget_packages,
     )
-    tools = {"ffprobe": ff, "mediainfo": mi}
+    # VAGUE D : etendre le payload avec fpcalc (Chromaprint audio fingerprint)
+    # et LPIPS (modele ONNX deep-learning perceptuel). Ces deux outils sont
+    # bundled (assets/tools, assets/models) donc n'influencent ni hybrid_ready
+    # ni degraded_mode (qui restent pilotes par ffprobe/mediainfo seuls).
+    fp = _build_fpcalc_status(runner=runner, which_fn=which_fn, check_versions=check_versions)
+    lp = _build_lpips_status()
+    tools = {"ffprobe": ff, "mediainfo": mi, "fpcalc": fp, "lpips": lp}
 
     ff_ready = bool(ff.get("available")) and bool(ff.get("compatible"))
     mi_ready = bool(mi.get("available")) and bool(mi.get("compatible"))
