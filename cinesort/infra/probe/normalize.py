@@ -20,6 +20,14 @@ _GROUPED_NUMBER_RE = re.compile(r"(\d{1,3}(?:[ \t,\.]\d{3})+)")
 _GROUP_SEP_RE = re.compile(r"[ \t,\.]")
 _FIRST_DIGITS_RE = re.compile(r"\d+")
 
+# Audit 2026-05-26 [audit-bot:2026-05-26-A4] : borne max pour eviter qu'un fichier
+# video crafte avec une chaine "9" * N dans ses metadonnees fasse exploser la heap
+# au passage par int() ou a la serialisation JSON ulterieure. 10^15 = 1 quadrillion,
+# largement au-dessus de toute duree (>30M ans) / taille (>1 Po) / bitrate (>1 Pbps)
+# physiquement plausible pour un fichier video. Au-dela, _to_int retourne None.
+_MAX_PROBE_INT = 10**15
+_MAX_PROBE_INT_DIGITS = 16  # garde-fou cheap avant l'appel int() (eviter parsing N MB)
+
 
 def _to_float(value: Any) -> Optional[float]:
     if value is None:
@@ -54,14 +62,27 @@ def _to_int(value: Any) -> Optional[int]:
     if grouped:
         try:
             joined = _GROUP_SEP_RE.sub("", grouped.group(1))
-            return int(joined)
+            # Audit 2026-05-26 [audit-bot:2026-05-26-A4] : guard magnitude avant int().
+            if len(joined) > _MAX_PROBE_INT_DIGITS:
+                return None
+            v = int(joined)
+            if abs(v) > _MAX_PROBE_INT:
+                return None
+            return v
         except (TypeError, ValueError):
             pass
     m = _FIRST_DIGITS_RE.search(s_clean)
     if not m:
         return None
+    raw = m.group(0)
+    # Audit 2026-05-26 [audit-bot:2026-05-26-A4] : guard magnitude avant int().
+    if len(raw) > _MAX_PROBE_INT_DIGITS:
+        return None
     try:
-        return int(m.group(0))
+        v = int(raw)
+        if abs(v) > _MAX_PROBE_INT:
+            return None
+        return v
     except (TypeError, ValueError):
         return None
 
