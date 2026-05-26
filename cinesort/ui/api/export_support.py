@@ -141,6 +141,16 @@ def export_full_library(api: Any) -> Dict[str, Any]:
 
         # 3. Films du dernier run DONE (pour le portable detail) avec scores
         films: List[Dict[str, Any]] = []
+        # Audit 2026-05-26 [audit-bot:2026-05-26-A5] : valider last_done_run_id
+        # avant la construction du Path. La valeur vient de la DB
+        # (store.run.get_runs_summary) ; si la DB est compromise ou contient une
+        # ligne malformee, on evite path-traversal/UNC dans state_dir / "runs".
+        if last_done_run_id and store is not None and not api._is_valid_run_id(last_done_run_id):
+            logger.warning(
+                "export: last_done_run_id invalide ignore (%r)",
+                last_done_run_id[:50],
+            )
+            last_done_run_id = ""
         if last_done_run_id and store is not None:
             run_dir = state_dir / "runs" / f"tri_films_{last_done_run_id}"
             if not run_dir.is_dir():
