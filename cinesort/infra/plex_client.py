@@ -29,6 +29,13 @@ _PLEX_HEADERS = {
 # avant interpolation dans /library/sections/{lid}/...
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
+# Cf issue #433 : limite de taille pour les reponses HTTP afin d'eviter
+# qu'un serveur Plex compromis/malveillant n'epuise la memoire (DoS).
+# Aligne sur le seuil jellyfin_client.py (10 MB). Note : c'est un check post-decode
+# comme dans jellyfin_client (cf issue #425 qui propose un streaming) ; l'amelioration
+# definitive (iter_content + Content-Length pre-check) sera traitee transversement.
+_MAX_RESPONSE_BYTES = 10_000_000
+
 
 from cinesort.infra.integration_errors import IntegrationError
 
@@ -38,6 +45,19 @@ class PlexError(IntegrationError):
 
     Herite de IntegrationError (BUG-1 v7.8.0) pour catch uniforme cross-clients.
     """
+
+
+def _check_response_size(resp: requests.Response, scope: str) -> None:
+    """Cf issue #433 : leve PlexError si la reponse depasse la limite de taille.
+
+    A appeler AVANT `.json()` sur chaque endpoint qui parse un body.
+    """
+    body = getattr(resp, "content", b"")
+    if body and len(body) > _MAX_RESPONSE_BYTES:
+        raise PlexError(
+            f"Reponse Plex trop volumineuse pour {scope} : "
+            f"{len(body)} octets > limite {_MAX_RESPONSE_BYTES}"
+        )
 
 
 def _normalize_url(url: str) -> str:
@@ -107,6 +127,7 @@ class PlexClient:
             return {"ok": False, "error": "Token Plex non configure"}
         try:
             resp = self._get("/identity")
+            _check_response_size(resp, "/identity")
             data = resp.json()
         except PlexError as exc:
             return {"ok": False, "error": str(exc)}
@@ -124,6 +145,7 @@ class PlexClient:
         """Retourne les sections de bibliotheque (filtrees par type)."""
         try:
             resp = self._get("/library/sections")
+            _check_response_size(resp, "/library/sections")
             data = resp.json()
         except PlexError:
             raise
@@ -157,6 +179,7 @@ class PlexClient:
             raise PlexError(f"Invalid library section id: {lid!r}")
         try:
             resp = self._get(f"/library/sections/{lid}/all", params={"type": "1"})
+            _check_response_size(resp, f"/library/sections/{lid}/all")
             data = resp.json()
         except PlexError:
             raise
@@ -207,6 +230,7 @@ class PlexClient:
             raise PlexError(f"Invalid library section id: {lid!r}")
         try:
             resp = self._get(f"/library/sections/{lid}/all", params={"type": "1", "X-Plex-Container-Size": "0"})
+            _check_response_size(resp, f"/library/sections/{lid}/all (count)")
             data = resp.json()
             mc = data.get("MediaContainer") or {}
             return int(mc.get("totalSize") or mc.get("size") or 0)

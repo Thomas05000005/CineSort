@@ -102,6 +102,31 @@ class PlexClientMockTests(unittest.TestCase):
         client = PlexClient("http://localhost:32400", "tok")
         self.assertTrue(client.refresh_library("1"))
 
+    @mock.patch("cinesort.infra.plex_client.PlexClient._get")
+    def test_validate_connection_rejects_oversized_body(self, mock_get) -> None:
+        """Cf issue #433 : reponse > 10 MB doit etre rejetee (DoS protection)."""
+        resp = mock.MagicMock()
+        resp.content = b"x" * (10_000_001)  # 10 MB + 1
+        resp.json.return_value = {"MediaContainer": {"friendlyName": "Evil"}}
+        mock_get.return_value = resp
+        client = PlexClient("http://localhost:32400", "tok")
+        result = client.validate_connection()
+        self.assertFalse(result["ok"])
+        self.assertIn("volumineuse", result["error"].lower())
+
+    @mock.patch("cinesort.infra.plex_client.PlexClient._get")
+    def test_get_libraries_rejects_oversized_body(self, mock_get) -> None:
+        """Cf issue #433 : reponse > 10 MB doit lever PlexError."""
+        from cinesort.infra.plex_client import PlexError
+
+        resp = mock.MagicMock()
+        resp.content = b"x" * (10_000_001)
+        resp.json.return_value = {"MediaContainer": {"Directory": []}}
+        mock_get.return_value = resp
+        client = PlexClient("http://localhost:32400", "tok")
+        with self.assertRaises(PlexError):
+            client.get_libraries("movie")
+
 
 # ---------------------------------------------------------------------------
 # Refresh post-apply (2 tests)
