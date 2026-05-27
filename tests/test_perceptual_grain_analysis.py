@@ -107,6 +107,17 @@ class EstimateGrainTests(unittest.TestCase):
         if result["flat_zone_count"] > 0:
             self.assertGreater(result["grain_uniformity"], 0.5)
 
+    def test_pixels_size_mismatch_returns_default(self) -> None:
+        """Cf issue #435 : buffer pixels incoherent avec width*height → fallback gracieux."""
+        # width*height=32*32=1024 attendu, mais on fournit 500 pixels → ancien comportement: ValueError
+        truncated_pixels = [128] * 500
+        result = estimate_grain(truncated_pixels, 32, 32, bit_depth=8)
+        self.assertEqual(result, {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0})
+        # Idem avec trop de pixels
+        oversize_pixels = [128] * (32 * 32 + 100)
+        result2 = estimate_grain(oversize_pixels, 32, 32, bit_depth=8)
+        self.assertEqual(result2, {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0})
+
 
 # ---------------------------------------------------------------------------
 # classify_film_era (2 tests)

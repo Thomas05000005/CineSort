@@ -63,7 +63,21 @@ def estimate_grain(
     # de h_full × w_full sont ignores, idem version pure Python avec range(0, h - bs + 1, bs)).
     h_full = (h // bs) * bs
     w_full = (w // bs) * bs
-    arr = np.asarray(pixels, dtype=np.float64).reshape(h, w)
+    arr_flat = np.asarray(pixels, dtype=np.float64)
+    expected_size = h * w
+    if arr_flat.size != expected_size:
+        # Cf issue #435 : metadonnees width/height incoherentes avec buffer
+        # pixels (frame partielle, decode interrompu). Fallback gracieux plutot
+        # que ValueError qui ferait planter l'analyse du film entier.
+        logger.debug(
+            "grain: taille pixels %d != attendu %dx%d=%d, frame ignoree",
+            arr_flat.size,
+            h,
+            w,
+            expected_size,
+        )
+        return {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0}
+    arr = arr_flat.reshape(h, w)
     cropped = arr[:h_full, :w_full]
     # Reshape vers (n_y, bs, n_x, bs) puis swapaxes pour grouper les axes des blocs.
     blocks = cropped.reshape(h_full // bs, bs, w_full // bs, bs).swapaxes(1, 2)
