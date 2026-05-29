@@ -1129,8 +1129,8 @@ def get_perceptual_compare_audio(
 
         probe_a = _load_probe(api, store, run_row, media_a)
         probe_b = _load_probe(api, store, run_row, media_b)
-        na = probe_a.get("normalized") if isinstance(probe_a, dict) else {} or {}
-        nb = probe_b.get("normalized") if isinstance(probe_b, dict) else {} or {}
+        na = (probe_a.get("normalized") if isinstance(probe_a, dict) else {}) or {}
+        nb = (probe_b.get("normalized") if isinstance(probe_b, dict) else {}) or {}
         dur_a = float(na.get("duration_s") or 0)
         dur_b = float(nb.get("duration_s") or 0)
 
