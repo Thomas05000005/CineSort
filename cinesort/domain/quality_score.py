@@ -3,6 +3,12 @@ from __future__ import annotations
 import copy
 import logging
 import re
+# Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : import top-level
+# pour permettre aux helpers (_estimate_file_size, _build_invalid_profile_result,
+# _apply_custom_rules_helper, _build_quality_metrics_helper, _merge_probe_with_name_hints)
+# d'accepter aussi un NormalizedProbe @dataclass passe directement. Le mutation
+# testing patche dataclasses.is_dataclass -> les tests cassent (preuve).
+from dataclasses import asdict as _asdict, is_dataclass as _is_dc
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.conversions import to_bool as _to_bool, to_float as _to_float, to_int as _to_int
@@ -968,8 +974,23 @@ def _cap_tier(tier: str, max_tier: str) -> str:
     return _TIER_ORDER[max(cur, cap)]
 
 
-def _estimate_file_size(normalized_probe: Dict[str, Any], bitrate_kbps: Optional[int]) -> int:
+# Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : normaliseur central.
+# Tous les helpers qui peuvent recevoir un NormalizedProbe @dataclass ou
+# un dict natif passent par ce filtre pour eviter les branches `else -> {}`
+# silencieuses qui faussaient duration_s, edition, tmdb_collection_id, file_size.
+def _normalize_probe_arg(x: Any) -> Dict[str, Any]:
+    if _is_dc(x) and not isinstance(x, type):
+        return _asdict(x)
+    if isinstance(x, dict):
+        return x
+    return {}
+
+
+def _estimate_file_size(normalized_probe: Any, bitrate_kbps: Optional[int]) -> int:
     """Estime la taille du fichier en octets depuis duration et bitrate."""
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : accepter NormalizedProbe
+    # @dataclass natif (cinesort.infra.probe.service.ProbeService) en plus du dict.
+    normalized_probe = _normalize_probe_arg(normalized_probe)
     if not isinstance(normalized_probe, dict):
         return 0
     dur = float(normalized_probe.get("duration_s") or 0)
@@ -997,6 +1018,10 @@ def _build_invalid_profile_result(
     errs: List[str],
 ) -> Dict[str, Any]:
     """Construit le resultat retourne quand le profil est invalide."""
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : convertir NormalizedProbe
+    # dataclass -> dict avant la branche isinstance, sinon le probe_quality reel
+    # (FULL/PARTIAL) etait ecrase en 'FAILED' silencieusement.
+    normalized_probe = _normalize_probe_arg(normalized_probe)
     return {
         "score": 0,
         "tier": "Reject",
@@ -1193,6 +1218,11 @@ def _apply_custom_rules_helper(
     applied_rule_ids: List[str] = []
     if not custom_rules:
         return score, tier, custom_flags_added, applied_rule_ids
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : normaliser EN TETE pour
+    # que edition/duration_s/tmdb_collection_id soient lus correctement meme si
+    # le caller passe un NormalizedProbe dataclass (le call site compute_quality_score
+    # transmettait la variable brute non convertie, cf bug critique fix).
+    normalized_probe = _normalize_probe_arg(normalized_probe)
     try:
         resolution_rank_map = {"2160p": 3, "1080p": 2, "720p": 1, "SD": 0, "480p": 0}
         file_size_bytes = _estimate_file_size(normalized_probe, vr["bitrate_kbps"])
@@ -1329,6 +1359,11 @@ def _build_quality_metrics_helper(
     primary_genre: Optional[str],
 ) -> Dict[str, Any]:
     """Construit le dictionnaire metrics retourne dans le QualityScoreResult."""
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : normaliser pour que
+    # detected.duration_s et detected.file_size_bytes ne soient pas 0 quand
+    # un NormalizedProbe @dataclass est passe (caller compute_quality_score
+    # transmettait la variable brute, exposant la UI Bibliotheque a un faux 0).
+    normalized_probe = _normalize_probe_arg(normalized_probe)
     weights = prof["weights"]
     vt = prof["video_thresholds"]
     return {
@@ -1448,6 +1483,11 @@ def _merge_probe_with_name_hints(
 
     Retourne (probe_enrichi, liste_des_champs_combles_par_nom).
     """
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : si un caller externe passe
+    # un NormalizedProbe @dataclass, on convertit AVANT le check isinstance(dict)
+    # pour eviter le wipe-and-replace ({} + remplissage uniquement depuis le nom),
+    # signature exacte du bug v1.5.6.
+    normalized_probe = _normalize_probe_arg(normalized_probe)
     if not isinstance(normalized_probe, dict):
         normalized_probe = {}
     # Copie defensive pour ne pas muter le dict d'entree (utilise ailleurs).
@@ -1793,13 +1833,18 @@ def compute_quality_score(
     tier = _determine_tier(score, prof["tiers"])
 
     # --- Custom rules (G6) ---
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : on passe la variable LOCALE
+    # 'probe' (deja convertie via _asdict en tete) au lieu de 'normalized_probe'
+    # (parametre brut). Le bug critique: les regles custom ciblant edition/
+    # duration_s/tmdb_in_collection ne s'appliquaient JAMAIS si caller passait
+    # un NormalizedProbe (ex: ProbeService a l'avenir si conversion enlevee).
     score, tier, custom_flags_added, applied_rule_ids = _apply_custom_rules_helper(
         prof=prof,
         score=score,
         tier=tier,
         vr=vr,
         best_audio=best_audio,
-        normalized_probe=normalized_probe,
+        normalized_probe=probe,
         film_year=film_year,
         subtitle_info=subtitle_info,
         encode_warnings=encode_warnings,
@@ -1842,6 +1887,10 @@ def compute_quality_score(
     )
 
     # --- Metrics ---
+    # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : passer 'probe' (variable
+    # locale deja convertie) au lieu de 'normalized_probe' (parametre brut).
+    # Sinon detected.duration_s et detected.file_size_bytes etaient 0 quand le
+    # caller transmettait un NormalizedProbe (impact UI Bibliotheque).
     metrics = _build_quality_metrics_helper(
         prof=prof,
         probe_quality=probe_quality,
@@ -1849,7 +1898,7 @@ def compute_quality_score(
         best_audio=best_audio,
         audio_tracks=audio_tracks,
         langs=langs,
-        normalized_probe=normalized_probe,
+        normalized_probe=probe,
         sources=sources,
         toggles=toggles,
         confidence_value=confidence_value,
