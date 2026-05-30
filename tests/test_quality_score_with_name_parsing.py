@@ -168,7 +168,7 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
         )
 
     def test_movie_720p_webdl_aac_probe_failed(self) -> None:
-        """Probe FAILED + nom 720p WEB-DL AAC -> Bronze."""
+        """Probe FAILED + nom 720p WEB-DL AAC -> Reject/Bronze (borderline)."""
         name = "Movie (2020) 720p WEB-DL x264 AAC 2.0.mkv"
         result = compute_quality_score(
             normalized_probe=_failed_probe(),
@@ -181,9 +181,15 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
         )
         self.assertGreaterEqual(result["score"], 25, f"score trop faible: {result['score']}")
         self.assertLessEqual(result["score"], 55, f"score trop fort: {result['score']}")
+        # Fix audit 2026-05-30 (v1.5.7) : calibration biblio reelle (Bronze=40
+        # au lieu de 25). Un 720p WEB-DL AAC probe FAILED score ~39 = tier
+        # Reject/Bronze legitime. Avant Bronze=25 -> Bronze obligatoire.
+        # Maintenant : la cassure est entre 39 (Reject) et 40 (Bronze) sur ce
+        # cas borderline ; on accepte les 3 tiers possibles sur cet exemple
+        # qui est par construction limite-qualite.
         self.assertIn(
             result["tier"],
-            {"Bronze", "Silver"},
+            {"Reject", "Bronze", "Silver"},
             f"tier={result['tier']} score={result['score']}",
         )
 

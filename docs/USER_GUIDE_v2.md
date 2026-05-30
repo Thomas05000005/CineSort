@@ -222,10 +222,51 @@ alerte est mappée à un libellé humain + icône + description + niveau de sév
 | `integrity_header_invalid` | 🛡 | Intégrité fichier invalide | critical |
 | `duplicate_cross_root` | 🔁 | Doublon dans 2 dossiers racines | warning |
 | `low_bitrate` | 📉 | Bitrate vidéo anormalement faible | info |
+| `LOW_BITRATE_4K` | 🎯 | 4K (2160p) avec bitrate trop faible (faux 4K probable) | warning |
 | `runtime_mismatch` | ⏱ | Durée incohérente avec TMDb | critical |
 
 Les alertes apparaissent sur la fiche film, les groupes de doublons, et la grille
 Bibliothèque (badge ⚠ avec compteur).
+
+### Zoom sur `LOW_BITRATE_4K`
+
+**Quel signal déclenche l'alerte ?**
+Un film classé **2160p (4K)** dont le **bitrate vidéo est inférieur au seuil
+typique d'une vraie source 4K** (typiquement < 10 Mbps). L'alerte est posée par
+le détecteur d'anomalies après le probe ffmpeg (voir
+`cinesort/ui/api/dashboard_support.py` — code `LOW_BITRATE_4K`, niveau `WARN`,
+message *"Debit faible pour 2160p (<bitrate> kbps)"*).
+
+**Pourquoi c'est suspect ?**
+Un **vrai 4K BluRay (UHD remux)** a typiquement un bitrate vidéo de **30-80 Mbps**
+(parfois jusqu'à 100 Mbps sur les remux). Un fichier annoncé 2160p mais à
+**< 10 Mbps** est presque certainement :
+
+- un **upscale** depuis une source 1080p (gain de résolution nominal, aucun gain
+  de détail réel),
+- ou un **re-encode très agressif** (HEVC bas débit, "4K light", web-rip
+  ré-encodé) qui perd énormément de détail par rapport à la source d'origine,
+- ou parfois un **fichier corrompu / incomplet**.
+
+Dans tous les cas, vous n'avez pas la qualité 4K que vous croyez avoir.
+
+**Comment agir en tant qu'utilisateur ?**
+
+1. **Vérifier la source réelle** : ouvrir la fiche film, regarder le bitrate
+   exact, le codec (HEVC/H.265 attendu en 4K), la taille fichier. Un "4K" de
+   3 Go est un signal fort de faux 4K.
+2. **Comparer dans le groupe de doublons** : si CineSort a détecté un doublon
+   pour ce film, comparer avec la version 1080p — souvent la 1080p est en
+   réalité de meilleure qualité visuelle qu'un faux 4K à bas débit.
+3. **Chercher une version remux** : pour les films que vous tenez à garder en
+   vrai 4K, rechercher une version **UHD BluRay Remux** (typiquement 50-80 Mbps,
+   taille 40-80 Go) auprès de la source d'origine.
+4. **Marquer pour suppression** si la version 1080p est suffisante ou
+   meilleure : utiliser "Marquer pour suppression" sur la fiche, le fichier
+   partira dans `_user_marked_for_deletion/` à l'apply (réversible).
+5. **Ignorer l'alerte** si vous savez qu'il s'agit d'une release légitime à
+   bas débit que vous souhaitez conserver (par ex. encodage HEVC très optimisé
+   accepté en connaissance de cause).
 
 ---
 

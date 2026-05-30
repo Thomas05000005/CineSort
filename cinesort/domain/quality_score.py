@@ -107,10 +107,21 @@ def default_quality_profile() -> Dict[str, Any]:
             # massivement les bonus video/audio qui debalancerait le UHD) permet
             # a ces 1080p qualitatifs d'atteindre Gold. Combinée avec le bump de
             # base audio (10 -> 12, voir _score_audio).
-            "platinum": 75,
-            "gold": 56,
-            "silver": 42,
-            "bronze": 25,
+            # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : sur la
+            # distribution observee 853 films (run 20260530_144631_443) -
+            # 20-29:1, 30-39:69, 40-49:181, 50-59:321 (peak), 60-69:277, 70-79:4 -
+            # les seuils 75/56/42/25 placaient 100% des films en Silver+Bronze
+            # (aucun Platinum car max=79, et Bronze 25 trop genereux : 100% > 25).
+            # Recalibrage cible decision senior (distribution observee) :
+            #   Platinum 70+ : 0.5% (4 films exceptionnels)
+            #   Gold     66+ : ~13% (UHD light ou 1080p HDR premium)
+            #   Silver   55+ : ~38% (peak, BluRay 1080p propre)
+            #   Bronze   40+ : ~40% (1080p web/encodes legers)
+            #   Reject  <40  : ~8% (probe FAILED, qualite tres faible)
+            "platinum": 70,
+            "gold": 66,
+            "silver": 55,
+            "bronze": 40,
         },
     }
 
@@ -150,7 +161,8 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
     equilibre["weights"].update({"video": 60, "audio": 30, "extras": 10})
     equilibre["toggles"].update({"enable_4k_light": True, "include_metadata": False, "include_naming": False})
     # Fix audit 2026-05-25 (v1.5.5) Vague J : equilibre suit le default recalibre.
-    equilibre["tiers"].update({"platinum": 75, "gold": 58, "silver": 42, "bronze": 25})
+    # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : aligne sur default.
+    equilibre["tiers"].update({"platinum": 70, "gold": 66, "silver": 55, "bronze": 40})
 
     light = copy.deepcopy(base)
     light["id"] = "CinemaLux_Light_v1"
@@ -390,14 +402,16 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults recalibres (voir
     # default_quality_profile()).
     # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56.
-    raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 75)))
-    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 56)))
-    raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 42)))
-    raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 25))
-    tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 75)))
-    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 56)))
-    tiers["silver"] = max(0, min(100, _to_int(raw_silver, 42)))
-    tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 25)))
+    # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : defaults
+    # 70/66/55/40 (voir default_quality_profile pour justification).
+    raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 70)))
+    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 66)))
+    raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 55)))
+    raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 40))
+    tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 70)))
+    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 66)))
+    tiers["silver"] = max(0, min(100, _to_int(raw_silver, 55)))
+    tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 40)))
     # Retirer les vieilles cles pour n'avoir qu'une source de verite apres normalisation
     for _legacy in ("premium", "bon", "moyen"):
         tiers.pop(_legacy, None)
@@ -457,12 +471,20 @@ def _resolution_label(*, width: int, height: int, release_name: str = "") -> Tup
     # Prefer measured probe dimensions when available.
     w = max(0, int(width or 0))
     h = max(0, int(height or 0))
-    short_edge = min(w, h) if w and h else max(w, h)
-    if short_edge >= 2100:
+    # Fix audit 2026-05-30 (v1.5.7) bug 178 faux 720p : utiliser short_edge=min(w,h)
+    # classait les films cinema 1920x800 (ratio 2.35:1) en 720p car 800<1000. Or
+    # ce sont des 1080p natifs croppes ou matted (les bandes noires retirees).
+    # Tous les films 21:9 / 2.39:1 ont une height ~800-900 avec width 1920.
+    # Solution : utiliser le pattern (w>=X or h>=Y) coherent avec library_support
+    # ._classify_resolution. Width est le critere principal (1920 = 1080p
+    # toujours, peu importe l aspect ratio). VERIFIE par ffprobe direct sur 15
+    # echantillons de la biblio utilisateur : 15/15 = 1920x[784-818] etaient
+    # tous des vrais 1080p mal classes en 720p avec l ancienne logique.
+    if w >= 3800 or h >= 2100:
         return "2160p", "probe"
-    if short_edge >= 1000:
+    if w >= 1900 or h >= 1000:
         return "1080p", "probe"
-    if short_edge >= 680:
+    if w >= 1280 or h >= 680:
         return "720p", "probe"
 
     rel = str(release_name or "").strip().lower()
@@ -933,10 +955,12 @@ def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
     # quand les seuils ne sont pas explicitement fournis par le profil.
     # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56 (voir
     # default_quality_profile pour la justification).
-    plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 75)), 75)
-    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 56)), 56)
-    silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 42)), 42)
-    bronze_seuil = _to_int(tiers.get("bronze", 25), 25)
+    # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : 70/66/55/40
+    # (voir default_quality_profile pour la justification).
+    plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 70)), 70)
+    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 66)), 66)
+    silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 55)), 55)
+    bronze_seuil = _to_int(tiers.get("bronze", 40), 40)
 
     if score >= plat_seuil:
         return "Platinum"
