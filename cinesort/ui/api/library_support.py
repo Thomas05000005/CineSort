@@ -54,7 +54,8 @@ _CODEC_NORMALIZE = {
 def _normalize_codec(codec: Optional[str]) -> str:
     if not codec:
         return "unknown"
-    return _CODEC_NORMALIZE.get(str(codec).strip().lower(), str(codec).strip().lower())
+    normalized = str(codec).strip().lower()
+    return _CODEC_NORMALIZE.get(normalized, normalized)
 
 
 def _classify_resolution(width: int, height: int) -> str:
@@ -251,7 +252,8 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     def _in_list(row_val: Any, filter_list: Any) -> bool:
         if not filter_list:
             return True
-        return str(row_val or "").lower() in [str(v).lower() for v in filter_list]
+        wanted = {str(v).lower() for v in filter_list}
+        return str(row_val or "").lower() in wanted
 
     def _any_in_list(row_vals: Any, filter_list: Any) -> bool:
         """True si au moins un element de row_vals (liste) est dans filter_list."""
