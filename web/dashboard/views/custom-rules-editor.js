@@ -4,7 +4,9 @@
 
 import { apiPost } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
-import { showModal, closeModal } from "../components/modal.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 ajout dangerConfirmModal
+// pour remplacer confirm() natifs sur actions destructives (wipe regles).
+import { showModal, closeModal, dangerConfirmModal } from "../components/modal.js";
 import { openQualitySimulator } from "./quality-simulator.js";
 
 const FIELD_GROUPS = [
@@ -121,33 +123,50 @@ function _parseValue(raw, op) {
 
 function _condRowHtml(ruleId, c, idx) {
   const val = _fmtValue(c.value);
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-04 labels associes via for/id (visually-hidden).
+  const fieldId = `cond-field-${escapeHtml(ruleId)}-${idx}`;
+  const opId = `cond-op-${escapeHtml(ruleId)}-${idx}`;
+  const valId = `cond-value-${escapeHtml(ruleId)}-${idx}`;
   return `
   <div class="rule-condition" data-rule-id="${escapeHtml(ruleId)}" data-cond-idx="${idx}">
-    <select class="input" data-cond-field>${_fieldOptsHtml(c.field)}</select>
-    <select class="input" data-cond-op>${_opOptsHtml(c.op)}</select>
-    <input type="text" class="input rule-condition__value" data-cond-value value="${escapeHtml(val)}" placeholder="valeur (liste : a,b,c)" />
-    <button type="button" class="btn btn--compact rule-condition__delete" data-action="delete-condition" title="Supprimer">✕</button>
+    <label for="${fieldId}" class="visually-hidden">Champ de la condition</label>
+    <select id="${fieldId}" class="input" data-cond-field>${_fieldOptsHtml(c.field)}</select>
+    <label for="${opId}" class="visually-hidden">Operateur</label>
+    <select id="${opId}" class="input" data-cond-op>${_opOptsHtml(c.op)}</select>
+    <label for="${valId}" class="visually-hidden">Valeur de la condition</label>
+    <input type="text" id="${valId}" class="input rule-condition__value" data-cond-value value="${escapeHtml(val)}" placeholder="valeur (liste : a,b,c)" />
+    <button type="button" class="btn btn--compact rule-condition__delete" data-action="delete-condition" title="Supprimer" aria-label="Supprimer la condition">✕</button>
   </div>`;
 }
 
 function _ruleCardHtml(r) {
   const conds = r.conditions.map((c, i) => _condRowHtml(r.id, c, i)).join("");
   const off = r.enabled ? "" : " rule-card--disabled";
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-04 labels associes via for/id (visually-hidden).
+  const idSafe = escapeHtml(r.id);
+  const nameId = `rule-name-${idSafe}`;
+  const prioId = `rule-priority-${idSafe}`;
+  const matchId = `rule-match-${idSafe}`;
+  const actTypeId = `rule-action-type-${idSafe}`;
+  const actValueId = `rule-action-value-${idSafe}`;
+  const actReasonId = `rule-action-reason-${idSafe}`;
   return `
-  <article class="rule-card${off}" data-rule-id="${escapeHtml(r.id)}">
+  <article class="rule-card${off}" data-rule-id="${idSafe}">
     <header class="rule-card__header">
       <label class="rule-toggle"><input type="checkbox" data-rule-enabled${r.enabled ? " checked" : ""}/><span class="rule-toggle__label">${r.enabled ? "Actif" : "Désactivé"}</span></label>
-      <input type="text" class="input rule-card__name" data-rule-name value="${escapeHtml(r.name)}" placeholder="Nom de la règle" />
-      <label class="rule-card__priority"><span>Prio</span><input type="number" min="0" max="999" class="input" data-rule-priority value="${escapeHtml(r.priority)}"/></label>
-      <button type="button" class="btn btn--compact" data-action="move-up">↑</button>
-      <button type="button" class="btn btn--compact" data-action="move-down">↓</button>
-      <button type="button" class="btn btn--compact rule-card__delete" data-action="delete-rule">✕</button>
+      <label for="${nameId}" class="visually-hidden">Nom de la regle</label>
+      <input type="text" id="${nameId}" class="input rule-card__name" data-rule-name value="${escapeHtml(r.name)}" placeholder="Nom de la règle" />
+      <label class="rule-card__priority" for="${prioId}"><span>Prio</span><input type="number" id="${prioId}" min="0" max="999" class="input" data-rule-priority value="${escapeHtml(r.priority)}"/></label>
+      <button type="button" class="btn btn--compact" data-action="move-up" aria-label="Monter la priorite">↑</button>
+      <button type="button" class="btn btn--compact" data-action="move-down" aria-label="Descendre la priorite">↓</button>
+      <button type="button" class="btn btn--compact rule-card__delete" data-action="delete-rule" aria-label="Supprimer la regle">✕</button>
     </header>
     <section class="rule-card__body">
       <div class="rule-conditions">
         <div class="rule-conditions__header">
           <span class="rule-kw">SI</span>
-          <select class="input" data-rule-match>
+          <label for="${matchId}" class="visually-hidden">Mode d'association des conditions</label>
+          <select id="${matchId}" class="input" data-rule-match>
             <option value="all"${r.match === "all" ? " selected" : ""}>toutes les conditions</option>
             <option value="any"${r.match === "any" ? " selected" : ""}>au moins une condition</option>
           </select>
@@ -158,9 +177,12 @@ function _ruleCardHtml(r) {
       </div>
       <div class="rule-action">
         <span class="rule-kw">ALORS</span>
-        <select class="input" data-action-type>${_actOptsHtml(r.action.type)}</select>
-        <input type="text" class="input rule-action__value" data-action-value value="${escapeHtml(_fmtValue(r.action.value))}" placeholder="Valeur" />
-        <input type="text" class="input rule-action__reason" data-action-reason value="${escapeHtml(r.action.reason)}" placeholder="Raison (optionnel)" />
+        <label for="${actTypeId}" class="visually-hidden">Type d'action</label>
+        <select id="${actTypeId}" class="input" data-action-type>${_actOptsHtml(r.action.type)}</select>
+        <label for="${actValueId}" class="visually-hidden">Valeur de l'action</label>
+        <input type="text" id="${actValueId}" class="input rule-action__value" data-action-value value="${escapeHtml(_fmtValue(r.action.value))}" placeholder="Valeur" />
+        <label for="${actReasonId}" class="visually-hidden">Raison de l'action</label>
+        <input type="text" id="${actReasonId}" class="input rule-action__reason" data-action-reason value="${escapeHtml(r.action.reason)}" placeholder="Raison (optionnel)" />
       </div>
     </section>
   </article>`;
@@ -251,10 +273,26 @@ async function _applyTemplate(tid) {
   await _loadTemplates();
   const tpl = (state.templates || []).find(t => t.id === tid);
   if (!tpl) return;
-  if (state.rules.length && !confirm(`Charger le template "${tpl.name}" ? Les règles actuelles seront remplacées.`)) return;
-  state.rules = (tpl.rules || []).map(r => _normalizeRule({ ...r, id: _genId() }));
-  _renderList();
-  _setMsg(`Template "${tpl.name}" chargé (${state.rules.length} règles).`, "success");
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace confirm() natif
+  // par dangerConfirmModal (ecrasement des regles existantes = destructif).
+  const applyTpl = () => {
+    state.rules = (tpl.rules || []).map(r => _normalizeRule({ ...r, id: _genId() }));
+    _renderList();
+    _setMsg(`Template "${tpl.name}" chargé (${state.rules.length} règles).`, "success");
+  };
+  if (state.rules.length) {
+    const count = state.rules.length;
+    dangerConfirmModal({
+      title: `Charger le template "${tpl.name}" ?`,
+      consequence: `Les ${count} règle${count > 1 ? "s" : ""} actuelle${count > 1 ? "s" : ""} seront remplacées par celles du template. Action non automatiquement réversible.`,
+      countdownSeconds: count > 50 ? 3 : 0,
+      confirmLabel: "Remplacer les règles",
+      cancelLabel: "Annuler",
+      onConfirm: applyTpl,
+    });
+    return;
+  }
+  applyTpl();
 }
 
 function _exportJson() {
@@ -291,12 +329,24 @@ async function _saveRules() {
   // confirme avant. Pas de confirmation si l'utilisateur a explicitement
   // supprime quelques regles et veut tout vider, mais on l'avertit du wipe.
   const existingCount = Number(state._existingCount || 0);
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+  // par dangerConfirmModal (wipe de N regles = destructif). Countdown 3s si > 50 elements.
   if (existingCount > 0 && rules.length === 0) {
-    const ok = typeof window !== "undefined" && typeof window.confirm === "function"
-      ? window.confirm(`Vous etes sur le point de supprimer les ${existingCount} regles existantes. Confirmer ?`)
-      : true;
-    if (!ok) { _setMsg("Sauvegarde annulee.", "info"); return; }
+    dangerConfirmModal({
+      title: `Supprimer les ${existingCount} règle${existingCount > 1 ? "s" : ""} existante${existingCount > 1 ? "s" : ""} ?`,
+      consequence: "L'éditeur est vide : enregistrer maintenant supprimera toutes les règles custom du profil qualité. Cette action n'est pas automatiquement réversible.",
+      countdownSeconds: existingCount > 50 ? 3 : 0,
+      confirmLabel: "Supprimer toutes les règles",
+      cancelLabel: "Annuler",
+      onConfirm: () => { _doSaveRules(rules); },
+    });
+    _setMsg("Sauvegarde en attente de confirmation…", "info");
+    return;
   }
+  await _doSaveRules(rules);
+}
+
+async function _doSaveRules(rules) {
   const v = await apiPost("quality/validate_custom_rules", { rules });
   // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
   const _vPayload = (v && v.data) || v || {};

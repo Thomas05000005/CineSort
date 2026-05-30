@@ -684,24 +684,37 @@ async function _checkProbeToolsBoot() {
   const ffprobe = tools.ffprobe || {};
   if (ffprobe.available) return; // tout va bien
   try {
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-005 : utilise une
+    // classe CSS dediee (.ffprobe-banner) avec tokens du design system
+    // (--sev-warning-*, --radius-sm, --sp-3) au lieu de styles inline en dur.
+    // Icone alignee dans .ffprobe-banner__icon, variante sev-warning.
+    // DV-001 z-index 150 conserve (entre contenu et chrome).
     const banner = document.createElement("div");
     banner.id = "ffprobe-missing-banner";
+    banner.className = "ffprobe-banner ffprobe-banner--warning";
     banner.setAttribute("role", "alert");
-    banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:#F59E0B;color:#1F2937;padding:10px 16px;z-index:9998;font-family:sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;gap:12px;";
-    const icon = document.createElement("strong");
-    icon.textContent = "⚠ ffprobe introuvable.";
+    const icon = document.createElement("span");
+    icon.className = "ffprobe-banner__icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "⚠";
     banner.appendChild(icon);
+    const title = document.createElement("strong");
+    title.className = "ffprobe-banner__title";
+    title.textContent = "ffprobe introuvable.";
+    banner.appendChild(title);
     const msg = document.createElement("span");
-    msg.textContent = " Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Parametres > Outils > Auto-install.";
-    msg.style.flex = "1";
+    msg.className = "ffprobe-banner__msg";
+    msg.textContent = "Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Parametres > Outils > Auto-install.";
     banner.appendChild(msg);
     const settingsBtn = document.createElement("a");
+    settingsBtn.className = "ffprobe-banner__action";
     settingsBtn.href = "#/parametres";
     settingsBtn.textContent = "Ouvrir Parametres";
-    settingsBtn.style.cssText = "background:#1F2937;color:#F59E0B;padding:4px 10px;border-radius:4px;text-decoration:none;font-weight:600;";
     banner.appendChild(settingsBtn);
     const closeBtn = document.createElement("button");
-    closeBtn.style.cssText = "background:transparent;border:1px solid #1F2937;color:#1F2937;padding:2px 8px;border-radius:4px;cursor:pointer;";
+    closeBtn.className = "ffprobe-banner__close";
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Fermer le bandeau");
     closeBtn.textContent = "Fermer";
     closeBtn.addEventListener("click", () => { banner.remove(); });
     banner.appendChild(closeBtn);

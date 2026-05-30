@@ -28,6 +28,9 @@
 
 import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
+// natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
+import { dangerConfirmModal } from "../components/modal.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1242,18 +1245,29 @@ async function _saveProfileAsNew() {
 }
 
 async function _recomputeScores() {
-  if (!window.confirm("Re-calculer les scores avec ce profil ?\n\nCette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.")) return;
-  _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
-  try {
-    const res = await apiPost("quality/recompute_all_scores", {});
-    if (res && res.data && res.data.ok) {
-      _showProfilMessage(`✓ Re-calcul lancé : job_id = ${res.data.job_id || "?"}.`, "ok");
-    } else {
-      _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
-    }
-  } catch (err) {
-    _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
-  }
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+  // natif par dangerConfirmModal (ecrasement des scores de toute la biblio = destructif).
+  // Memoire utilisateur exige modale custom + confirm supplementaire.
+  dangerConfirmModal({
+    title: "Re-calculer les scores avec ce profil ?",
+    consequence: "Cette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.",
+    countdownSeconds: 3,
+    confirmLabel: "Lancer le re-calcul",
+    cancelLabel: "Annuler",
+    onConfirm: async () => {
+      _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
+      try {
+        const res = await apiPost("quality/recompute_all_scores", {});
+        if (res && res.data && res.data.ok) {
+          _showProfilMessage(`✓ Re-calcul lancé : job_id = ${res.data.job_id || "?"}.`, "ok");
+        } else {
+          _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
+        }
+      } catch (err) {
+        _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
+      }
+    },
+  });
 }
 
 function _showProfilMessage(msg, level) {
@@ -1770,15 +1784,24 @@ function _bindFields(container) {
   }
   if (regenBtn && tokenInput) {
     regenBtn.addEventListener("click", () => {
-      if (!window.confirm("Régénérer le token ? Les clients distants devront utiliser la nouvelle clé.")) return;
-      const bytes = new Uint8Array(24);
-      crypto.getRandomValues(bytes);
-      const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      tokenInput.value = b64;
-      tokenInput.type = "text";
-      _state.settings.rest_api_token = b64;
-      if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
-      _scheduleSave();
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+      // natif par dangerConfirmModal (regen token = invalide tous les clients distants).
+      dangerConfirmModal({
+        title: "Régénérer le token API ?",
+        consequence: "Les clients distants (mobile, navigateur autre poste) devront utiliser la nouvelle clé. Les connexions en cours seront perdues.",
+        confirmLabel: "Régénérer",
+        cancelLabel: "Annuler",
+        onConfirm: () => {
+          const bytes = new Uint8Array(24);
+          crypto.getRandomValues(bytes);
+          const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+          tokenInput.value = b64;
+          tokenInput.type = "text";
+          _state.settings.rest_api_token = b64;
+          if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
+          _scheduleSave();
+        },
+      });
     });
   }
 

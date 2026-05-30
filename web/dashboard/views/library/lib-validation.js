@@ -8,6 +8,9 @@ import { showModal } from "../../components/modal.js";
 import { refreshVerification } from "./lib-verification.js";
 import { markValidationSaved } from "./lib-apply.js";
 import { getNavSignal, isAbortError } from "../../core/nav-abort.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer alert() natifs
+// par showToast pour notifications informatives/erreur (read-only history & report).
+import { showToast } from "../../components/toast.js";
 
 let _state = null;
 let _allRows = [];
@@ -397,7 +400,8 @@ async function _hookDetailModalActions() {
       const { apiPost } = await import("../../core/api.js");
       const r = await apiPost("library/get_film_history", { film_id: btn.dataset.filmId || "" });
       const events = r.data?.events || [];
-      if (!events.length) { alert("Aucun historique."); return; }
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+      if (!events.length) { showToast({ type: "info", text: "Aucun historique." }); return; }
       let h = '<div class="timeline-container">';
       for (const ev of events) { h += `<div class="timeline-event"><strong>${escapeHtml(ev.type)}</strong> — ${escapeHtml(ev.date || "")}<br>${escapeHtml(ev.detail || "")}</div>`; }
       h += "</div>";
@@ -423,7 +427,8 @@ async function _hookDetailModalActions() {
         const r2 = await apiPost("quality/get_perceptual_report", { run_id: runId, row_id: rowId });
         const d2 = r2.data || {};
         if (!d2.ok && d2.ok !== undefined) {
-          alert(d2.message || "Analyse perceptuelle echouee.");
+          // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+          showToast({ type: "error", text: d2.message || "Analyse perceptuelle echouee." });
           return;
         }
         const r3 = await apiPost("quality/get_perceptual_details", { run_id: runId, row_id: rowId });
@@ -432,10 +437,12 @@ async function _hookDetailModalActions() {
         // au moins le payload immediat de get_perceptual_report.
         if (!details) details = d2;
       } else if (d1.message) {
-        alert(d1.message);
+        // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+        showToast({ type: "error", text: d1.message });
         return;
       }
-      if (!details) { alert("Pas de rapport perceptuel disponible."); return; }
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+      if (!details) { showToast({ type: "info", text: "Pas de rapport perceptuel disponible." }); return; }
       // Helpers d'affichage
       const _fmt = (v, missing = "—") => (v === null || v === undefined || v === "") ? missing : v;
       const _shortFp = (fp) => { const s = String(fp || ""); return s.length > 16 ? s.slice(0, 8) + "…" + s.slice(-6) : s; };

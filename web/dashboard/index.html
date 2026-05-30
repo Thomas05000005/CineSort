@@ -51,7 +51,12 @@
   <!-- ============ LOGIN (plein ecran, pas de shell) ============ -->
   <div id="view-login" class="view login-wrap">
     <div class="card login-card">
-      <h1>CineSort <span class="text-accent">Dashboard</span></h1>
+      <!-- Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-007 : un seul
+           H1 par page (semantique). L'accueil porte le H1 "Bonjour Thomas"
+           donc le titre login devient un div.login-brand (visuel uniquement,
+           pas un titre de section). Le texte reste lisible par les SR via
+           le label/aria-label du formulaire (autour de loginForm). -->
+      <div class="login-brand">CineSort <span class="text-accent">Dashboard</span></div>
       <p class="subtitle">Entrez la clé d'accès fournie par CineSort (Paramètres → API REST → Clé d'accès, ou carte « Accès distant » de l'accueil).</p>
       <form id="loginForm" autocomplete="off">
         <div class="field">

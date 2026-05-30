@@ -46,10 +46,16 @@ const _DEFAULT_DURATIONS = {
 
 /**
  * Affiche un toast bottom-right.
- * @param {{type?:"info"|"success"|"warning"|"warn"|"error", text:string, duration?:number}} opts
+ * @param {{type?:"info"|"success"|"warning"|"warn"|"error", text:string, duration?:number, action?:{label:string, onClick:Function}, persistent?:boolean}} opts
+ *
+ * Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : ajout des options
+ * `action` (bouton inline "Annuler", "Voir", etc.) et `persistent` (le toast
+ * ne se ferme pas auto, l'utilisateur doit cliquer Annuler / close (x)).
+ * Remplace les patterns setTimeout 5s + variable globale window._snapshot qui
+ * cachaient l'option Undo a l'utilisateur (cf _handleBulkApprove).
  */
 export function showToast(opts) {
-  const { type = "info", text = "" } = opts || {};
+  const { type = "info", text = "", action = null, persistent = false } = opts || {};
   if (!text) return;
   // Fix audit 2026-05-24 : "warn" mappe sur "warning" pour aligner avec le
   // reste de la dashboard (notification-center, css .toast--warning, etc).
@@ -60,16 +66,38 @@ export function showToast(opts) {
     : (_DEFAULT_DURATIONS[normalizedType] || 4000);
   const root = _ensureContainer();
   const node = document.createElement("div");
-  node.className = `toast toast--${normalizedType}`;
+  node.className = `toast toast--${normalizedType}${action ? " toast--has-action" : ""}${persistent ? " toast--persistent" : ""}`;
   node.setAttribute("role", "status");
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : bouton action
+  // inline rendu via DOM (pas innerHTML) pour eviter l'echappement HTML du label.
   node.innerHTML = `<span class="toast__icon">${_icon(normalizedType)}</span><span class="toast__text"></span><button class="toast__close" aria-label="Fermer" type="button">×</button>`;
   node.querySelector(".toast__text").textContent = text;
-  root.appendChild(node);
 
   const close = () => {
     node.classList.add("toast--out");
     setTimeout(() => node.remove(), 220);
   };
+
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : insertion du
+  // bouton d'action AVANT le close (×), apres le texte. Sur clic : execute
+  // le callback puis ferme le toast.
+  if (action && typeof action.onClick === "function" && action.label) {
+    const actionBtn = document.createElement("button");
+    actionBtn.type = "button";
+    actionBtn.className = "toast__action v5-btn v5-btn--sm v5-btn--ghost";
+    actionBtn.textContent = String(action.label);
+    actionBtn.addEventListener("click", () => {
+      try { action.onClick(); } finally { close(); }
+    });
+    // Insertion avant le bouton de fermeture (dernier enfant).
+    node.insertBefore(actionBtn, node.querySelector(".toast__close"));
+  }
+
+  root.appendChild(node);
   node.querySelector(".toast__close").addEventListener("click", close);
-  setTimeout(close, Math.max(1500, duration));
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : si persistent,
+  // pas d'auto-dismiss : l'utilisateur DOIT interagir (Annuler / close).
+  if (!persistent) {
+    setTimeout(close, Math.max(1500, duration));
+  }
 }

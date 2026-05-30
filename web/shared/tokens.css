@@ -83,6 +83,15 @@
   --text-disabled:  #4B5563;
   --text-inverse:   #0F1419;
 
+  /* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-006 : alias text-1/2/3
+     utilises massivement dans shared/components.css (341 occurrences) sans
+     etre definis -> fallback navigateur (currentColor/inherit) qui rendait
+     parfois les titres en blanc cru (effet "card border blanc" sur fond
+     sombre quand le titre debordait via box-shadow). Alias defensif. */
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+
   /* ===========================================================
    * Typography
    * =========================================================== */

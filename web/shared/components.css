@@ -4176,14 +4176,20 @@ body.v5-notif-lock {
   width: 100%;
 }
 
+/* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-002 : les sections
+   "Dernier run / Points a traiter / Sante / Activite" sont des balises H2
+   et doivent porter une taille de titre H2 standard (18px), pas une taille
+   eyebrow 11px en uppercase. On harmonise toutes les sections sur fs-lg
+   semibold, sans uppercase ni letter-spacing, et couleur text-1 (lisible).
+   Le H2 24px du CTA "Lancer un nouveau scan" reste accueil-cta-scan-title
+   (fs-xl) -> aucun doublon eyebrow+24px. */
 .accueil-section-title {
   font-family: var(--font-family-base);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  color: var(--text-1);
   margin: 0 0 var(--sp-4);
+  line-height: 1.3;
 }
 
 .accueil-empty-msg {

@@ -325,7 +325,7 @@ function _renderHeaderRun() {
       <div class="traitement-header-actions">
         ${isRunning ? `<button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="pause">⏸ Pause</button>` : ""}
         ${isPaused ? `<button type="button" class="v5-btn v5-btn--primary" data-traitement-action="resume">▶ Reprendre</button>` : ""}
-        <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="save">💾 Sauvegarder</button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="save" title="Sauvegarde le run en cours pour le reprendre plus tard depuis l Historique">💾 Sauvegarder</button><!-- Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-04 : tooltip explicite, distingue "Sauvegarder le run" (header) de "Sauver les decisions" (validation). -->
         <button type="button" class="v5-btn v5-btn--danger" data-traitement-action="cancel">⏹ Annuler</button>
       </div>
     </header>
@@ -1233,26 +1233,41 @@ async function _handleBulkApprove(filter) {
     }
   });
 
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : snapshot des
+  // checkboxes AVANT modification (et non du champ `decision` cote serveur qui
+  // n'a pas encore ete persiste a ce stade). Sans ca, l'undo restaurait des
+  // "PENDING" cote DOM alors que l'utilisateur avait deja coche manuellement.
+  const checkboxSnapshot = new Map();
+  _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+    checkboxSnapshot.set(cb.dataset.rowId, cb.checked);
+  });
+
   // Mise a jour locale + UI
   _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
     if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
   });
 
-  // Snapshot pour Undo
-  const snapshot = {};
-  rows.forEach((r) => { snapshot[r.row_id] = r.decision; });
-
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : remplacement du
+  // setTimeout 5s + window._traitementLastBulkSnapshot (placeholder invisible)
+  // par un toast PERSISTANT avec bouton "Annuler" inline. L'utilisateur voit
+  // l'option d'undo et la declenche explicitement ; aucune action implicite
+  // hors champ visuel.
   showToast({
     type: "success",
-    text: `${approvedCount} films approuvés.`,
-    duration: 5000,
+    text: `${approvedCount} films approuves.`,
+    persistent: true,
+    action: {
+      label: "Annuler",
+      onClick: () => {
+        if (!_activeContainer) return;
+        _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+          const prev = checkboxSnapshot.get(cb.dataset.rowId);
+          if (prev !== undefined) cb.checked = prev;
+        });
+        showToast({ type: "info", text: "Approbation en masse annulee." });
+      },
+    },
   });
-
-  // L'undo via toast est un placeholder : on l'expose comme bouton dans le toast,
-  // mais le composant showToast actuel n'a pas d'API onAction. On utilise une
-  // sauvegarde du snapshot accessible 5s via fenetre globale.
-  window._traitementLastBulkSnapshot = snapshot;
-  setTimeout(() => { delete window._traitementLastBulkSnapshot; }, 5000);
 }
 
 async function _handleApplyNow() {
@@ -1390,6 +1405,36 @@ function _onContainerClick(event) {
       _writeStep("validation");
       _renderInPlace();
     } else if (action === "go-doublons") {
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-02 : avant la
+      // transition Validation -> Doublons, detecter si l'utilisateur a modifie
+      // des decisions (checkboxes / annees) sans cliquer "Sauver les decisions".
+      // Avant : la transition etait silencieuse -> au retour sur Validation,
+      // les decisions etaient perdues car save_validation n'avait jamais ete
+      // appele. Maintenant : modal explicite "Sauvegarder avant de continuer ?"
+      // avec 3 choix (Sauver puis continuer / Continuer sans sauver / Annuler).
+      if (_hasUnsavedValidationDecisions()) {
+        showModal({
+          title: "Decisions non sauvegardees",
+          body: `<p>Vous avez modifie des decisions de validation sans cliquer sur <strong>"Sauver les decisions"</strong>.</p>
+                 <p>Si vous passez aux Doublons maintenant, vos modifications seront perdues au prochain rechargement.</p>
+                 <p><strong>Sauvegarder avant de continuer ?</strong></p>`,
+          actions: [
+            { label: "Annuler", cls: "", onClick: () => {} },
+            { label: "Continuer sans sauver", cls: "v5-btn--secondary", onClick: () => {
+              _currentStep = "doublons";
+              _writeStep("doublons");
+              _renderInPlace();
+            } },
+            { label: "Sauver puis continuer", cls: "btn-primary v5-btn--primary", onClick: async () => {
+              await _handleSaveValidation();
+              _currentStep = "doublons";
+              _writeStep("doublons");
+              _renderInPlace();
+            } },
+          ],
+        });
+        return;
+      }
       _currentStep = "doublons";
       _writeStep("doublons");
       _renderInPlace();
@@ -1404,11 +1449,22 @@ function _onContainerClick(event) {
       // "X décidés / Y" => on calcule pending depuis le DOM si présent.
       const pendingDups = _readDoublonsPendingFromDom();
       if (pendingDups > 0) {
-        const confirmed = window.confirm(
-          `Il reste ${pendingDups} doublon${pendingDups > 1 ? "s" : ""} non décidé${pendingDups > 1 ? "s" : ""}. ` +
-          `Les choix par défaut seront appliqués. Continuer ?`,
-        );
-        if (!confirmed) return;
+        // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+        // natif par dangerConfirmModal (application defauts = potentiellement destructif sur
+        // les groupes non arbitres). Memoire utilisateur exige countdown 3s si > 50 elements.
+        dangerConfirmModal({
+          title: `Passer à Apply avec ${pendingDups} doublon${pendingDups > 1 ? "s" : ""} non décidé${pendingDups > 1 ? "s" : ""} ?`,
+          consequence: "Les choix par défaut (premier fichier de chaque groupe) seront appliqués. Les autres fichiers de doublons peuvent être supprimés/déplacés selon votre profil.",
+          countdownSeconds: pendingDups > 50 ? 3 : 0,
+          confirmLabel: "Continuer vers Apply",
+          cancelLabel: "Retourner aux Doublons",
+          onConfirm: () => {
+            _currentStep = "apply";
+            _writeStep("apply");
+            _renderInPlace();
+          },
+        });
+        return;
       }
       _currentStep = "apply";
       _writeStep("apply");
@@ -1510,6 +1566,43 @@ function _onContainerChange(event) {
     _renderInPlace();
     return;
   }
+}
+
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-02 : detecte si l'etat
+// des checkboxes / annees diverge du `decision` cote serveur (_validationPlan).
+// - checkbox cochee = decision OK (approuve), non cochee = REJECT.
+// - year input value differente du proposed_year initial = modifie.
+// Renvoie true si AU MOINS une ligne diverge -> proposer la sauvegarde.
+function _hasUnsavedValidationDecisions() {
+  if (!_activeContainer) return false;
+  const rows = (_validationPlan && _validationPlan.rows) || [];
+  if (rows.length === 0) return false;
+  const rowsById = new Map(rows.map((r) => [String(r.row_id || ""), r]));
+  const checks = _activeContainer.querySelectorAll("[data-traitement-validation-check]");
+  // Si la vue Validation n'a jamais ete montee (aucune checkbox), pas de
+  // divergence possible : on retourne false (laisse passer la transition).
+  if (checks.length === 0) return false;
+  for (const cb of checks) {
+    const rowId = String(cb.dataset.rowId || "");
+    const row = rowsById.get(rowId);
+    if (!row) continue;
+    // _renderValidationStep coche par defaut si confidence >= 85. C'est cet
+    // etat "par defaut" qui est compare a l'etat actuel pour savoir si
+    // l'utilisateur a interagi. Si decision serveur existe deja, on l'utilise.
+    let defaultChecked;
+    if (row.decision === "OK" || row.decision === "APPROVED") defaultChecked = true;
+    else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultChecked = false;
+    else defaultChecked = Number(row.confidence || 0) >= 85;
+    if (cb.checked !== defaultChecked) return true;
+    // Annee : compare l'input avec proposed_year.
+    const yearInput = _activeContainer.querySelector(`.traitement-validation-year-input[data-row-id="${rowId}"]`);
+    if (yearInput) {
+      const currentYear = Number(yearInput.value) || null;
+      const originalYear = Number(row.proposed_year) || null;
+      if (currentYear !== originalYear) return true;
+    }
+  }
+  return false;
 }
 
 // Fix Vague G Fix 4 helper : lit le nombre de doublons en attente depuis le DOM

@@ -801,11 +801,23 @@ function _goToApply() {
   // perdre ses decisions de doublons en partant prematurement.
   const pending = _state.groups.filter((g) => !g.winner_decided).length;
   if (pending > 0) {
-    const confirmed = confirm(`Il reste ${pending} groupes de doublons non decides. Les fichiers en doublon seront conserves tels quels. Continuer ?`);
-    if (!confirmed) return;
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace confirm() natif
+    // par dangerConfirmModal (perte potentielle de decisions doublons = destructif).
+    // Memoire utilisateur : countdown 3s si > 50 elements impactes.
+    dangerConfirmModal({
+      title: `Continuer avec ${pending} groupe${pending > 1 ? "s" : ""} de doublons non décidé${pending > 1 ? "s" : ""} ?`,
+      consequence: "Les fichiers en doublon seront conservés tels quels (aucune décision n'est appliquée). Vous pourrez perdre ces décisions au prochain rescan.",
+      countdownSeconds: pending > 50 ? 3 : 0,
+      confirmLabel: "Continuer vers Apply",
+      cancelLabel: "Annuler",
+      onConfirm: () => {
+        // navigateTo prefixe avec "#" -> on passe sans le "#" initial.
+        // Le fragment "#step-apply" est lu par traitement.js _readStep().
+        navigateTo("/traitement#step-apply");
+      },
+    });
+    return;
   }
-  // navigateTo préfixe avec "#" -> on passe sans le "#" initial.
-  // Le fragment "#step-apply" est lu par traitement.js _readStep().
   navigateTo("/traitement#step-apply");
 }
 
