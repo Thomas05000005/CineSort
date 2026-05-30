@@ -409,8 +409,8 @@ class _StoreBase:
         most_recent = pre_migration[0]  # list_backups trie plus recent d'abord
         try:
             restore_backup(most_recent, self.db_path)
-        except (sqlite3.Error, OSError, FileNotFoundError) as exc:
-            logger.error("rollback_migration: restore depuis %s echoue: %s", most_recent, exc)
+        except (sqlite3.Error, OSError, FileNotFoundError):
+            logger.exception("rollback_migration: restore depuis %s echoue", most_recent)
             return None
         return most_recent
 

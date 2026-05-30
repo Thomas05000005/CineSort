@@ -197,7 +197,7 @@ def export_full_library(api: Any) -> Dict[str, Any]:
             "film_count": len(films),
         }
     except (AttributeError, OSError, TypeError) as exc:
-        logger.error("export_full_library failed: %s", exc)
+        logger.exception("export_full_library failed")
         return _err_response(f"Export echoue : {exc}", category="runtime", level="error", log_module=__name__)
 
 

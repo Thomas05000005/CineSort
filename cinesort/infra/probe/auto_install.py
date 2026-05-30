@@ -145,13 +145,13 @@ def install_all(
     try:
         results["ffprobe"] = install_ffprobe(progress_callback)
     except (OSError, FileNotFoundError, zipfile.BadZipFile) as exc:
-        logger.error("auto_install: echec ffprobe: %s", exc)
+        logger.exception("auto_install: echec ffprobe")
         errors.append(f"FFprobe: {exc}")
 
     try:
         results["mediainfo"] = install_mediainfo(progress_callback)
     except (OSError, FileNotFoundError, zipfile.BadZipFile) as exc:
-        logger.error("auto_install: echec MediaInfo: %s", exc)
+        logger.exception("auto_install: echec MediaInfo")
         errors.append(f"MediaInfo: {exc}")
 
     return {"installed": results, "errors": errors}

@@ -364,7 +364,7 @@ def auto_install_probe_tools(
         _logger.info("auto_install_probe_tools: ok=%s installed=%s errors=%s", ok, list(installed), errors)
         return {"ok": ok, "installed": installed, "errors": errors, "message": msg, "status": status}
     except (OSError, FileNotFoundError) as exc:
-        _logger.error("auto_install_probe_tools: %s", exc)
+        _logger.exception("auto_install_probe_tools failed")
         return {"ok": False, "message": f"Echec de l'installation : {exc}", "errors": [str(exc)]}
 
 
