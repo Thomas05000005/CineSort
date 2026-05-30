@@ -592,9 +592,9 @@ def find_best_nfo_for_video(folder: Path, video: Path) -> Optional[Path]:
         return same[0]
     nongeneric = [p for p in nfos if p.name.lower() != "movie.nfo"]
     if nongeneric:
-        return sorted(nongeneric, key=lambda p: p.name.lower())[0]
+        return min(nongeneric, key=lambda p: p.name.lower())
     movie = [p for p in nfos if p.name.lower() == "movie.nfo"]
-    return movie[0] if movie else sorted(nfos, key=lambda p: p.name.lower())[0]
+    return movie[0] if movie else min(nfos, key=lambda p: p.name.lower())
 
 
 @dataclass(frozen=True)
