@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -401,5 +402,9 @@ def folder_matches_template(
 
 
 def _norm_compare(s: str) -> str:
-    """Normalise une chaine pour la comparaison de conformance."""
-    return re.sub(r"\s+", " ", s.strip().lower())
+    """Normalise une chaine pour la comparaison de conformance.
+
+    NFC-normalise puis casefold pour gerer correctement les equivalences
+    Windows/SMB (case-only, NFC vs NFD, eszett allemand, ligatures).
+    """
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", s or "").strip().casefold())

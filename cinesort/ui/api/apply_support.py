@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -1133,6 +1134,7 @@ def _execute_apply(
     run_id: str,
     batch_state: List[Any],
     preview_ops_out: Optional[List[Dict[str, Any]]] = None,
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> Tuple[Any, Optional[str], int]:
     """Applique un batch.
 
@@ -1320,6 +1322,7 @@ def _execute_apply(
             decision_presence=decision_presence,
             record_op=record_op_for_apply,
             duplicate_loser_row_ids=duplicate_losers if duplicate_losers else None,
+            progress_cb=progress_cb,
         )
 
         if result is None:
@@ -1845,6 +1848,27 @@ def _apply_changes_body(
     log_fn("INFO", f"=== APPLY start (dry_run={dry_run}, quarantine={quarantine_unapproved}) ===")
     batch_state: List[Any] = [None, 0]  # [apply_batch_id, op_index] — mutable for _execute_apply
 
+    # Progress apply : on attache un callback au RunState si present (run en
+    # memoire). En mode DB-only, rs vaut None et le callback aussi : pas de
+    # polling temps reel possible mais l'apply fonctionne quand meme.
+    rs = None
+    try:
+        rs = api._get_run(run_id)
+    except Exception:
+        rs = None
+    if rs is not None:
+        try:
+            rs.apply_begin(total=len(rows), dry_run=bool(dry_run), phase="rows")
+        except Exception:
+            _log.debug("apply_begin a echoue, on continue sans progress", exc_info=True)
+    _apply_cb: Optional[Callable[[int, int, str], None]] = None
+    if rs is not None:
+        def _apply_cb(idx: int, total: int, current: str, _rs: Any = rs) -> None:  # noqa: E306
+            try:
+                _rs.apply_progress(idx, total, current, "rows")
+            except Exception:
+                _log.debug("apply_progress a echoue", exc_info=True)
+
     # Jellyfin Phase 2 : snapshot watched AVANT apply
     watched_ctx = None
     if not dry_run:
@@ -1865,8 +1889,14 @@ def _apply_changes_body(
                 api=api,
                 run_id=run_id,
                 batch_state=batch_state,
+                progress_cb=_apply_cb,
             )
         except _DuplicateCheckError as exc:
+            if rs is not None:
+                try:
+                    rs.apply_end(error=str(exc))
+                except Exception:
+                    _log.debug("apply_end a echoue", exc_info=True)
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
@@ -1898,7 +1928,27 @@ def _apply_changes_body(
             cleanup_reason_label=cleanup_reason_label,
         )
 
+        if rs is not None:
+            try:
+                rs.apply_progress(
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    "Synchronisation Jellyfin...",
+                    "jellyfin",
+                )
+            except Exception:
+                _log.debug("apply_progress phase jellyfin a echoue", exc_info=True)
         _trigger_jellyfin_refresh(api, log_fn, dry_run=dry_run)
+        if rs is not None:
+            try:
+                rs.apply_progress(
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    "Synchronisation Plex...",
+                    "plex",
+                )
+            except Exception:
+                _log.debug("apply_progress phase plex a echoue", exc_info=True)
         _trigger_plex_refresh(api, log_fn, dry_run=dry_run)
 
         # Jellyfin Phase 2 : restore watched APRES refresh
@@ -1938,6 +1988,11 @@ def _apply_changes_body(
             except Exception as backup_exc:
                 log_fn("WARN", f"DB backup post-apply ignore: {backup_exc}")
 
+        if rs is not None:
+            try:
+                rs.apply_end(error=None)
+            except Exception:
+                _log.debug("apply_end OK a echoue", exc_info=True)
         return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
@@ -1972,6 +2027,11 @@ def _apply_changes_body(
                 "decision_count": len(decisions),
             },
         )
+        if rs is not None:
+            try:
+                rs.apply_end(error=str(exc))
+            except Exception:
+                _log.debug("apply_end KO a echoue", exc_info=True)
         return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
     # Fix audit 2026-05-25 (v1.5.3) Vague H : plus de `finally:
     # api._release_apply_slot(run_id)` ici — gere par `_apply_slot_guard`
@@ -2208,6 +2268,28 @@ def _build_apply_preview_body(
                 action_summary = "video_move"
         else:
             action_summary = op_type.lower() or "unknown"
+        # Fix audit 2026-05-30 (APPLY-1) Vague J — defense en profondeur cote UI :
+        # meme si une op a echappe au backend (regression future), on ne doit
+        # PAS la presenter comme un rename si folder_old_name et folder_new_name
+        # sont equivalents au sens filesystem Windows/SMB (case-insensitive +
+        # NFC/NFD insensitive). Pour MOVE_FILE, on verifie en plus que le nom
+        # de fichier video reste identique (sinon c'est un vrai rename TV).
+        def _fs_equivalent_name(a: str, b: str) -> bool:
+            if not a or not b:
+                return False
+            return (
+                unicodedata.normalize("NFC", a).casefold()
+                == unicodedata.normalize("NFC", b).casefold()
+            )
+
+        if op_type == "MOVE_DIR" and _fs_equivalent_name(folder_old_name, folder_new_name):
+            action_summary = "noop_equivalent_fs"
+        elif (
+            op_type == "MOVE_FILE"
+            and _fs_equivalent_name(folder_old_name, folder_new_name)
+            and (not video_filename or not dst_filename or video_filename == dst_filename)
+        ):
+            action_summary = "noop_equivalent_fs"
         slim_op = {
             "op_type": op_type,
             "src_path": src_path,  # preserve pour retro-compat
@@ -2229,9 +2311,16 @@ def _build_apply_preview_body(
 
     films_list = list(films_map.values())
     # Classifier chaque film par type de changement
+    # Fix audit 2026-05-30 (APPLY-1) : on exclut les ops marquees
+    # "noop_equivalent_fs" du decompte des ops effectives. Un film
+    # dont TOUTES les ops sont equivalentes FS doit etre classe "noop"
+    # pour ne pas apparaitre comme un changement dans l'UI.
     for film in films_list:
-        n_move_dir = sum(1 for op in film["ops"] if op["op_type"] == "MOVE_DIR")
-        n_move_file = sum(1 for op in film["ops"] if op["op_type"] == "MOVE_FILE")
+        effective_ops = [
+            op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"
+        ]
+        n_move_dir = sum(1 for op in effective_ops if op["op_type"] == "MOVE_DIR")
+        n_move_file = sum(1 for op in effective_ops if op["op_type"] == "MOVE_FILE")
         if n_move_dir + n_move_file == 0:
             film["change_type"] = "noop"
         elif n_move_dir > 0 and n_move_file == 0:
@@ -2242,6 +2331,14 @@ def _build_apply_preview_body(
             film["change_type"] = "move_mixed"
 
     # Stats globales à partir du résultat dry-run
+    # Fix audit 2026-05-30 (APPLY-1) : nouveau compteur `noop_equivalent_fs`
+    # pour observability des ops detectees comme equivalentes FS cote UI.
+    noop_equivalent_fs_count = sum(
+        1
+        for f in films_list
+        for op in f["ops"]
+        if op.get("action_summary") == "noop_equivalent_fs"
+    )
     totals = {
         "films": len(films_list),
         "moves": int(getattr(result, "moves", 0) or 0),
@@ -2253,6 +2350,7 @@ def _build_apply_preview_body(
         "orphan_ops": len(orphan_ops),
         "changes_count": sum(1 for f in films_list if f["change_type"] != "noop"),
         "noop_count": sum(1 for f in films_list if f["change_type"] == "noop"),
+        "noop_equivalent_fs": noop_equivalent_fs_count,
     }
 
     return {

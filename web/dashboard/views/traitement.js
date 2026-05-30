@@ -55,6 +55,8 @@ const STATUS_COLORS = {
 
 const POLL_INTERVAL_RUNNING = 5000; // 5s pendant RUNNING (header)
 const POLL_INTERVAL_ANALYSE = 2000; // 2s pendant scan en cours (etape 1)
+// Fix APPLY-2 (2026-05-30) : polling rapide pendant apply en cours (etape 5).
+const POLL_INTERVAL_APPLY = 1500;
 const UNDO_COUNTDOWN_INTERVAL_MS = 60_000; // Spec 08 §3.5 : refresh carte undo / 60s
 
 let _currentStep = "analyse";
@@ -85,6 +87,15 @@ let _doublonsMounted = false;
 let _eventsBound = false;
 let _verifFilter = "all";
 let _validationPlan = null; // { rows: [...] }
+// Fix VAL-3 (2026-05-30) : state module-level pour filtre / tri / expanded rows
+// de l'etape Validation. Reset au unmount pour eviter de garder un etat surprenant
+// si l'utilisateur revient plus tard sur l'etape Validation.
+let _validationFilter = "all"; // all | high | mid | low | none
+let _validationSort = { key: "confidence", dir: "desc" };
+let _validationExpanded = new Set();
+// Fix APPLY-2 (2026-05-30) : intervalle polling pendant l'apply (idem scan)
+// et state apply pour les progressions live.
+let _applyStatus = null;
 let _applyOptions = { dry_run: true, export_csv: false, sync_jellyfin: false, quarantine: false };
 // Fix audit 2026-05-24 : AbortController scope module pour annuler tous les
 // apiPost en vol au unmount (navigation, fermeture vue). Sans ça les fetch
@@ -209,6 +220,25 @@ async function _loadRunStatus() {
       error: data.error || null,
       cancelRequested: Boolean(data.cancel_requested),
     };
+    // Fix APPLY-2 (2026-05-30) : capter le sous-objet apply pour le rendu
+    // de la barre de progression de l'etape 5. Backward-compat : si le backend
+    // ne renvoie pas encore data.apply, on garde _applyStatus tel quel (peut
+    // etre seede par _handleApplyNow en local).
+    if (data.apply) {
+      _applyStatus = {
+        running: Boolean(data.apply.running),
+        done: Boolean(data.apply.done),
+        idx: Number(data.apply.idx || 0),
+        total: Number(data.apply.total || 0),
+        current: String(data.apply.current || ""),
+        phase: String(data.apply.phase || ""),
+        eta_s: Number(data.apply.eta_s || 0),
+        speed: Number(data.apply.speed || 0),
+        dryRun: Boolean(data.apply.dry_run),
+      };
+    } else if (!_applyStatus?.running) {
+      _applyStatus = null;
+    }
     const newLogs = Array.isArray(data.logs) ? data.logs : [];
     if (newLogs.length) {
       _logsState.items = (_logsState.items || []).concat(newLogs).slice(-30);
@@ -230,12 +260,22 @@ function _stopPolling() {
 
 function _startPolling() {
   _stopPolling();
-  const interval = _currentStep === "analyse" ? POLL_INTERVAL_ANALYSE : POLL_INTERVAL_RUNNING;
+  // Fix APPLY-2 (2026-05-30) : polling rapide pendant un apply en cours sur
+  // l'etape 5, pour que la barre de progression et le fichier en cours
+  // refletent la realite serveur sans attendre 5s.
+  let interval = POLL_INTERVAL_RUNNING;
+  if (_currentStep === "analyse") {
+    interval = POLL_INTERVAL_ANALYSE;
+  } else if (_currentStep === "apply" && _applyStatus?.running) {
+    interval = POLL_INTERVAL_APPLY;
+  }
   _pollTimer = setInterval(async () => {
     // Fix audit 2026-05-24 : avant on poll-ait infiniment meme apres run done
     // -> 1 call/2-5s a vie tant que vue montee. Arret propre quand run termine.
     // Un refresh manuel ou un nouveau scan re-arme via _startPolling().
-    if (_runStatus && _runStatus.done) {
+    // Fix APPLY-2 (2026-05-30) : ne PAS stopper le polling tant qu'un apply
+    // est en cours, meme si le scan top-level est done.
+    if (_runStatus && _runStatus.done && (!_applyStatus || _applyStatus.done || !_applyStatus.running)) {
       _stopPolling();
       // Fix audit 2026-05-24 (v1.5.2) : auto-transition Analyse -> Verification
       // quand le scan vient de se terminer. Avant : utilisateur restait sur
@@ -387,14 +427,21 @@ function _renderStepStats(stepId) {
           ${_renderStat("Conflits", _runInfo.conflicts)}
         </div>
       `;
-    case "validation":
+    case "validation": {
+      // Fix VAL-1 (2026-05-30) : fallback defensif si le backend ne renvoie
+      // pas encore validated_count / rejected_count dans kpis (compat ascendante
+      // pendant rollout du patch backend dashboard_support.py).
+      const validated = Number(_runInfo.validated ?? 0);
+      const rejected = Number(_runInfo.rejected ?? 0);
+      const total = Number(_runInfo.total ?? 0);
       return `
         <div class="traitement-stats">
-          ${_renderStat("Validés", _runInfo.validated)}
-          ${_renderStat("Rejetés", _runInfo.rejected)}
-          ${_renderStat("En attente", Math.max(0, _runInfo.total - _runInfo.validated - _runInfo.rejected))}
+          ${_renderStat("Validés", validated)}
+          ${_renderStat("Rejetés", rejected)}
+          ${_renderStat("En attente", Math.max(0, total - validated - rejected))}
         </div>
       `;
+    }
     case "doublons":
       return `
         <div class="traitement-stats">
@@ -502,7 +549,10 @@ function _renderVerificationStep() {
     return true;
   });
 
-  const tableRows = filtered.slice(0, 50).map((r) => {
+  // Fix VAL-2 (2026-05-30) : suppression du slice(0,50) qui tronquait
+  // silencieusement la liste. Si > 500 lignes, un info banner est affiche
+  // pour suggerer l'usage des filtres de confiance.
+  const tableRows = filtered.map((r) => {
     const flags = String(r.warning_flags || "").split(",").filter(Boolean);
     return `
       <tr data-row-id="${escapeHtml(r.row_id || "")}">
@@ -550,6 +600,11 @@ function _renderVerificationStep() {
           </thead>
           <tbody>${tableRows}</tbody>
         </table>
+        ${filtered.length > 500 ? `
+          <p class="traitement-verif-info v5u-text-muted v5u-text-center">
+            Affichage de ${filtered.length} films. Utilisez les filtres ci-dessus pour reduire la liste si besoin.
+          </p>
+        ` : ""}
       `}
 
       <div class="traitement-actions">
@@ -562,28 +617,162 @@ function _renderVerificationStep() {
 
 /* --- Etape 3 : Validation (spec §3.3) --- */
 
+// Fix VAL-3 (2026-05-30) : helpers de tri et bucketization.
+function _confidenceBucket(conf) {
+  const c = Number(conf || 0);
+  if (c >= 85) return "high";
+  if (c >= 60) return "mid";
+  if (c > 0) return "low";
+  return "none";
+}
+
+function _sortValidationRows(rows, sort) {
+  const dirMult = sort.dir === "asc" ? 1 : -1;
+  const key = sort.key;
+  const copy = rows.slice();
+  copy.sort((a, b) => {
+    let va;
+    let vb;
+    if (key === "titre" || key === "proposed_title") {
+      va = String(a.proposed_title || "").toLocaleLowerCase();
+      vb = String(b.proposed_title || "").toLocaleLowerCase();
+      return va.localeCompare(vb) * dirMult;
+    }
+    if (key === "annee" || key === "proposed_year") {
+      va = Number(a.proposed_year) || 0;
+      vb = Number(b.proposed_year) || 0;
+    } else if (key === "score") {
+      va = Number(a.score) || 0;
+      vb = Number(b.score) || 0;
+    } else {
+      // confidence (defaut)
+      va = Number(a.confidence) || 0;
+      vb = Number(b.confidence) || 0;
+    }
+    if (va < vb) return -1 * dirMult;
+    if (va > vb) return 1 * dirMult;
+    return 0;
+  });
+  return copy;
+}
+
+// Fix VAL-3 : snapshot des etats DOM (checkbox + year input) avant un re-render
+// declenche par un filtre / tri / expand pour eviter de perdre les modifications
+// manuelles de l'utilisateur (regression UX-03 documentee dans _handleBulkApprove).
+// Reinjecte directement dans _validationPlan.rows[].decision/proposed_year pour
+// que le prochain render reflete les choix actifs.
+function _persistValidationDomState() {
+  if (!_activeContainer || !_validationPlan || !Array.isArray(_validationPlan.rows)) return;
+  const byId = new Map();
+  _validationPlan.rows.forEach((r) => byId.set(String(r.row_id || ""), r));
+  _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+    const row = byId.get(String(cb.dataset.rowId || ""));
+    if (!row) return;
+    row.decision = cb.checked ? "OK" : "REJECT";
+  });
+  _activeContainer.querySelectorAll(".traitement-validation-year-input").forEach((inp) => {
+    const row = byId.get(String(inp.dataset.rowId || ""));
+    if (!row) return;
+    const y = Number(inp.value) || null;
+    if (y !== null) row.proposed_year = y;
+  });
+}
+
 function _renderValidationStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   const pending = rows.filter((r) => !r.decision || r.decision === "PENDING");
   const sureCount = pending.filter((r) => Number(r.confidence || 0) >= 90).length;
 
-  const tableRows = pending.slice(0, 100).map((r) => {
+  // Fix VAL-3 : compteurs par bucket de confiance sur l'ensemble pending.
+  const buckets = { high: 0, mid: 0, low: 0, none: 0 };
+  pending.forEach((r) => { buckets[_confidenceBucket(r.confidence)] += 1; });
+
+  // Application du filtre puis du tri (VAL-3).
+  let filtered = pending;
+  if (_validationFilter !== "all") {
+    filtered = pending.filter((r) => _confidenceBucket(r.confidence) === _validationFilter);
+  }
+  filtered = _sortValidationRows(filtered, _validationSort);
+
+  // Fix VAL-2 (2026-05-30) : suppression du slice(0,100). On rend toutes les
+  // lignes filtrees/triees ; un info banner s'affiche au-dela de 500.
+  const sortKey = _validationSort.key;
+  const sortDir = _validationSort.dir;
+  const ariaSort = (col) => (sortKey === col ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+  const sortIndicator = (col) => {
+    if (sortKey !== col) return "";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  };
+
+  const tableRows = filtered.map((r) => {
     const conf = Number(r.confidence || 0);
     const confLabel = conf >= 85 ? "Haute" : (conf >= 60 ? "Moyenne" : "Basse");
     const confCls = conf >= 85 ? "is-high" : (conf >= 60 ? "is-mid" : "is-low");
-    return `
-      <tr data-row-id="${escapeHtml(r.row_id || "")}">
+    const rowId = String(r.row_id || "");
+    const isExpanded = _validationExpanded.has(rowId);
+    let defaultChecked;
+    if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
+    else if (r.decision === "REJECT" || r.decision === "REJECTED") defaultChecked = false;
+    else defaultChecked = conf >= 85;
+
+    const flags = String(r.warning_flags || "").split(",").filter(Boolean);
+    const candidates = Array.isArray(r.candidates) ? r.candidates.slice(0, 3) : [];
+
+    const baseRow = `
+      <tr data-row-id="${escapeHtml(rowId)}">
         <td class="traitement-validation-check">
-          <input type="checkbox" data-traitement-validation-check data-row-id="${escapeHtml(r.row_id || "")}" ${conf >= 85 ? "checked" : ""}>
+          <input type="checkbox" data-traitement-validation-check data-row-id="${escapeHtml(rowId)}" ${defaultChecked ? "checked" : ""}>
         </td>
-        <td class="traitement-validation-confidence ${confCls}">${escapeHtml(confLabel)}</td>
+        <td class="traitement-validation-confidence ${confCls}">${escapeHtml(confLabel)} (${conf})</td>
         <td class="traitement-validation-title">${escapeHtml(r.proposed_title || "—")}</td>
         <td class="traitement-validation-year">
-          <input type="number" min="1900" max="2099" value="${escapeHtml(String(r.proposed_year || ""))}" class="traitement-validation-year-input" data-row-id="${escapeHtml(r.row_id || "")}">
+          <input type="number" min="1900" max="2099" value="${escapeHtml(String(r.proposed_year || ""))}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
         </td>
         <td class="traitement-validation-score">${escapeHtml(String(r.score ?? "—"))}</td>
+        <td class="traitement-validation-source">${escapeHtml(String(r.proposed_source || "—"))}</td>
         <td class="traitement-validation-actions">
-          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-traitement-validation-action="inspect" data-row-id="${escapeHtml(r.row_id || "")}">👁</button>
+          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost"
+                  data-traitement-validation-action="toggle-reasons"
+                  data-row-id="${escapeHtml(rowId)}"
+                  aria-expanded="${isExpanded ? "true" : "false"}"
+                  title="${isExpanded ? "Replier les details" : "Afficher les details"}">
+            ${isExpanded ? "▾" : "▸"}
+          </button>
+          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-traitement-validation-action="inspect" data-row-id="${escapeHtml(rowId)}" title="Voir le detail">👁</button>
+        </td>
+      </tr>
+    `;
+
+    if (!isExpanded) return baseRow;
+
+    const flagsHtml = flags.length
+      ? `<div class="traitement-validation-reasons-flags">${flags.map((f) => `<span class="traitement-verif-alert">${escapeHtml(f)}</span>`).join(" ")}</div>`
+      : "";
+    const yearReason = r.detected_year_reason
+      ? `<div><strong>Annee detectee :</strong> ${escapeHtml(String(r.detected_year_reason))}</div>`
+      : "";
+    const notes = r.notes
+      ? `<div><strong>Notes :</strong> ${escapeHtml(String(r.notes))}</div>`
+      : "";
+    const candidatesHtml = candidates.length
+      ? `<div class="traitement-validation-reasons-candidates">
+           <strong>Candidats (top ${candidates.length}) :</strong>
+           <ul>
+             ${candidates.map((c) => `<li>[${escapeHtml(String(c.source || "?"))}] ${escapeHtml(String(c.title || "—"))} (${escapeHtml(String(c.year || "—"))}) — score=${escapeHtml(String(c.score ?? "—"))}${c.note ? ` — ${escapeHtml(String(c.note))}` : ""}</li>`).join("")}
+           </ul>
+         </div>`
+      : "";
+
+    return `${baseRow}
+      <tr class="traitement-validation-row-expand">
+        <td colspan="7">
+          <div class="traitement-validation-reasons">
+            ${flagsHtml}
+            ${yearReason}
+            ${notes}
+            ${candidatesHtml}
+            ${!flagsHtml && !yearReason && !notes && !candidatesHtml ? '<p class="v5u-text-muted">Aucun detail supplementaire.</p>' : ""}
+          </div>
         </td>
       </tr>
     `;
@@ -594,6 +783,14 @@ function _renderValidationStep() {
       <h2 id="traitement-panel-title" class="traitement-panel-title">Étape 3 — Validation</h2>
       <p class="traitement-panel-desc">Approuver / rejeter les propositions de classification</p>
       ${_renderStepStats("validation")}
+
+      <div class="traitement-validation-filters" role="tablist" aria-label="Filtres confiance validation">
+        <button type="button" role="tab" class="traitement-validation-filter ${_validationFilter === "all" ? "is-active" : ""}" data-traitement-validation-filter="all" aria-selected="${_validationFilter === "all" ? "true" : "false"}">Tous (${pending.length})</button>
+        <button type="button" role="tab" class="traitement-validation-filter ${_validationFilter === "high" ? "is-active" : ""}" data-traitement-validation-filter="high" aria-selected="${_validationFilter === "high" ? "true" : "false"}">Haute (${buckets.high})</button>
+        <button type="button" role="tab" class="traitement-validation-filter ${_validationFilter === "mid" ? "is-active" : ""}" data-traitement-validation-filter="mid" aria-selected="${_validationFilter === "mid" ? "true" : "false"}">Moyenne (${buckets.mid})</button>
+        <button type="button" role="tab" class="traitement-validation-filter ${_validationFilter === "low" ? "is-active" : ""}" data-traitement-validation-filter="low" aria-selected="${_validationFilter === "low" ? "true" : "false"}">Basse (${buckets.low})</button>
+        <button type="button" role="tab" class="traitement-validation-filter ${_validationFilter === "none" ? "is-active" : ""}" data-traitement-validation-filter="none" aria-selected="${_validationFilter === "none" ? "true" : "false"}">Sans confiance (${buckets.none})</button>
+      </div>
 
       <div class="traitement-validation-bulk">
         <button type="button" class="v5-btn v5-btn--primary" data-traitement-action="bulk-approve-sure">
@@ -619,15 +816,37 @@ function _renderValidationStep() {
           <thead>
             <tr>
               <th>✓</th>
-              <th>Confiance</th>
-              <th>Titre</th>
-              <th>Année</th>
-              <th>Score</th>
+              <th class="is-sort ${sortKey === "confidence" ? "is-active is-" + sortDir : ""}"
+                  data-traitement-validation-sort="confidence"
+                  aria-sort="${ariaSort("confidence")}"
+                  role="columnheader"
+                  tabindex="0">Confiance${sortIndicator("confidence")}</th>
+              <th class="is-sort ${sortKey === "titre" ? "is-active is-" + sortDir : ""}"
+                  data-traitement-validation-sort="titre"
+                  aria-sort="${ariaSort("titre")}"
+                  role="columnheader"
+                  tabindex="0">Titre${sortIndicator("titre")}</th>
+              <th class="is-sort ${sortKey === "annee" ? "is-active is-" + sortDir : ""}"
+                  data-traitement-validation-sort="annee"
+                  aria-sort="${ariaSort("annee")}"
+                  role="columnheader"
+                  tabindex="0">Année${sortIndicator("annee")}</th>
+              <th class="is-sort ${sortKey === "score" ? "is-active is-" + sortDir : ""}"
+                  data-traitement-validation-sort="score"
+                  aria-sort="${ariaSort("score")}"
+                  role="columnheader"
+                  tabindex="0">Score${sortIndicator("score")}</th>
+              <th>Source</th>
               <th></th>
             </tr>
           </thead>
           <tbody>${tableRows}</tbody>
         </table>
+        ${filtered.length > 500 ? `
+          <p class="traitement-validation-info v5u-text-muted v5u-text-center">
+            Affichage de ${filtered.length} films. Utilisez les presets "Approuver les surs" ou les filtres de confiance pour traiter par lots.
+          </p>
+        ` : ""}
       `}
 
       <div class="traitement-actions">
@@ -951,11 +1170,37 @@ function _renderApplyStep() {
   `;
   }).join("");
 
+  // Fix APPLY-2 (2026-05-30) : barre de progression live pendant un apply
+  // en cours. Reutilise les classes CSS .traitement-scan-progress-* deja
+  // stylees pour l'etape Analyse.
+  const applyIdx = Number(_applyStatus?.idx || 0);
+  const applyTotal = Number(_applyStatus?.total || 0);
+  const applyPct = applyTotal > 0 ? Math.round((applyIdx * 100) / applyTotal) : 0;
+  const applyEta = Number(_applyStatus?.eta_s || 0);
+  const applyDryRun = Boolean(_applyStatus?.dryRun);
+  const applyCurrent = String(_applyStatus?.current || "");
+  const applyPhase = String(_applyStatus?.phase || "");
+
   return `
     <section class="traitement-panel" aria-labelledby="traitement-panel-title">
       <h2 id="traitement-panel-title" class="traitement-panel-title">Étape 5 — Application</h2>
       <p class="traitement-panel-desc">Renommage et déplacement sur disque</p>
       ${_renderStepStats("apply")}
+
+      ${_applyStatus?.running ? `
+        <div class="traitement-apply-progress traitement-scan-progress" role="status" aria-live="polite">
+          <div class="traitement-scan-progress-bar">
+            <div class="traitement-scan-progress-fill" style="--progress: ${applyPct / 100}"></div>
+          </div>
+          <div class="traitement-scan-progress-meta">
+            <span>${escapeHtml(String(applyIdx))}/${escapeHtml(String(applyTotal))} ${applyDryRun ? "simules" : "appliques"}</span>
+            <span>${applyPct}%</span>
+            ${applyEta > 0 ? `<span>~${escapeHtml(formatDuration(applyEta))} restant</span>` : ""}
+          </div>
+          ${applyCurrent ? `<div class="traitement-scan-current">${applyDryRun ? "Simulation" : "Traitement"} : <code>${escapeHtml(applyCurrent)}</code></div>` : ""}
+          ${applyPhase ? `<div class="traitement-apply-phase v5u-text-muted">Phase : ${escapeHtml(applyPhase)}</div>` : ""}
+        </div>
+      ` : ""}
 
       <div class="traitement-apply-summary">
         <h3>Résumé des opérations</h3>
@@ -1217,6 +1462,7 @@ function _buildDecisions() {
 
 async function _handleBulkApprove(filter) {
   if (!_validationPlan?.rows) return;
+  if (!_runInfo?.runId) return;
   let approvedCount = 0;
   const rows = _validationPlan.rows;
   const targetIds = new Set();
@@ -1247,24 +1493,80 @@ async function _handleBulkApprove(filter) {
     if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
   });
 
-  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : remplacement du
-  // setTimeout 5s + window._traitementLastBulkSnapshot (placeholder invisible)
-  // par un toast PERSISTANT avec bouton "Annuler" inline. L'utilisateur voit
-  // l'option d'undo et la declenche explicitement ; aucune action implicite
-  // hors champ visuel.
+  // Fix VAL-1 (2026-05-30) : persister les decisions cote serveur via
+  // run/save_validation AVANT d'afficher le toast success. Sans ca, les KPI
+  // cards (Valides / Rejetes / En attente) restaient figes a 0 puisque le
+  // backend ne savait rien des approbations en masse. En cas d'echec API on
+  // rollback le DOM via le snapshot et on n'affiche pas le toast success.
+  const decisions = _buildDecisions();
+  let saveOk = false;
+  try {
+    const res = await apiPost(
+      "run/save_validation",
+      { run_id: _runInfo.runId, decisions },
+      { signal: _signal() },
+    );
+    saveOk = res?.data?.ok !== false;
+  } catch (_err) {
+    saveOk = false;
+  }
+
+  if (!saveOk) {
+    // Rollback DOM : on remet les checkboxes telles qu'avant le bulk approve.
+    _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+      const prev = checkboxSnapshot.get(cb.dataset.rowId);
+      if (prev !== undefined) cb.checked = prev;
+    });
+    showToast({
+      type: "error",
+      text: "Echec de la sauvegarde des decisions. Aucun changement applique.",
+      duration: 8000,
+    });
+    return;
+  }
+
+  // Recharge les KPIs frais (validated_count / rejected_count) puis re-render.
+  await _loadRunInfo();
+  _renderInPlace();
+
+  // Fix TOAST-1 (2026-05-30) : remplacement de persistent: true par
+  // duration: 10000. Le bouton Annuler reste cliquable 10s (UX standard,
+  // cf Gmail Undo Send 5-30s) et le toast disparait tout seul ensuite.
+  // Evite l'accumulation de toasts indemontables si l'utilisateur clique
+  // plusieurs fois "Approuver les surs" (10+ toasts persistants signales).
   showToast({
     type: "success",
     text: `${approvedCount} films approuves.`,
-    persistent: true,
+    duration: 10000,
     action: {
       label: "Annuler",
-      onClick: () => {
+      onClick: async () => {
         if (!_activeContainer) return;
+        // Restaurer les checkboxes au snapshot original.
         _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
           const prev = checkboxSnapshot.get(cb.dataset.rowId);
           if (prev !== undefined) cb.checked = prev;
         });
-        showToast({ type: "info", text: "Approbation en masse annulee." });
+        // Re-persister les decisions originales pour que les KPI reflechissent
+        // l'etat avant le bulk approve.
+        if (!_runInfo?.runId) return;
+        const originalDecisions = _buildDecisions();
+        try {
+          await apiPost(
+            "run/save_validation",
+            { run_id: _runInfo.runId, decisions: originalDecisions },
+            { signal: _signal() },
+          );
+          await _loadRunInfo();
+          _renderInPlace();
+          showToast({ type: "info", text: "Approbation en masse annulee." });
+        } catch (_err) {
+          showToast({
+            type: "error",
+            text: "Annulation echouee : impossible de restaurer les decisions.",
+            duration: 8000,
+          });
+        }
       },
     },
   });
@@ -1277,6 +1579,21 @@ async function _handleApplyNow() {
 
   if (_applyOptions.dry_run) {
     // Dry-run direct sans confirmation
+    // Fix APPLY-2 (2026-05-30) : seed l'etat optimiste pour la barre de
+    // progression + relance le polling avec interval rapide (1.5s).
+    _applyStatus = {
+      running: true,
+      done: false,
+      idx: 0,
+      total: opCount,
+      current: "Demarrage...",
+      phase: "starting",
+      eta_s: 0,
+      speed: 0,
+      dryRun: true,
+    };
+    _renderInPlace();
+    _startPolling();
     try {
       const res = await apiPost("run/apply", {
         run_id: _runInfo.runId,
@@ -1285,10 +1602,12 @@ async function _handleApplyNow() {
         quarantine_unapproved: _applyOptions.quarantine,
       }, { signal: _signal() });
       if (res?.data?.ok !== false) {
+        if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
         showToast({ type: "success", text: "Dry-run terminé. Aucun fichier modifié.", duration: 5000 });
         await _loadRunInfo();
         _renderInPlace();
       } else {
+        if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
         // Fix audit 2026-05-25 (v1.5.5) Vague J : remonter le vrai message
         // backend (user_message Vague G / message _err_response) au lieu
         // d'un toast generique qui masque le diag. (res.data || res) car
@@ -1333,6 +1652,21 @@ async function _handleApplyNow() {
     cancelLabel: "Annuler",
     countdownSeconds: 3,
     onConfirm: async () => {
+      // Fix APPLY-2 (2026-05-30) : seed apply progress optimiste + polling
+      // rapide pour refleter en direct l'avancement cote backend.
+      _applyStatus = {
+        running: true,
+        done: false,
+        idx: 0,
+        total: opCount,
+        current: "Demarrage...",
+        phase: "starting",
+        eta_s: 0,
+        speed: 0,
+        dryRun: false,
+      };
+      _renderInPlace();
+      _startPolling();
       try {
         const res = await apiPost("run/apply", {
           run_id: _runInfo.runId,
@@ -1341,14 +1675,19 @@ async function _handleApplyNow() {
           quarantine_unapproved: _applyOptions.quarantine,
         }, { signal: _signal() });
         if (res?.data?.ok !== false) {
+          if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
           showToast({ type: "success", text: "Apply terminé · Undo possible 24h", duration: 7000 });
           await _loadRunInfo();
           _renderInPlace();
         } else {
+          if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
           showToast({ type: "error", text: "Échec de l'apply." });
+          _renderInPlace();
         }
       } catch {
+        if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
         showToast({ type: "error", text: "Erreur lors de l'apply." });
+        _renderInPlace();
       }
     },
   });
@@ -1495,6 +1834,31 @@ function _onContainerClick(event) {
     return;
   }
 
+  // Fix VAL-3 (2026-05-30) : filtre confiance validation (chips).
+  const validationFilterBtn = event.target.closest("[data-traitement-validation-filter]");
+  if (validationFilterBtn && container.contains(validationFilterBtn)) {
+    // Persister l'etat DOM (checkboxes/years modifies a la main) avant re-render
+    // pour ne pas perdre les changements utilisateur (regression UX-03).
+    _persistValidationDomState();
+    _validationFilter = validationFilterBtn.dataset.traitementValidationFilter || "all";
+    _renderInPlace();
+    return;
+  }
+
+  // Fix VAL-3 (2026-05-30) : tri colonne validation.
+  const validationSortBtn = event.target.closest("[data-traitement-validation-sort]");
+  if (validationSortBtn && container.contains(validationSortBtn)) {
+    _persistValidationDomState();
+    const newKey = validationSortBtn.dataset.traitementValidationSort;
+    if (_validationSort.key === newKey) {
+      _validationSort = { key: newKey, dir: _validationSort.dir === "asc" ? "desc" : "asc" };
+    } else {
+      _validationSort = { key: newKey, dir: "asc" };
+    }
+    _renderInPlace();
+    return;
+  }
+
   // Verification actions (rescan / rename / ignore)
   const verifActionBtn = event.target.closest("[data-traitement-verif-action]");
   if (verifActionBtn && container.contains(verifActionBtn)) {
@@ -1528,7 +1892,7 @@ function _onContainerClick(event) {
     return;
   }
 
-  // Validation inspect (œil)
+  // Validation inspect (œil) + toggle-reasons (VAL-3)
   const validationActionBtn = event.target.closest("[data-traitement-validation-action]");
   if (validationActionBtn && container.contains(validationActionBtn)) {
     const action = validationActionBtn.dataset.traitementValidationAction;
@@ -1536,6 +1900,15 @@ function _onContainerClick(event) {
     const runId = _runInfo?.runId;
     if (action === "inspect" && runId && rowId) {
       renderFilmDetail({ mode: "C", rowId, runId });
+    } else if (action === "toggle-reasons" && rowId) {
+      // Fix VAL-3 (2026-05-30) : ouvrir/fermer la ligne de details.
+      _persistValidationDomState();
+      if (_validationExpanded.has(rowId)) {
+        _validationExpanded.delete(rowId);
+      } else {
+        _validationExpanded.add(rowId);
+      }
+      _renderInPlace();
     }
     return;
   }
@@ -1745,6 +2118,13 @@ export function unmountTraitement() {
   _runStatus = null;
   _activeContainer = null;
   _validationPlan = null;
+  // Fix VAL-3 (2026-05-30) : reset filtre/tri/expand au unmount pour eviter
+  // qu'un etat "filtre=high" persiste si l'utilisateur revient plus tard.
+  _validationFilter = "all";
+  _validationSort = { key: "confidence", dir: "desc" };
+  _validationExpanded = new Set();
+  // Fix APPLY-2 (2026-05-30) : reset etat apply.
+  _applyStatus = null;
   _logsState = { items: [], nextIndex: 0 };
   void navigateTo;
 }

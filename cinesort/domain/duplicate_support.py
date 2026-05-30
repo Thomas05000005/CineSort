@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -67,6 +68,23 @@ def single_folder_is_conform(
 
         if folder_matches_template(folder_name, naming_template, title, year):
             return True
+
+    # Check 1bis : defense en profondeur — equivalence FS Windows/SMB.
+    # os.listdir peut retourner NFD (macOS/SMB) alors que windows_safe applique
+    # NFC cote template. La comparaison via _norm_compare (lower+collapse spaces)
+    # ne couvre pas NFC vs NFD car les bytes different meme apres lower().
+    # Cette verification capture aussi les cas ou Check 1 echoue parce que le
+    # template est vide ou ou movie_dir_title_year ne match pas mais le folder
+    # est en fait equivalent au format "Title (Year)" attendu.
+    if 1900 <= int(year or 0) <= 2100:
+        expected_folder = windows_safe(f"{title or ''} ({int(year)})")
+        try:
+            norm_folder = unicodedata.normalize("NFC", folder_name or "").casefold()
+            norm_expected = unicodedata.normalize("NFC", expected_folder).casefold()
+            if norm_folder == norm_expected:
+                return True
+        except (TypeError, ValueError):
+            pass
 
     # Check 2 : fallback format historique "Title (Year)"
     expected_title = windows_safe(title or "")

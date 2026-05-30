@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
 
@@ -975,6 +976,7 @@ def apply_rows(
     decision_presence: Optional[Set[str]] = None,
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
     duplicate_loser_row_ids: Optional[Set[str]] = None,
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> "ApplyResult":
     """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup.
 
@@ -1081,7 +1083,20 @@ def apply_rows(
         """Retourne le chemin courant d'un folder en tenant compte des moves déjà appliqués."""
         return Path(ctx.folder_map.get(folder_str, folder_str))
 
-    for row in rows:
+    _apply_total = len(rows)
+    for idx, row in enumerate(rows, start=1):
+        # Notifier l'UI de la progression de l'apply (1 callback par row).
+        # Defensif : ne jamais laisser une exception du callback casser le batch.
+        if progress_cb is not None:
+            try:
+                progress_cb(
+                    idx,
+                    _apply_total,
+                    str(getattr(row, "folder", "") or row.row_id),
+                )
+            except Exception:  # noqa: BLE001 - callback exterieur, on swallow
+                _logger.debug("apply: progress_cb error", exc_info=True)
+
         dec = decisions.get(row.row_id, {})
         ok = bool(dec.get("ok", False))
         new_title = (dec.get("title") or row.proposed_title).strip()
@@ -1367,8 +1382,25 @@ def apply_single(
     # apply reel via le bloc tmp_ren pour case-change Windows).
     # NB : on compare les Path resolus pour gerer aussi les separateurs et
     # la casse Windows (folder.samefile() echouerait si dst n'existe pas).
-    if str(folder) == str(dst):
-        log("INFO", f"NOOP rename: src == dst ({folder})")
+    # Fix audit 2026-05-30 Vague J renforce : str(folder) == str(dst) ne capte
+    # pas l'equivalence FS Windows/SMB (case-only, NFC vs NFD, NBSP vs space).
+    # Le filesystem cible (Windows local + SMB share) traite ces variantes comme
+    # le MEME chemin physique. Sans ce filet, on emet un faux rename qui
+    # declenche une cascade merge_dir_safe -> MOVE_FILE inutiles dans la preview.
+    def _fs_equivalent(a: Path, b: Path) -> bool:
+        # Compare via PureWindowsPath normcase (lower) + NFC normalize des noms.
+        norm_a = unicodedata.normalize("NFC", a.name).casefold()
+        norm_b = unicodedata.normalize("NFC", b.name).casefold()
+        if norm_a != norm_b:
+            return False
+        # Meme nom apres normalisation -> verifier qu'on est dans le meme parent.
+        try:
+            return core_mod._norm_win_path(a.parent) == core_mod._norm_win_path(b.parent)
+        except (OSError, ValueError):
+            return str(a.parent).casefold() == str(b.parent).casefold()
+
+    if str(folder) == str(dst) or _fs_equivalent(folder, dst):
+        log("INFO", f"NOOP rename: src equivalent dst on FS ({folder} ~= {dst})")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
 

@@ -10,7 +10,16 @@ import contextlib
 logger = logging.getLogger(__name__)
 
 
-IGNORE_VIDEO_NAME_RE = re.compile(r"\b(sample|trailer|teaser|demo)\b", re.IGNORECASE)
+# SCAN-1 (zone L13) : regex renforcee.
+# - Avant : r"\b(sample|trailer|teaser|demo)\b" matchait trop large
+#   ('demo' attrapait des films legitimes comme "Demo Day (2015)").
+# - Apres : exige un separateur explicite (point/tiret/underscore/espace) au
+#   debut OU en fin de stem, ce qui evite les faux positifs au milieu d'un mot.
+#   'demo' retire (trop ambigu).
+IGNORE_VIDEO_NAME_RE = re.compile(
+    r"(?:^|[\.\-_\s])(sample|trailer|teaser)(?:[\.\-_\s]|$)",
+    re.IGNORECASE,
+)
 GENERIC_EXTRA_VIDEO_NAMES = {
     "bonus",
     "bonus feature",
@@ -28,16 +37,43 @@ GENERIC_EXTRA_VIDEO_NAMES = {
 }
 
 
-def iter_videos(cfg: Any, folder: Path, *, min_video_bytes: int) -> List[Path]:
+def _bump_stats_reject(stats: Any, key: str, *, path: str | None = None) -> None:
+    """Incremente stats.analyse_ignores_par_raison[key] avec defense en profondeur.
+
+    Tolere stats=None (compat appelants existants) et un objet stats incomplet.
+    """
+    if stats is None:
+        return
+    try:
+        bucket = getattr(stats, "analyse_ignores_par_raison", None)
+        if bucket is None:
+            return
+        bucket[key] = int(bucket.get(key, 0)) + 1
+    except (AttributeError, TypeError, ValueError):
+        return
+
+
+def iter_videos(
+    cfg: Any,
+    folder: Path,
+    *,
+    min_video_bytes: int,
+    stats: Any = None,
+) -> List[Path]:
     # BUG 3 : optimisation NAS. `os.scandir()` retourne les metadata
     # (is_file, stat) en une seule operation systeme au lieu de round-trips
     # separes comme avec `folder.iterdir() + p.is_file() + p.stat()`.
+    # SCAN-1 (zone L38-L41) : tracabilite des rejets scandir + observabilite par
+    # categorie (extension, taille, nom suspect). `stats` est optionnel pour
+    # preserver la backward-compat des appelants existants.
     vids: List[Path] = []
     video_exts = cfg.video_exts or set()
     min_bytes = int(min_video_bytes)
     try:
         scandir_ctx = os.scandir(str(folder))
-    except (OSError, PermissionError, FileNotFoundError):
+    except (OSError, PermissionError, FileNotFoundError) as exc:
+        logger.warning("scan: scandir failed on %s: %s", folder, exc)
+        _bump_stats_reject(stats, "ignore_scandir_error", path=str(folder))
         return vids
     try:
         for entry in scandir_ctx:
@@ -48,8 +84,10 @@ def iter_videos(cfg: Any, folder: Path, *, min_video_bytes: int) -> List[Path]:
                 continue
             ext = name[dot:].lower()
             if ext not in video_exts:
+                _bump_stats_reject(stats, "ignore_extension", path=entry.path)
                 continue
             if IGNORE_VIDEO_NAME_RE.search(name):
+                _bump_stats_reject(stats, "ignore_nom_suspect", path=entry.path)
                 continue
             try:
                 if not entry.is_file(follow_symlinks=False):
@@ -57,8 +95,10 @@ def iter_videos(cfg: Any, folder: Path, *, min_video_bytes: int) -> List[Path]:
                 # stat() sur le DirEntry utilise le cache de scandir (0 round-trip NAS)
                 st = entry.stat(follow_symlinks=False)
                 if st.st_size < min_bytes:
+                    _bump_stats_reject(stats, "ignore_taille_min", path=entry.path)
                     continue
             except (OSError, PermissionError, FileNotFoundError, ValueError, TypeError):
+                _bump_stats_reject(stats, "ignore_scandir_error", path=entry.path)
                 continue
             vids.append(Path(entry.path))
     finally:
@@ -119,7 +159,12 @@ def collect_non_video_extensions(cfg: Any, folder: Path) -> Dict[str, int]:
 _FILM_FOLDER_NAME_RE = re.compile(r"\(\s*(19|20)\d{2}\s*\)")
 
 
-def discover_candidate_folders(cfg: Any, *, max_depth: int = 3) -> List[Path]:
+def discover_candidate_folders(
+    cfg: Any,
+    *,
+    max_depth: int = 6,
+    stats: Any = None,
+) -> List[Path]:
     """BUG 1 + BUG 5 : decouverte rapide des dossiers candidats, optimisee NAS.
 
     Strategie :
@@ -136,6 +181,13 @@ def discover_candidate_folders(cfg: Any, *, max_depth: int = 3) -> List[Path]:
     - Dossier avec sous-dossiers + des fichiers video non-bonus → candidat + descente
     - Dossier avec sous-dossiers mais uniquement des bonus/trailers → descente seule
     - Dossier vide → ignore
+
+    SCAN-1 (L122) : max_depth eleve de 3 a 6 pour gerer les organisations
+    profondes type Films/A-F/Action/2024/MovieName/Movie.mkv (5 niveaux).
+    SCAN-1 (L174-L179) : le skip des dossiers prefixes '_' est limite a depth == 0
+    (racine), sauf le dossier collection (CineSort interne, toujours skip).
+    SCAN-1 (L157-L163) : tous les echecs scandir sont logges et comptabilises
+    dans stats.analyse_ignores_par_raison['ignore_scandir_error'].
 
     Cible : < 2s sur NAS SMB pour ~1000 dossiers a majorite plate.
     """
@@ -156,10 +208,21 @@ def discover_candidate_folders(cfg: Any, *, max_depth: int = 3) -> List[Path]:
 
     def _walk(current: Path, depth: int) -> None:
         if depth > max_depth:
+            # SCAN-1 (L122) : tracer les dossiers abandonnes par depasement
+            # de profondeur pour permettre un diagnostic UI.
+            logger.warning(
+                "scan: max_depth=%d depasse pour %s (abandon descente)",
+                max_depth,
+                current,
+            )
+            _bump_stats_reject(stats, "ignore_profondeur_max", path=str(current))
             return
         try:
             scandir_ctx = os.scandir(str(current))
-        except (OSError, PermissionError, FileNotFoundError):
+        except (OSError, PermissionError, FileNotFoundError) as exc:
+            # SCAN-1 (L160-L163) : tracer l'echec scandir pour diagnostic SMB.
+            logger.warning("scan: scandir failed on %s: %s", current, exc)
+            _bump_stats_reject(stats, "ignore_scandir_error", path=str(current))
             return
         subdirs: List[Path] = []
         any_file = False
@@ -172,7 +235,17 @@ def discover_candidate_folders(cfg: Any, *, max_depth: int = 3) -> List[Path]:
                     continue
                 nm = entry.name
                 if is_dir:
-                    if nm.startswith("_"):
+                    # SCAN-1 (L174-L179) : limite le skip '_' a la racine
+                    # (depth == 0). En profondeur, certains utilisateurs
+                    # legitimes ont des sous-dossiers prefixes '_' (snapshots,
+                    # versionnage manuel, etc.). On garde toujours le skip du
+                    # dossier collection (interne CineSort).
+                    if depth == 0 and nm.startswith("_"):
+                        _bump_stats_reject(
+                            stats,
+                            "ignore_prefix_underscore",
+                            path=entry.path,
+                        )
                         continue
                     if depth == 0 and nm.lower() == collection_name_lower:
                         # Skip le dossier _Collection au niveau 1 du root
@@ -223,16 +296,31 @@ def discover_candidate_folders(cfg: Any, *, max_depth: int = 3) -> List[Path]:
     return candidates
 
 
-def stream_scan_targets(cfg: Any, *, min_video_bytes: int) -> Iterator[Path]:
+def stream_scan_targets(
+    cfg: Any,
+    *,
+    min_video_bytes: int,
+    stats: Any = None,
+) -> Iterator[Path]:
     """Legacy : stream base sur os.walk. Conserve pour compat tests anciens.
 
     BUG 1 : le nouveau code plan_library passe par discover_candidate_folders()
     + iter_videos() en phase 2 pour eviter les round-trips NAS multiples.
+
+    SCAN-1 (zone L307-L310) : `os.walk` etait silencieux sur les echecs scandir.
+    On passe un `onerror` callback qui log + comptabilise chaque echec.
     """
     root_resolved = cfg.root.resolve()
     seen_real_paths: Set[str] = set()
 
-    for current, dirnames, filenames in os.walk(str(cfg.root), followlinks=False):
+    def _walk_onerror(exc: OSError) -> None:
+        path = getattr(exc, "filename", None) or "<inconnu>"
+        logger.warning("scan: os.walk scandir failed on %s: %s", path, exc)
+        _bump_stats_reject(stats, "ignore_scandir_error", path=str(path))
+
+    for current, dirnames, filenames in os.walk(
+        str(cfg.root), followlinks=False, onerror=_walk_onerror
+    ):
         folder = Path(current)
         try:
             real_key = str(folder.resolve())
@@ -263,7 +351,7 @@ def stream_scan_targets(cfg: Any, *, min_video_bytes: int) -> Iterator[Path]:
         if folder.resolve() == root_resolved:
             continue
 
-        videos = iter_videos(cfg, folder, min_video_bytes=min_video_bytes)
+        videos = iter_videos(cfg, folder, min_video_bytes=min_video_bytes, stats=stats)
         if videos:
             if dirnames and all(_looks_like_nested_extra_video(v) for v in videos):
                 continue
@@ -277,8 +365,12 @@ def stream_scan_targets(cfg: Any, *, min_video_bytes: int) -> Iterator[Path]:
             yield folder
 
 
-def iter_scan_targets(cfg: Any, *, min_video_bytes: int) -> List[Path]:
-    return list(stream_scan_targets(cfg, min_video_bytes=min_video_bytes))
+def iter_scan_targets(
+    cfg: Any, *, min_video_bytes: int, stats: Any = None
+) -> List[Path]:
+    return list(
+        stream_scan_targets(cfg, min_video_bytes=min_video_bytes, stats=stats)
+    )
 
 
 # =========================================================

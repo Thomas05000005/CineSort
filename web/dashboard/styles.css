@@ -1132,6 +1132,44 @@ body.is-background .skeleton { animation-play-state: paused; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ============================================================
+   DOUBLONS — BARRE DE PROGRESSION BULK PERCEPTUAL (DUP-1)
+   Miroir exact de .traitement-scan-progress* (shared/components.css)
+   pour assurer la coherence visuelle entre la barre du scan etape 1
+   et celle du bulk perceptuel dans la vue Doublons. Memes hauteurs,
+   meme animation pilotee par la variable CSS --progress (decimal 0..1).
+   ============================================================ */
+.doublons-bulk-progress {
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.doublons-bulk-progress-bar {
+  width: 100%;
+  height: 12px;
+  background: var(--surface-2, var(--bg-raised));
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+  border: 1px solid var(--border-1, var(--border-strong));
+}
+.doublons-bulk-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.4s ease-out;
+}
+.doublons-bulk-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: var(--text-2, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    TOASTS GLOBAUX (D5) — copie du desktop avec memes tokens.
    ============================================================ */
 #toast-container {
@@ -1161,6 +1199,19 @@ body.is-background .skeleton { animation-play-state: paused; }
 .toast--info .toast__icon { color: var(--accent, #60A5FA); }
 .toast__icon { display: flex; flex-shrink: 0; }
 .toast__text { flex: 1; }
+/* TOAST-1 : badge de dedup ("xN") affiche dans showToast quand un toast
+   identique est redemande dans la fenetre de dedup. Reutilise les tokens
+   du design system (text-muted, tabular-nums) pour rester coherent. */
+.toast__count {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
 .toast__close {
   background: transparent; border: 0; color: var(--text-muted); cursor: pointer;
   font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0;

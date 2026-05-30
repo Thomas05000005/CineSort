@@ -683,13 +683,60 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
         if cache_hit:
             continue
 
-        videos = core_mod.iter_videos(ctx.cfg, folder, min_video_bytes=core_mod.MIN_VIDEO_BYTES)
+        # SCAN-1 : on capture l'etat des compteurs detailles AVANT iter_videos pour
+        # pouvoir distinguer la contribution de CE dossier (utile au diagnostic
+        # quand videos=[] et qu'on doit savoir pourquoi precisement).
+        ignores_par_raison_before = dict(ctx.stats.analyse_ignores_par_raison or {})
+        # SCAN-1 : passage de stats=ctx.stats pour categoriser chaque rejet
+        # (extension hors liste / taille < min / nom suspect / erreur stat) au lieu
+        # d'incrementer aveuglement 'ignore_non_supporte'. Utilise cfg.min_video_bytes
+        # si configure (Phase 3 du plan), sinon core_mod.MIN_VIDEO_BYTES (10MB).
+        _cfg_min = getattr(ctx.cfg, "min_video_bytes", None)
+        _effective_min_bytes = int(_cfg_min) if _cfg_min is not None else core_mod.MIN_VIDEO_BYTES
+        videos = core_mod.iter_videos(
+            ctx.cfg,
+            folder,
+            min_video_bytes=_effective_min_bytes,
+            stats=ctx.stats,
+        )
         if not videos:
-            core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
-            for ext, count in core_mod._collect_non_video_extensions(ctx.cfg, folder).items():
-                ctx.stats.analyse_ignores_extensions[ext] = int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(
-                    count
+            # SCAN-1 : second passage diagnostic. iter_videos a deja categorise via
+            # stats= les rejets (ignore_extension, ignore_nom_suspect, ignore_taille_min,
+            # ignore_scandir_error). On calcule ici le delta pour alimenter les
+            # compteurs dedies films_rejected_* exposes au dashboard 'Diagnostic scan'.
+            ignores_par_raison_after = dict(ctx.stats.analyse_ignores_par_raison or {})
+
+            def _delta(reason: str) -> int:
+                return int(ignores_par_raison_after.get(reason, 0)) - int(
+                    ignores_par_raison_before.get(reason, 0)
                 )
+
+            delta_ext = _delta("ignore_extension")
+            delta_size = _delta("ignore_taille_min")
+            delta_name = _delta("ignore_nom_suspect")
+            delta_scandir = _delta("ignore_scandir_error")
+            if delta_ext > 0 and hasattr(ctx.stats, "films_rejected_ext"):
+                ctx.stats.films_rejected_ext = int(ctx.stats.films_rejected_ext or 0) + delta_ext
+            if delta_size > 0 and hasattr(ctx.stats, "films_rejected_size"):
+                ctx.stats.films_rejected_size = int(ctx.stats.films_rejected_size or 0) + delta_size
+            if delta_name > 0 and hasattr(ctx.stats, "films_rejected_name"):
+                ctx.stats.films_rejected_name = int(ctx.stats.films_rejected_name or 0) + delta_name
+            if delta_scandir > 0 and hasattr(ctx.stats, "folders_rejected_scandir_error"):
+                ctx.stats.folders_rejected_scandir_error = int(
+                    ctx.stats.folders_rejected_scandir_error or 0
+                ) + delta_scandir
+
+            # Si AUCUN rejet detaille n'a ete enregistre (dossier vide, ou tous
+            # fichiers non-video sans matche), on retombe sur ignore_non_supporte
+            # pour preserver le comportement historique et l'UI 'X films exclus'.
+            if (delta_ext + delta_size + delta_name + delta_scandir) == 0:
+                core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
+
+            # Inventaire des extensions presentes (pour bandeau diagnostic UI).
+            for ext, count in core_mod._collect_non_video_extensions(ctx.cfg, folder).items():
+                ctx.stats.analyse_ignores_extensions[ext] = int(
+                    ctx.stats.analyse_ignores_extensions.get(ext, 0)
+                ) + int(count)
             ctx.persist_folder_cache(
                 folder=folder,
                 folder_sig=folder_sig,

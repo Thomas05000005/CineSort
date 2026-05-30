@@ -150,6 +150,21 @@ class RunState:
         self.rows: List[core.PlanRow] = []
         self.stats: Optional[core.Stats] = None
 
+        # APPLY-2 (v1.5.4) : etat d'avancement de la phase apply (symetrique
+        # au scan). Permet au frontend de poller run/status et d'afficher une
+        # barre de progression realiste pendant l'application (rows/jellyfin/
+        # plex/cleanup) au lieu d'un spinner aveugle.
+        self.apply_running: bool = False
+        self.apply_done: bool = False
+        self.apply_phase: str = ""  # 'precheck'|'duplicates'|'rows'|'cleanup'|'jellyfin'|'plex'|'summary'
+        self.apply_idx: int = 0
+        self.apply_total: int = 0
+        self.apply_current: str = ""
+        self.apply_started_ts: float = 0.0
+        self.apply_speed_ewma: float = 0.0
+        self.apply_progress_samples: List[Tuple[float, int]] = []
+        self.apply_dry_run: bool = False
+
     def log(self, level: str, msg: str) -> None:
         ts = time.strftime("%H:%M:%S")
         item = {"ts": ts, "level": level, "msg": msg}
@@ -200,6 +215,71 @@ class RunState:
             self.progress_samples.append((now, idx))
             if len(self.progress_samples) > 400:
                 self.progress_samples = self.progress_samples[-400:]
+
+    # APPLY-2 (v1.5.4) : trois methodes symetriques au scan (progress) pour
+    # piloter l'etat de la phase apply. Toutes mutations sont protegees par
+    # self.lock pour rester thread-safe vis-a-vis du polling get_status.
+
+    def apply_begin(self, total: int, dry_run: bool, phase: str = "rows") -> None:
+        """Reset les compteurs apply et passe l'etat en running."""
+        now = time.time()
+        with self.lock:
+            self.apply_running = True
+            self.apply_done = False
+            self.apply_phase = str(phase or "rows")
+            self.apply_idx = 0
+            self.apply_total = int(total or 0)
+            self.apply_current = ""
+            self.apply_started_ts = now
+            self.apply_speed_ewma = 0.0
+            self.apply_progress_samples = []
+            self.apply_dry_run = bool(dry_run)
+
+    def apply_progress(self, idx: int, total: int, current: str, phase: Optional[str] = None) -> None:
+        """Avance le compteur d'application. Calque sur progress() L178-L202."""
+        now = time.time()
+        with self.lock:
+            prev_idx = self.apply_idx
+            prev_ts = (
+                self.apply_progress_samples[-1][0]
+                if self.apply_progress_samples
+                else (self.apply_started_ts or now)
+            )
+
+            self.apply_idx = int(idx or 0)
+            self.apply_total = int(total or 0)
+            self.apply_current = str(current or "")
+            if phase is not None:
+                self.apply_phase = str(phase)
+
+            if self.apply_idx > prev_idx:
+                dt = max(0.001, now - prev_ts)
+                inst_speed = (self.apply_idx - prev_idx) / dt
+                alpha = 0.28
+                self.apply_speed_ewma = (
+                    inst_speed
+                    if self.apply_speed_ewma <= 0.0
+                    else (alpha * inst_speed + (1.0 - alpha) * self.apply_speed_ewma)
+                )
+            elif self.apply_speed_ewma <= 0.0 and self.apply_idx > 0:
+                elapsed = max(0.001, now - (self.apply_started_ts or now))
+                self.apply_speed_ewma = self.apply_idx / elapsed
+
+            self.apply_progress_samples.append((now, self.apply_idx))
+            if len(self.apply_progress_samples) > 400:
+                self.apply_progress_samples = self.apply_progress_samples[-400:]
+
+    def apply_end(self, error: Optional[str] = None) -> None:
+        """Marque la fin de l'apply (succes ou erreur). Conserve idx/total
+        pour l'affichage final cote frontend."""
+        with self.lock:
+            self.apply_running = False
+            self.apply_done = True
+            if error:
+                # On ne surcharge pas self.error (champ scan) ; le frontend lit
+                # apply.done + run.error si besoin. Garde une trace neanmoins.
+                if not self.error:
+                    self.error = str(error)
 
 
 def _read_app_version() -> str:

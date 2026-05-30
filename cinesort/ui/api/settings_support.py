@@ -866,6 +866,18 @@ def build_cfg_from_settings(
     residual_scope = str(settings.get("cleanup_residual_folders_scope") or "touched_only").strip().lower()
     if residual_scope not in {"touched_only", "root_all"}:
         residual_scope = "touched_only"
+    # SCAN-1 : injecter explicitement video_exts pour garantir la parite avec
+    # apply_core (qui faisait deja l'union avec VIDEO_EXTS_ALL). Sans cela, le
+    # Config par defaut utilisait uniquement VIDEO_EXTS_DEFAULT, ce qui pouvait
+    # diverger du set effectif utilise lors de l'apply (extensions rares non
+    # reconnues lors du scan/plan). On prend l'union du set settings (si fourni)
+    # ou du DEFAULT avec VIDEO_EXTS_ALL pour mirroir apply_core.py:187.
+    settings_video_exts = settings.get("video_exts")
+    if settings_video_exts:
+        base_video_exts = {str(x).lower() for x in settings_video_exts}
+    else:
+        base_video_exts = set(core.VIDEO_EXTS_DEFAULT)
+    video_exts = base_video_exts | set(core.VIDEO_EXTS_ALL)
     return core.Config(
         root=root,
         enable_collection_folder=to_bool(settings.get("collection_folder_enabled"), True),
@@ -880,6 +892,7 @@ def build_cfg_from_settings(
         cleanup_residual_include_images=to_bool(settings.get("cleanup_residual_include_images"), True),
         cleanup_residual_include_subtitles=to_bool(settings.get("cleanup_residual_include_subtitles"), True),
         cleanup_residual_include_texts=to_bool(settings.get("cleanup_residual_include_texts"), True),
+        video_exts=video_exts,
         enable_tmdb=to_bool(settings.get("tmdb_enabled"), True),
         incremental_scan_enabled=to_bool(settings.get("incremental_scan_enabled"), False),
         enable_tv_detection=to_bool(settings.get("enable_tv_detection"), False),

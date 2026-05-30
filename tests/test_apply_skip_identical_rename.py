@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -62,16 +63,10 @@ class ApplySkipIdenticalRenameTests(unittest.TestCase):
     def _make_apply_result(self):
         return core.ApplyResult()
 
-    def test_skip_when_src_equals_dst_strict(self):
-        """Cas critique : folder == dst (chemins strictement identiques)
-        + _single_folder_is_conform forcee a False (simule un bug Unicode/template).
-        Sans le fix Vague J, apply_single ferait quand meme un rename.
+    def _run_apply_single(self, folder: Path, title: str, year: int):
+        """Helper : execute apply_single en dry_run sur un dossier et retourne
+        (res, logs). Pas de mock du conformance check : on teste le vrai code.
         """
-        folder_name = "12 Hommes en colere (1957)"
-        folder = self.root / folder_name
-        folder.mkdir()
-        (folder / "movie.mkv").write_bytes(b"x" * 2048)
-
         cfg = _DummyConfig(self.root)
         res = self._make_apply_result()
         logs = []
@@ -79,31 +74,111 @@ class ApplySkipIdenticalRenameTests(unittest.TestCase):
         def log(level, msg):
             logs.append((level, msg))
 
-        # Force _single_folder_is_conform a retourner False pour reproduire
-        # le cas du bug (Unicode/template subtil). apply_single doit malgre
-        # tout detecter src==dst et skipper.
-        with mock.patch.object(core, "_single_folder_is_conform", return_value=False):
-            apply_single(
-                cfg,
-                folder,
-                title="12 Hommes en colere",
-                year=1957,
-                dry_run=True,
-                log=log,
-                res=res,
-                conflicts_root=self.conflicts,
-                conflicts_sidecars_root=self.conflicts_sidecars,
-                duplicates_identical_root=self.dup_identical,
-                leftovers_root=self.leftovers,
-            )
+        apply_single(
+            cfg,
+            folder,
+            title=title,
+            year=year,
+            dry_run=True,
+            log=log,
+            res=res,
+            conflicts_root=self.conflicts,
+            conflicts_sidecars_root=self.conflicts_sidecars,
+            duplicates_identical_root=self.dup_identical,
+            leftovers_root=self.leftovers,
+        )
+        return res, logs
+
+    def test_skip_when_src_equals_dst_strict(self):
+        """Cas critique : folder == dst (chemins strictement identiques).
+        Apres fix (Couches 1+2+3), le vrai code doit detecter src==dst et skipper
+        SANS mock du conformance check.
+        """
+        folder_name = "12 Hommes en colere (1957)"
+        folder = self.root / folder_name
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+        res, logs = self._run_apply_single(folder, title="12 Hommes en colere", year=1957)
 
         # AUCUN rename ne doit etre comptabilise
         self.assertEqual(res.renames, 0, f"Rename inutile compte: logs={logs}")
-        # Le folder doit etre marque skip (NOOP)
+        # Le folder doit etre marque skip (NOOP / deja conforme)
         self.assertGreaterEqual(res.skipped, 1, f"Skip attendu absent: res={vars(res)}")
-        # Log de diagnostic NOOP present
-        noop_logs = [m for _lvl, m in logs if "NOOP rename" in m]
-        self.assertTrue(noop_logs, f"Log NOOP attendu manquant: {logs}")
+
+    def test_skip_when_src_dst_differ_only_in_case(self):
+        """Folder='12 Hommes en colere (1957)' / title='12 hommes en colere'.
+        Sur Windows/SMB le filesystem est case-insensitive : le rename serait
+        un noop physique. Le code doit le detecter et skipper.
+        """
+        folder_name = "12 Hommes en colere (1957)"
+        folder = self.root / folder_name
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+        # Title en minuscules -> dst calcule = "12 hommes en colere (1957)"
+        # qui ne differe de src que par la casse.
+        res, logs = self._run_apply_single(folder, title="12 hommes en colere", year=1957)
+
+        self.assertEqual(
+            res.renames,
+            0,
+            f"Rename case-only inutile compte: logs={logs}, res={vars(res)}",
+        )
+        self.assertGreaterEqual(res.skipped, 1, f"Skip attendu absent: res={vars(res)}")
+
+    def test_skip_when_src_dst_differ_only_in_nfc_nfd(self):
+        """Folder avec 'colere' en NFD (decomposed : e + combining grave)
+        vs title 'colere' en NFC (precomposed). Equivalents sur FS, doit skipper.
+        """
+        # Forme NFC : "colere" avec e accentue precompose (U+00E8)
+        title_nfc = unicodedata.normalize("NFC", "12 Hommes en colère")
+        # Forme NFD : e + combining grave (U+0065 U+0300)
+        folder_name_nfd = unicodedata.normalize(
+            "NFD", "12 Hommes en colère (1957)"
+        )
+        # Verifications de pre-condition : les deux formes sont bien differentes
+        # byte-a-byte mais equivalentes apres NFC.
+        self.assertNotEqual(folder_name_nfd, "12 Hommes en colère (1957)")
+        self.assertEqual(
+            unicodedata.normalize("NFC", folder_name_nfd),
+            "12 Hommes en colère (1957)",
+        )
+
+        folder = self.root / folder_name_nfd
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+        res, logs = self._run_apply_single(folder, title=title_nfc, year=1957)
+
+        self.assertEqual(
+            res.renames,
+            0,
+            f"Rename NFC/NFD inutile compte: logs={logs}, res={vars(res)}",
+        )
+        self.assertGreaterEqual(res.skipped, 1, f"Skip attendu absent: res={vars(res)}")
+
+    def test_skip_when_src_dst_differ_only_in_nbsp(self):
+        """Folder avec U+00A0 (NBSP) vs title avec U+0020 (espace normal).
+        Difference invisible pour l'oeil, equivalente apres normalisation
+        whitespace. Doit skipper.
+        """
+        # Folder contient un NBSP entre "Hommes" et "en"
+        folder_name = "12 Hommes en colere (1957)"
+        title_with_space = "12 Hommes en colere"
+
+        folder = self.root / folder_name
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+        res, logs = self._run_apply_single(folder, title=title_with_space, year=1957)
+
+        self.assertEqual(
+            res.renames,
+            0,
+            f"Rename NBSP/space inutile compte: logs={logs}, res={vars(res)}",
+        )
+        self.assertGreaterEqual(res.skipped, 1, f"Skip attendu absent: res={vars(res)}")
 
 
 class BuildPreviewSkipIdenticalRenameTests(unittest.TestCase):

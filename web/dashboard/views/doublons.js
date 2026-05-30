@@ -62,6 +62,11 @@ function _initState() {
     // Désormais : Set des groupKeys en vol -> seuls les boutons du groupe
     // concerné se désactivent, l'utilisateur peut décider en parallèle.
     decisionInFlightByGroup: new Set(),
+    // Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le
+    // bulk perceptual (miroir du pattern scan etape 1 Analyse). Null hors batch,
+    // sinon {jobId, done, total, status, startedTs} mis a jour a chaque tick
+    // du _pollJobUntilDone toutes les 2s pour rafraichir la barre.
+    bulkJob: null,
   };
 }
 
@@ -393,6 +398,49 @@ function _renderGroupCard(group) {
   `;
 }
 
+// Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le bulk
+// perceptual (miroir du pattern scan etape 1 Analyse). Retourne '' si pas de
+// _state.bulkJob actif, sinon une barre avec --progress (variable CSS),
+// compteur done/total, pourcentage et ETA derive du startedTs.
+function _renderBulkProgress() {
+  const job = _state && _state.bulkJob;
+  if (!job) return "";
+  const total = Math.max(0, Number(job.total) || 0);
+  const done = Math.max(0, Math.min(total, Number(job.done) || 0));
+  const ratio = total > 0 ? done / total : 0;
+  const pct = Math.round(ratio * 100);
+  // ETA : duree ecoulee / done * (total - done). startedTs est en secondes.
+  let etaText = "—";
+  if (job.startedTs && done > 0 && done < total) {
+    const elapsed = Math.max(0, (Date.now() / 1000) - Number(job.startedTs));
+    const remaining = Math.round((elapsed / done) * (total - done));
+    if (remaining > 0 && isFinite(remaining)) {
+      etaText = `~${remaining}s restant`;
+    }
+  } else if (job.status === "queuing") {
+    etaText = "Démarrage…";
+  } else if (done >= total && total > 0) {
+    etaText = "Finalisation…";
+  }
+  const statusLabel = job.status === "queuing"
+    ? "Mise en file"
+    : job.status === "error"
+      ? "Erreur"
+      : "Analyse perceptuelle";
+  return `
+    <div class="doublons-bulk-progress" role="status" aria-live="polite" aria-label="${escapeHtml(statusLabel)}">
+      <div class="doublons-bulk-progress-bar">
+        <div class="doublons-bulk-progress-fill" style="--progress: ${ratio}"></div>
+      </div>
+      <div class="doublons-bulk-progress-meta">
+        <span>${done}/${total} paires analysées</span>
+        <span>${pct}%</span>
+        <span>${escapeHtml(etaText)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function _renderBody() {
   // Fix audit 2026-05-25 (v1.5.3) Vague F : loading visible avec skeleton + message
   // d'attente explicite. Avant : "Chargement des doublons…" sur une ligne -> barre
@@ -412,9 +460,13 @@ function _renderBody() {
   }
   const list = _visibleGroups();
   if (list.length === 0) {
-    return _renderEmpty();
+    return `
+      ${_renderBulkProgress()}
+      ${_renderEmpty()}
+    `;
   }
   return `
+    ${_renderBulkProgress()}
     <div class="doublons-list">
       ${list.map(_renderGroupCard).join("")}
     </div>
@@ -842,32 +894,55 @@ async function _bulkPerceptual() {
     return;
   }
   _state.bulkInFlight = true;
+  // Fix audit 2026-05-30 (DUP-1) : initialiser bulkJob AVANT l'appel API pour
+  // afficher immediatement la barre a 0% (feedback visuel instantane). La barre
+  // remplace le toast "Lancement…" qui est donc raccourci a duration 1500ms.
+  _state.bulkJob = {
+    jobId: null,
+    done: 0,
+    total: pairs.length,
+    status: "queuing",
+    startedTs: Date.now() / 1000,
+  };
   _render();
-  showToast({ type: "info", text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…` });
+  showToast({
+    type: "info",
+    text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…`,
+    duration: 1500,
+  });
 
   try {
     const res = await apiPost("quality/queue_perceptual_analyses", { pairs, options: {} }, { signal: _signal() });
+    // Fix audit 2026-05-30 (DUP-1) : garde unmount apres await.
+    if (!_state) return;
     const data = _payload(res);
     if (data.ok === false) {
-      showToast({ type: "error", text: data.message || data.error || "Échec queue analyses" });
-      _state.bulkInFlight = false;
-      _render();
+      showToast({ type: "error", text: data.message || data.error || "Échec queue analyses", duration: 8000 });
       return;
     }
     const jobId = data.job_id;
     if (!jobId) {
-      showToast({ type: "warn", text: "Job ID manquant." });
-      _state.bulkInFlight = false;
-      _render();
+      showToast({ type: "warn", text: "Job ID manquant.", duration: 8000 });
       return;
+    }
+    // Fix audit 2026-05-30 (DUP-1) : on bascule en running des qu'on a un jobId.
+    if (_state.bulkJob) {
+      _state.bulkJob = { ..._state.bulkJob, jobId, status: "running" };
+      _render();
     }
     // Polling job status (max 30 essais, 2s entre chaque = 1 min)
     await _pollJobUntilDone(jobId, 30, 2000);
   } catch (err) {
-    showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+    if (!_state) return;
+    showToast({ type: "error", text: err && err.message ? err.message : String(err), duration: 8000 });
   } finally {
-    _state.bulkInFlight = false;
-    _render();
+    // Fix audit 2026-05-30 (DUP-1) : cleanup idempotent. bulkJob remis a null
+    // pour faire disparaitre la barre dans tous les chemins (success/error/timeout).
+    if (_state) {
+      _state.bulkInFlight = false;
+      _state.bulkJob = null;
+      _render();
+    }
   }
 }
 
@@ -884,27 +959,34 @@ async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
       if (!_state) return;
       const data = _payload(res);
       if (data.ok === false) {
-        showToast({ type: "error", text: data.message || data.error || "Polling job échoué" });
+        showToast({ type: "error", text: data.message || data.error || "Polling job échoué", duration: 8000 });
         return;
       }
       const status = String(data.status || "").toLowerCase();
       const done = Number(data.done || 0);
       const total = Number(data.total || 0);
+      // Fix audit 2026-05-30 (DUP-1) : mise a jour de la barre a chaque tick
+      // (toutes les 2s). Le throttle "i % 5 === 0" sur les toasts intermediaires
+      // est supprime car la barre fournit deja un feedback continu non intrusif.
+      _state.bulkJob = {
+        ...(_state.bulkJob || { startedTs: Date.now() / 1000 }),
+        jobId,
+        done,
+        total,
+        status,
+      };
+      _render();
       if (status === "done" || status === "complete" || status === "completed" || status === "finished") {
         showToast({ type: "success", text: `✓ ${done}/${total} analyses terminées` });
         return;
       }
       if (status === "error" || status === "failed") {
-        showToast({ type: "error", text: "Analyses échouées." });
+        showToast({ type: "error", text: "Analyses échouées.", duration: 8000 });
         return;
-      }
-      // En cours
-      if (i > 0 && i % 5 === 0) {
-        showToast({ type: "info", text: `⏳ ${done}/${total} analyses…` });
       }
     } catch (err) {
       if (!_state) return;
-      showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+      showToast({ type: "error", text: err && err.message ? err.message : String(err), duration: 8000 });
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -912,7 +994,7 @@ async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
     if (!_state) return;
   }
   if (!_state) return;
-  showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs." });
+  showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs.", duration: 8000 });
 }
 
 /* --- Navigation clavier --- */

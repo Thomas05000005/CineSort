@@ -236,6 +236,43 @@ def _build_dashboard_section(
         fallback=int(stats_obj.get("planned_rows") or 0),
     )
 
+    # VAL-1 : compteurs validated/rejected calcules en live sur les decisions
+    # persistees pour que les KPI cards refletent la realite immediatement
+    # apres bulk-approve. Recalcul a chaque appel (cf get_dashboard pour le
+    # contournement du cache _load_dashboard_cache).
+    try:
+        decisions = api._load_decisions_from_validation(run_paths) or {}
+    except (OSError, TypeError, ValueError, AttributeError):
+        decisions = {}
+    validated_count = sum(
+        1 for d in decisions.values() if isinstance(d, dict) and d.get("ok") is True
+    )
+    rejected_count = sum(
+        1 for d in decisions.values() if isinstance(d, dict) and d.get("ok") is False
+    )
+
+    # SCAN-1 : diagnostic scan expose depuis stats_obj pour la carte
+    # "Diagnostic scan : N fichiers exclus par categorie". Sans cela
+    # l'utilisateur ne peut pas savoir POURQUOI il manque des films.
+    scan_diagnostic = {
+        "films_rejected_ext": int(stats_obj.get("films_rejected_ext") or 0),
+        "films_rejected_size": int(stats_obj.get("films_rejected_size") or 0),
+        "films_rejected_name": int(stats_obj.get("films_rejected_name") or 0),
+        "folders_rejected_underscore": int(stats_obj.get("folders_rejected_underscore") or 0),
+        "folders_rejected_depth": int(stats_obj.get("folders_rejected_depth") or 0),
+        "folders_rejected_scandir_error": int(
+            stats_obj.get("folders_rejected_scandir_error") or 0
+        ),
+    }
+    scan_diagnostic["total_excluded"] = int(
+        scan_diagnostic["films_rejected_ext"]
+        + scan_diagnostic["films_rejected_size"]
+        + scan_diagnostic["films_rejected_name"]
+        + scan_diagnostic["folders_rejected_underscore"]
+        + scan_diagnostic["folders_rejected_depth"]
+        + scan_diagnostic["folders_rejected_scandir_error"]
+    )
+
     score_bins = [0 for _ in range(10)]
     resolutions = {"2160p": 0, "1080p": 0, "720p": 0, "other": 0}
     hdr_counts = {"SDR": 0, "HDR10": 0, "HDR10+": 0, "DV": 0, "Unknown": 0}
@@ -410,6 +447,10 @@ def _build_dashboard_section(
             "total_movies": total_movies,
             "scored_movies": scored_movies,
             "probe_partial_count": probe_partial_count,
+            # VAL-1 : exposition validated/rejected pour les KPI cards
+            # Traitement (Valides / Rejetes / En attente).
+            "validated_count": int(validated_count),
+            "rejected_count": int(rejected_count),
         },
         "distributions": {
             "score_bins": bins_payload,
@@ -423,6 +464,8 @@ def _build_dashboard_section(
             "sdr_4k": sdr_4k,
             "vo_missing": vo_missing,
         },
+        # SCAN-1 : carte "Diagnostic scan" avec breakdown des exclusions.
+        "scan_diagnostic": scan_diagnostic,
         "message": "Dashboard genere avec succes." if scored_movies else "Run non score ou partiellement score.",
         "rows": _build_library_rows(rows, reports),
     }
@@ -550,8 +593,29 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         # (hors cache dashboard) — countdown qui s'ecoule entre deux GET.
         pending_undo = _build_pending_undo_payload(store, resolved_run_id)
 
+        # VAL-1 : recalcul live de validated_count / rejected_count pour que
+        # les KPI cards refletent immediatement bulk-approve / annulation sans
+        # attendre l'invalidation du cache dashboard.
+        try:
+            _decisions_live = api._load_decisions_from_validation(run_paths) or {}
+        except (OSError, TypeError, ValueError, AttributeError):
+            _decisions_live = {}
+        validated_live = sum(
+            1 for d in _decisions_live.values() if isinstance(d, dict) and d.get("ok") is True
+        )
+        rejected_live = sum(
+            1 for d in _decisions_live.values() if isinstance(d, dict) and d.get("ok") is False
+        )
+
         cached_payload = api._load_dashboard_cache(run_row=run_row, run_paths=run_paths, store=store)
         if isinstance(cached_payload, dict):
+            # VAL-1 : injecter les compteurs live dans kpis pour contourner le cache stale.
+            cached_kpis = cached_payload.get("kpis") if isinstance(cached_payload.get("kpis"), dict) else {}
+            if isinstance(cached_kpis, dict):
+                cached_kpis = dict(cached_kpis)
+                cached_kpis["validated_count"] = int(validated_live)
+                cached_kpis["rejected_count"] = int(rejected_live)
+                cached_payload = {**cached_payload, "kpis": cached_kpis}
             return {
                 "ok": True,
                 "mode": mode,

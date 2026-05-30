@@ -805,6 +805,10 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
             "next_log_index": int(last_log_index or 0),
             "status": status_text,
             "cancel_requested": bool(run_row.get("cancel_requested") or 0),
+            # APPLY-2 : branche DB-only (run termine hors memoire) — pas de
+            # polling de la phase apply possible. On retourne None pour
+            # coherence cote frontend (data.apply == null => pas de barre).
+            "apply": None,
         }
 
     with rs.lock:
@@ -819,6 +823,19 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         samples = list(rs.progress_samples)
         ewma = rs.speed_ewma
         paths_snapshot = rs.paths
+        # APPLY-2 : capture defensive des attributs apply_* sous le meme lock.
+        # getattr() avec defaut pour rester compatible tant que la Couche 1
+        # (RunState.apply_begin/apply_progress/apply_end) n'est pas deployee.
+        apply_running = bool(getattr(rs, "apply_running", False))
+        apply_done = bool(getattr(rs, "apply_done", False))
+        apply_idx = int(getattr(rs, "apply_idx", 0) or 0)
+        apply_total = int(getattr(rs, "apply_total", 0) or 0)
+        apply_current = str(getattr(rs, "apply_current", "") or "")
+        apply_phase = str(getattr(rs, "apply_phase", "") or "")
+        apply_dry_run = bool(getattr(rs, "apply_dry_run", False))
+        apply_started_ts = float(getattr(rs, "apply_started_ts", 0.0) or 0.0)
+        apply_samples = list(getattr(rs, "apply_progress_samples", ()) or ())
+        apply_ewma = float(getattr(rs, "apply_speed_ewma", 0.0) or 0.0)
 
     snap = rs.runner.get_status(run_id)
     status_text = "RUNNING"
@@ -856,6 +873,28 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 
+    # APPLY-2 : payload distinct pour la phase apply. On expose les compteurs
+    # uniquement si la phase est ou a ete active (apply_running ou apply_done)
+    # afin de garder data.apply == None pendant la phase scan/analyse et eviter
+    # un re-render inutile cote frontend. Backward-compat : les champs
+    # top-level running/idx/total/current/... restent dedies au scan.
+    apply_payload: Optional[Dict[str, Any]] = None
+    if apply_running or apply_done:
+        apply_speed, apply_eta = _compute_speed_and_eta(
+            apply_idx, apply_total, apply_started_ts or started, apply_samples, apply_ewma
+        )
+        apply_payload = {
+            "running": apply_running,
+            "done": apply_done,
+            "idx": apply_idx,
+            "total": apply_total,
+            "current": apply_current,
+            "phase": apply_phase,
+            "dry_run": apply_dry_run,
+            "speed": apply_speed,
+            "eta_s": apply_eta,
+        }
+
     return {
         "ok": True,
         "running": running,
@@ -870,6 +909,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         "next_log_index": last_log_index + len(logs),
         "status": status_text,
         "cancel_requested": cancel_requested,
+        "apply": apply_payload,
     }
 
 
@@ -1244,7 +1284,10 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             rows = rs.rows
             if not rows:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
-            safe = api._normalize_decisions_for_rows(rows, decisions)
+            incoming = decisions if isinstance(decisions, dict) else {}
+            disk_decisions = api._load_decisions_from_validation(rs.paths)
+            merged = api._merge_decisions(incoming, disk_decisions)
+            safe = api._normalize_decisions_for_rows(rows, merged)
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             data["size_savings_total"] = _compute_size_savings_total(data)
@@ -1266,7 +1309,10 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
     )
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        safe = api._normalize_decisions_for_rows(rows, decisions)
+        incoming = decisions if isinstance(decisions, dict) else {}
+        disk_decisions = api._load_decisions_from_validation(run_paths)
+        merged = api._merge_decisions(incoming, disk_decisions)
+        safe = api._normalize_decisions_for_rows(rows, merged)
         cfg = api._cfg_from_run_row(row)
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)

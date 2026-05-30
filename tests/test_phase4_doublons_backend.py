@@ -234,6 +234,86 @@ class CheckDuplicatesSizeSavingsTests(unittest.TestCase):
         self.assertIn("size_savings_total", r)
         self.assertEqual(r["size_savings_total"], 80_235)
 
+    def test_check_duplicates_hydrates_decisions_from_disk(self) -> None:
+        """Regression : decisions persistees dans validation.json sont rechargees.
+
+        Sans ce test, le bug DUP-2 regressera silencieusement : si le frontend
+        appelle check_duplicates avec decisions={}, les decisions de validation
+        persistees sur disque doivent etre mergees avant le scan _find_dups,
+        sinon les rows ont ok=False et aucun groupe n'est detecte.
+        """
+        api = mock.MagicMock()
+        api._find_run_row.return_value = ({"run_id": "run1"}, mock.MagicMock())
+
+        row_a = mock.MagicMock(row_id="rowA")
+        rs = mock.MagicMock()
+        rs.done = True
+        rs.rows = [row_a]
+        rs.cfg = mock.MagicMock()
+        rs.store = mock.MagicMock()
+        rs.paths = mock.MagicMock()
+        api._get_run.return_value = rs
+
+        # Decision persistee sur disque (validation.json) pour rowA.
+        disk_decision = {"rowA": {"ok": True, "title": "X", "year": 2020}}
+        api._load_decisions_from_validation.return_value = disk_decision
+
+        # _merge_decisions doit etre appele avec (incoming={}, disk=disk_decision).
+        merged_decision = dict(disk_decision)
+        api._merge_decisions.return_value = merged_decision
+
+        # On capture l'argument passe a _normalize_decisions_for_rows pour assert.
+        api._normalize_decisions_for_rows.return_value = merged_decision
+
+        captured_rows: List[Any] = []
+        captured_decisions: List[Any] = []
+
+        def _capture_find_dups(cfg: Any, rows: Any, decisions: Any) -> Dict[str, Any]:
+            captured_rows.append(rows)
+            captured_decisions.append(decisions)
+            return {"groups": []}
+
+        with mock.patch.object(
+            run_flow_support,
+            "_find_dups",
+            side_effect=_capture_find_dups,
+        ):
+            with mock.patch.object(run_flow_support, "_enrich_groups_with_quality_comparison"):
+                r = run_flow_support.check_duplicates(api, "run1", {})
+
+        self.assertTrue(r["ok"], msg=str(r))
+
+        # 1. _load_decisions_from_validation a bien ete appele.
+        api._load_decisions_from_validation.assert_called_once()
+
+        # 2. _merge_decisions appele avec disk_decision (et incoming={}).
+        api._merge_decisions.assert_called_once()
+        merge_args = api._merge_decisions.call_args
+        # Le second arg doit contenir la decision disque.
+        self.assertIn(disk_decision, list(merge_args.args) + list(merge_args.kwargs.values()))
+
+        # 3. _normalize_decisions_for_rows recoit un dict NON vide (merged).
+        api._normalize_decisions_for_rows.assert_called_once()
+        norm_args = api._normalize_decisions_for_rows.call_args
+        # Le dict passe doit contenir au moins l'entree rowA.
+        passed_decisions = None
+        for arg in list(norm_args.args) + list(norm_args.kwargs.values()):
+            if isinstance(arg, dict) and "rowA" in arg:
+                passed_decisions = arg
+                break
+        self.assertIsNotNone(
+            passed_decisions,
+            msg=f"_normalize_decisions_for_rows pas appele avec dict contenant rowA: {norm_args}",
+        )
+        self.assertTrue(passed_decisions["rowA"].get("ok"))
+
+        # 4. Au moins un row a ete passe a _find_dups (avec ok=True via decisions).
+        self.assertEqual(len(captured_rows), 1)
+        self.assertEqual(len(captured_rows[0]), 1)
+        # Les decisions passees a _find_dups doivent porter ok=True pour rowA.
+        self.assertIn("rowA", captured_decisions[0])
+        self.assertTrue(captured_decisions[0]["rowA"].get("ok"))
+
 
 # =============================================================================
 # 3. queue_perceptual_analyses : JobRunner queue + polling

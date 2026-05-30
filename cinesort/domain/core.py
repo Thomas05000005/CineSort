@@ -76,7 +76,22 @@ _COMPAT_SCAN_EXPORTS = (
 # CONFIG
 # =========================================================
 
-VIDEO_EXTS_DEFAULT = {".mkv", ".mp4", ".avi", ".m2ts"}
+VIDEO_EXTS_DEFAULT = {
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".m2ts",
+    ".m4v",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".ts",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".ogv",
+    ".vob",
+}
 
 # Phase 6 (v7.8.0) : VIDEO_EXTS_ALL = union maximale des extensions video
 # reconnues dans toute la codebase. Avant ce constant, apply_core/apply_support
@@ -98,7 +113,7 @@ VIDEO_EXTS_ALL = frozenset(
 )
 SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
 
-MIN_VIDEO_BYTES = 50 * 1024 * 1024  # 50MB
+MIN_VIDEO_BYTES = 10 * 1024 * 1024  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
 
 GENERIC_SIDE_FILES_DEFAULT = {
     "movie.nfo",
@@ -216,6 +231,9 @@ class Config:
 
     # Scan
     incremental_scan_enabled: bool = False
+    # Seuil minimal taille fichier video (en octets). None = utilise MIN_VIDEO_BYTES (10MB).
+    # Permet de configurer le seuil pour bibliotheques avec courts metrages / animations.
+    min_video_bytes: Optional[int] = None
 
     # Profils de renommage
     naming_movie_template: str = "{title} ({year})"
@@ -260,6 +278,7 @@ class Config:
             enable_tmdb=self.enable_tmdb,
             tmdb_language=self.tmdb_language,
             incremental_scan_enabled=bool(self.incremental_scan_enabled),
+            min_video_bytes=int(self.min_video_bytes) if self.min_video_bytes is not None else None,
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
         )
@@ -285,6 +304,15 @@ class Stats:
     incremental_cache_rows_reused: int = 0
     incremental_cache_row_hits: int = 0
     incremental_cache_row_misses: int = 0
+    # Phase 2 SCAN-1 (observabilite) : compteurs detailles de rejet pour debug post-scan.
+    # Exposes via dashboard_support dans une carte "Diagnostic scan".
+    films_rejected_ext: int = 0  # fichier video : extension hors VIDEO_EXTS
+    films_rejected_size: int = 0  # fichier video : taille < MIN_VIDEO_BYTES
+    films_rejected_name: int = 0  # fichier video : nom matche IGNORE_VIDEO_NAME_RE (sample/trailer/teaser)
+    folders_rejected_underscore: int = 0  # dossier prefixe '_' (skip _Collection, _Vide, etc.)
+    folders_rejected_depth: int = 0  # dossier au-dela de max_depth
+    folders_rejected_scandir_error: int = 0  # echec os.scandir (PermissionError, OSError, timeout SMB)
+    folders_rejected_tv_like_count_videos: int = 0  # dossier rejete par looks_tv_like (compte videos)
 
 
 def _stats_add_ignore(stats: Stats, reason: str) -> None:

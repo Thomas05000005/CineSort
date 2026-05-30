@@ -6529,6 +6529,27 @@ body.v5-notif-lock {
   word-break: break-all;
 }
 
+/* --- Apply progress (alias de scan progress, coloris vert) ---
+   Reutilise la structure de .traitement-scan-progress + barre + meta
+   en surchargeant uniquement le degrade de remplissage pour distinguer
+   visuellement la phase d'application (vert) du scan (bleu). */
+.traitement-apply-progress {
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.traitement-apply-progress .traitement-scan-progress-fill {
+  background: linear-gradient(90deg, var(--success, #16a34a), var(--accent));
+}
+.traitement-apply-phase {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* --- Tables denses verif + validation --- */
 .traitement-verif-table,
 .traitement-validation-table {
@@ -6594,6 +6615,64 @@ body.v5-notif-lock {
   padding: var(--sp-3);
   background: var(--surface-2);
   border-radius: var(--radius-md);
+}
+
+/* --- Tri colonnes validation --- */
+.traitement-validation-table thead th.is-sort {
+  cursor: pointer;
+  user-select: none;
+}
+.traitement-validation-table thead th.is-sort:hover {
+  color: var(--text-1);
+}
+.traitement-validation-table thead th.is-sort.is-active {
+  color: var(--accent);
+}
+.traitement-validation-table thead th.is-sort .sort-arrow::after {
+  content: "\2195";
+  opacity: 0.4;
+  margin-left: 4px;
+}
+.traitement-validation-table thead th.is-sort.is-asc .sort-arrow::after {
+  content: "\2191";
+  opacity: 1;
+}
+.traitement-validation-table thead th.is-sort.is-desc .sort-arrow::after {
+  content: "\2193";
+  opacity: 1;
+}
+
+/* --- Ligne d'expansion raisons validation --- */
+.traitement-validation-row-expand td {
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: none;
+}
+.traitement-validation-reasons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+}
+.traitement-validation-reasons h4 {
+  font-size: var(--fs-xs);
+  margin: 0 0 var(--sp-1);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.traitement-validation-reasons .candidate-row {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 2px 0;
+}
+
+/* --- Source proposee validation --- */
+.traitement-validation-source {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* --- Filtres verif --- */
