@@ -1563,7 +1563,23 @@ def compute_quality_score(
         return _build_invalid_profile_result(profile, normalized_probe, errs)
 
     # --- Setup contexte ---
-    probe = normalized_probe if isinstance(normalized_probe, dict) else {}
+    # Fix audit 2026-05-26 (v1.5.6) Vague L+ : BUG CRITIQUE DE PROD detecte par
+    # test manuel apres Vague L. compute_quality_score traitait normalized_probe
+    # comme un Dict UNIQUEMENT. Or `cinesort.infra.probe.service.ProbeService`
+    # retourne un NormalizedProbe @dataclass. isinstance(dataclass_instance, dict)
+    # vaut False -> probe={} -> probe_quality='FAILED' meme avec un vrai probe
+    # FULL -> tier=Silver max sur TOUS les films, scoring lit le nom de fichier
+    # uniquement. Le finding Vague L lib-1 (memes cles divergentes en library_
+    # support) a ete corrige mais le meme pattern subsistait ici, non couvert par
+    # les tests (les tests passent des dicts simules). Conversion dataclass->dict
+    # via dataclasses.asdict + acceptation du dict natif si deja converti.
+    from dataclasses import asdict as _asdict, is_dataclass as _is_dc
+    if _is_dc(normalized_probe) and not isinstance(normalized_probe, type):
+        probe = _asdict(normalized_probe)
+    elif isinstance(normalized_probe, dict):
+        probe = normalized_probe
+    else:
+        probe = {}
     probe_quality = str(probe.get("probe_quality") or "FAILED")
 
     # Fix audit 2026-05-25 (v1.5.5) Vague K : enrichir le probe avec les hints
