@@ -72,16 +72,21 @@ def _classify_resolution(width: int, height: int) -> str:
 
 
 def _classify_hdr(probe_video: Dict[str, Any]) -> str:
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : metrics.detected utilise les cles
+    # hdr_dolby_vision / hdr10_plus / hdr10 (cf quality_score.py:1331-1333). Les
+    # anciennes cles has_dv / has_hdr10_plus / has_hdr10 / dv_profile ne sont pas
+    # persistees dans metrics.detected. On accepte les deux schemas pour eviter
+    # de casser un eventuel appelant qui passerait encore le NormalizedProbe brut.
     if not isinstance(probe_video, dict):
         return "sdr"
-    if probe_video.get("has_hdr10_plus"):
+    if probe_video.get("hdr10_plus") or probe_video.get("has_hdr10_plus"):
         return "hdr10_plus"
-    if probe_video.get("has_dv"):
+    if probe_video.get("hdr_dolby_vision") or probe_video.get("has_dv"):
         profile = str(probe_video.get("dv_profile") or "").strip()
         if profile == "5":
             return "dv_p5"
         return "dv"
-    if probe_video.get("has_hdr10"):
+    if probe_video.get("hdr10") or probe_video.get("has_hdr10"):
         return "hdr10"
     return "sdr"
 
@@ -242,22 +247,43 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         metrics = (qual or {}).get("metrics") if qual else None
         if not isinstance(metrics, dict):
             metrics = {}
-        probe_video = metrics.get("video") or {}
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : la vraie structure persistee
+        # par compute_quality_score est metrics["detected"] (dict imbrique), PAS
+        # metrics["video"] / metrics["audio"]. Cf cinesort/domain/quality_score.py
+        # _build_quality_metrics_helper (lignes 1318-1372). Les cles correctes :
+        #   detected.width / detected.height (int)
+        #   detected.video_codec (str) — pas "codec"
+        #   detected.duration_s (float)
+        #   detected.audio_tracks_count + detected.languages (langues AUDIO ISO639)
+        #   detected.audio_best_codec / detected.audio_best_channels
+        #   detected.hdr_dolby_vision / detected.hdr10 / detected.hdr10_plus (bool)
+        #   detected.file_size_bytes (estimation bitrate*duration, voir lib-2)
+        # Avant ce fix : metrics.get("video") = None partout -> width/height/codec/
+        # hdr = "unknown" sur 100% des films, et metrics.get("duration_s") = None
+        # car duration_s est dans detected, pas top-level metrics.
+        detected = metrics.get("detected") if isinstance(metrics, dict) else None
+        if not isinstance(detected, dict):
+            detected = {}
+        probe_video = detected  # pour _classify_hdr (cles hdr10/hdr_dolby_vision)
 
-        width = int(probe_video.get("width") or 0)
-        height = int(probe_video.get("height") or 0)
-        duration_s = float(metrics.get("duration_s") or 0)
+        width = int(detected.get("width") or 0)
+        height = int(detected.get("height") or 0)
+        duration_s = float(detected.get("duration_s") or 0)
 
         # Phase 4 spec 07 : exposer audio_langs / subs_langs / subs_missing pour
-        # compteurs chips + export. audio_languages est dans metrics.audio.
-        audio_metrics = metrics.get("audio") if isinstance(metrics, dict) else None
+        # compteurs chips + export.
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : les langues audio sont dans
+        # detected.languages (liste de str ISO639-2/3 brutes, ex ["eng","fra"]). Avant :
+        # on lisait metrics.audio (liste de dicts {language: ...}) qui n'a jamais
+        # existe -> audio_languages = [] systematiquement, cassant le compteur chip
+        # "audio_langs" et le filtre subtitle_languages.
+        raw_audio_langs = detected.get("languages")
         audio_langs: List[str] = []
-        if isinstance(audio_metrics, list):
-            for stream in audio_metrics:
-                if isinstance(stream, dict):
-                    lang = str(stream.get("language") or "").strip().lower()
-                    if lang and lang not in audio_langs:
-                        audio_langs.append(lang)
+        if isinstance(raw_audio_langs, list):
+            for lang in raw_audio_langs:
+                lang_norm = str(lang or "").strip().lower()
+                if lang_norm and lang_norm not in audio_langs:
+                    audio_langs.append(lang_norm)
 
         # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 2 — la PlanRow ne capture pas
         # les pistes subtitle EMBARQUEES (scan sans probe). On enrichit ici depuis
@@ -330,7 +356,9 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "tmdb_id": resolved_tmdb_by_row.get(row_id) or r.get("tmdb_id"),
             "duration_s": duration_s,
             "duration_min": int(duration_s / 60) if duration_s > 0 else 0,
-            "codec": _normalize_codec(probe_video.get("codec")),
+            # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : la cle persistee est
+            # detected.video_codec (pas .codec). Cf quality_score.py:1329.
+            "codec": _normalize_codec(detected.get("video_codec") or detected.get("codec")),
             "resolution": _classify_resolution(width, height),
             "width": width,
             "height": height,
@@ -363,7 +391,17 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "subtitle_missing_langs": subtitle_missing_langs,
             "proposed_source": proposed_source,
             "confidence": confidence,
-            "size_bytes": int(r.get("size_bytes") or metrics.get("size_bytes") or 0),
+            # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-2) : metrics["size_bytes"]
+            # n'existe pas. La taille estimee est dans detected.file_size_bytes
+            # (bitrate_kbps * duration_s, cf _estimate_file_size en domain/quality_score.py).
+            # Avant : metrics.get("size_bytes") = None -> tous les size_bytes
+            # provenaient uniquement de PlanRow.size_bytes (lui-meme souvent 0
+            # tant que le scan FS n'a pas posé la stat), cassant le tri/filtre taille.
+            "size_bytes": int(
+                r.get("size_bytes")
+                or detected.get("file_size_bytes")
+                or 0
+            ),
         }
 
         # Si grain dans metrics

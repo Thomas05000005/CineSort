@@ -18,8 +18,10 @@ Tests :
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
+from cinesort.domain.librarian import generate_suggestions
 from cinesort.ui.api import library_support
 
 
@@ -149,90 +151,132 @@ class RowSubsMissingFrConsistencyTests(unittest.TestCase):
         self.assertTrue(library_support._row_subs_missing_fr(row))
 
 
-class LibraryAndQualityCountAlignmentTests(unittest.TestCase):
-    """Vague I BUG 2 : le compte "sans subs FR" de Bibliotheque == compte
-    Qualite. C'est l'invariant attendu apres le fix : les 2 endpoints
-    consomment la meme structure rows enrichie.
+def _plan_row_obj(row_id, *, subtitle_languages=None, subtitle_missing_langs=None):
+    """PlanRow-like object (acces via getattr) pour le chemin QUALITE
+    (librarian.generate_suggestions). Reflete le MEME film que _plan_row()."""
+    return SimpleNamespace(
+        row_id=row_id,
+        proposed_title=f"Film {row_id}",
+        proposed_source="tmdb",
+        confidence=90,
+        warning_flags=[],
+        subtitle_languages=subtitle_languages or [],
+        subtitle_missing_langs=subtitle_missing_langs or [],
+        tmdb_collection_id=None,
+        tmdb_collection_name=None,
+    )
 
-    On compare :
-    - sum(_row_subs_missing_fr(row) pour row in library_rows)
-    - vs sum(idem) sur la meme liste construite via _build_library_rows
-    Les 2 doivent etre strictement egaux car alimentes par la meme source.
+
+def _quality_report_qr(row_id, *, embedded_subs=None):
+    """quality_report cote librarian (meme schema metrics.subtitles_embedded
+    que la vue Bibliotheque)."""
+    return {
+        "row_id": row_id,
+        "score": 75,
+        "tier": "Gold",
+        "metrics": {
+            "subtitles_embedded": embedded_subs or [],
+            "video": {"width": 1920, "height": 1080},
+            "detected": {"video_codec": "hevc", "resolution": "1080p", "height": 1080},
+        },
+    }
+
+
+class LibraryAndQualityCountAlignmentTests(unittest.TestCase):
+    """Vague L (subs-2) : invariant d'alignement NON-TAUTOLOGIQUE.
+
+    L'ancien test comparait deux derivations de la MEME liste _build_library_rows
+    (toujours egales par construction). On compare desormais les DEUX vrais
+    chemins de production sur LE MEME film a FR embarque :
+
+      - chemin BIBLIOTHEQUE : library_support._build_library_rows + _row_subs_missing_fr
+      - chemin QUALITE      : domain.librarian.generate_suggestions (suggestion
+                              "missing_subtitles")
+
+    Avant le fix subs-1, generate_suggestions ignore metrics.subtitles_embedded
+    -> il compte le film comme "sans FR" alors que la Bibliotheque le compte
+    comme OK -> divergence -> ce test ECHOUE. Apres le fix, les 2 concordent.
     """
 
-    def test_alignment_when_embedded_present(self) -> None:
-        """3 films : 2 avec FR embarque, 1 sans aucun subtitle FR."""
-        api = MagicMock()
-        plan_rows = [
-            _plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"]),
-            _plan_row("R2", subtitle_languages=[], subtitle_missing_langs=["fr"]),
-            _plan_row("R3", subtitle_languages=[], subtitle_missing_langs=["fr"]),
-        ]
-        quality_list = [
-            _quality_report(
-                "R1", embedded_subs=[{"language": "fra", "forced": False}]
-            ),
-            _quality_report(
-                "R2", embedded_subs=[{"language": "fre", "forced": False}]
-            ),
-            # R3 : pas de quality_report -> reste flag missing FR
-        ]
-        _patch_store(api, plan_rows=plan_rows, quality_list=quality_list)
-
+    def _bibliotheque_missing_fr(self, api) -> int:
         rows = library_support._build_library_rows(api, "run_xyz")
-        self.assertEqual(len(rows), 3)
+        return sum(1 for r in rows if library_support._row_subs_missing_fr(r))
 
-        # Compte cote "Bibliotheque" (chip subs_missing_fr)
-        missing_fr_count = sum(
-            1 for r in rows if library_support._row_subs_missing_fr(r)
-        )
+    def _qualite_missing_fr(self, plan_rows_obj, quality_list) -> int:
+        result = generate_suggestions(plan_rows_obj, quality_list, {"subtitle_expected_languages": ["fr"]})
+        for sugg in result.get("suggestions", []):
+            if sugg.get("id") == "missing_subtitles":
+                return int(sugg.get("count") or 0)
+        return 0
 
-        # Compte cote "Qualite" : meme logique, meme source de verite
-        # (le rapport qualite agrege subtitle_languages des memes library rows).
-        # Apres le fix Vague I, les 2 vues utilisent _build_library_rows comme
-        # base, donc le compte derive est strictement identique.
-        quality_missing_fr_count = sum(
-            1
-            for r in rows
-            if not any(lang.startswith("fr") for lang in r.get("subtitle_languages") or [])
-        )
+    def test_alignment_single_film_fr_embedded(self) -> None:
+        """1 film, FR uniquement EMBARQUE. Biblio dit "OK", Qualite doit aussi.
 
+        C'est LE cas du BUG : avant subs-1, Qualite=1 et Biblio=0 -> echec.
+        """
+        api = MagicMock()
+        plan_rows_dict = [_plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])]
+        plan_rows_obj = [_plan_row_obj("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])]
+        quality_list = [_quality_report("R1", embedded_subs=[{"language": "fra", "forced": False}])]
+        quality_list_qr = [_quality_report_qr("R1", embedded_subs=[{"language": "fra", "forced": False}])]
+        _patch_store(api, plan_rows=plan_rows_dict, quality_list=quality_list)
+
+        biblio = self._bibliotheque_missing_fr(api)
+        qualite = self._qualite_missing_fr(plan_rows_obj, quality_list_qr)
+
+        self.assertEqual(biblio, 0, "Biblio : FR embarque -> 0 manquant")
         self.assertEqual(
-            missing_fr_count,
-            quality_missing_fr_count,
-            "BUG 2 : les 2 vues doivent donner le meme compte 'sans subs FR'",
+            qualite,
+            biblio,
+            "subs-1 : Qualite doit concorder avec Bibliotheque (FR embarque compte)",
         )
-        # Et le compte attendu est 1 (seul R3 sans FR embarque)
-        self.assertEqual(missing_fr_count, 1)
 
-    def test_alignment_when_all_have_fr_embedded(self) -> None:
-        """Cas regression : 3 films, tous avec FR embarque -> 0 missing."""
+    def test_alignment_mixed_films(self) -> None:
+        """3 films : 2 avec FR embarque, 1 sans aucun FR. Les 2 vues : 1 manquant."""
         api = MagicMock()
-        plan_rows = [
+        plan_rows_dict = [
             _plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"]),
             _plan_row("R2", subtitle_languages=[], subtitle_missing_langs=["fr"]),
             _plan_row("R3", subtitle_languages=[], subtitle_missing_langs=["fr"]),
         ]
-        quality_list = [
-            _quality_report(
-                rid, embedded_subs=[{"language": "fra", "forced": False}]
-            )
-            for rid in ("R1", "R2", "R3")
+        plan_rows_obj = [
+            _plan_row_obj("R1", subtitle_languages=[], subtitle_missing_langs=["fr"]),
+            _plan_row_obj("R2", subtitle_languages=[], subtitle_missing_langs=["fr"]),
+            _plan_row_obj("R3", subtitle_languages=[], subtitle_missing_langs=["fr"]),
         ]
-        _patch_store(api, plan_rows=plan_rows, quality_list=quality_list)
-        rows = library_support._build_library_rows(api, "run_xyz")
+        quality_list = [
+            _quality_report("R1", embedded_subs=[{"language": "fra", "forced": False}]),
+            _quality_report("R2", embedded_subs=[{"language": "fre", "forced": False}]),
+        ]
+        quality_list_qr = [
+            _quality_report_qr("R1", embedded_subs=[{"language": "fra", "forced": False}]),
+            _quality_report_qr("R2", embedded_subs=[{"language": "fre", "forced": False}]),
+        ]
+        _patch_store(api, plan_rows=plan_rows_dict, quality_list=quality_list)
 
-        missing_fr_count = sum(
-            1 for r in rows if library_support._row_subs_missing_fr(r)
-        )
-        quality_missing_fr_count = sum(
-            1
-            for r in rows
-            if not any(lang.startswith("fr") for lang in r.get("subtitle_languages") or [])
-        )
+        biblio = self._bibliotheque_missing_fr(api)
+        qualite = self._qualite_missing_fr(plan_rows_obj, quality_list_qr)
 
-        self.assertEqual(missing_fr_count, 0, "Tous ont FR embarque -> 0 missing")
-        self.assertEqual(missing_fr_count, quality_missing_fr_count)
+        self.assertEqual(biblio, 1, "Seul R3 (sans FR) doit etre manquant")
+        self.assertEqual(qualite, biblio, "subs-1 : les 2 vues concordent")
+
+    def test_alignment_german_embedded_not_french(self) -> None:
+        """Film avec GER embarque (pas FR) : doit compter manquant des 2 cotes.
+
+        CASSE si _normalize_iso639 collapse 'ger' -> 'fr' (mutation testing).
+        """
+        api = MagicMock()
+        plan_rows_dict = [_plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])]
+        plan_rows_obj = [_plan_row_obj("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])]
+        quality_list = [_quality_report("R1", embedded_subs=[{"language": "ger", "forced": False}])]
+        quality_list_qr = [_quality_report_qr("R1", embedded_subs=[{"language": "ger", "forced": False}])]
+        _patch_store(api, plan_rows=plan_rows_dict, quality_list=quality_list)
+
+        biblio = self._bibliotheque_missing_fr(api)
+        qualite = self._qualite_missing_fr(plan_rows_obj, quality_list_qr)
+
+        self.assertEqual(biblio, 1, "GER embarque != FR -> manquant cote Biblio")
+        self.assertEqual(qualite, 1, "GER embarque != FR -> manquant cote Qualite")
 
 
 if __name__ == "__main__":

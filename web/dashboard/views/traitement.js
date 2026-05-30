@@ -246,6 +246,12 @@ function _startPolling() {
       if (_currentStep === "analyse") {
         _currentStep = "verification";
         _writeStep("verification");
+        // Fix audit 2026-05-26 (v1.5.6) Vague L (step-1) :
+        // _renderInPlace seul affichait la Verification avec _validationPlan vide
+        // (ou stale d'un run precedent). On charge le plan AVANT le render final
+        // pour eviter l'ecran "0 films a verifier" trompeur juste apres la fin
+        // de scan. _loadPlan est idempotent et s'auto-protege si runId absent.
+        await _loadPlan();
       }
       _renderInPlace(); // render final manquant (avant return)
       return;
@@ -1301,7 +1307,13 @@ async function _handleApplyNow() {
       `Quarantaine : ${_applyOptions.quarantine ? "activée" : "désactivée"}`,
       `CSV : ${_applyOptions.export_csv ? "exporté" : "non exporté"}`,
     ],
-    consequence: "Les fichiers sur disque seront effectivement modifiés. Réversible via Undo pendant 7 jours après apply.",
+    // Fix audit 2026-05-26 (v1.5.6) Vague L (undo-1) :
+    // Le backend enforce un delai d'undo de 24h (cf cinesort/ui/api/apply_support.py:52,
+    // _UNDO_DEADLINE_SECONDS = 24 * 3600). La modale danger pre-apply affichait
+    // erronement "7 jours" (heritage du doc 08-traitement.md), ce qui creait une
+    // attente utilisateur incoherente avec la realite serveur. On aligne sur 24h
+    // pour matcher le toast post-apply (ligne ~1317) et la carte annulation expiree.
+    consequence: "Les fichiers sur disque seront effectivement modifiés. Réversible via Undo pendant 24h après apply.",
     confirmLabel: "✗ Appliquer pour de vrai",
     cancelLabel: "Annuler",
     countdownSeconds: 3,

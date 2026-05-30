@@ -794,7 +794,13 @@ async function _loadDashTheme() {
       document.body.dataset.animation = s.animation_level || "moderate";
       document.documentElement.dataset.effects = s.effects_mode || "restraint";
       const root = document.documentElement;
-      const _map = (v, lo, hi) => lo + ((v || 50) - 0) * (hi - lo) / 100;
+      // Fix audit 2026-05-26 (v1.5.6) Vague L (theme-1) :
+      // Avant : v||50 traitait 0 comme "valeur absente" et le remplacait par 50.
+      // Du coup, l'utilisateur qui voulait DESACTIVER un effet (glow=0,
+      // animation=0, light=0) voyait quand meme une intensite a 50% appliquee.
+      // v??50 garde 0 (valeur legitime de l'utilisateur) et ne replace que les
+      // null/undefined (valeur reellement absente) par 50.
+      const _map = (v, lo, hi) => lo + ((v ?? 50) - 0) * (hi - lo) / 100;
       root.style.setProperty("--animation-speed", _map(s.effect_speed, 0.3, 3));
       root.style.setProperty("--glow-intensity", _map(s.glow_intensity, 0, 0.5));
       root.style.setProperty("--light-intensity", _map(s.light_intensity, 0, 0.3));

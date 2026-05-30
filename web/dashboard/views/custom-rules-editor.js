@@ -285,6 +285,18 @@ function _importJson(file) {
 
 async function _saveRules() {
   const rules = _gatherAll();
+  // Fix audit 2026-05-26 (v1.5.6) Vague L (crules-1) : defense en profondeur.
+  // Si on s'apprete a passer de N>0 regles a 0 regle (cas suspect : editeur
+  // ouvert vide a cause d'un bug + clic Enregistrer = wipe silencieux), on
+  // confirme avant. Pas de confirmation si l'utilisateur a explicitement
+  // supprime quelques regles et veut tout vider, mais on l'avertit du wipe.
+  const existingCount = Number(state._existingCount || 0);
+  if (existingCount > 0 && rules.length === 0) {
+    const ok = typeof window !== "undefined" && typeof window.confirm === "function"
+      ? window.confirm(`Vous etes sur le point de supprimer les ${existingCount} regles existantes. Confirmer ?`)
+      : true;
+    if (!ok) { _setMsg("Sauvegarde annulee.", "info"); return; }
+  }
   const v = await apiPost("quality/validate_custom_rules", { rules });
   // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
   const _vPayload = (v && v.data) || v || {};
@@ -394,13 +406,30 @@ function _hook() {
 
 export async function openCustomRulesEditor() {
   state.rules = [];
+  // Fix audit 2026-05-26 (v1.5.6) Vague L (crules-1) :
+  // apiPost retourne {status, data}. L'ancien code lisait profRes.profile_json (residuel
+  // res.ok-style) au lieu de profRes.data.profile_json -> l'editeur s'ouvrait TOUJOURS
+  // vide, et un clic "Enregistrer" ecrasait silencieusement les regles existantes.
+  // On lit maintenant le payload imbrique comme dans _saveRules ci-dessus.
+  let existingCount = 0;
   try {
     const profRes = await apiPost("quality/get_quality_profile");
-    const profile = (profRes && profRes.profile_json) || {};
-    state.rules = (profile.custom_rules || []).map(r => _normalizeRule({ ...r, id: r.id || _genId() }));
+    const profPayload = (profRes && profRes.data) || profRes || {};
+    const profile = profPayload.profile_json || {};
+    const existing = Array.isArray(profile.custom_rules) ? profile.custom_rules : [];
+    existingCount = existing.length;
+    state.rules = existing.map(r => _normalizeRule({ ...r, id: r.id || _genId() }));
   } catch {
     state.rules = [];
+    existingCount = 0;
   }
+
+  // Fix audit 2026-05-26 (v1.5.6) Vague L (crules-1) defense en profondeur :
+  // si le state d'origine contient deja des regles, on garde une trace pour
+  // demander confirmation lors d'un Enregistrer qui finirait par tout vider
+  // (cas race : utilisateur clic Enregistrer apres avoir supprime toutes les
+  // regles sans en recreer ; on protege uniquement la suppression totale).
+  state._existingCount = existingCount;
 
   showModal({
     title: "Règles personnalisées (G6)",

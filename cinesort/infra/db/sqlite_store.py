@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
-from .migration_manager import MigrationManager, _split_sql_statements
+from .migration_manager import MigrationManager, _is_idempotent_error, _split_sql_statements
 from .repositories import (
     AnomalyRepository,
     ApplyRepository,
@@ -25,6 +25,14 @@ from .repositories import (
 )
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
+# Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
+# apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap
+# ordonne (toutes les migrations en mode CREATE TABLE IF NOT EXISTS),
+# independamment de PRAGMA user_version. C'est le filet de securite
+# self-healing pour le bug ou une migration etait marquee appliquee mais
+# n'avait pas cree ses tables (cas observe sur 023). Ajout des 3 tables de
+# 023 (ignored_alerts, film_marked_for_deletion, film_tmdb_overrides) ici
+# pour que la detection soit independante de uv.
 REQUIRED_SCHEMA_TABLES = (
     "runs",
     "errors",
@@ -39,6 +47,11 @@ REQUIRED_SCHEMA_TABLES = (
     "incremental_scan_cache",
     "perceptual_reports",
     "duplicate_decisions",
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables 023 (Modal Film)
+    # ajoutees ici pour detection self-healing independante de user_version.
+    "ignored_alerts",
+    "film_marked_for_deletion",
+    "film_tmdb_overrides",
 )
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
@@ -131,6 +144,16 @@ class _StoreBase:
         BEGIN/COMMIT — meme pattern que migration_manager.apply_migrations().
         SQLite supporte le rollback DDL (contrairement a MySQL), donc
         le schema bootstrap devient "tout ou rien".
+
+        Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : ce bootstrap est
+        invoque en filet de securite quand des tables critiques manquent
+        APRES migrations (peut arriver suite a un bug historique du migration
+        manager, ou DB clonee partiellement). Or les migrations contiennent
+        des ALTER TABLE ADD COLUMN qui ne sont pas IF NOT EXISTS-able : sur
+        une DB partiellement existante, ces statements echouent avec
+        "duplicate column name" et plantent tout le bootstrap. On adopte
+        donc ici le meme mecanisme savepoint+_is_idempotent_error que dans
+        MigrationManager.apply pour rester self-healing.
         """
         script, version = self.migrations.build_bootstrap_script()
         if not script or version <= 0:
@@ -140,8 +163,27 @@ class _StoreBase:
         with self._managed_conn() as conn:
             conn.execute("BEGIN")
             try:
-                for stmt in statements:
-                    conn.execute(stmt)
+                for idx, stmt in enumerate(statements):
+                    sp_name = f"bootstrap_{idx}"
+                    conn.execute(f"SAVEPOINT {sp_name}")
+                    try:
+                        conn.execute(stmt)
+                        conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                    except sqlite3.OperationalError as stmt_exc:
+                        # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
+                        # tolere les erreurs idempotentes (duplicate column,
+                        # already exists) pour rester self-healing sur DB
+                        # partielle.
+                        if _is_idempotent_error(stmt_exc):
+                            conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                            conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                            logger.warning(
+                                "bootstrap_schema: statement %d ignore (idempotence): %s",
+                                idx,
+                                stmt_exc,
+                            )
+                            continue
+                        raise
                 conn.execute(f"PRAGMA user_version = {int(version)}")
                 conn.commit()
             except sqlite3.DatabaseError:

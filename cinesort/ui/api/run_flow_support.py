@@ -742,7 +742,14 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     last_log_index = clamp_non_negative_int(last_log_index)
     # Fix audit 2026-05-25 (v1.5.5) Vague J : import local pour eviter cycle
     # run_flow <-> run_data lors du chargement du module.
-    from cinesort.ui.api.run_data_support import count_plan_rows
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Import en plus de
+    # compute_total_fallback pour harmoniser le fallback total entre
+    # dashboard/history/run_flow (auparavant run_flow ne lisait que
+    # run_row.total, ignorant stats.planned_rows).
+    from cinesort.ui.api.run_data_support import (
+        compute_total_fallback,
+        count_plan_rows,
+    )
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -751,7 +758,18 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         run_row, _store = found
         status_text = str(run_row.get("status") or RunStatus.FAILED.value)
         idx = int(run_row.get("idx") or 0)
-        total = int(run_row.get("total") or 0)
+        # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Calcul de stats_obj
+        # pour faire passer planned_rows dans compute_total_fallback().
+        stats_obj_raw = run_row.get("stats_json")
+        stats_obj: Dict[str, Any] = {}
+        if isinstance(stats_obj_raw, str) and stats_obj_raw.strip():
+            try:
+                parsed = json.loads(stats_obj_raw)
+                if isinstance(parsed, dict):
+                    stats_obj = parsed
+            except (ValueError, json.JSONDecodeError):
+                stats_obj = {}
+        total = compute_total_fallback(run_row, stats_obj)
         cur = str(run_row.get("current_folder") or "")
         running = status_text in {RunStatus.PENDING.value, RunStatus.RUNNING.value}
         done = status_text in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}

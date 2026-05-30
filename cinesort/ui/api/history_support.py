@@ -215,7 +215,14 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # Fix audit 2026-05-25 (v1.5.4) Vague I : aligner total_rows sur la
     # source unique de verite = nombre de PlanRow dans plan.jsonl. Le
     # snapshot DB (run_row.total ou stats.planned_rows) peut etre obsolete.
-    from cinesort.ui.api.run_data_support import count_plan_rows as _count_plan_rows
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Fallback delegue a
+    # compute_total_fallback() pour aligner avec dashboard/run_flow (avant
+    # cet helper, history priorisait row.total puis stats.planned_rows,
+    # dashboard l'inverse, run_flow ne lisait que row.total).
+    from cinesort.ui.api.run_data_support import (
+        compute_total_fallback as _compute_total_fallback,
+        count_plan_rows as _count_plan_rows,
+    )
 
     try:
         _hist_run_paths = api._run_paths_for(
@@ -225,10 +232,10 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
         )
         total_rows = _count_plan_rows(
             _hist_run_paths,
-            fallback=int(row.get("total") or stats_obj.get("planned_rows", 0) or 0),
+            fallback=_compute_total_fallback(row, stats_obj),
         )
     except (AttributeError, OSError, TypeError, ValueError):
-        total_rows = int(row.get("total") or stats_obj.get("planned_rows", 0) or 0)
+        total_rows = _compute_total_fallback(row, stats_obj)
     applied_rows = int(stats_obj.get("applied_count") or 0)
 
     # Quality reports : count + tier distribution + score moyen.

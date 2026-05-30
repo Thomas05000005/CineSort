@@ -214,12 +214,117 @@ class TierDistributionRealisticTests(unittest.TestCase):
         self.assertEqual(res["tier"], "Reject")
 
     def test_determine_tier_with_empty_profile_uses_calibrated_defaults(self) -> None:
-        """_determine_tier({}) doit utiliser les defaults recalibres (75/58/42/25)."""
+        """_determine_tier({}) doit utiliser les defaults recalibres (75/56/42/25).
+
+        Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold passe de 58 a 56.
+        """
         self.assertEqual(_determine_tier(75, {}), "Platinum")
-        self.assertEqual(_determine_tier(58, {}), "Gold")
+        self.assertEqual(_determine_tier(56, {}), "Gold")
+        self.assertEqual(_determine_tier(55, {}), "Silver")
         self.assertEqual(_determine_tier(42, {}), "Silver")
         self.assertEqual(_determine_tier(25, {}), "Bronze")
         self.assertEqual(_determine_tier(24, {}), "Reject")
+
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : tests dedies a la
+# recalibration biaisee Bronze. Avant fix, ~80% des 1080p propres tombaient en
+# Bronze (seuils trop hauts, base audio trop basse). Apres fix : 1080p AVC
+# propre >= Silver, 1080p HEVC HDR ou DTS-HD MA propre >= Gold (seuil 56).
+class BronzeBiasRecalibrationTests(unittest.TestCase):
+    """Vague L (scoring-5) : recalibration pour distribution realiste."""
+
+    def setUp(self) -> None:
+        self.profile = default_quality_profile()
+
+    def test_1080p_avc_8mbps_5_1_reaches_silver(self) -> None:
+        """1080p AVC 8 Mbps 5.1 propre -> Silver minimum (score >= 42)."""
+        probe = _make_probe(
+            codec="h264", width=1920, height=1080, bitrate=8_000_000,
+            bit_depth=8, hdr10=False,
+            audio_codec="ac3", channels=6, audio_bitrate=448_000,
+        )
+        res = compute_quality_score(normalized_probe=probe, profile=self.profile, film_year=2015)
+        self.assertGreaterEqual(
+            res["score"], 42,
+            f"1080p AVC 8Mbps 5.1 doit atteindre Silver : score={res['score']}"
+        )
+        self.assertIn(
+            res["tier"], ("Silver", "Gold", "Platinum"),
+            f"tier={res['tier']} score={res['score']} : 1080p AVC propre >= Silver"
+        )
+
+    def test_1080p_hevc_hdr_10mbps_dts_hd_ma_reaches_gold(self) -> None:
+        """1080p HEVC HDR 10 Mbps DTS-HD MA propre -> Gold (>= seuil Gold)."""
+        probe = _make_probe(
+            codec="hevc", width=1920, height=1080, bitrate=10_000_000,
+            bit_depth=10, hdr10=True,
+            audio_codec="dts-hd ma", channels=6, audio_bitrate=768_000,
+        )
+        res = compute_quality_score(normalized_probe=probe, profile=self.profile, film_year=2015)
+        gold_th = self.profile["tiers"]["gold"]
+        self.assertGreaterEqual(
+            res["score"], gold_th,
+            f"1080p HEVC HDR 10Mbps DTS-HD MA doit atteindre Gold (>={gold_th}) : "
+            f"score={res['score']} tier={res['tier']}"
+        )
+        self.assertIn(
+            res["tier"], ("Gold", "Platinum"),
+            f"tier={res['tier']} score={res['score']} : 1080p HEVC HDR DTS-HD MA >= Gold"
+        )
+
+    def test_simulated_library_50_1080p_distribution_realistic(self) -> None:
+        """Bibliotheque simulee de 50 films 1080p -> >=30% en Silver+ (pas tout Bronze).
+
+        Avant fix : ~80% en Bronze sur un panel 1080p courant (bug scoring-5).
+        Apres fix : au moins 30% atteignent Silver ou plus.
+        Mutation test : si _determine_tier hardcode "Bronze" pour tout, ce test casse.
+        """
+        # Panel de 50 films 1080p representatifs d'une bibliotheque typique.
+        # Mix : BluRay propre, web 5.1, web stereo, HEVC HDR, AVC standard.
+        configs = [
+            # 10 BluRay AVC 8-12 Mbps 5.1 propres (cas dominant)
+            *[{"codec": "h264", "bitrate": 8_500_000 + i * 500_000, "audio_codec": "ac3",
+               "channels": 6, "audio_bitrate": 448_000, "bit_depth": 8} for i in range(10)],
+            # 10 BluRay AVC 10-13 Mbps DTS 5.1
+            *[{"codec": "h264", "bitrate": 10_000_000 + i * 300_000, "audio_codec": "dts",
+               "channels": 6, "audio_bitrate": 768_000, "bit_depth": 8} for i in range(10)],
+            # 10 HEVC HDR 8-12 Mbps DTS-HD MA (qualite premium 1080p)
+            *[{"codec": "hevc", "bitrate": 8_000_000 + i * 500_000, "audio_codec": "dts-hd ma",
+               "channels": 6, "audio_bitrate": 768_000, "bit_depth": 10, "hdr10": True} for i in range(10)],
+            # 10 Web AVC 5-7 Mbps 5.1 AAC (cas standard streaming)
+            *[{"codec": "h264", "bitrate": 5_000_000 + i * 200_000, "audio_codec": "aac",
+               "channels": 6, "audio_bitrate": 384_000, "bit_depth": 8} for i in range(10)],
+            # 10 Web AVC 3-5 Mbps stereo AAC (cas bas de gamme)
+            *[{"codec": "h264", "bitrate": 3_500_000 + i * 150_000, "audio_codec": "aac",
+               "channels": 2, "audio_bitrate": 128_000, "bit_depth": 8} for i in range(10)],
+        ]
+        tiers: list[str] = []
+        for cfg in configs:
+            probe = _make_probe(
+                codec=cfg["codec"], width=1920, height=1080,
+                bitrate=cfg["bitrate"], bit_depth=cfg["bit_depth"],
+                hdr10=cfg.get("hdr10", False),
+                audio_codec=cfg["audio_codec"], channels=cfg["channels"],
+                audio_bitrate=cfg["audio_bitrate"],
+            )
+            res = compute_quality_score(normalized_probe=probe, profile=self.profile, film_year=2018)
+            tiers.append(res["tier"])
+
+        dist = Counter(tiers)
+        silver_or_better = dist.get("Silver", 0) + dist.get("Gold", 0) + dist.get("Platinum", 0)
+        ratio_silver_plus = silver_or_better / len(tiers)
+        self.assertGreaterEqual(
+            ratio_silver_plus, 0.30,
+            f"Bibliotheque 1080p : seulement {ratio_silver_plus:.0%} en Silver+ "
+            f"(attendu >= 30%). Distribution : {dict(dist)}. "
+            f"Le bug scoring-5 (Bronze biaise) est en place."
+        )
+        # Verifie aussi qu'on n'a pas tout-en-Bronze (mutation simple).
+        self.assertLess(
+            dist.get("Bronze", 0) + dist.get("Reject", 0),
+            len(tiers),
+            f"Tous les films classes Bronze/Reject -> bug recalibration : {dict(dist)}"
+        )
 
 
 if __name__ == "__main__":

@@ -40,6 +40,12 @@ class ReleaseNameInfo:
     audio_is_lossless: bool = False  # TrueHD, FLAC, DTS-HD MA, PCM
     release_group: str = ""
     extras: List[str] = field(default_factory=list)  # autres tags
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : flag CAM/TS/SCREENER detecte
+    # INDEPENDAMMENT de source_hint. Une release "X.CAM.2160p.REMUX" doit
+    # rester marquee CAM meme si un token source superieur (REMUX/BluRay)
+    # coexiste : source_hint s'arrete au premier match et ratait le CAM.
+    is_cam: bool = False
+    cam_token: str = ""  # "cam", "ts", "telesync", "screener", "tc"
 
 
 # Ordre important : motifs plus specifiques en premier.
@@ -102,6 +108,22 @@ _PATTERNS_AUDIO = [
     (r"\bMP3\b", "mp3", False),
 ]
 
+# Fix audit 2026-05-26 (v1.5.6) Vague L : detection CAM/TS/SCREENER INDEPENDANTE
+# de source_hint. Liste de tokens "qualite de captation degradee" avec leur
+# label normalise. Detecte meme si un token source superieur coexiste.
+# \bTS\b et \bTC\b sont risques (faux positifs : "TS" peut etre une initiale)
+# mais en pratique sur un nom de release ils signalent TeleSync/TeleCine.
+_PATTERNS_CAM = [
+    (r"\bTELESYNC\b", "telesync"),
+    (r"\bTELECINE\b", "telecine"),
+    (r"\bSCREENER\b|\bSCR\b|\bDVDSCR\b|\bBDSCR\b", "screener"),
+    (r"\bCAMRIP\b|\bHDCAM\b|\bCAM\b", "cam"),
+    (r"\bHDTS\b|\bTS\b", "ts"),
+    (r"\bTC\b", "tc"),
+    (r"\bWORKPRINT\b|\bWP\b", "workprint"),
+]
+
+
 _PATTERN_CHANNELS = re.compile(r"\b(?:7\.1|5\.1|5\.0|2\.1|2\.0|1\.0|6\.1)\b")
 
 # Release group : tag final apres dernier tiret. Tolere extension de fichier.
@@ -157,6 +179,19 @@ def parse_release_name(name: str) -> ReleaseNameInfo:
     for pattern, source in _PATTERNS_SOURCE:
         if re.search(pattern, text, re.IGNORECASE):
             info.source_hint = source
+            break
+
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : detection CAM/TS/SCREENER
+    # INDEPENDANTE. Contrairement a source_hint (qui break au premier match et
+    # ratait CAM si REMUX/BluRay precedait), on scanne TOUTE la liste CAM et on
+    # garde le premier token degrade trouve. Si un CAM est detecte, on force
+    # aussi source_hint="cam" : un fichier CAM EST une captation degradee, peu
+    # importe le mensonge "REMUX/BluRay" colle dans le nom.
+    for pattern, cam_tok in _PATTERNS_CAM:
+        if re.search(pattern, text, re.IGNORECASE):
+            info.is_cam = True
+            info.cam_token = cam_tok
+            info.source_hint = "cam"
             break
 
     # Audio : premier match wins pour codec/lossless, mais atmos/dts_x sont

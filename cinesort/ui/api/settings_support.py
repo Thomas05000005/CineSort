@@ -13,7 +13,10 @@ import cinesort.infra.state as state
 from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.naming import PRESETS, validate_template
-from cinesort.infra.jellyfin_client import JellyfinClient
+# Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError doit etre
+# importe pour etre catche dans test_jellyfin_connection (sinon l'exception
+# s'echappe et le caller voit un crash plutot qu'un message utilisateur).
+from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
 from cinesort.infra.local_secret_store import (
     SECRET_PROTECTION_NONE,
     SECRET_PROTECTION_UNAVAILABLE,
@@ -1659,10 +1662,16 @@ def test_jellyfin_connection(
         libraries = []
         movies_count = 0
         if user_id:
+            # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError
+            # (levee par get_libraries/get_movies_count sur 401/403/5xx, cf
+            # jellyfin_client.py:109-112) n'etait pas catchee, donc une auth
+            # KO sur ces endpoints s'echappait jusqu'au caller. On l'ajoute au
+            # tuple pour degrader gracieusement (libraries=[], movies_count=0)
+            # et retourner ok=True avec les infos serveur deja recuperees.
             try:
                 libraries = client.get_libraries(user_id)
                 movies_count = client.get_movies_count(user_id)
-            except (ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+            except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
                 logger.debug("Jellyfin: erreur récupération bibliothèques: %s", exc)
 
         return {
@@ -1675,7 +1684,13 @@ def test_jellyfin_connection(
             "libraries": libraries,
             "movies_count": movies_count,
         }
-    except (ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — meme correction au
+    # niveau du bloc except principal. Si client.validate_connection() leve
+    # JellyfinError (cas typique : URL malformee qui passe la normalisation mais
+    # echoue cote serveur, ou erreur reseau bas niveau remontee comme
+    # JellyfinError), on retourne un err() proprement plutot que de laisser
+    # l'exception remonter au caller (qui afficherait une stacktrace dans l'UI).
+    except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
         return err(f"Jellyfin connection failed: {exc}", category="runtime", level="error")
 
 

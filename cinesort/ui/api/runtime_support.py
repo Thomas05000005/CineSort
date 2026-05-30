@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -32,10 +33,31 @@ _logger = logging.getLogger(__name__)
 # la session courante, reset si la CineSortApi est recree (tests).
 _RECONCILED_STATE_DIRS: set = set()
 
+# Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) :
+# get_or_create_infra construisait le SQLiteStore + appelait initialize() HORS
+# du _runs_lock (build long), puis recheckait le cache dans le lock. Sous deux
+# appels paralleles avec un cache vide, les DEUX threads passaient initialize()
+# en parallele -> double backup pre_migration, double execution PRAGMA
+# integrity_check, double tentative de migrations. Le second perdant etait
+# finalement jete a la sortie (already win), mais les effets de bord etaient
+# deja survenus.
+#
+# Solution : pattern Event "init in progress" par state_dir. Un seul thread
+# fait l'initialize ; les autres attendent l'Event puis recuperent le cache.
+# On ne tient PAS _runs_lock pendant initialize() (qui peut prendre plusieurs
+# secondes : backup + migrations), seulement le temps de claim l'Event.
+_INIT_IN_PROGRESS: Dict[str, threading.Event] = {}
+_INIT_IN_PROGRESS_LOCK = threading.Lock()
+
 
 def reset_reconciliation_cache_for_tests() -> None:
     """Permet aux tests d'isoler la reconciliation entre runs."""
     _RECONCILED_STATE_DIRS.clear()
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : reset aussi le registre
+    # d'initialisations en cours pour eviter qu'un test residuel ne bloque
+    # un test suivant (Event jamais sette suite a un crash).
+    with _INIT_IN_PROGRESS_LOCK:
+        _INIT_IN_PROGRESS.clear()
 
 
 def state_dir_key(state_dir: Path) -> str:
@@ -145,89 +167,129 @@ def get_or_create_infra(
         except (OSError, TypeError, ValueError):
             return
 
-    with api._runs_lock:
-        existing = api._infra_by_state_dir.get(key)
-        if existing:
-            # Fix audit 2026-05-24 : avant on rappelait .initialize() a chaque
-            # endpoint, ce qui retriggerait _backup_before_migrations() ->
-            # spam de backups (9 backups DB en 13s observe en prod).
-            # initialize() est idempotent et a deja ete appele au premier
-            # create. On retourne directement le cache.
-            return existing
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) : claim-or-wait pattern.
+    # Cas 1 : cache present -> retour immediat.
+    # Cas 2 : cache absent, mais un autre thread est en train d'initialiser
+    #         pour CE state_dir -> on attend l'Event puis on relit le cache.
+    # Cas 3 : cache absent et personne n'initialise -> on devient le builder
+    #         et on cree un Event pour les futurs threads qui arriveraient
+    #         pendant notre initialize().
+    init_event: Optional[threading.Event] = None
+    we_are_the_builder = False
+    while True:
+        with api._runs_lock:
+            existing = api._infra_by_state_dir.get(key)
+            if existing:
+                # Fix audit 2026-05-24 : initialize() est idempotent + deja
+                # appele au premier create. On retourne directement le cache.
+                return existing
+            # Cache absent : voir si un autre thread initialise deja.
+            with _INIT_IN_PROGRESS_LOCK:
+                pending = _INIT_IN_PROGRESS.get(key)
+                if pending is None:
+                    # On devient le builder. Pose un Event pour les autres.
+                    init_event = threading.Event()
+                    _INIT_IN_PROGRESS[key] = init_event
+                    we_are_the_builder = True
+                else:
+                    init_event = pending
+                    we_are_the_builder = False
+        if we_are_the_builder:
+            break
+        # On n'est pas builder : attendre la fin de l'initialize, puis reboucler
+        # pour relire le cache. Timeout defensif pour eviter un freeze infini
+        # si le builder a crash (l'Event sera nettoye par le finally du
+        # builder, mais on garde un cap).
+        init_event.wait(timeout=60.0)
+        # Reboucle pour relire le cache. Si le cache est absent (le builder a
+        # echoue), on retente l'init nous-meme.
 
-    store = SQLiteStore(
-        db_path_for_state_dir(state_dir),
-        busy_timeout_ms=8000,
-        debug_logger=_sqlite_debug,
-    )
-    version = store.initialize()
-    _sqlite_debug(f"SQLite initialized at {store.db_path}, schema version={version}")
+    try:
+        store = SQLiteStore(
+            db_path_for_state_dir(state_dir),
+            busy_timeout_ms=8000,
+            debug_logger=_sqlite_debug,
+        )
+        version = store.initialize()
+        _sqlite_debug(f"SQLite initialized at {store.db_path}, schema version={version}")
 
-    # V2-11 audit QA 20260504 : si l'integrity_check a detecte une corruption,
-    # publier une notification UI persistante (consommee par le notification
-    # center au prochain affichage). Independant de la reconciliation, car
-    # peut arriver meme sans pending_moves.
-    _publish_integrity_notification_if_any(api, store)
+        # V2-11 audit QA 20260504 : si l'integrity_check a detecte une corruption,
+        # publier une notification UI persistante (consommee par le notification
+        # center au prochain affichage). Independant de la reconciliation, car
+        # peut arriver meme sans pending_moves.
+        _publish_integrity_notification_if_any(api, store)
 
-    # CR-1 audit QA 20260429 : reconciliation des moves orphelins au 1er boot
-    # de chaque state_dir. Si un crash a interrompu un apply precedent, on
-    # examine apply_pending_moves et on classifie/cleanup chaque entree.
-    if key not in _RECONCILED_STATE_DIRS:
-        try:
-            notify = getattr(api, "_notify", None)
-            report = reconcile_at_boot(store, notify=notify)
-            if report.get("examined", 0) > 0:
-                _logger.info(
-                    "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
-                    report["examined"],
-                    report.get("completed", 0),
-                    report.get("rolled_back", 0),
-                    len(report.get("duplicated", [])),
-                    len(report.get("lost", [])),
-                )
-        except Exception as exc:
-            _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
-        # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
-        # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
-        # en BDD pour toujours. On les marque FAILED avec message de crash.
-        try:
-            with store._managed_conn() as conn:  # type: ignore[attr-defined]
-                cursor = conn.execute(
-                    "SELECT run_id FROM runs WHERE status = ?",
-                    ("RUNNING",),
-                )
-                orphan_run_ids = [row[0] for row in cursor.fetchall()]
-                if orphan_run_ids:
-                    conn.execute(
-                        "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) WHERE status = ?",
-                        ("FAILED", "Crash detecte au boot (run orphelin)", "RUNNING"),
+        # CR-1 audit QA 20260429 : reconciliation des moves orphelins au 1er boot
+        # de chaque state_dir. Si un crash a interrompu un apply precedent, on
+        # examine apply_pending_moves et on classifie/cleanup chaque entree.
+        if key not in _RECONCILED_STATE_DIRS:
+            try:
+                notify = getattr(api, "_notify", None)
+                report = reconcile_at_boot(store, notify=notify)
+                if report.get("examined", 0) > 0:
+                    _logger.info(
+                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
+                        report["examined"],
+                        report.get("completed", 0),
+                        report.get("rolled_back", 0),
+                        len(report.get("duplicated", [])),
+                        len(report.get("lost", [])),
                     )
-                    _logger.warning(
-                        "Boot cleanup: %d run(s) orphelin(s) marques FAILED: %s",
-                        len(orphan_run_ids),
-                        ", ".join(orphan_run_ids[:5]),
+            except Exception as exc:
+                _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
+            # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
+            # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
+            # en BDD pour toujours. On les marque FAILED avec message de crash.
+            try:
+                with store._managed_conn() as conn:  # type: ignore[attr-defined]
+                    cursor = conn.execute(
+                        "SELECT run_id FROM runs WHERE status = ?",
+                        ("RUNNING",),
                     )
-        except Exception as exc:
-            _logger.warning("orphan runs cleanup: ignored (%s)", exc)
-        _RECONCILED_STATE_DIRS.add(key)
+                    orphan_run_ids = [row[0] for row in cursor.fetchall()]
+                    if orphan_run_ids:
+                        conn.execute(
+                            "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) WHERE status = ?",
+                            ("FAILED", "Crash detecte au boot (run orphelin)", "RUNNING"),
+                        )
+                        _logger.warning(
+                            "Boot cleanup: %d run(s) orphelin(s) marques FAILED: %s",
+                            len(orphan_run_ids),
+                            ", ".join(orphan_run_ids[:5]),
+                        )
+            except Exception as exc:
+                _logger.warning("orphan runs cleanup: ignored (%s)", exc)
+            _RECONCILED_STATE_DIRS.add(key)
 
-    def _jobrunner_debug(msg: str) -> None:
-        if not env_truthy_fn("CINESORT_DEBUG"):
-            return
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            api._append_text(state_dir / "debug_jobrunner.log", f"[{ts}] {msg}\n")
-        except (OSError, TypeError, ValueError):
-            return
+        def _jobrunner_debug(msg: str) -> None:
+            if not env_truthy_fn("CINESORT_DEBUG"):
+                return
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                api._append_text(state_dir / "debug_jobrunner.log", f"[{ts}] {msg}\n")
+            except (OSError, TypeError, ValueError):
+                return
 
-    runner = JobRunner(store, debug_logger=_jobrunner_debug)
+        runner = JobRunner(store, debug_logger=_jobrunner_debug)
 
-    with api._runs_lock:
-        already = api._infra_by_state_dir.get(key)
-        if already:
-            return already
-        api._infra_by_state_dir[key] = (store, runner)
-        return store, runner
+        with api._runs_lock:
+            already = api._infra_by_state_dir.get(key)
+            if already:
+                return already
+            api._infra_by_state_dir[key] = (store, runner)
+            return store, runner
+    finally:
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) : que le build
+        # reussisse, throw, ou cas race (already), on RELACHE toujours
+        # l'Event pour debloquer les threads en attente, et on retire
+        # l'entree du registre pour permettre une nouvelle tentative si
+        # le build a echoue.
+        with _INIT_IN_PROGRESS_LOCK:
+            current = _INIT_IN_PROGRESS.get(key)
+            if current is init_event:
+                _INIT_IN_PROGRESS.pop(key, None)
+        if init_event is not None:
+            init_event.set()
 
 
 def get_run(api: Any, run_id: str) -> Optional[Any]:

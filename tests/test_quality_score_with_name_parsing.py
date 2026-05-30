@@ -106,7 +106,14 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
         self.profile = default_quality_profile()
 
     def test_12_angry_men_4k_dv_bluray_dts_hd_x265_probe_failed(self) -> None:
-        """Probe FAILED + nom UHD DV BluRay DTS-HD MA -> Platinum/Gold."""
+        """Probe FAILED + nom UHD DV BluRay DTS-HD MA -> score eleve mais tier CAP a Silver.
+
+        Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : avant ce fix, le tier
+        etait Platinum/Gold (sur la base du seul nom). Decision senior : sans
+        verification ffprobe, on ne peut pas certifier un tier Gold+ et le tier
+        est plafonne a Silver. Le score brut reste eleve (recompense des hints
+        du nom riche) et la raison explique le plafonnement.
+        """
         name = "12 Angry Men (1957) 2160p DV HDR BluRay DTS-HD MA x265.mkv"
         result = compute_quality_score(
             normalized_probe=_failed_probe(),
@@ -117,13 +124,29 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
             expected_year=1957,
             film_year=1957,
         )
+        # Le score brut reste eleve (le nom est riche).
         self.assertGreaterEqual(
             result["score"], 70, f"score trop faible: {result['score']} ({result['reasons']})"
         )
-        self.assertIn(result["tier"], {"Platinum", "Gold"}, f"tier={result['tier']}")
+        # Mais le tier est CAP a Silver max parce que le probe a echoue.
+        self.assertEqual(
+            result["tier"],
+            "Silver",
+            f"tier={result['tier']} score={result['score']} : probe FAILED doit cap Silver",
+        )
+        # Et une raison explicite documente le plafonnement.
+        self.assertTrue(
+            any("plafonne" in r.lower() and "silver" in r.lower() for r in result["reasons"]),
+            f"reason cap manquante : {result['reasons']}",
+        )
 
     def test_inception_1080p_bluray_x264_dts_hd_ma_probe_failed(self) -> None:
-        """Probe FAILED + nom 1080p BluRay DTS-HD MA -> Gold/Silver."""
+        """Probe FAILED + nom 1080p BluRay DTS-HD MA -> Silver (cap Vague L scoring-1).
+
+        Fix audit 2026-05-26 (v1.5.6) Vague L : cap a Silver pour tout
+        probe FAILED, meme si le nom est riche. Le score brut peut etre
+        proche du seuil Gold (>=56) mais le tier reste plafonne.
+        """
         name = "Inception (2010) 1080p BluRay x264 DTS-HD MA 5.1.mkv"
         result = compute_quality_score(
             normalized_probe=_failed_probe(),
@@ -137,7 +160,12 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
         self.assertGreaterEqual(
             result["score"], 55, f"score trop faible: {result['score']} ({result['reasons']})"
         )
-        self.assertIn(result["tier"], {"Gold", "Silver"}, f"tier={result['tier']}")
+        # Cap force a Silver max (probe FAILED).
+        self.assertEqual(
+            result["tier"],
+            "Silver",
+            f"tier={result['tier']} score={result['score']} : probe FAILED doit cap Silver",
+        )
 
     def test_movie_720p_webdl_aac_probe_failed(self) -> None:
         """Probe FAILED + nom 720p WEB-DL AAC -> Bronze."""
@@ -246,6 +274,93 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
             with_name["score"] - without["score"],
             40,
             f"gap insuffisant: {without['score']} -> {with_name['score']}",
+        )
+
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : tests dedies au CAP de tier
+# lorsque le probe a echoue. Le nom seul ne peut pas certifier Gold/Platinum.
+class FailedProbeTierCapTests(unittest.TestCase):
+    """Vague L (scoring-1) : probe FAILED -> tier plafonne a Silver."""
+
+    def setUp(self) -> None:
+        self.profile = default_quality_profile()
+
+    def test_failed_probe_caps_to_silver(self) -> None:
+        """Pivot : nom UHD premium + probe FAILED -> tier <= Silver.
+
+        Bug avant fix : score brut 76+ -> Platinum/Gold sur la base du seul nom
+        (non verifie). Apres fix : tier cap a Silver, score brut conserve.
+        """
+        name = "Movie (2024) 2160p REMUX DV TrueHD 7.1 x265.mkv"
+        result = compute_quality_score(
+            normalized_probe=_failed_probe(),
+            profile=self.profile,
+            release_name=name,
+            folder_name="Movie (2024)",
+            film_year=2024,
+        )
+        # Le score brut est eleve (recompense du nom riche).
+        self.assertGreaterEqual(
+            result["score"],
+            56,
+            f"score insuffisant pour declencher un cap : {result['score']}",
+        )
+        # Mais le tier est BORNE a Silver.
+        tier_order = ["Platinum", "Gold", "Silver", "Bronze", "Reject"]
+        self.assertGreaterEqual(
+            tier_order.index(result["tier"]),
+            tier_order.index("Silver"),
+            f"tier={result['tier']} : probe FAILED doit etre <= Silver",
+        )
+        # Pour ce cas pivot pile au-dessus de Silver, on attend exactement Silver.
+        self.assertEqual(result["tier"], "Silver")
+
+    def test_failed_probe_cap_does_not_promote_bronze(self) -> None:
+        """Cap = plafonnement uniquement : un Bronze brut reste Bronze (pas remonte)."""
+        # Nom pauvre + probe FAILED -> score brut ~25-30 (Bronze).
+        result = compute_quality_score(
+            normalized_probe=_failed_probe(),
+            profile=self.profile,
+            release_name="Movie (2024) 720p WEB-DL AAC.mkv",
+            folder_name="Movie (2024)",
+            film_year=2024,
+        )
+        self.assertIn(
+            result["tier"],
+            {"Bronze", "Reject"},
+            f"tier={result['tier']} score={result['score']} : Bronze brut ne doit pas etre promu",
+        )
+
+    def test_full_probe_not_capped(self) -> None:
+        """Pivot inverse : probe FULL = pas de cap, tier reel preserve."""
+        probe = {
+            "probe_quality": "FULL",
+            "video": {
+                "codec": "hevc",
+                "width": 3840,
+                "height": 2160,
+                "bitrate": 48_000_000,
+                "bit_depth": 10,
+                "hdr10": True,
+                "hdr_dolby_vision": True,
+                "hdr10_plus": False,
+            },
+            "audio_tracks": [
+                {"codec": "truehd atmos", "channels": 8, "language": "eng", "bitrate": 4_000_000}
+            ],
+            "sources": {},
+        }
+        result = compute_quality_score(
+            normalized_probe=probe,
+            profile=self.profile,
+            release_name="Movie.2024.2160p.UHD.BluRay.Remux.HDR.DV.TrueHD.Atmos.mkv",
+            film_year=2024,
+        )
+        # Probe FULL : on peut faire confiance et atteindre Platinum.
+        self.assertEqual(
+            result["tier"],
+            "Platinum",
+            f"tier={result['tier']} score={result['score']} : probe FULL UHD premium = Platinum",
         )
 
 

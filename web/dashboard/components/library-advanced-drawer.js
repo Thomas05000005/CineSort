@@ -89,16 +89,26 @@ function _renderMultiSelect(name, options, current) {
     .join("");
 }
 
-function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix) {
+function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix, nameMin, nameMax) {
+  // Fix audit 2026-05-26 (v1.5.6) Vague L (drawer-1) :
+  // Avant, le helper imposait `${name}_min` / `${name}_max` pour l'attribut name
+  // des inputs. Pour la section "Taille fichier (Go)" on passait name="size_gb",
+  // ce qui produisait size_gb_min / size_gb_max, alors que DEFAULTS / state /
+  // buildBackendFilters lisent size_min_gb / size_max_gb. Resultat : la valeur
+  // saisie par l'utilisateur n'arrivait JAMAIS au backend (perdue dans
+  // _collectValues car ecrasee par DEFAULTS lors du spread). On accepte
+  // desormais des noms explicites en option pour eviter le mismatch.
+  const minName = nameMin || `${name}_min`;
+  const maxName = nameMax || `${name}_max`;
   return `
     <div class="bibliotheque-drawer-range">
       <input type="number" class="v5-input bibliotheque-drawer-range-input"
-             name="${escapeHtml(name)}_min"
+             name="${escapeHtml(minName)}"
              min="${absMin}" max="${absMax}" step="${step}"
              value="${minVal}" aria-label="${escapeHtml(name)} min">
       <span class="bibliotheque-drawer-range-sep">—</span>
       <input type="number" class="v5-input bibliotheque-drawer-range-input"
-             name="${escapeHtml(name)}_max"
+             name="${escapeHtml(maxName)}"
              min="${absMin}" max="${absMax}" step="${step}"
              value="${maxVal}" aria-label="${escapeHtml(name)} max">
       ${suffix ? `<span class="bibliotheque-drawer-range-suffix">${escapeHtml(suffix)}</span>` : ""}
@@ -147,7 +157,10 @@ function _buildHtml(initial) {
 
         <section class="bibliotheque-drawer-section">
           <h3>Taille fichier (Go)</h3>
-          ${_renderRange("size_gb", state.size_min_gb, state.size_max_gb, 0, 200, 0.5, "Go")}
+          ${/* Fix audit 2026-05-26 (v1.5.6) Vague L (drawer-1) : aligne les attributs name HTML
+              (size_min_gb/size_max_gb) avec les cles DEFAULTS lues par buildBackendFilters,
+              au lieu de produire size_gb_min/size_gb_max qui etaient ecrases par DEFAULTS. */ ""}
+          ${_renderRange("size_gb", state.size_min_gb, state.size_max_gb, 0, 200, 0.5, "Go", "size_min_gb", "size_max_gb")}
         </section>
 
         <section class="bibliotheque-drawer-section">

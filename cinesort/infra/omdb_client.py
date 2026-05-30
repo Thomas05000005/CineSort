@@ -320,11 +320,24 @@ class OmdbClient:
         full_params["apikey"] = self.api_key
 
         self._rate_limit_wait()
+
+        # Fix audit 2026-05-26 (v1.5.6) Vague L : omdb-1 — circuit breaker inerte.
+        # Avant : `response.raise_for_status()` etait appele APRES `_breaker.call(...)`.
+        # Comme la Session a `raise_on_status=False` (cf _http_utils.py:47), un
+        # status 5xx/429/401 ne levait aucune HTTPError dans le lambda, donc le
+        # breaker ne comptait pas l'echec : 100 reponses 503 consecutives
+        # laissaient le circuit ferme. On deplace `raise_for_status()` a
+        # l'INTERIEUR du lambda pour que les status d'erreur (5xx/429) levent
+        # bien HTTPError vu par le breaker (cf _is_server_down dans
+        # _circuit_breaker.py:51-67 — 5xx et 429 ouvrent le circuit, 4xx hors
+        # 429 ne le ferment pas).
+        def _do_get() -> requests.Response:
+            resp = self._session.get(OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
+            resp.raise_for_status()
+            return resp
+
         try:
-            response = self._breaker.call(
-                lambda: self._session.get(OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
-            )
-            response.raise_for_status()
+            response = self._breaker.call(_do_get)
             _body = getattr(response, "content", b"")
             if _body and len(_body) > 10_000_000:
                 raise ValueError("Response too large")

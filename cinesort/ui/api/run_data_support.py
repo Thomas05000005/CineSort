@@ -144,6 +144,54 @@ def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
 # On aligne tout le monde sur count_plan_rows() = nombre de PlanRow non-null
 # valides dans plan.jsonl, source faisant autorite. Si plan.jsonl est
 # inaccessible, fallback sur stats.planned_rows pour ne pas casser l'UI.
+def compute_total_fallback(
+    run_row: Dict[str, Any] | None,
+    stats_obj: Dict[str, Any] | None,
+) -> int:
+    """Calcule le fallback "nombre de films" quand plan.jsonl est inaccessible.
+
+    Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Avant ce helper,
+    chaque endpoint avait son propre ordre de priorite divergent :
+      - dashboard_support.py:80 : stats.planned_rows -> run_row.total -> 0
+      - history_support.py:228  : run_row.total -> stats.planned_rows -> 0
+      - run_flow_support.py:772 : run_row.total -> 0
+    Resultat : trois compteurs distincts pour le meme run quand plan.jsonl
+    manque.
+
+    Choix senior : on PRIORISE stats.planned_rows car c'est le snapshot
+    persiste a la fin du run, refletant le nombre de PlanRow effectivement
+    ecrits dans plan.jsonl au moment de mark_run_done. run_row.total = total
+    de dossiers DECOUVERTS pendant le scan (discover_total) — toujours >=
+    planned_rows car certains dossiers explores sont ignores (pas de video)
+    ou regroupes (multi-version d'un meme film). Pour un fallback qui doit
+    approcher au plus pres len(plan.jsonl), planned_rows est le meilleur
+    proxy. run_row.total ne sert que pour les runs RUNNING ou FAILED avant
+    mark_run_done (stats absentes).
+
+    Args:
+        run_row: dict du run depuis store.run (peut etre None).
+        stats_obj: dict deserialise de run_row.stats_json (peut etre None).
+
+    Returns:
+        Meilleure estimation entiere positive ou 0.
+    """
+    if isinstance(stats_obj, dict):
+        try:
+            planned = int(stats_obj.get("planned_rows") or 0)
+            if planned > 0:
+                return planned
+        except (TypeError, ValueError):
+            pass
+    if isinstance(run_row, dict):
+        try:
+            total = int(run_row.get("total") or 0)
+            if total > 0:
+                return total
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
 def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
     """Retourne le nombre de PlanRow valides dans plan.jsonl.
 

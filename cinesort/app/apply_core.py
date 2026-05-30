@@ -117,6 +117,47 @@ def record_apply_op(
         return False
 
 
+def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
+    """Fix audit 2026-05-26 (v1.5.6) Vague L (test vacuous rollback) :
+    helper extrait du _execute_apply pour permettre un test de COMPORTEMENT
+    (assertLogs sur le warning de rollback echoue) au lieu d'un match de
+    texte source.
+
+    Sur Windows / case-insensitive FS, renommer "Film" -> "film" necessite
+    un detour par un nom temporaire ".__tmp_ren" (sinon le FS considere
+    folder == dst et refuse). Si le rename tmp->dst echoue, on tente le
+    rollback tmp -> folder pour ne pas laisser le dossier dans un etat
+    impossible a recuperer manuellement. Si MEME le rollback echoue, on
+    LOG un warning (le dossier reste en .__tmp_ren et l'utilisateur doit
+    intervenir) puis on re-raise l'exception originale.
+
+    Raises:
+        OSError / PermissionError : l'exception du 2e rename est toujours
+        re-raisee (le caller decide de l'impact).
+    """
+    tmp = folder.parent / (folder.name + ".__tmp_ren")
+    if tmp.exists():
+        tmp = tmp.with_name(tmp.name + "_2")
+    folder.rename(tmp)
+    try:
+        tmp.rename(dst)
+    except (OSError, PermissionError):
+        # Rollback : restaurer le nom original si le 2e rename echoue
+        try:
+            tmp.rename(folder)
+        except OSError as rollback_err:
+            # M4 : ne plus masquer silencieusement — le dossier reste en .__tmp_ren
+            # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+            # (l'exception originale est re-raise apres : le caller decidera de l'impact)
+            _logger.warning(
+                "apply: rollback rename echoue %s -> %s: %s (dossier en etat .__tmp_ren)",
+                tmp,
+                folder,
+                rollback_err,
+            )
+        raise
+
+
 def is_managed_merge_file(cfg: "Config", path: Path) -> bool:
     """Indique si le fichier doit être pris en compte lors d'un merge (vidéo ou sidecar)."""
     ext = path.suffix.lower()
@@ -1381,27 +1422,11 @@ def apply_single(
                 src_size = None
 
         if folder.name.lower() == dst.name.lower():
-            tmp = folder.parent / (folder.name + ".__tmp_ren")
-            if tmp.exists():
-                tmp = tmp.with_name(tmp.name + "_2")
-            folder.rename(tmp)
-            try:
-                tmp.rename(dst)
-            except (OSError, PermissionError):
-                # Rollback : restaurer le nom original si le 2e rename echoue
-                try:
-                    tmp.rename(folder)
-                except OSError as rollback_err:
-                    # M4 : ne plus masquer silencieusement — le dossier reste en .__tmp_ren
-                    # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
-                    # (l'exception originale est re-raise apres : le caller decidera de l'impact)
-                    _logger.warning(
-                        "apply: rollback rename echoue %s -> %s: %s (dossier en etat .__tmp_ren)",
-                        tmp,
-                        folder,
-                        rollback_err,
-                    )
-                raise
+            # Fix audit 2026-05-26 (v1.5.6) Vague L : extraction en helper
+            # _case_only_rename_with_rollback pour tester le COMPORTEMENT de
+            # rollback (assertLogs sur logger.warning) au lieu de matcher le
+            # texte du source code.
+            _case_only_rename_with_rollback(folder, dst)
         else:
             folder.rename(dst)
 

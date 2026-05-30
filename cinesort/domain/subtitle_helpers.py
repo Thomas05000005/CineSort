@@ -285,9 +285,25 @@ def build_subtitle_report(
     languages = sorted(all_languages)
     formats = sorted({s.ext for s in matched})
 
-    # Langues attendues manquantes : verifiees sur l'UNION externes+embarquees
-    expected = [lang.lower().strip() for lang in (expected_languages or []) if lang]
-    missing = [lang for lang in expected if lang not in all_languages]
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-3) : normalisation SYMETRIQUE.
+    # Avant, `expected_languages` etait seulement .lower().strip() sans passer par
+    # _LANG_MAP. Donc une attente saisie en ISO 639-2 ou en nom courant
+    # ('french'/'francais'/'fra'/'fre') ne matchait JAMAIS les langues detectees
+    # (deja normalisees en 'fr') -> tous les films flagges "manquant" a tort.
+    # Maintenant : on normalise les DEUX cotes via _normalize_iso639, et on
+    # compare des codes ISO 639-1 canoniques. On garde le code original dans la
+    # liste `missing` quand il n'est pas resolvable (pour ne pas masquer une
+    # saisie utilisateur erronee).
+    expected_pairs = [
+        (raw, _normalize_iso639(raw))
+        for raw in (lang.strip() for lang in (expected_languages or []) if lang)
+        if raw
+    ]
+    missing = [
+        (norm or raw)
+        for raw, norm in expected_pairs
+        if (norm or raw.lower()) not in all_languages
+    ]
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).

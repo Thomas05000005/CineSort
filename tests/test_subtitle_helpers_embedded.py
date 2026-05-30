@@ -158,6 +158,108 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
             )
             self.assertIn("fr", report.languages)
 
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-2 mutation testing) : les tests
+    # ci-dessus ne distinguaient pas les langues -> une mutation de
+    # _normalize_iso639 renvoyant 'fr' constant les laissait TOUS verts. Les cas
+    # suivants verifient des langues DISTINCTES : ils CASSENT si la normalisation
+    # collapse tout vers 'fr'.
+
+    def test_embedded_german_is_not_french(self):
+        """Un sous-titre 'ger' embarque ne doit PAS satisfaire expected=['fr'].
+
+        CASSE si _normalize_iso639 retourne 'fr' constant : 'de' apparaitrait
+        comme 'fr' et missing_languages serait vide a tort.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            video = folder / "Movie.mkv"
+            video.touch()
+
+            embedded = [{"index": 0, "language": "ger", "forced": False}]
+            report = build_subtitle_report(
+                folder, video, ["fr"], embedded_subtitles=embedded
+            )
+            self.assertEqual(report.languages, ["de"], "'ger' doit normaliser vers 'de', pas 'fr'")
+            self.assertEqual(
+                report.missing_languages,
+                ["fr"],
+                "FR doit etre flag manquant : seul un sous-titre allemand est present",
+            )
+            self.assertNotIn("fr", report.languages)
+
+    def test_distinct_languages_preserved(self):
+        """eng + ger + spa restent distincts (aucun collapse vers 'fr')."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            video = folder / "Movie.mkv"
+            video.touch()
+
+            embedded = [
+                {"index": 0, "language": "eng", "forced": False},
+                {"index": 1, "language": "ger", "forced": False},
+                {"index": 2, "language": "spa", "forced": False},
+            ]
+            report = build_subtitle_report(
+                folder, video, ["fr"], embedded_subtitles=embedded
+            )
+            self.assertEqual(report.languages, ["de", "en", "es"])
+            self.assertEqual(report.missing_languages, ["fr"])
+
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-3) : normalisation SYMETRIQUE
+    # des langues ATTENDUES. Avant le fix, expected_languages n'etait pas passe
+    # par _LANG_MAP : 'french'/'fra'/'fre'/'francais' ne matchaient jamais 'fr'.
+
+    def test_expected_language_iso639_2_normalized(self):
+        """expected=['fra'] (ISO 639-2) doit matcher un FR present (externe)."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            video = folder / "Movie.mkv"
+            video.touch()
+            (folder / "Movie.fr.srt").touch()
+
+            report = build_subtitle_report(folder, video, ["fra"])
+            self.assertIn("fr", report.languages)
+            self.assertEqual(
+                report.missing_languages,
+                [],
+                "expected 'fra' doit normaliser vers 'fr' et matcher le sous-titre FR",
+            )
+
+    def test_expected_language_common_name_normalized(self):
+        """expected=['french'] / ['French'] doit matcher un FR embarque."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            video = folder / "Movie.mkv"
+            video.touch()
+
+            embedded = [{"index": 0, "language": "fre", "forced": False}]
+            for exp in ("french", "French", "FRENCH", "fre"):
+                report = build_subtitle_report(
+                    folder, video, [exp], embedded_subtitles=embedded
+                )
+                self.assertEqual(
+                    report.missing_languages,
+                    [],
+                    f"expected '{exp}' doit normaliser vers 'fr' et ne pas etre manquant",
+                )
+
+    def test_expected_language_normalized_still_flags_real_miss(self):
+        """expected=['fra'] reste flag manquant si SEUL l'anglais est present.
+
+        Garde-fou : la normalisation symetrique ne doit pas tout faire matcher.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            video = folder / "Movie.mkv"
+            video.touch()
+
+            embedded = [{"index": 0, "language": "eng", "forced": False}]
+            report = build_subtitle_report(
+                folder, video, ["fra"], embedded_subtitles=embedded
+            )
+            self.assertEqual(report.languages, ["en"])
+            self.assertEqual(report.missing_languages, ["fr"])
+
 
 if __name__ == "__main__":
     unittest.main()

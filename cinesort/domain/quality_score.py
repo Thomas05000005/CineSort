@@ -90,12 +90,19 @@ def default_quality_profile() -> Dict[str, Any]:
             # placait 100% des films en Reject (< 30). Les nouveaux seuils
             # sont calibres pour une distribution realiste :
             #   Platinum 75+ : UHD HDR Remux haut debit
-            #   Gold 58+     : 1080p BluRay propre ou UHD light
+            #   Gold 56+     : 1080p BluRay propre ou UHD light
             #   Silver 42+   : 1080p web/DVD HD standard
             #   Bronze 25+   : 720p, encodes leger, probe partielle
             #   Reject < 25  : echec probe ou tres faible qualite reelle
+            # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56.
+            # Sur un panel reel, ~80% des 1080p HEVC HDR propres (10 Mbps + DTS-HD MA)
+            # stagnent en Silver a 55 alors qu'ils meritent Gold (HEVC + HDR + audio
+            # lossless multicanal). Abaisser Gold de 2 points (au lieu de gonfler
+            # massivement les bonus video/audio qui debalancerait le UHD) permet
+            # a ces 1080p qualitatifs d'atteindre Gold. Combinée avec le bump de
+            # base audio (10 -> 12, voir _score_audio).
             "platinum": 75,
-            "gold": 58,
+            "gold": 56,
             "silver": 42,
             "bronze": 25,
         },
@@ -376,12 +383,13 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     base_tiers = base["tiers"]
     # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults recalibres (voir
     # default_quality_profile()).
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56.
     raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 75)))
-    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 58)))
+    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 56)))
     raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 42)))
     raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 25))
     tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 75)))
-    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 58)))
+    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 56)))
     tiers["silver"] = max(0, min(100, _to_int(raw_silver, 42)))
     tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 25)))
     # Retirer les vieilles cles pour n'avoir qu'une source de verite apres normalisation
@@ -733,7 +741,13 @@ def _score_audio(
         sign = "+" if delta >= 0 else ""
         reasons.append(f"{sign}{delta} {label}")
 
-    audio_sub = 10.0
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : base audio 10 -> 12.
+    # Sur le panel reel, le subscore audio plafonne autour de 28-32 (DTS-HD MA 5.1 +
+    # VO) ce qui penalise les 1080p HEVC HDR propres lors de la ponderation
+    # (audio = 30% du score). +2 de base ramene les fichiers audio lossless
+    # multicanal au niveau attendu sans gonfler les UHD premium qui sont deja
+    # clamped a 100.
+    audio_sub = 12.0
     best_audio = _best_audio_track(audio_tracks)
     if not best_audio:
         audio_sub -= 25
@@ -911,8 +925,10 @@ def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
     # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults alignes sur
     # default_quality_profile() (75/58/42/25) pour distribution realiste
     # quand les seuils ne sont pas explicitement fournis par le profil.
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56 (voir
+    # default_quality_profile pour la justification).
     plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 75)), 75)
-    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 58)), 58)
+    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 56)), 56)
     silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 42)), 42)
     bronze_seuil = _to_int(tiers.get("bronze", 25), 25)
 
@@ -925,6 +941,31 @@ def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
     if score >= bronze_seuil:
         return "Bronze"
     return "Reject"
+
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L : ordre des tiers, du meilleur au pire,
+# pour pouvoir CAPER un tier a un maximum (on ne descend jamais, on plafonne).
+_TIER_ORDER = ["Platinum", "Gold", "Silver", "Bronze", "Reject"]
+
+
+def _cap_tier(tier: str, max_tier: str) -> str:
+    """Plafonne `tier` a `max_tier` (ne remonte jamais un tier vers le haut).
+
+    Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : quand le probe a echoue,
+    on ne peut PAS certifier Platinum/Gold sur un simple nom de fichier
+    declaratif (non verifie). On cape donc le tier a Silver maximum. Idem pour
+    une captation degradee (CAM) qui est plafonnee bien plus bas.
+    """
+    try:
+        cur = _TIER_ORDER.index(tier)
+    except ValueError:
+        return tier
+    try:
+        cap = _TIER_ORDER.index(max_tier)
+    except ValueError:
+        return tier
+    # Index plus grand = tier plus bas. On garde le plus bas des deux.
+    return _TIER_ORDER[max(cur, cap)]
 
 
 def _estimate_file_size(normalized_probe: Dict[str, Any], bitrate_kbps: Optional[int]) -> int:
@@ -1601,6 +1642,22 @@ def compute_quality_score(
                 sign = "+" if src_delta >= 0 else ""
                 reasons.append(f"{sign}{src_delta} {src_label}")
 
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : PENALITE CAM/TS/SCREENER
+    # forte et INCONDITIONNELLE. Une captation degradee (CAM, TeleSync, Screener)
+    # reste de tres mauvaise qualite meme si le nom ment avec des tokens
+    # superieurs colles (ex: "X.CAM.2160p.REMUX.DV"). On ecrase les bonus
+    # resolution/codec/source en imposant un plancher bas sur les subscores et
+    # on memorise le flag pour caper le tier final plus bas.
+    cam_detected = bool(name_info.is_cam)
+    if cam_detected:
+        cam_label = f"Captation degradee ({name_info.cam_token.upper() or 'CAM'}) - qualite reelle tres faible"
+        # Plancher dur : peu importe les tokens premium menteurs, une CAM ne
+        # peut pas avoir un bon subscore video/audio.
+        video_sub = min(float(video_sub), 14.0)
+        audio_sub = min(float(audio_sub), 14.0)
+        factors.append({"category": "video", "delta": -30, "label": cam_label})
+        reasons.append(f"-30 {cam_label}")
+
     # Fix audit 2026-05-25 (v1.5.5) Vague K : bonus Atmos/DTS:X depuis le nom
     # de release quand le probe ne les a pas detectes (ex: piste TrueHD sans
     # side-data Atmos exposee). On n'ajoute que si l'audio sub n'a pas deja
@@ -1733,6 +1790,30 @@ def compute_quality_score(
         factors=factors,
         reasons=reasons,
     )
+
+    # --- Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : CAP de tier ---
+    # Decision senior conservatrice. Applique APRES custom rules pour etre la
+    # derniere autorite : aucune regle / aucun bonus de nom ne peut certifier un
+    # tier eleve si on n'a pas verifie le fichier (probe FAILED) ou si c'est une
+    # captation degradee (CAM).
+    if probe_quality == "FAILED":
+        capped = _cap_tier(tier, "Silver")
+        if capped != tier:
+            reasons.append(
+                f"Tier plafonne a Silver : probe indisponible, qualite non verifiee "
+                f"(tier brut {tier} non certifiable sur le seul nom de fichier)"
+            )
+            factors.append(
+                {"category": "probe", "delta": 0, "label": f"Cap probe FAILED: {tier} -> {capped}"}
+            )
+            tier = capped
+    if cam_detected:
+        # Une CAM/TS/Screener est plafonnee a Bronze maximum (jamais Silver+).
+        capped = _cap_tier(tier, "Bronze")
+        if capped != tier:
+            reasons.append(f"Tier plafonne a Bronze : captation degradee ({name_info.cam_token.upper() or 'CAM'})")
+            factors.append({"category": "video", "delta": 0, "label": f"Cap CAM: {tier} -> {capped}"})
+            tier = capped
 
     # --- Probe quality reasons ---
     _append_probe_quality_reasons(probe, factors, reasons)

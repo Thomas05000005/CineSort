@@ -169,18 +169,37 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         # Dedup et tri
         self.assertEqual(captured_ids, [1, 2, 3])
 
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : tmdb-1 — cap defensif eleve de
+    # 20 a 2000 dans Vague J (cf tmdb_support.py:28-34). Le test originel
+    # test_ids_capped_at_20 etait rouge depuis ce changement. On reecrit pour
+    # verifier le nouveau cap a 2000 + on conserve un cas "sous le cap" pour
+    # detecter une regression dans le sens inverse (cap re-baisse a 20).
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
-    def test_ids_capped_at_20(self, mock_client_cls):
+    def test_ids_capped_at_2000(self, mock_client_cls):
         client = MagicMock()
         client.get_movie_poster_thumb_url.return_value = "https://img/x.jpg"
         mock_client_cls.return_value = client
 
         api = _make_api()
-        big_list = list(range(1, 100))  # 99 ids
+        # 2500 ids > cap 2000 -> doit etre tronque a 2000 appels exactement.
+        big_list = list(range(1, 2501))
         tmdb_support.get_tmdb_posters(api, tmdb_ids=big_list)
 
-        # Cap a 20 => 20 appels
-        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 20)
+        # Cap a 2000 => 2000 appels
+        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 2000)
+
+    @patch("cinesort.ui.api.tmdb_support.TmdbClient")
+    def test_ids_below_cap_not_truncated(self, mock_client_cls):
+        """Garde-fou regression : 100 ids doivent etre tous appeles (pas re-cape a 20)."""
+        client = MagicMock()
+        client.get_movie_poster_thumb_url.return_value = "https://img/x.jpg"
+        mock_client_cls.return_value = client
+
+        api = _make_api()
+        big_list = list(range(1, 100))  # 99 ids, sous le cap 2000
+        tmdb_support.get_tmdb_posters(api, tmdb_ids=big_list)
+
+        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 99)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_string_numeric_ids_converted_to_int(self, mock_client_cls):
