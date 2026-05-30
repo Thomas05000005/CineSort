@@ -189,7 +189,11 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
         }
     )
     light["languages"].update({"bonus_vo_present": 5, "bonus_vf_present": 3})
-    light["tiers"].update({"premium": 80, "bon": 64, "moyen": 50})
+    # Fix audit 2026-05-30 (v1.5.8) align CinemaLux_Light_v1 sur calibration biblio reelle :
+    # Avant : premium=80, bon=64, moyen=50 (legacy) -> normalisation produisait Platinum 85
+    # ce qui placait 0 film en Platinum sur la distribution observee (max=79).
+    # Apres : aligne sur les seuils default recalibres 70/66/55/40.
+    light["tiers"].update({"platinum": 70, "gold": 66, "silver": 55, "bronze": 40})
 
     # Streaming optimal : profil pour bibliotheques destinees au streaming
     # (Plex/Jellyfin). Tolerant sur l'audio (peu de pertes a 5.1), severe sur
