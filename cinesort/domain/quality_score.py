@@ -22,6 +22,10 @@ from cinesort.domain.genre_rules import (
 # Fix audit 2026-05-25 (v1.5.5) Vague K : parser nom de release pour fallback
 # quand le probe est PARTIAL/FAILED (ex: SMB obsolete, fichier corrompu).
 from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_name
+# SCORE-02 (Vague M, M-06) : helpers tiers centralises (dedup retro-compat
+# legacy premium/bon/moyen -> platinum/gold/silver). Pure delegation sans
+# changement de comportement attendu sur les tiers.
+from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers_central
 
 logger = logging.getLogger(__name__)
 
@@ -399,25 +403,16 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     ab["channels_bonus_map"] = channels
 
     tiers = profile["tiers"]
-    # Retro-compat : les profils sauvegardes peuvent utiliser les anciennes cles
-    # (premium/bon/moyen) ou les nouvelles (platinum/gold/silver/bronze). On lit
-    # les deux et on normalise vers les nouveaux noms apres validation.
-    base_tiers = base["tiers"]
-    # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults recalibres (voir
-    # default_quality_profile()).
-    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56.
-    # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : defaults
-    # 70/66/55/40 (voir default_quality_profile pour justification).
-    raw_plat = tiers.get("platinum", tiers.get("premium", base_tiers.get("platinum", 70)))
-    raw_gold = tiers.get("gold", tiers.get("bon", base_tiers.get("gold", 66)))
-    raw_silver = tiers.get("silver", tiers.get("moyen", base_tiers.get("silver", 55)))
-    raw_bronze = tiers.get("bronze", base_tiers.get("bronze", 40))
-    tiers["platinum"] = max(0, min(100, _to_int(raw_plat, 70)))
-    tiers["gold"] = max(0, min(100, _to_int(raw_gold, 66)))
-    tiers["silver"] = max(0, min(100, _to_int(raw_silver, 55)))
-    tiers["bronze"] = max(0, min(100, _to_int(raw_bronze, 40)))
-    # Retirer les vieilles cles pour n'avoir qu'une source de verite apres normalisation
-    for _legacy in ("premium", "bon", "moyen"):
+    # SCORE-02 (Vague M, M-06) : delegation a tiers_helpers.normalize_tiers
+    # pour centraliser la retro-compat legacy (premium/bon/moyen). Comportement
+    # preserve : meme defaults v1.5.7 70/66/55/40, meme clamp [0,100], meme
+    # suppression des cles legacy apres normalisation.
+    normalized = _normalize_tiers_central(tiers)
+    tiers["platinum"] = normalized["platinum"]
+    tiers["gold"] = normalized["gold"]
+    tiers["silver"] = normalized["silver"]
+    tiers["bronze"] = normalized["bronze"]
+    for _legacy in ("premium", "bon", "moyen", "faible"):
         tiers.pop(_legacy, None)
     if not (tiers["platinum"] >= tiers["gold"] >= tiers["silver"] >= tiers["bronze"]):
         errs.append("Seuils invalides: Platinum >= Gold >= Silver >= Bronze requis.")
@@ -950,29 +945,18 @@ def _apply_weights(
 def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
     """Retourne le tier (Platinum / Gold / Silver / Bronze / Reject).
 
-    Accepte les anciens seuils (premium/bon/moyen) pour retro-compat profils
-    sauvegardes avant la migration 011. Les nouveaux profils utilisent
-    platinum/gold/silver/bronze.
+    SCORE-02 (Vague M, M-06) : delegation a tiers_helpers.normalize_tiers pour
+    la retro-compat legacy (premium/bon/moyen). Defaults v1.5.7 70/66/55/40.
     """
-    # Fix audit 2026-05-25 (v1.5.5) Vague J : defaults alignes sur
-    # default_quality_profile() (75/58/42/25) pour distribution realiste
-    # quand les seuils ne sont pas explicitement fournis par le profil.
-    # Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-5) : Gold 58 -> 56 (voir
-    # default_quality_profile pour la justification).
-    # Fix audit 2026-05-30 (v1.5.7) calibration biblio reelle : 70/66/55/40
-    # (voir default_quality_profile pour la justification).
-    plat_seuil = _to_int(tiers.get("platinum", tiers.get("premium", 70)), 70)
-    gold_seuil = _to_int(tiers.get("gold", tiers.get("bon", 66)), 66)
-    silver_seuil = _to_int(tiers.get("silver", tiers.get("moyen", 55)), 55)
-    bronze_seuil = _to_int(tiers.get("bronze", 40), 40)
-
-    if score >= plat_seuil:
+    seuils = _normalize_tiers_central(tiers)
+    s = _to_int(score, 0)
+    if s >= seuils["platinum"]:
         return "Platinum"
-    if score >= gold_seuil:
+    if s >= seuils["gold"]:
         return "Gold"
-    if score >= silver_seuil:
+    if s >= seuils["silver"]:
         return "Silver"
-    if score >= bronze_seuil:
+    if s >= seuils["bronze"]:
         return "Bronze"
     return "Reject"
 
@@ -1641,7 +1625,8 @@ def compute_quality_score(
     # support) a ete corrige mais le meme pattern subsistait ici, non couvert par
     # les tests (les tests passent des dicts simules). Conversion dataclass->dict
     # via dataclasses.asdict + acceptation du dict natif si deja converti.
-    from dataclasses import asdict as _asdict, is_dataclass as _is_dc
+    # M-04 (Vague M) SCORE-DEAD-CODE : import local supprime, _asdict et _is_dc
+    # sont deja importes en top-level (L11) et le shadowing local n'apporte rien.
     if _is_dc(normalized_probe) and not isinstance(normalized_probe, type):
         probe = _asdict(normalized_probe)
     elif isinstance(normalized_probe, dict):

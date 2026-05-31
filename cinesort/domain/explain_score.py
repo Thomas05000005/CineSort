@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers
+
 
 # --- Libellés catégories (utilisés dans narrative + UI) -----------------
 
@@ -178,11 +180,16 @@ def _compute_baseline(
     tiers: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Distance au tier supérieur + résumé des seuils."""
-    # Normaliser les seuils (compat anciens noms)
-    plat = int(tiers.get("platinum", tiers.get("premium", 85)) or 85)
-    gold = int(tiers.get("gold", tiers.get("bon", 68)) or 68)
-    silver = int(tiers.get("silver", tiers.get("moyen", 54)) or 54)
-    bronze = int(tiers.get("bronze", 30) or 30)
+    # SCORE-01 (Vague M, M-06) : utiliser tiers_helpers.normalize_tiers pour
+    # aligner les defaults sur la calibration biblio reelle v1.5.7 (70/66/55/40).
+    # Avant : defaults 85/68/54/30 (legacy pre-v1.5.5) qui divergeaient de
+    # quality_score.default_quality_profile() -> distance_to_next_tier faux pour
+    # les profils sans seuils explicites.
+    normalized = _normalize_tiers(tiers)
+    plat = normalized["platinum"]
+    gold = normalized["gold"]
+    silver = normalized["silver"]
+    bronze = normalized["bronze"]
 
     thresholds = {
         "Platinum": plat,
