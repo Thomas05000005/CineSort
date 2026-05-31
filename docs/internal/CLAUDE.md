@@ -188,6 +188,27 @@ get_tmdb_posters, smart_playlists (CRUD), list_films_with_history, export_full_l
 
 ---
 
+## Claude AI Configuration
+
+Configuration appliquee aux workflows GitHub Actions Claude (`claude.yml` et `audit-module.yml`) :
+
+| Parametre | Valeur |
+|-----------|--------|
+| **Model** | `claude-opus-4-8` (Claude Opus 4.8 — latest) |
+| **Thinking budget** | `--max-thinking-tokens 200000` (max) |
+| **Effort** | `ultra` (qualite maximale, aucune limite de tokens) |
+| **Daily run** | `.github/workflows/audit-module.yml` (cron `0 4 * * *`, audit quotidien par couche) |
+| **Weekly run** | `.github/workflows/claude.yml` (cron `0 4 * * 1`, Claude Code Action) |
+
+Notes :
+- `--max-turns` (200 pour `claude.yml`, 1500 pour `audit-module.yml`) et timeouts (90min / 360min) preserves.
+- Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
+- Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
+
+*Last updated : 2026-06-01.*
+
+---
+
 ## Issues ouvertes (3)
 
 | # | Sujet | Statut | Effort |

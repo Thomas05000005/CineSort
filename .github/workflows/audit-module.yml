@@ -170,19 +170,24 @@ jobs:
         uses: anthropics/claude-code-action@20c8abf165d5f85ab3fc970db9498436377dc9d1 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Modele : Opus 4.7. Le modele est passe via --model dans
-          # claude_args (NB : 'model' au niveau input direct n'existe
-          # pas, ca a fait fail le run du 12/05 23h).
+          # Modele : Opus 4.8 (dernier modele). Le modele est passe via
+          # --model dans claude_args (NB : 'model' au niveau input direct
+          # n'existe pas, ca a fait fail le run du 12/05 23h).
           # max-turns 1500 + timeout 360min : audit ultra-complet sans
           # plafond. La qualite est la priorite, pas le cout token.
+          # --max-thinking-tokens 200000 : extended thinking au max (effort
+          # ultra, qualite maximale, aucune limite raisonnement).
           # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)"
           # (separe par virgule sans espace, entoure de double-quotes).
           claude_args: |
-            --model claude-opus-4-7
+            --model claude-opus-4-8
             --max-turns 1500
+            --max-thinking-tokens 200000
             --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           prompt: >-
-            Audit automatique CineSort. Parametres de cette execution :
+            Audit automatique CineSort avec Opus 4.8 + thinking max
+            (effort ultra, qualite maximale, aucune limite de tokens).
+            Parametres de cette execution :
             - couche : "${{ steps.target.outputs.target }}"
             - niveau : "${{ github.event.inputs.level || 'modere' }}"
             - ouvrir PRs : "${{ github.event.inputs.open_prs || 'true' }}"
