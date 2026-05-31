@@ -134,18 +134,27 @@ class BugfixV166RegressionTests(unittest.TestCase):
     # --------------------------------------------------------------- APPLY-2
     def test_apply2_run_state_exposes_apply_progress_attrs(self):
         """APPLY-2 : RunState ou status payload doit exposer apply_running/total/done."""
-        # On lit cinesort_api.py pour verifier que la clef 'apply' est ajoutee
-        # au status payload (decouple de scan).
+        # On lit cinesort_api.py + _run_state.py pour verifier que la clef
+        # 'apply' est ajoutee au status payload (decouple de scan).
+        # M-07 (Vague M) : la classe RunState a ete extraite dans
+        # cinesort/ui/api/_run_state.py ; les attributs apply_* y vivent
+        # desormais. cinesort_api.py reste source de verite pour la cle
+        # "apply" du status payload (_get_status_impl).
         api_path = REPO_ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py"
+        run_state_path = REPO_ROOT / "cinesort" / "ui" / "api" / "_run_state.py"
         self.assertTrue(api_path.exists(), "cinesort_api.py introuvable")
-        src = _read(api_path)
+        src_api = _read(api_path)
+        # _run_state.py optionnel : si absent, on cherche seulement dans api.
+        src_rs = _read(run_state_path) if run_state_path.exists() else ""
+        src = src_api + "\n" + src_rs
         # Au moins une des nouvelles cles apply doit etre presente dans payload.
         # Source : commit message "payload _get_status_impl expose cle 'apply'".
         apply_keywords = ["apply_running", "apply_total", "apply_done", '"apply"']
         found = [kw for kw in apply_keywords if kw in src]
         self.assertGreaterEqual(
             len(found), 1,
-            f"APPLY-2 regression : aucune des cles {apply_keywords} dans cinesort_api.py"
+            f"APPLY-2 regression : aucune des cles {apply_keywords} dans "
+            f"cinesort_api.py ni _run_state.py"
         )
 
     # ----------------------------------------------------------------- DUP-1
