@@ -187,8 +187,13 @@ hiddenimports += collect_submodules("cinesort.domain.perceptual")
 # - requests.packages.urllib3 / urllib3 : http clients TMDb/Jellyfin/Plex/Radarr
 # - onnxruntime.capi : runtime C natif requis par LPIPS ONNX (§11)
 # - cryptography.hazmat.bindings : bindings natifs requis pour HTTPS REST
-hiddenimports += collect_submodules("PIL")
+# Vague M post-mortem : collect_submodules('PIL') ramenait ~50 plugins inutiles
+# (ImageTk, AvifImagePlugin, BdfFontFile, etc.). Seul PIL.Image est utilise
+# par perceptual_support.py L825 -> on liste explicitement le minimum.
 hiddenimports += [
+    "PIL",
+    "PIL.Image",
+    "PIL.PngImagePlugin",
     "requests.packages.urllib3",
     "urllib3",
     "onnxruntime.capi",
@@ -246,7 +251,11 @@ binaries = cffi_binaries + clr_loader_binaries + pythonnet_binaries
 binaries.append((str(_cffi_backend_path), "."))
 
 # ---------------------------------------------------------------------------
-# Excludes — strip unused stdlib and dev-only modules (~15-25 MB saved)
+# Excludes — strip unused stdlib, dev-only modules, and ML deps tirees par
+# defaut depuis le site-packages global (torch=3.5GB, transformers, scipy, ...)
+# Vague M post-mortem : ces packages NE SONT PAS importes par cinesort/ mais
+# PyInstaller les detecte via les hooks contrib quand ils sont installes
+# globalement. Sans excludes, bundle = 2.33 GB ; avec excludes ~150 MB.
 # ---------------------------------------------------------------------------
 
 excludes = [
@@ -264,6 +273,61 @@ excludes = [
     # Exclure cause ImportError sur cette feature - cf audit 2026-05-24.
     # Other unused stdlib
     "curses", "turtledemo", "turtle", "idlelib",
+    # ---- Vague M post-mortem : ML stack tiree par site-packages global ----
+    # torch + ecosystem : aucun import direct dans cinesort/ (lpips_compare
+    # utilise onnxruntime). torch/lib seul fait 3.5 GB de DLLs CUDA.
+    "torch", "torchvision", "torchaudio",
+    "transformers", "tokenizers", "accelerate", "safetensors",
+    "huggingface_hub", "hf_xet",
+    "tensorflow", "tensorboard",
+    # scipy : 0 import, tire par hook auto. Si besoin futur, reactiver.
+    "scipy",
+    # Notebook/IPython stack : completion code IDE, jamais utilisee runtime
+    "IPython", "ipykernel", "jedi", "parso",
+    "nbformat", "nbconvert", "jupyter", "jupyter_client", "jupyter_core",
+    "notebook", "traitlets", "tornado",
+    # Messaging async/notebook
+    "zmq", "pyzmq",
+    # Templating/parsing non utilises
+    "lxml", "jinja2", "fsspec", "anyio",
+    "sympy", "networkx", "matplotlib", "pandas",
+    "lark", "jsonschema", "jsonschema_specifications", "referencing",
+    # rich/pygments : pas d'usage runtime CineSort
+    "rich", "pygments",
+    # Dev-only (pyproject [optional-dependencies] dev)
+    "playwright",
+    "pytest", "_pytest", "pytest_cov",
+    "hypothesis",
+    "coverage",
+    "ruff",
+    "pre_commit",
+    "importlinter", "import_linter",
+    # numpy : noyau garde, mais sous-modules dev/build inutiles
+    "numpy.distutils", "numpy.f2py", "numpy.testing", "numpy.tests",
+    # onnxruntime : noyau garde (capi), modules training/tools inutiles
+    "onnxruntime.training", "onnxruntime.tools",
+    # PIL : noyau garde (Image, PngImagePlugin via hiddenimports), plugins
+    # exotiques retires (encodage PNG seul est utilise par perceptual_support).
+    "PIL.ImageTk", "PIL.ImageDraw2", "PIL.ImageQt",
+    "PIL.ImageGrab", "PIL.ImageShow", "PIL.ImageWin",
+    "PIL._tkinter_finder",
+    "PIL.AvifImagePlugin", "PIL.BdfFontFile", "PIL.BlpImagePlugin",
+    "PIL.BufrStubImagePlugin", "PIL.ContainerIO", "PIL.CurImagePlugin",
+    "PIL.DcxImagePlugin", "PIL.DdsImagePlugin", "PIL.EpsImagePlugin",
+    "PIL.FitsImagePlugin", "PIL.FliImagePlugin", "PIL.FpxImagePlugin",
+    "PIL.FtexImagePlugin", "PIL.GbrImagePlugin", "PIL.GdImageFile",
+    "PIL.GribStubImagePlugin", "PIL.Hdf5StubImagePlugin",
+    "PIL.IcnsImagePlugin", "PIL.IcoImagePlugin", "PIL.ImImagePlugin",
+    "PIL.ImageMorph", "PIL.ImageTransform", "PIL.ImtImagePlugin",
+    "PIL.IptcImagePlugin", "PIL.McIdasImagePlugin", "PIL.MicImagePlugin",
+    "PIL.MpegImagePlugin", "PIL.MspImagePlugin", "PIL.PSDraw",
+    "PIL.PalmImagePlugin", "PIL.PcdImagePlugin", "PIL.PcfFontFile",
+    "PIL.PdfImagePlugin", "PIL.PixarImagePlugin", "PIL.PsdImagePlugin",
+    "PIL.QoiImagePlugin", "PIL.SgiImagePlugin", "PIL.SpiderImagePlugin",
+    "PIL.SunImagePlugin", "PIL.TarIO", "PIL.TgaImagePlugin",
+    "PIL.WalImageFile", "PIL.WebPImagePlugin", "PIL.WmfImagePlugin",
+    "PIL.XVThumbImagePlugin", "PIL.XbmImagePlugin", "PIL.XpmImagePlugin",
+    "PIL.__main__", "PIL.report",
 ]
 
 # ---------------------------------------------------------------------------
