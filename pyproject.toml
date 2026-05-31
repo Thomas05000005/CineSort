@@ -1,9 +1,83 @@
 [project]
 name = "cinesort"
+# v1.5.2-beta - lue depuis VERSION pour build, dupliquee ici pour PEP 621.
+# Garder ces deux valeurs synchronisees lors d'un bump (scripts/bump_version.py
+# couvre VERSION + ce champ).
+version = "1.5.2-beta"
+description = "CineSort - tri et renommage automatique de bibliotheques de films (Windows desktop, Python 3.13, pywebview)."
+readme = "README.md"
 license = {text = "MIT"}
+# v77 M-08 (ARCH-03) : remplace le placeholder <PROJECT_AUTHOR>.
 authors = [
-    {name = "<PROJECT_AUTHOR>"},
+    {name = "Thomas", email = "blanc.thomas.paty@gmail.com"},
 ]
+# Pin strict Python 3.13.* aligne sur runtime cible (PyInstaller bundle utilise
+# l'embedded 3.13). Ne pas elargir sans valider la matrice CI windows-latest.
+requires-python = "==3.13.*"
+keywords = ["movies", "library", "renaming", "tmdb", "perceptual-quality", "windows"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+]
+
+# v77 M-08 (ARCH-03) : migration des requirements*.txt vers pyproject [project.dependencies].
+# Les requirements*.txt sont conserves en tant qu'alias pour la compat des workflows CI
+# qui font `pip install -r requirements.txt` (migration progressive).
+# Source de verite : ce bloc. requirements.txt doit etre synchronise lors d'un bump.
+dependencies = [
+    "pywebview>=6.2.1,<7",
+    "requests>=2.34.2",
+    # urllib3 epingle pour CVE-2024-37891 (fuite Proxy-Authorization sur redirect)
+    # et CVE-2025-66418 (zip bomb decompression). < 3.0 par compat requests.
+    "urllib3>=2.7.0,<3.0.0",
+    "segno>=1.6.6",
+    "rapidfuzz>=3.14.5",
+    "numpy>=2.0",
+    "onnxruntime>=1.26.0,<2.0",
+    # zipp epingle Snyk (CVE chain).
+    "zipp>=3.23.1",
+]
+
+[project.optional-dependencies]
+# dev : alignement strict sur requirements-dev.txt. pre-commit, ruff, coverage,
+# pytest (+ hypothesis + import-linter pour les contracts).
+dev = [
+    "playwright>=1.60.0,<2",
+    "Pillow>=12.2",
+    "ruff>=0.15.14,<0.16",
+    "coverage>=7.14.0,<8",
+    "pre-commit>=4.6.0,<5",
+    "pytest>=9.0.3,<10",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.152.9,<7",
+    "import-linter>=2.0,<3",
+]
+# build : pyinstaller + Pillow (alignement avec requirements-build.txt).
+build = [
+    "pyinstaller>=6.20.0",
+    "pillow>=12.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/Thomas05000005/CineSort"
+Repository = "https://github.com/Thomas05000005/CineSort"
+Issues = "https://github.com/Thomas05000005/CineSort/issues"
+
+# v77 M-08 : declare cinesort comme un package importable (utilise pour les
+# tests d'import editable `pip install -e .` valide par tests/test_pip_install_editable_v77.py).
+[tool.setuptools]
+packages = ["cinesort"]
+include-package-data = false
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.ruff]
 target-version = "py313"
