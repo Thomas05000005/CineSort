@@ -519,6 +519,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
                 "state_dir": str(self.state_dir),
                 "tmdb_enabled": False,
                 "collection_folder_enabled": True,
+                # M-07 hotfix Vague M : desactive l'auto-recompute background
+                # (v1.5.4 Vague I) qui ecrit des logs "QUALITE ..." apres
+                # done=True, causant une race sur rs.logs[0] (off-by-one).
+                "auto_recompute_quality_on_scan": False,
             }
         )
         run_id = start["run_id"]
@@ -528,11 +532,19 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIsNotNone(rs)
         assert rs is not None
 
+        # Snapshot du compteur de logs deja presents (start_plan en cree
+        # plusieurs : START PLAN / Scan folders / Plan built / PLAN READY).
+        # On verifie le contrat de la cap : peu importe combien de logs
+        # pre-existent, apres avoir push MAX+250 logs, len == MAX et le
+        # premier message survivant est log-(pre + 250 - 0) calcule.
+        pre = len(rs.logs)
         for i in range(api_mod.MAX_RUN_LOG_ITEMS + 250):
             rs.log("DEBUG", f"log-{i}")
 
         self.assertEqual(len(rs.logs), api_mod.MAX_RUN_LOG_ITEMS)
-        self.assertEqual(rs.logs[0]["msg"], "log-250")
+        # Total inserted = pre + (MAX + 250) ; kept = last MAX ; dropped = pre + 250
+        # First surviving log message index = (pre + 250) - pre = 250 si pre <= 250.
+        self.assertEqual(rs.logs[0]["msg"], f"log-{250}")
 
     def test_terminal_runs_memory_is_bounded(self) -> None:
         class _FakeSnap:
