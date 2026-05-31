@@ -1,9 +1,11 @@
-"""AnomalyRepository : anomalies detectees pendant scan/quality (issue #85 phase B2).
+"""AnomalyRepository : anomalies detectees pendant scan/quality (issue #85 phase B2+B8).
 
-Migration #85 phase B2 (2026-05-16) : meme pattern que phase B1 ProbeRepository :
-- Code metier vit DANS AnomalyRepository
-- _AnomalyMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance de _AnomalyMixin
+Migration #85 :
+- Phase B2 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_AnomalyMixin` legacy supprime, SQLiteStore
+  expose AnomalyRepository par composition (`store.anomaly`).
+
+Pattern d'usage : store.anomaly.<methode>(...)
 
 Methodes exposees :
     get_anomaly_counts_for_runs, get_anomaly_stats, get_top_anomaly_codes,

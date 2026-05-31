@@ -1,16 +1,14 @@
-"""ProbeRepository : cache ffprobe/mediainfo (issue #85 phase B1).
+"""ProbeRepository : cache ffprobe/mediainfo (issue #85 phase B1+B8).
 
-Migration #85 phase B1 : le code metier vit maintenant DANS ce Repository
-(plus dans `_ProbeMixin`). Le mixin devient un thin wrapper qui delegue
-a `self.probe.X()` (instance de ProbeRepository creee dans `SQLiteStore.__init__`).
+Migration #85 :
+- Phase B1 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_ProbeMixin` legacy supprime, SQLiteStore
+  expose desormais ProbeRepository par composition (`store.probe`). Plus
+  d'heritage MRO.
 
-Pourquoi cette structure transitoire :
-- SQLiteStore conserve son inheritance de _ProbeMixin -> backward-compat 100%
-  pour les call sites `store.get_probe_cache(...)`.
-- ProbeRepository devient testable en isolation (mock FakeStore qui implemente
-  _managed_conn / _ensure_schema_group / _decode_row_json).
-- Phase B8 future : SQLiteStore arretera d'heriter de _ProbeMixin, les
-  callers migreront vers `store.probe.get_probe_cache(...)`.
+Pattern d'usage (obligatoire pour tout nouveau code) :
+    store.probe.get_probe_cache(...)
+    store.probe.upsert_probe_cache(...)
 
 Methodes exposees :
     get_probe_cache, upsert_probe_cache, prune_probe_cache

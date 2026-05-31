@@ -1,9 +1,11 @@
-"""ScanRepository : caches incremental scan (issue #85 phase B3).
+"""ScanRepository : caches incremental scan (issue #85 phase B3+B8).
 
-Migration #85 phase B3 (2026-05-16) : meme pattern que B1/B2 :
-- Code metier vit DANS ScanRepository
-- _ScanMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+Migration #85 :
+- Phase B3 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_ScanMixin` legacy supprime, SQLiteStore
+  expose ScanRepository par composition (`store.scan`).
+
+Pattern d'usage : store.scan.<methode>(...)
 
 Methodes exposees :
     clear_all_incremental_caches, get_incremental_file_hash,

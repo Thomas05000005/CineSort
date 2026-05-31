@@ -1,9 +1,11 @@
-"""PerceptualRepository : rapports perceptuels (issue #85 phase B4).
+"""PerceptualRepository : rapports perceptuels (issue #85 phase B4+B8).
 
-Migration #85 phase B4 (2026-05-16) : meme pattern que B1/B2/B3 :
-- Code metier vit DANS PerceptualRepository
-- _PerceptualMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+Migration #85 :
+- Phase B4 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_PerceptualMixin` legacy supprime, SQLiteStore
+  expose PerceptualRepository par composition (`store.perceptual`).
+
+Pattern d'usage : store.perceptual.<methode>(...)
 
 Methodes exposees :
     upsert_perceptual_report, get_perceptual_report, list_perceptual_reports,

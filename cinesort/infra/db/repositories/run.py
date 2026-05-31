@@ -1,13 +1,15 @@
-"""RunRepository : runs + errors (issue #85 phase B6).
+"""RunRepository : runs + errors (issue #85 phase B6+B8).
 
-Migration #85 phase B6 (2026-05-16) : meme pattern que B1-B5 :
-- Code metier vit DANS RunRepository
-- _RunMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+Migration #85 :
+- Phase B6 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_RunMixin` legacy supprime, SQLiteStore
+  expose RunRepository par composition (`store.run`).
 
-Note specifique B6 : `insert_run_pending` appelle `initialize()` en fallback
-si la table runs n'existe pas. Dans RunRepository (_BaseRepository compose),
-on appelle `self._store.initialize()` pour deleguer au SQLiteStore parent.
+Note B6 : `insert_run_pending` appelle `initialize()` en fallback si la table
+runs n'existe pas. Dans RunRepository (compose via _BaseRepository), on appelle
+`self._store.initialize()` pour deleguer au SQLiteStore parent.
+
+Pattern d'usage : store.run.<methode>(...)
 
 Methodes exposees :
     insert_run_pending, mark_run_running, update_run_progress,

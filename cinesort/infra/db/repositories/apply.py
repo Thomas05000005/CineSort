@@ -1,13 +1,15 @@
-"""ApplyRepository : apply batches + operations + pending moves (issue #85 phase B7).
+"""ApplyRepository : apply batches + operations + pending moves (issue #85 phase B7+B8).
 
-Migration #85 phase B7 (2026-05-16) : meme pattern que B1-B6 :
-- Code metier vit DANS ApplyRepository
-- _ApplyMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+Migration #85 :
+- Phase B7 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_ApplyMixin` legacy supprime, SQLiteStore
+  expose ApplyRepository par composition (`store.apply`).
 
-Note specifique B7 : `mark_apply_batch_undo_status` appelle `self.close_apply_batch`
-en interne. Dans ApplyRepository, `self.close_apply_batch` est la methode locale
-(meme classe) — pas d'indirection.
+Note B7 : `mark_apply_batch_undo_status` appelle `self.close_apply_batch` en
+interne. Dans ApplyRepository, c'est la methode locale (meme classe) — pas
+d'indirection.
+
+Pattern d'usage : store.apply.<methode>(...)
 
 Methodes exposees :
     insert_apply_batch, append_apply_operation, close_apply_batch,

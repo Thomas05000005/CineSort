@@ -1,9 +1,11 @@
-"""QualityRepository : profils + rapports + feedback (issue #85 phase B5).
+"""QualityRepository : profils + rapports + feedback (issue #85 phase B5+B8).
 
-Migration #85 phase B5 (2026-05-16) : meme pattern que B1-B4 :
-- Code metier vit DANS QualityRepository
-- _QualityMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+Migration #85 :
+- Phase B5 (2026-05-16) : code metier extrait du mixin vers ce Repository.
+- Phase B8 (CLOSED 2026-05-17) : `_QualityMixin` legacy supprime, SQLiteStore
+  expose QualityRepository par composition (`store.quality`).
+
+Pattern d'usage : store.quality.<methode>(...)
 
 Methodes exposees :
     get_active_quality_profile, save_quality_profile, get_quality_report,
