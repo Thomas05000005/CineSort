@@ -86,6 +86,30 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 
 ## Sessions recentes
 
+### 1 juin 2026 — M-03 cloture #84 etapes 2-4 (Vague M) ✅ partial
+
+Item M-03-FINISH-REFACTOR-84 (Vague M, juin 2026). Strategie minimal-viable :
+inventorier les lazy imports residuels au lieu de tout refactorer (risque trop eleve
+pour gain modere).
+
+**Constat** : apres Issue #83 (150 lazy imports convertis en mai 2026), il restait
+**73 lazy imports** dans `cinesort/`, pas les 179 du re-budget pessimiste.
+
+**Conversions safes appliquees (4)** :
+- `cinesort/ui/api/settings_support.py` : `re`, `secrets` -> top-level
+- `cinesort/ui/api/quality_simulator_support.py` : `re` -> top-level
+- `cinesort/infra/db/migration_manager.py` : `Path` deja top-level, doublon supprime
+
+**Reste 69 lazy imports volontaires** (deps optionnelles segno/onnxruntime/rapidfuzz,
+platform-specific msvcrt/fcntl, cycles intentionnels documentes, `# noqa: PLC0415`).
+
+**Garde-fou** : `tests/test_refactor_84_progress_v77.py` borne le count a 69
+(`MAX_LAZY_IMPORTS=69`). Toute regression future declenchera le test.
+
+**Status** : PARTIAL — Vague N+ peut reprendre le sujet pour les ~20 cas restants
+convertibles (analyse fine par cas necessaire, hors budget M-03). Detail dans
+`docs/internal/REFACTOR_PLAN_84.md` section "M-03".
+
 ### 21 mai 2026 — Audit complet 3 tiers (Tier 1 + Tier 2 + Tier 3 + docs) ✅
 
 Audit exhaustif lance par l'utilisateur sur tout le repo (v1.2.0-beta).

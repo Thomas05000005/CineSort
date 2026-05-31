@@ -203,10 +203,9 @@ class MigrationManager:
             # Recuperer la version app depuis le fichier VERSION si possible
             app_version = ""
             try:
-                from pathlib import Path as _P
-
                 # Le repo root est 3 niveaux au-dessus de ce fichier (cinesort/infra/db)
-                version_file = _P(__file__).resolve().parents[3] / "VERSION"
+                # M-03 (refactor #84) : Path deja importe au top-level
+                version_file = Path(__file__).resolve().parents[3] / "VERSION"
                 if version_file.is_file():
                     app_version = version_file.read_text(encoding="utf-8").strip()
             except (OSError, PermissionError):
