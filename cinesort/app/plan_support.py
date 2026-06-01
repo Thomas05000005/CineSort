@@ -16,6 +16,12 @@ from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
 from cinesort.domain import duplicate_support as _dup
 from cinesort.domain.edition_helpers import extract_edition, strip_edition
 from cinesort.domain.integrity_check import check_header
+from cinesort.domain.runtime_hard_filter import (
+    DEFAULT_RUNTIME_HARD_THRESHOLD_MIN,
+    WARN_RUNTIME_HARD_EXCLUDED,
+    WARN_RUNTIME_HARD_KEPT_VIA_EDITION,
+    evaluate_runtime_hard_filter,
+)
 from cinesort.domain.runtime_matching import score_runtime_delta
 from cinesort.domain.scan_helpers import (
     _NOT_A_MOVIE_THRESHOLD,
@@ -1387,6 +1393,168 @@ def _build_tmdb_fallback_candidates(
     return tmdb_cands, True
 
 
+def _resolve_file_runtime_min(
+    nfo: Optional[Any],
+    folder: Path,
+    video: Path,
+    *,
+    store: Any = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Optional[float]:
+    """Retrouve la duree fichier en minutes (NFO en priorite, puis probe cache).
+
+    1. Si nfo.runtime existe (zero cout, deja parse) -> utilise direct.
+    2. Sinon, tentative de lookup probe cache (pas de probe fresh -- on ne veut
+       pas declencher de ffprobe lourd au stade scoring). Si miss -> None.
+
+    Retourne None si aucune duree disponible (probe FAILED ou pas de cache).
+    Dans ce cas, le filtre HARD se desactive pour cette ligne (cf evaluate_runtime_hard_filter).
+    """
+    # Source 1 : NFO runtime (deja parse en amont)
+    if nfo is not None:
+        runtime = getattr(nfo, "runtime", None)
+        try:
+            value = float(runtime) if runtime else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    # Source 2 : probe cache (sans declencher de probe fresh)
+    if store is None:
+        return None
+    try:
+        media_path = Path(folder) / video.name if not isinstance(video, Path) else video
+        if not safe_path_exists(media_path):
+            return None
+        from cinesort.infra.probe import ProbeService  # lazy: optionnel
+        probe = ProbeService(store)
+        probe_settings = settings or {}
+        # On force un mode cache-only via une probe normale ; en cas de miss
+        # ffprobe sera invoque -- ce qui n'est pas souhaitable au stade scoring.
+        # On lit donc directement le cache via l'API store si dispo, sinon skip.
+        if hasattr(store, "get_probe_cache"):
+            try:
+                cached = store.get_probe_cache(str(media_path))
+                if cached:
+                    normalized = cached.get("normalized") if isinstance(cached, dict) else None
+                    if isinstance(normalized, dict):
+                        duration_s = normalized.get("duration_s")
+                        if duration_s and float(duration_s) > 0:
+                            return float(duration_s) / 60.0
+            except (AttributeError, KeyError, TypeError, ValueError, OSError):
+                return None
+        # Pas d'API cache-only : on s'abstient (cf docstring).
+        _ = probe  # silence linter
+        _ = probe_settings
+    except (ImportError, OSError, TypeError, ValueError):
+        return None
+    return None
+
+
+def _apply_runtime_hard_filter_to_tmdb_cands(
+    tmdb_cands: List[Any],
+    *,
+    file_runtime_min: Optional[float],
+    detected_edition: Optional[str],
+    tmdb: Optional[TmdbClient],
+    settings: Optional[Dict[str, Any]],
+    log: Callable[[str, str], None],
+    log_ctx: str = "",
+) -> Tuple[List[Any], bool]:
+    """Filtre HARD : exclut les candidats TMDb dont la duree diverge trop.
+
+    Politique (cf cinesort/domain/runtime_hard_filter.py) :
+    - delta > threshold sans edition flag -> EXCLU
+    - delta > threshold AVEC edition flag -> conserve + warning
+    - delta <= threshold -> conserve sans modification
+
+    Args:
+        tmdb_cands: candidats TMDb (avec tmdb_id)
+        file_runtime_min: duree fichier en minutes (None -> filtre off)
+        detected_edition: label edition canonique (None si pas detecte)
+        tmdb: client TMDb pour fetcher le runtime de chaque candidat
+        settings: dict effectives, supporte 'runtime_hard_filter_enabled' (bool)
+            et 'runtime_hard_threshold_min' (int). Defaults : True / 60.
+        log: callback log pour tracer les exclusions
+        log_ctx: contexte pour le log
+
+    Returns:
+        (kept_tmdb_cands, any_excluded) ou kept_tmdb_cands est la liste filtree.
+    """
+    if not tmdb_cands or tmdb is None:
+        return tmdb_cands, False
+
+    # Configuration : enabled + threshold (defaults : True / 60 min)
+    settings = settings or {}
+    enabled = bool(settings.get("runtime_hard_filter_enabled", True))
+    if not enabled:
+        return tmdb_cands, False
+    try:
+        threshold = int(settings.get("runtime_hard_threshold_min", DEFAULT_RUNTIME_HARD_THRESHOLD_MIN))
+    except (TypeError, ValueError):
+        threshold = DEFAULT_RUNTIME_HARD_THRESHOLD_MIN
+    if threshold <= 0:
+        return tmdb_cands, False
+
+    # Probe FAILED / pas de duree -> filtre completement desactive
+    if file_runtime_min is None or float(file_runtime_min) <= 0:
+        return tmdb_cands, False
+
+    kept: List[Any] = []
+    any_excluded = False
+    for cand in tmdb_cands:
+        cand_tmdb_id = getattr(cand, "tmdb_id", None)
+        if not cand_tmdb_id:
+            # Pas d'ID TMDb -> on ne peut pas fetcher le runtime, on conserve
+            kept.append(cand)
+            continue
+        try:
+            cand_runtime = tmdb.get_movie_runtime(int(cand_tmdb_id))
+        except (AttributeError, TypeError, ValueError):
+            cand_runtime = None
+
+        excluded, warning = evaluate_runtime_hard_filter(
+            file_runtime_min=file_runtime_min,
+            candidate_runtime_min=cand_runtime,
+            edition_label=detected_edition,
+            enabled=True,
+            threshold_min=threshold,
+        )
+        if excluded:
+            any_excluded = True
+            delta = (
+                abs(float(file_runtime_min) - float(cand_runtime))
+                if cand_runtime is not None
+                else None
+            )
+            delta_str = f"{delta:.0f}" if delta is not None else "?"
+            log(
+                "INFO",
+                f"VN-D.3 runtime HARD filter{(' ' + log_ctx) if log_ctx else ''}: "
+                f"candidat exclu (tmdb_id={cand_tmdb_id}, titre={cand.title!r}, "
+                f"runtime TMDb={cand_runtime} min, fichier={float(file_runtime_min):.0f} min, "
+                f"delta={delta_str} min > seuil {threshold} min, pas d'edition flag)",
+            )
+            continue
+        if warning:
+            # Conserve avec warning : delta > seuil mais edition longue detectee
+            existing_note = getattr(cand, "note", "") or ""
+            if WARN_RUNTIME_HARD_KEPT_VIA_EDITION not in existing_note:
+                try:
+                    cand.note = (existing_note + f" [{WARN_RUNTIME_HARD_KEPT_VIA_EDITION}]").strip()
+                except (AttributeError, TypeError):
+                    pass
+            log(
+                "WARN",
+                f"VN-D.3 runtime HARD filter{(' ' + log_ctx) if log_ctx else ''}: "
+                f"candidat conserve grace a edition flag {detected_edition!r} "
+                f"(tmdb_id={cand_tmdb_id}, titre={cand.title!r}, "
+                f"runtime TMDb={cand_runtime} min, fichier={float(file_runtime_min):.0f} min)",
+            )
+        kept.append(cand)
+    return kept, any_excluded
+
+
 def _disambiguate_candidates(
     cands: List[Any],
     *,
@@ -1873,6 +2041,29 @@ def _plan_item(
         should_cancel=should_cancel,
     )
 
+    # VN-D.3 : runtime HARD filter sur les candidats TMDb.
+    # Exclut les candidats dont la duree TMDb diverge de >60 min vs le fichier
+    # quand aucune edition longue n'est detectee dans le nom. Configurable via
+    # settings.runtime_hard_filter_enabled (default True) et
+    # settings.runtime_hard_threshold_min (default 60).
+    runtime_hard_excluded_flag: Optional[str] = None
+    if tmdb_cands:
+        # Source duree : nfo.runtime (zero cout). Si absent, on saute ; le
+        # cross-check post-process via probe (runtime_probe_check) finira le job.
+        file_runtime_min = _resolve_file_runtime_min(nfo, folder, video)
+        if file_runtime_min is not None:
+            tmdb_cands, _excluded_any = _apply_runtime_hard_filter_to_tmdb_cands(
+                tmdb_cands,
+                file_runtime_min=file_runtime_min,
+                detected_edition=detected_edition,
+                tmdb=tmdb,
+                settings=getattr(cfg, "_runtime_filter_settings", None),
+                log=log,
+                log_ctx=log_ctx,
+            )
+            if _excluded_any:
+                runtime_hard_excluded_flag = WARN_RUNTIME_HARD_EXCLUDED
+
     cands = []
     cands.extend(nfo_cands)
     cands.extend(tmdb_cands)
@@ -1930,6 +2121,15 @@ def _plan_item(
             tmdb=tmdb,
             log=log,
         )
+
+    # VN-D.3 : pose le warning sur la PlanRow si au moins un candidat TMDb a
+    # ete exclu par le runtime HARD filter (utile pour debug user en UI).
+    if runtime_hard_excluded_flag and result_row is not None:
+        flags = getattr(result_row, "warning_flags", None)
+        if flags is None:
+            result_row.warning_flags = [runtime_hard_excluded_flag]
+        elif runtime_hard_excluded_flag not in flags:
+            flags.append(runtime_hard_excluded_flag)
 
     _apply_subtitle_detection(folder, video, result_row, subtitle_expected_languages=subtitle_expected_languages)
     _apply_not_a_movie_detection(video, result_row)
