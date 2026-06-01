@@ -221,5 +221,101 @@ function _showWhyModal(row) {
     body += `</ul>`;
   }
 
+  // VO-C-FRONTEND-2 : inspecteur waterfall (categories + baseline + suggestions
+  // + applied_rule_ids) issu de `row.score_explanation_full` (backend VO-C).
+  // Reutilise la classe CSS `.score-waterfall` ajoutee par lib-validation phase.
+  body += _renderScoreWaterfall(row);
+  body += _renderCustomFormatsImpact(row);
+
   showModal({ title: "Pourquoi ce cas ?", body, testid: "lib-verif-why-panel" });
+}
+
+/* --- VO-C-FRONTEND-2 : Waterfall scoring + custom formats ------ */
+
+/** Rend le waterfall des contributions de score (vidéo / audio / extras / custom_rules)
+ *  depuis `row.score_explanation_full` (payload backend VO-C). Pattern identique
+ *  a lib-validation, module distinct conformement aux memoires user (pas de
+ *  classe CSS partagee entre composants DOM differents : on cible
+ *  `.score-waterfall` ajoutee globalement, mais le wrapper data-testid est
+ *  specifique au panneau verification).
+ *
+ *  Backward compat : retourne "" si pas d'explanation disponible (None backend).
+ */
+function _renderScoreWaterfall(row) {
+  const exp = row && row.score_explanation_full;
+  if (!exp || typeof exp !== "object") return "";
+  const categories = Array.isArray(exp.categories) ? exp.categories : [];
+  const baseline = exp.baseline && typeof exp.baseline === "object" ? exp.baseline : {};
+  const suggestions = Array.isArray(exp.suggestions) ? exp.suggestions : [];
+  const narrative = String(exp.narrative || "");
+  if (!categories.length && !suggestions.length && !narrative) return "";
+
+  let html = `<h4 class="mt-4">Composition du score</h4>`;
+  html += `<div class="score-waterfall" data-testid="lib-verif-score-waterfall">`;
+
+  // Baseline (point de depart neutre)
+  if (baseline && (baseline.score !== undefined || baseline.label)) {
+    const baseScore = baseline.score !== undefined ? Number(baseline.score) : null;
+    const baseLabel = escapeHtml(String(baseline.label || "Baseline"));
+    html += `<div class="score-waterfall__row score-waterfall__row--baseline">`;
+    html += `<span class="score-waterfall__label">${baseLabel}</span>`;
+    if (baseScore !== null) html += `<span class="score-waterfall__value">${baseScore}</span>`;
+    html += `</div>`;
+  }
+
+  // Categories (video / audio / extras + custom_rules synthetique)
+  for (const cat of categories) {
+    if (!cat || typeof cat !== "object") continue;
+    const name = String(cat.name || "");
+    const label = escapeHtml(String(cat.label || name || "?"));
+    const contrib = cat.contribution !== undefined ? Number(cat.contribution) : null;
+    const sign = contrib === null ? "" : contrib >= 0 ? "+" : "";
+    const sentiment = contrib === null ? "neutral" : contrib >= 0 ? "positive" : "negative";
+    html += `<div class="score-waterfall__row score-waterfall__row--${escapeHtml(sentiment)}" data-category="${escapeHtml(name)}">`;
+    html += `<span class="score-waterfall__label">${label}</span>`;
+    if (contrib !== null) {
+      html += `<span class="score-waterfall__value">${sign}${contrib}</span>`;
+    } else if (name === "custom_rules" && cat.rules_count !== undefined) {
+      html += `<span class="score-waterfall__value">${Number(cat.rules_count)} règle(s)</span>`;
+    } else {
+      html += `<span class="score-waterfall__value">—</span>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+
+  // Narrative + suggestions
+  if (narrative) {
+    html += `<p class="text-muted mt-2">${escapeHtml(narrative)}</p>`;
+  }
+  if (suggestions.length) {
+    html += `<details class="mt-2"><summary>Suggestions d'amélioration (${suggestions.length})</summary><ul>`;
+    for (const s of suggestions.slice(0, 8)) {
+      const text = typeof s === "string" ? s : (s && s.text) || JSON.stringify(s);
+      html += `<li>${escapeHtml(String(text))}</li>`;
+    }
+    html += `</ul></details>`;
+  }
+  return html;
+}
+
+/** Rend l'impact des regles "custom formats" (Sonarr-style) appliquees,
+ *  depuis `applied_rule_ids`. Pattern identique a lib-validation mais module
+ *  distinct (pas de classe CSS partagee, pas d'import croise).
+ *
+ *  Backward compat : "" si pas de regles ou pas d'explanation.
+ */
+function _renderCustomFormatsImpact(row) {
+  const exp = row && row.score_explanation_full;
+  if (!exp || typeof exp !== "object") return "";
+  const ids = Array.isArray(exp.applied_rule_ids) ? exp.applied_rule_ids : [];
+  if (!ids.length) return "";
+  let html = `<h4 class="mt-4">Règles personnalisées appliquées</h4>`;
+  html += `<ul class="custom-formats-impact" data-testid="lib-verif-custom-formats-impact">`;
+  for (const rid of ids) {
+    html += `<li><code>${escapeHtml(String(rid))}</code></li>`;
+  }
+  html += `</ul>`;
+  return html;
 }
