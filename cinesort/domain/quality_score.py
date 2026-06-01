@@ -1003,8 +1003,6 @@ def _estimate_file_size(normalized_probe: Any, bitrate_kbps: Optional[int]) -> i
     # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : accepter NormalizedProbe
     # @dataclass natif (cinesort.infra.probe.service.ProbeService) en plus du dict.
     normalized_probe = _normalize_probe_arg(normalized_probe)
-    if not isinstance(normalized_probe, dict):
-        return 0
     dur = float(normalized_probe.get("duration_s") or 0)
     br = int(bitrate_kbps or 0)
     if dur > 0 and br > 0:
@@ -1045,9 +1043,7 @@ def _build_invalid_profile_result(
                 profile.get("version") if isinstance(profile, dict) else DEFAULT_PROFILE_VERSION,
                 DEFAULT_PROFILE_VERSION,
             ),
-            "probe_quality": str(
-                normalized_probe.get("probe_quality") if isinstance(normalized_probe, dict) else "FAILED"
-            ),
+            "probe_quality": str(normalized_probe.get("probe_quality")),
             "validation_errors": errs,
         },
     }
@@ -1254,19 +1250,15 @@ def _apply_custom_rules_helper(
                 "subtitle_count": int((subtitle_info or {}).get("count") or 0),
                 "subtitle_languages": list((subtitle_info or {}).get("languages") or []),
                 "warning_flags": list(encode_warnings or []),
-                "edition": (normalized_probe or {}).get("edition") if isinstance(normalized_probe, dict) else None,
-                "duration_s": int((normalized_probe or {}).get("duration_s") or 0)
-                if isinstance(normalized_probe, dict)
-                else 0,
+                "edition": normalized_probe.get("edition"),
+                "duration_s": int(normalized_probe.get("duration_s") or 0),
             },
             "__computed__": {
                 "resolution_rank": resolution_rank_map.get(str(vr["resolution_label"]), 0),
                 "tier_before": tier,
                 "score_before": int(score),
                 "file_size_gb": round(file_size_bytes / 1e9, 2) if file_size_bytes else 0.0,
-                "tmdb_in_collection": bool((normalized_probe or {}).get("tmdb_collection_id"))
-                if isinstance(normalized_probe, dict)
-                else False,
+                "tmdb_in_collection": bool(normalized_probe.get("tmdb_collection_id")),
             },
         }
         rule_result = _apply_rules(score, rule_context, custom_rules)
@@ -1406,7 +1398,7 @@ def _build_quality_metrics_helper(
             "audio_best_codec": str(best_audio.get("codec") or ""),
             "audio_best_channels": _to_int(best_audio.get("channels"), 0),
             "languages": langs,
-            "duration_s": float(normalized_probe.get("duration_s") or 0) if isinstance(normalized_probe, dict) else 0,
+            "duration_s": float(normalized_probe.get("duration_s") or 0),
             "file_size_bytes": _estimate_file_size(normalized_probe, vr["bitrate_kbps"]),
         },
         "weights": copy.deepcopy(weights),
@@ -1508,8 +1500,6 @@ def _merge_probe_with_name_hints(
     # pour eviter le wipe-and-replace ({} + remplissage uniquement depuis le nom),
     # signature exacte du bug v1.5.6.
     normalized_probe = _normalize_probe_arg(normalized_probe)
-    if not isinstance(normalized_probe, dict):
-        normalized_probe = {}
     # Copie defensive pour ne pas muter le dict d'entree (utilise ailleurs).
     enriched = copy.deepcopy(normalized_probe)
     enriched.setdefault("video", {})
