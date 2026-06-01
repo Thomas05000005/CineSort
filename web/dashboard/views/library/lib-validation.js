@@ -17,6 +17,12 @@ let _allRows = [];
 let _filteredRows = [];
 let _searchTimer = null;
 let _filters = { search: "", confidence: "", source: "", preset: "" };
+// VO-C-FRONTEND-LIB-VAL : cache module-level du mapping rule_id -> {name, action}
+// pour render le waterfall custom_formats sans refetch a chaque ouverture de
+// l'inspecteur. Hydrate au 1er showInspector (paresseux). Map<string, {name,
+// action}>.
+let _profileRulesById = null;
+let _profileRulesPromise = null;
 
 /* --- Colonnes de la table (9 colonnes) ------------------------ */
 
@@ -386,6 +392,11 @@ function _showInspector(row) {
 
   body += `</div>`;
 
+  // VO-C-FRONTEND-LIB-VAL : Breakdown du score waterfall (categories +
+  // baseline + applied_rule_ids + suggestions). Affiche uniquement si le
+  // backend a fourni row.score_explanation_full (VO-C-BACKEND).
+  body += _renderScoreWaterfall(row);
+
   // Candidats TMDb
   const candidates = row.candidates || [];
   if (candidates.length > 1) {
@@ -407,6 +418,228 @@ function _showInspector(row) {
 
   // Event delegation pour les boutons d'action dans la modale detail
   _hookDetailModalActions();
+
+  // Hydrate paresseuse du mapping rule_id -> name. Si la modale contient
+  // au moins un applied_rule_id non resolu, on lance le fetch profile et on
+  // re-render uniquement la sous-section custom_formats (sans re-ouvrir la
+  // modale).
+  const full = row.score_explanation_full;
+  if (full && Array.isArray(full.applied_rule_ids) && full.applied_rule_ids.length > 0) {
+    _hydrateProfileRulesAsync().then(() => {
+      _refreshWaterfallCustomFormats(full.applied_rule_ids);
+    }).catch(() => { /* network refused : labels restent en rule_id brut */ });
+  }
+}
+
+/** Render waterfall additif type Radarr. Retourne "" si pas de donnees. */
+function _renderScoreWaterfall(row) {
+  const full = row && row.score_explanation_full;
+  if (!full || typeof full !== "object") return "";
+
+  const categories = Array.isArray(full.categories) ? full.categories : [];
+  const baseline = (full.baseline && typeof full.baseline === "object") ? full.baseline : {};
+  const applied = Array.isArray(full.applied_rule_ids) ? full.applied_rule_ids : [];
+  const suggestions = Array.isArray(full.suggestions) ? full.suggestions : [];
+  const narrative = String(full.narrative || "");
+
+  // Score total + tier final (vient du row, source unique).
+  const totalScore = (row.score === null || row.score === undefined || row.score === "")
+    ? null
+    : Math.round(Number(row.score) || 0);
+  const finalTier = String(row.quality_tier || "").trim();
+
+  // Baseline = score "de depart" du profil. build_rich_explanation ne fournit
+  // pas explicitement ce nombre : on affiche une ligne baseline neutre avec
+  // les seuils du profil (Platinum/Gold/Silver/Bronze) en label, et la
+  // distance au prochain tier si calculee.
+  const thresholds = (baseline.tier_thresholds && typeof baseline.tier_thresholds === "object")
+    ? baseline.tier_thresholds : {};
+  const nextTier = baseline.next_tier ? String(baseline.next_tier) : "";
+  const distance = (typeof baseline.distance_to_next_tier === "number")
+    ? baseline.distance_to_next_tier : null;
+
+  let html = `<h4 class="mt-4" data-testid="score-waterfall-title">Breakdown du score</h4>`;
+  html += `<div class="score-waterfall" data-testid="score-waterfall">`;
+
+  // Ligne baseline : seuils du profil (texte informatif).
+  const thresholdsTxt = ["Platinum", "Gold", "Silver", "Bronze"]
+    .map(t => (thresholds[t] != null ? `${t} ≥ ${thresholds[t]}` : null))
+    .filter(Boolean)
+    .join(" · ");
+  if (thresholdsTxt) {
+    html += `<div class="score-waterfall-row score-waterfall-row--baseline">`;
+    html += `<span class="score-waterfall-label">Seuils du profil</span>`;
+    html += `<span class="score-waterfall-detail">${escapeHtml(thresholdsTxt)}</span>`;
+    html += `</div>`;
+  }
+
+  // Lignes categories (video / audio / extras / custom_rules).
+  if (categories.length === 0) {
+    html += `<div class="score-waterfall-row score-waterfall-row--empty">`;
+    html += `<span class="score-waterfall-label">Pas de breakdown disponible</span>`;
+    html += `</div>`;
+  }
+  for (const cat of categories) {
+    if (!cat || typeof cat !== "object") continue;
+    const name = String(cat.name || "");
+    const label = String(cat.label || name || "?");
+
+    // Categorie synthetique custom_rules : pas de contribution chiffree
+    // (deja agregee dans video par compute_quality_score). On affiche les
+    // badges des regles via _renderCustomFormatsImpact (placeholder ici,
+    // hydratation paresseuse).
+    if (name === "custom_rules") {
+      const ruleIds = Array.isArray(cat.rule_ids) ? cat.rule_ids : applied;
+      html += `<div class="score-waterfall-row score-waterfall-row--custom" data-waterfall-custom-formats>`;
+      html += `<span class="score-waterfall-label">${escapeHtml(label)}</span>`;
+      html += `<span class="score-waterfall-detail">${_renderCustomFormatsImpact(ruleIds, _profileRulesById)}</span>`;
+      html += `</div>`;
+      continue;
+    }
+
+    // Categories standards : contribution ponderee + subscore + counts.
+    const contribution = (cat.contribution === null || cat.contribution === undefined)
+      ? null : Number(cat.contribution);
+    const subscore = (cat.subscore === null || cat.subscore === undefined)
+      ? null : Number(cat.subscore);
+    const weightPct = (cat.weight_pct === null || cat.weight_pct === undefined)
+      ? null : Number(cat.weight_pct);
+    const pos = Number(cat.positive_count || 0);
+    const neg = Number(cat.negative_count || 0);
+
+    let contribClass = "score-waterfall-contribution-neutral";
+    let contribTxt = "—";
+    if (contribution !== null && !Number.isNaN(contribution)) {
+      if (contribution > 0) {
+        contribClass = "score-waterfall-contribution-positive";
+        contribTxt = `+${_round1(contribution)}`;
+      } else if (contribution < 0) {
+        contribClass = "score-waterfall-contribution-negative";
+        contribTxt = `${_round1(contribution)}`;
+      } else {
+        contribTxt = "0";
+      }
+    }
+
+    const details = [];
+    if (subscore !== null && !Number.isNaN(subscore)) details.push(`subscore ${Math.round(subscore)}`);
+    if (weightPct !== null && !Number.isNaN(weightPct)) details.push(`poids ${Math.round(weightPct)}%`);
+    if (pos > 0) details.push(`${pos} bonus`);
+    if (neg > 0) details.push(`${neg} pénalité${neg > 1 ? "s" : ""}`);
+
+    html += `<div class="score-waterfall-row" data-cat="${escapeHtml(name)}">`;
+    html += `<span class="score-waterfall-label">${escapeHtml(label)}</span>`;
+    html += `<span class="score-waterfall-contribution ${contribClass}">${escapeHtml(contribTxt)}</span>`;
+    if (details.length) {
+      html += `<span class="score-waterfall-detail">${escapeHtml(details.join(" · "))}</span>`;
+    }
+    html += `</div>`;
+  }
+
+  // Ligne total : score final + tier.
+  html += `<div class="score-waterfall-row score-waterfall-row--total">`;
+  html += `<span class="score-waterfall-label">Total</span>`;
+  if (totalScore !== null) {
+    html += `<span class="score-waterfall-contribution score-waterfall-contribution-total">= ${escapeHtml(String(totalScore))}</span>`;
+  } else {
+    html += `<span class="score-waterfall-contribution score-waterfall-contribution-total">—</span>`;
+  }
+  if (finalTier) {
+    html += `<span class="score-waterfall-detail">→ ${escapeHtml(finalTier)}</span>`;
+  }
+  html += `</div>`;
+
+  // Distance au prochain tier (info actionable).
+  if (nextTier && distance !== null) {
+    html += `<div class="score-waterfall-row score-waterfall-row--next">`;
+    html += `<span class="score-waterfall-label">Prochain tier</span>`;
+    html += `<span class="score-waterfall-detail">${escapeHtml(nextTier)} à ${escapeHtml(String(distance))} pt(s)</span>`;
+    html += `</div>`;
+  }
+
+  html += `</div>`; // .score-waterfall
+
+  // Narrative (1-3 phrases FR generees par build_rich_explanation).
+  if (narrative) {
+    html += `<p class="score-waterfall-narrative" data-testid="score-waterfall-narrative">${escapeHtml(narrative)}</p>`;
+  }
+
+  // Suggestions actionables.
+  if (suggestions.length > 0) {
+    html += `<ul class="score-waterfall-suggestions" data-testid="score-waterfall-suggestions">`;
+    for (const s of suggestions) {
+      html += `<li>${escapeHtml(String(s))}</li>`;
+    }
+    html += `</ul>`;
+  }
+
+  return html;
+}
+
+/** Render badges "Rule: NomLisible" pour chaque applied_rule_id. */
+function _renderCustomFormatsImpact(appliedRuleIds, profileRulesById) {
+  const ids = Array.isArray(appliedRuleIds) ? appliedRuleIds : [];
+  if (ids.length === 0) return `<span class="text-muted">—</span>`;
+
+  let html = "";
+  for (const rawId of ids) {
+    const id = String(rawId || "").trim();
+    if (!id) continue;
+    const rule = profileRulesById ? profileRulesById.get(id) : null;
+    const name = (rule && rule.name) ? String(rule.name) : id;
+    const action = rule && rule.action;
+    const actionTxt = action && (action.value !== null && action.value !== undefined && action.value !== "")
+      ? ` (${Number(action.value) >= 0 ? "+" : ""}${action.value})`
+      : "";
+    html += `<span class="badge badge-custom-rule" title="${escapeHtml(id)}">Rule: ${escapeHtml(name)}${escapeHtml(actionTxt)}</span> `;
+  }
+  return html || `<span class="text-muted">—</span>`;
+}
+
+/** Charge le profil qualite (1x par session) pour resoudre rule_id -> name. */
+async function _hydrateProfileRulesAsync() {
+  if (_profileRulesById) return _profileRulesById;
+  if (_profileRulesPromise) return _profileRulesPromise;
+  _profileRulesPromise = (async () => {
+    try {
+      const res = await apiPost("quality/get_quality_profile", {});
+      const payload = (res && res.data) || res || {};
+      const profile = payload.profile_json || {};
+      const rules = Array.isArray(profile.custom_rules) ? profile.custom_rules : [];
+      const map = new Map();
+      for (const r of rules) {
+        const id = String((r && r.id) || "").trim();
+        if (!id) continue;
+        map.set(id, {
+          name: String((r && r.name) || id),
+          action: (r && r.action) || null,
+        });
+      }
+      _profileRulesById = map;
+      return map;
+    } catch {
+      _profileRulesById = new Map();
+      return _profileRulesById;
+    } finally {
+      _profileRulesPromise = null;
+    }
+  })();
+  return _profileRulesPromise;
+}
+
+/** Re-render uniquement la sous-section custom_formats apres hydratation. */
+function _refreshWaterfallCustomFormats(appliedRuleIds) {
+  const overlay = document.querySelector(".modal-overlay");
+  if (!overlay) return;
+  const cell = overlay.querySelector("[data-waterfall-custom-formats] .score-waterfall-detail");
+  if (!cell) return;
+  cell.innerHTML = _renderCustomFormatsImpact(appliedRuleIds, _profileRulesById);
+}
+
+/** Arrondi a 1 decimale, en supprimant le ".0" trailing. */
+function _round1(v) {
+  const n = Math.round(Number(v) * 10) / 10;
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 /** Event delegation sur les boutons data-action dans la modale ouverte. */

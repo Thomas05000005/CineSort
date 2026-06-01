@@ -9700,3 +9700,108 @@ body.v5-notif-lock {
 .historique-films-history-tier--silver   { background: #c0c0c0; color: #2a2a2a; }
 .historique-films-history-tier--bronze   { background: #cd7f32; color: #3a1a00; }
 .historique-films-history-tier--reject   { background: #f48fb1; color: #4a0010; }
+
+/* ============================================================
+ * VO-C-FRONTEND-LIB-VAL : waterfall inspecteur lib-validation
+ * ============================================================
+ * Breakdown du score affiche dans l'inspecteur de film. Style
+ * additif type Radarr : 1 ligne par categorie (video/audio/extras/
+ * custom_rules), contribution coloree (+vert/-rouge), total final.
+ * Classes specifiques (.score-waterfall-*) volontairement non
+ * partagees avec les badges audio/tier dont les couleurs sont
+ * invariantes (cf memoire user feedback_cinesort_v76_ui).
+ * ============================================================ */
+.score-waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--surface-2, var(--bg-raised, #1a1a1a));
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--surface-3, var(--border, #2a2a2a));
+  font-family: var(--font-family-base);
+}
+.score-waterfall-row {
+  display: grid;
+  grid-template-columns: 160px 80px 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px dashed var(--surface-3, var(--border, #2a2a2a));
+}
+.score-waterfall-row:last-child { border-bottom: 0; }
+.score-waterfall-row--baseline {
+  font-style: italic;
+  opacity: 0.85;
+}
+.score-waterfall-row--total {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 2px solid var(--surface-3, var(--border, #2a2a2a));
+  border-bottom: 0;
+  font-weight: var(--fw-semibold, 600);
+}
+.score-waterfall-row--next {
+  font-size: var(--fs-sm);
+  opacity: 0.85;
+}
+.score-waterfall-row--custom {
+  grid-template-columns: 160px 1fr;
+}
+.score-waterfall-row--empty {
+  grid-template-columns: 1fr;
+  font-style: italic;
+  opacity: 0.7;
+}
+.score-waterfall-label {
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-contribution {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold, 600);
+  text-align: right;
+}
+.score-waterfall-contribution-positive { color: #4ade80; }
+.score-waterfall-contribution-negative { color: #f87171; }
+.score-waterfall-contribution-neutral { color: var(--text-2, var(--text-secondary, #aaa)); }
+.score-waterfall-contribution-total { color: var(--accent, #60a5fa); font-size: var(--fs-md, 1rem); }
+.score-waterfall-detail {
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-narrative {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--surface-2, var(--bg-raised, #1a1a1a));
+  border-left: 3px solid var(--accent, #60a5fa);
+  border-radius: var(--radius-sm, 3px);
+  font-size: var(--fs-sm);
+  color: var(--text-1, var(--text-primary, #eee));
+}
+.score-waterfall-suggestions {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-4);
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-suggestions li { margin-bottom: 2px; }
+.badge-custom-rule {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 2px;
+  border-radius: var(--radius-sm, 3px);
+  background: var(--surface-3, var(--border, #2a2a2a));
+  color: var(--text-1, var(--text-primary, #eee));
+  font-size: var(--fs-xs, 0.75rem);
+  font-weight: var(--fw-semibold, 600);
+}
+@media (max-width: 767px) {
+  .score-waterfall-row {
+    grid-template-columns: 1fr auto;
+    gap: var(--sp-1);
+  }
+  .score-waterfall-row--custom { grid-template-columns: 1fr; }
+  .score-waterfall-detail { grid-column: 1 / -1; }
+}
