@@ -23,6 +23,7 @@ from .repositories import (
     RunRepository,
     ScanRepository,
 )
+from .repositories.field_locks import FieldLocksRepository
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
@@ -77,6 +78,8 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "duplicate_decisions": ("duplicate_decisions",),
     # Vague P / VP-A (migration 029) : apply atomique forward rollback (opt-in).
     "apply_atomic": ("apply_batch_modes",),
+    # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin-style.
+    "field_locks": ("film_field_locks",),
 }
 
 
@@ -667,3 +670,5 @@ class SQLiteStore(_StoreBase):
         self.scan = ScanRepository(self)
         # Spec 06 Modal Film (migration 023) : etat utilisateur sur les films.
         self.film_modal = FilmModalRepository(self)
+        # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin.
+        self.field_locks = FieldLocksRepository(self)

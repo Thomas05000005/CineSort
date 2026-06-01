@@ -4,7 +4,7 @@ import { $, escapeHtml } from "../../core/dom.js";
 import { apiGet, apiPost, fetchConfidenceThresholds, getConfidenceThresholdsSync } from "../../core/api.js";
 import { tableHtml, attachSort } from "../../components/table.js";
 import { badgeHtml } from "../../components/badge.js";
-import { showModal } from "../../components/modal.js";
+import { showModal, dangerConfirmModal } from "../../components/modal.js";
 import { refreshVerification } from "./lib-verification.js";
 import { markValidationSaved } from "./lib-apply.js";
 import { getNavSignal, isAbortError } from "../../core/nav-abort.js";
@@ -837,4 +837,125 @@ function _showMsg(text, isError = false) {
   if (!el) return;
   el.textContent = text;
   el.className = "status-msg" + (isError ? " error" : " success");
+}
+
+/* =============================================================
+ * Vague P / VP-C : Field locks Jellyfin-style — UI
+ * =============================================================
+ * Cadenas par champ + 2 modes UI :
+ *   - "Completer les manques uniquement" (defaut, sans confirmation)
+ *   - "Tout reconstruire" : dangerConfirmModal OBLIGATOIRE avec liste
+ *     des champs verrouilles + countdown 3s si plus de 50 items
+ *     (memo feedback_cinesort_actions_dangereuses).
+ *
+ * `dangerConfirmModal` est la seule modale autorisee pour les actions
+ * destructives (jamais window.confirm/alert/prompt).
+ */
+
+const _DEFAULT_LOCKABLE_FIELDS = [
+  "title",
+  "proposed_title",
+  "year",
+  "proposed_year",
+  "tmdb_id",
+  "imdb_id",
+  "overview",
+  "genres",
+];
+
+/**
+ * Lance un rebuild complet d'un champ (ou de plusieurs films) avec
+ * confirmation dangereuse OBLIGATOIRE.
+ *
+ * @param {object} opts
+ * @param {string[]} opts.rowIds - films impactes par le rebuild
+ * @param {string[]} [opts.lockedFields] - champs actuellement verrouilles
+ * @param {Function} opts.onConfirm - callback async appele a la confirmation
+ */
+export function confirmRebuildAll({ rowIds = [], lockedFields = [], onConfirm } = {}) {
+  const count = Array.isArray(rowIds) ? rowIds.length : 0;
+  const fields = Array.isArray(lockedFields) && lockedFields.length > 0
+    ? lockedFields
+    : _DEFAULT_LOCKABLE_FIELDS;
+
+  // Memo feedback_cinesort_actions_dangereuses : countdown 3s si > 50.
+  const countdownSeconds = count > 50 ? 3 : 0;
+
+  const titleSuffix = count > 1 ? `${count} films` : "ce film";
+  const items = fields.map((f) => `Champ : ${f}`);
+  const consequence = count > 50
+    ? `Les champs verrouilles de ${count} films seront ecrases si vous les deverrouilez d'abord. Action non-reversible automatiquement.`
+    : `Les champs verrouilles seront preserves. Les autres champs seront reconstruits depuis TMDb/OMDb.`;
+
+  return dangerConfirmModal({
+    title: `Tout reconstruire (${titleSuffix}) ?`,
+    items,
+    consequence,
+    countdownSeconds,
+    confirmLabel: "Reconstruire",
+    cancelLabel: "Annuler",
+    onConfirm: async () => {
+      if (typeof onConfirm === "function") {
+        await onConfirm();
+      }
+    },
+  });
+}
+
+/**
+ * Pose ou retire un verrou sur un champ pour un film.
+ *
+ * @param {string} filmId - cle stable (tmdb:<id> ou path:<sha1>)
+ * @param {string} fieldName
+ * @param {*} value - valeur a verrouiller (ignoree si unlock)
+ * @param {boolean} [locked=true] - true=lock, false=unlock
+ */
+export async function setFieldLock(filmId, fieldName, value, locked = true) {
+  if (!filmId || !fieldName) return { ok: false, reason: "filmId et fieldName requis" };
+  const endpoint = locked ? "library/set_field_lock" : "library/clear_field_lock";
+  try {
+    const res = await apiPost(endpoint, {
+      film_id: String(filmId),
+      field_name: String(fieldName),
+      locked_value: locked ? value : undefined,
+      source: "ui_lock",
+    });
+    return res?.data || { ok: true };
+  } catch (err) {
+    return { ok: false, reason: String(err) };
+  }
+}
+
+/**
+ * Recupere les locks d'un film (pour render les cadenas).
+ *
+ * @param {string} filmId
+ * @returns {Promise<{locked_fields: string[]}>}
+ */
+export async function loadFieldLocks(filmId) {
+  if (!filmId) return { locked_fields: [] };
+  try {
+    const res = await apiPost("library/list_field_locks", { film_id: String(filmId) });
+    const list = res?.data?.locks || [];
+    return {
+      locked_fields: list.map((lk) => String(lk.field_name || "")).filter(Boolean),
+    };
+  } catch {
+    return { locked_fields: [] };
+  }
+}
+
+/**
+ * Render un cadenas inline pour un champ (utilise par lib-inspector).
+ * Renvoie le HTML d'un bouton toggle (lock/unlock).
+ *
+ * @param {string} fieldName
+ * @param {boolean} isLocked
+ * @returns {string} HTML
+ */
+export function fieldLockToggleHtml(fieldName, isLocked) {
+  const icon = isLocked ? "[verrouille]" : "[deverrouille]";
+  const cls = isLocked ? "field-lock-toggle field-lock-toggle--locked" : "field-lock-toggle";
+  const label = isLocked ? "Deverrouiller le champ" : "Verrouiller le champ";
+  return `<button type="button" class="${cls}" data-field-lock="${escapeHtml(fieldName)}" title="${escapeHtml(label)}">${icon}</button>`;
 }

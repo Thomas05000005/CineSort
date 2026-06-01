@@ -21,6 +21,7 @@ from __future__ import annotations
 from cinesort.infra.db.repositories._base import _BaseRepository
 from cinesort.infra.db.repositories.anomaly import AnomalyRepository
 from cinesort.infra.db.repositories.apply import ApplyRepository
+from cinesort.infra.db.repositories.field_locks import FieldLocksRepository
 from cinesort.infra.db.repositories.film_modal import FilmModalRepository
 from cinesort.infra.db.repositories.perceptual import PerceptualRepository
 from cinesort.infra.db.repositories.probe import ProbeRepository
@@ -32,6 +33,7 @@ __all__ = [
     "_BaseRepository",
     "AnomalyRepository",
     "ApplyRepository",
+    "FieldLocksRepository",
     "FilmModalRepository",
     "PerceptualRepository",
     "ProbeRepository",

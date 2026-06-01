@@ -148,6 +148,70 @@ class ExistingDbFixtureTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_v29_to_v30_real_migration_030(self):
+        """VP-C AC-1 : fixture v29 reelle + apply migration 030 reelle.
+
+        Verifie l'enchainement exact que VP-C suit en prod : DB v29
+        (post-VP-A apply_atomic_mode) -> CREATE TABLE film_field_locks
+        + 3 CREATE INDEX (incl. idx_film_id pour migrate_locks fix #5).
+        AUCUN ALTER TABLE.
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(29)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 29)
+
+            tables_before = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertNotIn("film_field_locks", tables_before)
+            # AC-4 : film_tmdb_overrides coexiste (zero regression)
+            self.assertIn("film_tmdb_overrides", tables_before)
+            # AC-1 (VP-A) : apply_batch_modes deja la (chainage 029 -> 030 OK)
+            self.assertIn("apply_batch_modes", tables_before)
+
+            sql_path = _project_migrations_dir() / "030_field_locks.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 030 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 030")
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 30")
+            conn.commit()
+
+            tables_after = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertIn("film_field_locks", tables_after)
+            # film_tmdb_overrides toujours la (coexistence)
+            self.assertIn("film_tmdb_overrides", tables_after)
+            # apply_batch_modes toujours la (VP-A)
+            self.assertIn("apply_batch_modes", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 30)
+
+            # AC-3 : idx_film_id present (dedie a migrate_locks)
+            indexes = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_field_locks'"
+                )
+            }
+            self.assertIn("idx_film_field_locks_film_id", indexes, "Index dedie a migrate_locks (fix #5)")
+        finally:
+            conn.close()
+
     def test_migrations_dir_override(self):
         """On peut passer un dossier de migrations custom (tests isoles)."""
         from cinesort.infra.db.migration_manager import MigrationManager

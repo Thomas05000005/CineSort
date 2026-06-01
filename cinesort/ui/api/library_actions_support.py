@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.app.merge_metadata import merge_metadata
+from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
@@ -236,8 +238,46 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
     }
 
 
+def _get_field_locks_repo(api: Any):
+    """Best-effort acces au FieldLocksRepository via le store.
+
+    Retourne None si infra non dispo, ou si l'attribut field_locks n'existe
+    pas (tests avec mocks legers). Toujours wrappe en try/except — un echec
+    d'acces field_locks ne doit JAMAIS faire planter rescan/rematch.
+    """
+    try:
+        settings = api.settings.get_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        store, _runner = api._get_or_create_infra(state_dir)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("_get_field_locks_repo: infra unavailable: %s", exc)
+        return None
+    return getattr(store, "field_locks", None)
+
+
+def _list_locked_field_names(api: Any, film_id: str) -> List[str]:
+    """Liste les noms de champs verrouilles pour film_id (vide si aucun)."""
+    if not film_id:
+        return []
+    repo = _get_field_locks_repo(api)
+    if repo is None:
+        return []
+    try:
+        locks = repo.list_locks(film_id)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("list_locks failed film_id=%s: %s", film_id, exc)
+        return []
+    return [str(lk.get("field_name") or "") for lk in locks if lk.get("field_name")]
+
+
 def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
-    """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl."""
+    """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl.
+
+    Vague P / VP-C :
+        - Consulte `field_locks` AVANT d'ecraser les champs de target.
+        - Appelle `migrate_locks(old_film_id, new_film_id)` lors de la
+          transition `path:<sha1>` -> `tmdb:<id>` (fix #5 ROADMAP_VAGUE_P).
+    """
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
@@ -291,6 +331,47 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
 
     new_row_json = plan_row_to_jsonable(new_row)
     new_row_json["row_id"] = str(row_id)
+
+    # Vague P / VP-C : barriere merge_metadata + migrate_locks.
+    # 1. Calcul des film_id ancien / nouveau.
+    # 2. Si transition path: -> tmdb:, migrate_locks vers le nouveau id.
+    # 3. Consulte les locks (nouveau id) et applique merge_metadata pour
+    #    ne pas ecraser les champs verrouilles.
+    try:
+        old_film_id = compute_film_id(target)
+        new_film_id = compute_film_id(new_row_json)
+        if (
+            old_film_id
+            and new_film_id
+            and old_film_id != new_film_id
+            and is_path_film_id(old_film_id)
+        ):
+            repo = _get_field_locks_repo(api)
+            if repo is not None:
+                try:
+                    migrated = repo.migrate_locks(old_film_id, new_film_id)
+                    if migrated:
+                        logger.info(
+                            "field_locks migrate %s -> %s : %d lock(s)",
+                            old_film_id,
+                            new_film_id,
+                            migrated,
+                        )
+                except (OSError, AttributeError, TypeError, ValueError) as exc:
+                    logger.warning("migrate_locks failed: %s", exc)
+
+        locked_names = _list_locked_field_names(api, new_film_id)
+        if locked_names:
+            # source = nouvelle row enrichie, target = ancienne row preservee
+            new_row_json = merge_metadata(
+                source=new_row_json,
+                target=target,
+                locked_fields=locked_names,
+                replace_data=True,
+            )
+            new_row_json["row_id"] = str(row_id)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("field_locks integration failed (best-effort): %s", exc)
 
     all_rows[target_idx] = new_row_json
     tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
