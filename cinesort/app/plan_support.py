@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import cinesort.app.apply_core as _apply_core_mod
 import cinesort.domain.core as core_mod
+from cinesort.app._local_candidate import (
+    LocalCandidate,
+    parallel_extract_local_candidates,
+    resolve_scan_max_workers,
+)
 from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
 from cinesort.domain import duplicate_support as _dup
 from cinesort.domain.edition_helpers import extract_edition, strip_edition
@@ -715,6 +720,27 @@ def _classify_and_plan_folder(
     return ctx.check_cancel()
 
 
+def _merge_local_candidate_into_ctx(
+    ctx: _PlanLibraryContext, local: "LocalCandidate"
+) -> None:
+    """Rejoue les buckets locaux d'un LocalCandidate sur ctx.stats (Phase 2).
+
+    VO-B : iter_videos a tourne en Phase 1 avec un bucket prive (thread-safe).
+    On reapplique ici les compteurs `ignores_par_raison` sur `ctx.stats` dans
+    l'ordre original (1..N) pour preserver la semantique des deltas SCAN-1
+    (cf. _filter_dossiers_phase). Aucun effet si bucket vide.
+    """
+    if local.ignores_par_raison:
+        bucket = ctx.stats.analyse_ignores_par_raison
+        for reason, count in local.ignores_par_raison.items():
+            if not count:
+                continue
+            bucket[reason] = int(bucket.get(reason, 0)) + int(count)
+    # Replay des erreurs eventuelles en logs Phase 2 (ordre 1..N preserve).
+    for msg in local.errors:
+        ctx.log("WARN", msg)
+
+
 def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
     """Phase 2 : itere sur les dossiers candidats, applique le cache incremental,
     classe chaque dossier (TV/root/single+extras/collection/single) et genere les
@@ -722,10 +748,35 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
 
     Met a jour ctx.rows, ctx.stats, ctx.folders_seen_for_prune, ctx.video_paths_seen,
     ctx.scanned_total en place.
-    """
 
+    VO-B refactor : si `cfg.scan_max_workers > 1`, la sous-phase locale
+    (iter_videos scandir + collect_non_video_extensions) est pre-calculee en
+    parallele via ThreadPoolExecutor. La boucle Phase 2 reste sequentielle
+    (TMDb / SQLite / progress UI / stats merge en ordre 1..N strict). Pour
+    `scan_max_workers <= 1` (default), comportement strictement identique a
+    l'historique : pas de pool cree, iter_videos appele inline.
+    """
     # Phase 2 — analyse : total fixe, la barre de progression est maintenant deterministe.
     discover_total = len(ctx.candidate_folders)
+
+    # VO-B Phase 1 : pre-extraction parallele optionnelle (videos +
+    # non_video_exts + ignores_par_raison locaux). Pour max_workers=1 retourne
+    # immediatement une liste vide -> fallback inline historique en Phase 2.
+    max_workers = resolve_scan_max_workers(ctx.cfg)
+    pre_extracted: List[Optional[LocalCandidate]] = []
+    if max_workers > 1 and discover_total > 1:
+        pre_extracted = parallel_extract_local_candidates(
+            ctx.candidate_folders,
+            ctx.cfg,
+            max_workers=max_workers,
+            should_cancel=ctx.should_cancel,
+        )
+        _log.info(
+            "scan: VO-B phase 1 parallele = %d candidates (workers=%d)",
+            len(pre_extracted),
+            max_workers,
+        )
+
     for idx, folder in enumerate(ctx.candidate_folders, start=1):
         # VN-E.3 : pause cooperative AVANT cancel check pour que le worker se
         # mette en sommeil au plus tot. wait_while_paused retourne True si une
@@ -751,18 +802,38 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
         # pouvoir distinguer la contribution de CE dossier (utile au diagnostic
         # quand videos=[] et qu'on doit savoir pourquoi precisement).
         ignores_par_raison_before = dict(ctx.stats.analyse_ignores_par_raison or {})
-        # SCAN-1 : passage de stats=ctx.stats pour categoriser chaque rejet
-        # (extension hors liste / taille < min / nom suspect / erreur stat) au lieu
-        # d'incrementer aveuglement 'ignore_non_supporte'. Utilise cfg.min_video_bytes
-        # si configure (Phase 3 du plan), sinon core_mod.MIN_VIDEO_BYTES (10MB).
-        _cfg_min = getattr(ctx.cfg, "min_video_bytes", None)
-        _effective_min_bytes = int(_cfg_min) if _cfg_min is not None else core_mod.MIN_VIDEO_BYTES
-        videos = core_mod.iter_videos(
-            ctx.cfg,
-            folder,
-            min_video_bytes=_effective_min_bytes,
-            stats=ctx.stats,
-        )
+
+        # VO-B : 2 chemins possibles pour obtenir `videos` + `non_video_exts`.
+        # - Phase 1 parallele OFF (default, max_workers<=1) : appel inline a
+        #   iter_videos avec stats=ctx.stats, exactement comme avant le refactor.
+        # - Phase 1 parallele ON : reutilisation du LocalCandidate pre-extrait,
+        #   et replay des compteurs locaux sur ctx.stats dans l'ordre 1..N.
+        local_cand: Optional[LocalCandidate] = None
+        if pre_extracted and (idx - 1) < len(pre_extracted):
+            local_cand = pre_extracted[idx - 1]
+
+        if local_cand is not None:
+            # Rejoue les ignores_par_raison du worker sur ctx.stats (ordre stable).
+            _merge_local_candidate_into_ctx(ctx, local_cand)
+            videos = local_cand.videos
+            # _collect_non_video_extensions deja calcule en Phase 1 si videos=[].
+            non_video_exts_precomputed = local_cand.non_video_exts
+        else:
+            # Code-path sequentiel historique : iter_videos inline, stats=ctx.stats.
+            # SCAN-1 : passage de stats=ctx.stats pour categoriser chaque rejet
+            # (extension hors liste / taille < min / nom suspect / erreur stat) au lieu
+            # d'incrementer aveuglement 'ignore_non_supporte'. Utilise cfg.min_video_bytes
+            # si configure (Phase 3 du plan), sinon core_mod.MIN_VIDEO_BYTES (10MB).
+            _cfg_min = getattr(ctx.cfg, "min_video_bytes", None)
+            _effective_min_bytes = int(_cfg_min) if _cfg_min is not None else core_mod.MIN_VIDEO_BYTES
+            videos = core_mod.iter_videos(
+                ctx.cfg,
+                folder,
+                min_video_bytes=_effective_min_bytes,
+                stats=ctx.stats,
+            )
+            non_video_exts_precomputed = None
+
         if not videos:
             # SCAN-1 : second passage diagnostic. iter_videos a deja categorise via
             # stats= les rejets (ignore_extension, ignore_nom_suspect, ignore_taille_min,
@@ -797,7 +868,12 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
                 core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
 
             # Inventaire des extensions presentes (pour bandeau diagnostic UI).
-            for ext, count in core_mod._collect_non_video_extensions(ctx.cfg, folder).items():
+            # VO-B : reutilise le calcul Phase 1 si dispo, evite un 2e scandir NAS.
+            if non_video_exts_precomputed is not None:
+                non_video_exts_iter = non_video_exts_precomputed.items()
+            else:
+                non_video_exts_iter = core_mod._collect_non_video_extensions(ctx.cfg, folder).items()
+            for ext, count in non_video_exts_iter:
                 ctx.stats.analyse_ignores_extensions[ext] = int(
                     ctx.stats.analyse_ignores_extensions.get(ext, 0)
                 ) + int(count)

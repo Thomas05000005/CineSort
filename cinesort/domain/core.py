@@ -236,6 +236,12 @@ class Config:
     # Seuil minimal taille fichier video (en octets). None = utilise MIN_VIDEO_BYTES (10MB).
     # Permet de configurer le seuil pour bibliotheques avec courts metrages / animations.
     min_video_bytes: Optional[int] = None
+    # VO-B : nombre de workers pour la pre-extraction locale parallele de
+    # `_filter_dossiers_phase`. 1 (default) = comportement sequentiel strict
+    # historique (pas de ThreadPoolExecutor cree). >=2 active la parallelisation
+    # Phase 1 (iter_videos + collect_non_video_extensions). Plafonne a 32.
+    # Voir cinesort/app/_local_candidate.py et docs/internal/VO_B_ANALYSIS.md.
+    scan_max_workers: int = 1
 
     # Profils de renommage
     naming_movie_template: str = "{title} ({year})"
@@ -281,6 +287,7 @@ class Config:
             tmdb_language=self.tmdb_language,
             incremental_scan_enabled=bool(self.incremental_scan_enabled),
             min_video_bytes=int(self.min_video_bytes) if self.min_video_bytes is not None else None,
+            scan_max_workers=max(1, int(self.scan_max_workers or 1)),
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
         )
