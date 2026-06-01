@@ -1,5 +1,5 @@
 {
-  "_doc": "Vague M M-02 (2026-05-31) : snapshot du contrat des facades CineSortApi (issue #84 + Pass 1 legacy). Regenere via tests/test_facade_coverage_no_orphan_impl_v77.py::regenerate_facade_snapshot(). Sert de filet de regression : detecte ajout d'un _impl orphelin (sans facade) ET retrait d'une methode publique d'une facade.",
+  "_doc": "Vague M M-02 : snapshot du contrat des facades CineSortApi. Regenere via regenerate_facade_snapshot(). Detecte ajout d'un _impl orphelin (sans facade) et retrait d'une methode publique d'une facade.",
   "version": "1.5.2-beta",
   "generated_at_iso": "2026-06-01",
   "facades": {
@@ -122,6 +122,7 @@
       "purge_probe_cache",
       "recheck_probe_tools",
       "reset_incremental_cache",
+      "run_nas_benchmark",
       "search_docs",
       "set_probe_tool_paths",
       "start_demo_mode",
@@ -131,6 +132,7 @@
     ],
     "settings": [
       "get_advanced_pragma_settings",
+      "get_confidence_thresholds",
       "get_dashboard_qr",
       "get_naming_presets",
       "get_profiles",
@@ -171,7 +173,7 @@
     "open_path",
     "test_reset"
   ],
-  "total_impl_methods": 135,
-  "total_facade_methods": 150,
-  "total_methods": 153
+  "total_impl_methods": 136,
+  "total_facade_methods": 152,
+  "total_methods": 155
 }

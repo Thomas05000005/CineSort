@@ -1040,6 +1040,95 @@ class CineSortApi:
             ),
         }
 
+    # ---------- VO-A-NAS : benchmark perf SQLite sur stockage cible ----------
+    def _run_nas_benchmark_impl(
+        self,
+        n_writes: int = 1000,
+        n_reads: int = 10000,
+    ) -> Dict[str, Any]:
+        """VO-A-NAS : declenche un benchmark perf SQLite sur le stockage cible.
+
+        Cree une table dediee dans la DB CineSort active, mesure les
+        percentiles p50/p95/p99 ecritures + lectures, puis DROP la table.
+        Le rapport est sauvegarde sous
+        ``<state_dir>/diagnostics/nas_benchmark_<ts>.json``.
+
+        Args:
+            n_writes: nombre d'INSERT a executer (clamp 1..100000).
+            n_reads: nombre de SELECT a executer (clamp 1..1000000).
+
+        Returns:
+            dict de la forme {ok, result, report_path}. En cas d'erreur d'init
+            DB : {ok: False, error: ...} via _err_response.
+        """
+        from cinesort.infra.db import db_path_for_state_dir
+        from cinesort.infra.db.nas_validation import (
+            run_nas_benchmark,
+            write_benchmark_report,
+        )
+
+        _log = logging.getLogger(__name__)
+
+        # Clamp pour eviter qu'un appel API distant ne lance un bench de 10M
+        # lignes qui geleait la DB pendant 30 minutes.
+        try:
+            n_writes_clamped = clamp_non_negative_int(n_writes, default=1000)
+        except (TypeError, ValueError):
+            n_writes_clamped = 1000
+        try:
+            n_reads_clamped = clamp_non_negative_int(n_reads, default=10000)
+        except (TypeError, ValueError):
+            n_reads_clamped = 10000
+        n_writes_clamped = max(1, min(n_writes_clamped, 100_000))
+        n_reads_clamped = max(1, min(n_reads_clamped, 1_000_000))
+
+        state_dir = self._get_state_dir()
+        try:
+            db_path = db_path_for_state_dir(state_dir)
+        except Exception as exc:  # noqa: BLE001 -- chemin invalide / OSError
+            _log.exception("api: run_nas_benchmark resolve db_path echec")
+            return _err_response(
+                f"Resolution chemin DB impossible : {type(exc).__name__}: {exc}",
+                category="state",
+                level="error",
+                log_module=__name__,
+            )
+
+        # Best-effort : si la DB n'existe pas encore (cas test / 1er boot
+        # tres precoce), on cree au moins le dossier parent pour que
+        # sqlite3.connect puisse instancier le fichier.
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _log.warning("api: run_nas_benchmark mkdir parent echec : %s", exc)
+
+        try:
+            result = run_nas_benchmark(
+                db_path,
+                n_writes=n_writes_clamped,
+                n_reads=n_reads_clamped,
+            )
+        except Exception as exc:  # noqa: BLE001 -- protection enveloppe
+            _log.exception("api: run_nas_benchmark echec")
+            return _err_response(
+                f"Benchmark echec : {type(exc).__name__}: {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+
+        report_path: Optional[Path] = None
+        try:
+            report_path = write_benchmark_report(result, state_dir)
+        except OSError as exc:
+            _log.warning("api: run_nas_benchmark write_report echec : %s", exc)
+
+        return {
+            "ok": bool(result.get("ok", False)),
+            "result": result,
+            "report_path": str(report_path) if report_path else None,
+        }
+
     # ---------- Helper masque -> cle stockee ----------
     def _unmask_or_stored(self, field: str, value: str) -> str:
         """UX fix : si le frontend renvoie le masque "••••••••" parce que la cle

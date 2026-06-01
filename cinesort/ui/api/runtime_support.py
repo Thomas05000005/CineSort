@@ -206,8 +206,18 @@ def get_or_create_infra(
         # echoue), on retente l'init nous-meme.
 
     try:
+        # VO-A-NAS : DB_LOCAL_GUARD fail-closed avant toute ouverture SQLite.
+        # Refuse les chemins UNC (\\server\share\...) sauf override explicite
+        # via env CINESORT_ALLOW_UNC_DB=1. Cf Sonarr #1886 (corruption SQLite
+        # silencieuse sur SMB). Le guard leve RuntimeError si UNC sans override,
+        # ce qui se propage a CineSortApi et empeche le boot.
+        from cinesort.infra.db.nas_validation import db_local_guard
+
+        resolved_db_path = db_path_for_state_dir(state_dir)
+        db_local_guard(resolved_db_path)
+
         store = SQLiteStore(
-            db_path_for_state_dir(state_dir),
+            resolved_db_path,
             busy_timeout_ms=8000,
             debug_logger=_sqlite_debug,
         )
