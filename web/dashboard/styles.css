@@ -1237,11 +1237,26 @@ body.is-background .skeleton { animation-play-state: paused; }
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+/* Fix VN-A.4 (Vague N batch 1) — WCAG 2.2.1 Level AA "Target Size (Minimum)"
+   24x24 CSS pixels minimum pour les controles interactifs. L'ancienne version
+   (padding 0 4px, font-size 18px) donnait une cible d'environ 16x18 px : trop
+   petite pour un clic precis a la souris et carrement inutilisable au tactile.
+   Reference : https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html
+   On utilise display:inline-flex + min-width/min-height pour preserver le
+   layout flex existant. Le bouton "action" inline (toast__action) repose deja
+   sur les classes .v5-btn--sm qui respectent la cible 24px, mais on garantit
+   un floor explicite ici au cas ou ces classes ne seraient pas chargees. */
 .toast__close {
   background: transparent; border: 0; color: var(--text-muted); cursor: pointer;
-  font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0;
+  font-size: 18px; line-height: 1; padding: 0; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; border-radius: 4px;
 }
-.toast__close:hover { color: var(--text-primary); }
+.toast__close:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+.toast__action {
+  /* Floor WCAG 2.2.1 24x24 explicite, meme si .v5-btn--sm fournit deja la taille. */
+  min-width: 24px; min-height: 24px;
+}
 .toast--out { animation: toast-out 200ms ease forwards; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
 @keyframes toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(40px); } }
