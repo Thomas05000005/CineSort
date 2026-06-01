@@ -41,30 +41,19 @@ from .constants import (
     TP_CLIPPING,
     TP_MAX,
 )
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK_FULL
+
 from .ffmpeg_runner import run_ffmpeg_text
 from .models import AudioPerceptual
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Hierarchie codec audio (reutilisation du ranking de audio_analysis.py 9.7)
+# Hierarchie codec audio (centralisee dans cinesort.domain.codec_ranks)
+# On strippe le label pour conserver la signature historique List[(pat, rang)].
 # ---------------------------------------------------------------------------
 
-_CODEC_RANK: List[tuple[str, int]] = [
-    ("atmos", 6),
-    ("truehd", 5),
-    ("dts-hd", 4),
-    ("dtshd", 4),
-    ("eac3", 3),
-    ("e-ac-3", 3),
-    ("flac", 3),
-    ("dts", 2),
-    ("ac3", 2),
-    ("a_ac3", 2),
-    ("aac", 1),
-    ("mp3", 1),
-    ("opus", 1),
-]
+_CODEC_RANK: List[tuple[str, int]] = [(pat, rank) for pat, rank, _label in _CODEC_RANK_FULL]
 
 # Regex pour astats
 _RE_RMS = re.compile(r"RMS level.*?:\s*([-\d.]+)", re.IGNORECASE)

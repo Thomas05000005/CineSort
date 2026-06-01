@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 from cinesort.domain.film_history import (
     film_identity_key,
-    _identity_key_from_dict,
+    identity_key_from_dict,
     get_film_timeline,
 )
 
@@ -87,13 +87,13 @@ class FilmIdentityKeyTests(unittest.TestCase):
         self.assertEqual(film_identity_key(row1), film_identity_key(row2))
 
     def test_dict_identity(self) -> None:
-        """_identity_key_from_dict fonctionne sur un dict plan.jsonl."""
+        """identity_key_from_dict fonctionne sur un dict plan.jsonl."""
         d = {
             "proposed_title": "Inception",
             "proposed_year": 2010,
             "candidates": [{"tmdb_id": 27205}],
         }
-        self.assertEqual(_identity_key_from_dict(d), "tmdb:27205")
+        self.assertEqual(identity_key_from_dict(d), "tmdb:27205")
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +412,7 @@ class EdgeCaseTests(unittest.TestCase):
         """Film renomme entre 2 runs → lie par tmdb_id, pas par dossier."""
         d1 = {"proposed_title": "Inception", "proposed_year": 2010, "candidates": [{"tmdb_id": 27205}]}
         d2 = {"proposed_title": "Inception Renamed", "proposed_year": 2010, "candidates": [{"tmdb_id": 27205}]}
-        self.assertEqual(_identity_key_from_dict(d1), _identity_key_from_dict(d2))
+        self.assertEqual(identity_key_from_dict(d1), identity_key_from_dict(d2))
 
     def test_zero_runs_empty_result(self) -> None:
         """0 runs → timeline vide."""

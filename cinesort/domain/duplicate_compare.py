@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
+
 logger = logging.getLogger(__name__)
 
 # --- Ponderations des criteres -------------------------------------------
@@ -43,20 +45,8 @@ _VIDEO_CODEC_RANK = {
     "divx": 1,
 }
 
-_AUDIO_CODEC_RANK = {
-    "truehd": 5,
-    "atmos": 5,
-    "dts-hd ma": 4,
-    "dtshd": 4,
-    "dts-hd": 4,
-    "flac": 3,
-    "dts": 2,
-    "ac3": 2,
-    "eac3": 2,
-    "aac": 1,
-    "mp3": 1,
-    "opus": 1,
-}
+# _AUDIO_CODEC_RANK : dict[str, int] importe depuis cinesort.domain.codec_ranks
+# (lookup exact, semantique differente du ranking par substring du badge audio)
 
 
 # --- Dataclasses ---------------------------------------------------------

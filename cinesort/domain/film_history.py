@@ -80,8 +80,13 @@ def _load_plan_rows_from_jsonl(plan_path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _identity_key_from_dict(data: Dict[str, Any]) -> str:
-    """Calcule la cle d'identite depuis un dict plan.jsonl (sans instancier PlanRow)."""
+def identity_key_from_dict(data: Dict[str, Any]) -> str:
+    """Calcule la cle d'identite depuis un dict plan.jsonl (sans instancier PlanRow).
+
+    Variante de :func:`film_identity_key` qui opere sur un dict brut (plan.jsonl
+    deserialise) plutot que sur un PlanRow. Source unique partagee entre le
+    domain (timeline) et l'UI (film_support.get_film_full).
+    """
     edition = str(data.get("edition") or "").strip().lower()
     ed_suffix = f"|{edition}" if edition else ""
 
@@ -143,7 +148,7 @@ def get_film_timeline(
         matched_row: Optional[Dict[str, Any]] = None
         matched_row_id: Optional[str] = None
         for row_data in plan_rows:
-            if _identity_key_from_dict(row_data) == film_id:
+            if identity_key_from_dict(row_data) == film_id:
                 matched_row = row_data
                 matched_row_id = str(row_data.get("row_id") or "")
                 break
@@ -263,7 +268,7 @@ def list_films_overview(
 
     films: List[Dict[str, Any]] = []
     for row_data in plan_rows[:limit]:
-        fid = _identity_key_from_dict(row_data)
+        fid = identity_key_from_dict(row_data)
         row_id = str(row_data.get("row_id") or "")
         score: Optional[int] = None
         tier = ""

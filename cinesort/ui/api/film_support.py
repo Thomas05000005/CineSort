@@ -16,6 +16,7 @@ import contextlib
 import logging
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -182,20 +183,6 @@ def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]
     return 0
 
 
-def _film_identity_key(row: Dict[str, Any]) -> str:
-    """Reproduit film_identity_key depuis film_history module (tmdb ou title+year)."""
-    ed = str(row.get("edition") or "").strip().lower()
-    ed_suffix = ("|" + ed) if ed else ""
-    candidates = row.get("candidates") or []
-    for c in candidates:
-        tid = int(c.get("tmdb_id") or 0)
-        if tid > 0:
-            return f"tmdb:{tid}{ed_suffix}"
-    title = str(row.get("proposed_title") or "").strip().lower()
-    year = int(row.get("proposed_year") or 0)
-    return f"title:{title}|{year}{ed_suffix}"
-
-
 def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
     """Retourne la totalite des informations d'un film pour la page standalone.
 
@@ -279,7 +266,7 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     # History timeline
     history = []
     try:
-        fid = _film_identity_key(row)
+        fid = identity_key_from_dict(row)
         h_res = film_history_support.get_film_history(api, fid)
         if h_res and h_res.get("ok"):
             history = h_res.get("history") or []

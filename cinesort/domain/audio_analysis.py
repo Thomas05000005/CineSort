@@ -9,27 +9,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK
+
 logger = logging.getLogger(__name__)
 
 # --- Hierarchie des formats audio (rang → label) --------------------------
 # Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/AC3(2) > AAC/MP3(1)
-
-_CODEC_RANK: List[Tuple[str, int, str]] = [
-    # (pattern_substring, rang, label) — ordre de priorite decroissant
-    ("atmos", 6, "Atmos"),  # Atmos dans codec OU title
-    ("truehd", 5, "TrueHD"),
-    ("dts-hd", 4, "DTS-HD MA"),
-    ("dtshd", 4, "DTS-HD MA"),
-    ("eac3", 3, "EAC3"),
-    ("e-ac-3", 3, "EAC3"),
-    ("flac", 3, "FLAC"),
-    ("dts", 2, "DTS"),
-    ("ac3", 2, "AC3"),
-    ("a_ac3", 2, "AC3"),
-    ("aac", 1, "AAC"),
-    ("mp3", 1, "MP3"),
-    ("opus", 1, "Opus"),
-]
+# Definition centralisee dans cinesort.domain.codec_ranks._CODEC_RANK reste
+# l'alias local utilise par _classify_codec.
 
 # Tier par rang — labels canoniques (compatibles badge.js / dashboard)
 # Atmos/TrueHD = platinum, DTS-HD MA/EAC3/FLAC = gold, DTS/AC3 = silver, AAC/MP3/inconnu = bronze
