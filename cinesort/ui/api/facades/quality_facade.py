@@ -25,7 +25,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from cinesort.ui.api import quality_audit_support
+from cinesort.ui.api import (
+    profiles_support_import_export,
+    quality_audit_support,
+)
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -326,3 +329,70 @@ class QualityFacade(_BaseFacade):
         Cf CineSortApi._import_shareable_profile_impl pour la doc complete.
         """
         return self._api._import_shareable_profile_impl(content, activate=activate)
+
+    # ---------- VP-F (Vague P batch 6) — Recyclarr YAML round-trip ----------
+    # Extension de la facade (PAS nouvelle facade, recommandation critique ROADMAP).
+    # Cf cinesort/ui/api/profiles_support_import_export.py.
+
+    def export_recyclarr_yaml(self, profile_id: Optional[str] = None) -> Dict[str, Any]:
+        """Exporte un profil au format Recyclarr v6+ YAML (round-trip lossless).
+
+        Args:
+            profile_id: optionnel - profil specifique (preset ou custom). Si None,
+                exporte le profil actif.
+
+        Cf cinesort.ui.api.profiles_support_import_export.export_recyclarr_yaml.
+        """
+        return profiles_support_import_export.export_recyclarr_yaml(self._api, profile_id=profile_id)
+
+    def import_recyclarr_yaml(self, yaml_text: str, activate: bool = False) -> Dict[str, Any]:
+        """Importe un profil depuis YAML Recyclarr, persiste comme custom.
+
+        Args:
+            yaml_text: contenu YAML brut.
+            activate: si True, active le profil immediatement apres import.
+
+        Cf cinesort.ui.api.profiles_support_import_export.import_recyclarr_yaml.
+        """
+        return profiles_support_import_export.import_recyclarr_yaml(
+            self._api, yaml_text, activate=activate
+        )
+
+    # ---------- VP-F — Preset TRaSH 2026 embarque (AC-3 : OFF par defaut) ----------
+
+    def get_embedded_presets(self) -> Dict[str, Any]:
+        """Retourne le preset TRaSH 2026 + alternatifs (puriste DV, qualite max audio).
+
+        AC-3 : tous DESACTIVES par defaut (enabled_by_default=False). Aucune
+        mutation silencieuse au demarrage.
+
+        Cf cinesort.ui.api.profiles_support_import_export.get_embedded_presets.
+        """
+        return profiles_support_import_export.get_embedded_presets(self._api)
+
+    # ---------- VP-F — upgrade_until_score (AC-5 : default 10000) ----------
+
+    def get_upgrade_until_score(self) -> Dict[str, Any]:
+        """Retourne le upgrade_until_score du profil actif (default 10000).
+
+        Cf cinesort.ui.api.profiles_support_import_export.get_upgrade_until_score.
+        """
+        return profiles_support_import_export.get_upgrade_until_score(self._api)
+
+    def set_upgrade_until_score(self, score: Any) -> Dict[str, Any]:
+        """Met a jour le upgrade_until_score du profil actif (borne [0..100000]).
+
+        Cf cinesort.ui.api.profiles_support_import_export.set_upgrade_until_score.
+        """
+        return profiles_support_import_export.set_upgrade_until_score(self._api, score)
+
+    # ---------- VP-F — Breakdown 5 axes (AC-4 : Source/Codec/HDR/Audio/Group) ----------
+
+    def get_breakdown_5_axes(self) -> Dict[str, Any]:
+        """Retourne le breakdown 5 axes du profil actif pour affichage UI.
+
+        Memo `feedback_cinesort_ui_pacotille` : eviter fonctions backend invisibles.
+
+        Cf cinesort.ui.api.profiles_support_import_export.get_breakdown_5_axes.
+        """
+        return profiles_support_import_export.get_breakdown_5_axes(self._api)

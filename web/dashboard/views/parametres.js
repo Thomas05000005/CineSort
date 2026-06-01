@@ -1270,6 +1270,66 @@ function _renderProfilsQualite() {
       </button>
     </div>
     <p class="parametres-profils-message" data-parametres-profils-message></p>
+
+    <!-- VP-F (Vague P batch 6) : import/export Recyclarr YAML + breakdown 5 axes + upgrade_until_score -->
+    <h4 class="parametres-subheading">Profils qualité (compatibilité Recyclarr / TRaSH 2026)</h4>
+    <p class="parametres-section-intro">
+      Importez ou exportez votre profil au format Recyclarr v6+ YAML, compatible avec
+      les <em>Custom Format Groups</em> TRaSH-Guides. Le format embarque l'intégralité
+      du profil CineSort dans la clé <code>cinesort_profile</code> pour un round-trip
+      sans perte.
+    </p>
+
+    <div class="parametres-profils-recyclarr" data-vpf-recyclarr-host>
+      <div class="parametres-profils-recyclarr-actions">
+        <button type="button" class="v5-btn" data-vpf-action="export-yaml"
+                aria-label="Exporter le profil actif au format Recyclarr YAML">
+          📤 Exporter YAML (Recyclarr)
+        </button>
+        <button type="button" class="v5-btn" data-vpf-action="import-yaml"
+                aria-label="Importer un profil depuis YAML Recyclarr">
+          📥 Importer YAML (Recyclarr)
+        </button>
+        <button type="button" class="v5-btn v5-btn--ghost" data-vpf-action="show-presets"
+                aria-label="Voir les presets embarqués TRaSH 2026">
+          📚 Presets TRaSH 2026
+        </button>
+      </div>
+      <textarea class="parametres-input parametres-profils-yaml" data-vpf-yaml-textarea
+                rows="8" placeholder="Collez ici votre YAML Recyclarr puis cliquez sur Importer YAML, ou cliquez sur Exporter YAML pour obtenir le profil actif."
+                aria-label="Zone YAML Recyclarr"></textarea>
+      <p class="parametres-profils-message" data-vpf-recyclarr-message></p>
+    </div>
+
+    <h4 class="parametres-subheading">Score d'arrêt des upgrades</h4>
+    <p class="parametres-section-intro">
+      Au-dessus de ce score, l'UI n'affichera plus de recommandation
+      d'upgrade pour ces films (réduit le bruit décisionnel). Par défaut
+      <strong>10000</strong> (jamais arrêter).
+    </p>
+    <div class="parametres-profils-upgrade-until" data-vpf-upgrade-host>
+      <label for="parametres-upgrade-until-score">Score seuil d'arrêt&nbsp;:</label>
+      <input type="number" id="parametres-upgrade-until-score"
+             class="parametres-input"
+             min="0" max="100000" step="100" value="10000"
+             data-vpf-upgrade-input
+             aria-label="upgrade_until_score">
+      <button type="button" class="v5-btn v5-btn--primary" data-vpf-action="save-upgrade-until">
+        ✓ Enregistrer
+      </button>
+      <p class="parametres-profils-message" data-vpf-upgrade-message></p>
+    </div>
+
+    <h4 class="parametres-subheading">Détail du scoring (5 axes)</h4>
+    <p class="parametres-section-intro">
+      Décomposition du scoring par axe technique. Le poids affiché est la
+      contribution maximale théorique du profil actif sur chaque axe.
+    </p>
+    <div class="parametres-profils-breakdown" data-vpf-breakdown-host>
+      <p class="parametres-section-intro" data-vpf-breakdown-loading>
+        Chargement…
+      </p>
+    </div>
   </div>`;
 }
 
@@ -2719,6 +2779,215 @@ function _bindProfilsQualite(container) {
       }
     });
   });
+
+  // VP-F (Vague P batch 6) : import/export Recyclarr YAML + breakdown + upgrade_until_score.
+  _bindVPFRecyclarrActions(container);
+  _bindVPFUpgradeUntilScore(container);
+  // Charge le breakdown (lazy ; pas bloquant pour le rendu).
+  _loadVPFBreakdown(container);
+  // Charge la valeur initiale de upgrade_until_score.
+  _loadVPFUpgradeUntilScore(container);
+}
+
+/* =============================================================
+ * 12bis) VP-F (Vague P batch 6) — Recyclarr import/export + breakdown
+ * ============================================================= */
+
+function _showVPFMessage(selector, msg, level) {
+  const el = _state.containerRef?.querySelector(selector);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = `parametres-profils-message ${level ? `parametres-profils-message--${level}` : ""}`;
+}
+
+function _bindVPFRecyclarrActions(container) {
+  container.querySelectorAll("[data-vpf-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.vpfAction;
+      try {
+        if (action === "export-yaml") {
+          await _vpfExportRecyclarrYaml();
+        } else if (action === "import-yaml") {
+          await _vpfImportRecyclarrYaml();
+        } else if (action === "show-presets") {
+          await _vpfShowEmbeddedPresets();
+        }
+      } catch (e) {
+        _showVPFMessage("[data-vpf-recyclarr-message]", `Erreur : ${e?.message || e}`, "error");
+      }
+    });
+  });
+}
+
+async function _vpfExportRecyclarrYaml() {
+  const textarea = _state.containerRef?.querySelector("[data-vpf-yaml-textarea]");
+  if (!textarea) return;
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Export en cours…", "info");
+  const res = await apiPost("quality/export_recyclarr_yaml", {});
+  if (res && res.data && res.data.ok) {
+    textarea.value = res.data.yaml || "";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `✓ Profil exporté (${res.data.profile_id || "actif"}). Copiez le YAML ci-dessus.`,
+      "ok"
+    );
+  } else {
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "export impossible"}`,
+      "error"
+    );
+  }
+}
+
+async function _vpfImportRecyclarrYaml() {
+  const textarea = _state.containerRef?.querySelector("[data-vpf-yaml-textarea]");
+  if (!textarea) return;
+  const yaml = String(textarea.value || "").trim();
+  if (!yaml) {
+    _showVPFMessage("[data-vpf-recyclarr-message]", "Collez d'abord du YAML dans la zone.", "warning");
+    return;
+  }
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Import en cours…", "info");
+  const res = await apiPost("quality/import_recyclarr_yaml", { yaml_text: yaml, activate: false });
+  if (res && res.data && res.data.ok) {
+    const lossy = res.data.lossy ? " (reconstruction approximative)" : " (lossless)";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `✓ Profil "${res.data.profile_id}" importé${lossy}.`,
+      "ok"
+    );
+    // Rafraichit la liste des profils pour faire apparaitre le nouveau custom.
+    await _loadProfiles();
+    _rerenderActiveCategory();
+  } else {
+    const errs = Array.isArray(res?.data?.errors) ? ` (${res.data.errors.join(" ; ")})` : "";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "import refusé"}${errs}`,
+      "error"
+    );
+  }
+}
+
+async function _vpfShowEmbeddedPresets() {
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Chargement des presets embarqués…", "info");
+  const res = await apiPost("quality/get_embedded_presets", {});
+  if (res && res.data && res.data.ok) {
+    const presets = res.data.presets || [];
+    if (presets.length === 0) {
+      _showVPFMessage(
+        "[data-vpf-recyclarr-message]",
+        "Aucun preset embarqué disponible.",
+        "warning"
+      );
+      return;
+    }
+    const labels = presets
+      .map((p) => `${p.label} (${p.preset_id}) — ${p.enabled_by_default ? "ON" : "OFF par défaut"}`)
+      .join("\n");
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `${presets.length} preset(s) embarqué(s) : ${labels}. Tous DÉSACTIVÉS par défaut (AC-3).`,
+      "info"
+    );
+  } else {
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "chargement impossible"}`,
+      "error"
+    );
+  }
+}
+
+function _bindVPFUpgradeUntilScore(container) {
+  const saveBtn = container.querySelector('[data-vpf-action="save-upgrade-until"]');
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const input = container.querySelector("[data-vpf-upgrade-input]");
+      if (!input) return;
+      const score = parseInt(input.value, 10);
+      if (Number.isNaN(score) || score < 0 || score > 100000) {
+        _showVPFMessage(
+          "[data-vpf-upgrade-message]",
+          "Valeur invalide (0..100000 attendu).",
+          "error"
+        );
+        return;
+      }
+      _showVPFMessage("[data-vpf-upgrade-message]", "Enregistrement…", "info");
+      try {
+        const res = await apiPost("quality/set_upgrade_until_score", { score });
+        if (res && res.data && res.data.ok) {
+          _showVPFMessage(
+            "[data-vpf-upgrade-message]",
+            `✓ Score d'arrêt mis à jour : ${res.data.upgrade_until_score}.`,
+            "ok"
+          );
+        } else {
+          _showVPFMessage(
+            "[data-vpf-upgrade-message]",
+            `Erreur : ${res?.data?.message || "sauvegarde refusée"}`,
+            "error"
+          );
+        }
+      } catch (e) {
+        _showVPFMessage("[data-vpf-upgrade-message]", `Erreur : ${e?.message || e}`, "error");
+      }
+    });
+  }
+}
+
+async function _loadVPFUpgradeUntilScore(container) {
+  try {
+    const res = await apiPost("quality/get_upgrade_until_score", {});
+    if (res && res.data && res.data.ok) {
+      const input = container.querySelector("[data-vpf-upgrade-input]");
+      if (input && typeof res.data.upgrade_until_score === "number") {
+        input.value = String(res.data.upgrade_until_score);
+      }
+    }
+  } catch (_e) {
+    // Silencieux : le default 10000 est deja dans le HTML.
+  }
+}
+
+async function _loadVPFBreakdown(container) {
+  const host = container.querySelector("[data-vpf-breakdown-host]");
+  if (!host) return;
+  try {
+    const res = await apiPost("quality/get_breakdown_5_axes", {});
+    if (res && res.data && res.data.ok) {
+      const axes = res.data.axes || [];
+      const totalWeight = axes.reduce((s, a) => s + (Number(a.weight) || 0), 0);
+      const rows = axes
+        .map((a) => {
+          const w = Number(a.weight) || 0;
+          const pct = totalWeight > 0 ? Math.round((w / totalWeight) * 100) : 0;
+          return `<div class="parametres-breakdown-row" data-axis="${escapeHtml(a.id)}">
+            <span class="parametres-breakdown-label">${escapeHtml(a.label || a.id)}</span>
+            <span class="parametres-breakdown-bar" aria-hidden="true">
+              <span class="parametres-breakdown-bar-fill" style="width: ${pct}%"></span>
+            </span>
+            <span class="parametres-breakdown-value">${w} pts (${pct}%)</span>
+          </div>`;
+        })
+        .join("");
+      host.innerHTML = `<div class="parametres-breakdown-grid">${rows}</div>
+        <p class="parametres-section-intro">
+          Total théorique max : <strong>${totalWeight} pts</strong>. Score d'arrêt
+          des upgrades configuré : <strong>${res.data.upgrade_until_score || 10000}</strong>.
+        </p>`;
+    } else {
+      host.innerHTML = `<p class="parametres-section-intro parametres-profils-message--warning">
+        Breakdown indisponible : ${escapeHtml(res?.data?.message || "réponse vide")}.
+      </p>`;
+    }
+  } catch (e) {
+    host.innerHTML = `<p class="parametres-section-intro parametres-profils-message--error">
+      Erreur : ${escapeHtml(e?.message || String(e))}.
+    </p>`;
+  }
 }
 
 /* =============================================================

@@ -220,6 +220,13 @@ migration_datas = [
     for p in Path("cinesort/infra/db/migrations").glob("*.sql")
 ]
 
+# VP-F (Vague P batch 6) : presets statiques (tier_preset_trash_2026.json + alternatifs).
+# DESACTIVES par defaut (AC-3) ; charges via importlib.resources("cinesort.data.presets").
+preset_datas = [
+    (str(p), "cinesort/data/presets")
+    for p in Path("cinesort/data/presets").glob("*.json")
+] if Path("cinesort/data/presets").is_dir() else []
+
 # V6-01 Polish Total v7.7.0 : fichiers de traduction i18n (locales/<lang>.json)
 # servis par /locales/* via REST + lus par cinesort/domain/i18n_messages.py.
 locales_datas = [
@@ -231,6 +238,7 @@ datas = (
     web_datas
     + migration_datas
     + locales_datas
+    + preset_datas
     + cffi_datas
     + clr_loader_datas
     + pythonnet_datas
