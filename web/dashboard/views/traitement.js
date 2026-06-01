@@ -103,7 +103,16 @@ let _decisionsState = new Map();
 // Fix APPLY-2 (2026-05-30) : intervalle polling pendant l'apply (idem scan)
 // et state apply pour les progressions live.
 let _applyStatus = null;
-let _applyOptions = { dry_run: true, export_csv: false, sync_jellyfin: false, quarantine: false };
+// Vague P / VP-A : `apply_atomic` opt-in (default OFF). Si actif et qu'une
+// erreur interrompt le batch en cours d'apply reel, le backend declenche un
+// rollback FS+DB forward (cf cinesort/app/apply_rollback.py).
+let _applyOptions = {
+  dry_run: true,
+  export_csv: false,
+  sync_jellyfin: false,
+  quarantine: false,
+  apply_atomic: false,
+};
 // Fix audit 2026-05-24 : AbortController scope module pour annuler tous les
 // apiPost en vol au unmount (navigation, fermeture vue). Sans ça les fetch
 // continuent et appellent _renderInPlace/_loadXxx après remise à null du
@@ -1258,6 +1267,10 @@ function _renderApplyStep() {
           <input type="checkbox" data-apply-opt="quarantine" ${_applyOptions.quarantine ? "checked" : ""}>
           Quarantaine des non-approuvés
         </label>
+        <label class="checkbox-row" title="Si une erreur interrompt le batch, tous les renommages deja effectues sont annules (rollback FS+DB).">
+          <input type="checkbox" data-apply-opt="apply_atomic" ${_applyOptions.apply_atomic ? "checked" : ""}>
+          Mode atomique (rollback en cas d'echec en cours de batch)
+        </label>
       </div>
 
       <div class="traitement-actions">
@@ -1747,6 +1760,10 @@ async function _handleApplyNow() {
         decisions,
         dry_run: true,
         quarantine_unapproved: _applyOptions.quarantine,
+        // Vague P / VP-A : dry-run ne declenche pas de rollback mais on
+        // propage le flag pour qu'un eventuel preview cote backend puisse
+        // tracer "mode atomique demande" si besoin.
+        apply_atomic: Boolean(_applyOptions.apply_atomic),
       }, { signal: _signal() });
       if (res?.data?.ok !== false) {
         if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
@@ -1787,6 +1804,8 @@ async function _handleApplyNow() {
       `${opCount} fichiers renommés/déplacés`,
       `Quarantaine : ${_applyOptions.quarantine ? "activée" : "désactivée"}`,
       `CSV : ${_applyOptions.export_csv ? "exporté" : "non exporté"}`,
+      // Vague P / VP-A : indicateur mode atomique dans le recap pre-apply
+      `Mode atomique : ${_applyOptions.apply_atomic ? "activé (rollback en cas d'echec)" : "désactivé"}`,
     ],
     // Fix audit 2026-05-26 (v1.5.6) Vague L (undo-1) :
     // Le backend enforce un delai d'undo de 24h (cf cinesort/ui/api/apply_support.py:52,
@@ -1820,6 +1839,8 @@ async function _handleApplyNow() {
           decisions,
           dry_run: false,
           quarantine_unapproved: _applyOptions.quarantine,
+          // Vague P / VP-A : flag opt-in pour rollback FS+DB forward.
+          apply_atomic: Boolean(_applyOptions.apply_atomic),
         }, { signal: _signal() });
         if (res?.data?.ok !== false) {
           if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
@@ -2097,7 +2118,34 @@ function _onContainerChange(event) {
   // Apply options
   const applyInput = event.target.closest("[data-apply-opt]");
   if (applyInput && container.contains(applyInput)) {
-    _applyOptions[applyInput.dataset.applyOpt] = applyInput.checked;
+    const key = applyInput.dataset.applyOpt;
+    // Vague P / VP-A : activation `apply_atomic` -> dangerConfirmModal
+    // pour expliquer les consequences. Pas de countdown (memo
+    // `feedback_cinesort_actions_dangereuses` autorise countdown OFF pour
+    // actions non-destructives) — AC-4.
+    if (key === "apply_atomic" && applyInput.checked && !_applyOptions.apply_atomic) {
+      // On annule l'activation tant que l'utilisateur n'a pas confirme.
+      applyInput.checked = false;
+      dangerConfirmModal({
+        title: "Activer le mode atomique pour l'apply ?",
+        items: [
+          "Si une operation echoue au milieu du batch, TOUTES les operations precedentes sont annulees (rollback).",
+          "Les fichiers deja deplaces reviennent a leur emplacement d'origine.",
+          "La base de donnees est mise a jour pour tracer le rollback.",
+          "Le mode standard laisse l'apply s'arreter sur l'erreur sans annuler les operations reussies.",
+        ],
+        consequence: "L'apply prendra legerement plus de temps a cause du journal write-ahead et du rollback potentiel. Recommande pour les batches critiques (>50 films).",
+        confirmLabel: "Activer le mode atomique",
+        cancelLabel: "Annuler",
+        countdownSeconds: 0,
+        onConfirm: () => {
+          _applyOptions.apply_atomic = true;
+          _renderInPlace();
+        },
+      });
+      return;
+    }
+    _applyOptions[key] = applyInput.checked;
     _renderInPlace();
     return;
   }

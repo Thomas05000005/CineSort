@@ -469,6 +469,125 @@ class ApplyRepository(_BaseRepository):
         return int(row["n"]) if row else 0
 
     # =====================================================================
+    # Vague P / VP-A (migration 029) : apply atomique forward rollback (opt-in)
+    # =====================================================================
+    # Memo `feedback_cinesort_design` + plan VP-A : le mode atomique est OPT-IN
+    # strict (flag default False). Le rollback_status est SEPARE de la chaine
+    # undo classique (`undo_status` / `mark_apply_batch_undo_status`). Aucun
+    # impact sur `get_last_reversible_apply_batch` qui reste autorite undo.
+    #
+    # Valeurs rollback_status :
+    #   'NONE' (default), 'IN_PROGRESS', 'ROLLED_BACK_BY_ATOMIC',
+    #   'ROLLBACK_FAILED', 'ROLLBACK_PARTIAL'
+
+    def _ensure_apply_atomic_tables(self) -> None:
+        self._ensure_schema_group("apply_atomic")
+
+    def upsert_atomic_mode(self, batch_id: str, enabled: bool) -> None:
+        """Enregistre le mode atomique pour un batch (insert ou update).
+
+        Appele tres tot dans `_execute_apply` apres `insert_apply_batch` pour
+        memoriser le flag opt-in. Idempotent : un re-appel met juste a jour
+        `atomic_enabled` sans toucher au `rollback_status` deja stocke.
+        """
+        self._ensure_apply_atomic_tables()
+        with self._managed_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO apply_batch_modes(
+                  batch_id, atomic_enabled, rollback_status, rolled_back_at
+                )
+                VALUES(?, ?, 'NONE', NULL)
+                ON CONFLICT(batch_id) DO UPDATE SET
+                    atomic_enabled = excluded.atomic_enabled
+                """,
+                (str(batch_id), 1 if bool(enabled) else 0),
+            )
+
+    def mark_rollback_status(
+        self,
+        batch_id: str,
+        status: str,
+        *,
+        rolled_back_at: Optional[str] = None,
+    ) -> None:
+        """Met a jour `rollback_status` d'un batch (et eventuellement le ts).
+
+        Tolerant si le batch n'existe pas dans `apply_batch_modes` (cas
+        legitime : batch lance avant migration 029 ou mode atomique jamais
+        active). Dans ce cas, on cree une ligne avec atomic_enabled=0 pour
+        ne pas perdre la trace de l'echec de rollback (audit).
+        """
+        self._ensure_apply_atomic_tables()
+        ts = str(rolled_back_at) if rolled_back_at is not None else None
+        if ts is None and str(status) in ("IN_PROGRESS", "ROLLED_BACK_BY_ATOMIC", "ROLLBACK_FAILED", "ROLLBACK_PARTIAL"):
+            # auto-fill timestamp ISO-like pour audit
+            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._managed_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO apply_batch_modes(
+                  batch_id, atomic_enabled, rollback_status, rolled_back_at
+                )
+                VALUES(?, 0, ?, ?)
+                ON CONFLICT(batch_id) DO UPDATE SET
+                    rollback_status = excluded.rollback_status,
+                    rolled_back_at  = COALESCE(excluded.rolled_back_at, apply_batch_modes.rolled_back_at)
+                """,
+                (str(batch_id), str(status or "NONE"), ts),
+            )
+
+    def get_atomic_mode(self, batch_id: str) -> Optional[Dict[str, Any]]:
+        """Retourne {atomic_enabled, rollback_status, rolled_back_at} ou None."""
+        self._ensure_apply_atomic_tables()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT batch_id, atomic_enabled, rollback_status, rolled_back_at
+                FROM apply_batch_modes
+                WHERE batch_id=?
+                """,
+                (str(batch_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "batch_id": str(row["batch_id"]),
+            "atomic_enabled": int(row["atomic_enabled"] or 0),
+            "rollback_status": str(row["rollback_status"] or "NONE"),
+            "rolled_back_at": str(row["rolled_back_at"]) if row["rolled_back_at"] else None,
+        }
+
+    def list_atomic_modes_for_run(self, *, run_id: str) -> Dict[str, Dict[str, Any]]:
+        """Liste tous les modes atomiques pour les batches d'un run (UI badge).
+
+        Retourne un dict {batch_id: {atomic_enabled, rollback_status, rolled_back_at}}.
+        Utilise par list_apply_history pour annoter chaque batch avec le mode.
+        """
+        self._ensure_apply_atomic_tables()
+        self._ensure_apply_journal_tables()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT m.batch_id, m.atomic_enabled, m.rollback_status, m.rolled_back_at
+                FROM apply_batch_modes m
+                INNER JOIN apply_batches b ON b.batch_id = m.batch_id
+                WHERE b.run_id = ?
+                """,
+                (str(run_id),),
+            )
+            rows = cur.fetchall()
+        return {
+            str(r["batch_id"]): {
+                "atomic_enabled": int(r["atomic_enabled"] or 0),
+                "rollback_status": str(r["rollback_status"] or "NONE"),
+                "rolled_back_at": str(r["rolled_back_at"]) if r["rolled_back_at"] else None,
+            }
+            for r in rows
+        }
+
+    # =====================================================================
     # Phase 4 doublons (migration 023, cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md)
     # =====================================================================
     # Decisions utilisateur "garder ce winner" sur un groupe de doublons.

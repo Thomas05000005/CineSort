@@ -2224,7 +2224,10 @@ class CineSortApi:
         decisions: Dict[str, Dict[str, Any]],
         dry_run: bool,
         quarantine_unapproved: bool,
+        apply_atomic: bool = False,
     ) -> Dict[str, Any]:
+        """Vague P / VP-A : `apply_atomic` opt-in (default False, backward
+        compat ABSOLUE — la signature retourne toujours `{ok: bool, ...}`)."""
         result = apply_support.apply_changes(
             self,
             run_id,
@@ -2234,6 +2237,7 @@ class CineSortApi:
             cleanup_scope_label=_cleanup_scope_label,
             cleanup_status_label=_cleanup_status_label,
             cleanup_reason_label=_cleanup_reason_label,
+            apply_atomic=bool(apply_atomic),
         )
         if not dry_run:
             self._touch_event()

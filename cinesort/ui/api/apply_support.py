@@ -27,6 +27,7 @@ import cinesort.app.plan_support as _plan_support_mod
 import cinesort.infra.plex_client as _plex_mod
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
 from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
@@ -837,6 +838,22 @@ def _list_apply_history_impl(api: Any, run_id: str) -> Dict[str, Any]:
         batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=20)
     except (sqlite3.Error, AttributeError, OSError):
         return _err_response("Historique apply indisponible.", category="state", level="warning", log_module=__name__)
+
+    # Vague P / VP-A : annoter chaque batch avec mode atomique + rollback status
+    # (badge "Mode atomique" + indicateur rollback dans UI historique).
+    # Tolerant si la table n'existe pas (DB pre-migration 029) : on retourne
+    # les batches non annotes — UI affichera "mode standard".
+    try:
+        atomic_modes = store.apply.list_atomic_modes_for_run(run_id=run_id)
+    except (sqlite3.Error, AttributeError, OSError):
+        atomic_modes = {}
+    if atomic_modes:
+        for batch in batches:
+            bid = str(batch.get("batch_id") or "")
+            mode = atomic_modes.get(bid)
+            if mode is not None:
+                batch["atomic_mode"] = mode
+
     return {"ok": True, "run_id": run_id, "batches": batches}
 
 
@@ -1135,6 +1152,7 @@ def _execute_apply(
     batch_state: List[Any],
     preview_ops_out: Optional[List[Dict[str, Any]]] = None,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    apply_atomic: bool = False,
 ) -> Tuple[Any, Optional[str], int]:
     """Applique un batch.
 
@@ -1218,6 +1236,17 @@ def _execute_apply(
         except (OSError, TypeError, ValueError) as exc:
             apply_batch_id = None
             log_fn("WARN", f"Journal apply indisponible: {exc}")
+
+        # Vague P / VP-A : memoriser le mode atomique pour ce batch (opt-in
+        # strict, default False). Tolerant : un echec n'empeche pas l'apply
+        # de continuer — au pire on perd le badge UI "mode atomique" mais le
+        # rollback_forward est toujours declenchable manuellement.
+        if apply_batch_id is not None and bool(apply_atomic):
+            try:
+                store.apply.upsert_atomic_mode(str(apply_batch_id), True)
+                log_fn("INFO", f"Mode atomique active pour batch {apply_batch_id}")
+            except (sqlite3.Error, AttributeError, OSError, TypeError) as exc:
+                log_fn("WARN", f"Mode atomique non persiste batch {apply_batch_id}: {exc}")
 
         # P2.3 : ouvrir le journal d'audit JSONL pour ce batch (apply réel uniquement)
         try:
@@ -1805,8 +1834,16 @@ def apply_changes(
     cleanup_scope_label: Callable[[str], str],
     cleanup_status_label: Callable[..., str],
     cleanup_reason_label: Callable[[str], str],
+    apply_atomic: bool = False,
 ) -> Dict[str, Any]:
-    _log.info("api: apply run_id=%s dry_run=%s", run_id, dry_run)
+    """Applique les decisions.
+
+    Vague P / VP-A : `apply_atomic` kwarg OPT-IN strict (default False).
+    Si True ET apply reel (non dry-run), une exception en cours de batch
+    declenche un `rollback_forward` (revert FS+DB du journal). La signature
+    de retour reste `{ok: bool, ...}` (backward compat ABSOLUE — AC-1).
+    """
+    _log.info("api: apply run_id=%s dry_run=%s atomic=%s", run_id, dry_run, bool(apply_atomic))
     # Fix audit 2026-05-25 (v1.5.3) Vague H : context manager pour garantir
     # le release du slot meme si une exception se propage au-dela des except
     # locaux (avant ce fix, un crash inattendu laissait le slot bloque).
@@ -1824,6 +1861,7 @@ def apply_changes(
             cleanup_scope_label=cleanup_scope_label,
             cleanup_status_label=cleanup_status_label,
             cleanup_reason_label=cleanup_reason_label,
+            apply_atomic=bool(apply_atomic),
         )
 
 
@@ -1837,10 +1875,15 @@ def _apply_changes_body(
     cleanup_scope_label: Callable[[str], str],
     cleanup_status_label: Callable[..., str],
     cleanup_reason_label: Callable[[str], str],
+    apply_atomic: bool = False,
 ) -> Dict[str, Any]:
     """Corps de ``apply_changes`` une fois le slot apply acquis (cf
     ``_apply_slot_guard``). Le release est gere par le context manager
-    parent — pas de ``finally`` ici."""
+    parent — pas de ``finally`` ici.
+
+    Vague P / VP-A : `apply_atomic` declenche un `rollback_forward` si le
+    batch crashe APRES journalisation (cf. except Exception en bas).
+    """
     validation = _validate_apply(api, run_id, decisions, dry_run, quarantine_unapproved)
     if not validation.get("ok"):
         return validation
@@ -1891,6 +1934,7 @@ def _apply_changes_body(
                 run_id=run_id,
                 batch_state=batch_state,
                 progress_cb=_apply_cb,
+                apply_atomic=bool(apply_atomic),
             )
         except _DuplicateCheckError as exc:
             if rs is not None:
@@ -2017,6 +2061,32 @@ def _apply_changes_body(
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
                 )
         log_fn("ERROR", f"Echec application : {exc}")
+
+        # Vague P / VP-A : rollback forward atomique si opt-in active.
+        # AC-3 : rollback FS+DB coordonne — si DB rollback echoue, FS revert
+        # tente quand meme + log d'audit. La fonction retourne toujours un
+        # dict synthese qu'on logge sans propager (le caller recoit l'erreur
+        # initiale via _err_response).
+        atomic_rollback_summary: Optional[Dict[str, Any]] = None
+        if bool(apply_atomic) and apply_batch_id is not None:
+            try:
+                atomic_rollback_summary = _atomic_rollback_forward(
+                    store,
+                    str(apply_batch_id),
+                    audit_fn=log_fn,
+                )
+                log_fn(
+                    "INFO",
+                    f"Rollback atomique batch={apply_batch_id} status="
+                    f"{atomic_rollback_summary.get('rollback_status')} "
+                    f"counts={atomic_rollback_summary.get('counts')}",
+                )
+            except Exception as rb_exc:  # noqa: BLE001 - rollback must never re-raise
+                log_fn(
+                    "ERROR",
+                    f"Rollback atomique a leve une exception batch={apply_batch_id}: {rb_exc}",
+                )
+
         api.log_api_exception(
             "apply",
             exc,
@@ -2026,6 +2096,12 @@ def _apply_changes_body(
                 "dry_run": bool(dry_run),
                 "quarantine_unapproved": bool(quarantine_unapproved),
                 "decision_count": len(decisions),
+                "apply_atomic": bool(apply_atomic),
+                "atomic_rollback_status": (
+                    str((atomic_rollback_summary or {}).get("rollback_status") or "")
+                    if atomic_rollback_summary
+                    else ""
+                ),
             },
         )
         if rs is not None:
@@ -2033,7 +2109,16 @@ def _apply_changes_body(
                 rs.apply_end(error=str(exc))
             except Exception:
                 _log.debug("apply_end KO a echoue", exc_info=True)
-        return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
+        err_payload = _err_response(
+            t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__
+        )
+        # AC-1 : on ENRICHIT le payload {ok: False, ...} avec la synthese
+        # du rollback sans casser la signature (champ optionnel).
+        if atomic_rollback_summary is not None:
+            err_payload["atomic_rollback"] = atomic_rollback_summary
+        if apply_batch_id is not None:
+            err_payload["apply_batch_id"] = apply_batch_id
+        return err_payload
     # Fix audit 2026-05-25 (v1.5.3) Vague H : plus de `finally:
     # api._release_apply_slot(run_id)` ici — gere par `_apply_slot_guard`
     # dans `apply_changes`.

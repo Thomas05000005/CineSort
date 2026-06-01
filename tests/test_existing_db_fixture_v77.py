@@ -98,6 +98,56 @@ class ExistingDbFixtureTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_v28_to_v29_real_migration_029(self):
+        """VP-A AC-2 : fixture v28 reelle + apply migration 029 reelle.
+
+        Verifie l'enchainement exact que le code prod suit : DB pre-existante
+        v28 (post-VO-A pragma_history) puis CREATE TABLE apply_batch_modes
+        + 2 CREATE INDEX. Aucun ALTER TABLE.
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(28)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 28)
+
+            # Table absente avant 029
+            tables_before = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertNotIn("apply_batch_modes", tables_before)
+
+            # Appliquer la migration 029 reelle
+            sql_path = _project_migrations_dir() / "029_apply_atomic_mode.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 029 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            # AC-2 (existing_db_fixture) : ordre strict CREATE TABLE -> CREATE INDEX
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 029")
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 29")
+            conn.commit()
+
+            tables_after = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertIn("apply_batch_modes", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 29)
+        finally:
+            conn.close()
+
     def test_migrations_dir_override(self):
         """On peut passer un dossier de migrations custom (tests isoles)."""
         from cinesort.infra.db.migration_manager import MigrationManager

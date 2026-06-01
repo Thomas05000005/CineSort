@@ -75,6 +75,8 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     ),
     # Phase 4 doublons (migration 024, spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md).
     "duplicate_decisions": ("duplicate_decisions",),
+    # Vague P / VP-A (migration 029) : apply atomique forward rollback (opt-in).
+    "apply_atomic": ("apply_batch_modes",),
 }
 
 

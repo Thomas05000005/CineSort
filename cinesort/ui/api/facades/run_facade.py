@@ -197,9 +197,17 @@ class RunFacade(_BaseFacade):
         decisions: Dict[str, Dict[str, Any]],
         dry_run: bool,
         quarantine_unapproved: bool,
+        apply_atomic: bool = False,
     ) -> Dict[str, Any]:
-        """Applique les decisions de validation (deplacements/renommages reels ou dry-run)."""
-        return self._api._apply_impl(run_id, decisions, dry_run, quarantine_unapproved)
+        """Applique les decisions de validation (deplacements/renommages reels ou dry-run).
+
+        Vague P / VP-A : `apply_atomic=True` (opt-in, default False) declenche
+        un rollback FS+DB forward si une exception interrompt le batch. La
+        signature retour reste `{ok: bool, ...}` (backward compat ABSOLUE).
+        """
+        return self._api._apply_impl(
+            run_id, decisions, dry_run, quarantine_unapproved, apply_atomic=bool(apply_atomic),
+        )
 
     def save_validation(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Persiste les decisions de validation dans validation.json (atomique)."""
