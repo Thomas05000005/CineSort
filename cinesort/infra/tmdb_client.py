@@ -46,7 +46,7 @@ _SEARCH_CACHE_TTL_S = 7 * 24 * 3600  # 7 jours pour les search:* / tv_search:*
 
 # Prefixes de cle qui correspondent a des lookups deterministes (TTL long).
 # Les autres (search, tv_search) utilisent _SEARCH_CACHE_TTL_S.
-_DETERMINISTIC_PREFIXES = ("movie|", "find_tmdb|", "find_imdb|", "tv_ep:")
+_DETERMINISTIC_PREFIXES = ("movie|", "movie_alt_titles|", "find_tmdb|", "find_imdb|", "tv_ep:")
 
 
 def _clamp_ttl_days(ttl_days: int | float | None) -> int:
@@ -625,6 +625,102 @@ class TmdbClient:
             self._save_cache_atomic()
         logger.info("TMDb: find_by_tmdb_id %d -> '%s' (%s)", mid, result.title, result.year)
         return result
+
+    def get_alternative_titles(
+        self,
+        movie_id: int,
+        country_code: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Recupere les titres alternatifs d'un film TMDb (cache persistent).
+
+        VN-D.2 : sert au matching cross-langue (FR/EN/JP/ES) quand le sim_best
+        sur title/original_title est faible (< 0.85). Permet d'identifier
+        "Le Voyage de Chihiro" comme alias de "Spirited Away" (TMDb expose
+        les titres dans toutes les langues).
+
+        Parameters
+        ----------
+        movie_id : int
+            Identifiant TMDb du film.
+        country_code : str, optional
+            Filtre ISO-3166-1 (ex: "FR", "US"). Si None, retourne toutes les
+            alternatives. Le filtre est applique cote client apres cache.
+
+        Returns
+        -------
+        list[dict]
+            Liste de {"iso_3166_1": str, "title": str, "type": str}.
+            Vide si pas d'alternative, l'API echoue ou movie_id invalide.
+
+        Notes
+        -----
+        Cache persistant (cle `movie_alt_titles|{id}`) reutilise au prochain
+        scan. TTL : meme que le cache movie (long, deterministe).
+        """
+        try:
+            mid = int(movie_id or 0)
+        except (TypeError, ValueError):
+            return []
+        if mid <= 0:
+            return []
+
+        cache_key = f"movie_alt_titles|{mid}"
+        cached = self._cache_get(cache_key)
+        if isinstance(cached, list):
+            titles = cached
+        else:
+            url = f"{TMDB_API_BASE}/movie/{mid}/alternative_titles"
+            params = {"api_key": self.api_key}
+            _t0 = time.monotonic()
+            try:
+                r = self._http_get(url, params=params)
+                r.raise_for_status()
+                _body = getattr(r, "content", b"")
+                if _body and len(_body) > 10_000_000:
+                    raise ValueError("Response too large")
+                data = r.json()
+                logger.debug(
+                    "TMDb: GET /movie/%d/alternative_titles -> %d (%.1fs)",
+                    mid,
+                    r.status_code,
+                    time.monotonic() - _t0,
+                )
+            except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
+                logger.debug("TMDb: echec alternative_titles /movie/%d — %s", mid, exc)
+                self._debug(f"get_alternative_titles warning movie_id={mid} error={exc}")
+                stale = self._cache_get_stale(cache_key)
+                if isinstance(stale, list):
+                    logger.info("TMDb: alternative_titles /movie/%d — fallback cache expire", mid)
+                    titles = stale
+                else:
+                    return []
+            else:
+                if not isinstance(data, dict):
+                    self._debug(f"get_alternative_titles warning movie_id={mid} error=payload_non_dict")
+                    return []
+                raw_titles = data.get("titles") or []
+                titles = []
+                for it in raw_titles:
+                    if not isinstance(it, dict):
+                        continue
+                    title = str(it.get("title") or "").strip()
+                    if not title:
+                        continue
+                    titles.append(
+                        {
+                            "iso_3166_1": str(it.get("iso_3166_1") or "").upper(),
+                            "title": title,
+                            "type": str(it.get("type") or ""),
+                        }
+                    )
+                self._cache_set(cache_key, titles)
+                with contextlib.suppress(OSError, PermissionError):
+                    self._save_cache_atomic()
+
+        if country_code:
+            cc = str(country_code).strip().upper()
+            return [t for t in titles if t.get("iso_3166_1") == cc]
+        return list(titles)
 
     def find_by_imdb_id(self, imdb_id: str) -> Optional[TmdbResult]:
         """Lookup TMDb via /find endpoint avec un IMDb ID externe.

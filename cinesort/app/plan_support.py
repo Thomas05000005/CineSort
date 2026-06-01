@@ -1053,6 +1053,92 @@ def _build_nfo_candidates(
     return nfo_cands, state
 
 
+# VN-D.2 (Vague N batch 3) : seuil sim_best en-deca duquel on tente le fetch
+# TMDb alternative_titles (cross-langue FR/EN/JP/etc). Au-dessus, le match est
+# considere fiable, inutile de couter un appel API supplementaire.
+# Audit logic L05 : sur 1006 films attendus, ~15% en zone ambigue = ~150
+# appels TMDb supplementaires (bornes par cache persistent).
+_ALT_TITLES_FETCH_THRESHOLD = 0.85
+
+
+def _rescore_with_alternative_titles(
+    sim_best: float,
+    *,
+    tmdb_id: int,
+    folder_clean: str,
+    video_clean: str,
+    tmdb: Optional[TmdbClient],
+) -> Tuple[float, Optional[str]]:
+    """Re-score sim_best en utilisant les alternative_titles TMDb si necessaire.
+
+    VN-D.2 : matching cross-langue. Si sim_best < 0.85, on fetch les
+    `alternative_titles` du film TMDb et on re-calcule la similarite contre
+    chacune. On garde le max. Permet d'identifier
+    "Le Voyage de Chihiro" (folder) comme alias de "Spirited Away"
+    (original TMDb).
+
+    Parameters
+    ----------
+    sim_best : float
+        Score fuzzy actuel (max sur title + original_title).
+    tmdb_id : int
+        ID TMDb du film candidat.
+    folder_clean : str
+        Nom de dossier deja nettoye (clean_title_guess).
+    video_clean : str
+        Nom de video deja nettoye.
+    tmdb : TmdbClient, optional
+        Client TMDb. Si None ou sans methode alt_titles, no-op.
+
+    Returns
+    -------
+    (float, Optional[str])
+        (sim_best mis a jour, source du gagnant). La source est None si on
+        ne fetch pas (sim deja eleve), sinon `alt-{iso}` (ex: "alt-JP",
+        "alt-FR") indiquant la langue de l'alias qui a matche.
+    """
+    if sim_best >= _ALT_TITLES_FETCH_THRESHOLD:
+        return sim_best, None
+    if tmdb is None or not hasattr(tmdb, "get_alternative_titles"):
+        return sim_best, None
+    if tmdb_id <= 0:
+        return sim_best, None
+
+    try:
+        alternatives = tmdb.get_alternative_titles(tmdb_id) or []
+    except (AttributeError, TypeError, ValueError) as exc:
+        _log.debug("alt_titles: fetch failed tmdb_id=%d — %s", tmdb_id, exc)
+        return sim_best, None
+
+    if not alternatives:
+        return sim_best, None
+
+    best = float(sim_best)
+    best_iso: Optional[str] = None
+    for alt in alternatives:
+        if not isinstance(alt, dict):
+            continue
+        alt_title = str(alt.get("title") or "").strip()
+        if not alt_title:
+            continue
+        sim_f = core_mod._title_similarity(folder_clean, alt_title) if folder_clean else 0.0
+        sim_v = core_mod._title_similarity(video_clean, alt_title) if video_clean else 0.0
+        sim_alt = max(sim_f, sim_v)
+        if sim_alt > best:
+            best = sim_alt
+            best_iso = str(alt.get("iso_3166_1") or "??").upper() or "??"
+
+    if best_iso is not None:
+        _log.info(
+            "alt_titles: tmdb_id=%d rescued sim=%.2f -> %.2f via alt-%s",
+            tmdb_id,
+            sim_best,
+            best,
+            best_iso,
+        )
+    return best, (f"alt-{best_iso}" if best_iso else None)
+
+
 def _augment_candidates_from_nfo_imdb(
     cfg: "Config",
     nfo: Optional[Any],
@@ -1081,19 +1167,27 @@ def _augment_candidates_from_nfo_imdb(
         # Verifier similarite titre vs folder/video name
         imdb_title = imdb_result.title or ""
         imdb_original = getattr(imdb_result, "original_title", "") or ""
+        folder_clean = core_mod.clean_title_guess(folder_name) or folder_name
+        video_clean = core_mod.clean_title_guess(video_name) or video_name
         sim_folder = max(
-            core_mod._title_similarity(core_mod.clean_title_guess(folder_name) or folder_name, imdb_title),
-            core_mod._title_similarity(core_mod.clean_title_guess(folder_name) or folder_name, imdb_original)
-            if imdb_original
-            else 0.0,
+            core_mod._title_similarity(folder_clean, imdb_title),
+            core_mod._title_similarity(folder_clean, imdb_original) if imdb_original else 0.0,
         )
         sim_video = max(
-            core_mod._title_similarity(core_mod.clean_title_guess(video_name) or video_name, imdb_title),
-            core_mod._title_similarity(core_mod.clean_title_guess(video_name) or video_name, imdb_original)
-            if imdb_original
-            else 0.0,
+            core_mod._title_similarity(video_clean, imdb_title),
+            core_mod._title_similarity(video_clean, imdb_original) if imdb_original else 0.0,
         )
         sim_best = max(sim_folder, sim_video)
+        # VN-D.2 : si match faible (< 0.85), tenter alternative_titles
+        # (cross-langue FR/EN/JP). Ex: "Le Voyage de Chihiro" vs
+        # "Spirited Away" remonte a 1.0 via alt-FR.
+        sim_best, alt_source = _rescore_with_alternative_titles(
+            sim_best,
+            tmdb_id=int(imdb_result.id or 0),
+            folder_clean=folder_clean,
+            video_clean=video_clean,
+            tmdb=tmdb,
+        )
         # Verifier aussi l'annee si disponible
         year_ok = True
         year_delta = None
@@ -1105,13 +1199,14 @@ def _augment_candidates_from_nfo_imdb(
         # si annee matche parfaitement et similarite >= 0.35
         accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
         if accept:
+            note_extra = f" via {alt_source}" if alt_source else ""
             nfo_imdb_cand = core_mod.Candidate(
                 title=imdb_result.title,
                 year=imdb_result.year,
                 source="nfo_imdb",
                 tmdb_id=imdb_result.id,
                 score=0.95,
-                note=f"IMDb lookup {nfo.imdbid} → tmdb:{imdb_result.id}, sim={sim_best:.2f}",
+                note=f"IMDb lookup {nfo.imdbid} → tmdb:{imdb_result.id}, sim={sim_best:.2f}{note_extra}",
             )
             nfo_cands.append(nfo_imdb_cand)
             _log.info(
@@ -1179,6 +1274,16 @@ def _augment_candidates_from_nfo_tmdb_id(
             core_mod._title_similarity(video_clean, tmdb_original) if tmdb_original else 0.0,
         )
         sim_best = max(sim_folder, sim_video)
+        # VN-D.2 : si match faible (< 0.85), tenter alternative_titles
+        # (cross-langue FR/EN/JP). Limite aux candidats ambigus pour respecter
+        # le rate limit TMDb 40/10s.
+        sim_best, alt_source = _rescore_with_alternative_titles(
+            sim_best,
+            tmdb_id=int(tmdb_result.id or 0),
+            folder_clean=folder_clean,
+            video_clean=video_clean,
+            tmdb=tmdb,
+        )
         year_ok = True
         year_delta = None
         if name_year is not None and tmdb_result.year:
@@ -1190,13 +1295,14 @@ def _augment_candidates_from_nfo_tmdb_id(
             # Ne pas doublonner si un candidat NFO/IMDb avec ce tmdb_id existe déjà
             already_have = any(getattr(c, "tmdb_id", None) == tmdb_result.id for c in nfo_cands)
             if not already_have:
+                note_extra = f" via {alt_source}" if alt_source else ""
                 nfo_tmdb_cand = core_mod.Candidate(
                     title=tmdb_result.title,
                     year=tmdb_result.year,
                     source="nfo_tmdb",
                     tmdb_id=tmdb_result.id,
                     score=0.93,
-                    note=f"TMDb ID {nfo.tmdbid} verifie, sim={sim_best:.2f}",
+                    note=f"TMDb ID {nfo.tmdbid} verifie, sim={sim_best:.2f}{note_extra}",
                 )
                 nfo_cands.append(nfo_tmdb_cand)
                 _log.info(
