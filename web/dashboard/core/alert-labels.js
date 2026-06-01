@@ -87,6 +87,17 @@ const FLAG_MAP = {
     severity: "critical",
     action: { kind: "rescan", label: "Re-scanner" },
   },
+  // VN-A.1 : flag explicite pour exposer probe_quality=FAILED/PARTIAL en UI.
+  // Backend : analyze_encode_quality + quality_report_support marquent ce flag
+  // quand ffprobe/MediaInfo echouent ou ne renvoient qu'un sous-ensemble des
+  // metriques. Avant : l'utilisateur voyait juste un score "weird" sans cause.
+  integrity_probe_failed: {
+    icon: "🛰",
+    label: "Analyse technique incomplète",
+    description: "La probe ffprobe/MediaInfo a échoué ou n'a renvoyé qu'une partie des métriques — score qualité partiel.",
+    severity: "warning",
+    action: { kind: "rescan", label: "Re-scanner" },
+  },
 
   // --- Sous-titres ---
   subtitle_missing_fr: {

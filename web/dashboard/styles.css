@@ -744,6 +744,16 @@ body.is-background .login-wrap { animation-play-state: paused; }
   background: var(--danger-strong-soft); color: var(--danger-strong);
   border: 1px solid var(--danger-strong-border);
 }
+/* VN-A.1 : badges probe_quality (FAILED/PARTIAL) — visibilite explicite du
+ * NormalizedProbe.probe_quality dans la table de validation et inspecteur. */
+.badge-probe-failed {
+  background: var(--danger-strong-soft); color: var(--danger-strong);
+  border: 1px solid var(--danger-strong-border);
+}
+.badge-probe-partial {
+  background: var(--warning-soft); color: var(--warning);
+  border: 1px solid var(--warning-border);
+}
 .badge-saga {
   background: var(--purple-soft); color: var(--purple);
   border: 1px solid var(--purple-border);

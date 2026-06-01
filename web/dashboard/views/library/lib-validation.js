@@ -325,6 +325,17 @@ function _titleCell(v, row) {
   const flags = _parseFlags(row.warning_flags);
   if (flags.includes("not_a_movie")) html += ' <span class="badge badge-not-a-movie">Non-film</span>';
   if (flags.includes("integrity_header_invalid")) html += ' <span class="badge badge-integrity">Corrompu</span>';
+  // VN-A.1 : badge probe_quality (FAILED/PARTIAL) explicite. Lit row.probe_quality
+  // si fourni par le backend (quality_report_support), sinon retombe sur
+  // warning_flags=integrity_probe_failed. data-probe-quality permet aux tests
+  // e2e/Playwright de cibler l'etat sans deviner le label.
+  const pq = String(row.probe_quality || "").toUpperCase();
+  const pqFlag = flags.includes("integrity_probe_failed");
+  if (pq === "FAILED" || (pqFlag && pq !== "FULL" && pq !== "PARTIAL")) {
+    html += ` <span class="badge badge-probe-failed" data-probe-quality="FAILED" title="Analyse technique échouée">Probe KO</span>`;
+  } else if (pq === "PARTIAL") {
+    html += ` <span class="badge badge-probe-partial" data-probe-quality="PARTIAL" title="Analyse technique partielle">Probe partielle</span>`;
+  }
   if (row.tmdb_collection_name) html += ` <span class="badge badge-saga" title="${escapeHtml(row.tmdb_collection_name)}">Saga</span>`;
   if (row.edition) html += ` <span class="badge badge-edition">${escapeHtml(row.edition)}</span>`;
   const aa = row.audio_analysis || {};
