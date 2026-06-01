@@ -1271,7 +1271,15 @@ def _apply_custom_rules_helper(
         }
         rule_result = _apply_rules(score, rule_context, custom_rules)
         if rule_result.get("applied_rule_ids"):
-            score = int(rule_result["score"])
+            # QW03 (anti-fraude Platinum) : reclamp defensif [0, 100] apres
+            # custom_rules. Bien que les actions internes (_act_score_delta,
+            # _act_score_mult, _act_force_score, _act_cap_*) appliquent deja
+            # _clamp en sortie, on reclamp ici comme defense en profondeur :
+            # si une regle custom future, un bug de plugin ou une serialisation
+            # corrompue injectait un score > 100, le tier serait Platinum
+            # frauduleusement (ex: score=150 -> Platinum certain). Le clamp
+            # garantit l invariant score in [0, 100] avant la decision tier.
+            score = _clamp_0_100(rule_result["score"])
             reasons.extend(rule_result.get("reasons") or [])
             custom_flags_added = list(rule_result.get("flags_added") or [])
             applied_rule_ids = list(rule_result.get("applied_rule_ids") or [])
