@@ -718,6 +718,116 @@ def _load_report_context(api: Any, run_id: str) -> Optional[Tuple[Any, Any, list
     return store, run_paths, rows, run_state, cfg_root, run_row
 
 
+_CATEGORY_LABELS_FR_FALLBACK: Dict[str, str] = {
+    "video": "Vidéo",
+    "audio": "Audio",
+    "extras": "Extras",
+    "custom_rules": "Règles personnalisées",
+}
+
+
+def compose_score_explanation(
+    quality_report: Optional[Dict[str, Any]],
+    custom_rules_result: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Compose les sources `score_explanation` (build_rich_explanation) et
+    `applied_rule_ids` (apply_custom_rules) en une structure waterfall unifiee
+    pour l'inspecteur frontend.
+
+    VO-C-BACKEND : helper PURE (stateless, deterministe). Ne modifie aucune
+    des sources et n'execute aucune logique de scoring : se contente d'agreger
+    les champs deja calcules pour exposer une vue waterfall coherente au
+    frontend.
+
+    Args:
+        quality_report: dict report qualite (peut contenir `metrics` ou etre
+            deja le metrics) OU directement le dict `score_explanation`. Si
+            None ou vide -> renvoie None (backward compat : le frontend gere
+            l'absence).
+        custom_rules_result: dict retourne par `apply_custom_rules`
+            (contient `applied_rule_ids`). Optionnel : si None, on tente de
+            recuperer `applied_rule_ids` depuis `quality_report.metrics`.
+
+    Returns:
+        dict {categories, baseline, suggestions, applied_rule_ids, narrative,
+              top_positive, top_negative} ou None si pas d'explanation
+        disponible.
+
+        - categories : list[{name, label, contribution, ...}] avec videos/
+          audio/extras venant de build_rich_explanation + une entree
+          custom_rules ajoutee SI applied_rule_ids non vide.
+        - applied_rule_ids : list[str] toujours presente (vide si pas de
+          regles appliquees).
+        - autres champs : passthrough depuis build_rich_explanation.
+    """
+    if not quality_report or not isinstance(quality_report, dict):
+        return None
+
+    # Le quality_report peut etre soit le report complet (contient `metrics`),
+    # soit directement le metrics, soit directement le score_explanation.
+    explanation: Dict[str, Any] = {}
+    metrics: Dict[str, Any] = {}
+    if isinstance(quality_report.get("score_explanation"), dict):
+        # quality_report est en realite le metrics dict
+        explanation = quality_report["score_explanation"]
+        metrics = quality_report
+    elif isinstance(quality_report.get("metrics"), dict):
+        metrics = quality_report["metrics"]
+        if isinstance(metrics.get("score_explanation"), dict):
+            explanation = metrics["score_explanation"]
+    elif "categories" in quality_report or "narrative" in quality_report:
+        # quality_report est en realite le score_explanation deja extrait
+        explanation = quality_report
+
+    if not explanation:
+        return None
+
+    # categories : dict -> list, en ajoutant une entree custom_rules si pertinent.
+    raw_categories = explanation.get("categories") or {}
+    categories_list: List[Dict[str, Any]] = []
+    if isinstance(raw_categories, dict):
+        for name, info in raw_categories.items():
+            if not isinstance(info, dict):
+                continue
+            entry = {"name": str(name), **info}
+            entry.setdefault("label", _CATEGORY_LABELS_FR_FALLBACK.get(str(name), str(name)))
+            categories_list.append(entry)
+    elif isinstance(raw_categories, list):
+        categories_list = [dict(item) for item in raw_categories if isinstance(item, dict)]
+
+    # applied_rule_ids : priorite au parametre explicite, sinon depuis metrics.
+    applied_rule_ids: List[str] = []
+    if custom_rules_result and isinstance(custom_rules_result, dict):
+        raw = custom_rules_result.get("applied_rule_ids") or []
+        if isinstance(raw, list):
+            applied_rule_ids = [str(r) for r in raw if str(r or "").strip()]
+    if not applied_rule_ids and metrics:
+        raw = metrics.get("applied_rule_ids") or []
+        if isinstance(raw, list):
+            applied_rule_ids = [str(r) for r in raw if str(r or "").strip()]
+
+    # Si des regles ont ete appliquees, ajouter une categorie synthetique
+    # custom_rules pour la cohérence du waterfall (contribution non chiffrée
+    # ici car deja agregee dans la video subscore par compute_quality_score).
+    if applied_rule_ids and not any(c.get("name") == "custom_rules" for c in categories_list):
+        categories_list.append({
+            "name": "custom_rules",
+            "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
+            "rule_ids": list(applied_rule_ids),
+            "rules_count": len(applied_rule_ids),
+        })
+
+    return {
+        "categories": categories_list,
+        "baseline": dict(explanation.get("baseline") or {}),
+        "suggestions": list(explanation.get("suggestions") or []),
+        "applied_rule_ids": applied_rule_ids,
+        "narrative": str(explanation.get("narrative") or ""),
+        "top_positive": list(explanation.get("top_positive") or []),
+        "top_negative": list(explanation.get("top_negative") or []),
+    }
+
+
 def _build_row_payload(
     run_id: str,
     row: Any,
@@ -734,6 +844,7 @@ def _build_row_payload(
     detected = metrics.get("detected") or {} if metrics else {}
     subscores = metrics.get("subscores") or {} if metrics else {}
     explanation = metrics.get("score_explanation") or {} if metrics else {}
+    score_explanation_full = compose_score_explanation(metrics) if metrics else None
 
     payload = {
         "run_id": run_id,
@@ -763,6 +874,10 @@ def _build_row_payload(
         "quality_subscore_audio": int(subscores.get("audio") or 0),
         "quality_subscore_extras": int(subscores.get("extras") or 0),
         "quality_explanation": str(explanation.get("narrative") or ""),
+        # VO-C-BACKEND : payload waterfall complet (categories + baseline +
+        # suggestions + applied_rule_ids + narrative + top_positive/negative).
+        # None si pas d'explanation disponible (backward compat frontend).
+        "score_explanation_full": score_explanation_full,
         "warning_flags": "|".join(row.warning_flags) if row.warning_flags else "",
         "nfo_present": bool(row.nfo_path),
         "subtitle_count": int(getattr(row, "subtitle_count", 0) or 0),
