@@ -96,10 +96,14 @@ class _StoreBase:
         migrations_dir: Optional[Path] = None,
         busy_timeout_ms: int = 5000,
         debug_logger: Optional[Callable[[str], None]] = None,
+        pragma_profile_name: Optional[str] = None,
     ):
         self.db_path = Path(db_path)
         self.busy_timeout_ms = int(max(1, busy_timeout_ms))
         self._debug_logger = debug_logger
+        # VO-A backend : override explicite du profil PRAGMA (None = autodetect
+        # via pragma_profile.detect_storage_type a chaque connexion).
+        self.pragma_profile_name: Optional[str] = pragma_profile_name
         # V1-09 audit ID-Y-001 : flag rempli par initialize(). "unknown" tant
         # que initialize() n'a pas tourne, "ok" sinon, ou message d'erreur.
         self._integrity_status: str = "unknown"
@@ -125,7 +129,11 @@ class _StoreBase:
             self._debug_logger(message)
 
     def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(str(self.db_path), busy_timeout_ms=self.busy_timeout_ms)
+        return connect_sqlite(
+            str(self.db_path),
+            busy_timeout_ms=self.busy_timeout_ms,
+            profile=self.pragma_profile_name,
+        )
 
     @contextmanager
     def _managed_conn(self) -> Iterator[sqlite3.Connection]:
