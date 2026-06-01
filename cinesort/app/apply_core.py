@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
 
 import cinesort.domain.core as core_mod
-from cinesort.app._dir_utils import is_dir_empty  # noqa: F401 - backward compat re-export (cf issue #288)
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
