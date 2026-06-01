@@ -175,15 +175,18 @@ class CoreHeuristicsTests(unittest.TestCase):
 
     def test_tmdb_confidence_boosts_to_high_when_year_matches(self) -> None:
         cfg = core.Config(root=Path(".")).normalized()
+        # VN-C.1 (batch 2) : seuil HIGH passe a 85. On force ici un score
+        # explicitement >= 85 via une similarite 0.92+0.88 declenchant tous
+        # les bonus tmdb au lieu d'un cas marginal a 84.
         chosen = core.Candidate(
             title="Les Bronzes 3",
             year=2006,
             source="tmdb",
-            score=0.86,
-            note="sim=0.80, dY=0",
+            score=0.92,
+            note="sim=0.95, dY=0",
         )
         score, label = core.compute_confidence(cfg, chosen, nfo_ok=False, year_delta_reject=False, tmdb_used=True)
-        self.assertGreaterEqual(score, 80)
+        self.assertGreaterEqual(score, 85)
         self.assertEqual(label, "high")
 
     def test_tmdb_poster_thumb_url(self) -> None:

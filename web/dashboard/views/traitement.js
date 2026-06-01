@@ -23,7 +23,7 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
-import { apiPost } from "../core/api.js";
+import { apiPost, fetchConfidenceThresholds, getConfidenceThresholdsSync } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
@@ -618,10 +618,13 @@ function _renderVerificationStep() {
 /* --- Etape 3 : Validation (spec §3.3) --- */
 
 // Fix VAL-3 (2026-05-30) : helpers de tri et bucketization.
+// VN-C.1 (batch 2) : seuils 85/60 -> getConfidenceThresholdsSync()
+// (source unique : cinesort/domain/confidence_thresholds.py).
 function _confidenceBucket(conf) {
   const c = Number(conf || 0);
-  if (c >= 85) return "high";
-  if (c >= 60) return "mid";
+  const t = getConfidenceThresholdsSync();
+  if (c >= t.high) return "high";
+  if (c >= t.medium) return "mid";
   if (c > 0) return "low";
   return "none";
 }
@@ -704,16 +707,18 @@ function _renderValidationStep() {
     return sortDir === "asc" ? " ▲" : " ▼";
   };
 
+  // VN-C.1 (batch 2) : seuils unifies — 85/60 deviennent t.high / t.medium.
+  const _thr = getConfidenceThresholdsSync();
   const tableRows = filtered.map((r) => {
     const conf = Number(r.confidence || 0);
-    const confLabel = conf >= 85 ? "Haute" : (conf >= 60 ? "Moyenne" : "Basse");
-    const confCls = conf >= 85 ? "is-high" : (conf >= 60 ? "is-mid" : "is-low");
+    const confLabel = conf >= _thr.high ? "Haute" : (conf >= _thr.medium ? "Moyenne" : "Basse");
+    const confCls = conf >= _thr.high ? "is-high" : (conf >= _thr.medium ? "is-mid" : "is-low");
     const rowId = String(r.row_id || "");
     const isExpanded = _validationExpanded.has(rowId);
     let defaultChecked;
     if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") defaultChecked = false;
-    else defaultChecked = conf >= 85;
+    else defaultChecked = conf >= _thr.high;
 
     const flags = String(r.warning_flags || "").split(",").filter(Boolean);
     const candidates = Array.isArray(r.candidates) ? r.candidates.slice(0, 3) : [];
@@ -1143,7 +1148,9 @@ function _formatPreviewEntry(entry) {
 
 function _renderApplyStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
-  const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= 85);
+  // VN-C.1 (batch 2) : seuil "auto-approve" = CONF_HIGH (85) via thresholds unifies.
+  const _autoThr = getConfidenceThresholdsSync().high;
+  const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= _autoThr);
   const renames = approved.length;
   const moves = (_runInfo?.duplicatesGroups || 0) * 2;
   const deletions = 0; // placeholder pour reject deletions
@@ -1470,6 +1477,9 @@ async function _handleBulkApprove(filter) {
     const conf = Number(r.confidence || 0);
     const flags = String(r.warning_flags || "");
     let match = false;
+    // VN-C.1 (batch 2) : "sure" reste a 90 (seuil bulk-approve specifique,
+    // plus strict que CONF_HIGH=85). C'est un parametre UI distinct
+    // des seuils high/med/low semantiques.
     if (filter === "sure") match = conf >= 90;
     else if (filter === "no-alert") match = !flags;
     else if (filter === "platinum-gold") match = ["Platinum", "Gold"].includes(String(r.tier || ""));
@@ -1959,13 +1969,12 @@ function _hasUnsavedValidationDecisions() {
     const rowId = String(cb.dataset.rowId || "");
     const row = rowsById.get(rowId);
     if (!row) continue;
-    // _renderValidationStep coche par defaut si confidence >= 85. C'est cet
-    // etat "par defaut" qui est compare a l'etat actuel pour savoir si
-    // l'utilisateur a interagi. Si decision serveur existe deja, on l'utilise.
+    // _renderValidationStep coche par defaut si confidence >= CONF_HIGH.
+    // VN-C.1 (batch 2) : seuil 85 -> getConfidenceThresholdsSync().high.
     let defaultChecked;
     if (row.decision === "OK" || row.decision === "APPROVED") defaultChecked = true;
     else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultChecked = false;
-    else defaultChecked = Number(row.confidence || 0) >= 85;
+    else defaultChecked = Number(row.confidence || 0) >= getConfidenceThresholdsSync().high;
     if (cb.checked !== defaultChecked) return true;
     // Annee : compare l'input avec proposed_year.
     const yearInput = _activeContainer.querySelector(`.traitement-validation-year-input[data-row-id="${rowId}"]`);
@@ -2076,6 +2085,10 @@ export async function initTraitement(container) {
   // pour qu'un re-mount (navigation back/forward) attache à nouveau les
   // listeners sur le nouveau container.
   _eventsBound = false;
+  // VN-C.1 (batch 2) : prefetch des seuils confidence (cache module-level
+  // dans core/api.js). Lance en // — pas critique de l'attendre, le
+  // fallback sync renvoie les DEFAULTS si pas encore arrive.
+  fetchConfidenceThresholds().catch(() => { /* fallback DEFAULTS */ });
   container.innerHTML = _renderTraitement();
   window.addEventListener("hashchange", _onHashChange);
   await _loadRunInfo();

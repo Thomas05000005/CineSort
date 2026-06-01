@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict as _asdict, is_dataclass as _is_dc
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.confidence_thresholds import confidence_label_fr
 from cinesort.domain.conversions import to_bool as _to_bool, to_float as _to_float, to_int as _to_int
 from cinesort.domain.custom_rules import apply_custom_rules as _apply_rules
 from cinesort.domain.explain_score import build_rich_explanation
@@ -439,11 +440,13 @@ def _clamp_0_100(value: float) -> int:
 
 
 def _confidence_label(value: int) -> str:
-    if value >= 75:
-        return "Elevee"
-    if value >= 50:
-        return "Moyenne"
-    return "Faible"
+    # VN-C.1 (batch 2) : delegation au module canonique
+    # cinesort.domain.confidence_thresholds. Anciens seuils 75/50 ->
+    # nouveaux CONF_HIGH=85 / CONF_MEDIUM=60 (alignes UI).
+    # Note backward-compat : moins de scores remontent "Elevee"
+    # (75-84 passent desormais "Moyenne"), mais le PlanRow
+    # confidence_label cote core utilise deja >= 80/60.
+    return confidence_label_fr(value)
 
 
 def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:

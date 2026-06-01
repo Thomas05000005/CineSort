@@ -274,6 +274,65 @@ if (typeof document !== "undefined" && typeof document.addEventListener === "fun
   });
 }
 
+/* ---------- VN-C.1 (batch 2) : seuils confidence unifies ----------
+ *
+ * Backend expose les seuils via settings.get_confidence_thresholds :
+ *     POST /api/settings/get_confidence_thresholds
+ *     -> { ok: true, thresholds: { high: 85, medium: 60, low: 0 } }
+ *
+ * Source unique : cinesort/domain/confidence_thresholds.py. Avant VN-C.1,
+ * les seuils 85/60 etaient hardcode dans traitement.js + lib-validation.js
+ * et incoherents avec le backend (75/50 quality_score, 80/60 core).
+ *
+ * Strategie :
+ *  - Cache module-level (les seuils ne changent que via deploiement code,
+ *    pas de TTL necessaire). Premier appel : un round-trip HTTP.
+ *  - Fallback safe : si l'endpoint repond pas (ancien backend), on garde
+ *    les valeurs DEFAULT 85/60 (= les anciennes hardcoded UI).
+ */
+const _CONF_DEFAULTS = Object.freeze({ high: 85, medium: 60, low: 0 });
+let _confThresholdsCache = null;
+let _confThresholdsInFlight = null;
+
+/**
+ * Retourne les seuils confidence (high / medium / low) via /api/settings/get_confidence_thresholds.
+ * Cache module-level + dedup des requetes paralleles. Retourne TOUJOURS un objet
+ * { high, medium, low } (fallback DEFAULTS si backend KO).
+ * @returns {Promise<{high: number, medium: number, low: number}>}
+ */
+export function fetchConfidenceThresholds() {
+  if (_confThresholdsCache) return Promise.resolve(_confThresholdsCache);
+  if (_confThresholdsInFlight) return _confThresholdsInFlight;
+  _confThresholdsInFlight = apiPost("settings/get_confidence_thresholds")
+    .then((resp) => {
+      const t = resp && resp.data && resp.data.thresholds;
+      if (t && Number.isFinite(t.high) && Number.isFinite(t.medium)) {
+        _confThresholdsCache = {
+          high: Number(t.high),
+          medium: Number(t.medium),
+          low: Number.isFinite(t.low) ? Number(t.low) : 0,
+        };
+      } else {
+        _confThresholdsCache = { ..._CONF_DEFAULTS };
+      }
+      return _confThresholdsCache;
+    })
+    .catch(() => {
+      _confThresholdsCache = { ..._CONF_DEFAULTS };
+      return _confThresholdsCache;
+    })
+    .finally(() => { _confThresholdsInFlight = null; });
+  return _confThresholdsInFlight;
+}
+
+/**
+ * Variante synchrone : retourne les seuils si deja fetched, sinon les
+ * DEFAULTS (85/60). Utile pour les rendus init avant fetch async.
+ */
+export function getConfidenceThresholdsSync() {
+  return _confThresholdsCache || { ..._CONF_DEFAULTS };
+}
+
 /**
  * Teste la connexion : GET /api/health (pas d'auth requise,
  * mais on envoie le token pour verifier qu'il est valide via un POST).

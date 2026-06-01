@@ -135,3 +135,17 @@ class SettingsFacade(_BaseFacade):
         Cf CineSortApi._preview_naming_template_impl pour la doc complete.
         """
         return self._api._preview_naming_template_impl(template, sample_row_id)
+
+    # ---------- VN-C.1 (batch 2) : seuils confidence unifies ----------
+
+    def get_confidence_thresholds(self) -> Dict[str, Any]:
+        """Retourne les seuils HIGH/MEDIUM/LOW partages backend+frontend.
+
+        Source unique : cinesort/domain/confidence_thresholds.py
+            { "ok": true, "thresholds": { "high": 85, "medium": 60, "low": 0 } }
+
+        Le dashboard consomme cet endpoint au demarrage et cache la valeur
+        module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
+        """
+        from cinesort.ui.api.settings_support import get_confidence_thresholds_payload  # noqa: PLC0415
+        return get_confidence_thresholds_payload()

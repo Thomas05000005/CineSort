@@ -1128,13 +1128,15 @@ def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any
 
 
 def _confidence_label_from_value(value: int) -> str:
-    """Reproduit la grille de labels utilisee par compute_confidence."""
-    v = int(value or 0)
-    if v >= 85:
-        return "high"
-    if v >= 60:
-        return "med"
-    return "low"
+    """Reproduit la grille de labels utilisee par compute_confidence.
+
+    VN-C.1 (batch 2) : delegation au module canonique
+    cinesort.domain.confidence_thresholds (source unique CONF_HIGH=85 /
+    CONF_MEDIUM=60). Anciens seuils hardcode 85/60 ici => meme valeurs,
+    mais maintenant pilotes depuis 1 endroit.
+    """
+    from cinesort.domain.confidence_thresholds import confidence_label  # noqa: PLC0415
+    return confidence_label(value)
 
 
 def _format_proposed_path(api: Any, run_id: str, title: str, year: int) -> str:

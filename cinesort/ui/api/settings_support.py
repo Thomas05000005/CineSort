@@ -1049,6 +1049,20 @@ def _unmask_secrets_for_save(incoming: Dict[str, Any], existing: Dict[str, Any])
             incoming[field] = str(existing.get(field) or "").strip()
 
 
+def get_confidence_thresholds_payload() -> Dict[str, Any]:
+    """VN-C.1 (batch 2) : seuils de confidence partages backend+frontend.
+
+    Source unique : cinesort/domain/confidence_thresholds.py. Le dashboard
+    consomme cet endpoint au demarrage et garde les valeurs en cache
+    module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
+    """
+    from cinesort.domain.confidence_thresholds import get_confidence_thresholds  # noqa: PLC0415
+    return {
+        "ok": True,
+        "thresholds": get_confidence_thresholds(),
+    }
+
+
 def get_settings_payload(
     *,
     state_dir: Path,

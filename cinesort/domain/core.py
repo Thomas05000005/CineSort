@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 #
 # TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation.
 import cinesort.domain.duplicate_support as core_duplicate_support
+from cinesort.domain.confidence_thresholds import (
+    CONF_HIGH as _CONF_HIGH,
+    CONF_MEDIUM as _CONF_MEDIUM,
+)
 from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
     iter_videos,
@@ -1241,7 +1245,12 @@ def compute_confidence(
             score = min(score, 59)  # cap sous le seuil "med"
 
     score = max(0, min(100, score))
-    label = "high" if score >= 80 else "med" if score >= 60 else "low"
+    # VN-C.1 (batch 2) : seuils unifies via domain.confidence_thresholds.
+    # Avant : >= 80 / >= 60 (hardcode). Apres : CONF_HIGH=85 / CONF_MEDIUM=60.
+    # Impact backward-compat : un score 80-84 retourne desormais "med"
+    # (au lieu de "high"). Aligne avec le frontend (traitement.js +
+    # lib-validation.js) qui utilisait deja 85/60.
+    label = "high" if score >= _CONF_HIGH else "med" if score >= _CONF_MEDIUM else "low"
     return score, label
 
 

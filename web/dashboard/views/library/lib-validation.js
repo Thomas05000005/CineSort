@@ -1,7 +1,7 @@
 /* lib-validation.js — Section 3 : Validation (table complète, filtres, presets, inspecteur) */
 
 import { $, escapeHtml } from "../../core/dom.js";
-import { apiGet, apiPost } from "../../core/api.js";
+import { apiGet, apiPost, fetchConfidenceThresholds, getConfidenceThresholdsSync } from "../../core/api.js";
 import { tableHtml, attachSort } from "../../components/table.js";
 import { badgeHtml } from "../../components/badge.js";
 import { showModal } from "../../components/modal.js";
@@ -38,6 +38,10 @@ export function initValidation(libState) {
   _state = libState;
   const el = $("libValidationContent");
   if (!el) return;
+  // VN-C.1 (batch 2) : prefetch des seuils confidence (cache module-level
+  // dans core/api.js). Lance en // — fallback sync sur DEFAULTS si pas
+  // encore arrive au premier render.
+  fetchConfidenceThresholds().catch(() => { /* fallback DEFAULTS */ });
   _loadRows(el);
 }
 
@@ -101,8 +105,10 @@ function _renderFull(el) {
   // Filtres
   html += `<div class="flex gap-2 items-center mb-4 flex-wrap">`;
   html += `<input type="text" class="input" placeholder="Rechercher..." id="libValSearch" data-testid="lib-valid-search" style="max-width:200px">`;
+  // VN-C.1 (batch 2) : libelles dynamiques bases sur les seuils unifies.
+  const _tFlt = getConfidenceThresholdsSync();
   html += `<select class="input" id="libValFilterConf" data-testid="lib-valid-filter-conf" style="max-width:140px">
-    <option value="">Confiance : Toutes</option><option value="high">Haute (≥85)</option><option value="med">Moyenne (60-84)</option><option value="low">Basse (&lt;60)</option></select>`;
+    <option value="">Confiance : Toutes</option><option value="high">Haute (&ge;${_tFlt.high})</option><option value="med">Moyenne (${_tFlt.medium}-${_tFlt.high - 1})</option><option value="low">Basse (&lt;${_tFlt.medium})</option></select>`;
   html += `<select class="input" id="libValFilterSource" data-testid="lib-valid-filter-source" style="max-width:140px">
     <option value="">Source : Toutes</option><option value="nfo">NFO</option><option value="tmdb">TMDb</option><option value="name">Nom</option></select>`;
   html += `</div>`;
@@ -214,12 +220,13 @@ function _applyFilters() {
       const text = `${row.proposed_title || ""} ${row.folder || ""} ${row.video_filename || ""}`.toLowerCase();
       if (!text.includes(q)) return false;
     }
-    // Confiance
+    // Confiance — VN-C.1 (batch 2) : seuils 85/60 -> getConfidenceThresholdsSync().
     if (_filters.confidence) {
       const c = Number(row.confidence || 0);
-      if (_filters.confidence === "high" && c < 85) return false;
-      if (_filters.confidence === "med" && (c < 60 || c >= 85)) return false;
-      if (_filters.confidence === "low" && c >= 60) return false;
+      const t = getConfidenceThresholdsSync();
+      if (_filters.confidence === "high" && c < t.high) return false;
+      if (_filters.confidence === "med" && (c < t.medium || c >= t.high)) return false;
+      if (_filters.confidence === "low" && c >= t.medium) return false;
     }
     // Source
     if (_filters.source) {
@@ -344,8 +351,11 @@ function _titleCell(v, row) {
 }
 
 function _confLabel(c) {
+  // VN-C.1 (batch 2) : seuils 85/60 -> getConfidenceThresholdsSync()
+  // (source unique : cinesort/domain/confidence_thresholds.py).
   const v = Number(c) || 0;
-  return v >= 85 ? "high" : v >= 60 ? "med" : "low";
+  const t = getConfidenceThresholdsSync();
+  return v >= t.high ? "high" : v >= t.medium ? "med" : "low";
 }
 
 function _short(p, max = 30) {
