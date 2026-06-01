@@ -976,12 +976,19 @@ def apply_rows(
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
     duplicate_loser_row_ids: Optional[Set[str]] = None,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    should_pause: Optional[Callable[[], bool]] = None,
 ) -> "ApplyResult":
     """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup.
 
     Phase 6 doublons (spec 01-doublons.md §3.7) : si `duplicate_loser_row_ids`
     est fourni, ces rows sont d'abord déplacés vers `_review/_duplicates_user_decided/`
     et exclus de la boucle apply normale.
+
+    VN-E.3 : `should_pause` est interroge en debut de chaque iteration de la
+    boucle principale `for row in rows`. La cancellation prevaut sur la pause.
+    Si ni `should_cancel` ni `should_pause` n'est fourni, comportement legacy
+    inchange (backward compat).
     """
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
@@ -1083,7 +1090,50 @@ def apply_rows(
         return Path(ctx.folder_map.get(folder_str, folder_str))
 
     _apply_total = len(rows)
+    # VN-E.3 : pause cooperative — sleep court entre 2 polls, cancellation
+    # prevaut sur pause. No-op si should_pause/should_cancel non fournis.
+    _pause_logged = {"v": False}
+
+    def _wait_while_paused_apply() -> bool:
+        """Return True si cancellation pendant pause -> sortir de la boucle."""
+        if should_pause is None:
+            return False
+        try:
+            if not bool(should_pause()):
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+        if not _pause_logged["v"]:
+            log("INFO", "apply: pause requested")
+            _pause_logged["v"] = True
+        while True:
+            if should_cancel is not None:
+                try:
+                    if bool(should_cancel()):
+                        return True
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                still = bool(should_pause())
+            except Exception:  # noqa: BLE001
+                still = False
+            if not still:
+                _pause_logged["v"] = False
+                log("INFO", "apply: pause released")
+                return False
+            time.sleep(0.5)
+
     for idx, row in enumerate(rows, start=1):
+        # VN-E.3 : pause cooperative + cancel — sortir au plus tot.
+        if _wait_while_paused_apply():
+            break
+        if should_cancel is not None:
+            try:
+                if bool(should_cancel()):
+                    log("INFO", "apply: cancel requested")
+                    break
+            except Exception:  # noqa: BLE001
+                pass
         # Notifier l'UI de la progression de l'apply (1 callback par row).
         # Defensif : ne jamais laisser une exception du callback casser le batch.
         if progress_cb is not None:

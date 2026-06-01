@@ -351,12 +351,27 @@ def _build_tmdb_client_optional(settings: Dict[str, Any], state_dir: Path):
 
 
 def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
-    """Build un job_fn compatible JobRunner pour rescanner N rows via le vrai pipeline."""
+    """Build un job_fn compatible JobRunner pour rescanner N rows via le vrai pipeline.
 
-    def job_fn(should_cancel) -> Dict[str, Any]:
+    VN-E.3 : accepte `should_pause` (kwarg optionnel) injecte par le JobRunner.
+    La cancellation prevaut sur la pause.
+    """
+
+    def job_fn(should_cancel, should_pause=None) -> Dict[str, Any]:
+        import time as _time
+
         processed = 0
         skipped = 0
         for rid in row_ids:
+            # VN-E.3 : pause cooperative AVANT cancel check.
+            if should_pause is not None:
+                try:
+                    while bool(should_pause()):
+                        if should_cancel():
+                            break
+                        _time.sleep(0.5)
+                except Exception:  # noqa: BLE001
+                    pass
             if should_cancel():
                 break
             try:

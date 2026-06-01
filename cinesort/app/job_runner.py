@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import sqlite3
 from dataclasses import dataclass, replace
@@ -103,6 +104,63 @@ class JobRunner:
                 return rt.cancel_event.is_set()
 
         return _should_cancel
+
+    def _invoke_job_fn(
+        self,
+        job_fn: JobFn,
+        should_cancel: Callable[[], bool],
+        should_pause: Callable[[], bool],
+    ) -> Optional[Dict[str, Any]]:
+        """VN-E.3 : invoque job_fn avec injection backward-compatible.
+
+        Strategie : si le job_fn accepte `should_pause` (kwarg explicite
+        ou **kwargs), on l'injecte. Sinon, on appelle avec uniquement
+        `should_cancel` comme avant.
+
+        On capture les TypeError signature pour fallback (defensif :
+        inspect.signature peut echouer sur certains callables C/builtins).
+        """
+        try:
+            sig = inspect.signature(job_fn)
+        # except Exception : inspect peut lever sur builtins/C-callables
+        except (TypeError, ValueError):
+            return job_fn(should_cancel)
+
+        params = sig.parameters
+        accepts_should_pause = (
+            "should_pause" in params
+            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        )
+        if accepts_should_pause:
+            try:
+                return job_fn(should_cancel, should_pause=should_pause)
+            except TypeError:
+                # Defensif : signature inattendue, fallback legacy.
+                return job_fn(should_cancel)
+        return job_fn(should_cancel)
+
+    def _should_pause_factory(self, run_id: str) -> Callable[[], bool]:
+        """VN-E.3 : factory pour la pause cooperative.
+
+        Le job_fn (scan/apply/plan/rescan) peut interroger ce callable
+        dans sa boucle principale pour suspendre proprement sa progression
+        tant que `pause_event` est pose. Symetrique de
+        `_should_cancel_factory`. Retourne False si run inconnu (defensif :
+        pas de blocage).
+
+        Note : la cancellation prevaut sur la pause — c'est au job_fn de
+        verifier `should_cancel()` apres chaque sleep pour sortir
+        immediatement si necessaire (cf. tests/test_pause_cooperative_v77).
+        """
+
+        def _should_pause() -> bool:
+            with self._lock:
+                rt = self._runs.get(run_id)
+                if not rt or rt.pause_event is None:
+                    return False
+                return rt.pause_event.is_set()
+
+        return _should_pause
 
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
         if not self._active_run_id:
@@ -280,8 +338,13 @@ class JobRunner:
                 )
 
             should_cancel = self._should_cancel_factory(run_id)
+            should_pause = self._should_pause_factory(run_id)
             self._debug(f"worker calling job_fn run_id={run_id}", run_debug)
-            stats = self._safe_stats(job_fn(should_cancel))
+            # VN-E.3 : backward compat — on inspecte la signature du job_fn
+            # pour passer should_pause si le job_fn l'accepte (kwarg explicite
+            # ou **kwargs). Sinon comportement actuel inchange (1 arg positionnel
+            # should_cancel uniquement) pour ne pas casser les job_fn legacy.
+            stats = self._safe_stats(self._invoke_job_fn(job_fn, should_cancel, should_pause))
             self._debug(f"worker job_fn returned run_id={run_id} stats_keys={list((stats or {}).keys())}", run_debug)
 
             ended_ts = time.time()

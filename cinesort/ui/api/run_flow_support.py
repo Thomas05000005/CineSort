@@ -377,7 +377,13 @@ def _build_plan_job_fn(
         except (KeyError, OSError, TypeError, ValueError) as exc:
             dlog(f"progress persistence warning idx={idx}/{total}: {exc}")
 
-    def job_fn(should_cancel: Callable[[], bool]) -> Optional[Dict[str, Any]]:
+    def job_fn(
+        should_cancel: Callable[[], bool],
+        should_pause: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        # VN-E.3 : job_fn accepte should_pause comme kwarg optionnel — le
+        # JobRunner inspecte la signature et l'injecte si present. Backward
+        # compat : si non fourni (legacy call), comportement inchange.
         dlog("job_fn started")
         dlog("job_fn writing ui_log.txt heartbeat")
         with rs.lock:
@@ -399,6 +405,9 @@ def _build_plan_job_fn(
                 "log": rs.log,
                 "progress": progress_with_persistence,
                 "should_cancel": should_cancel,
+                # VN-E.3 : injection should_pause vers plan_library (no-op
+                # si non fourni par le JobRunner pour ce run).
+                "should_pause": should_pause,
             }
             if bool(getattr(cfg, "incremental_scan_enabled", False)):
                 # #85 phase B8c : Repository pattern (store.scan au lieu de store).

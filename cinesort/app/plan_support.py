@@ -380,6 +380,10 @@ class _PlanLibraryContext:
     scan_index: Optional[Any]
     run_id: str
     subtitle_expected_languages: Optional[List[str]]
+    # VN-E.3 : pause cooperative — callable optionnel interroge entre 2
+    # dossiers dans _filter_dossiers_phase. La cancellation prevaut.
+    should_pause: Optional[Callable[[], bool]] = None
+    pause_logged: bool = False
     # Etat derive (rempli en debut de phase 1)
     stats: Any = None  # core_mod.Stats
     incremental_enabled: bool = False
@@ -416,6 +420,47 @@ class _PlanLibraryContext:
             self.log("INFO", "cancel requested")
             self.cancel_logged = True
         return True
+
+    def wait_while_paused(self, poll_interval_s: float = 0.5) -> bool:
+        """VN-E.3 : suspend la boucle tant que `should_pause()` retourne True.
+
+        Boucle de sommeil cooperative entre 2 iterations. La cancellation
+        prevaut : si `should_cancel()` devient True pendant la pause, on
+        sort immediatement (returns True pour signaler 'arret demande').
+
+        Retourne True si une cancellation est intervenue pendant la pause,
+        False sinon. No-op si `should_pause` est None (backward compat).
+        """
+
+        if self.should_pause is None:
+            return False
+        try:
+            paused_now = bool(self.should_pause())
+        # except Exception : callback exterieur, on swallow defensivement
+        except Exception:  # noqa: BLE001
+            return False
+        if not paused_now:
+            return False
+        if not self.pause_logged:
+            self.log("INFO", "pause requested")
+            self.pause_logged = True
+        # Boucle de pause cooperative — sleep court pour rester reactif au
+        # resume ET a la cancellation.
+        import time as _time
+
+        while True:
+            if core_mod._is_cancel_requested(self.should_cancel):
+                return True
+            try:
+                still_paused = bool(self.should_pause())
+            except Exception:  # noqa: BLE001
+                still_paused = False
+            if not still_paused:
+                # Reset du flag de log pour les pauses ulterieures.
+                self.pause_logged = False
+                self.log("INFO", "pause released")
+                return False
+            _time.sleep(poll_interval_s)
 
     def persist_folder_cache(
         self,
@@ -682,6 +727,11 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
     # Phase 2 — analyse : total fixe, la barre de progression est maintenant deterministe.
     discover_total = len(ctx.candidate_folders)
     for idx, folder in enumerate(ctx.candidate_folders, start=1):
+        # VN-E.3 : pause cooperative AVANT cancel check pour que le worker se
+        # mette en sommeil au plus tot. wait_while_paused retourne True si une
+        # cancellation est intervenue pendant la pause -> on sort de la boucle.
+        if ctx.wait_while_paused():
+            break
         if ctx.check_cancel():
             break
         ctx.scanned_total = idx
@@ -832,6 +882,7 @@ def plan_library(
     log: Callable[[str, str], None],
     progress: Callable[[int, int, str], None],
     should_cancel: Optional[Callable[[], bool]] = None,
+    should_pause: Optional[Callable[[], bool]] = None,
     scan_index: Optional[Any] = None,
     run_id: str = "",
     subtitle_expected_languages: Optional[List[str]] = None,
@@ -844,6 +895,10 @@ def plan_library(
       1. _scan_root_phase           : decouverte des dossiers candidats + setup contexte
       2. _filter_dossiers_phase     : iteration principale (cache, classification, plan_*)
       3. _dedup_and_finalize_phase  : purge cache incremental + finalisation stats
+
+    VN-E.3 : `should_pause` est interroge dans `_filter_dossiers_phase` pour
+    suspendre proprement la boucle entre 2 dossiers tant que le flag est pose
+    (cf JobRunner._should_pause_factory). La cancellation prevaut sur la pause.
     """
 
     ctx = _PlanLibraryContext(
@@ -852,6 +907,7 @@ def plan_library(
         log=log,
         progress=progress,
         should_cancel=should_cancel,
+        should_pause=should_pause,
         scan_index=scan_index,
         run_id=run_id,
         subtitle_expected_languages=subtitle_expected_languages,
@@ -2408,6 +2464,7 @@ def plan_multi_roots(
     log: Callable[[str, str], None],
     progress: Callable[[int, int, str], None],
     should_cancel: Optional[Callable[[], bool]] = None,
+    should_pause: Optional[Callable[[], bool]] = None,
     scan_index: Optional[Any] = None,
     run_id: str = "",
     subtitle_expected_languages: Optional[List[str]] = None,
@@ -2462,6 +2519,7 @@ def plan_multi_roots(
             log=log,
             progress=multi_progress,
             should_cancel=should_cancel,
+            should_pause=should_pause,
             scan_index=scan_index,
             run_id=run_id,
             subtitle_expected_languages=subtitle_expected_languages,
