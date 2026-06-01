@@ -93,6 +93,13 @@ let _validationPlan = null; // { rows: [...] }
 let _validationFilter = "all"; // all | high | mid | low | none
 let _validationSort = { key: "confidence", dir: "desc" };
 let _validationExpanded = new Set();
+// VN-C.2 (Vague N batch 2) : etat JS unique source de verite des decisions de
+// validation (ok/year). Remplace l'ancien DOM-as-source-of-truth de
+// _buildDecisions() qui ne lisait que les checkboxes presentes dans le DOM
+// (i.e. apres filtre). Resultat avant fix : un filtre "high" actif + Save
+// reinjectait silencieusement REJECT pour toutes les lignes hors viewport.
+// rowId -> { ok: bool, year: int|null, decided_at: ts }
+let _decisionsState = new Map();
 // Fix APPLY-2 (2026-05-30) : intervalle polling pendant l'apply (idem scan)
 // et state apply pour les progressions live.
 let _applyStatus = null;
@@ -659,25 +666,21 @@ function _sortValidationRows(rows, sort) {
   return copy;
 }
 
-// Fix VAL-3 : snapshot des etats DOM (checkbox + year input) avant un re-render
-// declenche par un filtre / tri / expand pour eviter de perdre les modifications
-// manuelles de l'utilisateur (regression UX-03 documentee dans _handleBulkApprove).
-// Reinjecte directement dans _validationPlan.rows[].decision/proposed_year pour
-// que le prochain render reflete les choix actifs.
+// VN-C.2 : depuis l'introduction du state JS `_decisionsState`, le DOM est
+// derive du state (pas l'inverse). _persistValidationDomState n'a donc plus a
+// snapshoter le DOM avant re-render : le state survit deja a filter / tri /
+// expand. On conserve toutefois un sync defensif (DOM -> state) pour le cas
+// ou une frappe rapide dans le year input ne declencherait pas encore d'event
+// "change" (ex. blur synthetique pendant un re-render).
 function _persistValidationDomState() {
-  if (!_activeContainer || !_validationPlan || !Array.isArray(_validationPlan.rows)) return;
-  const byId = new Map();
-  _validationPlan.rows.forEach((r) => byId.set(String(r.row_id || ""), r));
+  if (!_activeContainer) return;
   _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-    const row = byId.get(String(cb.dataset.rowId || ""));
-    if (!row) return;
-    row.decision = cb.checked ? "OK" : "REJECT";
+    const rowId = cb.dataset.rowId;
+    if (rowId) _setDecisionOk(rowId, cb.checked);
   });
   _activeContainer.querySelectorAll(".traitement-validation-year-input").forEach((inp) => {
-    const row = byId.get(String(inp.dataset.rowId || ""));
-    if (!row) return;
-    const y = Number(inp.value) || null;
-    if (y !== null) row.proposed_year = y;
+    const rowId = inp.dataset.rowId;
+    if (rowId) _setDecisionYear(rowId, inp.value);
   });
 }
 
@@ -715,10 +718,20 @@ function _renderValidationStep() {
     const confCls = conf >= _thr.high ? "is-high" : (conf >= _thr.medium ? "is-mid" : "is-low");
     const rowId = String(r.row_id || "");
     const isExpanded = _validationExpanded.has(rowId);
+    // VN-C.2 : state JS = source de verite. Si la row est connue du state on
+    // lit ok/year depuis lui (preserve les clics user a travers un filtre / tri
+    // / expand). Fallback sur la decision serveur puis sur le seuil high pour
+    // les rows non encore touchees.
+    const stState = _decisionsState.get(rowId);
     let defaultChecked;
-    if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
+    if (stState) {
+      defaultChecked = !!stState.ok;
+    } else if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") defaultChecked = false;
     else defaultChecked = conf >= _thr.high;
+    const yearForRender = stState && stState.year != null
+      ? String(stState.year)
+      : String(r.proposed_year || "");
 
     const flags = String(r.warning_flags || "").split(",").filter(Boolean);
     const candidates = Array.isArray(r.candidates) ? r.candidates.slice(0, 3) : [];
@@ -731,7 +744,7 @@ function _renderValidationStep() {
         <td class="traitement-validation-confidence ${confCls}">${escapeHtml(confLabel)} (${conf})</td>
         <td class="traitement-validation-title">${escapeHtml(r.proposed_title || "—")}</td>
         <td class="traitement-validation-year">
-          <input type="number" min="1900" max="2099" value="${escapeHtml(String(r.proposed_year || ""))}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
+          <input type="number" min="1900" max="2099" value="${escapeHtml(yearForRender)}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
         </td>
         <td class="traitement-validation-score">${escapeHtml(String(r.score ?? "—"))}</td>
         <td class="traitement-validation-source">${escapeHtml(String(r.proposed_source || "—"))}</td>
@@ -1450,21 +1463,71 @@ async function _loadPlan() {
   } catch {
     _validationPlan = { rows: [] };
   }
+  // VN-C.2 : initialise (ou complete) _decisionsState pour chaque row du plan.
+  // Toute row inconnue prend son etat par defaut (decision serveur si presente,
+  // sinon confidence >= seuil high -> approuve par defaut). Rows deja en state
+  // (ex. user a coche puis reload partiel) conservent leur valeur courante.
+  _initDecisionsState();
 }
 
+// VN-C.2 : seed/refresh du state JS depuis _validationPlan. On ne touche jamais
+// au DOM ici (pas de querySelectorAll). On ne supprime pas non plus d'entree
+// existante en cas de re-load partiel — la suppression franche se fait au
+// unmount (anti-leak inter-run).
+function _initDecisionsState() {
+  const rows = (_validationPlan && _validationPlan.rows) || [];
+  if (rows.length === 0) return;
+  const thrHigh = getConfidenceThresholdsSync().high;
+  const validIds = new Set();
+  for (const r of rows) {
+    const rowId = String(r.row_id || "");
+    if (!rowId) continue;
+    validIds.add(rowId);
+    if (_decisionsState.has(rowId)) continue; // user-modified state preserved
+    let ok;
+    if (r.decision === "OK" || r.decision === "APPROVED") ok = true;
+    else if (r.decision === "REJECT" || r.decision === "REJECTED") ok = false;
+    else ok = Number(r.confidence || 0) >= thrHigh;
+    const year = Number(r.proposed_year) || null;
+    _decisionsState.set(rowId, { ok, year, decided_at: Date.now() });
+  }
+  // Cleanup d'eventuelles entrees orphelines (rows disparues du plan, ex.
+  // rescan). Garde le state focus sur les rows actuelles uniquement.
+  for (const rid of Array.from(_decisionsState.keys())) {
+    if (!validIds.has(rid)) _decisionsState.delete(rid);
+  }
+}
+
+// VN-C.2 : source de verite des decisions = _decisionsState (Map JS), pas le
+// DOM. Garantit que les rows hors viewport (filtre actif, virtualisation
+// future) sont incluses dans le payload save_validation / apply.
 function _buildDecisions() {
-  if (!_activeContainer) return {};
   const decisions = {};
-  _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-    const rowId = cb.dataset.rowId;
-    if (!rowId) return;
-    const yearInput = _activeContainer.querySelector(`.traitement-validation-year-input[data-row-id="${rowId}"]`);
+  for (const [rowId, st] of _decisionsState.entries()) {
     decisions[rowId] = {
-      ok: cb.checked,
-      year: yearInput ? Number(yearInput.value) || null : null,
+      ok: !!st.ok,
+      year: st.year != null ? Number(st.year) || null : null,
     };
-  });
+  }
   return decisions;
+}
+
+// VN-C.2 : helpers d'update du state appeles par les handlers d'evenements
+// delegues. set/merge garantit qu'on ne perd jamais le champ year en mettant
+// a jour le ok, et reciproquement.
+function _setDecisionOk(rowId, ok) {
+  if (!rowId) return;
+  const id = String(rowId);
+  const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
+  _decisionsState.set(id, { ...prev, ok: !!ok, decided_at: Date.now() });
+}
+
+function _setDecisionYear(rowId, yearValue) {
+  if (!rowId) return;
+  const id = String(rowId);
+  const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
+  const y = yearValue === "" || yearValue == null ? null : Number(yearValue) || null;
+  _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now() });
 }
 
 async function _handleBulkApprove(filter) {
@@ -1489,16 +1552,19 @@ async function _handleBulkApprove(filter) {
     }
   });
 
-  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-03 : snapshot des
-  // checkboxes AVANT modification (et non du champ `decision` cote serveur qui
-  // n'a pas encore ete persiste a ce stade). Sans ca, l'undo restaurait des
-  // "PENDING" cote DOM alors que l'utilisateur avait deja coche manuellement.
-  const checkboxSnapshot = new Map();
-  _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-    checkboxSnapshot.set(cb.dataset.rowId, cb.checked);
-  });
+  // VN-C.2 + Fix audit 2026-05-30 (v1.5.8) UX-03 : snapshot pre-modification
+  // depuis _decisionsState (source de verite JS). Capture TOUTES les rows du
+  // plan, pas seulement celles visibles dans le DOM apres filtre. Sans ca,
+  // l'undo ne restaurait que les rows visibles -> perte silencieuse.
+  const stateSnapshot = new Map();
+  for (const [rid, st] of _decisionsState.entries()) {
+    stateSnapshot.set(rid, { ...st });
+  }
 
-  // Mise a jour locale + UI
+  // Mise a jour state JS (source de verite) + DOM visible.
+  for (const rid of targetIds) {
+    _setDecisionOk(rid, true);
+  }
   _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
     if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
   });
@@ -1522,10 +1588,15 @@ async function _handleBulkApprove(filter) {
   }
 
   if (!saveOk) {
-    // Rollback DOM : on remet les checkboxes telles qu'avant le bulk approve.
+    // VN-C.2 : rollback du state JS (source de verite) + DOM visible. Le
+    // snapshot couvre toutes les rows du plan (pas seulement les visibles).
+    _decisionsState = new Map();
+    for (const [rid, st] of stateSnapshot.entries()) {
+      _decisionsState.set(rid, { ...st });
+    }
     _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-      const prev = checkboxSnapshot.get(cb.dataset.rowId);
-      if (prev !== undefined) cb.checked = prev;
+      const prev = _decisionsState.get(cb.dataset.rowId);
+      if (prev) cb.checked = !!prev.ok;
     });
     showToast({
       type: "error",
@@ -1552,10 +1623,15 @@ async function _handleBulkApprove(filter) {
       label: "Annuler",
       onClick: async () => {
         if (!_activeContainer) return;
-        // Restaurer les checkboxes au snapshot original.
+        // VN-C.2 : restaurer le state JS au snapshot (toutes rows, pas seulement
+        // visibles) puis refleter sur le DOM visible.
+        _decisionsState = new Map();
+        for (const [rid, st] of stateSnapshot.entries()) {
+          _decisionsState.set(rid, { ...st });
+        }
         _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-          const prev = checkboxSnapshot.get(cb.dataset.rowId);
-          if (prev !== undefined) cb.checked = prev;
+          const prev = _decisionsState.get(cb.dataset.rowId);
+          if (prev) cb.checked = !!prev.ok;
         });
         // Re-persister les decisions originales pour que les KPI reflechissent
         // l'etat avant le bulk approve.
@@ -1928,6 +2004,21 @@ function _onContainerChange(event) {
   const container = _activeContainer;
   if (!container) return;
 
+  // VN-C.2 : capture des changements validation (checkbox + year input) vers
+  // le state JS `_decisionsState`. Sans ca, un re-render declenche par un
+  // filtre / tri / expand effacerait la modification utilisateur car le DOM
+  // est desormais derive du state (et plus l'inverse).
+  const valCheck = event.target.closest("[data-traitement-validation-check]");
+  if (valCheck && container.contains(valCheck)) {
+    _setDecisionOk(valCheck.dataset.rowId, valCheck.checked);
+    return;
+  }
+  const valYear = event.target.closest(".traitement-validation-year-input");
+  if (valYear && container.contains(valYear)) {
+    _setDecisionYear(valYear.dataset.rowId, valYear.value);
+    return;
+  }
+
   // Scan options (checkbox + range)
   const scanInput = event.target.closest("[data-scan-opt]");
   if (scanInput && container.contains(scanInput)) {
@@ -1952,37 +2043,29 @@ function _onContainerChange(event) {
 }
 
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-02 : detecte si l'etat
-// des checkboxes / annees diverge du `decision` cote serveur (_validationPlan).
-// - checkbox cochee = decision OK (approuve), non cochee = REJECT.
-// - year input value differente du proposed_year initial = modifie.
-// Renvoie true si AU MOINS une ligne diverge -> proposer la sauvegarde.
+// des decisions diverge du `decision` cote serveur (_validationPlan).
+// VN-C.2 : compare desormais _decisionsState (source de verite JS) contre les
+// rows serveur, ce qui inclut TOUTES les rows (visible ou masquees par filtre).
+// L'ancienne version iterait sur les checkboxes DOM et ratait les divergences
+// hors viewport (faux negatifs).
 function _hasUnsavedValidationDecisions() {
   if (!_activeContainer) return false;
   const rows = (_validationPlan && _validationPlan.rows) || [];
   if (rows.length === 0) return false;
-  const rowsById = new Map(rows.map((r) => [String(r.row_id || ""), r]));
-  const checks = _activeContainer.querySelectorAll("[data-traitement-validation-check]");
-  // Si la vue Validation n'a jamais ete montee (aucune checkbox), pas de
-  // divergence possible : on retourne false (laisse passer la transition).
-  if (checks.length === 0) return false;
-  for (const cb of checks) {
-    const rowId = String(cb.dataset.rowId || "");
-    const row = rowsById.get(rowId);
-    if (!row) continue;
-    // _renderValidationStep coche par defaut si confidence >= CONF_HIGH.
-    // VN-C.1 (batch 2) : seuil 85 -> getConfidenceThresholdsSync().high.
-    let defaultChecked;
-    if (row.decision === "OK" || row.decision === "APPROVED") defaultChecked = true;
-    else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultChecked = false;
-    else defaultChecked = Number(row.confidence || 0) >= getConfidenceThresholdsSync().high;
-    if (cb.checked !== defaultChecked) return true;
-    // Annee : compare l'input avec proposed_year.
-    const yearInput = _activeContainer.querySelector(`.traitement-validation-year-input[data-row-id="${rowId}"]`);
-    if (yearInput) {
-      const currentYear = Number(yearInput.value) || null;
-      const originalYear = Number(row.proposed_year) || null;
-      if (currentYear !== originalYear) return true;
-    }
+  if (_decisionsState.size === 0) return false;
+  const thrHigh = getConfidenceThresholdsSync().high;
+  for (const row of rows) {
+    const rowId = String(row.row_id || "");
+    const st = _decisionsState.get(rowId);
+    if (!st) continue;
+    let defaultOk;
+    if (row.decision === "OK" || row.decision === "APPROVED") defaultOk = true;
+    else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultOk = false;
+    else defaultOk = Number(row.confidence || 0) >= thrHigh;
+    if (!!st.ok !== defaultOk) return true;
+    const originalYear = Number(row.proposed_year) || null;
+    const currentYear = st.year != null ? Number(st.year) || null : null;
+    if (currentYear !== originalYear) return true;
   }
   return false;
 }
@@ -2131,6 +2214,10 @@ export function unmountTraitement() {
   _runStatus = null;
   _activeContainer = null;
   _validationPlan = null;
+  // VN-C.2 : reset du state JS des decisions au unmount. Aucune persistence
+  // hors session run (par design — la spec interdit localStorage long-terme,
+  // les decisions vivent uniquement le temps de la session de validation).
+  _decisionsState = new Map();
   // Fix VAL-3 (2026-05-30) : reset filtre/tri/expand au unmount pour eviter
   // qu'un etat "filtre=high" persiste si l'utilisateur revient plus tard.
   _validationFilter = "all";
