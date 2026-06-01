@@ -1,25 +1,72 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
 PROBE_QUALITY_FULL = "FULL"
 PROBE_QUALITY_PARTIAL = "PARTIAL"
 PROBE_QUALITY_FAILED = "FAILED"
 
+
+# VO-D-1 (2026-06-01) : StrEnum OpType pour typer fortement les valeurs
+# canoniques RENAME/MOVE/NOOP du champ RenameProposal.op_type.
+#
+# StrEnum (Python 3.11+) garantit l'equality avec str :
+#     OpType.RENAME == "RENAME"  # True
+#     isinstance(OpType.RENAME, str)  # True
+#
+# Cela preserve la backward compat absolue : tout code existant qui
+# manipulait des litterals "RENAME"/"MOVE"/"NOOP" ou les constantes
+# OP_TYPE_* continue de fonctionner sans modification.
+class OpType(StrEnum):
+    """Type d'operation atomique pour RenameProposal.
+
+    Aligne sur le contrat UPPERCASE journal/apply (move_journal + apply_audit
+    utilisent MOVE_FILE/MOVE_DIR/MKDIR/QUARANTINE_*/UNDO_*).
+
+    StrEnum implique str equality : OpType.RENAME == "RENAME" -> True.
+    """
+
+    RENAME = "RENAME"
+    MOVE = "MOVE"
+    NOOP = "NOOP"
+
+    @classmethod
+    def from_str(cls, value: str) -> "OpType":
+        """Convert a string to OpType, supporting legacy lowercase values.
+
+        :param value: chaine source (sensible a la casse normalisee)
+        :raises ValueError: si la valeur n'est pas un OpType valide
+        """
+        normalized = value.upper().strip()
+        try:
+            return cls(normalized)
+        except ValueError as e:
+            raise ValueError(
+                f"Unknown OpType: {value!r}, expected one of "
+                f"{[m.value for m in cls]}"
+            ) from e
+
+
 # VN-F.4 (2026-06-01) : OpType canonique UPPERCASE pour aligner RenameProposal
 # avec le contrat journal/apply (move_journal + apply_audit utilisent
 # MOVE_FILE/MOVE_DIR/MKDIR/QUARANTINE_*/UNDO_*). Les anciens callsites tests
 # qui utilisaient "rename"/"move"/"noop" doivent migrer vers ces constantes.
-OP_TYPE_RENAME = "RENAME"
-OP_TYPE_MOVE = "MOVE"
-OP_TYPE_NOOP = "NOOP"
+#
+# VO-D-1 : ces constantes sont conservees comme alias backward compat,
+# derives de OpType (single source of truth). Toute nouvelle utilisation
+# doit prefere OpType.RENAME / OpType.MOVE / OpType.NOOP.
+OP_TYPE_RENAME: str = OpType.RENAME.value  # backward compat alias
+OP_TYPE_MOVE: str = OpType.MOVE.value  # backward compat alias
+OP_TYPE_NOOP: str = OpType.NOOP.value  # backward compat alias
 OP_TYPE_VALUES = frozenset({OP_TYPE_RENAME, OP_TYPE_MOVE, OP_TYPE_NOOP})
 
 __all__ = [
     "PROBE_QUALITY_FULL",
     "PROBE_QUALITY_PARTIAL",
     "PROBE_QUALITY_FAILED",
+    "OpType",
     "OP_TYPE_RENAME",
     "OP_TYPE_MOVE",
     "OP_TYPE_NOOP",
@@ -141,7 +188,13 @@ class RenameProposal:
     # VN-F.4 : valeurs canoniques OP_TYPE_RENAME / OP_TYPE_MOVE / OP_TYPE_NOOP
     # (UPPERCASE, aligne sur le contrat journal/apply MOVE_FILE/MOVE_DIR/MKDIR).
     # Voir cinesort.domain.probe_models.OP_TYPE_VALUES.
-    op_type: str  # "RENAME" | "MOVE" | "NOOP"
+    #
+    # VO-D-1 : prefere OpType (StrEnum) pour les nouveaux callsites :
+    #     op_type=OpType.RENAME  # recommande
+    # L'annotation reste `str` pour preserver la backward compat ABSOLUE
+    # (anciens callsites passant "RENAME" directement). StrEnum IS str, donc
+    # OpType.RENAME est assignable a un champ typed str sans coercion.
+    op_type: str  # "RENAME" | "MOVE" | "NOOP" (prefere OpType StrEnum)
     no_op: bool = False
     reason: str = ""
     # Champs additionnels optionnels pour enrichissement futur
