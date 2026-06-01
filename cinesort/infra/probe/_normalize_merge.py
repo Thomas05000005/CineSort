@@ -7,6 +7,7 @@ FAILED.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.probe_models import (
@@ -22,6 +23,48 @@ from cinesort.infra.probe._normalize_helpers import (
     _to_int,
 )
 from cinesort.infra.probe._normalize_mediainfo import _extract_mediainfo
+
+_logger = logging.getLogger(__name__)
+
+# VN-A.5 : tolerance de divergence pour les champs numeriques (bitrate).
+# ffprobe et mediainfo arrondissent differemment ; un ecart < 5% est normal,
+# au-dela on logge pour audit / debugging.
+_BITRATE_PARITY_TOLERANCE = 0.05
+
+
+def _log_video_parity(mi_video: Dict[str, Any], ff_video: Dict[str, Any]) -> None:
+    """Logge les divergences materielles entre mediainfo et ffprobe sur la piste video.
+
+    VN-A.5 (item 6 "mediainfo parity") : trace les divergences codec / bitrate
+    pour permettre un audit sur les fichiers ou les deux backends ne s'accordent
+    pas. Niveau INFO (pas WARNING) car la divergence est attendue sur certains
+    containers exotiques ; on flag pour analyse offline pas pour alerter l'user.
+    """
+    if not mi_video or not ff_video:
+        return
+    # Codec : comparaison case-insensitive et stripped
+    mi_codec = str(mi_video.get("codec") or "").strip().lower()
+    ff_codec = str(ff_video.get("codec") or "").strip().lower()
+    if mi_codec and ff_codec and mi_codec != ff_codec:
+        _logger.info(
+            "probe_parity: codec divergent mediainfo=%s ffprobe=%s (flag pour audit)",
+            mi_codec, ff_codec,
+        )
+    # Bitrate : tolerance relative (kbps/bps mix possible mais _to_bitrate_int normalise)
+    mi_br = mi_video.get("bitrate")
+    ff_br = ff_video.get("bitrate")
+    if mi_br and ff_br:
+        try:
+            mi_v = float(mi_br)
+            ff_v = float(ff_br)
+            base = max(mi_v, ff_v)
+            if base > 0 and abs(mi_v - ff_v) / base > _BITRATE_PARITY_TOLERANCE:
+                _logger.info(
+                    "probe_parity: bitrate video divergent mediainfo=%s ffprobe=%s (>5%%, flag pour audit)",
+                    int(mi_v), int(ff_v),
+                )
+        except (TypeError, ValueError):
+            pass
 
 
 def _extract_tracks(
@@ -71,6 +114,8 @@ def _merge_probes(
 
     mi_video = mi.get("video") if isinstance(mi.get("video"), dict) else {}
     ff_video = ff.get("video") if isinstance(ff.get("video"), dict) else {}
+    # VN-A.5 (item 6) : flag mediainfo<->ffprobe parity divergence (codec, bitrate)
+    _log_video_parity(mi_video, ff_video)
     video: Dict[str, Any] = {}
     video_sources: Dict[str, str] = {}
 

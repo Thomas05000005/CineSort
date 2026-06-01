@@ -870,9 +870,23 @@ def main() -> None:
         # storage_path : isole le storage CineSort dans %LOCALAPPDATA%/CineSort/webview.
         _storage_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview"
         _storage_dir.mkdir(parents=True, exist_ok=True)
+        # VN-A.5 : DevTools (F12) actif uniquement en mode developpeur. Triggers :
+        #   - env CINESORT_DEBUG=1/true/yes/on
+        #   - env DEV_MODE=1 ou flag CLI --dev (cf is_dev_mode)
+        #   - flag file %APPDATA%/CineSort/debug.flag present
+        # En prod (sans aucun de ces triggers), F12 est inerte -> evite que
+        # l'utilisateur final tombe sur les internes WebView2 par accident.
+        _debug_flag_file = Path(os.environ.get("APPDATA", ".")) / "CineSort" / "debug.flag"
+        _devtools_enabled = (
+            str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            or is_dev_mode()
+            or _debug_flag_file.exists()
+        )
+        if _devtools_enabled:
+            _log.info("DevTools active (mode developpeur detecte)")
         webview.start(
             _startup,
-            debug=False,
+            debug=_devtools_enabled,
             private_mode=False,
             storage_path=str(_storage_dir),
         )
