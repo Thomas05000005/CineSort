@@ -2601,6 +2601,32 @@ class CineSortApi:
             locking_mode_exclusive=locking_mode_exclusive,
         )
 
+    # ---------- VO-B-CONFIG : scan_max_workers (tri-etat auto/manuel) ----------
+    def _get_scan_max_workers_impl(self) -> Dict[str, Any]:
+        """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+        Voir SettingsFacade.get_scan_max_workers pour la documentation
+        complete et la synergie avec VO-A detect_storage.
+        """
+        return settings_support.get_scan_max_workers_payload(
+            state_dir=self._get_state_dir(),
+        )
+
+    def _set_scan_max_workers_impl(
+        self,
+        mode: str,
+        value: Any = None,
+    ) -> Dict[str, Any]:
+        """VO-B-CONFIG : persiste le setting scan_max_workers + retourne l'etat.
+
+        Voir SettingsFacade.set_scan_max_workers pour la documentation.
+        """
+        return settings_support.set_scan_max_workers_payload(
+            state_dir=self._get_state_dir(),
+            mode=mode,
+            value=value,
+        )
+
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
         return history_support.open_path(

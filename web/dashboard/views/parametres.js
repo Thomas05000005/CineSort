@@ -267,6 +267,13 @@ export const PARAMETRES_GROUPS = [
       { id: "stockage-sqlite", label: "Stockage SQLite", fields: [
         { key: "__advanced_pragma__", label: "", type: "advanced-pragma" },
       ]},
+      // VO-B-CONFIG : Scan parallele — tri-etat auto/manuel + N workers [1..64].
+      // En mode auto : delegue a VO-A detect_storage (SSD=8 workers, SMB=4, autre=1).
+      // En mode manuel : l'utilisateur force une valeur entre 1 et 64.
+      // Backward compat (memoire user) : manuel=1 = comportement strictement sequentiel.
+      { id: "scan", label: "Scan", fields: [
+        { key: "__scan_max_workers__", label: "", type: "scan-max-workers" },
+      ]},
       { id: "parallelism", label: "Parallélisme", fields: [
         { key: "perceptual_parallelism_mode", label: "Mode parallélisme", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"max",l:"Max"},{v:"safe",l:"Sécurisé"},{v:"serial",l:"Séquentiel"},
@@ -349,6 +356,11 @@ const _state = {
   advancedPragmaState: null,
   advancedPragmaLoading: false,
   probeToolsLoading: false,
+  // VO-B-CONFIG : dernier payload retourne par settings/get_scan_max_workers.
+  // Forme : { mode, value, effective, storage_detected, auto_suggestion, min, max }.
+  // Null = pas encore charge cette session (premier render = "Chargement..." puis fetch).
+  scanMaxWorkersState: null,
+  scanMaxWorkersLoading: false,
 };
 
 /**
@@ -709,6 +721,72 @@ function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
 }
 
 /**
+ * VO-B-CONFIG : rend la section "Scan" (tri-etat workers auto/manuel).
+ *
+ * `state` = payload retourne par settings/get_scan_max_workers :
+ *   { mode, value, effective, storage_detected, auto_suggestion, min, max }
+ *
+ * En mode "auto", l'input number "value" est masque (le backend choisit
+ * en fonction de VO-A detect_storage). En mode "manual", il est visible
+ * et editable entre [min..max] (1..64). Le champ est applique au blur OU
+ * a l'Enter pour eviter les writes intermediaires.
+ */
+function _renderScanMaxWorkersSection(state) {
+  if (_state.scanMaxWorkersLoading) {
+    return `<div class="parametres-muted">Chargement de la configuration scan…</div>`;
+  }
+  if (!state || typeof state !== "object") {
+    return `<div class="parametres-muted">Statut non disponible. <button type="button" class="v5-btn v5-btn--sm" data-scan-workers-reload>Recharger</button></div>`;
+  }
+
+  const mode = String(state.mode || "auto");
+  const value = Number(state.value || 1);
+  const effective = Number(state.effective || 1);
+  const detected = String(state.storage_detected || "local_ssd");
+  const autoSuggestion = Number(state.auto_suggestion || 1);
+  const minVal = Number(state.min || 1);
+  const maxVal = Number(state.max || 64);
+
+  const detectedLabel = detected === "nas_smb"
+    ? "NAS / SMB"
+    : "SSD local";
+
+  const isManual = mode === "manual";
+  const numberHidden = isManual ? "" : ' style="display:none"';
+
+  const activeBadge = `<span class="parametres-tools-mode parametres-tools-mode--ok">Workers actifs : ${escapeHtml(String(effective))}</span>`;
+
+  return `<div class="parametres-scan-max-workers">
+    <p class="parametres-section-intro">
+      Nombre de workers pour la phase 1 du scan (parallelisation iter_videos).
+      <strong>Auto</strong> s'adapte au stockage détecté
+      (<em>${escapeHtml(detectedLabel)}</em> &rArr; ${escapeHtml(String(autoSuggestion))} workers).
+      Manuel = vous forcez une valeur entre ${escapeHtml(String(minVal))} et ${escapeHtml(String(maxVal))}.
+    </p>
+    <div class="parametres-field">
+      <label class="parametres-field-label" for="parametres-scan-workers-mode">Mode</label>
+      <select id="parametres-scan-workers-mode" class="parametres-select" data-scan-workers-mode>
+        <option value="auto" ${mode === "auto" ? "selected" : ""}>Auto (synergie storage)</option>
+        <option value="manual" ${mode === "manual" ? "selected" : ""}>Manuel (forcer N)</option>
+      </select>
+      <span class="parametres-field-hint">${activeBadge}</span>
+    </div>
+    <div class="parametres-field" data-scan-workers-value-wrapper${numberHidden}>
+      <label class="parametres-field-label" for="parametres-scan-workers-value">
+        Workers (${escapeHtml(String(minVal))}-${escapeHtml(String(maxVal))})
+      </label>
+      <input type="number" id="parametres-scan-workers-value" class="parametres-input"
+             min="${escapeHtml(String(minVal))}" max="${escapeHtml(String(maxVal))}" step="1"
+             value="${escapeHtml(String(value))}" data-scan-workers-value>
+      <span class="parametres-field-hint">
+        Backward compat : valeur 1 = comportement strictement séquentiel (aucune parallélisation).
+      </span>
+    </div>
+    <p class="parametres-scan-max-workers-message parametres-muted" data-scan-workers-message></p>
+  </div>`;
+}
+
+/**
  * VO-A UI : rend la section "Stockage SQLite" (tri-etat profil + toggle EXCLUSIVE).
  *
  * `state` = payload retourne par settings/get_advanced_pragma_settings :
@@ -1020,6 +1098,11 @@ function _renderField(field, value, query) {
       // VO-A UI : section "Stockage SQLite" tri-etat + toggle EXCLUSIVE.
       // Le contenu reel est rendu apres settings/get_advanced_pragma_settings.
       return `<div class="parametres-field parametres-field--advanced-pragma" data-advanced-pragma-host>${_renderAdvancedPragmaSection(_state.advancedPragmaState)}</div>`;
+
+    case "scan-max-workers":
+      // VO-B-CONFIG : tri-etat auto/manuel + input number 1..64.
+      // Le contenu reel est rendu apres settings/get_scan_max_workers.
+      return `<div class="parametres-field parametres-field--scan-max-workers" data-scan-workers-host>${_renderScanMaxWorkersSection(_state.scanMaxWorkersState)}</div>`;
 
     default:
       return `<div class="parametres-field">[type ${_esc(field.type)} non supporté pour « ${_esc(field.label)} »]</div>`;
@@ -2041,6 +2124,12 @@ function _bindFields(container) {
     _loadAdvancedPragmaState(container);
   }
 
+  // VO-B-CONFIG : Scan parallele (tri-etat workers auto/manuel)
+  _bindScanMaxWorkersActions(container);
+  if (container.querySelector("[data-scan-workers-host]") && _state.scanMaxWorkersState === null && !_state.scanMaxWorkersLoading) {
+    _loadScanMaxWorkersState(container);
+  }
+
   // QR dashboard auto-load
   if (container.querySelector("[data-qr-dashboard]")) {
     _loadQrDashboard(container);
@@ -2186,6 +2275,141 @@ function _bindAdvancedPragmaActions(container) {
           exclusiveToggle.checked = previous;
         }
       }, 100);
+    });
+  }
+}
+
+/* =============================================================
+ * VO-B-CONFIG : Scan parallele (tri-etat workers auto/manuel)
+ * ============================================================= */
+
+/**
+ * Refresh le panneau "Scan" sans full re-render. Re-attache les handlers
+ * (idempotent via data-bound).
+ */
+function _refreshScanMaxWorkersPanel(container) {
+  const host = container.querySelector("[data-scan-workers-host]");
+  if (!host) return;
+  host.innerHTML = _renderScanMaxWorkersSection(_state.scanMaxWorkersState);
+  _bindScanMaxWorkersActions(container);
+}
+
+/**
+ * Charge l'etat initial via settings/get_scan_max_workers.
+ */
+async function _loadScanMaxWorkersState(container) {
+  _state.scanMaxWorkersLoading = true;
+  _refreshScanMaxWorkersPanel(container);
+  try {
+    const res = await apiPost("settings/get_scan_max_workers", {});
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.scanMaxWorkersState = data;
+    } else {
+      _state.scanMaxWorkersState = null;
+    }
+  } catch (err) {
+    _state.scanMaxWorkersState = null;
+  } finally {
+    _state.scanMaxWorkersLoading = false;
+    _refreshScanMaxWorkersPanel(container);
+  }
+}
+
+/**
+ * Applique la combinaison (mode, value) via settings/set_scan_max_workers.
+ */
+async function _applyScanMaxWorkers(container, mode, value, msgEl) {
+  if (msgEl) msgEl.textContent = "Application en cours…";
+  try {
+    const payload = { mode: String(mode || "auto") };
+    if (mode === "manual") {
+      payload.value = Number(value);
+    }
+    const res = await apiPost("settings/set_scan_max_workers", payload);
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.scanMaxWorkersState = {
+        ...(_state.scanMaxWorkersState || {}),
+        mode: data.mode,
+        value: data.value,
+        effective: data.effective,
+        storage_detected: data.storage_detected,
+        auto_suggestion: data.auto_suggestion,
+        min: data.min,
+        max: data.max,
+      };
+      _refreshScanMaxWorkersPanel(container);
+      const newMsg = container.querySelector("[data-scan-workers-message]");
+      if (newMsg) newMsg.textContent = "✓ Configuration scan enregistrée.";
+      return true;
+    }
+    if (msgEl) msgEl.textContent = `Erreur : ${data?.message || "échec de l'enregistrement"}`;
+    return false;
+  } catch (err) {
+    if (msgEl) msgEl.textContent = `Erreur réseau : ${err?.message || err}`;
+    return false;
+  }
+}
+
+/**
+ * Bind des handlers select mode + input value.
+ *
+ * Memoire user "Pas de window.confirm/alert/prompt" : aucune dialog native.
+ * Le toggle mode applique immediatement (changement non-destructif).
+ * L'input value applique au blur OU sur Enter (evite N writes intermediaires
+ * pendant la frappe).
+ */
+function _bindScanMaxWorkersActions(container) {
+  // Bouton "Recharger" si state null
+  const reloadBtn = container.querySelector("[data-scan-workers-reload]");
+  if (reloadBtn && reloadBtn.dataset.bound !== "1") {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", () => _loadScanMaxWorkersState(container));
+  }
+
+  // Select mode — change applique direct
+  const modeSelect = container.querySelector("[data-scan-workers-mode]");
+  if (modeSelect && modeSelect.dataset.bound !== "1") {
+    modeSelect.dataset.bound = "1";
+    modeSelect.addEventListener("change", async () => {
+      const msg = container.querySelector("[data-scan-workers-message]");
+      const newMode = String(modeSelect.value || "auto");
+      const currentValue = Number(_state.scanMaxWorkersState?.value || 1);
+      // Show / hide l'input number selon le mode (UX)
+      const wrapper = container.querySelector("[data-scan-workers-value-wrapper]");
+      if (wrapper) {
+        wrapper.style.display = newMode === "manual" ? "" : "none";
+      }
+      await _applyScanMaxWorkers(container, newMode, currentValue, msg);
+    });
+  }
+
+  // Input value (mode manuel uniquement) — applique au blur ou Enter
+  const valueInput = container.querySelector("[data-scan-workers-value]");
+  if (valueInput && valueInput.dataset.bound !== "1") {
+    valueInput.dataset.bound = "1";
+    const applyFromInput = async () => {
+      const msg = container.querySelector("[data-scan-workers-message]");
+      const raw = valueInput.value;
+      const n = Number(raw);
+      const minVal = Number(_state.scanMaxWorkersState?.min || 1);
+      const maxVal = Number(_state.scanMaxWorkersState?.max || 64);
+      if (!Number.isFinite(n) || n < minVal || n > maxVal) {
+        if (msg) msg.textContent = `Valeur invalide : doit être un entier entre ${minVal} et ${maxVal}.`;
+        return;
+      }
+      const currentMode = String(_state.scanMaxWorkersState?.mode || "manual");
+      // Si l'utilisateur edite la valeur sans avoir bascule en manuel, on bascule pour eux
+      const targetMode = currentMode === "manual" ? "manual" : "manual";
+      await _applyScanMaxWorkers(container, targetMode, Math.floor(n), msg);
+    };
+    valueInput.addEventListener("blur", applyFromInput);
+    valueInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyFromInput();
+      }
     });
   }
 }

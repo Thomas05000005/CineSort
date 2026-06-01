@@ -186,6 +186,51 @@ class SettingsFacade(_BaseFacade):
             locking_mode_exclusive=locking_mode_exclusive,
         )
 
+    # ---------- VO-B-CONFIG : scan_max_workers (tri-etat auto/manuel) ----------
+
+    def get_scan_max_workers(self) -> Dict[str, Any]:
+        """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+        Synergie VO-A : en mode "auto", le backend lit `_detect_storage_profile`
+        et mappe vers un nombre de workers (8 pour SSD local, 4 pour NAS SMB,
+        1 fallback). En mode "manual", l'utilisateur force une valeur [1..64].
+
+        Returns:
+            {
+                "ok": True,
+                "mode": "auto" | "manual",
+                "value": int,             # valeur manuelle saisie
+                "effective": int,         # valeur effectivement appliquee
+                "storage_detected": str,  # heuristique VO-A
+                "auto_suggestion": int,   # workers proposes en mode auto
+                "min": 1,
+                "max": 64,
+            }
+        """
+        return self._api._get_scan_max_workers_impl()
+
+    def set_scan_max_workers(
+        self,
+        mode: str,
+        value: Any = None,
+    ) -> Dict[str, Any]:
+        """VO-B-CONFIG : persiste le setting scan_max_workers + retourne l'etat.
+
+        Memoire user BACKWARD COMPAT : mode="manual" avec value=1 garde un
+        comportement strictement sequentiel (cf.
+        `resolve_scan_max_workers` qui plafonne a [1..32] et retombe sur 1).
+        Mode="auto" delegue a VO-A pour adapter selon le storage detecte.
+
+        Args:
+            mode: "auto" | "manual".
+            value: int [1..64], requis si mode="manual".
+
+        Returns:
+            Meme forme que `get_scan_max_workers` + `write_result`.
+            En cas d'erreur de validation : { "ok": False, "message": ... }.
+        """
+        return self._api._set_scan_max_workers_impl(mode, value)
+
     # ---------- VN-C.1 (batch 2) : seuils confidence unifies ----------
 
     def get_confidence_thresholds(self) -> Dict[str, Any]:

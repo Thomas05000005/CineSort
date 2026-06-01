@@ -136,6 +136,7 @@
       "get_dashboard_qr",
       "get_naming_presets",
       "get_profiles",
+      "get_scan_max_workers",
       "get_server_info",
       "get_settings",
       "get_user_data_size",
@@ -148,7 +149,8 @@
       "save_settings",
       "set_active_profile",
       "set_advanced_pragma_settings",
-      "set_locale"
+      "set_locale",
+      "set_scan_max_workers"
     ],
     "integrations": [
       "get_jellyfin_libraries",
@@ -173,7 +175,7 @@
     "open_path",
     "test_reset"
   ],
-  "total_impl_methods": 136,
-  "total_facade_methods": 152,
-  "total_methods": 155
+  "total_impl_methods": 138,
+  "total_facade_methods": 154,
+  "total_methods": 157
 }

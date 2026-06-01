@@ -650,6 +650,12 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-04 (R5-STRESS-1) probe parallelism : 0 = auto (min(cpu_count(), 8))
     ("probe_workers", 0),
     ("probe_parallelism_enabled", True),
+    # VO-B-CONFIG : scan_max_workers tri-etat auto/manuel. Default "auto" +
+    # value=1 garde la backward compat stricte si l'utilisateur n'a jamais
+    # touche au setting (la resolution effective passe par
+    # resolve_effective_scan_max_workers qui delegue a VO-A detect_storage).
+    ("scan_max_workers_mode", "auto"),
+    ("scan_max_workers_value", 1),
     ("incremental_scan_enabled", False),
     ("quarantine_unapproved", False),
     ("dry_run_apply", True),
@@ -891,6 +897,19 @@ def build_cfg_from_settings(
     else:
         base_video_exts = set(core.VIDEO_EXTS_DEFAULT)
     video_exts = base_video_exts | set(core.VIDEO_EXTS_ALL)
+    # VO-B-CONFIG : determine scan_max_workers effectif depuis le payload.
+    # - mode="manual" -> on prend value clampe [1..64]
+    # - mode="auto"   -> 1 (la resolution VO-A complete se fait via
+    #     `resolve_effective_scan_max_workers(state_dir)` quand un state_dir
+    #     est disponible). Ici on est dans le code-path sans state_dir
+    #     (build depuis run_row notamment), on retombe sur sequentiel strict
+    #     pour preserver la backward compat.
+    cfg_mode = _normalize_scan_max_workers_mode(settings.get("scan_max_workers_mode"))
+    cfg_value = _normalize_scan_max_workers_value(settings.get("scan_max_workers_value"))
+    if cfg_mode == "manual":
+        cfg_scan_workers = cfg_value
+    else:
+        cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
     return core.Config(
         root=root,
         enable_collection_folder=to_bool(settings.get("collection_folder_enabled"), True),
@@ -909,6 +928,7 @@ def build_cfg_from_settings(
         enable_tmdb=to_bool(settings.get("tmdb_enabled"), True),
         incremental_scan_enabled=to_bool(settings.get("incremental_scan_enabled"), False),
         enable_tv_detection=to_bool(settings.get("enable_tv_detection"), False),
+        scan_max_workers=cfg_scan_workers,
         naming_movie_template=str(settings.get("naming_movie_template") or "{title} ({year})"),
         naming_tv_template=str(settings.get("naming_tv_template") or "{series} ({year})"),
     )
@@ -1197,6 +1217,27 @@ def _save_section_probe(payload: Dict[str, Any], *, default_probe_backend: str) 
         "probe_workers": max(0, min(16, workers_raw)),
         "probe_parallelism_enabled": to_bool(payload.get("probe_parallelism_enabled"), True),
     }
+
+
+def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """VO-B-CONFIG : persiste scan_max_workers_mode + scan_max_workers_value.
+
+    Si les cles sont absentes du payload, on ne les renvoie PAS (le dispatcher
+    fera un dict.update qui ne touchera pas l'existant ; les defaults seront
+    appliques au prochain `apply_settings_defaults`). Cela respecte la
+    memoire user "BACKWARD COMPAT" : un client qui ne connait pas le setting
+    ne doit pas le reinitialiser silencieusement.
+    """
+    out: Dict[str, Any] = {}
+    if "scan_max_workers_mode" in payload:
+        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(
+            payload.get("scan_max_workers_mode")
+        )
+    if "scan_max_workers_value" in payload:
+        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(
+            payload.get("scan_max_workers_value")
+        )
+    return out
 
 
 def _save_section_scan_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1616,6 +1657,8 @@ def save_settings_payload(
         )
     )
     to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
+    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
+    to_save.update(_save_section_scan_max_workers(settings))
     to_save.update(_save_section_scan_flags(settings))
     to_save.update(_save_section_jellyfin(settings))
     to_save.update(_save_section_plex(settings))
@@ -1835,6 +1878,225 @@ def _normalize_storage_profile(value: Any) -> str:
     if normalized in _VALID_STORAGE_PROFILES:
         return normalized
     return _DEFAULT_STORAGE_PROFILE
+
+
+# =============================================================================
+# VO-B Config : scan_max_workers (tri-etat auto / manuel N)
+# =============================================================================
+#
+# Phase VO-B-CONFIG : expose un setting `scan_max_workers` qui pilote la
+# parallelisation Phase 1 de `_filter_dossiers_phase`. Synergie avec VO-A :
+# en mode "auto", la detection storage (local_ssd / nas_smb) determine le
+# nombre de workers ; en mode manuel, l'utilisateur force une valeur N >= 1.
+#
+# Stockage settings.json :
+#   - scan_max_workers_mode : "auto" | "manual"  (default "auto")
+#   - scan_max_workers_value : int [1..64]       (default 1, utilise si mode=manual)
+#
+# Backward compat stricte (memoire user) : si la cle est absente OU mode="manual"
+# avec value=1, le comportement reste strictement sequentiel (cf.
+# `resolve_scan_max_workers` dans cinesort/app/_local_candidate.py qui plafonne
+# a 32 et retombe sur 1 si invalide).
+#
+# La memoire user impose une garantie supplementaire ici : la facade doit pouvoir
+# retourner la VALEUR EFFECTIVE (resolve_effective_scan_max_workers) pour que
+# `build_cfg_from_settings` injecte un entier coherent dans `Config.scan_max_workers`.
+
+_SCAN_MAX_WORKERS_MIN: int = 1
+_SCAN_MAX_WORKERS_MAX: int = 64
+_VALID_SCAN_MAX_WORKERS_MODES: Tuple[str, ...] = ("auto", "manual")
+_DEFAULT_SCAN_MAX_WORKERS_MODE: str = "auto"
+_DEFAULT_SCAN_MAX_WORKERS_VALUE: int = 1
+
+
+def _normalize_scan_max_workers_mode(value: Any) -> str:
+    """Clamp `scan_max_workers_mode` a {"auto","manual"}, defaut "auto"."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_SCAN_MAX_WORKERS_MODE
+    try:
+        normalized = str(value).strip().lower()
+    except (TypeError, ValueError):
+        return _DEFAULT_SCAN_MAX_WORKERS_MODE
+    if normalized in _VALID_SCAN_MAX_WORKERS_MODES:
+        return normalized
+    return _DEFAULT_SCAN_MAX_WORKERS_MODE
+
+
+def _normalize_scan_max_workers_value(value: Any) -> int:
+    """Clamp `scan_max_workers_value` a [1..64], defaut 1 si invalide."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    if n < _SCAN_MAX_WORKERS_MIN:
+        return _SCAN_MAX_WORKERS_MIN
+    if n > _SCAN_MAX_WORKERS_MAX:
+        return _SCAN_MAX_WORKERS_MAX
+    return n
+
+
+def _auto_scan_max_workers_for_storage(storage_type: str) -> int:
+    """VO-B/VO-A synergie : choix workers selon le type de stockage detecte.
+
+    - local_ssd : 8 workers (I/O scandir/stat parallelisable sans saturer SSD).
+    - nas_smb   : 4 workers (latence reseau eleve, gain limite >4, on prefere
+                  prudence pour eviter de saturer le partage SMB).
+    - autre     : 1 worker (fallback prudent, comportement sequentiel).
+    """
+    s = str(storage_type or "").strip().lower()
+    if s == "local_ssd":
+        return 8
+    if s == "nas_smb":
+        return 4
+    return 1
+
+
+def resolve_effective_scan_max_workers(state_dir: Path) -> int:
+    """Resout la valeur effective de scan_max_workers a injecter dans Config.
+
+    - Si mode = "auto" : utilise `_detect_storage_profile(state_dir)` (VO-A
+      synergie) puis mappe vers un nombre de workers via
+      `_auto_scan_max_workers_for_storage`.
+    - Si mode = "manual" : retourne `scan_max_workers_value` clampe [1..64].
+    - Si settings absents / corrompus : retourne 1 (sequentiel strict).
+    """
+    try:
+        data = read_settings(state_dir)
+    except (OSError, ValueError, TypeError):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    mode = _normalize_scan_max_workers_mode(data.get("scan_max_workers_mode"))
+    if mode == "manual":
+        return _normalize_scan_max_workers_value(data.get("scan_max_workers_value"))
+    # mode = "auto" : delegation VO-A detect_storage_type via _detect_storage_profile.
+    detected = _detect_storage_profile(state_dir)
+    return _auto_scan_max_workers_for_storage(detected)
+
+
+def get_scan_max_workers_payload(state_dir: Path) -> Dict[str, Any]:
+    """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+    Returns:
+        {
+            "ok": True,
+            "mode": "auto" | "manual",
+            "value": int,                # valeur manuelle saisie (defaut 1)
+            "effective": int,            # valeur effectivement appliquee (mode resolu)
+            "storage_detected": str,     # auto-detection VO-A
+            "auto_suggestion": int,      # workers proposes si mode=auto
+            "min": 1,
+            "max": 64,
+        }
+    """
+    try:
+        data = read_settings(state_dir)
+    except (OSError, ValueError, TypeError):
+        data = {}
+    mode = _normalize_scan_max_workers_mode(data.get("scan_max_workers_mode"))
+    value = _normalize_scan_max_workers_value(data.get("scan_max_workers_value"))
+    detected = _detect_storage_profile(state_dir)
+    auto_suggestion = _auto_scan_max_workers_for_storage(detected)
+    effective = auto_suggestion if mode == "auto" else value
+    return {
+        "ok": True,
+        "mode": mode,
+        "value": value,
+        "effective": effective,
+        "storage_detected": detected,
+        "auto_suggestion": auto_suggestion,
+        "min": _SCAN_MAX_WORKERS_MIN,
+        "max": _SCAN_MAX_WORKERS_MAX,
+    }
+
+
+def set_scan_max_workers_payload(
+    state_dir: Path,
+    mode: str,
+    value: Any = None,
+) -> Dict[str, Any]:
+    """VO-B-CONFIG : persiste le setting scan_max_workers et retourne l'etat.
+
+    Args:
+        state_dir: dossier state.
+        mode: "auto" | "manual". Invalide -> erreur.
+        value: int [1..64], requis et utilise UNIQUEMENT si mode="manual".
+            Pour mode="auto", peut etre None (ignore).
+
+    Returns:
+        Meme forme que `get_scan_max_workers_payload` + `write_result`.
+        En cas d'erreur de validation : { "ok": False, "message": ... }.
+    """
+    raw_mode = str(mode or "").strip().lower()
+    if raw_mode not in _VALID_SCAN_MAX_WORKERS_MODES:
+        return err(
+            f"Mode scan_max_workers invalide : {mode!r}. "
+            f"Valeurs autorisees : {', '.join(_VALID_SCAN_MAX_WORKERS_MODES)}.",
+            category="validation",
+            level="info",
+        )
+
+    if raw_mode == "manual":
+        # En manuel, on exige une valeur explicite int. On rejette bool, None,
+        # strings non-numeriques pour eviter qu'un payload UI casse retombe
+        # silencieusement sur 1 (comportement non-evident pour le user).
+        if value is None or isinstance(value, bool):
+            return err(
+                "Mode manuel : la valeur scan_max_workers_value est requise (int 1..64).",
+                category="validation",
+                level="info",
+            )
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return err(
+                f"Mode manuel : valeur scan_max_workers_value invalide ({value!r}). "
+                f"Attendu : entier dans [{_SCAN_MAX_WORKERS_MIN}..{_SCAN_MAX_WORKERS_MAX}].",
+                category="validation",
+                level="info",
+            )
+        if n < _SCAN_MAX_WORKERS_MIN or n > _SCAN_MAX_WORKERS_MAX:
+            return err(
+                f"Mode manuel : valeur scan_max_workers_value hors plage "
+                f"({n}). Attendu : entier dans "
+                f"[{_SCAN_MAX_WORKERS_MIN}..{_SCAN_MAX_WORKERS_MAX}].",
+                category="validation",
+                level="info",
+            )
+        normalized_value = n
+    else:
+        # mode = auto : valeur conservee si presente et valide, sinon defaut 1.
+        normalized_value = _normalize_scan_max_workers_value(value)
+
+    # Lecture / merge / ecriture (read_settings retourne les secrets dechiffres,
+    # write_settings rechiffrera correctement les autres champs).
+    data = read_settings(state_dir)
+    data["scan_max_workers_mode"] = raw_mode
+    data["scan_max_workers_value"] = normalized_value
+    try:
+        write_result = write_settings(state_dir, data)
+    except (OSError, ValueError, TypeError) as exc:
+        return err(
+            f"Echec de la sauvegarde de scan_max_workers : {exc}",
+            category="runtime",
+            level="error",
+        )
+
+    detected = _detect_storage_profile(state_dir)
+    auto_suggestion = _auto_scan_max_workers_for_storage(detected)
+    effective = auto_suggestion if raw_mode == "auto" else normalized_value
+
+    return {
+        "ok": True,
+        "mode": raw_mode,
+        "value": normalized_value,
+        "effective": effective,
+        "storage_detected": detected,
+        "auto_suggestion": auto_suggestion,
+        "min": _SCAN_MAX_WORKERS_MIN,
+        "max": _SCAN_MAX_WORKERS_MAX,
+        "write_result": write_result,
+    }
 
 
 def get_advanced_pragma_settings_payload(state_dir: Path) -> Dict[str, Any]:
