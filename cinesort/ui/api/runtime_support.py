@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.app import JobRunner
+from cinesort.app.apply_batches_reconciliation import reconcile_batches_at_boot
 from cinesort.app.move_reconciliation import reconcile_at_boot
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
@@ -237,6 +238,21 @@ def get_or_create_infra(
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
+            # VN-E.2 : nettoyer les apply_batches PENDING-zombi (status='PENDING'
+            # avec started_ts > 1h). Pattern symetrique a reconcile_at_boot
+            # mais cible apply_batches au lieu de apply_pending_moves. Idempotent.
+            try:
+                batches_report = reconcile_batches_at_boot(store)
+                if batches_report.get("pending_found", 0) > 0:
+                    _logger.info(
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned "
+                        "(%d completed, %d rolled_back)",
+                        batches_report["pending_found"],
+                        batches_report.get("completed", 0),
+                        batches_report.get("rolled_back", 0),
+                    )
+            except Exception as exc:
+                _logger.warning("reconcile_batches_at_boot: erreur ignoree (boot continue): %s", exc)
             # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
             # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
             # en BDD pour toujours. On les marque FAILED avec message de crash.
