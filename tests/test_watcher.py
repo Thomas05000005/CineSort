@@ -161,6 +161,56 @@ class WatcherLifecycleTests(unittest.TestCase):
         watcher = FolderWatcher(api, interval_s=10, roots=[])
         self.assertTrue(watcher._is_scan_running())
 
+    def test_change_kept_when_root_inaccessible(self) -> None:
+        """Audit 2026-06-01 (#487) : un changement detecte pendant que les
+        roots sont inaccessibles (NAS debranche) NE DOIT PAS etre perdu.
+
+        Avant le fix, `_previous_snapshot = current` etait grave avant l'appel
+        a `_trigger_scan(detail)`, qui pouvait early-return silencieusement
+        sur `is_dir_accessible == False`. Resultat : changement consume en
+        signature, aucun scan lance, modification invisible au poll suivant.
+
+        Le fix fait retourner `_trigger_scan` un bool ; on ne grave le snapshot
+        que si True (scan effectivement demarre).
+        """
+        tmp = tempfile.mkdtemp(prefix="cinesort_watch_inacc_")
+        try:
+            root = Path(tmp)
+            (root / "Film A").mkdir()
+
+            api = mock.MagicMock()
+            api._runs = {}
+            api._runs_lock = __import__("threading").Lock()
+            api.settings.get_settings.return_value = {"roots": [str(root)]}
+            api.run.start_plan.return_value = {"ok": True, "run_id": "test"}
+
+            watcher = FolderWatcher(api, interval_s=0.1, roots=[root])
+
+            # Patch is_dir_accessible pour simuler NAS debranche.
+            with mock.patch(
+                "cinesort.app.watcher.is_dir_accessible",
+                return_value=False,
+            ):
+                watcher.start()
+                time.sleep(0.3)  # snapshot initial
+
+                initial_snapshot = dict(watcher._previous_snapshot)
+
+                # Modif FS qui devrait declencher un scan, sauf que root inaccessible
+                (root / "Film B").mkdir()
+                time.sleep(0.3)  # laisser le poll suivant detecter + skip
+
+                watcher.stop()
+
+            self.assertEqual(
+                initial_snapshot,
+                watcher._previous_snapshot,
+                "Le snapshot baseline ne doit pas etre remplace si _trigger_scan early-return (roots inaccessibles).",
+            )
+            api.run.start_plan.assert_not_called()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_change_kept_when_scan_running(self) -> None:
         """Audit 2026-05-16 : un changement detecte pendant un scan en cours
         NE DOIT PAS etre perdu.
