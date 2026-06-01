@@ -163,6 +163,15 @@ function _initState() {
 
 /* --- Helpers --- */
 
+// VN-B.2 (Vague N batch 2) : lecture single source of truth display_tier
+// (echelle V2 lowercase reconciliee cote backend via tiers_helpers.
+// reconcile_display_tier). Fallback sur tier_v2 pour les reponses servies par
+// d'eventuels backends pre-VN-B.2 encore en cache.
+function _rowDisplayTier(row) {
+  if (!row) return "unknown";
+  return String(row.display_tier || row.tier_v2 || "unknown").toLowerCase();
+}
+
 function _tierBadge(tier) {
   const t = String(tier || "unknown").toLowerCase();
   const label = TIER_LABELS[t] || t;
@@ -206,7 +215,8 @@ function _totalDuration(rows) {
 function _tierDistribution(rows) {
   const dist = {};
   rows.forEach((r) => {
-    const t = String(r.tier_v2 || "unknown").toLowerCase();
+    // VN-B.2 : single source of truth display_tier (echelle V2 canonique).
+    const t = _rowDisplayTier(r);
     dist[t] = (dist[t] || 0) + 1;
   });
   return dist;
@@ -424,7 +434,7 @@ function _renderFilmCard(row) {
              aria-label="${escapeHtml(title)} ${row.year || ""}">
       <div class="bibliotheque-card-poster">
         ${poster}
-        ${_tierBadge(row.tier_v2)}
+        ${_tierBadge(_rowDisplayTier(row))}
         ${warningBadge}
         <label class="bibliotheque-card-check" onclick="event.stopPropagation()">
           <input type="checkbox" data-bibliotheque-select="${escapeHtml(rowId)}"${selected ? " checked" : ""} aria-label="Sélectionner">
@@ -476,7 +486,7 @@ function _renderTableRow(row) {
       <td><input type="checkbox" data-bibliotheque-select="${escapeHtml(rowId)}"${selected ? " checked" : ""}></td>
       <td class="bibliotheque-table-title">${escapeHtml(row.title || "Sans titre")}${warn}</td>
       <td>${row.year || "—"}</td>
-      <td>${_tierBadge(row.tier_v2)}</td>
+      <td>${_tierBadge(_rowDisplayTier(row))}</td>
       <td>${_formatConfidence(row.confidence)}</td>
       <td>${_formatScore(row.score_v2)}</td>
       <td>${escapeHtml(row.resolution || "—")}</td>

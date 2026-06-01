@@ -22,7 +22,7 @@ tiers (Platinum/Gold/Silver/Bronze) qui restent definies dans les tokens CSS
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +316,124 @@ def cap_tier(tier: Any, max_tier: Any) -> str:
     return TIER_ORDER_BEST_FIRST[max(cur, cap)]
 
 
+# ---------------------------------------------------------------------------
+# VN-B.2 : reconciliation V1 vs V2 + display_tier explicite
+# ---------------------------------------------------------------------------
+
+# Echelle canonique V2 (lowercase). Single source of truth pour le frontend.
+# Correspond aux classes CSS --tier-{name} (hex colors INVARIANTES).
+TIER_V2_CANONICAL: List[str] = ["platinum", "gold", "silver", "bronze", "reject"]
+
+# Mapping V1 (Capitalized: Platinum/Gold/Silver/Bronze/Reject + legacy
+# Premium/Bon/Moyen/Faible/Mauvais) -> V2 canonical (lowercase).
+# Note : V1 et V2 partagent les MEMES noms canoniques (Platinum->platinum)
+# malgre des SEUILS differents (70/66/55/40 vs 90/80/65/50). La
+# reconciliation est donc une simple normalisation de casse + alias legacy,
+# pas un recalcul de score.
+_V1_TO_V2_CANONICAL: Dict[str, str] = {
+    "Platinum": "platinum",
+    "Gold": "gold",
+    "Silver": "silver",
+    "Bronze": "bronze",
+    "Reject": "reject",
+}
+
+
+def to_canonical_v2_tier(raw: Any) -> str:
+    """Normalise n'importe quelle valeur de tier vers l'echelle V2 lowercase.
+
+    Accepte :
+    - V2 lowercase : platinum/gold/silver/bronze/reject (pass-through)
+    - V1 Capitalized : Platinum/Gold/Silver/Bronze/Reject (lowercase)
+    - Legacy : Premium/Bon/Moyen/Faible/Mauvais (via normalize_tier_string)
+    - Vide / None / inconnu : "" (le caller decide du fallback)
+
+    >>> to_canonical_v2_tier("platinum")
+    'platinum'
+    >>> to_canonical_v2_tier("Platinum")
+    'platinum'
+    >>> to_canonical_v2_tier("Premium")
+    'platinum'
+    >>> to_canonical_v2_tier("")
+    ''
+    >>> to_canonical_v2_tier(None)
+    ''
+    """
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low in TIER_V2_CANONICAL:
+        return low
+    canonical_v1 = normalize_tier_string(s)
+    if canonical_v1 in _V1_TO_V2_CANONICAL:
+        return _V1_TO_V2_CANONICAL[canonical_v1]
+    return ""
+
+
+def reconcile_display_tier(
+    perc_tier_v2: Any = None,
+    qual_tier_v1: Any = None,
+    default: str = "unknown",
+) -> Tuple[str, str]:
+    """Reconciliation explicite V1/V2 -> (display_tier, source).
+
+    Strategie : V2 prioritaire (echelle moderne 90/80/65/50). Fallback V1
+    (70/66/55/40, label Capitalized) normalise vers V2 lowercase. Sans
+    donnee, retourne (default, "fallback").
+
+    Returns:
+        (display_tier, source) ou source ∈ {
+            "perceptual",   # perc.global_tier_v2 utilise (V2 vraie)
+            "quality_v1",   # qual.tier (Capitalized) mappe en lowercase
+            "quality_v2",   # qual.tier deja en lowercase V2 (rare)
+            "fallback",     # aucune donnee, default utilise
+        }
+
+    NOTE : V1 et V2 ont des SEUILS differents (un film a 75/100 est Platinum
+    en V1 mais Silver en V2). On NE recalcule PAS depuis le score, on garde
+    le tier source tel quel apres normalisation de casse. C'est une
+    approximation acceptable car le but du fallback est d'afficher QUELQUE
+    chose tant que le user n'a pas lance l'analyse perceptuelle V2 (qui
+    coute ~1h pour 853 films) - la valeur sera raffinee a posteriori.
+
+    >>> reconcile_display_tier("platinum", "Bronze")
+    ('platinum', 'perceptual')
+    >>> reconcile_display_tier(None, "Gold")
+    ('gold', 'quality_v1')
+    >>> reconcile_display_tier(None, "gold")
+    ('gold', 'quality_v2')
+    >>> reconcile_display_tier(None, None)
+    ('unknown', 'fallback')
+    """
+    # 1. V2 perceptual prioritaire
+    v2 = to_canonical_v2_tier(perc_tier_v2)
+    if v2:
+        return v2, "perceptual"
+
+    # 2. V1 quality_report : detection casse pour distinguer V1 / V2 deja lowercase
+    if qual_tier_v1 is not None:
+        raw = str(qual_tier_v1).strip()
+        if raw:
+            canonical = to_canonical_v2_tier(raw)
+            if canonical:
+                # Si la valeur source etait deja en lowercase ET match V2
+                # canonical, on l'attribue a "quality_v2" pour debug (cas rare
+                # mais documente). Sinon (Capitalized/Premium/etc.) -> quality_v1.
+                if raw == raw.lower() and raw in TIER_V2_CANONICAL:
+                    return canonical, "quality_v2"
+                return canonical, "quality_v1"
+
+    # 3. Fallback
+    return default, "fallback"
+
+
 __all__ = [
     "TIER_ORDER_BEST_FIRST",
     "TIER_ORDER_WORST_FIRST",
+    "TIER_V2_CANONICAL",
     "DEFAULT_TIER_THRESHOLDS",
     "normalize_tier_string",
     "normalize_tiers",
@@ -329,4 +444,6 @@ __all__ = [
     "tier_min_score",
     "determine_tier",
     "cap_tier",
+    "to_canonical_v2_tier",
+    "reconcile_display_tier",
 ]

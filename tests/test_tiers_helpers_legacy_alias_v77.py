@@ -13,15 +13,18 @@ from cinesort.domain.tiers_helpers import (
     DEFAULT_TIER_THRESHOLDS,
     TIER_ORDER_BEST_FIRST,
     TIER_ORDER_WORST_FIRST,
+    TIER_V2_CANONICAL,
     cap_tier,
     determine_tier,
     is_premium_tier,
     normalize_tier_string,
     normalize_tiers,
+    reconcile_display_tier,
     tier_label_fr,
     tier_min_score,
     tier_order,
     tier_ordinal,
+    to_canonical_v2_tier,
 )
 
 
@@ -239,6 +242,105 @@ class ConstantsCoherenceTests(unittest.TestCase):
         self.assertEqual(DEFAULT_TIER_THRESHOLDS["gold"], prof_tiers["gold"])
         self.assertEqual(DEFAULT_TIER_THRESHOLDS["silver"], prof_tiers["silver"])
         self.assertEqual(DEFAULT_TIER_THRESHOLDS["bronze"], prof_tiers["bronze"])
+
+
+class ToCanonicalV2TierTests(unittest.TestCase):
+    """VN-B.2 : normalisation tout -> echelle V2 lowercase."""
+
+    def test_v2_lowercase_pass_through(self):
+        for canonical in TIER_V2_CANONICAL:
+            self.assertEqual(to_canonical_v2_tier(canonical), canonical)
+
+    def test_v1_capitalized_to_v2_lowercase(self):
+        self.assertEqual(to_canonical_v2_tier("Platinum"), "platinum")
+        self.assertEqual(to_canonical_v2_tier("Gold"), "gold")
+        self.assertEqual(to_canonical_v2_tier("Silver"), "silver")
+        self.assertEqual(to_canonical_v2_tier("Bronze"), "bronze")
+        self.assertEqual(to_canonical_v2_tier("Reject"), "reject")
+
+    def test_legacy_aliases_to_v2(self):
+        self.assertEqual(to_canonical_v2_tier("Premium"), "platinum")
+        self.assertEqual(to_canonical_v2_tier("Bon"), "gold")
+        self.assertEqual(to_canonical_v2_tier("Moyen"), "silver")
+        self.assertEqual(to_canonical_v2_tier("Faible"), "bronze")
+        self.assertEqual(to_canonical_v2_tier("Mauvais"), "reject")
+
+    def test_empty_and_none(self):
+        self.assertEqual(to_canonical_v2_tier(""), "")
+        self.assertEqual(to_canonical_v2_tier(None), "")
+        self.assertEqual(to_canonical_v2_tier("   "), "")
+
+    def test_unknown_returns_empty(self):
+        self.assertEqual(to_canonical_v2_tier("???"), "")
+        self.assertEqual(to_canonical_v2_tier("UnknownTier"), "")
+
+    def test_case_normalization_mixed(self):
+        self.assertEqual(to_canonical_v2_tier("PLATINUM"), "platinum")
+        self.assertEqual(to_canonical_v2_tier("  Gold  "), "gold")
+
+
+class ReconcileDisplayTierTests(unittest.TestCase):
+    """VN-B.2 : reconcile_display_tier remplace le fallback OR de library_support."""
+
+    def test_v2_perceptual_priority(self):
+        display, source = reconcile_display_tier(perc_tier_v2="platinum", qual_tier_v1="Bronze")
+        self.assertEqual(display, "platinum")
+        self.assertEqual(source, "perceptual")
+
+    def test_v1_fallback_when_no_v2(self):
+        display, source = reconcile_display_tier(perc_tier_v2=None, qual_tier_v1="Gold")
+        self.assertEqual(display, "gold")
+        self.assertEqual(source, "quality_v1")
+
+    def test_legacy_v1_alias_fallback(self):
+        # quality_report.tier sauvegarde pre-v1.5.5 (Premium au lieu de Platinum)
+        display, source = reconcile_display_tier(perc_tier_v2=None, qual_tier_v1="Premium")
+        self.assertEqual(display, "platinum")
+        self.assertEqual(source, "quality_v1")
+
+    def test_v2_lowercase_in_quality_marked_as_v2(self):
+        # cas rare : quality_report.tier deja en lowercase V2
+        display, source = reconcile_display_tier(perc_tier_v2=None, qual_tier_v1="silver")
+        self.assertEqual(display, "silver")
+        self.assertEqual(source, "quality_v2")
+
+    def test_both_none_returns_fallback(self):
+        display, source = reconcile_display_tier(perc_tier_v2=None, qual_tier_v1=None)
+        self.assertEqual(display, "unknown")
+        self.assertEqual(source, "fallback")
+
+    def test_empty_strings_fallback(self):
+        display, source = reconcile_display_tier(perc_tier_v2="", qual_tier_v1="")
+        self.assertEqual(display, "unknown")
+        self.assertEqual(source, "fallback")
+
+    def test_custom_default(self):
+        display, source = reconcile_display_tier(default="bronze")
+        self.assertEqual(display, "bronze")
+        self.assertEqual(source, "fallback")
+
+    def test_perceptual_capitalized_normalized(self):
+        # perceptual peut theoriquement renvoyer Capitalized (defensive)
+        display, source = reconcile_display_tier(perc_tier_v2="Platinum", qual_tier_v1="Bronze")
+        self.assertEqual(display, "platinum")
+        self.assertEqual(source, "perceptual")
+
+    def test_unknown_perceptual_falls_back_to_v1(self):
+        # perc.global_tier_v2 = "???" doit etre traite comme absent
+        display, source = reconcile_display_tier(perc_tier_v2="???", qual_tier_v1="Gold")
+        self.assertEqual(display, "gold")
+        self.assertEqual(source, "quality_v1")
+
+    def test_no_mixing_v1_v2_thresholds(self):
+        """MEMOIRE : V1 (70/66/55/40) et V2 (90/80/65/50) ne se melangent plus.
+
+        Un film Platinum V1 (score 75) reste affiche platinum (pas Silver V2)
+        - la reconciliation est une normalisation de label, pas un recalcul.
+        Le scoring V2 reel viendra raffiner si l'analyse perceptuelle est
+        lancee.
+        """
+        display, _src = reconcile_display_tier(perc_tier_v2=None, qual_tier_v1="Platinum")
+        self.assertEqual(display, "platinum")
 
 
 if __name__ == "__main__":

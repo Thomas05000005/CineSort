@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.tiers_helpers import reconcile_display_tier
 from cinesort.infra import state
 from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
@@ -122,6 +123,34 @@ def _extract_row_warnings(perceptual_row: Optional[Dict[str, Any]]) -> List[str]
             if "fake_4k" in adj:
                 flags.append("fake_4k_confirmed")
     return sorted(set(flags))
+
+
+def _build_display_tier_fields(
+    perc: Optional[Dict[str, Any]],
+    qual: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    """VN-B.2 : retourne les champs tier reconcilies pour une row library.
+
+    - display_tier : echelle V2 canonique (lowercase platinum/gold/silver/bronze/
+      reject), single source of truth pour le badge UI.
+    - tier_source : "perceptual" | "quality_v1" | "quality_v2" | "fallback",
+      preserve pour debug et instrumentation.
+    - tier_v2 : alias backward compat sur display_tier (memes valeurs, les
+      anciens callers continuent de fonctionner sans changement).
+    """
+    perc_tier = (perc or {}).get("global_tier_v2") if perc else None
+    qual_tier = (qual or {}).get("tier") if qual else None
+    display_tier, tier_source = reconcile_display_tier(
+        perc_tier_v2=perc_tier,
+        qual_tier_v1=qual_tier,
+        default="unknown",
+    )
+    return {
+        "display_tier": display_tier,
+        "tier_source": tier_source,
+        # Backward compat : conserve l'ancien champ pour les callers existants.
+        "tier_v2": display_tier,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -363,18 +392,18 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "width": width,
             "height": height,
             "hdr": _classify_hdr(probe_video),
-            # Fix audit 2026-05-25 (v1.5.4) Vague I : fallback tier V1 si perceptual V2
-            # pas calcule (V2 coute ~1h pour 853 films en ffmpeg, lance manuellement).
-            # quality_reports.tier (V1, peu couteux) est calcule en post-scan auto et donne
-            # deja Platinum/Gold/Silver/Bronze/Reject base sur les metrics du probe.
-            # Sans ce fallback, l'utilisateur voit 853 "Non identifie" jusqu'a ce qu'il
-            # lance manuellement l'analyse perceptuelle. Avec fallback : tier visible
-            # immediatement apres scan, V2 viendra raffiner si lance plus tard.
-            "tier_v2": str(
-                (perc or {}).get("global_tier_v2")
-                or (qual or {}).get("tier")
-                or "unknown"
-            ).lower(),
+            # VN-B.2 (Vague N batch 2) : reconciliation V1/V2 explicite via
+            # cinesort.domain.tiers_helpers.reconcile_display_tier. Avant : fallback
+            # `perc.global_tier_v2 OR qual.tier` melangeait 2 echelles incomparables
+            # (V1 seuils 70/66/55/40 capitalized vs V2 seuils 90/80/65/50 lowercase),
+            # exposant l'utilisateur a un Platinum V1 affiche comme "platinum" V2
+            # alors qu'il serait Silver/Bronze V2 reel.
+            #
+            # Le tuple (display_tier, tier_source) est la single source of truth pour
+            # le frontend (badge UI). On preserve tier_v2 pour backward compat
+            # (legacy callers) mais display_tier doit etre privilegie.
+            # Voir cinesort/domain/tiers_helpers.py::reconcile_display_tier docstring.
+            **_build_display_tier_fields(perc, qual),
             "score_v2": (perc or {}).get("global_score_v2") or (qual or {}).get("score"),
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
@@ -443,7 +472,11 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         wanted = {str(v).lower() for v in filter_list}
         return any(str(rv or "").lower() in wanted for rv in row_vals)
 
-    if not _in_list(row.get("tier_v2"), filters.get("tier_v2")):
+    # VN-B.2 : filtre par tier accepte les deux cles (tier_v2 legacy, display_tier
+    # nouveau). row.display_tier == row.tier_v2 depuis la reconciliation, mais on
+    # les supporte tous deux cote filtres entrants pour fluidifier la migration UI.
+    tier_filter = filters.get("tier_v2") or filters.get("display_tier")
+    if not _in_list(row.get("display_tier") or row.get("tier_v2"), tier_filter):
         return False
     if not _in_list(row.get("codec"), filters.get("codec")):
         return False
@@ -682,10 +715,11 @@ def _get_library_filtered_impl(
 
     total = len(filtered)
 
-    # Stats pour la sidebar (counts par tier)
+    # Stats pour la sidebar (counts par tier). VN-B.2 : lecture sur display_tier
+    # (single source of truth) avec fallback tier_v2 pour rows pre-VN-B.2.
     by_tier: Dict[str, int] = {}
     for r in filtered:
-        t = str(r.get("tier_v2") or "unknown").lower()
+        t = str(r.get("display_tier") or r.get("tier_v2") or "unknown").lower()
         by_tier[t] = by_tier.get(t, 0) + 1
 
     sorted_rows = _apply_sort(filtered, sort)
@@ -887,7 +921,8 @@ def get_scoring_rollup(
         if score is not None:
             bucket["score_sum"] += float(score)
             bucket["score_samples"] += 1
-        tier = str(r.get("tier_v2") or "unknown").lower()
+        # VN-B.2 : lecture sur display_tier (single source of truth).
+        tier = str(r.get("display_tier") or r.get("tier_v2") or "unknown").lower()
         if tier in bucket["tier_distribution"]:
             bucket["tier_distribution"][tier] += 1
         if len(bucket["top_film_ids"]) < 5:
@@ -1036,7 +1071,8 @@ def get_library_counters_by_chip(
 
     now_ts = time.time()
     for row in scoped_rows:
-        tier = str(row.get("tier_v2") or "unknown").lower()
+        # VN-B.2 : lecture sur display_tier (single source of truth).
+        tier = str(row.get("display_tier") or row.get("tier_v2") or "unknown").lower()
         if tier in counts:
             counts[tier] += 1
         else:
