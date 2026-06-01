@@ -19,15 +19,21 @@ rang superieur (6) pour distinguer visuellement le badge utilisateur.
 De meme, eac3 vaut 3 dans le ranking badge (au-dessus d'ac3) mais 2 dans le
 ranking duplicate (a egalite avec ac3) pour eviter de favoriser eac3 sur ac3
 lors d'une comparaison de qualite reelle.
+
+VN-F.1 (2026-06-01) : `format_audio_channels` centralise les 3 implementations
+divergentes de `_channels_label` (duplicate_compare/naming/audio_analysis). Le
+parametre `invalid` permet de preserver les sentinels heterogenes (`"?"` pour
+les comparaisons UI, `""` pour interpolation template, `"—"` pour badges).
 """
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 __all__ = [
     "AUDIO_CODEC_RANK_PATTERNS",
     "AUDIO_CODEC_RANK",
+    "format_audio_channels",
 ]
 
 
@@ -76,3 +82,64 @@ AUDIO_CODEC_RANK: dict[str, int] = {
     "mp3": 1,
     "opus": 1,
 }
+
+
+# ---------------------------------------------------------------------------
+# Formatage canaux audio — sortie lisible (badge UI, comparaison, naming)
+# ---------------------------------------------------------------------------
+
+
+def format_audio_channels(
+    channels: Any,
+    *,
+    invalid: str = "?",
+    mono_label: str = "",
+    bucketize: bool = False,
+) -> str:
+    """Formate un nombre de canaux audio en label lisible.
+
+    Args:
+        channels: nombre de canaux (int, str, None toleres).
+        invalid: sentinel renvoye si `channels` est nul, negatif ou invalide.
+            Les 3 appelants historiques utilisent des sentinels differents :
+            - `"?"` dans duplicate_compare (comparaison UI)
+            - `""` dans naming (interpolation template)
+            - `"—"` dans audio_analysis (badge audio)
+        mono_label: label renvoye pour `channels == 1` (defaut `""` comme avant
+            la centralisation pour duplicate_compare/naming ; audio_analysis
+            passe `"1.0"`). Si vide, retourne `invalid` pour `channels == 1`.
+        bucketize: si True (mode badge audio_analysis), regroupe les valeurs
+            non-canoniques sur le bucket inferieur (>=8 -> "7.1", >=6 -> "5.1",
+            >=2 -> "2.0"). Si False (mode strict duplicate_compare/naming),
+            renvoie `"{n}ch"` pour 3,4,5,7,9+ canaux.
+
+    Returns:
+        - `"2.0"`, `"5.1"`, `"7.1"` pour les configurations canoniques.
+        - `"{n}ch"` pour les autres comptes valides quand `bucketize=False`.
+        - bucket le plus proche par valeur inferieure quand `bucketize=True`.
+        - `invalid` pour les valeurs <= 0 ou non parsables.
+    """
+    try:
+        ch = int(channels or 0)
+    except (TypeError, ValueError):
+        return invalid
+    if ch <= 0:
+        return invalid
+    if ch == 1:
+        return mono_label or invalid
+    if bucketize:
+        if ch >= 8:
+            return "7.1"
+        if ch >= 6:
+            return "5.1"
+        if ch >= 2:
+            return "2.0"
+        # ch == 1 deja traite plus haut ; fallback defensif
+        return mono_label or invalid
+    if ch == 2:
+        return "2.0"
+    if ch == 6:
+        return "5.1"
+    if ch == 8:
+        return "7.1"
+    return f"{ch}ch"

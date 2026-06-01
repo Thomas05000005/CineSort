@@ -11,7 +11,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
+from cinesort.domain.codec_ranks import (
+    AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK,
+    format_audio_channels as _format_audio_channels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -404,15 +407,8 @@ def _audio_codec_label(rank: Optional[int]) -> str:
 
 
 def _channels_label(ch: Optional[int]) -> str:
-    if not ch or ch <= 0:
-        return "?"
-    if ch == 2:
-        return "2.0"
-    if ch == 6:
-        return "5.1"
-    if ch == 8:
-        return "7.1"
-    return f"{ch}ch"
+    """VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `?`)."""
+    return _format_audio_channels(ch, invalid="?")
 
 
 def _bitrate_label(br: Optional[int]) -> str:

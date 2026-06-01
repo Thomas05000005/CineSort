@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 from cinesort.domain.core import windows_safe
 
 logger = logging.getLogger(__name__)
@@ -363,17 +364,11 @@ def _hdr_label(video: Dict[str, Any]) -> str:
 
 
 def _channels_label(channels: Any) -> str:
-    """Formate le nombre de canaux audio en label lisible."""
-    ch = int(channels or 0)
-    if ch <= 0:
-        return ""
-    if ch == 2:
-        return "2.0"
-    if ch == 6:
-        return "5.1"
-    if ch == 8:
-        return "7.1"
-    return f"{ch}ch"
+    """Formate le nombre de canaux audio en label lisible.
+
+    VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `""`).
+    """
+    return _format_audio_channels(channels, invalid="")
 
 
 # --- Conformance check ----------------------------------------------------

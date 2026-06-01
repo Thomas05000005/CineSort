@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Tuple
 
-from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK
+from cinesort.domain.codec_ranks import (
+    AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK,
+    format_audio_channels as _format_audio_channels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,16 +132,15 @@ def _classify_codec(codec: str, title: str) -> Tuple[int, str]:
 
 
 def _channels_label(channels: int) -> str:
-    """Formate le nombre de canaux en label lisible."""
-    if channels >= 8:
-        return "7.1"
-    if channels >= 6:
-        return "5.1"
-    if channels >= 2:
-        return "2.0"
-    if channels == 1:
-        return "1.0"
-    return "—"
+    """Formate le nombre de canaux en label lisible.
+
+    VN-F.1 : delegue a `codec_ranks.format_audio_channels` (badge tier, sentinel
+    `—`, mode `bucketize=True` qui aligne 3/4/5 -> "2.0", 7 -> "5.1", 9+ -> "7.1",
+    et `mono_label="1.0"` pour l'historique badge).
+    """
+    return _format_audio_channels(
+        channels, invalid="—", mono_label="1.0", bucketize=True
+    )
 
 
 def _find_duplicate_tracks(tracks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
