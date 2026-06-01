@@ -16,6 +16,9 @@ import unittest
 from cinesort.domain.probe_models import (
     PROBE_QUALITY_FULL,
     PROBE_QUALITY_FAILED,
+    OP_TYPE_MOVE,
+    OP_TYPE_NOOP,
+    OP_TYPE_RENAME,
     NormalizedProbe,
     ProbeResult,
     ProbeSources,
@@ -96,10 +99,11 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/in/foo.mkv",
             target_path="/out/Foo (2024).mkv",
-            op_type="rename",
+            op_type=OP_TYPE_RENAME,
         )
         self.assertEqual(p.src_path, "/in/foo.mkv")
-        self.assertEqual(p.op_type, "rename")
+        # VN-F.4 : op_type canonique UPPERCASE aligne sur le contrat journal/apply.
+        self.assertEqual(p.op_type, "RENAME")
         self.assertFalse(p.no_op)
         self.assertEqual(p.reason, "")
         self.assertIsNone(p.confidence)
@@ -111,7 +115,7 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/in/movie.mkv",
             target_path="/out/Movie (2024) [tt12345].mkv",
-            op_type="move",
+            op_type=OP_TYPE_MOVE,
             no_op=False,
             reason="title+year+imdb match",
             confidence=0.92,
@@ -127,18 +131,18 @@ class RenameProposalTests(unittest.TestCase):
         data = {
             "src_path": "/a",
             "target_path": "/b",
-            "op_type": "rename",
+            "op_type": OP_TYPE_RENAME,
             "internal_debug_field": "should-be-ignored",
             "future_field_v8": 42,
         }
         p = RenameProposal.from_dict(data)
         self.assertEqual(p.src_path, "/a")
         self.assertEqual(p.target_path, "/b")
-        self.assertEqual(p.op_type, "rename")
+        self.assertEqual(p.op_type, "RENAME")
 
     def test_from_dict_uses_defaults_for_missing_fields(self) -> None:
         p = RenameProposal.from_dict(
-            {"src_path": "/a", "target_path": "/a", "op_type": "noop", "no_op": True}
+            {"src_path": "/a", "target_path": "/a", "op_type": OP_TYPE_NOOP, "no_op": True}
         )
         self.assertTrue(p.no_op)
         self.assertEqual(p.reasons, [])
@@ -148,7 +152,7 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/a",
             target_path="/b",
-            op_type="rename",
+            op_type=OP_TYPE_RENAME,
             confidence=0.5,
         )
         d = p.to_dict()
@@ -264,6 +268,11 @@ class ProbeModelsExportsTests(unittest.TestCase):
         # Et conserve les exports historiques
         self.assertIn("NormalizedProbe", probe_models.__all__)
         self.assertIn("PROBE_QUALITY_FULL", probe_models.__all__)
+        # VN-F.4 : constantes OpType canoniques exposees.
+        self.assertIn("OP_TYPE_RENAME", probe_models.__all__)
+        self.assertIn("OP_TYPE_MOVE", probe_models.__all__)
+        self.assertIn("OP_TYPE_NOOP", probe_models.__all__)
+        self.assertIn("OP_TYPE_VALUES", probe_models.__all__)
 
 
 if __name__ == "__main__":

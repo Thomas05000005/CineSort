@@ -7,10 +7,23 @@ PROBE_QUALITY_FULL = "FULL"
 PROBE_QUALITY_PARTIAL = "PARTIAL"
 PROBE_QUALITY_FAILED = "FAILED"
 
+# VN-F.4 (2026-06-01) : OpType canonique UPPERCASE pour aligner RenameProposal
+# avec le contrat journal/apply (move_journal + apply_audit utilisent
+# MOVE_FILE/MOVE_DIR/MKDIR/QUARANTINE_*/UNDO_*). Les anciens callsites tests
+# qui utilisaient "rename"/"move"/"noop" doivent migrer vers ces constantes.
+OP_TYPE_RENAME = "RENAME"
+OP_TYPE_MOVE = "MOVE"
+OP_TYPE_NOOP = "NOOP"
+OP_TYPE_VALUES = frozenset({OP_TYPE_RENAME, OP_TYPE_MOVE, OP_TYPE_NOOP})
+
 __all__ = [
     "PROBE_QUALITY_FULL",
     "PROBE_QUALITY_PARTIAL",
     "PROBE_QUALITY_FAILED",
+    "OP_TYPE_RENAME",
+    "OP_TYPE_MOVE",
+    "OP_TYPE_NOOP",
+    "OP_TYPE_VALUES",
     "NormalizedProbe",
     # Vague M (M-05) : extensions optionnelles, non utilisees ailleurs en
     # production a cette etape. Disponibles pour les vagues suivantes.
@@ -125,7 +138,10 @@ class RenameProposal:
 
     src_path: str
     target_path: str
-    op_type: str  # "rename" | "move" | "noop"
+    # VN-F.4 : valeurs canoniques OP_TYPE_RENAME / OP_TYPE_MOVE / OP_TYPE_NOOP
+    # (UPPERCASE, aligne sur le contrat journal/apply MOVE_FILE/MOVE_DIR/MKDIR).
+    # Voir cinesort.domain.probe_models.OP_TYPE_VALUES.
+    op_type: str  # "RENAME" | "MOVE" | "NOOP"
     no_op: bool = False
     reason: str = ""
     # Champs additionnels optionnels pour enrichissement futur
