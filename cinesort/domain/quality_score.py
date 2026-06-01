@@ -27,6 +27,15 @@ from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_n
 # legacy premium/bon/moyen -> platinum/gold/silver). Pure delegation sans
 # changement de comportement attendu sur les tiers.
 from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers_central
+# VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026). OPT-IN
+# strict (toggle default OFF) - aucune redistribution de tier sur 853 films
+# biblio sans validation user. AC-2 : applique AVANT _cap_tier securite
+# (FAILED/CAM restent autorite finale).
+from cinesort.domain.tiers_helpers import (
+    apply_tier_hierarchy as _apply_tier_hierarchy,
+    normalize_hierarchy_config as _normalize_hierarchy_config,
+    default_hierarchy_config as _default_hierarchy_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +143,12 @@ def default_quality_profile() -> Dict[str, Any]:
             "silver": 55,
             "bronze": 40,
         },
+        # VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026).
+        # OPT-IN strict : ``enabled=False`` par defaut - aucune redistribution
+        # de tier sur les biblio existantes sans validation user (memo fix #4
+        # ROADMAP Vague P). Activable via UI parametres > Hierarchie qualite.
+        # Voir ``cinesort.domain.tiers_helpers.default_hierarchy_config``.
+        "tier_hierarchy": _default_hierarchy_config(),
     }
 
 
@@ -432,6 +447,12 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     if isinstance(raw_rules, list):
         profile["custom_rules"] = raw_rules
 
+    # VP-B (Vague P) : hierarchie qualite multi-axes. Backward compat ABSOLUE :
+    # un profil legacy SANS cle ``tier_hierarchy`` recoit le default
+    # (enabled=False, no-op total). Cf normalize_hierarchy_config.
+    raw_hierarchy = raw_profile.get("tier_hierarchy")
+    profile["tier_hierarchy"] = _normalize_hierarchy_config(raw_hierarchy)
+
     return (len(errs) == 0), errs, profile
 
 
@@ -546,6 +567,35 @@ def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
             _to_int(t.get("bitrate"), 0),
         ),
     )
+
+
+def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
+    """Mappe le codec audio detecte vers le token canonique hierarchie VP-B.
+
+    Tokens canoniques (alignes sur DEFAULT_HIERARCHY_AUDIO_FLOORS) :
+    - "truehd_atmos"   : TrueHD avec Atmos (premium lossless multicanal)
+    - "dts_hd_ma"      : DTS-HD Master Audio (lossless)
+    - "truehd"         : TrueHD sans Atmos
+    - "dts"            : DTS standard (lossy)
+    - "aac"            : AAC
+    - ""               : non identifiable / pas d'audio
+    """
+    if not isinstance(best_audio, dict):
+        return ""
+    c = str(best_audio.get("codec") or "").strip().lower()
+    if not c:
+        return ""
+    if ("truehd" in c) and ("atmos" in c):
+        return "truehd_atmos"
+    if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
+        return "dts_hd_ma"
+    if "truehd" in c:
+        return "truehd"
+    if "dts" in c:
+        return "dts"
+    if "aac" in c:
+        return "aac"
+    return ""
 
 
 def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
@@ -1874,6 +1924,43 @@ def compute_quality_score(
         factors=factors,
         reasons=reasons,
     )
+
+    # --- VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026) ---
+    # Greffe AVANT _cap_tier securite. AC-1 default OFF -> no-op total quand
+    # ``tier_hierarchy.enabled == False`` (defaut absolu). AC-2 : _cap_tier
+    # (FAILED/CAM) reste autorite finale meme si hierarchy ON.
+    # AC-3 : ``composite_score_v2`` perceptual NON impacte (perceptual_reports
+    # != quality_reports, memo feedback_cinesort_design).
+    hierarchy_config = prof.get("tier_hierarchy")
+    if hierarchy_config:
+        # vr (video result) + best_audio + name_info disponibles dans ce scope.
+        hierarchy_dimensions: Dict[str, Any] = {
+            "resolution_label": vr.get("resolution_label"),
+            "resolution_source": vr.get("resolution_source"),
+            "video_codec": vr.get("video_codec"),
+            "hdr": (
+                "dolby_vision" if vr.get("has_dv")
+                else "hdr10_plus" if vr.get("has_hdr10p")
+                else "hdr10" if vr.get("has_hdr10")
+                else ""
+            ),
+            "audio_codec": _hierarchy_audio_codec_token(best_audio),
+            "release_group": str(name_info.release_group or "").lower() if name_info else "",
+        }
+        new_tier, hierarchy_decisions = _apply_tier_hierarchy(
+            tier, hierarchy_dimensions, hierarchy_config,
+        )
+        if new_tier != tier:
+            for dec in hierarchy_decisions:
+                factors.append({
+                    "category": "video" if dec["dimension"] in ("resolution", "video_codec", "hdr") else "audio",
+                    "delta": 0,
+                    "label": f"Hierarchy {dec['type']} ({dec['dimension']}={dec['value']}): {dec['from']} -> {dec['to']}",
+                })
+                reasons.append(
+                    f"+0 Hierarchie qualite {dec['type']} ({dec['dimension']}): {dec['from']} -> {dec['to']}"
+                )
+            tier = new_tier
 
     # --- Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : CAP de tier ---
     # Decision senior conservatrice. Applique APRES custom rules pour etre la

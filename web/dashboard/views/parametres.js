@@ -444,6 +444,31 @@ const _DEFAULT_WEIGHTS = {
   audio_channels: 0.10,
   subtitles_fr: 0.10,
 };
+
+// VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026).
+// OPT-IN strict (toggle default OFF). Default sync avec
+// cinesort.domain.tiers_helpers.default_hierarchy_config() :
+// - enabled=false (memo fix #4 ROADMAP : aucune redistribution sur 853 films).
+// - order = 5 dimensions canoniques (drag-and-drop user). Backend filtre
+//   les inconnues automatiquement.
+const _DEFAULT_HIERARCHY_DIMENSIONS = [
+  "resolution",
+  "video_codec",
+  "hdr",
+  "audio",
+  "release_group",
+];
+const _HIERARCHY_DIMENSION_LABELS = {
+  resolution: "Résolution",
+  video_codec: "Codec vidéo",
+  hdr: "HDR (DV / HDR10+)",
+  audio: "Audio",
+  release_group: "Release group",
+};
+const _DEFAULT_TIER_HIERARCHY = {
+  enabled: false,
+  order: _DEFAULT_HIERARCHY_DIMENSIONS.slice(),
+};
 const _WEIGHT_LABELS = {
   resolution: "Résolution",
   bitrate: "Bitrate vidéo",
@@ -1119,6 +1144,12 @@ function _renderProfilsQualite() {
   const draft = _state.profileDraft || { tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
   const tiers = draft.tiers || { ..._DEFAULT_TIERS };
   const weights = draft.weights || { ..._DEFAULT_WEIGHTS };
+  // VP-B : hierarchie qualite (default OFF, opt-in user).
+  const hierarchy = draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY };
+  const hierarchyEnabled = !!hierarchy.enabled;
+  const hierarchyOrder = (Array.isArray(hierarchy.order) && hierarchy.order.length > 0)
+    ? hierarchy.order.filter((d) => _DEFAULT_HIERARCHY_DIMENSIONS.includes(d))
+    : _DEFAULT_HIERARCHY_DIMENSIONS.slice();
 
   const totalWeight = Object.values(weights).reduce((s, v) => s + (Number(v) || 0), 0);
   const totalDisplay = totalWeight.toFixed(2);
@@ -1182,6 +1213,48 @@ function _renderProfilsQualite() {
       ${weightRows}
       <div class="parametres-weight-total ${totalCls}" data-weight-total>
         Total = ${totalDisplay} ${totalIcon}
+      </div>
+    </div>
+
+    <h4 class="parametres-subheading">Hiérarchie qualité (TRaSH 2026)</h4>
+    <p class="parametres-section-intro">
+      Mode avancé "Quality Trumps All" inspiré de TRaSH-Guides / Radarr.
+      Certaines dimensions techniques (résolution, codec, HDR, audio, release group)
+      imposent un plancher de tier (ex&nbsp;: un 2160p vérifié ne pourra pas être
+      Bronze). <strong>Activer ce mode peut redistribuer 30-40&nbsp;% de votre
+      bibliothèque actuelle — utilisez la simulation avant d'activer.</strong>
+      Par défaut désactivé pour préserver vos scores existants.
+    </p>
+    <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
+      <label class="parametres-hierarchy-toggle">
+        <input type="checkbox" data-parametres-hierarchy-enabled
+               ${hierarchyEnabled ? "checked" : ""}
+               aria-label="Activer la hiérarchie qualité multi-axes (TRaSH 2026)">
+        <span>Activer la hiérarchie qualité multi-axes</span>
+      </label>
+      <div class="parametres-hierarchy-order" data-parametres-hierarchy-order
+           aria-label="Ordre des dimensions (la première a la priorité la plus haute)">
+        <p class="parametres-hierarchy-order-intro">
+          Ordre de priorité (haut = plus prioritaire). Réorganisez avec
+          ↑ / ↓ pour ajuster les plafonds et planchers.
+        </p>
+        <ol class="parametres-hierarchy-list">
+          ${hierarchyOrder.map((dim, idx) => `
+            <li class="parametres-hierarchy-row" data-hierarchy-dim="${_esc(dim)}">
+              <span class="parametres-hierarchy-rank">${idx + 1}.</span>
+              <span class="parametres-hierarchy-label">${_esc(_HIERARCHY_DIMENSION_LABELS[dim] || dim)}</span>
+              <span class="parametres-hierarchy-controls">
+                <button type="button" class="v5-btn v5-btn--ghost v5-btn--xs"
+                        data-hierarchy-move="up" data-hierarchy-dim-target="${_esc(dim)}"
+                        ${idx === 0 ? "disabled" : ""}
+                        aria-label="Monter ${_esc(dim)}">↑</button>
+                <button type="button" class="v5-btn v5-btn--ghost v5-btn--xs"
+                        data-hierarchy-move="down" data-hierarchy-dim-target="${_esc(dim)}"
+                        ${idx === hierarchyOrder.length - 1 ? "disabled" : ""}
+                        aria-label="Descendre ${_esc(dim)}">↓</button>
+              </span>
+            </li>`).join("")}
+        </ol>
       </div>
     </div>
 
@@ -1341,15 +1414,41 @@ async function _loadProfiles() {
           label: active.label,
           tiers: { ..._DEFAULT_TIERS, ...(active.tiers || {}) },
           weights: { ..._DEFAULT_WEIGHTS, ...(active.weights || {}) },
+          // VP-B : tier_hierarchy charge depuis profil backend (default OFF).
+          tier_hierarchy: _mergeTierHierarchy(active.tier_hierarchy),
         };
       } else {
-        _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
       }
     }
   } catch (_e) {
     _state.profilesList = [];
-    _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
+    _state.profileDraft = {
+      id: "", label: "",
+      tiers: { ..._DEFAULT_TIERS },
+      weights: { ..._DEFAULT_WEIGHTS },
+      tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+    };
   }
+}
+
+// VP-B : merge tier_hierarchy backend vers shape canonique UI (default OFF
+// si profil legacy sans cle). Filtre les dimensions inconnues (backend deja
+// resilient mais on prefere belt-and-suspenders cote UI).
+function _mergeTierHierarchy(raw) {
+  const out = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() };
+  if (!raw || typeof raw !== "object") return out;
+  if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
+  if (Array.isArray(raw.order)) {
+    const filtered = raw.order.filter((d) => _DEFAULT_HIERARCHY_DIMENSIONS.includes(d));
+    if (filtered.length > 0) out.order = filtered;
+  }
+  return out;
 }
 
 async function _setActiveProfile(profileId) {
@@ -1364,6 +1463,7 @@ async function _setActiveProfile(profileId) {
           id: active.id, label: active.label,
           tiers: { ..._DEFAULT_TIERS, ...(active.tiers || {}) },
           weights: { ..._DEFAULT_WEIGHTS, ...(active.weights || {}) },
+          tier_hierarchy: _mergeTierHierarchy(active.tier_hierarchy),
         };
       }
       _showProfilMessage("✓ Profil activé.", "ok");
@@ -1400,6 +1500,9 @@ async function _saveProfileAsNew() {
     version: 1,
     tiers: draft.tiers,
     weights: draft.weights,
+    // VP-B : transmet la config hierarchie (OFF par defaut). Backend
+    // normalise via validate_quality_profile -> normalize_hierarchy_config.
+    tier_hierarchy: draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY },
   };
   try {
     const res = await apiPost("settings/save_profile", { profile });
@@ -2549,6 +2652,54 @@ function _bindProfilsQualite(container) {
     });
   });
 
+  // VP-B (Vague P) : toggle hierarchie qualite (default OFF).
+  const hierarchyToggle = container.querySelector("[data-parametres-hierarchy-enabled]");
+  if (hierarchyToggle) {
+    hierarchyToggle.addEventListener("change", (ev) => {
+      if (!_state.profileDraft) {
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+      }
+      if (!_state.profileDraft.tier_hierarchy) {
+        _state.profileDraft.tier_hierarchy = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() };
+      }
+      _state.profileDraft.tier_hierarchy.enabled = !!ev.target.checked;
+    });
+  }
+
+  // VP-B : reorder dimensions (haut/bas).
+  container.querySelectorAll("[data-hierarchy-move]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const dim = btn.dataset.hierarchyDimTarget;
+      const direction = btn.dataset.hierarchyMove;
+      if (!dim || !direction) return;
+      if (!_state.profileDraft) {
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+      }
+      const hier = _state.profileDraft.tier_hierarchy
+        || (_state.profileDraft.tier_hierarchy = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() });
+      const order = Array.isArray(hier.order) && hier.order.length > 0
+        ? hier.order.slice()
+        : _DEFAULT_HIERARCHY_DIMENSIONS.slice();
+      const idx = order.indexOf(dim);
+      if (idx === -1) return;
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= order.length) return;
+      [order[idx], order[swapIdx]] = [order[swapIdx], order[idx]];
+      hier.order = order;
+      _rerenderActiveCategory();
+    });
+  });
+
   // Boutons d'action
   container.querySelectorAll("[data-parametres-profils-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2556,8 +2707,14 @@ function _bindProfilsQualite(container) {
       if (action === "save") _saveProfileAsNew();
       else if (action === "recompute") _recomputeScores();
       else if (action === "reset") {
-        _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
-        _showProfilMessage("Seuils et poids restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.", "info");
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          // VP-B : reset hierarchie au default OFF.
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+        _showProfilMessage("Seuils, poids et hiérarchie restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.", "info");
         _rerenderActiveCategory();
       }
     });

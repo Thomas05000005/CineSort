@@ -430,11 +430,416 @@ def reconcile_display_tier(
     return default, "fallback"
 
 
+# ---------------------------------------------------------------------------
+# VP-B (Vague P) : hierarchie qualite multi-axes (inspire TRaSH/Radarr 2026)
+# ---------------------------------------------------------------------------
+#
+# Principe "Quality Trumps All" : certaines dimensions techniques (resolution,
+# codec, HDR, audio, release_group) imposent un PLANCHER de tier ou un
+# PLAFOND, independamment du score numerique calcule. Exemple :
+#
+#   - Un fichier 2160p HDR10+ mesure (probe) ne peut PAS finir en Bronze
+#     meme si son audio est moyen -> floor Gold sur dimension resolution.
+#   - Un fichier 720p ne peut PAS finir en Platinum meme avec audio premium
+#     -> ceiling Silver sur dimension resolution.
+#
+# Cette logique est entierement OPT-IN (toggle hierarchy_config.enabled=False
+# par defaut). Quand desactive, ``apply_tier_hierarchy`` retourne le tier
+# d'entree sans modification (no-op strict). Le but : preserver le scoring
+# V1 existant sur les biblio reelles deja calibrees (memo fix #4 ROADMAP
+# Vague P : eviter de redistribuer 30-40% des tiers sans validation user).
+#
+# IMPORTANT : cette logique agit UNIQUEMENT sur les tiers V1 (quality_score).
+# Elle NE TOUCHE PAS le pipeline perceptual V2 (composite_score_v2, 766 LOC)
+# qui possede sa propre echelle V2 (memo feedback_cinesort_design :
+# ``perceptual_reports != quality_reports``).
+#
+# IMPORTANT 2 : cette logique s'execute AVANT ``cap_tier`` (FAILED/CAM) qui
+# reste l'autorite finale de securite. Un fichier probe FAILED reste
+# plafonne Silver meme si la hierarchie tentait de le pousser Platinum.
+
+# Defaults TRaSH/Radarr 2026 "Quality Trumps All" - DESACTIVES par defaut.
+# Les dimensions sont listees par ordre de priorite (la PREMIERE dimension
+# qui declenche un floor/ceiling l'emporte). L'utilisateur peut re-ordonner
+# via l'UI parametres (drag-and-drop, fix #4 ROADMAP).
+DEFAULT_HIERARCHY_DIMENSIONS_ORDER: List[str] = [
+    "resolution",
+    "video_codec",
+    "hdr",
+    "audio",
+    "release_group",
+]
+
+# Planchers de tier par dimension. Format : { dimension_value : tier_floor }.
+# Un floor "Gold" signifie que le tier final ne pourra PAS etre inferieur a
+# Gold pour cette valeur de dimension. Les valeurs absentes du mapping ne
+# declenchent aucun floor (no-op).
+#
+# Source : TRaSH-Guides Radarr v3.x "Custom Format Groups" (2026 reference
+# community Radarr/Sonarr). Adaptee a l'echelle CineSort 4 tiers
+# (Platinum/Gold/Silver/Bronze).
+DEFAULT_HIERARCHY_RESOLUTION_FLOORS: Dict[str, str] = {
+    # 2160p mesure (probe) = certitude UHD -> Gold minimum.
+    # NOTE : "2160p_probe" (avec suffixe) distingue probe verifie du fallback
+    # nom de release (qui peut mentir : "4K" dans le nom + 1080p reel).
+    "2160p_probe": "Gold",
+}
+
+DEFAULT_HIERARCHY_RESOLUTION_CEILINGS: Dict[str, str] = {
+    # 720p ne peut pas etre Platinum (memo TRaSH 2026 : la resolution
+    # est determinante pour l'UHD).
+    "720p": "Silver",
+    "SD": "Bronze",
+}
+
+DEFAULT_HIERARCHY_CODEC_FLOORS: Dict[str, str] = {
+    # Pas de codec floor par defaut (AV1/HEVC sont des bonus mais pas
+    # un floor a eux seuls - une encode HEVC 720p reste 720p).
+}
+
+DEFAULT_HIERARCHY_HDR_FLOORS: Dict[str, str] = {
+    # Dolby Vision sur film 2160p mesure -> Gold floor (couvert par
+    # resolution_floors si combine). DV seul ne sera applique qu'en
+    # presence de probe verifie.
+    "dolby_vision": "Gold",
+    "hdr10_plus": "Silver",
+}
+
+DEFAULT_HIERARCHY_AUDIO_FLOORS: Dict[str, str] = {
+    # TrueHD Atmos lossless + multicanal premium -> Gold floor.
+    "truehd_atmos": "Gold",
+}
+
+DEFAULT_HIERARCHY_GROUP_FLOORS: Dict[str, str] = {
+    # Pas de release_group floor par defaut (a calibrer par user).
+}
+
+
+def default_hierarchy_config() -> Dict[str, Any]:
+    """Retourne le default hierarchy_config : DESACTIVE, defaults TRaSH 2026.
+
+    Le profil utilisateur peut surcharger n'importe quelle cle via
+    ``validate_quality_profile`` (section ``tier_hierarchy``).
+
+    >>> cfg = default_hierarchy_config()
+    >>> cfg["enabled"]
+    False
+    >>> cfg["order"]
+    ['resolution', 'video_codec', 'hdr', 'audio', 'release_group']
+    """
+    return {
+        "enabled": False,
+        "order": list(DEFAULT_HIERARCHY_DIMENSIONS_ORDER),
+        "resolution_floors": dict(DEFAULT_HIERARCHY_RESOLUTION_FLOORS),
+        "resolution_ceilings": dict(DEFAULT_HIERARCHY_RESOLUTION_CEILINGS),
+        "codec_floors": dict(DEFAULT_HIERARCHY_CODEC_FLOORS),
+        "hdr_floors": dict(DEFAULT_HIERARCHY_HDR_FLOORS),
+        "audio_floors": dict(DEFAULT_HIERARCHY_AUDIO_FLOORS),
+        "group_floors": dict(DEFAULT_HIERARCHY_GROUP_FLOORS),
+    }
+
+
+def normalize_hierarchy_config(raw: Any) -> Dict[str, Any]:
+    """Normalise un hierarchy_config user vers la shape canonique.
+
+    Les profils legacy SANS cle ``tier_hierarchy`` recoivent le default
+    (enabled=False) - garantit la backward compat ABSOLUE V1 (AC-1 VP-B).
+
+    Les profils avec ``tier_hierarchy`` partiel (ex: juste ``enabled=True``)
+    voient leurs champs manquants completes par les defaults TRaSH 2026.
+
+    Les tiers floor/ceiling sont normalises via ``normalize_tier_string``
+    (Premium -> Platinum, etc.). Les entrees avec tier invalide sont
+    droppees silencieusement (caller peut detecter via comparaison).
+
+    >>> normalize_hierarchy_config(None)["enabled"]
+    False
+    >>> normalize_hierarchy_config({"enabled": True})["enabled"]
+    True
+    >>> normalize_hierarchy_config({"enabled": True})["order"]
+    ['resolution', 'video_codec', 'hdr', 'audio', 'release_group']
+    """
+    out = default_hierarchy_config()
+    if not isinstance(raw, dict):
+        return out
+
+    # enabled : strict bool (default False si non interpretable).
+    raw_enabled = raw.get("enabled")
+    if isinstance(raw_enabled, bool):
+        out["enabled"] = raw_enabled
+    elif isinstance(raw_enabled, (int, str)):
+        # Tolerance "True"/"true"/1/"1" pour les profils YAML/CLI.
+        s = str(raw_enabled).strip().lower()
+        out["enabled"] = s in ("true", "1", "yes", "on")
+
+    # order : liste de dimensions canoniques, filtre les inconnues.
+    raw_order = raw.get("order")
+    if isinstance(raw_order, list):
+        filtered = [
+            str(d).strip().lower()
+            for d in raw_order
+            if isinstance(d, str) and str(d).strip().lower() in DEFAULT_HIERARCHY_DIMENSIONS_ORDER
+        ]
+        # Si user a fourni une liste non vide ET valide, on l'utilise tel
+        # quel (meme partielle). Sinon fallback default.
+        if filtered:
+            out["order"] = filtered
+
+    # Floors/ceilings par dimension : merge avec defaults TRaSH 2026.
+    for key in (
+        "resolution_floors",
+        "resolution_ceilings",
+        "codec_floors",
+        "hdr_floors",
+        "audio_floors",
+        "group_floors",
+    ):
+        raw_section = raw.get(key)
+        if isinstance(raw_section, dict):
+            # Merge : user > default. Normalise les noms de tier.
+            for k, v in raw_section.items():
+                canonical_tier = normalize_tier_string(v)
+                if canonical_tier:
+                    out[key][str(k)] = canonical_tier
+
+    return out
+
+
+def _floor_tier(current: str, floor: str) -> str:
+    """Plancher le tier ``current`` a ``floor`` (jamais en dessous de floor).
+
+    Coherent avec ``cap_tier`` mais en sens INVERSE : ``cap_tier`` plafonne
+    vers le BAS (jamais au-dessus), ``_floor_tier`` plancher vers le HAUT
+    (jamais en dessous). Utilise ``tier_order`` (index plus PETIT = tier
+    plus HAUT).
+
+    >>> _floor_tier("Bronze", "Gold")
+    'Gold'
+    >>> _floor_tier("Platinum", "Gold")
+    'Platinum'
+    >>> _floor_tier("Silver", "Silver")
+    'Silver'
+    """
+    canonical_cur = normalize_tier_string(current) or str(current or "")
+    canonical_floor = normalize_tier_string(floor) or str(floor or "")
+    if (
+        canonical_cur not in TIER_ORDER_BEST_FIRST
+        or canonical_floor not in TIER_ORDER_BEST_FIRST
+    ):
+        return canonical_cur
+    cur_idx = TIER_ORDER_BEST_FIRST.index(canonical_cur)
+    floor_idx = TIER_ORDER_BEST_FIRST.index(canonical_floor)
+    # Index plus PETIT = tier plus HAUT. On garde le plus PETIT.
+    return TIER_ORDER_BEST_FIRST[min(cur_idx, floor_idx)]
+
+
+def apply_tier_hierarchy(
+    tier_pondere: str,
+    dimensions: Dict[str, Any],
+    hierarchy_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, List[Dict[str, str]]]:
+    """Applique la hierarchie qualite multi-axes au tier calcule par le score.
+
+    Args:
+        tier_pondere: Tier calcule par le scoring V1 (apres ``_determine_tier``
+            + custom_rules ``force_tier``). Ex: "Bronze", "Gold", "Premium"
+            (legacy accepte via ``normalize_tier_string``).
+        dimensions: Dict des dimensions techniques observees sur le fichier :
+            - ``resolution_label`` (str) : "2160p" | "1080p" | "720p" | "SD"
+            - ``resolution_source`` (str) : "probe" | "name_fallback" | "unknown"
+            - ``video_codec`` (str) : "hevc" | "av1" | "avc" | ...
+            - ``hdr`` (str) : "dolby_vision" | "hdr10_plus" | "hdr10" | ""
+            - ``audio_codec`` (str) : "truehd_atmos" | "dts_hd_ma" | "dts" | ...
+            - ``release_group`` (str) : nom du groupe (optionnel)
+        hierarchy_config: Config user (default OFF si None).
+
+    Returns:
+        (tier_final, applied_decisions) ou applied_decisions est la liste des
+        decisions qui ont modifie le tier (audit trail pour UI/logs).
+
+        Si ``hierarchy_config["enabled"] == False`` : retourne
+        ``(tier_pondere_normalized, [])`` - no-op strict.
+
+    NOTE : cette fonction ne plafonne PAS par ``cap_tier`` securite
+    (FAILED/CAM) - c'est la responsabilite du caller (quality_score).
+    Apres cette fonction, le caller DOIT appeler ``cap_tier`` pour preserver
+    AC-2 (memo VP-B : ``_cap_tier`` securite reste autorite finale).
+
+    >>> # default OFF : no-op
+    >>> apply_tier_hierarchy("Bronze", {"resolution_label": "2160p"}, None)
+    ('Bronze', [])
+    >>> # enabled mais resolution non probe : pas de floor (declaratif)
+    >>> cfg = default_hierarchy_config()
+    >>> cfg["enabled"] = True
+    >>> apply_tier_hierarchy(
+    ...     "Bronze",
+    ...     {"resolution_label": "2160p", "resolution_source": "name_fallback"},
+    ...     cfg,
+    ... )
+    ('Bronze', [])
+    >>> # enabled + 2160p probe : floor Gold applique
+    >>> tier, dec = apply_tier_hierarchy(
+    ...     "Bronze",
+    ...     {"resolution_label": "2160p", "resolution_source": "probe"},
+    ...     cfg,
+    ... )
+    >>> tier
+    'Gold'
+    >>> dec[0]["dimension"]
+    'resolution'
+    """
+    # Normalisation entree (tolerance legacy Premium/Bon/Moyen).
+    tier_canonical = normalize_tier_string(tier_pondere) or str(tier_pondere or "")
+    if tier_canonical not in TIER_ORDER_BEST_FIRST:
+        # Tier inconnu : retour tel quel sans toucher (safe default).
+        return tier_canonical, []
+
+    cfg = normalize_hierarchy_config(hierarchy_config)
+    if not cfg.get("enabled"):
+        # AC-1 VP-B : default OFF = no-op strict.
+        return tier_canonical, []
+
+    if not isinstance(dimensions, dict):
+        dimensions = {}
+
+    applied: List[Dict[str, str]] = []
+    current_tier = tier_canonical
+
+    for dimension in cfg["order"]:
+        # === Resolution ===
+        if dimension == "resolution":
+            res_label = str(dimensions.get("resolution_label") or "").strip()
+            res_source = str(dimensions.get("resolution_source") or "").strip()
+            # Floor : utilise cle "{label}_probe" si source=probe pour
+            # distinguer probe verifie du fallback nom (declaratif).
+            if res_label and res_source == "probe":
+                key_probe = f"{res_label}_probe"
+                floor = cfg["resolution_floors"].get(key_probe)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "resolution",
+                            "type": "floor",
+                            "value": key_probe,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+            # Floor (declaratif, fallback nom accepte) : on autorise aussi
+            # les floors sans suffixe _probe pour le cas user opt-in qui
+            # ne veut PAS exiger le probe verifie.
+            if res_label:
+                floor = cfg["resolution_floors"].get(res_label)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "resolution",
+                            "type": "floor",
+                            "value": res_label,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+            # Ceiling : plafonne vers le BAS (utilise cap_tier helper).
+            if res_label:
+                ceil = cfg["resolution_ceilings"].get(res_label)
+                if ceil:
+                    new_tier = cap_tier(current_tier, ceil)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "resolution",
+                            "type": "ceiling",
+                            "value": res_label,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+
+        # === Codec ===
+        elif dimension == "video_codec":
+            codec = str(dimensions.get("video_codec") or "").strip().lower()
+            if codec:
+                floor = cfg["codec_floors"].get(codec)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "video_codec",
+                            "type": "floor",
+                            "value": codec,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+
+        # === HDR ===
+        elif dimension == "hdr":
+            hdr = str(dimensions.get("hdr") or "").strip().lower()
+            if hdr:
+                floor = cfg["hdr_floors"].get(hdr)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "hdr",
+                            "type": "floor",
+                            "value": hdr,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+
+        # === Audio ===
+        elif dimension == "audio":
+            audio = str(dimensions.get("audio_codec") or "").strip().lower()
+            if audio:
+                floor = cfg["audio_floors"].get(audio)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "audio",
+                            "type": "floor",
+                            "value": audio,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+
+        # === Release group ===
+        elif dimension == "release_group":
+            grp = str(dimensions.get("release_group") or "").strip().lower()
+            if grp:
+                floor = cfg["group_floors"].get(grp)
+                if floor:
+                    new_tier = _floor_tier(current_tier, floor)
+                    if new_tier != current_tier:
+                        applied.append({
+                            "dimension": "release_group",
+                            "type": "floor",
+                            "value": grp,
+                            "from": current_tier,
+                            "to": new_tier,
+                        })
+                        current_tier = new_tier
+
+    return current_tier, applied
+
+
 __all__ = [
     "TIER_ORDER_BEST_FIRST",
     "TIER_ORDER_WORST_FIRST",
     "TIER_V2_CANONICAL",
     "DEFAULT_TIER_THRESHOLDS",
+    "DEFAULT_HIERARCHY_DIMENSIONS_ORDER",
+    "DEFAULT_HIERARCHY_RESOLUTION_FLOORS",
+    "DEFAULT_HIERARCHY_RESOLUTION_CEILINGS",
+    "DEFAULT_HIERARCHY_CODEC_FLOORS",
+    "DEFAULT_HIERARCHY_HDR_FLOORS",
+    "DEFAULT_HIERARCHY_AUDIO_FLOORS",
+    "DEFAULT_HIERARCHY_GROUP_FLOORS",
     "normalize_tier_string",
     "normalize_tiers",
     "tier_order",
@@ -446,4 +851,7 @@ __all__ = [
     "cap_tier",
     "to_canonical_v2_tier",
     "reconcile_display_tier",
+    "default_hierarchy_config",
+    "normalize_hierarchy_config",
+    "apply_tier_hierarchy",
 ]
