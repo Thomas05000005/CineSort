@@ -261,6 +261,12 @@ export const PARAMETRES_GROUPS = [
   {
     id: "avance", label: "Avancé", icon: "⚙️",
     sections: [
+      // VO-A UI : Stockage SQLite — tri-etat (auto/local_ssd/nas_smb) + toggle
+      // EXCLUSIVE qui doit OBLIGATOIREMENT passer par dangerConfirmModal avec
+      // countdown 3s (memoire user actions dangereuses, P0 #233).
+      { id: "stockage-sqlite", label: "Stockage SQLite", fields: [
+        { key: "__advanced_pragma__", label: "", type: "advanced-pragma" },
+      ]},
       { id: "parallelism", label: "Parallélisme", fields: [
         { key: "perceptual_parallelism_mode", label: "Mode parallélisme", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"max",l:"Max"},{v:"safe",l:"Sécurisé"},{v:"serial",l:"Séquentiel"},
@@ -337,6 +343,11 @@ const _state = {
   // lpips }, hybrid_ready, degraded_mode, installer, ... }. Null = pas encore
   // charge cette session (premier render = "Chargement..." puis fetch).
   probeToolsStatus: null,
+  // VO-A UI : dernier payload retourne par settings/get_advanced_pragma_settings.
+  // Forme : { profile_active, profile_override, available_profiles,
+  // storage_detected, locking_mode_exclusive }. Null = pas encore charge.
+  advancedPragmaState: null,
+  advancedPragmaLoading: false,
   probeToolsLoading: false,
 };
 
@@ -698,6 +709,79 @@ function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
 }
 
 /**
+ * VO-A UI : rend la section "Stockage SQLite" (tri-etat profil + toggle EXCLUSIVE).
+ *
+ * `state` = payload retourne par settings/get_advanced_pragma_settings :
+ *   { profile_active, profile_override, available_profiles, storage_detected,
+ *     locking_mode_exclusive }
+ *
+ * IMPORTANT : la bascule "Verrouillage EXCLUSIVE" est DANGEREUSE (empeche
+ * toute lecture concurrente). Le handler attache (_attachAdvancedPragmaHandlers)
+ * intercepte le change et ouvre dangerConfirmModal avec countdown 3s avant
+ * de propager la modification au backend (memoire user actions dangereuses).
+ */
+function _renderAdvancedPragmaSection(state) {
+  if (_state.advancedPragmaLoading) {
+    return `<div class="parametres-muted">Chargement des paramètres de stockage…</div>`;
+  }
+  if (!state || typeof state !== "object") {
+    return `<div class="parametres-muted">Statut non disponible. <button type="button" class="v5-btn v5-btn--sm" data-advanced-pragma-reload>Recharger</button></div>`;
+  }
+
+  const profiles = Array.isArray(state.available_profiles) ? state.available_profiles : [];
+  const override = String(state.profile_override || "auto");
+  const active = String(state.profile_active || "auto");
+  const detected = String(state.storage_detected || "local_ssd");
+  const exclusive = !!state.locking_mode_exclusive;
+
+  const detectedLabel = detected === "nas_smb"
+    ? "NAS / SMB"
+    : "SSD local";
+
+  const profileOptions = profiles.length > 0
+    ? profiles.map((p) =>
+        `<option value="${escapeHtml(String(p.v))}" ${String(p.v) === override ? "selected" : ""}>${escapeHtml(String(p.l))}</option>`,
+      ).join("")
+    : `<option value="auto" selected>Auto (détection)</option>
+       <option value="local_ssd">SSD local (perf max)</option>
+       <option value="nas_smb">NAS / SMB (sécurisé)</option>`;
+
+  const activeBadge = active === "nas_smb"
+    ? `<span class="parametres-tools-mode parametres-tools-mode--warn">Actif : NAS / SMB</span>`
+    : `<span class="parametres-tools-mode parametres-tools-mode--ok">Actif : SSD local</span>`;
+
+  const exclusiveBadge = exclusive
+    ? `<span class="parametres-tools-mode parametres-tools-mode--warn">⚠ Verrouillage EXCLUSIVE activé</span>`
+    : "";
+
+  return `<div class="parametres-advanced-pragma">
+    <p class="parametres-section-intro">
+      Profil SQLite adapté au stockage de la base. <strong>Auto</strong> détecte
+      automatiquement (stockage détecté : <em>${escapeHtml(detectedLabel)}</em>).
+    </p>
+    <div class="parametres-field">
+      <label class="parametres-field-label" for="parametres-storage-profile">Profil de stockage</label>
+      <select id="parametres-storage-profile" class="parametres-select" data-advanced-pragma-profile>
+        ${profileOptions}
+      </select>
+      <span class="parametres-field-hint">${activeBadge}</span>
+    </div>
+    <label class="parametres-field parametres-field--toggle">
+      <input type="checkbox" class="parametres-checkbox"
+             data-advanced-pragma-exclusive
+             ${exclusive ? "checked" : ""}
+             aria-describedby="parametres-exclusive-hint">
+      <span class="parametres-field-label">Verrouillage EXCLUSIVE (lectures exclusives)</span>
+      <span id="parametres-exclusive-hint" class="parametres-field-hint">
+        Mode dangereux : aucun autre processus ne peut lire la base en parallèle.
+        Une confirmation supplémentaire est requise. ${exclusiveBadge}
+      </span>
+    </label>
+    <p class="parametres-advanced-pragma-message parametres-muted" data-advanced-pragma-message></p>
+  </div>`;
+}
+
+/**
  * Rend la table complete des outils externes. `status` = payload retourne
  * par runtime/get_probe_tools_status. Si null/loading, on affiche un placeholder.
  */
@@ -931,6 +1015,11 @@ function _renderField(field, value, query) {
       // VAGUE D : tableau des outils externes (ffprobe, mediainfo, fpcalc, LPIPS).
       // Le contenu reel est rendu apres apiPost("runtime/get_probe_tools_status").
       return `<div class="parametres-field parametres-field--probe-tools">${_renderProbeToolsTable(_state.probeToolsStatus)}</div>`;
+
+    case "advanced-pragma":
+      // VO-A UI : section "Stockage SQLite" tri-etat + toggle EXCLUSIVE.
+      // Le contenu reel est rendu apres settings/get_advanced_pragma_settings.
+      return `<div class="parametres-field parametres-field--advanced-pragma" data-advanced-pragma-host>${_renderAdvancedPragmaSection(_state.advancedPragmaState)}</div>`;
 
     default:
       return `<div class="parametres-field">[type ${_esc(field.type)} non supporté pour « ${_esc(field.label)} »]</div>`;
@@ -1945,9 +2034,159 @@ function _bindFields(container) {
     _loadProbeToolsStatus(container, { force: false });
   }
 
+  // VO-A UI : Stockage SQLite (tri-etat profil + toggle EXCLUSIVE)
+  _bindAdvancedPragmaActions(container);
+  // Auto-load au premier rendu si la section "stockage-sqlite" est presente
+  if (container.querySelector("[data-advanced-pragma-host]") && _state.advancedPragmaState === null && !_state.advancedPragmaLoading) {
+    _loadAdvancedPragmaState(container);
+  }
+
   // QR dashboard auto-load
   if (container.querySelector("[data-qr-dashboard]")) {
     _loadQrDashboard(container);
+  }
+}
+
+/**
+ * VO-A UI : refresh le panneau "Stockage SQLite" sans full re-render.
+ * Re-attache les handlers (idempotent via data-bound).
+ */
+function _refreshAdvancedPragmaPanel(container) {
+  const host = container.querySelector("[data-advanced-pragma-host]");
+  if (!host) return;
+  host.innerHTML = _renderAdvancedPragmaSection(_state.advancedPragmaState);
+  _bindAdvancedPragmaActions(container);
+}
+
+/**
+ * VO-A UI : charge l'etat initial via settings/get_advanced_pragma_settings.
+ */
+async function _loadAdvancedPragmaState(container) {
+  _state.advancedPragmaLoading = true;
+  _refreshAdvancedPragmaPanel(container);
+  try {
+    const res = await apiPost("settings/get_advanced_pragma_settings", {});
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.advancedPragmaState = data;
+    } else {
+      _state.advancedPragmaState = null;
+    }
+  } catch (err) {
+    _state.advancedPragmaState = null;
+  } finally {
+    _state.advancedPragmaLoading = false;
+    _refreshAdvancedPragmaPanel(container);
+  }
+}
+
+/**
+ * VO-A UI : applique le profil + locking_mode via settings/set_advanced_pragma_settings.
+ * Met a jour _state.advancedPragmaState avec la reponse et refresh.
+ */
+async function _applyAdvancedPragma(container, profileName, lockingExclusive, msgEl) {
+  if (msgEl) msgEl.textContent = "Application en cours…";
+  try {
+    const res = await apiPost("settings/set_advanced_pragma_settings", {
+      profile_name: String(profileName || "auto"),
+      locking_mode_exclusive: !!lockingExclusive,
+    });
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.advancedPragmaState = {
+        ...(_state.advancedPragmaState || {}),
+        profile_active: data.profile_active,
+        profile_override: data.profile_override,
+        storage_detected: data.storage_detected || _state.advancedPragmaState?.storage_detected,
+        locking_mode_exclusive: !!data.locking_mode_exclusive,
+        available_profiles: _state.advancedPragmaState?.available_profiles || [],
+      };
+      _refreshAdvancedPragmaPanel(container);
+      const newMsg = container.querySelector("[data-advanced-pragma-message]");
+      if (newMsg) newMsg.textContent = "✓ Paramètres de stockage enregistrés.";
+      return true;
+    }
+    if (msgEl) msgEl.textContent = `Erreur : ${data?.message || "échec de l'enregistrement"}`;
+    return false;
+  } catch (err) {
+    if (msgEl) msgEl.textContent = `Erreur réseau : ${err?.message || err}`;
+    return false;
+  }
+}
+
+/**
+ * VO-A UI : bind des handlers select profil + toggle EXCLUSIVE.
+ *
+ * Le toggle EXCLUSIVE est DANGEREUX (memoire user actions dangereuses) :
+ *   - JAMAIS window.confirm/prompt/alert
+ *   - dangerConfirmModal avec countdown 3s OBLIGATOIRE
+ *   - Cancel = checkbox revient a son etat initial (pas de changement)
+ */
+function _bindAdvancedPragmaActions(container) {
+  // Bouton "Recharger" si state null
+  const reloadBtn = container.querySelector("[data-advanced-pragma-reload]");
+  if (reloadBtn && reloadBtn.dataset.bound !== "1") {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", () => _loadAdvancedPragmaState(container));
+  }
+
+  // Select profil — applique direct (pas dangereux)
+  const profileSelect = container.querySelector("[data-advanced-pragma-profile]");
+  if (profileSelect && profileSelect.dataset.bound !== "1") {
+    profileSelect.dataset.bound = "1";
+    profileSelect.addEventListener("change", async () => {
+      const msg = container.querySelector("[data-advanced-pragma-message]");
+      const currentExclusive = !!(_state.advancedPragmaState && _state.advancedPragmaState.locking_mode_exclusive);
+      await _applyAdvancedPragma(container, profileSelect.value, currentExclusive, msg);
+    });
+  }
+
+  // Toggle EXCLUSIVE — DANGEREUX : dangerConfirmModal + countdown 3s
+  const exclusiveToggle = container.querySelector("[data-advanced-pragma-exclusive]");
+  if (exclusiveToggle && exclusiveToggle.dataset.bound !== "1") {
+    exclusiveToggle.dataset.bound = "1";
+    exclusiveToggle.addEventListener("change", () => {
+      const target = !!exclusiveToggle.checked;
+      const previous = !target; // on connait l'ancien etat
+      const msg = container.querySelector("[data-advanced-pragma-message]");
+      const currentProfile = _state.advancedPragmaState?.profile_override || "auto";
+
+      if (!target) {
+        // Desactivation : pas de confirmation (revenir a un mode safe)
+        _applyAdvancedPragma(container, currentProfile, false, msg);
+        return;
+      }
+
+      // Activation EXCLUSIVE : modale obligatoire avec countdown 3s
+      // Memoire feedback_cinesort_actions_dangereuses : JAMAIS window.confirm.
+      dangerConfirmModal({
+        title: "Verrouillage exclusif de la base de données",
+        consequence: "Mode EXCLUSIVE : aucun autre processus (UI distant, CLI, plugin) ne pourra lire la base de données en parallèle. À utiliser uniquement si vous êtes seul·e à utiliser CineSort sur cette machine.",
+        items: [
+          "Aucun autre processus ne peut lire la DB en parallèle",
+          "Les clients REST distants seront refusés tant que ce mode est actif",
+          "Désactivable à tout moment depuis ce même écran",
+        ],
+        countdownSeconds: 3,
+        confirmLabel: "Activer EXCLUSIVE",
+        cancelLabel: "Annuler",
+        onConfirm: async () => {
+          await _applyAdvancedPragma(container, currentProfile, true, msg);
+        },
+      });
+
+      // Reset visuel immediat : si l'utilisateur annule, l'etat de la checkbox
+      // doit refleter l'ancien etat. _applyAdvancedPragma fera un refresh
+      // complet en cas de succes ; en cas d'annulation, on remet manuellement.
+      // On revert tout de suite puis on laisse onConfirm faire le refresh si
+      // confirme (le refresh re-rend la section avec la bonne valeur).
+      setTimeout(() => {
+        const stillActive = !!(_state.advancedPragmaState && _state.advancedPragmaState.locking_mode_exclusive);
+        if (!stillActive && exclusiveToggle.isConnected) {
+          exclusiveToggle.checked = previous;
+        }
+      }, 100);
+    });
   }
 }
 

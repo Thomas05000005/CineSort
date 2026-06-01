@@ -136,6 +136,56 @@ class SettingsFacade(_BaseFacade):
         """
         return self._api._preview_naming_template_impl(template, sample_row_id)
 
+    # ---------- VO-A UI : Advanced PRAGMA settings (storage profile + EXCLUSIVE) ----------
+
+    def get_advanced_pragma_settings(self) -> Dict[str, Any]:
+        """VO-A : retourne l'etat des PRAGMA SQLite avances (profil + locking_mode).
+
+        Endpoint exposant le tri-etat storage_profile (auto/local_ssd/nas_smb)
+        et le flag locking_mode_exclusive. Le frontend l'utilise pour pre-remplir
+        la section "Avance > Stockage SQLite".
+
+        Cf CineSortApi._get_advanced_pragma_settings_impl pour la doc complete.
+
+        Returns:
+            {
+                "ok": True,
+                "profile_active": str,  # profil effectif
+                "profile_override": str,  # choix user
+                "available_profiles": [{"v": str, "l": str}, ...],
+                "storage_detected": str,
+                "locking_mode_exclusive": bool,
+            }
+        """
+        return self._api._get_advanced_pragma_settings_impl()
+
+    def set_advanced_pragma_settings(
+        self,
+        profile_name: str,
+        locking_mode_exclusive: bool = False,
+    ) -> Dict[str, Any]:
+        """VO-A : applique le profil PRAGMA et persiste dans settings.json.
+
+        IMPORTANT (memoire user actions dangereuses) : la bascule
+        locking_mode_exclusive=True est destructive (empeche toute lecture
+        concurrente). Le frontend DOIT afficher dangerConfirmModal avec
+        countdown 3s avant d'envoyer True ici.
+
+        Backward compat : `locking_mode_exclusive` est keyword-only par defaut
+        (False) - les anciens callers qui ne le passent pas continuent de
+        fonctionner et conservent l'etat actuel desactive.
+
+        Cf CineSortApi._set_advanced_pragma_settings_impl pour la doc complete.
+
+        Args:
+            profile_name: "auto" | "local_ssd" | "nas_smb"
+            locking_mode_exclusive: True = activer locking_mode=EXCLUSIVE (defaut False)
+        """
+        return self._api._set_advanced_pragma_settings_impl(
+            profile_name,
+            locking_mode_exclusive=locking_mode_exclusive,
+        )
+
     # ---------- VN-C.1 (batch 2) : seuils confidence unifies ----------
 
     def get_confidence_thresholds(self) -> Dict[str, Any]:

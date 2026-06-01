@@ -2484,6 +2484,34 @@ class CineSortApi:
 
         return profiles_support.set_active_profile(self, profile_id)
 
+    # ---------- VO-A UI : Advanced PRAGMA settings (storage profile + EXCLUSIVE) ----------
+    def _get_advanced_pragma_settings_impl(self) -> Dict[str, Any]:
+        """VO-A : retourne l'etat des PRAGMA SQLite avances (profil + locking_mode).
+
+        Retourne profil actif (auto/local_ssd/nas_smb), override user, profils
+        disponibles et stockage detecte (heuristique drive type Windows).
+        """
+        return settings_support.get_advanced_pragma_settings_payload(
+            state_dir=self._get_state_dir(),
+        )
+
+    def _set_advanced_pragma_settings_impl(
+        self,
+        profile_name: str,
+        locking_mode_exclusive: bool = False,
+    ) -> Dict[str, Any]:
+        """VO-A : applique le profil PRAGMA et persiste dans settings.json.
+
+        IMPORTANT : la bascule `locking_mode_exclusive=True` est destructive
+        (empeche toute lecture DB en parallele). Le frontend DOIT confirmer
+        via dangerConfirmModal avec countdown 3s avant d'envoyer True ici.
+        """
+        return settings_support.set_advanced_pragma_settings_payload(
+            state_dir=self._get_state_dir(),
+            profile_name=profile_name,
+            locking_mode_exclusive=locking_mode_exclusive,
+        )
+
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
         return history_support.open_path(

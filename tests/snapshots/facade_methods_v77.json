@@ -130,6 +130,7 @@
       "validate_dropped_path"
     ],
     "settings": [
+      "get_advanced_pragma_settings",
       "get_dashboard_qr",
       "get_naming_presets",
       "get_profiles",
@@ -144,6 +145,7 @@
       "save_profile",
       "save_settings",
       "set_active_profile",
+      "set_advanced_pragma_settings",
       "set_locale"
     ],
     "integrations": [
@@ -169,7 +171,7 @@
     "open_path",
     "test_reset"
   ],
-  "total_impl_methods": 133,
-  "total_facade_methods": 148,
-  "total_methods": 151
+  "total_impl_methods": 135,
+  "total_facade_methods": 150,
+  "total_methods": 153
 }

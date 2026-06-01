@@ -1769,3 +1769,158 @@ def restore_settings_backup(state_dir: Path, backup_filename: str) -> bool:
         return True
     except OSError:
         return False
+
+
+# =============================================================================
+# VO-A UI : Advanced PRAGMA settings (storage profile tri-etat + locking_mode)
+# =============================================================================
+#
+# Phase VO-A (Vague O) expose un endpoint dedie aux PRAGMA SQLite avances qui
+# influencent les perfs DB selon le type de stockage :
+#   - "auto"      : detection automatique au boot (defaut, comportement v7.x)
+#   - "local_ssd" : profil tunne pour SSD local (WAL agressif, cache eleve)
+#   - "nas_smb"   : profil prudent pour stockage reseau (WAL conservateur,
+#                   synchronous=FULL pour eviter corruption sur deconnexion SMB)
+#
+# Le toggle "locking_mode_exclusive" est destructif (aucun autre processus ne
+# peut lire la DB en parallele) et doit donc passer par dangerConfirmModal
+# cote UI avec countdown 3s (memoire user actions dangereuses).
+#
+# Les valeurs sont stockees dans settings.json sous :
+#   - storage_profile_override : "auto" | "local_ssd" | "nas_smb"
+#   - sqlite_locking_mode_exclusive : bool
+#
+# Le profil "actif" est calcule depuis l'override (si != auto) ou la detection.
+
+_VALID_STORAGE_PROFILES: Tuple[str, ...] = ("auto", "local_ssd", "nas_smb")
+_DEFAULT_STORAGE_PROFILE: str = "auto"
+
+
+def _detect_storage_profile(state_dir: Path) -> str:
+    """Detecte le type de stockage du state_dir (heuristique simple).
+
+    Retourne "local_ssd" ou "nas_smb". Sur Windows, on regarde le type de
+    drive via GetDriveType. Fallback "local_ssd" si la detection echoue
+    (pas grave : c'est juste pour pre-cocher le profil dans l'UI).
+    """
+    try:
+        path_str = str(state_dir).replace("\\", "/")
+        # Heuristique : UNC path ou lettre de drive distant
+        if path_str.startswith("//") or path_str.startswith("\\\\"):
+            return "nas_smb"
+        # Windows : interroger GetDriveTypeW si disponible
+        if os.name == "nt":
+            try:
+                import ctypes  # noqa: PLC0415
+                drive = str(state_dir.resolve()).split(":")[0] + ":\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                # 4 = DRIVE_REMOTE (SMB/CIFS)
+                if drive_type == 4:
+                    return "nas_smb"
+            except (OSError, AttributeError, ImportError):
+                pass
+    except (OSError, ValueError):
+        pass
+    return "local_ssd"
+
+
+def _normalize_storage_profile(value: Any) -> str:
+    """Clamp le profil de stockage a {"auto","local_ssd","nas_smb"}, defaut "auto"."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_STORAGE_PROFILE
+    try:
+        normalized = str(value).strip().lower()
+    except (TypeError, ValueError):
+        return _DEFAULT_STORAGE_PROFILE
+    if normalized in _VALID_STORAGE_PROFILES:
+        return normalized
+    return _DEFAULT_STORAGE_PROFILE
+
+
+def get_advanced_pragma_settings_payload(state_dir: Path) -> Dict[str, Any]:
+    """VO-A : retourne l'etat des PRAGMA SQLite avances.
+
+    Returns:
+        {
+            "ok": True,
+            "profile_active": "auto" | "local_ssd" | "nas_smb",  # profil effectif
+            "profile_override": "auto" | "local_ssd" | "nas_smb",  # choix user
+            "available_profiles": [{"v": ..., "l": ...}, ...],
+            "storage_detected": "local_ssd" | "nas_smb",  # heuristique
+            "locking_mode_exclusive": bool,  # toggle EXCLUSIVE
+        }
+    """
+    data = read_settings(state_dir)
+    override = _normalize_storage_profile(data.get("storage_profile_override"))
+    detected = _detect_storage_profile(state_dir)
+    profile_active = detected if override == "auto" else override
+    locking_exclusive = to_bool(data.get("sqlite_locking_mode_exclusive"), False)
+    return {
+        "ok": True,
+        "profile_active": profile_active,
+        "profile_override": override,
+        "available_profiles": [
+            {"v": "auto", "l": "Auto (detection)"},
+            {"v": "local_ssd", "l": "SSD local (perf max)"},
+            {"v": "nas_smb", "l": "NAS / SMB (securise)"},
+        ],
+        "storage_detected": detected,
+        "locking_mode_exclusive": locking_exclusive,
+    }
+
+
+def set_advanced_pragma_settings_payload(
+    state_dir: Path,
+    profile_name: str,
+    locking_mode_exclusive: bool = False,
+) -> Dict[str, Any]:
+    """VO-A : applique les PRAGMA SQLite avances et persiste dans settings.json.
+
+    Args:
+        state_dir: dossier state
+        profile_name: "auto" | "local_ssd" | "nas_smb"
+        locking_mode_exclusive: True = activer locking_mode=EXCLUSIVE (dangereux,
+            empeche toute lecture concurrente). Defaut False.
+
+    Returns:
+        { "ok": bool, "profile_active": str, "locking_mode_exclusive": bool,
+          "message": str (si erreur) }
+    """
+    normalized_profile = _normalize_storage_profile(profile_name)
+    if str(profile_name or "").strip().lower() not in _VALID_STORAGE_PROFILES:
+        return err(
+            f"Profil de stockage invalide : {profile_name!r}. "
+            f"Valeurs autorisees : {', '.join(_VALID_STORAGE_PROFILES)}.",
+            category="validation",
+            level="info",
+        )
+
+    locking_bool = bool(locking_mode_exclusive)
+
+    # Lire / merger / ecrire (write_settings recommence le pipeline DPAPI sur
+    # les autres champs : on reinjecte tous les champs sensibles tels qu'ils
+    # etaient pour ne rien casser. read_settings retourne deja les secrets
+    # dechiffres, donc write_settings va les rechiffrer correctement).
+    data = read_settings(state_dir)
+    data["storage_profile_override"] = normalized_profile
+    data["sqlite_locking_mode_exclusive"] = locking_bool
+    try:
+        write_result = write_settings(state_dir, data)
+    except (OSError, ValueError, TypeError) as exc:
+        return err(
+            f"Echec de la sauvegarde des PRAGMA avances : {exc}",
+            category="runtime",
+            level="error",
+        )
+
+    detected = _detect_storage_profile(state_dir)
+    profile_active = detected if normalized_profile == "auto" else normalized_profile
+
+    return {
+        "ok": True,
+        "profile_active": profile_active,
+        "profile_override": normalized_profile,
+        "locking_mode_exclusive": locking_bool,
+        "storage_detected": detected,
+        "write_result": write_result,
+    }
