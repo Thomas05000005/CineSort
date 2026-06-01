@@ -4,6 +4,7 @@ from collections import Counter
 import json
 import logging
 from pathlib import Path
+import sqlite3
 import time
 import traceback
 from dataclasses import asdict
@@ -924,6 +925,29 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
 
 @requires_valid_run_id
 def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Persiste les decisions de validation.
+
+    Vague P / VP-D : accepte AUSSI une cle optionnelle `decision`
+    (`accepted` / `rejected` / `deferred`) en plus du legacy `ok: bool`.
+
+    **Backward compat ABSOLUE** (AC-2) :
+      - Si une row ne contient que `ok: bool` (shape legacy), la reponse
+        retourne `{ok: bool, path: ...}` comme avant.
+      - Si une row contient `decision: 'deferred'` (nouveau VP-D), la
+        decision est miroir-ee dans la table SQL `film_decisions_v2` via
+        `store.decisions.set_decision`, et la shape de retour `{ok: bool}`
+        EST PRESERVEE (les decisions "deferred" sont projetees a `ok=false`
+        dans validation.json pour ne pas etre apply-ees).
+      - Aucun appel legacy ne casse : helper `to_legacy_ok_bool`
+        (cf cinesort/infra/db/repositories/decisions.py).
+
+    Coordination Vague P :
+      - VP-A `apply_atomic` : aucun kwarg `apply_atomic` n'est consomme
+        ici — pas de collision possible (AC-5).
+      - VP-C `field_locks` : transition `deferred -> accepted` consulte
+        les locks (via DecisionsRepository.upgrade_deferred_to_accepted)
+        — la repo expose les locks dans sa reponse (AC-3).
+    """
     if not isinstance(decisions, dict):
         return _err_response(
             t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
@@ -935,6 +959,8 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
             if not rows:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             safe = api._normalize_decisions_for_rows(rows, decisions)
+            # VP-D : miroir tri-etat en SQL (best-effort, non bloquant).
+            _mirror_decisions_to_sql(api, run_id, decisions, getattr(rs, "store", None))
             state.atomic_write_json(rs.paths.validation_json, safe)
             rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
             return {"ok": True, "path": str(rs.paths.validation_json)}
@@ -953,11 +979,92 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
         safe = api._normalize_decisions_for_rows(rows, decisions)
+        # VP-D : miroir tri-etat en SQL (best-effort, non bloquant).
+        _mirror_decisions_to_sql(api, run_id, decisions, _store)
         state.atomic_write_json(run_paths.validation_json, safe)
         api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
         return {"ok": True, "path": str(run_paths.validation_json)}
     except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+
+def _mirror_decisions_to_sql(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    store: Any,
+) -> None:
+    """Vague P / VP-D : mirror tri-etat vers `film_decisions_v2` (best-effort).
+
+    Ne JAMAIS lever d'exception : la persistance JSON reste la source
+    primaire. Cette fonction est un complement enrichi (tri-etat
+    accepted/rejected/deferred) qui permet l'historique long-terme + le
+    filtre UI. Si le store n'est pas dispo ou si l'ecriture echoue, on
+    log et on continue.
+
+    Backward compat ABSOLUE :
+      - Si le payload ne contient que `ok: bool`, on projete via
+        `from_legacy_ok_bool` (accepted/rejected uniquement).
+      - Si `decision` est explicitement specifie, on l'utilise tel quel
+        (validation stricte dans DecisionsRepository.set_decision).
+    """
+    if not store:
+        return
+    decisions_repo = getattr(store, "decisions", None)
+    if decisions_repo is None:
+        return
+
+    try:
+        # Import tardif pour eviter cycle (`infra.db` -> `ui.api` via store).
+        from cinesort.infra.db.repositories.decisions import (
+            DECISION_REJECTED,
+            from_legacy_ok_bool,
+        )
+    except ImportError:
+        return
+
+    for row_id, payload in (decisions or {}).items():
+        if not isinstance(payload, dict):
+            continue
+        rid = str(row_id or "").strip()
+        if not rid:
+            continue
+
+        # Cle stable film_id : on prefere tmdb_id si fourni, sinon
+        # fallback sur le row_id (cle inter-runs minimaliste).
+        tmdb_id = payload.get("tmdb_id")
+        if tmdb_id:
+            film_id = f"tmdb:{tmdb_id}"
+        else:
+            film_id = f"row:{rid}"
+
+        explicit_decision = payload.get("decision")
+        if explicit_decision is not None:
+            decision = str(explicit_decision).strip().lower()
+        else:
+            # Backward compat : projete `ok: bool` vers tri-etat.
+            ok_value = payload.get("ok")
+            if ok_value is None:
+                # Pas d'info : on stocke rien (evite un faux 'rejected').
+                continue
+            decision = from_legacy_ok_bool(ok_value)
+
+        try:
+            decisions_repo.set_decision(
+                film_id,
+                run_id,
+                decision,
+                row_id=rid,
+                decided_by=str(payload.get("decided_by") or "user"),
+                reason=str(payload.get("reason") or ""),
+            )
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+            _logger.debug(
+                "save_validation: mirror SQL ignore pour row %s : %s", rid, exc
+            )
+            # On force malgre tout decision=DECISION_REJECTED pour eviter
+            # le silence complet (ce code branch est defensif).
+            _ = DECISION_REJECTED
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:

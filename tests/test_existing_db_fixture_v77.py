@@ -212,6 +212,119 @@ class ExistingDbFixtureTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_v30_to_v31_real_migration_031(self):
+        """VP-D AC-1 : fixture v30 reelle + apply migration 031 reelle.
+
+        Verifie l'enchainement exact que VP-D suit en prod : DB v30
+        (post-VP-C field_locks) -> CREATE TABLE film_decisions_v2
+        + 2 CREATE INDEX. AUCUN ALTER TABLE.
+        Memo `feedback_sqlite_migration_test_existing_db` : migration
+        SQLite testee sur DB PRE-EXISTANTE (pas seulement fresh DB).
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(30)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 30, "Fixture doit etre v30")
+
+            tables_before = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertNotIn("film_decisions_v2", tables_before)
+            # AC-1 (VP-C) : film_field_locks deja la (chainage 030 -> 031 OK)
+            self.assertIn("film_field_locks", tables_before)
+            # AC-1 (VP-A) : apply_batch_modes deja la (chainage 029 -> 031 OK)
+            self.assertIn("apply_batch_modes", tables_before)
+            # Coexistence : film_tmdb_overrides toujours present
+            self.assertIn("film_tmdb_overrides", tables_before)
+
+            sql_path = _project_migrations_dir() / "031_tri_etat_decisions.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 031 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            # Ordre strict CREATE TABLE -> CREATE INDEX, pas d'ALTER
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX strict",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 031")
+
+            # Tous les CREATE doivent etre IF NOT EXISTS (idempotence)
+            cleaned_lines = []
+            for line in sql.splitlines():
+                idx = line.find("--")
+                if idx >= 0:
+                    line = line[:idx]
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).upper()
+            create_count = cleaned.count("CREATE TABLE") + cleaned.count("CREATE INDEX")
+            if_not_exists_count = cleaned.count("IF NOT EXISTS")
+            self.assertEqual(
+                create_count, if_not_exists_count,
+                "Tous les CREATE doivent etre IF NOT EXISTS (idempotence)",
+            )
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 31")
+            conn.commit()
+
+            tables_after = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertIn("film_decisions_v2", tables_after)
+            # Coexistence VP-A + VP-C + VP-D : toutes les tables presentes.
+            self.assertIn("film_field_locks", tables_after)
+            self.assertIn("apply_batch_modes", tables_after)
+            self.assertIn("film_tmdb_overrides", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 31)
+
+            # Verifier les 2 index (idx_film_decision, idx_run_decision)
+            indexes = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_decisions_v2'"
+                )
+            }
+            self.assertIn("idx_film_decisions_v2_film_decision", indexes)
+            self.assertIn("idx_film_decisions_v2_run_decision", indexes)
+
+            # CHECK contraint : seules 3 valeurs autorisees pour decision.
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    INSERT INTO film_decisions_v2(film_id, run_id, decision, decided_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    ("tmdb:1", "run-1", "garbage", 0.0),
+                )
+        finally:
+            conn.close()
+
+    def test_migration_031_idempotent(self):
+        """Rejouer 031 deux fois doit etre safe (IF NOT EXISTS)."""
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(30)
+        try:
+            sql = (_project_migrations_dir() / "031_tri_etat_decisions.sql").read_text(encoding="utf-8")
+            for _round in range(2):
+                for stmt in _split_sql_statements(sql):
+                    conn.execute(stmt)
+                conn.execute("PRAGMA user_version = 31")
+                conn.commit()
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 31)
+        finally:
+            conn.close()
+
     def test_migrations_dir_override(self):
         """On peut passer un dossier de migrations custom (tests isoles)."""
         from cinesort.infra.db.migration_manager import MigrationManager

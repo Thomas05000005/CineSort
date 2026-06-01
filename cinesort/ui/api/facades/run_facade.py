@@ -210,7 +210,20 @@ class RunFacade(_BaseFacade):
         )
 
     def save_validation(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Persiste les decisions de validation dans validation.json (atomique)."""
+        """Persiste les decisions de validation dans validation.json (atomique).
+
+        Vague P / VP-D : accepte AUSSI la nouvelle cle optionnelle
+        `decision: 'accepted'|'rejected'|'deferred'` en plus du legacy
+        `ok: bool`. La shape de retour reste `{ok: bool, path: str}`
+        — **backward compat ABSOLUE** (AC-2 ROADMAP_VAGUE_P).
+
+        Coordination Vague P :
+          - VP-A `apply_atomic` : aucun conflit kwargs (apply_atomic
+            transite par `apply()`, pas par `save_validation()`, AC-5).
+          - VP-C `field_locks` : la transition `deferred -> accepted`
+            consulte les locks via `DecisionsRepository
+            .upgrade_deferred_to_accepted` (AC-3).
+        """
         return self._api._save_validation_impl(run_id, decisions)
 
     def load_validation(self, run_id: str) -> Dict[str, Any]:

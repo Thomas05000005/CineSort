@@ -78,13 +78,20 @@ async function _loadRows(el) {
     _allRows = Array.isArray(planRes?.data?.rows) ? planRes.data.rows : [];
     _state.rows = _allRows;
 
-    // Restaurer les decisions existantes
+    // Restaurer les decisions existantes.
+    // Vague P / VP-D : tri-etat accepted/rejected/deferred. La cle SQL
+    // canonique est `decision` ; on conserve le legacy `ok: bool` pour
+    // les payloads pre-VP-D (backward compat ABSOLUE).
     _state.decisions = new Map();
     const saved = valRes?.data?.decisions || valRes?.data || {};
     if (typeof saved === "object" && !Array.isArray(saved)) {
       for (const [id, d] of Object.entries(saved)) {
         if (d && typeof d === "object") {
-          if (d.ok === true) _state.decisions.set(id, "approved");
+          const decision = String(d.decision || "").toLowerCase();
+          if (decision === "accepted") _state.decisions.set(id, "approved");
+          else if (decision === "rejected") _state.decisions.set(id, "rejected");
+          else if (decision === "deferred") _state.decisions.set(id, "deferred");
+          else if (d.ok === true) _state.decisions.set(id, "approved");
           else if (d.ok === false) _state.decisions.set(id, "rejected");
         }
       }
@@ -170,7 +177,7 @@ function _renderTable() {
     clickable: true,
   });
 
-  // Colorier les lignes
+  // Colorier les lignes (VP-D : tri-etat -> 3 classes).
   const tbody = el.querySelector("tbody");
   if (tbody) {
     const trs = tbody.querySelectorAll("tr");
@@ -178,9 +185,10 @@ function _renderTable() {
       const row = _filteredRows[i];
       if (!row) return;
       const dec = _state.decisions.get(String(row.row_id));
-      tr.classList.remove("row-approved", "row-rejected");
+      tr.classList.remove("row-approved", "row-rejected", "row-deferred");
       if (dec === "approved") tr.classList.add("row-approved");
       else if (dec === "rejected") tr.classList.add("row-rejected");
+      else if (dec === "deferred") tr.classList.add("row-deferred");
     });
   }
 
@@ -272,7 +280,11 @@ function _parseFlags(v) {
 
 function _toggleDecision(rowId, action) {
   const current = _state.decisions.get(rowId) || null;
-  const target = action === "approve" ? "approved" : "rejected";
+  // Vague P / VP-D : action 'defer' = etat 'deferred'.
+  let target;
+  if (action === "approve") target = "approved";
+  else if (action === "defer") target = "deferred";
+  else target = "rejected";
   _state.decisions.set(rowId, current === target ? null : target);
   _renderTable();
   _updateCounters();
@@ -291,15 +303,18 @@ function _toggleDecision(rowId, action) {
 function _updateCounters() {
   const el = $("libValCounters");
   if (!el) return;
-  let approved = 0, rejected = 0;
+  // Vague P / VP-D : 3 compteurs (accepted/rejected/deferred).
+  let approved = 0, rejected = 0, deferred = 0;
   for (const row of _allRows) {
     const dec = _state.decisions.get(String(row.row_id));
     if (dec === "approved") approved++;
     else if (dec === "rejected") rejected++;
+    else if (dec === "deferred") deferred++;
   }
   el.innerHTML = `
     <span>${_filteredRows.length} / ${_allRows.length} visibles</span>
-    <span class="badge badge-success">${approved} approuvé(s)</span>
+    <span class="badge badge-success">${approved} accepté(s)</span>
+    <span class="badge badge-warning">${deferred} reporté(s)</span>
     <span class="badge badge-danger">${rejected} rejeté(s)</span>`;
 }
 
@@ -310,12 +325,22 @@ export function buildDecisionsPayload() {
   for (const row of _allRows) {
     const id = String(row.row_id || "");
     const dec = _state.decisions.get(id) || null;
+    // Vague P / VP-D : emet `decision` (tri-etat) ET `ok` (legacy) pour
+    // backward compat ABSOLUE. Le backend lit `decision` en priorite (si
+    // present) et retombe sur `ok` sinon (helper `to_legacy_ok_bool`).
+    let decision;
+    if (dec === "approved") decision = "accepted";
+    else if (dec === "deferred") decision = "deferred";
+    else decision = "rejected";
     out[id] = {
       ok: dec === "approved",
+      decision: decision,
       title: String(row.proposed_title || "").trim(),
       year: parseInt(row.proposed_year || 0, 10) || 0,
       edited: false,
     };
+    // Echo film_id si dispo (cle stable VP-C/VP-D).
+    if (row.tmdb_id) out[id].tmdb_id = row.tmdb_id;
   }
   return out;
 }
@@ -327,8 +352,11 @@ function _approveCell(row) {
   const dec = _state.decisions.get(rid) || null;
   const aCls = dec === "approved" ? " active" : "";
   const rCls = dec === "rejected" ? " active" : "";
+  // Vague P / VP-D : 3eme bouton "Reporter" (deferred).
+  const dCls = dec === "deferred" ? " active" : "";
   return `<div class="review-actions-cell">
-    <button class="btn-review btn-approve${aCls}" data-action="approve" data-rid="${escapeHtml(rid)}" title="Approuver">✓</button>
+    <button class="btn-review btn-approve${aCls}" data-action="approve" data-rid="${escapeHtml(rid)}" title="Accepter">✓</button>
+    <button class="btn-review btn-defer${dCls}" data-action="defer" data-rid="${escapeHtml(rid)}" title="Reporter (decider plus tard)">⏸</button>
     <button class="btn-review btn-reject${rCls}" data-action="reject" data-rid="${escapeHtml(rid)}" title="Rejeter">✗</button>
   </div>`;
 }
@@ -796,7 +824,15 @@ function _hookValidationEvents() {
   // Bulk actions
   $("libBtnApproveAll")?.addEventListener("click", () => { _allRows.forEach(r => _state.decisions.set(String(r.row_id), "approved")); _renderTable(); _updateCounters(); });
   $("libBtnApproveSure")?.addEventListener("click", () => { _allRows.forEach(r => { if (Number(r.confidence || 0) >= _state.autoThreshold) _state.decisions.set(String(r.row_id), "approved"); }); _renderTable(); _updateCounters(); });
-  $("libBtnRejectAll")?.addEventListener("click", () => { _allRows.forEach(r => _state.decisions.set(String(r.row_id), "rejected")); _renderTable(); _updateCounters(); });
+  // Vague P / VP-D AC-4 : "Rejeter Tout" -> dangerConfirmModal avec
+  // countdown 3s SI > 50 items (memo feedback_cinesort_actions_dangereuses).
+  $("libBtnRejectAll")?.addEventListener("click", () => {
+    confirmBulkReject(_allRows, () => {
+      _allRows.forEach(r => _state.decisions.set(String(r.row_id), "rejected"));
+      _renderTable();
+      _updateCounters();
+    });
+  });
   $("libBtnResetDec")?.addEventListener("click", () => { _state.decisions = new Map(); _renderTable(); _updateCounters(); });
 
   // Sauvegarder
@@ -958,4 +994,71 @@ export function fieldLockToggleHtml(fieldName, isLocked) {
   const cls = isLocked ? "field-lock-toggle field-lock-toggle--locked" : "field-lock-toggle";
   const label = isLocked ? "Deverrouiller le champ" : "Verrouiller le champ";
   return `<button type="button" class="${cls}" data-field-lock="${escapeHtml(fieldName)}" title="${escapeHtml(label)}">${icon}</button>`;
+}
+
+/* =============================================================
+ * Vague P / VP-D : Decisions tri-etat & dangerConfirmModal Rejeter
+ * =============================================================
+ * AC-4 ROADMAP_VAGUE_P : "Rejeter Tout" doit declencher
+ * `dangerConfirmModal` avec countdown 3s SI plus de 50 items.
+ * Memo `feedback_cinesort_actions_dangereuses` : toute action UI
+ * destructive demande une modale dediee (jamais window.confirm).
+ */
+
+/**
+ * Confirme un rejet en masse via `dangerConfirmModal`. Si la liste
+ * contient plus de 50 elements, un countdown de 3s est applique sur
+ * le bouton "Rejeter" (memo actions dangereuses).
+ *
+ * @param {Array<object>} rows - rows visees par le rejet
+ * @param {Function} onConfirm - callback applique apres confirmation
+ */
+export function confirmBulkReject(rows, onConfirm) {
+  const count = Array.isArray(rows) ? rows.length : 0;
+  // AC-4 : countdown 3s si > 50 items.
+  const countdownSeconds = count > 50 ? 3 : 0;
+
+  // Items list : on prend les 5 premiers titres (la modale gere "+ N autres").
+  const items = (rows || []).slice(0, 50).map((r) => {
+    const t = String((r && (r.proposed_title || r.original_title || r.folder)) || "?");
+    const y = r && (r.proposed_year || r.year);
+    return y ? `${t} (${y})` : t;
+  });
+
+  const consequence = count > 50
+    ? `Vous etes sur le point de rejeter ${count} films d'un seul coup. Cette action peut etre annulee mais demande un re-traitement complet.`
+    : `Les ${count} films listes seront marques comme rejetes (non appliques au prochain Apply).`;
+
+  return dangerConfirmModal({
+    title: `Rejeter ${count} film${count > 1 ? "s" : ""} ?`,
+    items,
+    consequence,
+    countdownSeconds,
+    confirmLabel: "Rejeter",
+    cancelLabel: "Annuler",
+    onConfirm: async () => {
+      if (typeof onConfirm === "function") {
+        await onConfirm();
+      }
+    },
+  });
+}
+
+/**
+ * Filtre les rows par etat de decision tri-etat (VP-D).
+ *
+ * @param {string} state - 'accepted' | 'rejected' | 'deferred' | 'pending'
+ * @returns {Array<object>} rows correspondants
+ */
+export function filterByDecisionState(state) {
+  if (!_state || !Array.isArray(_allRows)) return [];
+  const want = String(state || "").toLowerCase();
+  return _allRows.filter((row) => {
+    const dec = _state.decisions.get(String(row.row_id)) || null;
+    if (want === "accepted") return dec === "approved";
+    if (want === "rejected") return dec === "rejected";
+    if (want === "deferred") return dec === "deferred";
+    if (want === "pending") return dec === null;
+    return false;
+  });
 }

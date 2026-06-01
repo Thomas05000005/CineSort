@@ -2121,7 +2121,13 @@ class CineSortApi:
         return history_support.load_validation(self, run_id, normalize_user_path=_normalize_user_path)
 
     def _save_validation_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Persiste les decisions de validation dans validation.json (atomique)."""
+        """Persiste les decisions de validation dans validation.json (atomique).
+
+        Vague P / VP-D : accepte aussi la cle optionnelle `decision`
+        (`accepted`/`rejected`/`deferred`) en complement du legacy
+        `ok: bool`. Backward compat ABSOLUE : shape retour `{ok, path}`
+        preservee (helper `to_legacy_ok_bool` dans decisions.py).
+        """
         return run_flow_support.save_validation(self, run_id, decisions)
 
     def _check_duplicates_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:

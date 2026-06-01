@@ -23,6 +23,7 @@ from .repositories import (
     RunRepository,
     ScanRepository,
 )
+from .repositories.decisions import DecisionsRepository
 from .repositories.field_locks import FieldLocksRepository
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
@@ -80,6 +81,10 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "apply_atomic": ("apply_batch_modes",),
     # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin-style.
     "field_locks": ("film_field_locks",),
+    # Vague P / VP-D (migration 031) : decisions tri-etat
+    # (accepted/rejected/deferred). Backward compat ABSOLUE preservee via
+    # helper `to_legacy_ok_bool` (cf cinesort/infra/db/repositories/decisions.py).
+    "tri_etat_decisions": ("film_decisions_v2",),
 }
 
 
@@ -672,3 +677,6 @@ class SQLiteStore(_StoreBase):
         self.film_modal = FilmModalRepository(self)
         # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin.
         self.field_locks = FieldLocksRepository(self)
+        # Vague P / VP-D (migration 031) : decisions tri-etat
+        # (accepted/rejected/deferred). Backward compat ABSOLUE.
+        self.decisions = DecisionsRepository(self)
