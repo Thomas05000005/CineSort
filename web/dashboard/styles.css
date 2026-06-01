@@ -752,10 +752,14 @@ body.is-background .login-wrap { animation-play-state: paused; }
   background: var(--lavender-soft); color: var(--lavender);
   border: 1px solid var(--lavender-border);
 }
-/* Audio badges */
+/* Audio badges — canoniques (QW02) + alias legacy retro-compat */
+.badge-audio-platinum,
 .badge-audio-premium { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold-border); }
+.badge-audio-gold,
 .badge-audio-bon { background: var(--success-soft); color: var(--success); border: 1px solid var(--success-border); }
+.badge-audio-silver,
 .badge-audio-standard { background: var(--accent-soft-15); color: var(--accent); border: 1px solid var(--accent-border-30); }
+.badge-audio-bronze,
 .badge-audio-basique { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-audio-lang { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--warning-border); }
 .badge-mkv-title { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--warning-border); }

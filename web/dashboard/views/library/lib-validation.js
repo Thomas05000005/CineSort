@@ -328,7 +328,7 @@ function _titleCell(v, row) {
   if (row.tmdb_collection_name) html += ` <span class="badge badge-saga" title="${escapeHtml(row.tmdb_collection_name)}">Saga</span>`;
   if (row.edition) html += ` <span class="badge badge-edition">${escapeHtml(row.edition)}</span>`;
   const aa = row.audio_analysis || {};
-  if (aa.badge_label) html += ` <span class="badge badge-audio-${aa.badge_tier || "basique"}">${escapeHtml(aa.badge_label)}</span>`;
+  if (aa.badge_label) html += ` <span class="badge badge-audio-${aa.badge_tier || "bronze"}">${escapeHtml(aa.badge_label)}</span>`;
   return html;
 }
 

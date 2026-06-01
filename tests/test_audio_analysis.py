@@ -53,48 +53,48 @@ class FormatTests(unittest.TestCase):
         """TrueHD + title contient 'Atmos' → Atmos."""
         r = analyze_audio([_track(codec="truehd", channels=8, title="TrueHD Atmos 7.1")])
         self.assertEqual(r["best_format"], "Atmos")
-        self.assertEqual(r["badge_tier"], "premium")
+        self.assertEqual(r["badge_tier"], "platinum")
 
     def test_truehd_without_atmos(self) -> None:
         """TrueHD sans Atmos dans le titre → TrueHD."""
         r = analyze_audio([_track(codec="truehd", channels=8)])
         self.assertEqual(r["best_format"], "TrueHD")
-        self.assertEqual(r["badge_tier"], "premium")
+        self.assertEqual(r["badge_tier"], "platinum")
 
     def test_dts_hd_ma(self) -> None:
         r = analyze_audio([_track(codec="dts-hd ma", channels=6)])
         self.assertEqual(r["best_format"], "DTS-HD MA")
-        self.assertEqual(r["badge_tier"], "bon")
+        self.assertEqual(r["badge_tier"], "gold")
 
     def test_eac3(self) -> None:
         r = analyze_audio([_track(codec="eac3", channels=6)])
         self.assertEqual(r["best_format"], "EAC3")
-        self.assertEqual(r["badge_tier"], "bon")
+        self.assertEqual(r["badge_tier"], "gold")
 
     def test_flac(self) -> None:
         r = analyze_audio([_track(codec="flac", channels=2)])
         self.assertEqual(r["best_format"], "FLAC")
-        self.assertEqual(r["badge_tier"], "bon")
+        self.assertEqual(r["badge_tier"], "gold")
 
     def test_dts(self) -> None:
         r = analyze_audio([_track(codec="dts", channels=6)])
         self.assertEqual(r["best_format"], "DTS")
-        self.assertEqual(r["badge_tier"], "standard")
+        self.assertEqual(r["badge_tier"], "silver")
 
     def test_ac3(self) -> None:
         r = analyze_audio([_track(codec="ac3", channels=6)])
         self.assertEqual(r["best_format"], "AC3")
-        self.assertEqual(r["badge_tier"], "standard")
+        self.assertEqual(r["badge_tier"], "silver")
 
     def test_aac(self) -> None:
         r = analyze_audio([_track(codec="aac", channels=2)])
         self.assertEqual(r["best_format"], "AAC")
-        self.assertEqual(r["badge_tier"], "basique")
+        self.assertEqual(r["badge_tier"], "bronze")
 
     def test_mp3(self) -> None:
         r = analyze_audio([_track(codec="mp3", channels=2)])
         self.assertEqual(r["best_format"], "MP3")
-        self.assertEqual(r["badge_tier"], "basique")
+        self.assertEqual(r["badge_tier"], "bronze")
 
     def test_best_format_from_multiple(self) -> None:
         """Plusieurs pistes → meilleur format selectionne."""
@@ -215,13 +215,13 @@ class BadgeTests(unittest.TestCase):
         r = analyze_audio([_track(codec="ac3", channels=6)])
         self.assertEqual(r["badge_label"], "AC3 5.1")
 
-    def test_badge_tier_premium(self) -> None:
+    def test_badge_tier_platinum(self) -> None:
         r = analyze_audio([_track(codec="truehd", channels=8)])
-        self.assertEqual(r["badge_tier"], "premium")
+        self.assertEqual(r["badge_tier"], "platinum")
 
-    def test_badge_tier_basique(self) -> None:
+    def test_badge_tier_bronze(self) -> None:
         r = analyze_audio([_track(codec="aac", channels=2)])
-        self.assertEqual(r["badge_tier"], "basique")
+        self.assertEqual(r["badge_tier"], "bronze")
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ class EdgeCaseTests(unittest.TestCase):
     def test_zero_tracks(self) -> None:
         r = analyze_audio([])
         self.assertEqual(r["best_format"], "Aucun")
-        self.assertEqual(r["badge_tier"], "basique")
+        self.assertEqual(r["badge_tier"], "bronze")
         self.assertEqual(r["tracks_count"], 0)
 
     def test_unknown_codec(self) -> None:
@@ -300,21 +300,21 @@ class UiBadgeTests(unittest.TestCase):
         self.assertIn("audio_analysis", self.review_js)
         self.assertIn("badge_label", self.review_js)
 
-    def test_desktop_css_audio_premium(self) -> None:
-        self.assertIn(".badge--audio-premium", self.app_css)
+    def test_desktop_css_audio_platinum(self) -> None:
+        self.assertIn(".badge--audio-platinum", self.app_css)
 
-    def test_desktop_css_audio_bon(self) -> None:
-        self.assertIn(".badge--audio-bon", self.app_css)
+    def test_desktop_css_audio_gold(self) -> None:
+        self.assertIn(".badge--audio-gold", self.app_css)
 
-    def test_desktop_css_audio_standard(self) -> None:
-        self.assertIn(".badge--audio-standard", self.app_css)
+    def test_desktop_css_audio_silver(self) -> None:
+        self.assertIn(".badge--audio-silver", self.app_css)
 
-    def test_desktop_css_audio_basique(self) -> None:
-        self.assertIn(".badge--audio-basique", self.app_css)
+    def test_desktop_css_audio_bronze(self) -> None:
+        self.assertIn(".badge--audio-bronze", self.app_css)
 
     def test_dashboard_css_audio(self) -> None:
-        self.assertIn("badge-audio-premium", self.dash_css)
-        self.assertIn("badge-audio-basique", self.dash_css)
+        self.assertIn("badge-audio-platinum", self.dash_css)
+        self.assertIn("badge-audio-bronze", self.dash_css)
 
 
 # ---------------------------------------------------------------------------

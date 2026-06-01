@@ -31,8 +31,9 @@ _CODEC_RANK: List[Tuple[str, int, str]] = [
     ("opus", 1, "Opus"),
 ]
 
-# Tier par rang
-_TIER_MAP = {6: "premium", 5: "premium", 4: "bon", 3: "bon", 2: "standard", 1: "basique", 0: "basique"}
+# Tier par rang — labels canoniques (compatibles badge.js / dashboard)
+# Atmos/TrueHD = platinum, DTS-HD MA/EAC3/FLAC = gold, DTS/AC3 = silver, AAC/MP3/inconnu = bronze
+_TIER_MAP = {6: "platinum", 5: "platinum", 4: "gold", 3: "gold", 2: "silver", 1: "bronze", 0: "bronze"}
 
 # Paires codec compat normales (codec_a + codec_b même langue = pas un doublon)
 _COMPAT_PAIRS = frozenset(
@@ -60,7 +61,7 @@ def analyze_audio(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
             "best_format": "Aucun",
             "best_channels": "—",
             "badge_label": "Aucun audio",
-            "badge_tier": "basique",
+            "badge_tier": "bronze",
             "tracks_count": 0,
             "has_commentary": False,
             "duplicate_tracks": [],
@@ -107,7 +108,7 @@ def analyze_audio(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
         "best_format": best_label,
         "best_channels": ch_label,
         "badge_label": f"{best_label} {ch_label}".strip(),
-        "badge_tier": _TIER_MAP.get(best_rank, "basique"),
+        "badge_tier": _TIER_MAP.get(best_rank, "bronze"),
         "tracks_count": len(audio_tracks),
         "has_commentary": has_commentary,
         "duplicate_tracks": duplicate_tracks,
