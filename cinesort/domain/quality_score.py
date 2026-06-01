@@ -56,6 +56,12 @@ def default_quality_profile() -> Dict[str, Any]:
             "include_metadata": False,
             "include_naming": False,
             "enable_4k_light": True,
+            # VN-F.2 : toggle ajoute explicitement aux profils 2026-06-01.
+            # Active la branche subtitle scoring (_score_extras) qui restait
+            # inatteignable. Defaut False pour preserver les scores existants ;
+            # un profil utilisateur (custom) peut le passer a True pour
+            # activer le bonus/penalty langues sous-titres.
+            "include_subtitles": False,
         },
         "video_thresholds": {
             "bitrate_min_kbps_2160p": 18000,
@@ -380,6 +386,9 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     toggles["include_metadata"] = _to_bool(toggles.get("include_metadata"), False)
     toggles["include_naming"] = _to_bool(toggles.get("include_naming"), False)
     toggles["enable_4k_light"] = _to_bool(toggles.get("enable_4k_light"), True)
+    # VN-F.2 : include_subtitles ajoute aux profils 2026-06-01 (defaut False
+    # pour preserver les scores existants ; activable via profil custom).
+    toggles["include_subtitles"] = _to_bool(toggles.get("include_subtitles"), False)
 
     vt = profile["video_thresholds"]
     for key in ("bitrate_min_kbps_2160p", "bitrate_min_kbps_1080p"):
