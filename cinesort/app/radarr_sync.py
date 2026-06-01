@@ -15,9 +15,12 @@ _OBSOLETE_CODECS = frozenset({"mpeg4", "xvid", "divx", "wmv", "mpeg2", "mpeg1"})
 # Score seuil pour proposer un upgrade
 _UPGRADE_SCORE_THRESHOLD = 54
 
-# Warnings d'encode que Radarr peut resoudre
-_UPGRADE_ENCODE_FLAGS = frozenset({"upscale_suspect", "reencode_degraded"})
-
+# Note (audit 2026-06-01 #490) : la constante `_UPGRADE_ENCODE_FLAGS = frozenset(
+# {"upscale_suspect", "reencode_degraded"})` declaree historiquement ici n'etait
+# jamais utilisee. La detection effective passe par un substring matching sur les
+# reasons humaines emises par quality_score (ex: "-25 Upscale suspect") car ces
+# strings sont en francais et ne contiennent pas les flags canoniques bruts. Pour
+# eviter une drift silencieuse on aligne le commentaire avec le code existant.
 
 from cinesort.app._fuzzy_utils import normalize_for_fuzzy
 from cinesort.app._path_utils import normalize_path as _normalize_path
@@ -166,7 +169,12 @@ def should_propose_upgrade(
     if codec in _OBSOLETE_CODECS:
         return True
 
-    # Verifier les flags d'encode du rapport
+    # Verifier les flags d'encode du rapport. Les reasons emises par
+    # quality_score sont des strings descriptives FR ("-25 Upscale suspect",
+    # "-15 Re-encode degrade") et non les flags canoniques raw, donc le match
+    # substring "upscale" / "reencode" est volontaire et permissif. Toute
+    # evolution du format reasons (passage a des flags canoniques bruts) devra
+    # synchroniser ce site avec encode_analysis._UPGRADE_ENCODE_FLAGS.
     reasons = quality_report.get("reasons") or []
     for reason in reasons:
         r = str(reason).lower()
