@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import tempfile
 import unittest
 from pathlib import Path
@@ -430,7 +429,10 @@ class CoreHeuristicsTests(unittest.TestCase):
             self.assertGreaterEqual(int(stats.analyse_ignores_extensions.get(".txt", 0)), 1)
             self.assertGreaterEqual(int(stats.analyse_ignores_extensions.get(".jpg", 0)), 1)
 
-    def test_stream_scan_targets_is_lazy_and_plan_results_stay_stable_on_large_tree(self) -> None:
+    def test_discover_candidate_folders_and_plan_results_stay_stable_on_large_tree(self) -> None:
+        # VN-F.3 (2026-06-01) : migration de stream_scan_targets supprime vers
+        # discover_candidate_folders (plan_library passe deja par cette API
+        # depuis Phase 6+).
         with tempfile.TemporaryDirectory(prefix="stream_large_tree_") as tmp:
             root = Path(tmp)
             for idx in range(60):
@@ -440,13 +442,8 @@ class CoreHeuristicsTests(unittest.TestCase):
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
             with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
-                stream = core_scan_helpers.stream_scan_targets(cfg, min_video_bytes=core.MIN_VIDEO_BYTES)
-                self.assertFalse(isinstance(stream, list))
-                first_batch = list(itertools.islice(stream, 5))
-                self.assertEqual(len(first_batch), 5)
-                remaining = list(stream)
-                all_targets = first_batch + remaining
-                self.assertEqual(len(all_targets), 60)
+                candidates = core_scan_helpers.discover_candidate_folders(cfg)
+                self.assertEqual(len(candidates), 60)
 
                 progress_calls = []
                 rows, stats = plan_support.plan_library(

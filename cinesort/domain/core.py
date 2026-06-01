@@ -40,7 +40,6 @@ import cinesort.domain.duplicate_support as core_duplicate_support
 from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
     iter_videos,
-    stream_scan_targets as _stream_scan_targets,
 )
 from cinesort.domain.title_helpers import (
     _expand_tmdb_queries,
@@ -67,7 +66,6 @@ if TYPE_CHECKING:
 
 _COMPAT_SCAN_EXPORTS = (
     _collect_non_video_extensions,
-    _stream_scan_targets,
     iter_videos,
 )
 

@@ -490,7 +490,8 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     ctx.log("INFO", "Scan folders: streaming")
 
     # BUG 1 : Phase 1 — decouverte rapide (< 2s sur NAS SMB). UN SEUL scandir par
-    # niveau au lieu de la recursion os.walk + iter_videos dans stream_scan_targets.
+    # niveau (VN-F.3 : l'ancien chemin os.walk via stream_scan_targets a ete
+    # supprime, plan_library passe exclusivement par discover_candidate_folders).
     _discover_t0 = time.monotonic()
     try:
         ctx.candidate_folders = discover_candidate_folders(ctx.cfg)

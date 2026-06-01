@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Set
+from typing import Any, Dict, List
 import contextlib
 
 logger = logging.getLogger(__name__)
@@ -296,81 +296,11 @@ def discover_candidate_folders(
     return candidates
 
 
-def stream_scan_targets(
-    cfg: Any,
-    *,
-    min_video_bytes: int,
-    stats: Any = None,
-) -> Iterator[Path]:
-    """Legacy : stream base sur os.walk. Conserve pour compat tests anciens.
-
-    BUG 1 : le nouveau code plan_library passe par discover_candidate_folders()
-    + iter_videos() en phase 2 pour eviter les round-trips NAS multiples.
-
-    SCAN-1 (zone L307-L310) : `os.walk` etait silencieux sur les echecs scandir.
-    On passe un `onerror` callback qui log + comptabilise chaque echec.
-    """
-    root_resolved = cfg.root.resolve()
-    seen_real_paths: Set[str] = set()
-
-    def _walk_onerror(exc: OSError) -> None:
-        path = getattr(exc, "filename", None) or "<inconnu>"
-        logger.warning("scan: os.walk scandir failed on %s: %s", path, exc)
-        _bump_stats_reject(stats, "ignore_scandir_error", path=str(path))
-
-    for current, dirnames, filenames in os.walk(
-        str(cfg.root), followlinks=False, onerror=_walk_onerror
-    ):
-        folder = Path(current)
-        try:
-            real_key = str(folder.resolve())
-        except (OSError, PermissionError, FileNotFoundError):
-            real_key = str(folder.absolute())
-        if real_key in seen_real_paths:
-            dirnames[:] = []
-            continue
-        seen_real_paths.add(real_key)
-
-        if folder.resolve() != root_resolved:
-            name_l = folder.name.lower()
-            if folder.name.startswith("_") or name_l == str(cfg.collection_root_name).lower():
-                dirnames[:] = []
-                continue
-
-        kept_dirs: List[str] = []
-        for dn in dirnames:
-            dn_l = dn.lower()
-            if dn.startswith("_"):
-                continue
-            if dn_l == str(cfg.collection_root_name).lower():
-                continue
-            kept_dirs.append(dn)
-        kept_dirs.sort(key=lambda name: name.lower())
-        dirnames[:] = kept_dirs
-
-        if folder.resolve() == root_resolved:
-            continue
-
-        videos = iter_videos(cfg, folder, min_video_bytes=min_video_bytes, stats=stats)
-        if videos:
-            if dirnames and all(_looks_like_nested_extra_video(v) for v in videos):
-                continue
-            yield folder
-            dirnames[:] = []
-            continue
-
-        has_files = bool(filenames)
-        has_subdirs = bool(dirnames)
-        if has_files and (not has_subdirs):
-            yield folder
-
-
-def iter_scan_targets(
-    cfg: Any, *, min_video_bytes: int, stats: Any = None
-) -> List[Path]:
-    return list(
-        stream_scan_targets(cfg, min_video_bytes=min_video_bytes, stats=stats)
-    )
+# VN-F.3 (2026-06-01) : `stream_scan_targets` (legacy os.walk streaming) et
+# `iter_scan_targets` (wrapper liste) supprimes — 81 LOC, 0 caller production.
+# Le code prod passe via `discover_candidate_folders` depuis Phase 6+. Les 2
+# tests historiques (test_scan_streaming, test_core_heuristics) ont ete migres
+# vers `discover_candidate_folders` qui couvre le meme contrat de decouverte.
 
 
 # =========================================================
