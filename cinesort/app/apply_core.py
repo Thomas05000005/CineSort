@@ -19,6 +19,7 @@ from cinesort.domain.naming import build_naming_context, format_movie_folder, fo
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from cinesort.app.apply_audit import ApplyAuditLogger
     from cinesort.domain.core import ApplyExecutionContext, ApplyResult, Config, PlanRow
 
 
@@ -978,6 +979,7 @@ def apply_rows(
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     should_pause: Optional[Callable[[], bool]] = None,
+    audit_logger: Optional["ApplyAuditLogger"] = None,
 ) -> "ApplyResult":
     """Execute the rename/move plan: process each approved row, handle merges, conflicts, quarantine, and cleanup.
 
@@ -989,6 +991,11 @@ def apply_rows(
     boucle principale `for row in rows`. La cancellation prevaut sur la pause.
     Si ni `should_cancel` ni `should_pause` n'est fourni, comportement legacy
     inchange (backward compat).
+
+    VN-E.4 : `audit_logger` (optionnel) recoit 4 events par row :
+    `row_decision` (debut), `op_skip` (skip detecte via delta res.skipped),
+    `op_conflict` (conflit detecte via delta sur compteurs de conflits),
+    `error` (exception attrapee). Backward compat : si None, comportement inchange.
     """
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
@@ -1155,6 +1162,32 @@ def apply_rows(
         if folder.parent == cfg.root:
             ctx.touched_top_level_dirs.add(folder)
 
+        # VN-E.4 : emit row_decision (UI accept/reject) - sortable par row_id.
+        if audit_logger is not None:
+            try:
+                _dec_reason = "user_approved" if ok else (
+                    "validation_absente" if row.row_id not in ctx.decision_keys else "user_rejected"
+                )
+                audit_logger.row_decision(
+                    row_id=str(row.row_id),
+                    ok=ok,
+                    title=new_title or None,
+                    year=int(new_year) if new_year else None,
+                    reason=_dec_reason,
+                )
+            except Exception:  # noqa: BLE001 - audit ne doit jamais casser l'apply
+                _logger.debug("apply: audit_logger.row_decision failed", exc_info=True)
+
+        # VN-E.4 : snapshot des compteurs de skip/conflict pour detecter les
+        # deltas post-row et emettre op_skip / op_conflict correspondants.
+        _audit_pre_skipped = int(res.skipped)
+        _audit_pre_skip_reasons = dict(res.skip_reasons) if audit_logger is not None else {}
+        _audit_pre_conflicts = (
+            int(res.conflicts_quarantined_count),
+            int(res.sidecar_conflicts_kept_both_count),
+            int(res.duplicates_identical_moved_count),
+        )
+
         # Wrap record_op to inject row_id for Undo v5 traceability.
         row_record_op = None
         if record_op is not None:
@@ -1290,6 +1323,16 @@ def apply_rows(
                 exc,
             )
             log("ERROR", err_msg)
+            # VN-E.4 : emit error event (PermissionError = Windows file lock)
+            if audit_logger is not None:
+                try:
+                    audit_logger.error(
+                        context="apply_row_permission_error",
+                        message=f"PermissionError: {exc}",
+                        row_id=str(getattr(row, "row_id", "") or ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    _logger.debug("apply: audit_logger.error failed", exc_info=True)
             continue
         except (FileNotFoundError, FileExistsError, OSError) as exc:
             # Sprint 2 audit P0 #5 : separer FS errors (attendues, log warning) des
@@ -1305,6 +1348,16 @@ def apply_rows(
                 exc,
             )
             log("ERROR", f"Erreur application ({row.row_id}) : {exc}")
+            # VN-E.4 : emit error event (FS error attendu)
+            if audit_logger is not None:
+                try:
+                    audit_logger.error(
+                        context="apply_row_fs_error",
+                        message=f"{type(exc).__name__}: {exc}",
+                        row_id=str(getattr(row, "row_id", "") or ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    _logger.debug("apply: audit_logger.error failed", exc_info=True)
         except (ValueError, TypeError) as exc:
             # State error : indique un bug (row malformee, decision incompatible).
             # On logge en error pour visibilite mais on n'arrete pas le batch :
@@ -1319,6 +1372,68 @@ def apply_rows(
                 exc_info=exc,
             )
             log("ERROR", f"Erreur application ({row.row_id}) : {exc}")
+            # VN-E.4 : emit error event (state error / bug logique)
+            if audit_logger is not None:
+                try:
+                    audit_logger.error(
+                        context="apply_row_state_error",
+                        message=f"{type(exc).__name__}: {exc}",
+                        row_id=str(getattr(row, "row_id", "") or ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    _logger.debug("apply: audit_logger.error failed", exc_info=True)
+
+        # VN-E.4 : detection post-row des skips / conflicts emis pendant le row.
+        # Compare counters pre/post pour identifier la raison dominante.
+        if audit_logger is not None:
+            try:
+                _audit_post_conflicts = (
+                    int(res.conflicts_quarantined_count),
+                    int(res.sidecar_conflicts_kept_both_count),
+                    int(res.duplicates_identical_moved_count),
+                )
+                _conflict_delta = tuple(
+                    _audit_post_conflicts[i] - _audit_pre_conflicts[i] for i in range(3)
+                )
+                if _conflict_delta[0] > 0:
+                    audit_logger.conflict(
+                        row_id=str(row.row_id),
+                        src=str(folder),
+                        dst="",
+                        conflict_type="file_conflict",
+                        resolution="moved_to_review_conflicts",
+                    )
+                if _conflict_delta[1] > 0:
+                    audit_logger.conflict(
+                        row_id=str(row.row_id),
+                        src=str(folder),
+                        dst="",
+                        conflict_type="sidecar_conflict",
+                        resolution="kept_both",
+                    )
+                if _conflict_delta[2] > 0:
+                    audit_logger.conflict(
+                        row_id=str(row.row_id),
+                        src=str(folder),
+                        dst="",
+                        conflict_type="duplicate_identical",
+                        resolution="moved_to_duplicates_identical",
+                    )
+                # op_skip : emission au niveau row (delta skip_reasons)
+                if int(res.skipped) > int(_audit_pre_skipped):
+                    _new_reasons = {
+                        k: int(res.skip_reasons.get(k, 0)) - int(_audit_pre_skip_reasons.get(k, 0))
+                        for k in res.skip_reasons.keys()
+                    }
+                    _new_reasons = {k: v for k, v in _new_reasons.items() if v > 0}
+                    for _reason, _count in _new_reasons.items():
+                        audit_logger.skip(
+                            row_id=str(row.row_id),
+                            reason=str(_reason),
+                            detail=f"count={_count}",
+                        )
+            except Exception:  # noqa: BLE001
+                _logger.debug("apply: audit post-row delta emit failed", exc_info=True)
 
     cleanup_preview = preview_cleanup_residual_folders(cfg, ctx.touched_top_level_dirs)
     _move_residual_top_level_dirs(

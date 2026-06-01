@@ -1323,6 +1323,7 @@ def _execute_apply(
             record_op=record_op_for_apply,
             duplicate_loser_row_ids=duplicate_losers if duplicate_losers else None,
             progress_cb=progress_cb,
+            audit_logger=auditor,
         )
 
         if result is None:
