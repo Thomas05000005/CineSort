@@ -204,8 +204,20 @@ class RenameProposal:
     reasons: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialisation API-friendly (roundtrip via from_dict)."""
-        return asdict(self)
+        """Serialisation API-friendly (roundtrip via from_dict).
+
+        VO-D-2 : normalise op_type en str pur (au cas ou un appelant a fourni
+        OpType.RENAME directement) pour preserver l'invariant json-safe.
+        StrEnum IS str donc la coercion est cosmetique mais elle aligne le
+        type runtime sur l'annotation declaree (str).
+        """
+        d = asdict(self)
+        # Normalise OpType -> str pur (json-safe). StrEnum.__str__ retourne
+        # la valeur (ex: "RENAME"), pas "OpType.RENAME", grace a StrEnum.
+        op = d.get("op_type")
+        if isinstance(op, OpType):
+            d["op_type"] = str(op)
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RenameProposal":

@@ -20,6 +20,7 @@ from cinesort.domain.probe_models import (
     OP_TYPE_NOOP,
     OP_TYPE_RENAME,
     NormalizedProbe,
+    OpType,
     ProbeResult,
     ProbeSources,
     RenameProposal,
@@ -99,11 +100,15 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/in/foo.mkv",
             target_path="/out/Foo (2024).mkv",
-            op_type=OP_TYPE_RENAME,
+            op_type=OpType.RENAME,
         )
         self.assertEqual(p.src_path, "/in/foo.mkv")
         # VN-F.4 : op_type canonique UPPERCASE aligne sur le contrat journal/apply.
+        # VO-D-2 : StrEnum equality preserve la comparaison avec la string brute.
         self.assertEqual(p.op_type, "RENAME")
+        self.assertEqual(p.op_type, OpType.RENAME)
+        # Backward compat alias OP_TYPE_RENAME == OpType.RENAME.value.
+        self.assertEqual(p.op_type, OP_TYPE_RENAME)
         self.assertFalse(p.no_op)
         self.assertEqual(p.reason, "")
         self.assertIsNone(p.confidence)
@@ -115,7 +120,7 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/in/movie.mkv",
             target_path="/out/Movie (2024) [tt12345].mkv",
-            op_type=OP_TYPE_MOVE,
+            op_type=OpType.MOVE,
             no_op=False,
             reason="title+year+imdb match",
             confidence=0.92,
@@ -131,7 +136,8 @@ class RenameProposalTests(unittest.TestCase):
         data = {
             "src_path": "/a",
             "target_path": "/b",
-            "op_type": OP_TYPE_RENAME,
+            # VO-D-2 : OpType.RENAME serialise comme str (StrEnum) -> from_dict OK.
+            "op_type": OpType.RENAME,
             "internal_debug_field": "should-be-ignored",
             "future_field_v8": 42,
         }
@@ -142,7 +148,7 @@ class RenameProposalTests(unittest.TestCase):
 
     def test_from_dict_uses_defaults_for_missing_fields(self) -> None:
         p = RenameProposal.from_dict(
-            {"src_path": "/a", "target_path": "/a", "op_type": OP_TYPE_NOOP, "no_op": True}
+            {"src_path": "/a", "target_path": "/a", "op_type": OpType.NOOP, "no_op": True}
         )
         self.assertTrue(p.no_op)
         self.assertEqual(p.reasons, [])
@@ -152,7 +158,7 @@ class RenameProposalTests(unittest.TestCase):
         p = RenameProposal(
             src_path="/a",
             target_path="/b",
-            op_type=OP_TYPE_RENAME,
+            op_type=OpType.RENAME,
             confidence=0.5,
         )
         d = p.to_dict()
@@ -273,6 +279,11 @@ class ProbeModelsExportsTests(unittest.TestCase):
         self.assertIn("OP_TYPE_MOVE", probe_models.__all__)
         self.assertIn("OP_TYPE_NOOP", probe_models.__all__)
         self.assertIn("OP_TYPE_VALUES", probe_models.__all__)
+        # VO-D-2 : OpType StrEnum expose en single source of truth.
+        self.assertIn("OpType", probe_models.__all__)
+        self.assertEqual(probe_models.OpType.RENAME, "RENAME")
+        self.assertEqual(probe_models.OpType.MOVE, probe_models.OP_TYPE_MOVE)
+        self.assertEqual(probe_models.OpType.NOOP, probe_models.OP_TYPE_NOOP)
 
 
 if __name__ == "__main__":
