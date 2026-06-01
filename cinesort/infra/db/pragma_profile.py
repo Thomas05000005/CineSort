@@ -29,12 +29,19 @@ Override explicite via `connect_sqlite(db_path, profile='nas_smb')` ou
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Dict, Mapping, Optional
 
 logger = logging.getLogger(__name__)
+
+# Sources valides pour pragma_history.source (migration 028). On reste laxiste
+# (TEXT libre cote schema) mais on documente les valeurs canoniques pour que
+# les callers et les requetes de debug puissent compter dessus.
+_VALID_PRAGMA_HISTORY_SOURCES = ("auto", "manual_settings", "env_override")
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +181,97 @@ def get_pragma_snapshot(conn: sqlite3.Connection) -> Dict[str, object]:
     return snapshot
 
 
-def apply_pragmas(conn: sqlite3.Connection, profile_name: str) -> Dict[str, object]:
+def _record_pragma_history(
+    conn: sqlite3.Connection,
+    *,
+    profile_name: str,
+    db_path: Optional[str],
+    storage_type_detected: Optional[str],
+    pragmas_snapshot: Mapping[str, object],
+    source: str,
+) -> None:
+    """Insere une ligne dans `pragma_history` (migration 028).
+
+    Tolerant : si la table n'existe pas (DB pre-migration 028, DB de test
+    vierge, migration partielle), on log en DEBUG et on n'echoue PAS. Le
+    but est l'observabilite/audit -- jamais bloquer une connexion legitime.
+
+    `pragmas_snapshot` est serialise en JSON (sort_keys=True pour
+    deterministe). `source` est libre cote schema mais on documente les
+    valeurs canoniques via `_VALID_PRAGMA_HISTORY_SOURCES`.
+    """
+    try:
+        payload = json.dumps(dict(pragmas_snapshot), sort_keys=True, default=str)
+    except (TypeError, ValueError) as exc:
+        logger.debug("_record_pragma_history: serialize snapshot a echoue (%s)", exc)
+        payload = "{}"
+
+    # IMPORTANT (Vague O / VO-A migration 028) : on COMMIT explicitement apres
+    # l'INSERT. apply_pragmas() est appelee depuis connect_sqlite() au tout
+    # debut du cycle de vie d'une connexion, AVANT que MigrationManager.apply()
+    # ne pose son propre BEGIN. Sans commit ici, l'INSERT ouvre une transaction
+    # implicite (isolation_level=DEFERRED) et le BEGIN du manager echoue avec
+    # "cannot start a transaction within a transaction" (cf. test_migration_chain
+    # test_idempotent_alter_table_tolerated).
+    #
+    # C'est conceptuellement correct : pragma_history est une table d'audit
+    # log pure, elle n'est jamais liee a une transaction metier.
+    try:
+        conn.execute(
+            "INSERT INTO pragma_history "
+            "(applied_at, profile_name, db_path, storage_type_detected, pragmas_json, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                int(time.time()),
+                str(profile_name),
+                str(db_path) if db_path is not None else "",
+                storage_type_detected,
+                payload,
+                str(source),
+            ),
+        )
+        # COMMIT immediat : libere la transaction implicite ouverte par INSERT.
+        # En cas d'echec ici, on ROLLBACK pour ne pas laisser de pending tx
+        # (un connect_sqlite suivi d'un BEGIN doit toujours fonctionner).
+        try:
+            conn.commit()
+        except sqlite3.Error as commit_exc:
+            logger.debug(
+                "_record_pragma_history: commit a echoue (%s) -- rollback",
+                commit_exc,
+            )
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+    except sqlite3.OperationalError as exc:
+        # Cas attendu : table absente (migration 028 pas encore appliquee).
+        # On log en DEBUG car ce n'est pas une erreur fonctionnelle.
+        logger.debug(
+            "_record_pragma_history: insertion ignoree (%s) -- table absente ?",
+            exc,
+        )
+        # Aucun INSERT n'a abouti -> pas de transaction implicite a fermer.
+    except sqlite3.Error as exc:
+        logger.warning(
+            "_record_pragma_history: insertion a echoue (%s) -- audit perdu",
+            exc,
+        )
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+
+
+def apply_pragmas(
+    conn: sqlite3.Connection,
+    profile_name: str,
+    *,
+    db_path: Optional[str] = None,
+    storage_type_detected: Optional[str] = None,
+    source: str = "auto",
+    record_history: bool = True,
+) -> Dict[str, object]:
     """Applique le profil PRAGMA `profile_name` a la connexion `conn`.
 
     Chaque PRAGMA est applique dans son propre try/except : un PRAGMA non
@@ -187,6 +284,11 @@ def apply_pragmas(conn: sqlite3.Connection, profile_name: str) -> Dict[str, obje
     Note importante : `foreign_keys` et `temp_store` ne font PAS partie des
     profils -- ce sont des invariants applicatifs (FK toujours ON, temp en
     memoire) appliques separement par `connect_sqlite`.
+
+    VO-A migration 028 : si `record_history=True` et que la table
+    `pragma_history` existe, une ligne d'audit est inseree apres readback.
+    Backward compat : tous les nouveaux kwargs ont un defaut, l'appel
+    `apply_pragmas(conn, profile_name)` continue de marcher inchange.
     """
     profile = PROFILES.get(profile_name)
     if profile is None:
@@ -214,6 +316,17 @@ def apply_pragmas(conn: sqlite3.Connection, profile_name: str) -> Dict[str, obje
         profile_name,
         snapshot,
     )
+
+    if record_history:
+        _record_pragma_history(
+            conn,
+            profile_name=profile_name,
+            db_path=db_path,
+            storage_type_detected=storage_type_detected,
+            pragmas_snapshot=snapshot,
+            source=source,
+        )
+
     return snapshot
 
 
@@ -260,4 +373,5 @@ __all__ = [
     "get_pragma_snapshot",
     "is_unc_path",
     "resolve_profile",
+    "_record_pragma_history",
 ]

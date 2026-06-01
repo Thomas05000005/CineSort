@@ -47,6 +47,7 @@ def connect_sqlite(
     # Import local pour eviter un cycle a froid au moment de l'import du module.
     from .pragma_profile import (
         apply_pragmas,
+        detect_storage_type,
         is_unc_path,
         resolve_profile,
     )
@@ -54,6 +55,15 @@ def connect_sqlite(
     # Resoudre le profil AVANT d'ouvrir la connexion : si le caller passe
     # un nom invalide on doit lever sans laisser de fichier sqlite vide.
     resolved_profile = resolve_profile(db_path, explicit_profile=profile)
+    # storage_type_detected loggee dans pragma_history (audit / debug NAS) :
+    # on capture la detection brute meme si le caller a override le profil,
+    # pour pouvoir comparer "auto eut choisi X" vs "manual a choisi Y" en
+    # post-mortem.
+    try:
+        storage_type_detected = detect_storage_type(db_path)
+    except Exception:  # noqa: BLE001 -- detection ne doit JAMAIS bloquer
+        storage_type_detected = None
+    history_source = "manual_settings" if profile is not None else "auto"
 
     conn = sqlite3.connect(
         str(db_path),
@@ -85,7 +95,13 @@ def connect_sqlite(
                 db_path,
                 resolved_profile,
             )
-        apply_pragmas(conn, resolved_profile)
+        apply_pragmas(
+            conn,
+            resolved_profile,
+            db_path=str(db_path),
+            storage_type_detected=storage_type_detected,
+            source=history_source,
+        )
 
         # 3. Backward compat busy_timeout : si le caller a fourni une valeur
         #    explicite differente du default, elle re-override le PRAGMA pose
