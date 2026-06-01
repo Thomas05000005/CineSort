@@ -230,9 +230,15 @@ def normalize_probe_backend(value: Any, *, default_backend: str = "auto") -> str
 
 
 # V4-05 (Polish Total v7.7.0) : valeurs autorisees pour `composite_score_version`.
-# Tout autre input retombe sur 1 (V1 reste defaut, decision non negociable).
+# VN-B.1 (Vague N batch 2) : V2 devient la source de verite unique.
+# - Defaut bascule de 1 -> 2 : nouveau scoring expose le vocabulaire
+#   Platinum/Gold/Silver/Bronze/Reject de v7.5.0.
+# - V1 reste accepte uniquement comme kill-switch de rollback explicite
+#   (settings.composite_score_version=1) pour les utilisateurs qui voudraient
+#   l'ancien vocabulaire reference/excellent/bon/mediocre/degrade le temps
+#   d'un re-scan. Tout autre input invalide retombe sur le defaut (V2).
 COMPOSITE_SCORE_VERSIONS: Tuple[int, ...] = (1, 2)
-DEFAULT_COMPOSITE_SCORE_VERSION: int = 1
+DEFAULT_COMPOSITE_SCORE_VERSION: int = 2
 
 # V6-01 Polish Total v7.7.0 (R4-I18N-4) : locales supportees pour le setting
 # `locale`. Source unique de verite cote backend (la liste cote frontend est
@@ -262,11 +268,15 @@ def _normalize_locale(value: Any) -> str:
 
 
 def _normalize_composite_score_version(value: Any) -> int:
-    """Clamp `composite_score_version` a {1, 2}, fallback 1 si invalide.
+    """Clamp `composite_score_version` a {1, 2}, fallback V2 si invalide.
+
+    VN-B.1 : depuis Vague N batch 2, V2 est la source de verite par defaut.
+    V1 reste accepte comme kill-switch de rollback explicite (vocabulaire
+    legacy reference/excellent/bon/mediocre/degrade).
 
     Accepte int ou string ("1"/"2"/"v1"/"v2") pour tolerer les payloads UI
     et les anciennes configs deja persistees. Toute autre valeur (None, 3,
-    "abc", float NaN, ...) retombe sur le defaut 1.
+    "abc", float NaN, ...) retombe sur le defaut V2.
     """
     if value is None:
         return DEFAULT_COMPOSITE_SCORE_VERSION
@@ -821,7 +831,10 @@ def apply_settings_defaults(
     # V6-01 (R4-I18N-4) : locale clamp via _normalize_locale a {"fr", "en"}, defaut "fr"
     payload["locale"] = _normalize_locale(payload.get("locale"))
 
-    # V4-05 (R4-PERC-7 / H16) : composite_score_version normalise (V1 par defaut)
+    # V4-05 (R4-PERC-7 / H16) : composite_score_version normalise.
+    # VN-B.1 (Vague N batch 2) : V2 par defaut. Les configs existantes sans
+    # champ explicite migrent silencieusement vers V2 (lecture unique de
+    # source de verite, plus de vocabulaire mixte reference/platinum cote UI).
     payload["composite_score_version"] = _normalize_composite_score_version(payload.get("composite_score_version"))
 
     # V3-04 (R4-LOG-3) : log_level normalise (DEBUG/INFO/WARNING/ERROR/CRITICAL)

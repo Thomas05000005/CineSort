@@ -1,4 +1,21 @@
-"""Score perceptuel composite + verdicts croises inter-metriques."""
+"""Score perceptuel composite V1 + verdicts croises inter-metriques.
+
+[DEPRECATED depuis VN-B.1 / Vague N batch 2]
+
+V1 reste presente pour 2 raisons :
+1. Kill-switch de rollback : `settings.composite_score_version=1` permet
+   de retomber sur le vocabulaire historique reference/excellent/bon/
+   mediocre/degrade le temps d'un re-scan, sans perdre les colonnes
+   `global_score`/`global_tier` deja stockees en BDD.
+2. Backward compat lecture : les anciennes rows scannees avant le batch 2
+   ont `global_score` / `global_tier` en vocabulaire V1, le frontend reste
+   capable de les afficher tant qu'un re-scan n'a pas migre.
+
+Par defaut, V2 (`composite_score_v2.py`) est desormais la source de verite
+unique pour les nouveaux scores (vocabulaire Platinum / Gold / Silver /
+Bronze / Reject). Ne pas ajouter de nouvelle logique ici sans repliquer
+en V2 -- privilegier directement V2.
+"""
 
 from __future__ import annotations
 

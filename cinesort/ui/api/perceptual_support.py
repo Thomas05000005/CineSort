@@ -459,18 +459,28 @@ def _execute_perceptual_analysis(
         result_dict["global_score_v2"] = gv2_payload
 
     # V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : dispatch V1/V2.
-    # - Defaut (`composite_score_version=1`) : on conserve le score V1 historique
-    #   comme `global_score`/`global_tier`, V2 reste accessible via la cle
-    #   `global_score_v2` (et en BDD).
-    # - Toggle V2 (`composite_score_version=2`) : on promeut V2 en score
-    #   principal pour ce payload (`global_score`, `global_tier`, marqueur
-    #   `composite_score_version=2`). Si le calcul V2 a echoue, fallback
-    #   silencieux vers V1 (jamais de KeyError pour l'UI).
-    result_dict["composite_score_version"] = 1
-    if p_settings.get("composite_score_version") == 2 and gv2_payload is not None and gv2_score is not None:
-        result_dict["global_score"] = int(round(float(gv2_score)))
-        result_dict["global_tier"] = str(gv2_tier or result_dict.get("global_tier") or "")
-        result_dict["composite_score_version"] = 2
+    # VN-B.1 (Vague N batch 2) : V2 est desormais la source de verite unique
+    # pour `global_score`/`global_tier` (vocabulaire Platinum/Gold/Silver/...
+    # Bronze/Reject). V1 reste un kill-switch de rollback explicite
+    # (composite_score_version=1) qui expose le vocabulaire historique
+    # reference/excellent/bon/mediocre/degrade. Avant VN-B.1 les 2 vocabulaires
+    # cohabitaient cote UI selon l'endroit consomme (audit Vague N).
+    # - Defaut (`composite_score_version=2`) : on promeut V2 comme score
+    #   principal. Si le calcul V2 a echoue, fallback silencieux vers V1
+    #   (jamais de KeyError pour l'UI).
+    # - Kill-switch (`composite_score_version=1`) : conserve les valeurs V1
+    #   historiques exposees par build_perceptual_result.
+    score_version = int(p_settings.get("composite_score_version") or 2)
+    result_dict["composite_score_version"] = score_version
+    if score_version == 2:
+        if gv2_payload is not None and gv2_score is not None:
+            result_dict["global_score"] = int(round(float(gv2_score)))
+            result_dict["global_tier"] = str(gv2_tier or result_dict.get("global_tier") or "")
+        else:
+            # Fallback silencieux : V2 indisponible, on conserve V1 mais on
+            # annonce explicitement la version effectivement exposee pour que
+            # l'UI ne mixe pas 2 vocabulaires inconsciemment.
+            result_dict["composite_score_version"] = 1
     return {"ok": True, "cache_hit": False, "perceptual": result_dict}
 
 
@@ -1280,14 +1290,18 @@ def enrich_quality_report_with_perceptual(
     row_id: str,
     result: Dict[str, Any],
     *,
-    composite_score_version: int = 1,
+    composite_score_version: int = 2,
 ) -> None:
     """Enrichit un rapport qualite technique avec les donnees perceptuelles si disponibles.
 
     V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : si `composite_score_version=2`,
     on substitue le score/tier global par la version V2 (stockee en BDD via
     migration 018). Fallback silencieux sur V1 si V2 indisponible (legacy row
-    sans calcul V2, ou setting V2 active mais cache V1 historique).
+    sans calcul V2, ou kill-switch V1 active).
+
+    VN-B.1 (Vague N batch 2) : V2 est desormais le defaut explicite. Les
+    appels legacy sans kwarg recoivent automatiquement le vocabulaire
+    Platinum/Gold/Silver/Bronze/Reject, supprimant le mix v1/v2 cote UI.
     """
     try:
         perc = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)

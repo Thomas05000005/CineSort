@@ -1,14 +1,17 @@
 """§16 v7.5.0 — Score composite V2 (Platinum/Gold/Silver/Bronze/Reject).
 
-Remplace progressivement `composite_score.py` v1. Agrege toutes les metriques
-des sections §3-§15 en :
+VN-B.1 (Vague N batch 2) : V2 est desormais la source de verite UNIQUE
+pour `global_score` / `global_tier` cote UI (defaut
+`composite_score_version=2`). Agrege toutes les metriques des sections
+§3-§15 en :
     - 3 categories ponderees (Video 60% / Audio 35% / Coherence 5%)
     - 9 regles d'ajustement contextuel
     - confidence-weighted scoring
     - warnings auto-collectes
 
-Coexiste avec la v1 (composite_score.py reste le comportement par defaut pour
-les rows historiques). La v2 est stockee separement en BDD.
+`composite_score.py` (V1) survit en kill-switch de rollback explicite et
+pour la lecture de rows historiques (vocabulaire reference/excellent/...
+bon/mediocre/degrade), mais n'est plus la voie nominale.
 """
 
 from __future__ import annotations
