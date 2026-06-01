@@ -281,7 +281,8 @@ a:hover { text-decoration: underline; }
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - var(--sp-7));
-  z-index: 150;
+  /* Fix VN-A.2 : z-index token unifie (banner system au niveau top-bar). */
+  z-index: var(--z-top-bar, 150);
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -602,7 +603,8 @@ body.is-background .login-wrap { animation-play-state: paused; }
 /* --- Utility ----------------------------------------------- */
 /* --- Modal ------------------------------------------------- */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 1000;
+  /* Fix VN-A.2 : z-index token unifie. */
+  position: fixed; inset: 0; z-index: var(--z-modal, 1000);
   background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: var(--sp-4);
@@ -1189,7 +1191,8 @@ body.is-background .skeleton { animation-play-state: paused; }
 #toast-container {
   position: fixed; bottom: 24px; right: 24px;
   display: flex; flex-direction: column-reverse; gap: 10px;
-  z-index: 10000; pointer-events: none;
+  /* Fix VN-A.2 : z-index token unifie (cf shared/tokens.css). */
+  z-index: var(--z-toast, 10000); pointer-events: none;
 }
 .toast {
   display: flex; align-items: center; gap: 12px;
@@ -1204,12 +1207,20 @@ body.is-background .skeleton { animation-play-state: paused; }
   color: var(--text-primary); font-size: 0.9rem; pointer-events: auto;
   animation: toast-in 220ms cubic-bezier(.16,.84,.32,1);
 }
-.toast--success { border-left-color: var(--success, #34D399); }
-.toast--success .toast__icon { color: var(--success, #34D399); }
-.toast--error { border-left-color: var(--danger, #F87171); }
-.toast--error .toast__icon { color: var(--danger, #F87171); }
-.toast--warn { border-left-color: var(--warning, #FBBF24); }
-.toast--warn .toast__icon { color: var(--warning, #FBBF24); }
+.toast--success { border-left-color: var(--sev-success-solid, var(--success, #34D399)); }
+.toast--success .toast__icon { color: var(--sev-success-solid, var(--success, #34D399)); }
+.toast--error { border-left-color: var(--sev-danger-solid, var(--danger, #F87171)); }
+.toast--error .toast__icon { color: var(--sev-danger-solid, var(--danger, #F87171)); }
+/* Fix VN-A.2 (Vague N batch 1) : ajout du selecteur .toast--warning manquant.
+   Le code toast.js normalise "warn" -> "warning" (cf _normalizeType) et emet
+   `toast--warning` sur le node, mais seul `.toast--warn` etait stylise.
+   Resultat : les toasts warning n'avaient pas de border-left jaune. On garde
+   `.toast--warn` en alias retro-compat (selecteur groupe). Tokens reutilises :
+   --sev-warning-solid (contraste WCAG AA sur fond glass sombre). */
+.toast--warning,
+.toast--warn { border-left-color: var(--sev-warning-solid, var(--warning, #FBBF24)); }
+.toast--warning .toast__icon,
+.toast--warn .toast__icon { color: var(--sev-warning-solid, var(--warning, #FBBF24)); }
 .toast--info .toast__icon { color: var(--accent, #60A5FA); }
 .toast__icon { display: flex; flex-shrink: 0; }
 .toast__text { flex: 1; }
@@ -1805,7 +1816,8 @@ a:focus-visible,
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 10vh;
-  z-index: 10001;
+  /* Fix VN-A.2 : z-index token unifie (palette > toast > modal). */
+  z-index: var(--z-palette, 10001);
   animation: cmd-fade-in 140ms ease-out;
 }
 .cmd-palette-overlay.hidden { display: none; }
@@ -1883,7 +1895,8 @@ kbd {
   /* background/backdrop-filter/border-bottom/box-shadow : definis dans themes.css V6 */
   position: sticky;
   top: 0;
-  z-index: 100;
+  /* Fix VN-A.2 : z-index token unifie. */
+  z-index: var(--z-top-bar, 300);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2104,7 +2117,8 @@ body.expert-mode-off [data-advanced="true"] {
   outline-offset: 2px;
 }
 .glossary-popover {
-  z-index: 9999;
+  /* Fix VN-A.2 : z-index token unifie (tooltip-level). */
+  z-index: var(--z-tooltip, 9999);
   background: var(--bg-overlay);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-md);
@@ -2131,7 +2145,8 @@ body.expert-mode-off [data-advanced="true"] {
   position: fixed;
   inset: 0;
   background: rgba(6, 9, 15, 0.88);
-  z-index: 99999;
+  /* Fix VN-A.2 : z-index token unifie (au-dessus de toast/palette). */
+  z-index: var(--z-tooltip, 99999);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2187,7 +2202,8 @@ body.expert-mode-off [data-advanced="true"] {
   gap: var(--sp-3);
   font-size: var(--fs-sm);
   font-weight: 500;
-  z-index: 9000;
+  /* Fix VN-A.2 : z-index token unifie (banner sticky, niveau top-bar). */
+  z-index: var(--z-top-bar, 300);
   position: sticky;
   top: 0;
   flex-wrap: wrap;
@@ -2372,7 +2388,8 @@ body.demo-mode-active .topbar { top: 36px; }
   font-size: 1.25rem;
   font-weight: 700;
   cursor: pointer;
-  z-index: 100;
+  /* Fix VN-A.2 : z-index token unifie (FAB ancre, niveau sidebar). */
+  z-index: var(--z-sidebar, 200);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   display: inline-flex;
   align-items: center;
