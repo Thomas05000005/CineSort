@@ -73,7 +73,11 @@ export function showModal(opts) {
   if (actions.length > 0) {
     actionsHtml = '<div class="modal-actions">';
     actions.forEach((a, i) => {
-      actionsHtml += `<button class="btn ${a.cls || ""}" data-modal-action="${i}">${escapeHtml(a.label)}</button>`;
+      // VN-A.3 : escape la classe cote callsite aussi (defense en profondeur
+      // au cas ou un caller passe une cls construite a partir de donnees
+      // externes : evite injection via attribut class="...").
+      const safeCls = escapeHtml(a.cls || "");
+      actionsHtml += `<button class="btn ${safeCls}" data-modal-action="${i}">${escapeHtml(a.label)}</button>`;
     });
     actionsHtml += "</div>";
   } else {
@@ -143,7 +147,11 @@ export function closeModal() {
   // V2-D (a11y) : restaurer le focus precedent (avant ouverture de la modale).
   const previous = overlay._previouslyFocused;
   overlay.remove();
-  if (previous && typeof previous.focus === "function") {
+  // VN-A.3 : ne restaurer le focus que si l'element est TOUJOURS dans le DOM
+  // (sinon focus tombe sur <body>, ce qui est pire que de laisser le navigateur
+  // gerer le defaut). isConnected couvre les cas ou le previous a ete supprime
+  // pendant l'ouverture de la modale (re-render react-like).
+  if (previous && typeof previous.focus === "function" && previous.isConnected) {
     try { previous.focus(); } catch (e) { /* noop */ }
   }
 }
@@ -276,7 +284,10 @@ export function dangerConfirmModal(opts) {
     }
     const prev = overlay._previouslyFocused;
     overlay.remove();
-    if (prev && typeof prev.focus === "function") {
+    // VN-A.3 : verifier isConnected avant de restaurer le focus precedent
+    // (l'element a pu etre supprime pendant que la modale etait ouverte,
+    //  ex. re-render apres l'action confirmee).
+    if (prev && typeof prev.focus === "function" && prev.isConnected) {
       try { prev.focus(); } catch (e) { /* noop */ }
     }
   };
