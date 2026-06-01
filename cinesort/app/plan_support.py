@@ -563,6 +563,13 @@ def _classify_and_plan_folder(
     """
 
     if core_mod.looks_tv_like(folder, videos):
+        # QW07 : compteur dedie au dashboard 'Diagnostic scan'. On compte le
+        # nombre de videos detectees comme TV (somme cumulee), pas le nombre
+        # de dossiers, conformement au nom du champ ('count_videos').
+        if hasattr(ctx.stats, "folders_rejected_tv_like_count_videos"):
+            ctx.stats.folders_rejected_tv_like_count_videos = int(
+                ctx.stats.folders_rejected_tv_like_count_videos or 0
+            ) + len(videos)
         if ctx.cfg.enable_tv_detection:
             # Treat as TV series: plan each video as a TV episode.
             if ctx.incremental_enabled:
@@ -787,6 +794,19 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
         ctx.stats.incremental_cache_row_hits = ctx.row_cache_stats.get("row_hits", 0)
     if hasattr(ctx.stats, "incremental_cache_row_misses"):
         ctx.stats.incremental_cache_row_misses = ctx.row_cache_stats.get("row_misses", 0)
+    # QW07 : repercute les raisons agregees (emises par discover_candidate_folders /
+    # scan_helpers._walk) sur les compteurs dedies du dashboard 'Diagnostic scan'.
+    # Sans ce report, folders_rejected_underscore et folders_rejected_depth
+    # affichaient systematiquement 0 alors que la raison etait bien tracee.
+    raisons = dict(ctx.stats.analyse_ignores_par_raison or {})
+    if hasattr(ctx.stats, "folders_rejected_underscore"):
+        ctx.stats.folders_rejected_underscore = int(
+            raisons.get("ignore_prefix_underscore", 0)
+        )
+    if hasattr(ctx.stats, "folders_rejected_depth"):
+        ctx.stats.folders_rejected_depth = int(
+            raisons.get("ignore_profondeur_max", 0)
+        )
     ctx.log("INFO", f"Scan folders: done total={ctx.scanned_total}")
     ctx.log("INFO", f"Plan built: rows={ctx.stats.planned_rows}")
     _log.info("scan: termine %s -> %d rows", ctx.cfg.root, ctx.stats.planned_rows)
