@@ -2066,6 +2066,69 @@ kbd {
 .score-v2-compare-delta { grid-column: 1 / -1; text-align: center; font-size: var(--fs-sm);
   color: var(--text-muted); padding-top: var(--sp-2); border-top: 1px solid rgba(255,255,255,.06); }
 
+/* ============================================================
+   VO-C-FRONTEND-SCORE-V2 (Vague O) — Quality waterfall inspector.
+   Prefix `.score-waterfall-*` EXCLUSIF (memoire feedback_js_release_checks :
+   pas de classe CSS partagee entre composants DOM differents).
+   Tier colors via var(--tier-*) deja definies plus haut (INVARIANTES).
+   ============================================================ */
+.score-waterfall-section { margin-top: var(--sp-3); padding: var(--sp-3);
+  background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.05); border-radius: 8px;
+  display: flex; flex-direction: column; gap: var(--sp-3); }
+.score-waterfall-section-header { font-weight: 600; font-size: var(--fs-body);
+  color: var(--text-primary); letter-spacing: .01em; }
+.score-waterfall-narrative { color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.5; }
+.score-waterfall { display: flex; flex-direction: column; gap: var(--sp-2); }
+.score-waterfall-title { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 600; }
+.score-waterfall-bars { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-row { display: grid; grid-template-columns: 140px 1fr 60px; align-items: center;
+  gap: var(--sp-2); font-size: var(--fs-sm); }
+.score-waterfall-label { color: var(--text-secondary); font-weight: 500; }
+.score-waterfall-rules-badge { display: inline-block; min-width: 18px; padding: 1px 6px;
+  margin-left: 4px; background: rgba(255,255,255,.08); border-radius: 9px; font-size: 10px;
+  font-weight: 700; color: var(--text-primary); text-align: center; }
+.score-waterfall-track { position: relative; height: 10px; background: rgba(255,255,255,.04);
+  border-radius: 5px; overflow: hidden; }
+.score-waterfall-bar { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px; width: 0%;
+  animation: scoreWaterfallFill .8s cubic-bezier(0.22,0.61,0.36,1) forwards; }
+.score-waterfall-bar--positive { background: linear-gradient(90deg, #16A34A, var(--tier-gold)); }
+.score-waterfall-bar--negative { background: linear-gradient(90deg, #B91C1C, var(--tier-reject)); }
+@keyframes scoreWaterfallFill { to { width: var(--waterfall-target, 0%); } }
+.score-waterfall-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.score-waterfall-row[data-sign="positive"] .score-waterfall-value { color: var(--tier-gold); }
+.score-waterfall-row[data-sign="negative"] .score-waterfall-value { color: var(--tier-reject); }
+.score-waterfall-baseline { font-size: var(--fs-sm); color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-3); background: rgba(255,255,255,.03); border-radius: 6px; }
+.score-waterfall-baseline-score { font-weight: 700; font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums; }
+.score-waterfall-baseline-tier { color: var(--text-muted); }
+.score-waterfall-baseline-next { color: var(--text-primary); font-weight: 500; }
+.score-waterfall-custom-formats { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-custom-formats-title { font-size: var(--fs-sm); color: var(--text-secondary);
+  font-weight: 600; }
+.score-waterfall-custom-formats-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.score-waterfall-custom-formats-item { display: flex; justify-content: space-between; align-items: center;
+  gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); background: rgba(255,255,255,.02);
+  border-radius: 4px; font-size: var(--fs-sm); }
+.score-waterfall-custom-formats-name { color: var(--text-primary); flex: 1; }
+.score-waterfall-custom-formats-score { font-variant-numeric: tabular-nums; font-weight: 600;
+  font-size: var(--fs-xs); padding: 2px 6px; border-radius: 3px; }
+.score-waterfall-custom-formats-score--positive { color: var(--tier-gold);
+  background: rgba(34,197,94,.08); }
+.score-waterfall-custom-formats-score--negative { color: var(--tier-reject);
+  background: rgba(239,68,68,.08); }
+.score-waterfall-suggestions { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-suggestions-title { font-size: var(--fs-sm); color: var(--text-secondary);
+  font-weight: 600; }
+.score-waterfall-suggestions-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.score-waterfall-suggestions-item { display: flex; justify-content: space-between; align-items: flex-start;
+  gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.score-waterfall-suggestions-message { color: var(--text-primary); flex: 1; line-height: 1.45; }
+.score-waterfall-suggestions-gain { color: var(--tier-gold); font-variant-numeric: tabular-nums;
+  font-weight: 600; white-space: nowrap; }
+
 /* --- V2-07 : composant EmptyState (mirror du desktop) ----------- */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; padding: var(--sp-8) var(--sp-4); gap: var(--sp-2); color: var(--text-muted); }

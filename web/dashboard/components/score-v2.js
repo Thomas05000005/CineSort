@@ -1,8 +1,17 @@
 /* dashboard/components/score-v2.js — §16b v7.5.0
  * Version ES module du composant score V2 (parite desktop).
+ *
+ * VO-C-FRONTEND-SCORE-V2 (Vague O) : extension `renderScoreV2Container`
+ * pour afficher un Quality waterfall lorsque `score_explanation_full` est
+ * fourni (via opt `scoreExplanationFull`). Le waterfall couvre EXCLUSIVEMENT
+ * la decomposition du `quality_score` (categories video/audio/extras +
+ * custom_rules). Il NE touche PAS la section PerceptualScore V2 :
+ * `perceptual-modal.js::_renderBreakdownSection` reste seul responsable de
+ * PerceptualScore V2 (memoire feedback_cinesort_design).
  */
 
 import { escapeHtml } from "../core/dom.js";
+import { renderQualityWaterfallSection } from "../core/score-helpers.js";
 
 const TIER_FR = {
   platinum: "Platinum", gold: "Or", silver: "Argent",
@@ -117,7 +126,8 @@ export function scoreWarningsHtml(warnings) {
   return html;
 }
 
-export function renderScoreV2Container(gsv2, { compact = false } = {}) {
+export function renderScoreV2Container(gsv2, opts = {}) {
+  const { compact = false, scoreExplanationFull = null, profileRulesById = null, showWaterfall = true } = opts || {};
   if (!gsv2 || typeof gsv2 !== "object") return "";
   const score = Number(gsv2.global_score) || 0;
   const tier = _tierOf(gsv2.global_tier || "unknown");
@@ -134,6 +144,13 @@ export function renderScoreV2Container(gsv2, { compact = false } = {}) {
   html += `</div>`;
   html += scoreAccordionHtml(cats);
   html += scoreWarningsHtml(warns);
+  // VO-C-FRONTEND-SCORE-V2 : Quality waterfall opt-in. Affiche UNIQUEMENT si
+  // scoreExplanationFull fourni (row.score_explanation_full du backend).
+  // Concerne le quality_score uniquement (memoire feedback_cinesort_design :
+  // PerceptualScore V2 reste rendu par perceptual-modal._renderBreakdownSection).
+  if (showWaterfall && scoreExplanationFull) {
+    html += renderQualityWaterfallSection(scoreExplanationFull, { profileRulesById });
+  }
   return html;
 }
 
