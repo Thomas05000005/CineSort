@@ -133,7 +133,7 @@ Les sept convergences cross-audits qui justifient la priorisation Vague N :
 
 ## 6. Pour toi
 
-Apres la Vague M et les audits complets, on a identifie 28 items a regler dans la prochaine vague (Vague N). Les bugs critiques actifs (crash films francais avec accents, score Platinum frauduleux possible) ont ete corriges immediatement. Le reste est planifie.
+Apres la Vague M, on a identifie 28 items a regler dans la prochaine vague (Vague N, 118.5h estimees). En attendant, 8 quickwins ont ete appliquees directement, incluant le fix anti-crash sur les films francais a accents (Léa, Amélie...) et la protection contre les scores frauduleux (custom rules ne peut plus produire Platinum > 100). Le reste est planifie.
 
 ---
 
