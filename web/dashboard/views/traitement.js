@@ -687,7 +687,10 @@ function _persistValidationDomState() {
 function _renderValidationStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   const pending = rows.filter((r) => !r.decision || r.decision === "PENDING");
-  const sureCount = pending.filter((r) => Number(r.confidence || 0) >= 90).length;
+  // VN-C.3 (Vague N batch 2) : seuil bulk-approve "sûrs" aligne sur CONF_HIGH
+  // (anciennement hardcode 90, desormais unifie via VN-C.1).
+  const _sureThr = getConfidenceThresholdsSync().high;
+  const sureCount = pending.filter((r) => Number(r.confidence || 0) >= _sureThr).length;
 
   // Fix VAL-3 : compteurs par bucket de confiance sur l'ensemble pending.
   const buckets = { high: 0, mid: 0, low: 0, none: 0 };
@@ -1530,28 +1533,82 @@ function _setDecisionYear(rowId, yearValue) {
   _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now() });
 }
 
-async function _handleBulkApprove(filter) {
-  if (!_validationPlan?.rows) return;
-  if (!_runInfo?.runId) return;
-  let approvedCount = 0;
-  const rows = _validationPlan.rows;
+// VN-C.3 (Vague N batch 2) : seuil bulk-approve "sûrs" = CONF_HIGH (85),
+// charge dynamiquement via les thresholds unifies (VN-C.1). Plus aucun
+// hardcode 90 dans le module. Le filtre "no-alert" et "platinum-gold"
+// conservent leur semantique propre (sans seuil de confiance).
+function _computeBulkApproveTargets(filter) {
   const targetIds = new Set();
-  rows.forEach((r) => {
+  const targetRows = [];
+  if (!_validationPlan?.rows) return { targetIds, targetRows };
+  const sureThr = getConfidenceThresholdsSync().high;
+  for (const r of _validationPlan.rows) {
     const conf = Number(r.confidence || 0);
     const flags = String(r.warning_flags || "");
     let match = false;
-    // VN-C.1 (batch 2) : "sure" reste a 90 (seuil bulk-approve specifique,
-    // plus strict que CONF_HIGH=85). C'est un parametre UI distinct
-    // des seuils high/med/low semantiques.
-    if (filter === "sure") match = conf >= 90;
+    if (filter === "sure") match = conf >= sureThr;
     else if (filter === "no-alert") match = !flags;
     else if (filter === "platinum-gold") match = ["Platinum", "Gold"].includes(String(r.tier || ""));
     if (match) {
       targetIds.add(r.row_id);
-      approvedCount += 1;
+      targetRows.push(r);
     }
-  });
+  }
+  return { targetIds, targetRows };
+}
 
+// VN-C.3 (Vague N batch 2) : libelle court pour la liste d'items affichee
+// dans dangerConfirmModal (max 5 visibles). Privilegie proposed_title puis
+// le nom du fichier video, en fallback le row_id.
+function _formatBulkApproveItem(r) {
+  const title = String(r?.proposed_title || "").trim();
+  const year = String(r?.proposed_year || "").trim();
+  if (title) return year ? `${title} (${year})` : title;
+  const video = String(r?.video || "").trim();
+  if (video) return video;
+  return String(r?.row_id || "—");
+}
+
+async function _handleBulkApprove(filter) {
+  if (!_validationPlan?.rows) return;
+  if (!_runInfo?.runId) return;
+
+  const { targetIds, targetRows } = _computeBulkApproveTargets(filter);
+  const approvedCount = targetIds.size;
+  if (approvedCount === 0) return;
+
+  // VN-C.3 (Vague N batch 2) : seuil de protection "actions dangereuses".
+  // Au-dela de 50 films impactes d'un coup, on impose dangerConfirmModal
+  // (liste + countdown 3s) conformement a la regle UX. Sous le seuil, on
+  // conserve l'UX-03 fix v166 (toast persistant 10s avec Annuler).
+  const DANGER_THRESHOLD = 50;
+  if (approvedCount > DANGER_THRESHOLD) {
+    const items = targetRows.slice(0, 5).map(_formatBulkApproveItem);
+    if (targetRows.length > 5) {
+      items.push(`… et ${targetRows.length - 5} autre${targetRows.length - 5 > 1 ? "s" : ""}`);
+    }
+    dangerConfirmModal({
+      title: `Confirmer l'approbation en masse de ${approvedCount} films ?`,
+      items,
+      consequence: `${approvedCount} films seront marqués comme approuvés. Vous pourrez encore les décocher individuellement avant Apply.`,
+      confirmLabel: `✓ Approuver ${approvedCount} films`,
+      cancelLabel: "Annuler",
+      countdownSeconds: 3,
+      onConfirm: async () => {
+        await _applyBulkApprove(targetIds, approvedCount);
+      },
+    });
+    return;
+  }
+
+  await _applyBulkApprove(targetIds, approvedCount);
+}
+
+// VN-C.3 (Vague N batch 2) : extraction du chemin "approbation effective"
+// (snapshot -> mutation -> persistance backend -> toast/undo) pour le
+// reutiliser entre le chemin direct (<= 50) et le callback dangerConfirmModal
+// (> 50). UX-03 fix v166 preserve : toast 10s avec bouton "Annuler".
+async function _applyBulkApprove(targetIds, approvedCount) {
   // VN-C.2 + Fix audit 2026-05-30 (v1.5.8) UX-03 : snapshot pre-modification
   // depuis _decisionsState (source de verite JS). Capture TOUTES les rows du
   // plan, pas seulement celles visibles dans le DOM apres filtre. Sans ca,
@@ -1565,9 +1622,11 @@ async function _handleBulkApprove(filter) {
   for (const rid of targetIds) {
     _setDecisionOk(rid, true);
   }
-  _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-    if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
-  });
+  if (_activeContainer) {
+    _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+      if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
+    });
+  }
 
   // Fix VAL-1 (2026-05-30) : persister les decisions cote serveur via
   // run/save_validation AVANT d'afficher le toast success. Sans ca, les KPI
@@ -1594,10 +1653,12 @@ async function _handleBulkApprove(filter) {
     for (const [rid, st] of stateSnapshot.entries()) {
       _decisionsState.set(rid, { ...st });
     }
-    _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
-      const prev = _decisionsState.get(cb.dataset.rowId);
-      if (prev) cb.checked = !!prev.ok;
-    });
+    if (_activeContainer) {
+      _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
+        const prev = _decisionsState.get(cb.dataset.rowId);
+        if (prev) cb.checked = !!prev.ok;
+      });
+    }
     showToast({
       type: "error",
       text: "Echec de la sauvegarde des decisions. Aucun changement applique.",
