@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
-from cinesort.domain.core import windows_safe
+
+# VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
+# domain<->domain core -> duplicate_support -> (lazy) naming -> core.
+# `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
+# compat avec les callers externes (apply_core, plan_support_*, etc.).
+from cinesort.domain.path_utils import windows_safe
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +75,17 @@ _CLEANUP_PATTERNS = [
     (re.compile(r"\s{2,}"), " "),  # espaces multiples
 ]
 
-# Seuil de warning pour la longueur du path
+# Seuil de warning pour la longueur du path (preventif, ~20 chars de marge avant MAX_PATH)
 _PATH_LENGTH_WARNING = 240
+
+# VQ-3 : kill-switch MAX_PATH Windows. La limite historique Windows est 260
+# chars (avec terminateur null). Au-dela on bascule en OSError obscur "Le
+# chemin specifie est introuvable" ou "Nom de fichier trop long" selon le cas.
+# Le kill-switch refuse de tenter le rename/move quand la cible depasserait
+# ce seuil, en remontant un SKIP propre plutot qu'une exception cryptique.
+# Le seuil exact 260 garde 0 char de marge ; on accepte 259 chars max pour
+# inclure le terminateur null cote API Win32.
+_PATH_LENGTH_KILL_SWITCH = 259
 
 
 # --- Presets --------------------------------------------------------------
@@ -301,6 +315,35 @@ def check_path_length(root: str, folder_name: str) -> Optional[str]:
     full = f"{root}\\{folder_name}"
     if len(full) > _PATH_LENGTH_WARNING:
         return f"Chemin long ({len(full)} chars, seuil {_PATH_LENGTH_WARNING}) : {full[:80]}..."
+    return None
+
+
+def check_path_length_killswitch(target_path: str) -> Optional[str]:
+    """VQ-3 : kill-switch MAX_PATH Windows.
+
+    Retourne un message d'erreur (a logger + remonter via res.error_messages)
+    si `target_path` depasse la limite historique Windows (MAX_PATH = 260).
+    Retourne None si le path est exploitable.
+
+    Backward compat : tout path <= 259 chars renvoie None (comportement
+    identique a l'absence de check). Seuls les paths anormalement longs
+    sont rejetes.
+
+    Args:
+        target_path: Chemin complet cible (str ou repr de Path).
+
+    Returns:
+        Message d'erreur explicite si > 259 chars, None sinon.
+    """
+    path_str = str(target_path)
+    length = len(path_str)
+    if length > _PATH_LENGTH_KILL_SWITCH:
+        preview = path_str[:80] + "..." if length > 80 else path_str
+        return (
+            f"PATH_TOO_LONG : chemin cible {length} chars (max Windows "
+            f"MAX_PATH = {_PATH_LENGTH_KILL_SWITCH + 1}), skip pour eviter "
+            f"OSError obscur : {preview}"
+        )
     return None
 
 

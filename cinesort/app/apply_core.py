@@ -14,7 +14,12 @@ from cinesort.app.cleanup import (
     preview_cleanup_residual_folders,
 )
 from cinesort.app.move_journal import atomic_move
-from cinesort.domain.naming import build_naming_context, format_movie_folder, format_tv_series_folder
+from cinesort.domain.naming import (
+    build_naming_context,
+    check_path_length_killswitch,
+    format_movie_folder,
+    format_tv_series_folder,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -1534,6 +1539,19 @@ def apply_single(
         dst = folder.parent / new_name
     core_mod.ensure_inside_root(cfg, dst)
 
+    # VQ-3 : kill-switch MAX_PATH Windows. Si le path cible > 259 chars on
+    # skip proprement plutot que tenter le rename et generer un OSError
+    # obscur (ou pire un rename partiel laissant le FS incoherent).
+    _path_err = check_path_length_killswitch(str(dst))
+    if _path_err is not None:
+        log("WARN", _path_err)
+        try:
+            res.error_messages.append(_path_err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+            pass
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
+        return
+
     if core_mod._single_folder_is_conform(folder.name, title, year, naming_template=cfg.naming_movie_template):
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
@@ -1690,6 +1708,20 @@ def apply_collection_item(
     sub_dir = folder / sub_name
     core_mod.ensure_inside_root(cfg, sub_dir)
 
+    # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
+    # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
+    # peut exceder 260 chars meme si sub_dir reste valide.
+    _candidate_video_path = sub_dir / video.name
+    _path_err = check_path_length_killswitch(str(_candidate_video_path))
+    if _path_err is not None:
+        log("WARN", _path_err)
+        try:
+            res.error_messages.append(_path_err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+            pass
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
+        return
+
     if not sub_dir.exists():
         mkdir_counted(sub_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
 
@@ -1796,6 +1828,19 @@ def apply_tv_episode(
     target_dir = cfg.root / series_folder_name / season_folder_name
     target_file = target_dir / target_filename
     core_mod.ensure_inside_root(cfg, target_file)
+
+    # VQ-3 : kill-switch MAX_PATH Windows. target_file inclut Serie/Saison/SxxExx
+    # ce qui peut facilement depasser 260 chars sur des series Anime longues
+    # avec sous-titres episode lengthy.
+    _path_err = check_path_length_killswitch(str(target_file))
+    if _path_err is not None:
+        log("WARN", _path_err)
+        try:
+            res.error_messages.append(_path_err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+            pass
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
+        return
 
     if target_file.exists():
         log("INFO", f"TV episode already in place: {target_file}")

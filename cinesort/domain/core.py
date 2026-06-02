@@ -6,7 +6,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -400,12 +400,24 @@ class PlanRow:
 # =========================================================
 # PATH + NAME HELPERS
 # =========================================================
-
-
-def _norm_win_path(p: Path) -> PureWindowsPath:
-    s = str(p).replace("/", "\\")
-    s = os.path.normcase(os.path.normpath(s))
-    return PureWindowsPath(s)
+#
+# VQ-1 (refactor) : `windows_safe` et `_norm_win_path` ont ete extraits vers
+# `cinesort.domain.path_utils` (feuille du graphe d'imports) pour casser le
+# cycle domain<->domain :
+#
+#   AVANT : core -> duplicate_support -> (lazy) naming -> core
+#   APRES : core -> path_utils  ; naming -> path_utils  (plus de retour vers core)
+#
+# Les noms sont RE-EXPORTES ici pour preserver integralement la backward
+# compatibility : app/apply_core, app/plan_support_*, app/cleanup,
+# ui/api/run_data_support, ui/api/settings_support et tests/test_domain_core
+# continuent d'utiliser `cinesort.domain.core.windows_safe` /
+# `core_mod._norm_win_path` sans aucune modification.
+from cinesort.domain.path_utils import (  # noqa: E402  (re-export volontaire)
+    _norm_win_path,
+    norm_win_path,
+    windows_safe,
+)
 
 
 def ensure_inside_root(cfg: Config, dst: Path) -> None:
@@ -416,42 +428,6 @@ def ensure_inside_root(cfg: Config, dst: Path) -> None:
         dst_pw.relative_to(root_pw)
     except ValueError:
         raise RuntimeError(f"REFUS: destination hors ROOT: {dst}") from None
-
-
-def windows_safe(name: str) -> str:
-    """Sanitise *name* for use as a Windows filename (reserved chars, DOS names, length)."""
-    name = unicodedata.normalize("NFC", name)
-    name = re.sub(r'[<>:"/\\|?*]', "", name).strip().rstrip(".")
-    name = re.sub(r"\s+", " ", name)
-    reserved = {
-        "con",
-        "prn",
-        "aux",
-        "nul",
-        "com1",
-        "com2",
-        "com3",
-        "com4",
-        "com5",
-        "com6",
-        "com7",
-        "com8",
-        "com9",
-        "lpt1",
-        "lpt2",
-        "lpt3",
-        "lpt4",
-        "lpt5",
-        "lpt6",
-        "lpt7",
-        "lpt8",
-        "lpt9",
-    }
-    if name.lower() in reserved:
-        name = f"_{name}"
-    if not name:
-        name = "_untitled"
-    return name[:180].strip()
 
 
 def _is_cancel_requested(should_cancel: Optional[Callable[[], bool]]) -> bool:
@@ -1285,6 +1261,12 @@ SKIP_REASON_MERGED = "skip_merged"
 SKIP_REASON_CONFLIT_QUARANTAINE = "skip_conflit_quarantaine"
 SKIP_REASON_ERREUR_PRECEDENTE = "skip_erreur_precedente"
 SKIP_REASON_AUTRE = "skip_autre"
+# VQ-3 : kill-switch MAX_PATH Windows. Le check check_path_length_killswitch
+# (domain/naming.py) bloque toute operation rename/move qui produirait un
+# path > 259 chars sur Windows. Sans ce skip distinct, l'utilisateur voyait
+# un OSError cryptique "Le chemin specifie est introuvable" ou pire un
+# rename partiel laissant le FS dans un etat intermediaire.
+SKIP_REASON_PATH_TOO_LONG = "skip_path_too_long"
 
 ANALYSE_IGNORE_LABELS_FR = {
     "ignore_tv_like": "Ignoré (ressemble à une série)",
@@ -1306,6 +1288,7 @@ SKIP_REASON_LABELS_FR = {
     SKIP_REASON_CONFLIT_QUARANTAINE: "Conflit -> quarantaine",
     SKIP_REASON_ERREUR_PRECEDENTE: "Erreur précédente",
     SKIP_REASON_AUTRE: "Autre",
+    SKIP_REASON_PATH_TOO_LONG: "Chemin trop long (MAX_PATH Windows)",
 }
 
 
