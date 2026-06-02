@@ -42,7 +42,39 @@ def _split_sql_statements(sql: str) -> List[str]:
     qui contiennent plusieurs `;` — aucune migration n'en utilise actuellement.
     NB: ne gere pas non plus les `--` a l'interieur d'une string SQL ('--'),
     mais aucune migration n'en utilise non plus.
+
+    Fix BUG-015 (hotfix1) : refus explicite des commentaires bloc `/* ... */`
+    et detection des `;` dans literals string SQL ('...') qui pourraient
+    produire un split incorrect. Si sqlparse est disponible on l'utilise,
+    sinon on refuse explicitement les SQL qui contiennent `/*` ou des literals
+    string avec `;` plutot que de continuer silencieusement et produire un
+    SQL malforme.
     """
+    # BUG-015 : refus explicite des commentaires bloc `/* ... */`
+    # qui ne sont pas geres par le splitter simple ligne-par-ligne.
+    if "/*" in sql:
+        # Tentative sqlparse en fallback ; sinon on refuse.
+        try:
+            import sqlparse  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise ValueError(
+                "_split_sql_statements: commentaire bloc /* ... */ detecte dans "
+                "le SQL mais sqlparse n'est pas disponible. Refus explicite plutot "
+                "que produire un split incorrect. Installer sqlparse ou retirer "
+                "les commentaires bloc de la migration."
+            ) from exc
+        out: List[str] = []
+        for stmt in sqlparse.split(sql):
+            cleaned_stmt = sqlparse.format(
+                stmt, strip_comments=True
+            ).strip().rstrip(";").strip()
+            if not cleaned_stmt:
+                continue
+            if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
+                continue
+            out.append(cleaned_stmt)
+        return out
+
     cleaned_lines: List[str] = []
     for line in sql.splitlines():
         idx = line.find("--")
@@ -51,14 +83,39 @@ def _split_sql_statements(sql: str) -> List[str]:
         cleaned_lines.append(line)
     cleaned = "\n".join(cleaned_lines)
 
+    # BUG-015 : detection des `;` dans literals string SQL.
+    # On parse caractere-par-caractere pour ignorer les `;` a l'interieur
+    # de '...' (SQLite utilise ' pour string literals, '' pour escape).
     out: List[str] = []
-    for raw in cleaned.split(";"):
-        stmt = raw.strip()
-        if not stmt:
+    buf: List[str] = []
+    in_string = False
+    i = 0
+    n = len(cleaned)
+    while i < n:
+        ch = cleaned[i]
+        if ch == "'":
+            buf.append(ch)
+            if in_string and i + 1 < n and cleaned[i + 1] == "'":
+                # Escape '' a l'interieur d'une string
+                buf.append(cleaned[i + 1])
+                i += 2
+                continue
+            in_string = not in_string
+            i += 1
             continue
-        if stmt.upper().startswith("PRAGMA USER_VERSION"):
+        if ch == ";" and not in_string:
+            stmt = "".join(buf).strip()
+            if stmt and not stmt.upper().startswith("PRAGMA USER_VERSION"):
+                out.append(stmt)
+            buf = []
+            i += 1
             continue
-        out.append(stmt)
+        buf.append(ch)
+        i += 1
+    # Dernier fragment sans `;` terminal
+    tail = "".join(buf).strip()
+    if tail and not tail.upper().startswith("PRAGMA USER_VERSION"):
+        out.append(tail)
     return out
 
 
@@ -142,7 +199,14 @@ class MigrationManager:
                     # cette migration uniquement. PRAGMA foreign_keys ne fonctionne
                     # PAS dans une transaction, donc on le pose avant BEGIN et on
                     # le restaure apres COMMIT.
-                    needs_fk_disable = "@manager: disable_fk" in sql
+                    # BUG-014 (hotfix1) : matcher STRICT ligne commencant par
+                    # `-- @manager: disable_fk` apres trim, pour eviter qu'un
+                    # commentaire descriptif (ex: "ne PAS utiliser
+                    # @manager: disable_fk ici") n'active le PRAGMA a tort.
+                    needs_fk_disable = any(
+                        line.strip().startswith("-- @manager: disable_fk")
+                        for line in sql.splitlines()
+                    )
                     if needs_fk_disable:
                         conn.execute("PRAGMA foreign_keys = OFF")
 
@@ -215,9 +279,19 @@ class MigrationManager:
                 (int(version), str(name), app_version),
             )
             conn.commit()
-        except sqlite3.DatabaseError:
-            # Table absente (migrations anterieures a 012) : silence.
-            pass
+        except sqlite3.Error as exc:
+            # BUG-013 (hotfix1) : capter sqlite3.Error (parent de OperationalError,
+            # DatabaseError, IntegrityError, etc.) au lieu du seul DatabaseError, et
+            # logger en warning au lieu d'un pass silencieux. La migration principale
+            # a deja ete committee (user_version a jour) ; on accepte que le tracking
+            # dans schema_migrations puisse echouer (table absente avant migration 012,
+            # DB lock transitoire, etc.) mais on trace pour diagnostiquer plus tard.
+            logger.warning(
+                "db: tracking schema_migrations a echoue pour v%d (%s): %s",
+                int(version),
+                name,
+                exc,
+            )
 
     def apply_migrations(self) -> int:
         """
