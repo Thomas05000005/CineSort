@@ -74,7 +74,7 @@ Apres la Vague N (revisee), la Vague O regroupe **4 chantiers court-terme** cent
 
 #### Item VO-3-SCAN-PARALLEL
 
-**Recadrage R2** : l'audit R1 a montre que `_filter_dossiers_phase` (`cinesort/ui/api/plan_support.py` L718-820) ne peut PAS etre paralelisee dans son ensemble car elle mute `ctx.rows/stats/folders_seen`, appelle `tmdb.search()` (HTTP, ordre TMDb non thread-safe), emet `progress(idx, discover_total)` strictement ordonne, appelle `wait_while_paused()` (cooperatif sequentiel) et `persist_folder_cache`.
+**Recadrage R2** : l'audit R1 a montre que `_filter_dossiers_phase` (`cinesort/app/plan_support.py` L718-820) ne peut PAS etre paralelisee dans son ensemble car elle mute `ctx.rows/stats/folders_seen`, appelle `tmdb.search()` (HTTP, ordre TMDb non thread-safe), emet `progress(idx, discover_total)` strictement ordonne, appelle `wait_while_paused()` (cooperatif sequentiel) et `persist_folder_cache`.
 
 **Sous-phase reellement paralelisable** : la **lecture FS locale** (scandir + extraction metadata locale via `iter_videos`/`extract_local_metadata`) **AVANT** l'appel `tmdb.search()`. Cette sous-phase est I/O-bound pure (GIL relache pendant syscalls SMB), sans mutation d'etat partage, sans ordre UI requis (resultats agreges puis traites sequentiellement ensuite).
 
@@ -126,6 +126,20 @@ Apres la Vague N (revisee), la Vague O regroupe **4 chantiers court-terme** cent
 - `cinesort/ui/api/library_support.py::_build_library_rows` (L161) : meme injection.
 - Backend `domain/explain_score.py` + `domain/custom_rules.py` DEJA en place depuis Vague J/M.
 
+**Fusion backend (contrat d'integration)**
+- Le payload `quality_score_explanation_full` est issu d'un appel sequentiel a 2 fonctions backend distinctes :
+  1. `domain/explain_score.py::build_rich_explanation(probe, score)` -> dict `{categories, baseline, suggestions, weighted_delta}` (decomposition additive du score baseline + factors).
+  2. `domain/custom_rules.py::apply_custom_rules(probe, profile)` -> dict `{applied_rule_ids: List[int], delta: int}` (impact des regles user).
+- **Contrat de fusion** : le support layer (`dashboard_support.py` / `library_support.py`) merge ces 2 dicts en un seul payload unifie :
+  ```
+  quality_score_explanation_full = {
+      **build_rich_explanation(probe, score),  # categories, baseline, suggestions
+      "applied_rule_ids": apply_custom_rules(probe, profile)["applied_rule_ids"],
+  }
+  ```
+- Aucun nouveau champ backend invente : `applied_rule_ids` est deja produit par `custom_rules.py`, et le lookup nom lisible est cote frontend via `profile.custom_rules` joint par `id` (cf. tranche R2 `applied_rules` vs `applied_rule_ids` ci-dessus).
+- L'ordre d'appel est libre (pas de dependance entre les 2 fonctions), mais l'appel doit etre **dans le meme support layer** pour eviter une N+1 query si custom_rules accede a la DB.
+
 **Tranchage `applied_rules` vs `applied_rule_ids` (R2)** : on retient **`applied_rule_ids`** cote backend (deja produit par `custom_rules.py::apply_custom_rules`). Le **lookup nom lisible** se fait cote frontend en joignant `profile.custom_rules` (deja transmis a l'UI via `get_active_profile`) par `id`. Aucun nouveau champ backend a inventer, aucune duplication de donnees.
 
 **Frontend - nouveau composant**
@@ -173,12 +187,12 @@ Apres la Vague N (revisee), la Vague O regroupe **4 chantiers court-terme** cent
 
 **Backend**
 - `cinesort/domain/probe_models.py` :
-  - Nouveau `class OpType(StrEnum)` avec valeurs `RENAME`, `MOVE`, `KEEP`, `SKIP` (etc., a confirmer par inventaire des constantes existantes).
+  - Nouveau `class OpType(StrEnum)` avec valeurs `RENAME`, `MOVE`, `NOOP` (decision VO-D execution : seules ces 3 valeurs canoniques, alignees sur l'implementation reelle de `probe_models.py` L22-33).
   - Conserver les constantes `OP_TYPE_RENAME = OpType.RENAME` (alias) pour retrocompat pendant la transition.
   - `RenameProposal.op_type: OpType` (typage renforce, retrocompat str preservee car `StrEnum` est `str`).
 
 **Call-sites a migrer (perimetre cible)**
-- Grep `OP_TYPE_RENAME|OP_TYPE_MOVE|OP_TYPE_KEEP|OP_TYPE_SKIP` dans `cinesort/` -> inventaire ~10-20 sites (a confirmer avant execution).
+- Grep `OP_TYPE_RENAME|OP_TYPE_MOVE|OP_TYPE_NOOP` dans `cinesort/` -> inventaire ~10-20 sites (constantes alias retrocompat preservees dans `probe_models.py` L60-63).
 - Migrer chaque site : `OP_TYPE_RENAME` -> `OpType.RENAME`.
 - `cinesort/app/apply_audit.py` (281 LOC) : aucune ref `RenameOpType|OpType` a migrer aujourd'hui, **mais** verifier que la migration des constantes upstream propage bien (apply_audit consomme `RenameProposal.op_type` via comparaisons string).
 
@@ -271,7 +285,7 @@ Cette section remplace l'ancien "Verdict NOGO" (R1) suite a application des reme
 
 2. **VO-B max_workers par defaut** : auto-detect via `detect_storage_type()` partage avec VO-A (synergie forte). NAS -> 32, NAS slow -> 16, local SSD -> 8, local HDD -> 4. A valider sur benchmark reel pendant execution.
 
-3. **VO-D inventaire constantes `OP_TYPE_*`** : confirmer la liste exacte avant execution (`OP_TYPE_RENAME`, `OP_TYPE_MOVE`, `OP_TYPE_KEEP`, `OP_TYPE_SKIP`, autres ?) via grep en debut de chantier.
+3. **VO-D inventaire constantes `OP_TYPE_*`** : TRANCHE a l'execution VO-D-1 (2026-06-01). Liste finale = `OP_TYPE_RENAME`, `OP_TYPE_MOVE`, `OP_TYPE_NOOP` uniquement (StrEnum a 3 valeurs canoniques alignees sur `probe_models.py` L22-33). Pas de `KEEP`/`SKIP` dans l'implementation.
 
 4. **Coordination migrations SQL Vague O** : 028 reservee VO-2 (`pragma_history`). 029/030 disponibles si necessaire (a priori non requis par VO-B/VO-C/VO-D).
 
