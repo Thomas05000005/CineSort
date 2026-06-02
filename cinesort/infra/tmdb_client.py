@@ -304,6 +304,45 @@ class TmdbClient:
         except (OSError, PermissionError) as exc:
             self._debug(f"cache flush warning path={self.cache_path} error={exc}")
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling dashboard. On expose CM + close() + __del__
+    # best-effort. close() flush egalement le cache TMDb (force=True) pour
+    # ne pas perdre les ecritures throttlees en attente.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente et flush le cache (idempotent)."""
+        # Flush cache d'abord pour persister les ecritures en attente
+        try:
+            self.flush()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "TmdbClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # __del__ peut etre invoque pendant l'interpreter shutdown : on ne
+        # tente PAS de flush le cache ici (risque de raise sur threading
+        # primitives deja teardown). On ferme juste la session.
+        try:
+            session = getattr(self, "_session", None)
+            if session is not None:
+                session.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     # ---------------------------
     # API calls
     # ---------------------------

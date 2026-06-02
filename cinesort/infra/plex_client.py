@@ -75,6 +75,34 @@ class PlexClient:
             }
         )
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, le pool de connexions de requests.Session
+    # garde N sockets TIME_WAIT a chaque polling dashboard. On expose CM +
+    # close() + __del__ best-effort.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente (idempotent)."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "PlexClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
         """GET avec gestion d'erreurs standardisee."""
         url = f"{self.base_url}{path}"

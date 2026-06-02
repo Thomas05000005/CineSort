@@ -488,13 +488,27 @@ def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:
 
 
 def _normalize_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
+    # Hotfix C5 (2026-06-02) : detection d'unite robuste pour 4K UHD REMUX.
+    # ANCIEN : `if n > 100000: n /= 1000` traitait tout > 100 Mbps comme bps.
+    # Or les 4K UHD REMUX reels atteignent legitiment 100-150 Mbps (= 100000-
+    # 150000 kbps), classes a tort en ~150 kbps (penalite -8 "bitrate faible"
+    # sur du contenu premium). FIX : seuil bps eleve a 500000 (= 500 Mbps,
+    # plafond physique sur tout disque BluRay/UHD-BD ; jamais atteint en
+    # kbps puisque ca correspondrait a 500 Gbps).
+    # Plages realistes :
+    #   - kbps  : 500 - 200000  (SD a 4K UHD REMUX)
+    #   - Mbps  : 1 - 200       (peu probable car probe expose generalement kbps)
+    #   - bps   : 500000+       (> 500 Mbps = forcement bps)
     if raw_bitrate is None:
         return None
     n = _to_float(raw_bitrate, -1.0)
     if n <= 0:
         return None
-    if n > 100000.0:
+    # > 500000 : forcement bps (500 Mbps n'existe pas en kbps cinema)
+    if n > 500000.0:
         return int(round(n / 1000.0))
+    # < 1.0 : suspect, probablement Mbps fractionnel (ex: 0.8 Mbps SD legacy)
+    # mais on retourne tel quel int(0) -> None apres clamp. On laisse passer.
     return int(round(n))
 
 
@@ -933,13 +947,32 @@ def _score_extras(
         reasons.append(f"{sign}{delta} {label}")
 
     extras_sub = 70.0
+    # Hotfix R1-BUG-019 (2026-06-02) : UNKNOWN doit etre NEUTRE.
+    # Semantique :
+    #   - FULL    : probe a reussi, toutes les metadonnees disponibles (bonus).
+    #   - PARTIAL : probe a partiellement reussi (petit bonus, penalite legere).
+    #   - FAILED  : probe a explicitement echoue (penalite -18, cap Silver).
+    #   - UNKNOWN : champ probe_quality absent du dict (caller legacy n'a pas
+    #     probe ou ne renseigne pas cet attribut). Pas de preuve d'echec, pas
+    #     de preuve de succes -> NEUTRE (skip bonus + skip malus). Avant le fix,
+    #     UNKNOWN tombait dans le `else` -> penalise comme FAILED MAIS sans
+    #     beneficier de la compensation l.1847 (qui ne se declenche QUE pour
+    #     "FAILED" strict). Bug regressif sur les callers legacy qui passaient
+    #     un probe-dict sans la cle probe_quality.
     if probe_quality == "FULL":
         extras_sub += 20
         add_reason(+6, "Metadonnees techniques completes")
     elif probe_quality == "PARTIAL":
         extras_sub += 4
         add_reason(-3, "Metadonnees techniques partielles")
+    elif probe_quality == "UNKNOWN":
+        # Pas de penalite ni de bonus : on log un warning a la place du malus.
+        logger.warning(
+            "scoring/_score_extras: probe_quality=UNKNOWN (champ absent), "
+            "neutre - ni bonus ni penalite metadata."
+        )
     else:
+        # FAILED (ou valeur fallback FAILED): probe a echoue, penalite normale.
         extras_sub -= 18
         add_reason(-10, "Metadonnees techniques indisponibles")
 
@@ -950,6 +983,8 @@ def _score_extras(
         elif probe_quality == "FAILED":
             extras_sub -= 10
             add_reason(-4, "Mode metadata strict: donnees absentes")
+        # UNKNOWN : pas de penalite stricte non plus (coherence avec l'absence
+        # de signal en mode permissif).
 
     if toggles.get("include_naming"):
         if expected_year and not _folder_has_year(folder_name, expected_year):
@@ -1298,19 +1333,30 @@ def _apply_custom_rules_helper(
     # le caller passe un NormalizedProbe dataclass (le call site compute_quality_score
     # transmettait la variable brute non convertie, cf bug critique fix).
     normalized_probe = _normalize_probe_arg(normalized_probe)
+    # Hotfix BUG-010 FIX COMPLET (2026-06-02) : helper defensif applique PARTOUT
+    # dans le helper + rule_context. _vr a remplace les acces direct vr["..."]
+    # qui levaient KeyError silencieusement (degrade silencieux par le
+    # try/except generique). Le fix partiel hotfix1 ne traitait que
+    # _compute_confidence_helper, laissant ce helper expose. Maintenant uniforme.
+    def _vr(key: str, default: Any = None) -> Any:
+        try:
+            return vr.get(key, default) if isinstance(vr, dict) else default
+        except (AttributeError, TypeError):
+            return default
+
     try:
         resolution_rank_map = {"2160p": 3, "1080p": 2, "720p": 1, "SD": 0, "480p": 0}
-        file_size_bytes = _estimate_file_size(normalized_probe, vr["bitrate_kbps"])
+        file_size_bytes = _estimate_file_size(normalized_probe, _vr("bitrate_kbps"))
         rule_context = {
             "detected": {
-                "video_codec": vr["video_codec"],
+                "video_codec": _vr("video_codec", "") or "",
                 "audio_best_codec": str(best_audio.get("codec") or ""),
-                "resolution": vr["resolution_label"],
-                "bitrate_kbps": vr["bitrate_kbps"],
+                "resolution": _vr("resolution_label", "") or "",
+                "bitrate_kbps": _vr("bitrate_kbps"),
                 "audio_best_channels": _to_int(best_audio.get("channels"), 0),
-                "hdr10": vr["has_hdr10"],
-                "hdr10_plus": vr["has_hdr10p"],
-                "hdr_dolby_vision": vr["has_dv"],
+                "hdr10": bool(_vr("has_hdr10", False)),
+                "hdr10_plus": bool(_vr("has_hdr10p", False)),
+                "hdr_dolby_vision": bool(_vr("has_dv", False)),
             },
             "__context__": {
                 "year": int(film_year or 0),
@@ -1321,7 +1367,7 @@ def _apply_custom_rules_helper(
                 "duration_s": int(normalized_probe.get("duration_s") or 0),
             },
             "__computed__": {
-                "resolution_rank": resolution_rank_map.get(str(vr["resolution_label"]), 0),
+                "resolution_rank": resolution_rank_map.get(str(_vr("resolution_label", "") or ""), 0),
                 "tier_before": tier,
                 "score_before": int(score),
                 "file_size_gb": round(file_size_bytes / 1e9, 2) if file_size_bytes else 0.0,
@@ -1377,13 +1423,25 @@ def _compute_confidence_helper(
     """Calcule (value, label, reasons) de la confiance score selon probe + completude metadata."""
     confidence_reasons: List[str] = []
     confidence_value = 58
+    # Hotfix R1-BUG-019 (2026-06-02) : UNKNOWN NEUTRE pour la confidence aussi.
+    # FAILED = probe explicit echec -> confidence basse legitime (-28).
+    # UNKNOWN = champ absent (legacy caller) -> neutre, on n'a pas la preuve
+    # que le probe a echoue, juste pas l'info. Avant : tombait dans le else
+    # (-28) -> double-peine avec _score_extras alors qu'aucune compensation
+    # n'etait declenchee (compensation l.1847 ne traite que "FAILED" strict).
     if probe_quality == "FULL":
         confidence_value += 24
         confidence_reasons.append("Probe complete (ffprobe/MediaInfo exploitables).")
     elif probe_quality == "PARTIAL":
         confidence_value -= 10
         confidence_reasons.append("Probe partielle (certaines metadonnees manquent).")
+    elif probe_quality == "UNKNOWN":
+        # Neutre : ni bonus ni malus. Warning deja log dans _score_extras.
+        confidence_reasons.append(
+            "Probe non renseignee (UNKNOWN): confidence neutre, donnees a interpreter."
+        )
     else:
+        # FAILED : probe explicite a echoue.
         confidence_value -= 28
         confidence_reasons.append("Probe indisponible: score base sur donnees limitees.")
 

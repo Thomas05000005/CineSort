@@ -225,6 +225,47 @@ class OmdbClient:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_cache()
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling dashboard. On expose CM + close() + __del__
+    # best-effort. close() flush egalement le cache OMDb pour ne pas perdre
+    # les ecritures en RAM.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente et flush le cache (idempotent)."""
+        # Flush cache best-effort (OMDb n'a pas de throttle save : ecritures
+        # toujours immediates via _save_cache_atomic, mais on garantit la
+        # symetrie avec TmdbClient).
+        try:
+            self._save_cache_atomic()
+        except Exception:  # noqa: BLE001
+            pass
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "OmdbClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # __del__ peut etre invoque pendant l'interpreter shutdown : on
+        # ferme juste la session (pas de flush pour eviter d'acceder a
+        # des primitives threading en cours de teardown).
+        try:
+            session = getattr(self, "_session", None)
+            if session is not None:
+                session.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     # --- Cache ---
 
     def _load_cache(self) -> None:

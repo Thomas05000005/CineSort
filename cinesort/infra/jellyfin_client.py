@@ -88,6 +88,40 @@ class JellyfinClient:
         )
 
     # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2 v1.5.x)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, le pool de connexions de requests.Session
+    # garde N sockets en TIME_WAIT a chaque polling dashboard (un client
+    # cree puis abandonne par appel REST). On expose __enter__/__exit__
+    # pour les callers qui veulent batch et close() pour cleanup explicite.
+    # __del__ ferme egalement la session si l'objet est GC sans CM (best
+    # effort, tolerant aux erreurs car __del__ peut etre invoque pendant
+    # l'interpreter shutdown).
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente (idempotent)."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+
+    def __enter__(self) -> "JellyfinClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # __del__ peut etre appele pendant l'interpreter shutdown ou apres
+        # une exception dans __init__ — on protege tout.
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

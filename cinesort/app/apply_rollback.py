@@ -88,6 +88,11 @@ def _revert_one_op(
     dst_path = str(op.get("dst_path") or "")
     reversible = int(op.get("reversible") or 0)
     undo_status = str(op.get("undo_status") or "PENDING")
+    # Hotfix2 H6 : src_sha1 = hash du fichier original avant le move (peut etre
+    # None si journal anterieur a la migration 013 ou si calcul a echoue).
+    expected_src_sha1 = op.get("src_sha1")
+    if expected_src_sha1 is not None:
+        expected_src_sha1 = str(expected_src_sha1) or None
 
     if not reversible:
         return {
@@ -152,6 +157,62 @@ def _revert_one_op(
 
     try:
         src.parent.mkdir(parents=True, exist_ok=True)
+        # Hotfix2 H6 : defense TOCTOU. Si src est apparu entre la verification
+        # ligne ~140 et maintenant (course user copie/cree fichier au meme path),
+        # shutil.move ECRASERAIT silencieusement le fichier user (data loss).
+        # On re-check et si le hash differe du src_sha1 journalise (ou si on
+        # n'a pas de hash de reference), on SKIP au lieu d'ecraser.
+        if src.exists():
+            user_file_safe = False
+            if expected_src_sha1:
+                try:
+                    # Import local : evite cycle au module-load et garde
+                    # apply_rollback utilisable meme si apply_core indisponible.
+                    from cinesort.app.apply_core import sha1_quick
+
+                    actual_src_sha1 = sha1_quick(src)
+                    if actual_src_sha1 and actual_src_sha1 == expected_src_sha1:
+                        # Meme contenu qu'avant l'apply : on peut ecraser sans
+                        # risque de data loss (c'est une copie/restauration
+                        # identique du fichier originel).
+                        user_file_safe = True
+                except (OSError, ImportError) as hash_exc:  # noqa: BLE001
+                    _audit_log(
+                        audit_fn,
+                        "WARN",
+                        f"rollback_forward: hash check FAILED op_id={op_id} "
+                        f"src={src_path}: {hash_exc} — assume user file, skip",
+                    )
+            if not user_file_safe:
+                _audit_log(
+                    audit_fn,
+                    "WARN",
+                    f"rollback_forward: src apparu pendant rollback op_id={op_id} "
+                    f"src={src_path} — fichier user different, skipped (no overwrite)",
+                )
+                return {
+                    "id": op_id,
+                    "op_index": op_index,
+                    "status": "SKIPPED",
+                    "reason": "src_appeared_during_rollback",
+                }
+            # Hash identique : on retire le fichier present pour permettre move
+            # (shutil.move sur Windows refuse l'ecrasement, on doit unlink).
+            try:
+                src.unlink()
+            except OSError as unlink_exc:
+                _audit_log(
+                    audit_fn,
+                    "ERROR",
+                    f"rollback_forward: unlink dup src FAILED op_id={op_id} "
+                    f"src={src_path}: {unlink_exc}",
+                )
+                return {
+                    "id": op_id,
+                    "op_index": op_index,
+                    "status": "FAILED",
+                    "reason": f"unlink_dup_src: {unlink_exc}",
+                }
         shutil.move(str(dst), str(src))
     except (OSError, PermissionError) as exc:
         _audit_log(
