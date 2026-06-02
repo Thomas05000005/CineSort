@@ -86,6 +86,24 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 
 ## Sessions recentes
 
+### 2 juin 2026 — Bilan 5 vagues completes (M / N / O / P / Q) ✅
+
+Recap synthetique de 5 vagues consecutives livrees en juin 2026. Detail complet dans
+[BILAN_PHASES.md](./BILAN_PHASES.md).
+
+**Resume** :
+- **Vague M** : 9 items (cloture refactor #84) + 1 hotfix bundle EXE (2.33 GB -> 54 MB) + 8 quickwins
+- **Vague N** : 17 items — Chromaprint audio, scoring unifie, WCAG AA, pause cooperative, apply_audit logger
+- **Vague O** : 4 items — SQLite pragmas profils, scan parallel x2.5, waterfall UI, OpType StrEnum
+- **Vague P** : 7 items — apply atomique, tier TRaSH hierarchique, field locks Jellyfin, tri-etat, optimistic concurrency, TRaSH YAML, tags providers brackets
+- **Vague Q** : 3 items — path_utils, quarantaine TTL, check_path_length MAX_PATH
+
+**Stats globales** :
+- 40+ items livres, 31+ workflows GitHub Actions, 5 migrations SQL neuves (027-031)
+- Bundle EXE : 59 MB (v166) -> 2.33 GB (regression torch) -> **54 MB stable** apres hotfix
+- 25 tags git poses (`sprint-0-inventory` jusqu'a `vague-q-complete`)
+- Methodologie : multi-agents en parallele dans worktrees isoles, revue adversaire iterative R1/R2 avant chaque tag de cloture
+
 ### 1 juin 2026 — M-03 cloture #84 etapes 2-4 (Vague M) ✅ partial
 
 Item M-03-FINISH-REFACTOR-84 (Vague M, juin 2026). Strategie minimal-viable :
@@ -205,7 +223,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-01.*
+*Last updated : 2026-06-02.*
 
 ---
 
@@ -248,3 +266,4 @@ python app.py --api                                              # REST seul, sa
 - [REFACTOR_PLAN_83.md](./REFACTOR_PLAN_83.md) — plan original casser cycle (acheve)
 - [REFACTOR_PLAN_84.md](./REFACTOR_PLAN_84.md) — plan facades (acheve)
 - [BILAN_CORRECTIONS.md](./BILAN_CORRECTIONS.md) — bilan audits successifs
+- [BILAN_PHASES.md](./BILAN_PHASES.md) — recap des grandes vagues (M / N / O / P / Q)
