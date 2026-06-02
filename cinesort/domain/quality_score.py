@@ -471,14 +471,19 @@ def _confidence_label(value: int) -> str:
 
 
 def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:
+    # Hotfix BUG-021 (2026-06-02) : defensive .get() pour eviter KeyError
+    # silencieux si le profil est partiel (ex: profile custom sans 'av1_bonus').
+    # Avant : bonuses["av1_bonus"] levait KeyError -> custom rules pipeline
+    # essayait/echouait silencieusement et retombait sur 0 implicite. Apres :
+    # .get(key, 0) retourne 0 explicitement pour les codecs absents du profil.
     c = str(codec or "").strip().lower()
-    bonuses = profile["codec_bonuses"]
+    bonuses = profile.get("codec_bonuses") or {}
     if "av1" in c:
-        return int(bonuses["av1_bonus"])
+        return _to_int(bonuses.get("av1_bonus"), 0)
     if c in {"hevc", "h265", "h.265", "x265"}:
-        return int(bonuses["hevc_bonus"])
+        return _to_int(bonuses.get("hevc_bonus"), 0)
     if c in {"avc", "h264", "h.264", "x264"}:
-        return int(bonuses["avc_bonus"])
+        return _to_int(bonuses.get("avc_bonus"), 0)
     return 0
 
 
@@ -1382,7 +1387,9 @@ def _compute_confidence_helper(
         confidence_value -= 28
         confidence_reasons.append("Probe indisponible: score base sur donnees limitees.")
 
-    resolution_source = vr["resolution_source"]
+    # Hotfix BUG-010 (2026-06-02) : defensive .get() ici aussi (vr peut etre
+    # tronque amont -> KeyError silencieux qui bypassait la confidence).
+    resolution_source = vr.get("resolution_source", "")
     if resolution_source == "probe":
         confidence_value += 8
         confidence_reasons.append("Resolution issue des metadonnees mesurees.")
@@ -1393,15 +1400,19 @@ def _compute_confidence_helper(
         confidence_value -= 16
         confidence_reasons.append("Resolution peu fiable.")
 
-    bitrate_kbps = vr["bitrate_kbps"]
+    # Hotfix BUG-010 (2026-06-02) : defensive .get() pour eviter KeyError
+    # silencieux qui bypassait _compute_confidence_helper. Si `vr` est tronque
+    # (defaut vide ou erreur amont), on degrade proprement vers une valeur sure
+    # plutot que de lever : la confidence est best-effort, pas un invariant.
+    bitrate_kbps = vr.get("bitrate_kbps")
     if bitrate_kbps is None:
         confidence_value -= 12
         confidence_reasons.append("Debit video absent.")
     else:
         confidence_value += 4
-    if vr["width"] <= 0 or vr["height"] <= 0:
+    if _to_int(vr.get("width"), 0) <= 0 or _to_int(vr.get("height"), 0) <= 0:
         confidence_value -= 8
-    if not vr["video_codec"]:
+    if not vr.get("video_codec"):
         confidence_value -= 8
     if not audio_tracks:
         confidence_value -= 8
@@ -1693,7 +1704,31 @@ def compute_quality_score(
         probe = normalized_probe
     else:
         probe = {}
-    probe_quality = str(probe.get("probe_quality") or "FAILED")
+    # Hotfix BUG-019 (2026-06-02) : differencier 'absent' (champ manquant) vs
+    # 'FAILED' explicit. Avant : .get(...) or "FAILED" ecrasait TOUT cas non
+    # valide (absent, "", None) en FAILED -> cap Silver injuste sur des probes
+    # incomplets (panel reel). Apres : si le champ est present mais vide, on
+    # log un warning et on retombe sur FAILED ; si totalement absent, on
+    # passe en 'UNKNOWN' (permissif, pas de cap Silver). Backward compat :
+    # les tiers downstream traitent toujours "FAILED"/"PARTIAL"/"FULL" et
+    # tout le reste (incluant UNKNOWN) est neutre (pas de cap_tier).
+    raw_probe_quality = probe.get("probe_quality") if "probe_quality" in probe else None
+    if raw_probe_quality is None:
+        # Champ totalement absent : pas une preuve d'echec, juste un manque
+        # d'information (ex: caller legacy qui n'a jamais probe). Permissif.
+        probe_quality = "UNKNOWN"
+    else:
+        candidate = str(raw_probe_quality or "").strip().upper()
+        if candidate in {"FULL", "PARTIAL", "FAILED"}:
+            probe_quality = candidate
+        else:
+            # Valeur vide explicite ou non reconnue : on degrade vers FAILED
+            # avec un warning explicite (pas silencieux comme avant).
+            logger.warning(
+                "scoring: probe_quality present mais invalide (%r), "
+                "fallback FAILED", raw_probe_quality,
+            )
+            probe_quality = "FAILED"
 
     # Fix audit 2026-05-25 (v1.5.5) Vague K : enrichir le probe avec les hints
     # du nom de release. Le probe garde la priorite quand il a une valeur ;
