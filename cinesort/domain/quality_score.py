@@ -487,7 +487,7 @@ def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:
     return 0
 
 
-def _normalize_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
+def _normalize_video_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
     # Hotfix C5 (2026-06-02) : detection d'unite robuste pour 4K UHD REMUX.
     # ANCIEN : `if n > 100000: n /= 1000` traitait tout > 100 Mbps comme bps.
     # Or les 4K UHD REMUX reels atteignent legitiment 100-150 Mbps (= 100000-
@@ -495,7 +495,7 @@ def _normalize_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
     # sur du contenu premium). FIX : seuil bps eleve a 500000 (= 500 Mbps,
     # plafond physique sur tout disque BluRay/UHD-BD ; jamais atteint en
     # kbps puisque ca correspondrait a 500 Gbps).
-    # Plages realistes :
+    # Plages realistes VIDEO :
     #   - kbps  : 500 - 200000  (SD a 4K UHD REMUX)
     #   - Mbps  : 1 - 200       (peu probable car probe expose generalement kbps)
     #   - bps   : 500000+       (> 500 Mbps = forcement bps)
@@ -504,12 +504,47 @@ def _normalize_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
     n = _to_float(raw_bitrate, -1.0)
     if n <= 0:
         return None
-    # > 500000 : forcement bps (500 Mbps n'existe pas en kbps cinema)
+    # > 500000 : forcement bps (500 Mbps n'existe pas en kbps cinema video)
     if n > 500000.0:
         return int(round(n / 1000.0))
     # < 1.0 : suspect, probablement Mbps fractionnel (ex: 0.8 Mbps SD legacy)
     # mais on retourne tel quel int(0) -> None apres clamp. On laisse passer.
     return int(round(n))
+
+
+def _normalize_audio_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
+    # Hotfix C5 patch (2026-06-02) : separation video/audio. La fonction video
+    # utilise un seuil bps=500000 pour ne pas casser les 4K UHD REMUX. Mais ce
+    # seuil casse l'audio : un flux AAC 192000 bps (= 192 kbps stereo) reste
+    # non-divise et est lu comme 192000 kbps. Per_channel = 96000 >> 650 et
+    # declenche a tort le bonus +4 "Debit audio eleve". De meme un flux DTS
+    # 1509000 bps (= 1509 kbps lossy) serait lu comme 1509000 kbps.
+    # Plages realistes AUDIO :
+    #   - kbps : 32 - 4000     (AAC 32k mono a TrueHD/DTS-HD MA 4 Mbps 7.1)
+    #   - Mbps : 0.032 - 4     (rare, probe expose plutot kbps ou bps)
+    #   - bps  : 32000 - 4000000 (= 4 Mbps lossless multicanal max)
+    # Strategie : valeur > 10000 (10 Mbps) ne peut etre que des bps audio,
+    # division /1000. Seuil 10000 retenu : plus que tout codec audio possible
+    # (TrueHD max ~24Mbit reste a 24000 kbps soit > 10000, donc detecte bps
+    # uniquement pour > 10000 et le seuil reel de bascule est confortable).
+    # Note : 10000 kbps audio existe pas en pratique (top TrueHD ~9000), donc
+    # toute valeur > 10000 est forcement bps (>= 10000 bps = 10 kbps audio
+    # plancher AAC mono qualite tres degradee).
+    if raw_bitrate is None:
+        return None
+    n = _to_float(raw_bitrate, -1.0)
+    if n <= 0:
+        return None
+    # > 10000 : forcement bps (10 Mbps audio n'existe pas pour un seul flux,
+    # plafond pratique TrueHD/DTS-HD MA ~6-9 Mbps lossless).
+    if n > 10000.0:
+        return int(round(n / 1000.0))
+    return int(round(n))
+
+
+# Backward-compat alias (callers externes potentiels). Pointe vers la variante
+# video qui preserve le comportement post-hotfix C5 pour le path video.
+_normalize_bitrate_kbps = _normalize_video_bitrate_kbps
 
 
 _RELEASE_2160_RE = re.compile(r"\b(2160p|4k|uhd)\b", re.IGNORECASE)
@@ -679,7 +714,7 @@ def _score_video(
 
     width = _to_int(video.get("width"), 0)
     height = _to_int(video.get("height"), 0)
-    bitrate_kbps = _normalize_bitrate_kbps(video.get("bitrate"))
+    bitrate_kbps = _normalize_video_bitrate_kbps(video.get("bitrate"))
     bit_depth = _to_int(video.get("bit_depth"), 0)
     video_codec = str(video.get("codec") or "").lower()
     has_dv = bool(video.get("hdr_dolby_vision"))
@@ -871,7 +906,7 @@ def _score_audio(
         audio_sub += ch_bonus
         if ch_bonus > 0:
             add_reason(+ch_bonus, ch_label)
-        a_bitrate_kbps = _normalize_bitrate_kbps(best_audio.get("bitrate"))
+        a_bitrate_kbps = _normalize_audio_bitrate_kbps(best_audio.get("bitrate"))
         if a_bitrate_kbps and channels > 0:
             per_channel = float(a_bitrate_kbps) / float(max(1, channels))
             if per_channel >= 650:
