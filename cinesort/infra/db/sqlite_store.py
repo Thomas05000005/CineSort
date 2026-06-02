@@ -202,7 +202,17 @@ class _StoreBase:
         # migrations FK-sensitives sinon CASCADE-supprimeraient les rows
         # enfants des migrations posterieures, alors meme qu'on est en mode
         # self-healing sur une DB partielle).
-        needs_fk_disable = "@manager: disable_fk" in script
+        # Fix BUG-001/014 (hotfix2) : matcher STRICT ligne commencant par
+        # `-- @manager: disable_fk` apres trim, pour eviter qu'un commentaire
+        # descriptif (ex: "ne PAS utiliser @manager: disable_fk ici") n'active
+        # le PRAGMA a tort. Replique le pattern strict line-match adopte dans
+        # migration_manager.py (BUG-014 hotfix1) pour coherence : sans ca, le
+        # bootstrap differerait du chemin migration-par-migration et un faux
+        # positif desactiverait silencieusement les FK pour TOUT le bootstrap.
+        needs_fk_disable = any(
+            line.strip().startswith("-- @manager: disable_fk")
+            for line in script.splitlines()
+        )
         with self._managed_conn() as conn:
             if needs_fk_disable:
                 conn.execute("PRAGMA foreign_keys = OFF")
