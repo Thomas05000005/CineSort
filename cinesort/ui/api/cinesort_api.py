@@ -1192,7 +1192,11 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : le run_dir suit la convention `tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Sans ce
+        # prefixe, plan_path pointait sur un dossier inexistant et la fonction
+        # retournait silencieusement "Aucun film dans ce run" en prod.
+        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1259,7 +1263,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1333,7 +1338,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1414,7 +1420,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]

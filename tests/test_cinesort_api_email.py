@@ -214,8 +214,9 @@ class TestGetJellyfinSyncReport(unittest.TestCase):
             store = MagicMock()
             store.run.get_runs_summary.return_value = [{"run_id": "run1", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
-            (self.state_dir / "runs" / "run1").mkdir(parents=True)
-            (self.state_dir / "runs" / "run1" / "plan.jsonl").write_text("", encoding="utf-8")
+            # Audit 2026-06-02 : convention `tri_films_{run_id}` (state.new_run).
+            (self.state_dir / "runs" / "tri_films_run1").mkdir(parents=True)
+            (self.state_dir / "runs" / "tri_films_run1" / "plan.jsonl").write_text("", encoding="utf-8")
 
             result = self.api.integrations.get_jellyfin_sync_report(run_id="run1")
             self.assertFalse(result["ok"])

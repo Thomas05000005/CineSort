@@ -156,7 +156,10 @@ class TimelineReconstructionTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _write_plan(self, run_id, rows_data):
-        run_dir = self.state_dir / "runs" / run_id
+        # Audit 2026-06-02 : aligne sur la convention `tri_films_{run_id}` de
+        # state.new_run / runtime_support.run_paths_for / job_runner. Le code
+        # prod (get_film_timeline / list_films_overview) cherche cet emplacement.
+        run_dir = self.state_dir / "runs" / f"tri_films_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         plan = run_dir / "plan.jsonl"
         with open(plan, "w", encoding="utf-8") as f:
@@ -316,7 +319,8 @@ class TimelineReconstructionTests(unittest.TestCase):
 
     def test_incompatible_plan_jsonl_skipped(self) -> None:
         """plan.jsonl avec lignes invalides → skip gracieux, pas de crash."""
-        run_dir = self.state_dir / "runs" / "run1"
+        # Audit 2026-06-02 : convention `tri_films_{run_id}` (cf _write_plan).
+        run_dir = self.state_dir / "runs" / "tri_films_run1"
         run_dir.mkdir(parents=True)
         (run_dir / "plan.jsonl").write_text("not json\n{bad\n", encoding="utf-8")
         store = _FakeStore(runs=[{"run_id": "run1", "status": "DONE", "start_ts": 1000, "created_ts": 1000}])

@@ -134,8 +134,10 @@ def get_film_timeline(
         if not run_id:
             continue
 
-        # Chemin du plan.jsonl pour ce run
-        run_dir = state_dir / "runs" / run_id
+        # Audit 2026-06-02 : le run_dir suit la convention `tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for). Sans ce prefixe le
+        # plan.jsonl n'etait jamais trouve en prod -> timeline toujours vide.
+        run_dir = state_dir / "runs" / f"tri_films_{run_id}"
         plan_path = run_dir / "plan.jsonl"
         plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
@@ -257,7 +259,8 @@ def list_films_overview(
         return []
 
     run_id = str(last_run.get("run_id") or "")
-    run_dir = state_dir / "runs" / run_id
+    # Audit 2026-06-02 : meme bug que get_film_timeline — cf commentaire la-bas.
+    run_dir = state_dir / "runs" / f"tri_films_{run_id}"
     plan_path = run_dir / "plan.jsonl"
     plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
