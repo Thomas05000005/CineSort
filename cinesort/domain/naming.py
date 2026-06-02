@@ -351,17 +351,25 @@ def check_path_length_killswitch(target_path: str) -> Optional[str]:
 
 
 def _resolution_label(video: Dict[str, Any]) -> str:
-    """Determine le label de resolution a partir des dimensions video."""
+    """Determine le label de resolution a partir des dimensions video.
+
+    Hotfix2 2026-06-02 (SCAN-1 propagation) : utilise width+height (et non
+    plus height seule) pour aligner sur quality_score._resolution_label.
+    L'ancienne logique classait les films cinema 1920x800 (ratio 2.35:1) en
+    720p alors que ce sont des 1080p natifs. Pattern coherent : width est le
+    critere principal (1920 = 1080p toujours, peu importe l aspect ratio).
+    """
     h = video.get("height")
     w = video.get("width")
     if not h and not w:
         return ""
-    height = int(h or 0)
-    if height >= 2160:
+    width = max(0, int(w or 0))
+    height = max(0, int(h or 0))
+    if width >= 3800 or height >= 2100:
         return "2160p"
-    if height >= 1080:
+    if width >= 1900 or height >= 1000:
         return "1080p"
-    if height >= 720:
+    if width >= 1280 or height >= 680:
         return "720p"
     if height >= 480:
         return "480p"

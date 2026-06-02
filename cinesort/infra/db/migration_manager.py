@@ -49,31 +49,47 @@ def _split_sql_statements(sql: str) -> List[str]:
     sinon on refuse explicitement les SQL qui contiennent `/*` ou des literals
     string avec `;` plutot que de continuer silencieusement et produire un
     SQL malforme.
+
+    Fix BUG-015 (hotfix2) : sqlparse n'est PAS une dependance declaree dans
+    pyproject.toml. L'ancien code levait ValueError en chaine d'ImportError
+    quand `/*` apparaissait dans le SQL, ce qui bloquait le demarrage de
+    l'app au runtime. On capture ImportError et on tombe en fallback sur
+    le stripper de commentaires bloc + split ligne-par-ligne, avec un
+    WARNING log pour signaler que la couverture sqlparse n'est pas active.
+    Aucune migration actuelle n'utilise `/*`, mais on garde un stripper
+    minimal pour ne pas planter si une migration future en introduit une.
     """
-    # BUG-015 : refus explicite des commentaires bloc `/* ... */`
-    # qui ne sont pas geres par le splitter simple ligne-par-ligne.
+    # BUG-015 (hotfix2) : sqlparse n'est PAS dans pyproject.toml.
+    # On tente l'import ; si absent on tombe en fallback safe au lieu
+    # de raise ValueError qui empechait l'app de demarrer.
     if "/*" in sql:
-        # Tentative sqlparse en fallback ; sinon on refuse.
         try:
             import sqlparse  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise ValueError(
+        except ImportError:
+            logger.warning(
                 "_split_sql_statements: commentaire bloc /* ... */ detecte dans "
-                "le SQL mais sqlparse n'est pas disponible. Refus explicite plutot "
-                "que produire un split incorrect. Installer sqlparse ou retirer "
-                "les commentaires bloc de la migration."
-            ) from exc
-        out: List[str] = []
-        for stmt in sqlparse.split(sql):
-            cleaned_stmt = sqlparse.format(
-                stmt, strip_comments=True
-            ).strip().rstrip(";").strip()
-            if not cleaned_stmt:
-                continue
-            if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
-                continue
-            out.append(cleaned_stmt)
-        return out
+                "le SQL mais sqlparse n'est pas installe. Fallback : strip naif "
+                "des blocs /* ... */ puis split simple. Pour une couverture "
+                "complete (literals contenant /*, blocs imbriques) installer "
+                "sqlparse ou retirer les commentaires bloc de la migration."
+            )
+            # Strip naif des blocs /* ... */ non-imbriques.
+            # Ne gere PAS les /* a l'interieur d'un literal string SQL,
+            # mais aucune migration actuelle n'en utilise.
+            sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+            # Continuer avec le fallback simple ci-dessous.
+        else:
+            out: List[str] = []
+            for stmt in sqlparse.split(sql):
+                cleaned_stmt = sqlparse.format(
+                    stmt, strip_comments=True
+                ).strip().rstrip(";").strip()
+                if not cleaned_stmt:
+                    continue
+                if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
+                    continue
+                out.append(cleaned_stmt)
+            return out
 
     cleaned_lines: List[str] = []
     for line in sql.splitlines():
