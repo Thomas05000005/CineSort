@@ -5,6 +5,11 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# VQ-1 : import top-level desormais sur. La chaine
+# duplicate_support -> naming -> path_utils est un DAG (path_utils est une
+# feuille), plus de cycle vers core.
+from cinesort.domain.naming import folder_matches_template as _folder_matches_template
+
 _MOVIE_DIR_RE = re.compile(r"^\s*(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)\s*$")
 
 
@@ -62,11 +67,9 @@ def single_folder_is_conform(
 ) -> bool:
     # Check 1 : template actif (si fourni)
     if naming_template:
-        # Lazy intentionnel : cycle reel detecte. duplicate_support -> naming
-        # -> domain.core -> duplicate_support (cf core.py:1352 _find_video_case_insensitive).
-        from cinesort.domain.naming import folder_matches_template
-
-        if folder_matches_template(folder_name, naming_template, title, year):
+        # VQ-1 : ancien lazy import remplace par alias top-level
+        # `_folder_matches_template` (cycle casse via path_utils).
+        if _folder_matches_template(folder_name, naming_template, title, year):
             return True
 
     # Check 1bis : defense en profondeur — equivalence FS Windows/SMB.
