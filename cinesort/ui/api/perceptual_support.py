@@ -935,32 +935,58 @@ def _run_perceptual_job(
     pairs: List[Dict[str, str]],
     options: Optional[Dict[str, Any]],
 ) -> None:
-    """Worker thread daemon : execute compare_perceptual sur chaque paire."""
+    """Worker thread daemon : execute compare_perceptual sur chaque paire.
+
+    BUG-005: garde-fou large `except Exception` autour de toute la boucle worker
+    pour eviter qu'une exception inattendue (RuntimeError, AttributeError, etc.)
+    laisse le job en status="running" indefiniment. Le catch etroit interne
+    (OSError/KeyError/TypeError/ValueError) reste pour qu'une paire defaillante
+    n'interrompe pas le batch, tandis que le catch externe garantit une
+    finalisation systematique status=error+ts_end en cas de plantage fatal.
+    """
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     done_count = 0
-    for pair in pairs:
-        try:
-            res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
-            if isinstance(res, dict) and res.get("ok"):
-                results.append({**pair, "ok": True})
-            else:
-                msg = str(res.get("message", "")) if isinstance(res, dict) else "erreur inconnue"
-                errors.append({**pair, "ok": False, "message": msg})
-        except (OSError, KeyError, TypeError, ValueError) as exc:
-            errors.append({**pair, "ok": False, "message": str(exc)})
-        done_count += 1
-        _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
+    try:
+        for pair in pairs:
+            try:
+                res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
+                if isinstance(res, dict) and res.get("ok"):
+                    results.append({**pair, "ok": True})
+                else:
+                    msg = str(res.get("message", "")) if isinstance(res, dict) else "erreur inconnue"
+                    errors.append({**pair, "ok": False, "message": msg})
+            except (OSError, KeyError, TypeError, ValueError) as exc:
+                errors.append({**pair, "ok": False, "message": str(exc)})
+            done_count += 1
+            _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
 
-    _record_job_snapshot(
-        job_id,
-        status="done",
-        done=done_count,
-        ts_end=time.time(),
-        results=list(results),
-        errors=list(errors),
-    )
-    _trim_perceptual_jobs()
+        _record_job_snapshot(
+            job_id,
+            status="done",
+            done=done_count,
+            ts_end=time.time(),
+            results=list(results),
+            errors=list(errors),
+        )
+    except Exception as exc:  # noqa: BLE001 - garde-fou worker thread
+        logger.exception("perceptual job %s a echoue: %s", job_id, exc)
+        try:
+            _record_job_snapshot(
+                job_id,
+                status="error",
+                done=done_count,
+                ts_end=time.time(),
+                results=list(results),
+                errors=list(errors) + [{"ok": False, "message": f"job worker failure: {exc}"}],
+            )
+        except Exception:  # noqa: BLE001 - dernier rempart, jamais propager hors du thread
+            logger.exception("perceptual job %s : impossible d'enregistrer le snapshot d'erreur", job_id)
+    finally:
+        try:
+            _trim_perceptual_jobs()
+        except Exception:  # noqa: BLE001
+            logger.exception("perceptual job %s : _trim_perceptual_jobs a echoue", job_id)
 
 
 def queue_perceptual_analyses(
