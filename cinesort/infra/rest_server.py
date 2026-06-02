@@ -1063,15 +1063,58 @@ class RestApiServer:
         logger.info("REST: dashboard accessible a %s", self.dashboard_url)
 
     def stop(self) -> None:
-        """Stop the HTTP server."""
-        if self._server:
-            self._server.shutdown()
+        """Stop the HTTP server.
+
+        H10 (hotfix2) : l'ancien code faisait join(timeout=5) puis NULL la ref
+        sans verifier is_alive(). Si le thread refusait de mourir (handler bloque,
+        socket non liberee), on se retrouvait avec un thread daemon orphelin
+        tournant a vide et une socket potentiellement encore ouverte, ce qui
+        faisait echouer le bind au prochain start().
+
+        Nouveau pattern :
+        - boucle de courts join(0.5) tant que is_alive() et timeout restant
+        - si is_alive() apres timeout : force-close de la socket sous-jacente
+          pour debloquer serve_forever() et liberer le port
+        - les refs ne sont nullifiees qu'apres best-effort de nettoyage
+        """
+        server = self._server
+        thread = self._thread
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.shutdown()
             with contextlib.suppress(OSError):
-                self._server.server_close()
-            self._server = None
-        if self._thread:
-            self._thread.join(timeout=5)
-            self._thread = None
+                server.server_close()
+        if thread is not None:
+            timeout_remaining = 5.0
+            step = 0.5
+            while thread.is_alive() and timeout_remaining > 0:
+                thread.join(step)
+                timeout_remaining -= step
+            if thread.is_alive():
+                # Le thread refuse de mourir : on force-close la socket
+                # sous-jacente pour debloquer serve_forever() et eviter de
+                # garder le port occupe (regression bind au restart).
+                logger.warning(
+                    "REST: thread %s toujours vivant apres timeout, "
+                    "force-close de la socket pour liberer le port.",
+                    thread.name,
+                )
+                if server is not None:
+                    sock = getattr(server, "socket", None)
+                    if sock is not None:
+                        with contextlib.suppress(OSError):
+                            sock.close()
+                # Dernier essai bref de join apres force-close
+                thread.join(timeout=1.0)
+                if thread.is_alive():
+                    logger.error(
+                        "REST: thread %s orphelin (daemon=%s) — la socket "
+                        "a ete fermee mais le thread n'a pas pu etre joint.",
+                        thread.name,
+                        thread.daemon,
+                    )
+        self._server = None
+        self._thread = None
         logger.info("REST API stopped.")
 
     def join(self) -> None:
