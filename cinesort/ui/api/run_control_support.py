@@ -228,17 +228,9 @@ def _pause_or_save(api: Any, run_id: str, *, saved: bool, status_label: str) -> 
             status=current_status,
         )
 
-    # Signaling JobRunner d'abord (best-effort) pour que le worker s'arrete
-    # sur la prochaine iteration. Si le run n'est plus en memoire (apres
-    # redemarrage app), pas de signaling — on persiste juste l'etat.
-    rs = api._get_run(run_id)
-    if rs is not None:
-        try:
-            rs.runner.request_pause(run_id)
-        # except Exception : le signaling est best-effort, on persiste quand meme
-        except Exception as exc:
-            logger.warning("pause_run: signaling failure run_id=%s err=%s", run_id, exc)
-
+    # BUG-012 fix : persister l'etat DB d'abord pour eviter une incoherence ou
+    # le worker est bloque par pause_event tandis que la DB voit toujours RUNNING
+    # (si la transition DB etait refusee apres signaling). Symetrique a resume_run.
     ok = store.run.mark_run_paused(run_id, saved=saved)
     if not ok:
         return _err_response(
@@ -248,5 +240,16 @@ def _pause_or_save(api: Any, run_id: str, *, saved: bool, status_label: str) -> 
             log_module=__name__,
             run_id=run_id,
         )
+
+    # Signaling JobRunner apres persistance reussie (best-effort) pour que le
+    # worker s'arrete sur la prochaine iteration. Si le run n'est plus en memoire
+    # (apres redemarrage app), pas de signaling — l'etat DB est suffisant.
+    rs = api._get_run(run_id)
+    if rs is not None:
+        try:
+            rs.runner.request_pause(run_id)
+        # except Exception : le signaling est best-effort, l'etat DB est deja persiste
+        except Exception as exc:
+            logger.warning("pause_run: signaling failure run_id=%s err=%s", run_id, exc)
 
     return {"ok": True, "run_id": run_id, "status": status_label}
