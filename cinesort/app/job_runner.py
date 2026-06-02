@@ -530,12 +530,45 @@ class JobRunner:
                 # est en etat sous controle operateur (PAUSED/SAVED/AWAITING).
                 # Sinon `start_job` autoriserait un second run en parallele
                 # alors qu'un run est en attente d'action utilisateur.
+                #
+                # HOTFIX3 fallback : si le snapshot est reste sur RUNNING
+                # (ou un etat non-terminal et non-reserved) apres sortie du
+                # `try` — typiquement parce que le guard C4 a leve une
+                # exception apres avoir lu db_status_before mais avant
+                # d'aligner le snapshot —, on tente un dernier alignement
+                # via la DB pour ne pas laisser snapshot=RUNNING en perma
+                # et eviter de liberer le slot a tort.
                 if rt and self._active_run_id == run_id:
                     held = rt.snapshot.status in (
                         RunStatus.PAUSED,
                         RunStatus.SAVED,
                         RunStatus.AWAITING_VALIDATION,
                     )
+                    if (
+                        not held
+                        and rt.snapshot.status not in _TERMINAL
+                    ):
+                        db_status_final = self._current_db_status(run_id)
+                        if self._is_user_held_state(db_status_final):
+                            try:
+                                held_status = RunStatus(db_status_final)
+                                self._set_snapshot(
+                                    run_id,
+                                    status=held_status,
+                                    running=False,
+                                    done=False,
+                                )
+                                held = True
+                                self._debug(
+                                    f"worker finally aligned snapshot on DB={db_status_final} run_id={run_id}",
+                                    run_debug,
+                                )
+                            except (KeyError, OSError, TypeError, ValueError):
+                                # Defensif : si le mapping echoue, on conserve
+                                # held=True base sur la DB pour ne pas liberer
+                                # le slot a tort tant que la DB indique un
+                                # etat user-held.
+                                held = True
                     if not held:
                         self._active_run_id = None
 
@@ -597,7 +630,7 @@ class JobRunner:
         self._debug(f"request_cancel persisted cancel_requested run_id={run_id}", run_debug)
         return True
 
-    def request_pause(self, run_id: str) -> bool:
+    def request_pause(self, run_id: str, *, saved: bool = False) -> bool:
         """Demande la suspension d'un run actif. Pose le `pause_event`.
 
         V8-01 spec 08 Traitement : la pause est cooperative — le job_fn doit
@@ -610,8 +643,17 @@ class JobRunner:
         eviter la desync entre l'etat DB (PAUSED) et l'etat memoire (RUNNING).
         `_active_run_locked`, `get_status` et `_run_worker` lisent tous le
         snapshot ; sans cette mise a jour, l'UI affichait toujours RUNNING.
+
+        HOTFIX3 fix : ajout du parametre keyword-only `saved` pour permettre
+        au caller (RunControlSupport.save_for_later) de demander un alignement
+        snapshot=SAVED au lieu de PAUSED. Le fix C3 d'origine forcait
+        inconditionnellement snapshot=PAUSED, ce qui re-introduisait la desync
+        snapshot=PAUSED / DB=SAVED lorsque le caller faisait
+        `mark_run_paused(saved=True)`. Le defaut `saved=False` preserve la
+        backward compat des callers existants (tests, autres call sites).
         """
         run_debug: Optional[Callable[[str], None]] = None
+        target_status = RunStatus.SAVED if saved else RunStatus.PAUSED
         with self._lock:
             rt = self._runs.get(run_id)
             if not rt:
@@ -624,10 +666,14 @@ class JobRunner:
             if rt.pause_event is None:
                 rt.pause_event = threading.Event()
             rt.pause_event.set()
-            # C3 : aligne le snapshot memoire (idempotent si deja PAUSED).
-            if rt.snapshot.status != RunStatus.PAUSED:
-                self._set_snapshot(run_id, status=RunStatus.PAUSED, running=False)
-            self._debug(f"request_pause set pause flag run_id={run_id}", run_debug)
+            # C3 + HOTFIX3 : aligne le snapshot memoire sur le target choisi
+            # par le caller (PAUSED par defaut, SAVED si save_for_later).
+            # Idempotent si snapshot est deja sur le bon target.
+            if rt.snapshot.status != target_status:
+                self._set_snapshot(run_id, status=target_status, running=False)
+            self._debug(
+                f"request_pause set pause flag run_id={run_id} target={target_status.value}", run_debug
+            )
         return True
 
     def request_resume(self, run_id: str) -> bool:
@@ -639,8 +685,14 @@ class JobRunner:
 
         C3 fix (hotfix2) : restaure aussi le snapshot memoire vers RUNNING
         pour cloturer la desync introduite par `request_pause`.
+
+        HOTFIX3 fix : etend le set de transitions valides PAUSED -> RUNNING
+        a SAVED -> RUNNING et AWAITING_VALIDATION -> RUNNING pour rester
+        coherent avec `request_pause(saved=True)` et avec
+        `RunRepository.mark_run_resumed` qui autorise SAVED -> RUNNING.
         """
         run_debug: Optional[Callable[[str], None]] = None
+        resumable = (RunStatus.PAUSED, RunStatus.SAVED, RunStatus.AWAITING_VALIDATION)
         with self._lock:
             rt = self._runs.get(run_id)
             if not rt:
@@ -652,8 +704,9 @@ class JobRunner:
                 return False
             if rt.pause_event is not None:
                 rt.pause_event.clear()
-            # C3 : restaure le snapshot memoire si on etait en pause.
-            if rt.snapshot.status == RunStatus.PAUSED:
+            # C3 + HOTFIX3 : restaure le snapshot memoire vers RUNNING si on
+            # etait dans un etat suspendu (PAUSED/SAVED/AWAITING_VALIDATION).
+            if rt.snapshot.status in resumable:
                 self._set_snapshot(run_id, status=RunStatus.RUNNING, running=True)
             self._debug(f"request_resume clear pause flag run_id={run_id}", run_debug)
         return True

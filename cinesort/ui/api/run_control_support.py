@@ -248,10 +248,16 @@ def _pause_or_save(api: Any, run_id: str, *, saved: bool, status_label: str) -> 
     # Signaling JobRunner apres persistance reussie (best-effort) pour que le
     # worker s'arrete sur la prochaine iteration. Si le run n'est plus en memoire
     # (apres redemarrage app), pas de signaling — l'etat DB est suffisant.
+    #
+    # HOTFIX3 fix : transmettre le flag `saved` au runner pour qu'il aligne le
+    # snapshot memoire sur le meme target status que la DB (SAVED si
+    # save_for_later, sinon PAUSED). Le fix C3 hotfix2 forcait inconditionnellement
+    # snapshot=PAUSED, ce qui creait une nouvelle desync snapshot=PAUSED /
+    # DB=SAVED dans le flux save_for_later.
     rs = api._get_run(run_id)
     if rs is not None:
         try:
-            rs.runner.request_pause(run_id)
+            rs.runner.request_pause(run_id, saved=saved)
         # except Exception : le signaling est best-effort, l'etat DB est deja persiste
         except Exception as exc:
             logger.warning("pause_run: signaling failure run_id=%s err=%s", run_id, exc)
