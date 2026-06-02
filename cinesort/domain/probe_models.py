@@ -9,6 +9,49 @@ PROBE_QUALITY_PARTIAL = "PARTIAL"
 PROBE_QUALITY_FAILED = "FAILED"
 
 
+# BUG-018 (hotfix1, 2026-06-02) : helpers centralises de comparaison
+# probe_quality. Le pipeline interne (_normalize_merge) produit toujours
+# UPPERCASE via la constante PROBE_QUALITY_FAILED, mais l'audit a montre
+# que certains consommateurs UI comparent en case-sensitive (== "FAILED")
+# alors que d'autres appliquent .upper() (dashboard_support). Cette
+# divergence silencieuse a deja masque des etats FAILED dans la couche
+# perceptual_support. Centraliser ici garantit un comportement uniforme
+# et robuste a un payload externe en lowercase ou avec espaces.
+def probe_quality_is_failed(value: Any) -> bool:
+    """Retourne True si la valeur probe_quality represente l'etat FAILED.
+
+    Tolere None, chaines avec espaces et casse mixte. Toute valeur non
+    interpretable comme str renvoie False (statut considere inconnu, donc
+    pas FAILED). La comparaison reste case-insensitive pour proteger les
+    callsites UI contre un payload serialise avec variation de casse.
+
+    :param value: valeur brute lue depuis NormalizedProbe.probe_quality ou
+                  un dict serialise (potentiellement None ou vide).
+    :return: True ssi la valeur normalisee == PROBE_QUALITY_FAILED.
+    """
+    if value is None:
+        return False
+    try:
+        return str(value).strip().upper() == PROBE_QUALITY_FAILED
+    except (TypeError, ValueError):
+        return False
+
+
+def probe_quality_is_partial_or_failed(value: Any) -> bool:
+    """Retourne True si probe_quality vaut PARTIAL ou FAILED (case-insensitive).
+
+    Sert aux consommateurs (dashboard, rapports) qui groupent les deux etats
+    "donnees incompletes" pour l'affichage et la detection d'anomalies.
+    """
+    if value is None:
+        return False
+    try:
+        normalized = str(value).strip().upper()
+    except (TypeError, ValueError):
+        return False
+    return normalized in {PROBE_QUALITY_PARTIAL, PROBE_QUALITY_FAILED}
+
+
 # VO-D-1 (2026-06-01) : StrEnum OpType pour typer fortement les valeurs
 # canoniques RENAME/MOVE/NOOP du champ RenameProposal.op_type.
 #
@@ -36,6 +79,10 @@ class OpType(StrEnum):
     def from_str(cls, value: str) -> "OpType":
         """Convert a string to OpType, supporting legacy lowercase values.
 
+        Ne couvre QUE le vocabulaire RenameProposal (RENAME/MOVE/NOOP), pas
+        celui du journal/apply (MOVE_FILE/MOVE_DIR/MKDIR/QUARANTINE_*/UNDO_*).
+        Pour mapper RenameProposal -> journal, voir to_journal_op_type().
+
         :param value: chaine source (sensible a la casse normalisee)
         :raises ValueError: si la valeur n'est pas un OpType valide
         """
@@ -45,8 +92,70 @@ class OpType(StrEnum):
         except ValueError as e:
             raise ValueError(
                 f"Unknown OpType: {value!r}, expected one of "
-                f"{[m.value for m in cls]}"
+                f"{[m.value for m in cls]} "
+                f"(vocabulaire RenameProposal, pas journal/apply : "
+                f"pour MOVE_FILE/MOVE_DIR/MKDIR/QUARANTINE_* voir "
+                f"to_journal_op_type())"
             ) from e
+
+    @classmethod
+    def try_from_str(cls, value: str) -> Optional["OpType"]:
+        """Mode tolerant : retourne None si la valeur n'est pas un OpType valide.
+
+        Utile lorsque le vocabulaire d'entree melange RenameProposal et journal
+        (MOVE_FILE/MOVE_DIR/etc.) et que l'appelant veut detecter quel
+        vocabulaire est en jeu sans crash.
+
+        :param value: chaine source (sensible a la casse normalisee)
+        :return: OpType correspondant ou None si non match
+        """
+        if value is None:
+            return None
+        try:
+            return cls.from_str(value)
+        except (ValueError, AttributeError):
+            return None
+
+    def to_journal_op_type(self, is_dir: bool = False) -> str:
+        """Mappe l'OpType RenameProposal vers le vocabulaire journal/apply.
+
+        Le journal/apply (move_journal + apply_audit) utilise un vocabulaire
+        plus granulaire que RenameProposal :
+            - RenameProposal.RENAME / MOVE -> MOVE_FILE (ou MOVE_DIR si is_dir)
+            - RenameProposal.NOOP          -> NOOP (conserve, n'est pas journalise
+              comme MOVE_FILE car aucune operation reelle)
+
+        Ce mapping NE COUVRE PAS QUARANTINE_FILE / QUARANTINE_DIR / MKDIR /
+        UNDO_*, qui sont produits directement par les helpers d'infra
+        (quarantine_file, ensure_dir, undo_*) sans passer par RenameProposal.
+
+        :param is_dir: True si la cible est un repertoire (rename de dossier)
+        :return: vocabulaire journal ("MOVE_FILE" | "MOVE_DIR" | "NOOP")
+        """
+        if self is OpType.NOOP:
+            return "NOOP"
+        return "MOVE_DIR" if is_dir else "MOVE_FILE"
+
+
+# Vocabulaire journal/apply (move_journal + apply_audit). Diverge volontairement
+# du vocabulaire domain (OpType RENAME/MOVE/NOOP) car le journal trace plus de
+# types d'operation que ce que RenameProposal exprime. Cette divergence est
+# DOCUMENTEE et intentionnelle : domain decrit l'intention, infra trace
+# l'execution reelle (deplacements de fichiers, repertoires, quarantaines).
+#
+# Pour mapper domain -> journal, utiliser OpType.to_journal_op_type().
+JOURNAL_OP_MOVE_FILE: str = "MOVE_FILE"
+JOURNAL_OP_MOVE_DIR: str = "MOVE_DIR"
+JOURNAL_OP_MKDIR: str = "MKDIR"
+JOURNAL_OP_QUARANTINE_FILE: str = "QUARANTINE_FILE"
+JOURNAL_OP_QUARANTINE_DIR: str = "QUARANTINE_DIR"
+JOURNAL_OP_VALUES = frozenset({
+    JOURNAL_OP_MOVE_FILE,
+    JOURNAL_OP_MOVE_DIR,
+    JOURNAL_OP_MKDIR,
+    JOURNAL_OP_QUARANTINE_FILE,
+    JOURNAL_OP_QUARANTINE_DIR,
+})
 
 
 # VN-F.4 (2026-06-01) : OpType canonique UPPERCASE pour aligner RenameProposal
@@ -66,11 +175,21 @@ __all__ = [
     "PROBE_QUALITY_FULL",
     "PROBE_QUALITY_PARTIAL",
     "PROBE_QUALITY_FAILED",
+    # BUG-018 (hotfix1) : helpers centralises probe_quality (case-insensitive).
+    "probe_quality_is_failed",
+    "probe_quality_is_partial_or_failed",
     "OpType",
     "OP_TYPE_RENAME",
     "OP_TYPE_MOVE",
     "OP_TYPE_NOOP",
     "OP_TYPE_VALUES",
+    # BUG-016 (hotfix1) : vocabulaire journal/apply expose et documente.
+    "JOURNAL_OP_MOVE_FILE",
+    "JOURNAL_OP_MOVE_DIR",
+    "JOURNAL_OP_MKDIR",
+    "JOURNAL_OP_QUARANTINE_FILE",
+    "JOURNAL_OP_QUARANTINE_DIR",
+    "JOURNAL_OP_VALUES",
     "NormalizedProbe",
     # Vague M (M-05) : extensions optionnelles, non utilisees ailleurs en
     # production a cette etape. Disponibles pour les vagues suivantes.
@@ -108,6 +227,15 @@ class NormalizedProbe:
     container_encoder: Optional[str] = None  # writing application
     container_creation_time: Optional[str] = None  # ISO8601 si dispo
     chapters: List[Dict[str, Any]] = field(default_factory=list)
+
+    # BUG-008-COMPLEMENT (hotfix1) : metadonnees enrichies optionnelles pour
+    # support edition (Director's Cut, Extended, Theatrical, etc.) et
+    # appartenance a une collection TMDb (saga / franchise). Tous deux
+    # OPTIONNELS pour preserver la backward compat absolue : les anciens
+    # consommateurs ignorent ces champs et la signature minimale
+    # NormalizedProbe(path=...) continue de fonctionner.
+    edition: Optional[str] = None  # "Director's Cut", "Extended", etc.
+    tmdb_collection_id: Optional[str] = None  # id TMDb de la collection/saga
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -225,6 +353,14 @@ class RenameProposal:
 
         Tolere les champs manquants en utilisant les defauts du dataclass.
         Les champs inconnus sont ignores silencieusement (forward-compat).
+
+        BUG-020 (hotfix1) : normalise op_type via OpType.from_str pour
+        accepter les valeurs lowercase pre-VN-F.4 ("rename"/"move"/"noop")
+        et garantir un roundtrip propre. Si la valeur est inconnue mais
+        non vide, on laisse passer la valeur brute pour preserver la
+        backward compat absolue (un appelant peut avoir stocke un op_type
+        custom). Si la valeur est invalide pour OpType, on conserve la
+        chaine telle quelle apres upper-strip basique.
         """
         known = {
             "src_path",
@@ -238,6 +374,18 @@ class RenameProposal:
             "reasons",
         }
         filtered = {k: v for k, v in data.items() if k in known}
+        # Normalise op_type via OpType.from_str (upper-strip + validation).
+        # Fallback : si la valeur est invalide pour OpType, on garde la chaine
+        # brute apres normalisation cosmetique (upper-strip) pour eviter de
+        # casser un appelant qui aurait stocke un vocabulaire custom.
+        raw_op = filtered.get("op_type")
+        if isinstance(raw_op, str):
+            normalized = OpType.try_from_str(raw_op)
+            if normalized is not None:
+                filtered["op_type"] = normalized
+            else:
+                # Conserve la valeur brute apres upper-strip pour backward compat.
+                filtered["op_type"] = raw_op.upper().strip()
         return cls(**filtered)
 
 

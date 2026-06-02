@@ -54,6 +54,13 @@ REQUIRED_SCHEMA_TABLES = (
     "ignored_alerts",
     "film_marked_for_deletion",
     "film_tmdb_overrides",
+    # Fix BUG-002 (hotfix1) : tables des migrations 029/030/031 (Vague P).
+    # Sans elles, _ensure_required_schema ne detectait pas leur absence et
+    # le filet de securite self-healing ne se declenchait jamais pour les
+    # features apply atomique / field locks / decisions tri-etat.
+    "apply_batch_modes",
+    "film_field_locks",
+    "film_decisions_v2",
 )
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
@@ -172,41 +179,67 @@ class _StoreBase:
         "duplicate column name" et plantent tout le bootstrap. On adopte
         donc ici le meme mecanisme savepoint+_is_idempotent_error que dans
         MigrationManager.apply pour rester self-healing.
+
+        Fix BUG-001 (hotfix1) : le script bootstrap concatene TOUTES les
+        migrations, y compris celles porteuses du marker `@manager: disable_fk`
+        (ex: migration 025 qui DROP/RECREATE `runs`). Sans cette desactivation,
+        le DROP TABLE runs declenche ON DELETE CASCADE et supprime
+        silencieusement errors/quality_reports/anomalies dont les rows ne
+        seront jamais reinjectes. On replique donc ici la meme logique que
+        MigrationManager.apply : detection du marker dans le script global,
+        PRAGMA foreign_keys=OFF avant BEGIN, restauration ON apres COMMIT.
+        PRAGMA foreign_keys ne fonctionne PAS dans une transaction, on le
+        pose donc avant BEGIN et on le restaure dans un finally.
         """
         script, version = self.migrations.build_bootstrap_script()
         if not script or version <= 0:
             raise RuntimeError("Aucune migration SQL disponible pour initialiser le schema SQLite.")
 
         statements = _split_sql_statements(script)
+        # Fix BUG-001 : detection du marker disable_fk au niveau global du
+        # script bootstrap. Si au moins une migration concatenee le porte,
+        # on desactive les FK pour TOUT le bootstrap (les DROP TABLE des
+        # migrations FK-sensitives sinon CASCADE-supprimeraient les rows
+        # enfants des migrations posterieures, alors meme qu'on est en mode
+        # self-healing sur une DB partielle).
+        needs_fk_disable = "@manager: disable_fk" in script
         with self._managed_conn() as conn:
-            conn.execute("BEGIN")
+            if needs_fk_disable:
+                conn.execute("PRAGMA foreign_keys = OFF")
             try:
-                for idx, stmt in enumerate(statements):
-                    sp_name = f"bootstrap_{idx}"
-                    conn.execute(f"SAVEPOINT {sp_name}")
-                    try:
-                        conn.execute(stmt)
-                        conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                    except sqlite3.OperationalError as stmt_exc:
-                        # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
-                        # tolere les erreurs idempotentes (duplicate column,
-                        # already exists) pour rester self-healing sur DB
-                        # partielle.
-                        if _is_idempotent_error(stmt_exc):
-                            conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                conn.execute("BEGIN")
+                try:
+                    for idx, stmt in enumerate(statements):
+                        sp_name = f"bootstrap_{idx}"
+                        conn.execute(f"SAVEPOINT {sp_name}")
+                        try:
+                            conn.execute(stmt)
                             conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                            logger.warning(
-                                "bootstrap_schema: statement %d ignore (idempotence): %s",
-                                idx,
-                                stmt_exc,
-                            )
-                            continue
-                        raise
-                conn.execute(f"PRAGMA user_version = {int(version)}")
-                conn.commit()
-            except sqlite3.DatabaseError:
-                conn.rollback()
-                raise
+                        except sqlite3.OperationalError as stmt_exc:
+                            # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
+                            # tolere les erreurs idempotentes (duplicate column,
+                            # already exists) pour rester self-healing sur DB
+                            # partielle.
+                            if _is_idempotent_error(stmt_exc):
+                                conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                                conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                                logger.warning(
+                                    "bootstrap_schema: statement %d ignore (idempotence): %s",
+                                    idx,
+                                    stmt_exc,
+                                )
+                                continue
+                            raise
+                    conn.execute(f"PRAGMA user_version = {int(version)}")
+                    conn.commit()
+                except sqlite3.DatabaseError:
+                    conn.rollback()
+                    raise
+            finally:
+                if needs_fk_disable:
+                    # Best effort : restaurer le PRAGMA quoi qu'il arrive.
+                    with suppress(sqlite3.Error):
+                        conn.execute("PRAGMA foreign_keys = ON")
         return int(version)
 
     def _prepare_db_directory(self) -> None:
