@@ -22,6 +22,21 @@ _logger = logging.getLogger(__name__)
 JobFn = Callable[[Callable[[], bool]], Optional[Dict[str, Any]]]
 _TERMINAL = {RunStatus.DONE, RunStatus.FAILED, RunStatus.CANCELLED}
 _ACTIVE = {RunStatus.PENDING, RunStatus.RUNNING}
+# H15 fix (hotfix2) : ensemble etendu pour `_active_run_locked`. Un run
+# PAUSED ou AWAITING_VALIDATION possede encore un thread worker ou un
+# verrou logique sur le store : autoriser `start_job` a en lancer un nouveau
+# en parallele aboutirait a deux jobs ecrivant simultanement sur la meme
+# base. SAVED est inclus pour la meme raison (l'operateur peut reprendre
+# a tout moment). On garde `_ACTIVE` strict pour la semantique `running`
+# exposee dans RunSnapshot afin de ne pas casser la backward compat des
+# consommateurs (UI, logs, get_status).
+_RESERVED = {
+    RunStatus.PENDING,
+    RunStatus.RUNNING,
+    RunStatus.PAUSED,
+    RunStatus.SAVED,
+    RunStatus.AWAITING_VALIDATION,
+}
 
 
 @dataclass
@@ -162,6 +177,40 @@ class JobRunner:
 
         return _should_pause
 
+    def _current_db_status(self, run_id: str) -> Optional[str]:
+        """Lit le statut DB courant (sans modifier l'etat memoire). C4 fix.
+
+        Utilise par les transitions terminales pour eviter d'ecraser un
+        PAUSED/SAVED/AWAITING_VALIDATION qu'un thread API aurait persiste
+        concurremment (cf. RunRepository.mark_run_paused, dont l'UPDATE
+        n'a pas de WHERE status pour empecher l'ecrasement inverse cote
+        runner). Defensif : retourne None si DB inaccessible.
+        """
+        try:
+            row = self._store.run.get_run(run_id)
+        # except Exception : best-effort, on prefere autoriser la transition
+        except Exception as exc:
+            self._debug(f"_current_db_status warning run_id={run_id}: {exc}")
+            return None
+        if not row:
+            return None
+        return str(row.get("status") or "") or None
+
+    def _is_user_held_state(self, db_status: Optional[str]) -> bool:
+        """True si la DB indique un etat sous controle operateur (C4 fix).
+
+        Les transitions terminales (DONE/CANCELLED/FAILED) initiees par le
+        worker ne doivent PAS ecraser ces etats : c'est l'operateur (via
+        resume / save) qui decide quand le run quitte la pause.
+        """
+        if not db_status:
+            return False
+        return db_status in (
+            RunStatus.PAUSED.value,
+            RunStatus.SAVED.value,
+            RunStatus.AWAITING_VALIDATION.value,
+        )
+
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
         if not self._active_run_id:
             return None
@@ -169,7 +218,12 @@ class JobRunner:
         if not rt:
             self._active_run_id = None
             return None
-        if rt.snapshot.status in _ACTIVE:
+        # H15 fix (hotfix2) : un thread suspendu (PAUSED) ou en attente de
+        # validation operateur (AWAITING_VALIDATION/SAVED) detient encore le
+        # slot actif. Sans cette extension, `start_job` autorisait un second
+        # run en parallele, et deux threads ecrivaient simultanement sur le
+        # meme store SQLite (corruption metier).
+        if rt.snapshot.status in _RESERVED:
             return rt
         self._active_run_id = None
         return None
@@ -310,13 +364,21 @@ class JobRunner:
 
             if cancelled_before_run:
                 self._debug(f"worker cancel before run run_id={run_id}", run_debug)
+                # C2 fix (hotfix2) : un run annule AVANT que le worker n'ait pu
+                # appeler `mark_run_running` etait persiste CANCELLED avec
+                # started_ts=NULL et ended_ts=now(), ce qui violait l'invariant
+                # metier "un run cancelled a forcement demarre" (utilise par les
+                # rapports, le dashboard, et la duree affichee). On force
+                # started_ts = ended_ts = now() ce qui donne une duree de 0s
+                # documentee, semantique correcte sans casser l'API ou le schema.
                 ended_ts = time.time()
+                self._store.run.mark_run_running(run_id, started_ts=ended_ts)
                 self._store.run.mark_run_cancelled(run_id, ended_ts=ended_ts)
                 with self._lock:
                     self._set_snapshot(
                         run_id,
                         status=RunStatus.CANCELLED,
-                        started_ts=None,
+                        started_ts=ended_ts,
                         ended_ts=ended_ts,
                         cancel_requested=True,
                         running=False,
@@ -348,6 +410,39 @@ class JobRunner:
             self._debug(f"worker job_fn returned run_id={run_id} stats_keys={list((stats or {}).keys())}", run_debug)
 
             ended_ts = time.time()
+            # C4 fix (hotfix2) : avant toute transition terminale, on verifie
+            # que le run n'a pas ete pose en PAUSED / SAVED / AWAITING_VALIDATION
+            # par l'API entre temps. Sans ce guard, `mark_run_done/cancelled`
+            # ecrasait silencieusement l'etat operateur (le UPDATE repo n'a pas
+            # de clause WHERE status pour des raisons de backward compat).
+            db_status_before = self._current_db_status(run_id)
+            if self._is_user_held_state(db_status_before):
+                self._debug(
+                    f"worker terminal transition SKIPPED — db_status={db_status_before} run_id={run_id}",
+                    run_debug,
+                )
+                _logger.info(
+                    "job: terminal transition skipped (user-held state) run_id=%s db_status=%s",
+                    run_id,
+                    db_status_before,
+                )
+                # On aligne le snapshot memoire sur la DB pour eviter la desync.
+                with self._lock:
+                    rt_now = self._runs.get(run_id)
+                    if rt_now and rt_now.snapshot.status not in _TERMINAL:
+                        try:
+                            held = RunStatus(db_status_before)
+                            self._set_snapshot(
+                                run_id,
+                                status=held,
+                                running=False,
+                                done=False,
+                            )
+                        except (KeyError, OSError, TypeError, ValueError):
+                            # Defensif : statut DB inattendu, on n'ecrase pas
+                            # le snapshot pour ne pas casser get_status.
+                            pass
+                return
             if should_cancel():
                 self._store.run.mark_run_cancelled(run_id, stats=stats, ended_ts=ended_ts)
                 self._debug(f"worker mark_run_cancelled OK run_id={run_id}", run_debug)
@@ -383,28 +478,66 @@ class JobRunner:
             self._debug(f"worker exception run_id={run_id}: {error_message}\n{tb_text}", run_debug)
             ended_ts = time.time()
             self._write_crash_for_run(run_id, "job_runner worker failed", tb_text)
-            self._store.run.mark_run_failed(run_id, error_message=error_message, ended_ts=ended_ts)
-            self._store.run.insert_error(
-                run_id=run_id,
-                step="job_runner",
-                code=exc.__class__.__name__,
-                message=error_message,
-                context={"run_id": run_id, "traceback": tb_text},
-            )
-            with self._lock:
-                self._set_snapshot(
-                    run_id,
-                    status=RunStatus.FAILED,
-                    ended_ts=ended_ts,
-                    running=False,
-                    done=True,
-                    error=error_message,
+            # C4 fix (hotfix2) : meme guard que pour DONE/CANCELLED — un
+            # crash worker ne doit pas ecraser un PAUSED persiste par l'API.
+            # L'erreur reste tracee dans la table `errors` (insert_error).
+            db_status_before = self._current_db_status(run_id)
+            if self._is_user_held_state(db_status_before):
+                self._debug(
+                    f"worker FAILED transition SKIPPED — db_status={db_status_before} run_id={run_id}",
+                    run_debug,
                 )
+                _logger.warning(
+                    "job: FAILED transition skipped (user-held state) run_id=%s db_status=%s err=%s",
+                    run_id,
+                    db_status_before,
+                    error_message,
+                )
+                # On trace tout de meme l'erreur pour ne pas la perdre.
+                try:
+                    self._store.run.insert_error(
+                        run_id=run_id,
+                        step="job_runner",
+                        code=exc.__class__.__name__,
+                        message=error_message,
+                        context={"run_id": run_id, "traceback": tb_text, "skipped_terminal": db_status_before},
+                    )
+                # except Exception : ne pas masquer la propagation finally
+                except Exception as exc2:
+                    self._debug(f"worker insert_error failure run_id={run_id}: {exc2}", run_debug)
+            else:
+                self._store.run.mark_run_failed(run_id, error_message=error_message, ended_ts=ended_ts)
+                self._store.run.insert_error(
+                    run_id=run_id,
+                    step="job_runner",
+                    code=exc.__class__.__name__,
+                    message=error_message,
+                    context={"run_id": run_id, "traceback": tb_text},
+                )
+                with self._lock:
+                    self._set_snapshot(
+                        run_id,
+                        status=RunStatus.FAILED,
+                        ended_ts=ended_ts,
+                        running=False,
+                        done=True,
+                        error=error_message,
+                    )
         finally:
             with self._lock:
                 rt = self._runs.get(run_id)
+                # H15 fix (hotfix2) : ne pas liberer le slot actif si le run
+                # est en etat sous controle operateur (PAUSED/SAVED/AWAITING).
+                # Sinon `start_job` autoriserait un second run en parallele
+                # alors qu'un run est en attente d'action utilisateur.
                 if rt and self._active_run_id == run_id:
-                    self._active_run_id = None
+                    held = rt.snapshot.status in (
+                        RunStatus.PAUSED,
+                        RunStatus.SAVED,
+                        RunStatus.AWAITING_VALIDATION,
+                    )
+                    if not held:
+                        self._active_run_id = None
 
                 rt_after = self._runs.get(run_id)
                 if rt_after and rt_after.snapshot.status in _TERMINAL and rt_after.snapshot.ended_ts is None:
@@ -448,6 +581,16 @@ class JobRunner:
                 return False
             rt.cancel_event.set()
             self._set_snapshot(run_id, cancel_requested=True)
+            # H16 fix (hotfix2) : si le run est PAUSED, le worker est endormi
+            # dans `wait_while_paused()` (ou equivalent) et n'observera jamais
+            # `cancel_requested` tant que `pause_event` est pose. On efface
+            # `pause_event` APRES avoir pose `cancel_event` pour debloquer la
+            # boucle cooperative — l'ordre est important : `should_cancel`
+            # doit voir True avant que le worker ne reprenne sa boucle, sinon
+            # il interpreterait le clear comme un resume.
+            if rt.pause_event is not None and rt.pause_event.is_set():
+                rt.pause_event.clear()
+                self._debug(f"request_cancel cleared pause_event for PAUSED run_id={run_id}", run_debug)
             self._debug(f"request_cancel set cancel flag run_id={run_id}", run_debug)
 
         self._store.run.mark_cancel_requested(run_id)
@@ -462,6 +605,11 @@ class JobRunner:
         pour suspendre proprement. Retourne False si run inconnu ou deja
         termine. Pas de persistance ici : le caller (RunControlSupport) gere
         l'etat DB via `RunRepository.mark_run_paused`.
+
+        C3 fix (hotfix2) : aligne aussi le snapshot memoire sur PAUSED pour
+        eviter la desync entre l'etat DB (PAUSED) et l'etat memoire (RUNNING).
+        `_active_run_locked`, `get_status` et `_run_worker` lisent tous le
+        snapshot ; sans cette mise a jour, l'UI affichait toujours RUNNING.
         """
         run_debug: Optional[Callable[[str], None]] = None
         with self._lock:
@@ -476,6 +624,9 @@ class JobRunner:
             if rt.pause_event is None:
                 rt.pause_event = threading.Event()
             rt.pause_event.set()
+            # C3 : aligne le snapshot memoire (idempotent si deja PAUSED).
+            if rt.snapshot.status != RunStatus.PAUSED:
+                self._set_snapshot(run_id, status=RunStatus.PAUSED, running=False)
             self._debug(f"request_pause set pause flag run_id={run_id}", run_debug)
         return True
 
@@ -485,6 +636,9 @@ class JobRunner:
         Symetrique de `request_pause`. Retourne False si run inconnu ou
         deja termine. Pas de persistance : caller gere via
         `RunRepository.mark_run_resumed`.
+
+        C3 fix (hotfix2) : restaure aussi le snapshot memoire vers RUNNING
+        pour cloturer la desync introduite par `request_pause`.
         """
         run_debug: Optional[Callable[[str], None]] = None
         with self._lock:
@@ -498,6 +652,9 @@ class JobRunner:
                 return False
             if rt.pause_event is not None:
                 rt.pause_event.clear()
+            # C3 : restaure le snapshot memoire si on etait en pause.
+            if rt.snapshot.status == RunStatus.PAUSED:
+                self._set_snapshot(run_id, status=RunStatus.RUNNING, running=True)
             self._debug(f"request_resume clear pause flag run_id={run_id}", run_debug)
         return True
 
