@@ -833,7 +833,17 @@ function _hookValidationEvents() {
       _updateCounters();
     });
   });
-  $("libBtnResetDec")?.addEventListener("click", () => { _state.decisions = new Map(); _renderTable(); _updateCounters(); });
+  // Vague P / VP-G AC-5 : "Reinitialiser" efface TOUTES les decisions
+  // accepted/rejected/deferred -> action destructive, dangerConfirmModal
+  // OBLIGATOIRE (memo feedback_cinesort_actions_dangereuses). Countdown 3s
+  // si plus de 50 decisions posees. Si aucune decision posee : no-op silencieux.
+  $("libBtnResetDec")?.addEventListener("click", () => {
+    confirmResetDecisions(_state.decisions, () => {
+      _state.decisions = new Map();
+      _renderTable();
+      _updateCounters();
+    });
+  });
 
   // Sauvegarder
   $("libBtnSaveVal")?.addEventListener("click", async () => {
@@ -1035,6 +1045,63 @@ export function confirmBulkReject(rows, onConfirm) {
     consequence,
     countdownSeconds,
     confirmLabel: "Rejeter",
+    cancelLabel: "Annuler",
+    onConfirm: async () => {
+      if (typeof onConfirm === "function") {
+        await onConfirm();
+      }
+    },
+  });
+}
+
+/**
+ * Vague P / VP-G AC-5 : confirme la reinitialisation TOTALE des decisions
+ * (efface accepted+rejected+deferred). Action destructive -> `dangerConfirmModal`
+ * OBLIGATOIRE avec countdown 3s si plus de 50 decisions posees (memo
+ * feedback_cinesort_actions_dangereuses).
+ *
+ * Si zero decision posee : no-op silencieux (pas de modal inutile).
+ *
+ * @param {Map<string,string>} decisionsMap - Map row_id -> 'approved'/'rejected'/'deferred'
+ * @param {Function} onConfirm - callback applique apres confirmation
+ */
+export function confirmResetDecisions(decisionsMap, onConfirm) {
+  const decisions = decisionsMap instanceof Map ? decisionsMap : new Map();
+  const count = decisions.size;
+  if (count === 0) {
+    // Rien a effacer -> on n'affiche pas de modal (UX silencieuse).
+    if (typeof onConfirm === "function") onConfirm();
+    return Promise.resolve();
+  }
+
+  // Comptage par etat pour la modale.
+  let approved = 0;
+  let rejected = 0;
+  let deferred = 0;
+  for (const dec of decisions.values()) {
+    if (dec === "approved") approved++;
+    else if (dec === "rejected") rejected++;
+    else if (dec === "deferred") deferred++;
+  }
+
+  // AC-5 / memo actions dangereuses : countdown 3s si > 50.
+  const countdownSeconds = count > 50 ? 3 : 0;
+
+  const items = [];
+  if (approved > 0) items.push(`${approved} decision(s) "accepte(es)"`);
+  if (deferred > 0) items.push(`${deferred} decision(s) "reporte(es)"`);
+  if (rejected > 0) items.push(`${rejected} decision(s) "rejete(es)"`);
+
+  const consequence = count > 50
+    ? `Vous etes sur le point d'effacer ${count} decisions de validation. Cette action n'est pas reversible : il faudra refaire la revue.`
+    : `Toutes les decisions accepted/rejected/deferred seront effacees. Le brouillon de validation revient a vide.`;
+
+  return dangerConfirmModal({
+    title: `Reinitialiser ${count} decision${count > 1 ? "s" : ""} ?`,
+    items,
+    consequence,
+    countdownSeconds,
+    confirmLabel: "Reinitialiser",
     cancelLabel: "Annuler",
     onConfirm: async () => {
       if (typeof onConfirm === "function") {

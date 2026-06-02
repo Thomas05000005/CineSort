@@ -1420,3 +1420,171 @@ def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
         res = str(row.get("resolution") or "").strip()
         return res.upper() if res and res != "unknown" else None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Vague P / VP-G : Field locks UI endpoints (cablage final integration)
+# ---------------------------------------------------------------------------
+# Audit prealable VP-G (cf docs/internal/AUDIT_VP_G_LIB_VALIDATION_V5_LEGACY.md)
+# a identifie 3 endpoints attendus par `web/dashboard/views/library/lib-validation.js`
+# mais inexistants cote backend : `library/set_field_lock`,
+# `library/clear_field_lock`, `library/list_field_locks`.
+#
+# Le repository `FieldLocksRepository` existe deja (cf
+# `cinesort/infra/db/repositories/field_locks.py`). On ajoute juste la couche
+# UI/facade pour exposer les routes via introspection
+# `rest_server._get_api_methods` (pass 2 `/api/library/{method}`).
+#
+# Memo `feedback_cinesort_v76_ui` : endpoints dans `library_support.py`,
+# pas dans un controller. Pas de duplication de logique : delegation au repo.
+
+
+_VALID_LOCK_SOURCES = {
+    "ui_lock",
+    "manual_identify",
+    "user_edit",
+    "auto_match",
+}
+
+
+def _get_field_locks_repo_safe(api: Any):
+    """Acces best-effort au FieldLocksRepository (sans crash si infra HS).
+
+    Retourne None si infra non disponible ou si l'attribut `field_locks`
+    n'existe pas sur le store (cas tests legers).
+    """
+    store = _get_store(api)
+    if store is None:
+        return None
+    return getattr(store, "field_locks", None)
+
+
+def set_field_lock(
+    api: Any,
+    film_id: str,
+    field_name: str,
+    locked_value: Any = None,
+    source: str = "ui_lock",
+) -> Dict[str, Any]:
+    """Vague P / VP-G : pose un verrou sur un champ d'un film.
+
+    Args:
+        film_id: cle stable du film (`tmdb:<id>` ou `path:<sha1>`).
+        field_name: nom du champ a verrouiller (ex. "title", "year").
+        locked_value: valeur a verrouiller (serialisee JSON cote repo).
+        source: origine du lock (`ui_lock` par defaut, audit only).
+
+    Returns:
+        `{ok: True, locked_at: float}` en cas de succes,
+        `{ok: False, message: ..., user_message: ...}` sinon.
+    """
+    fid = str(film_id or "").strip()
+    fname = str(field_name or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+    if not fname:
+        return _err_response("field_name requis.", category="validation", level="info", log_module=__name__)
+
+    src = str(source or "ui_lock").strip().lower()
+    if src not in _VALID_LOCK_SOURCES:
+        src = "ui_lock"
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        return _err_response(
+            "Store SQLite indisponible (field_locks).",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    try:
+        res = repo.set_lock(fid, fname, locked_value, source=src)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance lock echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    if not res or not res.get("ok"):
+        return _err_response(
+            str((res or {}).get("reason") or "set_lock refuse"),
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+    return {
+        "ok": True,
+        "film_id": fid,
+        "field_name": fname,
+        "locked_at": float(res.get("locked_at") or 0.0),
+        "source": src,
+    }
+
+
+def clear_field_lock(api: Any, film_id: str, field_name: str) -> Dict[str, Any]:
+    """Vague P / VP-G : retire un verrou champ-par-champ.
+
+    Returns:
+        `{ok: True, removed: bool, film_id, field_name}` en cas de succes,
+        `{ok: False, ...}` sinon. `removed=False` si aucun lock n'existait
+        (idempotence OK, ce n'est pas une erreur).
+    """
+    fid = str(film_id or "").strip()
+    fname = str(field_name or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+    if not fname:
+        return _err_response("field_name requis.", category="validation", level="info", log_module=__name__)
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        return _err_response(
+            "Store SQLite indisponible (field_locks).",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    try:
+        res = repo.clear_lock(fid, fname)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Suppression lock echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    return {
+        "ok": True,
+        "removed": bool((res or {}).get("removed")),
+        "film_id": fid,
+        "field_name": fname,
+    }
+
+
+def list_field_locks(api: Any, film_id: str) -> Dict[str, Any]:
+    """Vague P / VP-G : liste tous les verrous d'un film.
+
+    Returns:
+        `{ok: True, film_id, locks: [...]}` ou erreur.
+
+    Chaque lock = `{field_name, locked_value, locked_at, source, run_id, row_id}`.
+    """
+    fid = str(film_id or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        # Best-effort : si le store est HS, on renvoie liste vide plutot
+        # qu'une erreur dure -> UI affiche "aucun lock" et ne bloque pas
+        # l'utilisateur. Symetrie avec _list_locked_field_names dans
+        # library_actions_support.
+        logger.debug("list_field_locks : repo indisponible, retour liste vide")
+        return {"ok": True, "film_id": fid, "locks": []}
+    try:
+        locks = repo.list_locks(fid)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("list_field_locks repo error film_id=%s: %s", fid, exc)
+        return {"ok": True, "film_id": fid, "locks": []}
+    return {"ok": True, "film_id": fid, "locks": list(locks or [])}
