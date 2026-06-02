@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -45,10 +47,27 @@ from cinesort.domain.perceptual.upscale_detection import (
 )
 from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
 from cinesort.infra.probe import ProbeService
+from cinesort.infra.subprocess_safety import tracked_run
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+def _ffmpeg_platform_kwargs() -> Dict[str, Any]:
+    """Kwargs subprocess Windows pour eviter le flash console ffmpeg.
+
+    Identique a `cinesort.domain.perceptual.ffmpeg_runner._runner_platform_kwargs`
+    mais local pour eviter une dependance ui -> domain interne.
+    """
+    if os.name != "nt":
+        return {}
+    kwargs: Dict[str, Any] = {"creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0))}
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    si.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+    kwargs["startupinfo"] = si
+    return kwargs
 
 
 def get_perceptual_report(
@@ -945,12 +964,27 @@ def _run_perceptual_job(
     (OSError/KeyError/TypeError/ValueError) reste pour qu'une paire defaillante
     n'interrompe pas le batch, tandis que le catch externe garantit une
     finalisation systematique status=error+ts_end en cas de plantage fatal.
+
+    Hotfix2 (H12) : verifie `api._perceptual_cancel_event` (s'il existe) entre
+    chaque paire pour permettre un shutdown propre du batch sans laisser de
+    ffmpeg orphelins ni de jobs bloques en "running". Les ffmpeg lances par
+    compare_perceptual sont deja proteges par `tracked_run` (registre global
+    + cleanup atexit), donc le shutdown gracieux les tue. Le check ici evite
+    de demarrer une NOUVELLE paire apres signal cancel + marque le job comme
+    "cancelled" avec ts_end pour finalisation propre.
     """
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     done_count = 0
+    cancel_event = _resolve_cancel_event(api)
+    cancelled = False
     try:
         for pair in pairs:
+            # H12: check cancel AVANT de lancer une nouvelle paire — evite de
+            # demarrer un compare_perceptual (qui spawn ffmpeg) sur shutdown.
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
             try:
                 res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
                 if isinstance(res, dict) and res.get("ok"):
@@ -963,9 +997,11 @@ def _run_perceptual_job(
             done_count += 1
             _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
 
+        # Status final : cancelled si event signale en cours de boucle, sinon done.
+        final_status = "cancelled" if cancelled else "done"
         _record_job_snapshot(
             job_id,
-            status="done",
+            status=final_status,
             done=done_count,
             ts_end=time.time(),
             results=list(results),
@@ -1223,9 +1259,13 @@ def _extract_audio_waveform_b64(
 
     Renvoie chaine vide si ffmpeg echoue (pas d'erreur, l'UI peut afficher
     un placeholder).
+
+    Hotfix2 (C1) : utilise `tracked_run` pour garantir le cleanup du child
+    ffmpeg en cas de shutdown / KeyboardInterrupt / exception (sinon zombie
+    ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
+    le flash de console.
     """
     import base64
-    import subprocess
 
     cmd = [
         ffmpeg_path,
@@ -1249,12 +1289,14 @@ def _extract_audio_waveform_b64(
         "png",
         "-",
     ]
+    platform_kwargs = _ffmpeg_platform_kwargs()
     try:
-        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+        result = tracked_run(  # noqa: S603 - cmd built from sanitized args
             cmd,
             capture_output=True,
             timeout=30,
             check=False,
+            **platform_kwargs,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.debug("waveform ffmpeg failed (%s)", exc)
@@ -1270,9 +1312,14 @@ def _extract_audio_clip_b64(
     ts: float,
     duration_s: int,
 ) -> str:
-    """Extrait un clip MP3 court via ffmpeg + libmp3lame, retourne base64."""
+    """Extrait un clip MP3 court via ffmpeg + libmp3lame, retourne base64.
+
+    Hotfix2 (C1) : utilise `tracked_run` pour garantir le cleanup du child
+    ffmpeg en cas de shutdown / KeyboardInterrupt / exception (sinon zombie
+    ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
+    le flash de console.
+    """
     import base64
-    import subprocess
 
     cmd = [
         ffmpeg_path,
@@ -1297,12 +1344,14 @@ def _extract_audio_clip_b64(
         "mp3",
         "-",
     ]
+    platform_kwargs = _ffmpeg_platform_kwargs()
     try:
-        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+        result = tracked_run(  # noqa: S603 - cmd built from sanitized args
             cmd,
             capture_output=True,
             timeout=30,
             check=False,
+            **platform_kwargs,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.debug("audio clip ffmpeg failed (%s)", exc)

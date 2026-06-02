@@ -141,9 +141,22 @@ def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
         OSError / PermissionError : l'exception du 2e rename est toujours
         re-raisee (le caller decide de l'impact).
     """
-    tmp = folder.parent / (folder.name + ".__tmp_ren")
-    if tmp.exists():
-        tmp = tmp.with_name(tmp.name + "_2")
+    # Hotfix2 H1 (TOCTOU) : boucle bornee pour trouver un suffixe tmp libre
+    # (l'ancien fallback ".__tmp_ren_2" plantait si un crash precedent laissait
+    # tmp + tmp_2 sur disque). On essaie ".__tmp_ren", "_0", "_1", ... jusqu'a
+    # 10 candidats puis on leve FileExistsError plutot que d'ecraser.
+    tmp: Optional[Path] = None
+    base_name = folder.name + ".__tmp_ren"
+    for idx in range(10):
+        candidate = folder.parent / (base_name if idx == 0 else f"{base_name}_{idx}")
+        if not candidate.exists():
+            tmp = candidate
+            break
+    if tmp is None:
+        raise FileExistsError(
+            f"_case_only_rename_with_rollback: aucun suffixe tmp libre pour {folder} "
+            f"(essaye {base_name}, {base_name}_1..{base_name}_9)"
+        )
     folder.rename(tmp)
     try:
         tmp.rename(dst)
@@ -351,12 +364,32 @@ def mkdir_counted(
     res: "ApplyResult",
     record_op_fn: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
-    """Crée `path` (parents inclus) et incrémente `res.mkdirs` (no-op si existe ou dry_run)."""
+    """Crée `path` (parents inclus) et incrémente `res.mkdirs` (no-op si existe ou dry_run).
+
+    Hotfix2 H2 (TOCTOU) : on utilise un try/except FileExistsError sur le mkdir
+    final (sans exist_ok) pour SAVOIR si on l'a vraiment cree (counted=True) ou
+    si un autre process l'a cree entre temps (counted=False, pas de record_op).
+    On cree d'abord les parents avec exist_ok=True (rien a journaliser pour eux,
+    ce n'est pas le dossier dont on suit la creation pour le rollback).
+    """
     if path.exists():
         return
     log("INFO", f"MKDIR: {path}")
     if not dry_run:
-        path.mkdir(parents=True, exist_ok=True)
+        # Cree d'abord les parents (sans bruit, exist_ok=True) pour que le mkdir
+        # final ne leve que FileExistsError sur la cible.
+        parent = path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=False, exist_ok=False)
+        except FileExistsError:
+            # Autre process / autre thread a cree le dossier entre exists() et
+            # mkdir(). Rien a faire : pas de record_op MKDIR (on ne pourra pas
+            # le supprimer au rollback sans risquer de toucher au travail d'un
+            # autre), et on n'incremente pas res.mkdirs (on ne l'a pas cree).
+            _logger.debug("mkdir_counted: %s pre-existant (race), pas de record_op", path)
+            return
         record_apply_op(
             record_op_fn,
             op_type="MKDIR",
@@ -682,6 +715,32 @@ def move_file_with_collision_policy(
                 _logger.debug("P1.2: sha1 pre-apply echoue pour %s: %s", src_file, exc)
                 src_sha1 = None
                 src_size = None
+
+        # Hotfix2 H4 (DATA LOSS) : double-check juste avant le move qu'aucune
+        # collision n'est apparue entre le dst_file.exists() initial (l. 577)
+        # et maintenant (fenetre TOCTOU sur SMB qui peut etre longue : mkdir,
+        # sha1, hash_cache lookup...). Sans cette garde, shutil.move sur
+        # Windows ECRASE silencieusement le fichier de destination si un autre
+        # process / autre thread l'a cree entre temps = DATA LOSS reel.
+        if dst_file.exists():
+            log("WARN", f"CONFLICT (race) detected pre-move: {src_file} -> {dst_file}, quarantining")
+            qdst = move_to_review_bucket(
+                src_file,
+                src_anchor=src_anchor,
+                bucket_root=conflicts_root / conflict_context(cfg, src_anchor, dst_file),
+                bucket_name="CONFLICT quarantined",
+                include_anchor_name=False,
+                use_dup_suffix=False,
+                rel_override=None,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=record_op,
+            )
+            log("WARN", f"CONFLICT (race): {src_file} would overwrite {dst_file} -> {qdst}")
+            res.conflicts_quarantined_count += 1
+            res.quarantined += 1
+            return "conflict"
 
         atomic_move(
             record_op,
@@ -1672,6 +1731,17 @@ def apply_single(
             # texte du source code.
             _case_only_rename_with_rollback(folder, dst)
         else:
+            # Hotfix2 H5 (DATA LOSS) : guard explicite avant rename pour eviter
+            # ecrasement silencieux. dst.exists() etait verifie l. 1619 mais la
+            # fenetre TOCTOU jusqu'ici peut etre longue (sha1 du main_video sur
+            # SMB). Sur POSIX, Path.rename() ECRASE silencieusement la cible si
+            # elle existe ; sur Windows ca leve FileExistsError mais le
+            # comportement SMB est variable. On force une erreur explicite et
+            # cohrente plutot que de perdre des donnees.
+            if dst.exists():
+                raise FileExistsError(
+                    f"apply_single: destination apparue pendant l'apply (race condition) : {dst}"
+                )
             folder.rename(dst)
 
     # P1.3 : record l'op même en dry_run pour la preview UI

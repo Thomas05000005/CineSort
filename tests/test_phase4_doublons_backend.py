@@ -452,9 +452,12 @@ class CompareAudioTests(unittest.TestCase):
         fake_proc_png = mock.MagicMock(returncode=0, stdout=fake_png, stderr=b"")
         fake_proc_mp3 = mock.MagicMock(returncode=0, stdout=fake_mp3, stderr=b"")
 
-        # subprocess.run est appele 4 fois : 2 waveforms puis 2 clips MP3.
+        # tracked_run est appele 4 fois : 2 waveforms puis 2 clips MP3.
         # On retourne alternativement PNG / MP3 selon l'ordre d'appel (waveform_a,
         # waveform_b, audio_a, audio_b dans cet ordre).
+        # Hotfix2 (C1) : les helpers utilisent maintenant `tracked_run`
+        # (depuis cinesort.infra.subprocess_safety) au lieu de subprocess.run
+        # direct, pour garantir le cleanup des ffmpeg orphelins.
         run_side_effects: List[Any] = [
             fake_proc_png,
             fake_proc_png,
@@ -480,7 +483,10 @@ class CompareAudioTests(unittest.TestCase):
                 "cinesort.ui.api.perceptual_support._load_probe",
                 return_value={"normalized": {"duration_s": 100.0}},
             ),
-            mock.patch("subprocess.run", side_effect=run_side_effects),
+            mock.patch(
+                "cinesort.ui.api.perceptual_support.tracked_run",
+                side_effect=run_side_effects,
+            ),
         ]
         for p in patches:
             p.start()
