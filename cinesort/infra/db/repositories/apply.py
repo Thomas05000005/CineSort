@@ -28,6 +28,50 @@ from uuid import uuid4
 from cinesort.infra.db.repositories._base import _BaseRepository
 
 
+class ApplyBatchStateError(RuntimeError):
+    """Levee quand `close_apply_batch` recoit une transition d'etat invalide.
+
+    H14 hotfix2 : avant ce hotfix, `close_apply_batch` faisait un UPDATE
+    inconditionnel et autorisait n'importe quelle transition (incluant
+    ROLLED_BACK -> DONE), ce qui pouvait faire reapparaitre un batch deja
+    annule comme "dernier reversible" via `get_last_reversible_apply_batch`
+    et provoquer une perte silencieuse de l'integrite du journal undo.
+    """
+
+
+# H14 : whitelist des transitions autorisees. PENDING peut aller vers
+# n'importe quel etat final ; DONE peut uniquement basculer vers les etats
+# d'undo (UNDONE_DONE / UNDONE_PARTIAL) consommes par
+# `mark_apply_batch_undo_status`. Toute autre transition (notamment
+# ROLLED_BACK/FAILED/UNDONE_* -> DONE) est rejetee pour eviter la
+# regression de reversibilite decrite par H14.
+_ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
+    "PENDING": frozenset({
+        "PENDING",
+        "DONE",
+        "FAILED",
+        "ROLLED_BACK",
+        "ROLLED_BACK_BY_ATOMIC",
+        "UNDONE_DONE",
+        "UNDONE_PARTIAL",
+        "ABORTED",
+        "ABORTED_HASH_MISMATCH",
+    }),
+    # Premier undo full ou selectif depuis un batch acheve.
+    "DONE": frozenset({
+        "UNDONE_DONE",
+        "UNDONE_PARTIAL",
+    }),
+    # Reprise d'un undo selectif partiel : on autorise a re-affiner le
+    # statut tant qu'on reste dans la famille UNDONE_*. Tout retour vers
+    # DONE/PENDING reste interdit (regression H14).
+    "UNDONE_PARTIAL": frozenset({
+        "UNDONE_DONE",
+        "UNDONE_PARTIAL",
+    }),
+}
+
+
 class ApplyRepository(_BaseRepository):
     """Repository pour les operations apply (batches + operations + pending moves)."""
 
@@ -127,18 +171,67 @@ class ApplyRepository(_BaseRepository):
         summary: Optional[Dict[str, Any]] = None,
         ended_ts: Optional[float] = None,
     ) -> None:
+        """Met a jour le statut final + summary d'un batch.
+
+        H14 hotfix2 : la transition d'etat est desormais validee par une
+        whitelist (`_ALLOWED_BATCH_TRANSITIONS`). L'UPDATE filtre sur
+        `status IN (...)` atomiquement (pas de TOCTOU) pour empecher la
+        regression d'un batch deja cloture (ex: ROLLED_BACK -> DONE) qui
+        ferait silencieusement reapparaitre un batch dans
+        `get_last_reversible_apply_batch`. Si la transition n'est pas
+        autorisee ou si le batch est introuvable, on leve
+        `ApplyBatchStateError` apres avoir verifie l'etat reel en base
+        (pour distinguer "batch absent" d'une "transition invalide").
+        """
         self._ensure_apply_journal_tables()
         now = float(ended_ts if ended_ts is not None else time.time())
         payload = json.dumps(summary or {}, ensure_ascii=False, sort_keys=True)
+        target_status = str(status)
         with self._managed_conn() as conn:
-            conn.execute(
-                """
+            # Construire la liste des statuts source autorises pour atteindre
+            # `target_status`. Si la cible n'apparait dans AUCUN frozenset
+            # autorise, on bloque immediatement.
+            allowed_sources = [
+                src for src, targets in _ALLOWED_BATCH_TRANSITIONS.items()
+                if target_status in targets
+            ]
+            if not allowed_sources:
+                # Avant de lever, on lit l'etat reel pour message clair.
+                cur = conn.execute(
+                    "SELECT status FROM apply_batches WHERE batch_id=?",
+                    (str(batch_id),),
+                )
+                row = cur.fetchone()
+                current = (row["status"] if row else None)
+                raise ApplyBatchStateError(
+                    f"close_apply_batch: transition invalide vers '{target_status}' "
+                    f"(batch_id={batch_id}, etat courant={current!r})"
+                )
+            placeholders = ",".join("?" for _ in allowed_sources)
+            params = [target_status, now, payload, str(batch_id), *allowed_sources]
+            cur = conn.execute(
+                f"""
                 UPDATE apply_batches
                 SET status=?, ended_ts=?, summary_json=?
-                WHERE batch_id=?
+                WHERE batch_id=? AND status IN ({placeholders})
                 """,
-                (str(status), now, payload, str(batch_id)),
+                params,
             )
+            if cur.rowcount == 0:
+                # Soit le batch n'existe pas, soit son etat actuel n'autorise
+                # pas la transition demandee. On distingue les deux pour le
+                # log via une lecture explicite.
+                cur2 = conn.execute(
+                    "SELECT status FROM apply_batches WHERE batch_id=?",
+                    (str(batch_id),),
+                )
+                row2 = cur2.fetchone()
+                current = (row2["status"] if row2 else None)
+                raise ApplyBatchStateError(
+                    f"close_apply_batch: transition refusee vers '{target_status}' "
+                    f"(batch_id={batch_id}, etat courant={current!r}, "
+                    f"sources autorisees={sorted(allowed_sources)})"
+                )
 
     def get_last_reversible_apply_batch(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Retourne le dernier batch apply reel (non dry-run) DONE pour ce run, sinon None."""
