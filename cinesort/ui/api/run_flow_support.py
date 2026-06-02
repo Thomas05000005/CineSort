@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 import sqlite3
+import threading
 import time
 import traceback
 from dataclasses import asdict
@@ -952,40 +953,124 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
         return _err_response(
             t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
         )
-    rs = api._get_run(run_id)
-    if rs:
+    # BUG-003 / BUG-004 (VP-D, hotfix) : si une row porte `decision` tri-etat,
+    # on PROJETTE `ok` via to_legacy_ok_bool AVANT _normalize_decisions_for_rows
+    # afin que validation.json et le mirror SQL voient la meme verite
+    # (sinon `decision=deferred` avec ok absent/true entraine une drift
+    # vers `ok=true` apply-ee a tort, ou un `ok=None` rejected).
+    projected_decisions = _project_decisions_ok_from_tri_state(decisions)
+    # BUG-011 (hotfix) : verrou inter-thread par run_id pour eviter
+    # last-write-wins lors d'un double-click UI sur "Enregistrer".
+    save_lock = _get_save_validation_lock(api, run_id)
+    with save_lock:
+        rs = api._get_run(run_id)
+        if rs:
+            try:
+                rows = rs.rows
+                if not rows:
+                    rows = api._load_rows_from_plan_jsonl(rs.paths)
+                safe = api._normalize_decisions_for_rows(rows, projected_decisions)
+                # VP-D : miroir tri-etat en SQL (best-effort, non bloquant).
+                _mirror_decisions_to_sql(api, run_id, projected_decisions, getattr(rs, "store", None))
+                state.atomic_write_json(rs.paths.validation_json, safe)
+                rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
+                return {"ok": True, "path": str(rs.paths.validation_json)}
+            except (OSError, PermissionError, TypeError, ValueError) as exc:
+                return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+        found = api._find_run_row(run_id)
+        if not found:
+            return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+        row, _store = found
+        run_paths = api._run_paths_for(
+            normalize_user_path(row.get("state_dir"), api._state_dir),
+            run_id,
+            ensure_exists=False,
+        )
         try:
-            rows = rs.rows
-            if not rows:
-                rows = api._load_rows_from_plan_jsonl(rs.paths)
-            safe = api._normalize_decisions_for_rows(rows, decisions)
+            rows = api._load_rows_from_plan_jsonl(run_paths)
+            safe = api._normalize_decisions_for_rows(rows, projected_decisions)
             # VP-D : miroir tri-etat en SQL (best-effort, non bloquant).
-            _mirror_decisions_to_sql(api, run_id, decisions, getattr(rs, "store", None))
-            state.atomic_write_json(rs.paths.validation_json, safe)
-            rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
-            return {"ok": True, "path": str(rs.paths.validation_json)}
-        except (OSError, PermissionError, TypeError, ValueError) as exc:
+            _mirror_decisions_to_sql(api, run_id, projected_decisions, _store)
+            state.atomic_write_json(run_paths.validation_json, safe)
+            api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
+            return {"ok": True, "path": str(run_paths.validation_json)}
+        except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
-    found = api._find_run_row(run_id)
-    if not found:
-        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
-    row, _store = found
-    run_paths = api._run_paths_for(
-        normalize_user_path(row.get("state_dir"), api._state_dir),
-        run_id,
-        ensure_exists=False,
-    )
+
+def _get_save_validation_lock(api: Any, run_id: str) -> "threading.Lock":
+    """BUG-011 (hotfix) : retourne le verrou par-run_id pour save_validation.
+
+    Initialisation lazy de l'attribut `api._save_validation_locks` (dict
+    run_id -> Lock) afin de ne pas toucher au constructeur de CineSortAPI
+    et preserver la backward compat ABSOLUE.
+    """
+    locks_map = getattr(api, "_save_validation_locks", None)
+    if locks_map is None:
+        # Section critique courte : on initialise le map lui-meme sous
+        # un lock connu (le _runs_lock existe deja sur l'API).
+        runs_lock = getattr(api, "_runs_lock", None)
+        if runs_lock is not None:
+            with runs_lock:
+                locks_map = getattr(api, "_save_validation_locks", None)
+                if locks_map is None:
+                    locks_map = {}
+                    api._save_validation_locks = locks_map
+        else:
+            locks_map = {}
+            api._save_validation_locks = locks_map
+
+    lock = locks_map.get(run_id)
+    if lock is None:
+        # Best-effort : creer le lock si absent. Race minime acceptable —
+        # au pire deux Lock() sont crees, le 1er save l'emporte mais aucun
+        # n'est perdu (validation.json est atomic_write).
+        lock = threading.Lock()
+        locks_map[run_id] = lock
+    return lock
+
+
+def _project_decisions_ok_from_tri_state(
+    decisions: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """BUG-003 / BUG-004 (hotfix VP-D) : projette `ok` depuis `decision`.
+
+    Si une row du payload porte un champ `decision` (tri-etat
+    accepted/rejected/deferred), on REECRIT son champ `ok` via
+    `to_legacy_ok_bool(decision)` afin que :
+      - `validation.json` (produit via `_normalize_decisions_for_rows` qui
+        ne lit que `raw.get("ok")`) soit COHERENT avec la decision tri-etat.
+      - Le mirror SQL via `_mirror_decisions_to_sql` reste consistant.
+
+    Backward compat ABSOLUE :
+      - Si une row ne porte PAS de `decision`, son `ok` est conserve tel
+        quel (shape legacy intacte).
+      - Le dict d'entree n'est pas mute (copie shallow par row).
+    """
+    if not isinstance(decisions, dict):
+        return {}
     try:
-        rows = api._load_rows_from_plan_jsonl(run_paths)
-        safe = api._normalize_decisions_for_rows(rows, decisions)
-        # VP-D : miroir tri-etat en SQL (best-effort, non bloquant).
-        _mirror_decisions_to_sql(api, run_id, decisions, _store)
-        state.atomic_write_json(run_paths.validation_json, safe)
-        api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
-        return {"ok": True, "path": str(run_paths.validation_json)}
-    except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
-        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+        from cinesort.infra.db.repositories.decisions import to_legacy_ok_bool
+    except ImportError:
+        # Si l'import echoue (cycle, env degrade), on retourne tel quel
+        # pour ne pas casser le flow legacy {ok: bool}.
+        return decisions
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for row_id, raw in decisions.items():
+        if not isinstance(raw, dict):
+            out[row_id] = raw
+            continue
+        explicit_decision = raw.get("decision")
+        if explicit_decision is None:
+            out[row_id] = raw
+            continue
+        # Projection : on cree une copie shallow et on ecrase `ok`.
+        copied = dict(raw)
+        copied["ok"] = to_legacy_ok_bool(explicit_decision)
+        out[row_id] = copied
+    return out
 
 
 def _mirror_decisions_to_sql(
