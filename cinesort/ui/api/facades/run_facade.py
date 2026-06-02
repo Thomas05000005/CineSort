@@ -152,6 +152,35 @@ class RunFacade(_BaseFacade):
         """
         return self._api._cleanup_old_runs_impl(retention_days)
 
+    # VQ-2 QUARANTAINE-TTL : 3 endpoints filesystem `_review` ----------
+    def purge_quarantine_bucket(
+        self, ttl_days: int = 30, dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Purge les fichiers du bucket `_review` > `ttl_days` jours (defaut 30).
+
+        Appele par le cron `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`
+        au boot puis toutes les 24h. Aussi disponible manuellement (debug).
+
+        Retourne `{ok, deleted, bytes_freed, considered, errors, by_subdir, ...}`.
+        """
+        return self._api._purge_quarantine_bucket_impl(int(ttl_days), bool(dry_run))
+
+    def purge_quarantine_bucket_all(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Vider integralement le bucket `_review` (sauf `_duplicates_user_decided`).
+
+        Appele par l'UI bouton "Vider maintenant" (parametres > Quarantaine),
+        protege cote front par dangerConfirmModal (countdown 3s si > 50 fichiers).
+        """
+        return self._api._purge_quarantine_bucket_all_impl(bool(dry_run))
+
+    def list_quarantine_bucket(self, limit: int = 500) -> Dict[str, Any]:
+        """Inventaire du bucket `_review` pour le viewer UI.
+
+        Tronque a `limit` entrees (defaut 500), triees mtime DESC.
+        Retourne `{ok, review_root, exists, files_count, total_size_bytes, files, by_subdir}`.
+        """
+        return self._api._list_quarantine_bucket_impl(int(limit))
+
     def rescan_row(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Spec 06 §3.6 : relance probe + analyse perceptuelle pour 1 row.
 

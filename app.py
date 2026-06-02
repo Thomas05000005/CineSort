@@ -439,6 +439,18 @@ def main_api() -> None:
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
         print(f"[REST] spec 09 retention cron init echouee: {_ret_exc}", file=sys.stderr)
 
+    # VQ-2 QUARANTAINE-TTL : cron TTL du bucket FS `_review` (defaut 30j, 0 OFF).
+    try:
+        from cinesort.app.quarantine_ttl import (
+            DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+            start_quarantine_ttl_cron,
+        )
+
+        quarantaine_ttl_api = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+        start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl_api)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
+        print(f"[REST] vq-2 quarantine ttl cron init echouee: {_qttl_exc}", file=sys.stderr)
+
     server.start()
     try:
         server.join()
@@ -794,6 +806,19 @@ def main() -> None:
                     start_retention_cron(api, retention_days=retention_days)
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
                     _log.warning("spec 09: retention cron init echouee — %s", _ret_exc)
+
+                # VQ-2 QUARANTAINE-TTL : cron TTL bucket FS `_review`
+                # (defaut 30j, 0 desactive). Le cron tourne toutes les 24h.
+                try:
+                    from cinesort.app.quarantine_ttl import (
+                        DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+                        start_quarantine_ttl_cron,
+                    )
+
+                    quarantaine_ttl = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+                    start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl)
+                except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
+                    _log.warning("vq-2: quarantine ttl cron init echouee — %s", _qttl_exc)
 
                 # Fix 2026-05-24 ecran noir post-v1.3.0 :
                 # Le bootstrap natif (token, mode native, force #/accueil) est

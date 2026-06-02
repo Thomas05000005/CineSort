@@ -1502,6 +1502,11 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
     if "retention_days" in payload:
         out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    # VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review (defaut 30j, 0 = OFF).
+    # Bornage [0, 3650] aligne sur history_retention_days. Le cron tourne 24h via
+    # `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`, demarre depuis app.py.
+    if "quarantaine_ttl_days" in payload:
+        out["quarantaine_ttl_days"] = max(0, min(3650, to_int(payload.get("quarantaine_ttl_days"), 30)))
     if "auto_check_updates" in payload:
         out["auto_check_updates"] = to_bool(payload.get("auto_check_updates"), True)
     if "update_check_enabled" in payload:

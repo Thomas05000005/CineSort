@@ -307,6 +307,21 @@ export const PARAMETRES_GROUPS = [
         { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
           hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
+      // VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review + viewer + bouton vider.
+      // Cron 24h cote backend purge _review/_conflicts, _conflicts_sidecars,
+      // _duplicates_identical, _leftovers et rows top-level > TTL jours.
+      // `quarantaine_ttl_days = 0` desactive le cron. Bouton "Vider maintenant"
+      // protege par dangerConfirmModal (countdown 3s si > 50 fichiers).
+      { id: "quarantaine", label: "Quarantaine", fields: [
+        { key: "quarantaine_ttl_days", label: "TTL fichiers en quarantaine (jours)", type: "number", min: 0, max: 365, default: 30,
+          hint: "Bucket _review (conflits, doublons, leftovers, rows non approuvées). 0 = désactivé." },
+        { key: "__quarantine_viewer__", label: "Contenu du bucket _review", type: "action",
+          action: "quarantine_viewer", buttonLabel: "👁️ Voir le bucket",
+          hint: "Inventaire des fichiers actuellement en quarantaine (lecture seule)." },
+        { key: "__quarantine_purge_all__", label: "Vider le bucket maintenant", type: "action",
+          action: "quarantine_purge_all", buttonLabel: "🗑️ Vider maintenant",
+          hint: "Supprime TOUS les fichiers de _review/ sauf les décisions de doublons. Action irréversible — confirmation requise." },
+      ]},
       // Sprint orphelins #350 : RGPD Art.20 export portable (library/export_full_library).
       { id: "export-rgpd", label: "Export RGPD", fields: [
         { key: "__export_full_library__", label: "Export portable complet (JSON)", type: "action",
@@ -2174,6 +2189,129 @@ function _bindFields(container) {
       } catch (err) {
         if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
       } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // VQ-2 QUARANTAINE-TTL : viewer du bucket _review (route /quarantine_viewer).
+  // Inventaire lecture seule des fichiers en quarantaine, trie par mtime DESC.
+  container.querySelectorAll('[data-action="quarantine_viewer"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="quarantine_viewer"]');
+      btn.disabled = true;
+      if (resultEl) { resultEl.textContent = "Chargement…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
+      try {
+        const res = await apiPost("run/list_quarantine_bucket", { limit: 500 });
+        const data = res && res.data ? res.data : res;
+        if (!data || data.ok === false) {
+          throw new Error((data && (data.message || data.error)) || "Echec inventaire.");
+        }
+        const total = Number(data.files_count || 0);
+        const sizeBytes = Number(data.total_size_bytes || 0);
+        const sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
+        if (!data.exists) {
+          if (resultEl) {
+            resultEl.textContent = "Bucket _review absent (rien à afficher).";
+            resultEl.className = "parametres-test-result parametres-test-result--info";
+          }
+          return;
+        }
+        const subdirCounts = Object.entries(data.by_subdir || {})
+          .map(([k, v]) => `${escapeHtml(k)} : ${v?.count || 0}`)
+          .join(" · ");
+        const sample = (data.files || []).slice(0, 20).map((f) => {
+          const age = Number(f.age_days || 0).toFixed(1);
+          const sub = escapeHtml(String(f.subdir || ""));
+          const rel = escapeHtml(String(f.rel || f.path || ""));
+          return `<li><code>${rel}</code> <span class="parametres-muted">(${sub}, ${age}j)</span></li>`;
+        }).join("");
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div><strong>${total}</strong> fichier(s) en quarantaine · <strong>${sizeMo} Mo</strong></div>
+            <div class="parametres-muted">${subdirCounts || "(vide)"}</div>
+            ${sample ? `<ul class="parametres-quarantine-sample">${sample}</ul>` : ""}
+            ${total > 20 ? `<div class="parametres-muted">(${total - 20} fichier(s) supplémentaire(s) non listé(s))</div>` : ""}
+          `;
+          resultEl.className = "parametres-test-result parametres-test-result--ok";
+        }
+      } catch (err) {
+        if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // VQ-2 QUARANTAINE-TTL : bouton "Vider maintenant" — DANGEREUX.
+  // Memoire actions dangereuses utilisateur : dangerConfirmModal OBLIGATOIRE
+  // avec liste elements + consequence + countdown 3s si > 50 fichiers.
+  container.querySelectorAll('[data-action="quarantine_purge_all"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="quarantine_purge_all"]');
+      btn.disabled = true;
+      try {
+        // 1) On interroge le bucket pour avoir un decompte fiable (declenche
+        // le countdown 3s si > 50 fichiers, exigence memoire utilisateur).
+        let total = 0;
+        let sample = [];
+        let sizeMo = "0";
+        try {
+          const listRes = await apiPost("run/list_quarantine_bucket", { limit: 50 });
+          const listData = listRes && listRes.data ? listRes.data : listRes;
+          if (listData && listData.ok !== false) {
+            total = Number(listData.files_count || 0);
+            sample = (listData.files || []).slice(0, 10).map((f) => f.rel || f.path);
+            const sizeBytes = Number(listData.total_size_bytes || 0);
+            sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
+          }
+        } catch (_listErr) {
+          // best-effort, on continue meme si l'inventaire echoue
+        }
+
+        if (total === 0) {
+          if (resultEl) {
+            resultEl.textContent = "Bucket déjà vide.";
+            resultEl.className = "parametres-test-result parametres-test-result--info";
+          }
+          btn.disabled = false;
+          return;
+        }
+
+        const sampleHtml = sample.length
+          ? `<ul class="parametres-quarantine-sample">${sample.map((s) => `<li><code>${escapeHtml(String(s))}</code></li>`).join("")}</ul>`
+          : "";
+        const countdown = total > 50 ? 3 : 0;
+        dangerConfirmModal({
+          title: `Vider le bucket _review (${total} fichier(s)) ?`,
+          consequence: `Cette action va supprimer définitivement <strong>${total}</strong> fichier(s) en quarantaine (~${sizeMo} Mo). Les décisions de doublons (_duplicates_user_decided) sont préservées. ${sampleHtml}`,
+          countdownSeconds: countdown,
+          confirmLabel: "Vider maintenant",
+          cancelLabel: "Annuler",
+          onConfirm: async () => {
+            if (resultEl) { resultEl.textContent = "Suppression en cours…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
+            try {
+              const res = await apiPost("run/purge_quarantine_bucket_all", { dry_run: false });
+              const data = res && res.data ? res.data : res;
+              if (!data || data.ok === false) {
+                throw new Error((data && (data.message || data.error)) || "Echec suppression.");
+              }
+              const deleted = Number(data.deleted || 0);
+              const freedMo = Number(data.bytes_freed || 0) / 1024 / 1024;
+              if (resultEl) {
+                resultEl.textContent = `✓ ${deleted} fichier(s) supprimé(s) (${freedMo.toFixed(1)} Mo libérés).`;
+                resultEl.className = "parametres-test-result parametres-test-result--ok";
+              }
+            } catch (err) {
+              if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
+            } finally {
+              btn.disabled = false;
+            }
+          },
+          onCancel: () => { btn.disabled = false; },
+        });
+      } catch (err) {
+        if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
         btn.disabled = false;
       }
     });

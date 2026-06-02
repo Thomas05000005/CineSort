@@ -2546,6 +2546,57 @@ class CineSortApi:
         """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
         return history_support.cleanup_old_runs(self, retention_days=retention_days)
 
+    # ---------- VQ-2 QUARANTAINE-TTL (bucket _review filesystem) ----------
+    def _purge_quarantine_bucket_impl(
+        self, ttl_days: int = 30, dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Purge le bucket FS `_review` des fichiers > TTL jours (defaut 30).
+
+        Appele :
+        - automatiquement au boot par le cron `quarantine_ttl.start_quarantine_ttl_cron`
+        - via le bouton "Vider maintenant" (parametres > Quarantaine) en mode `purge_all=True`
+        - manuellement depuis tests/REST.
+        """
+        from cinesort.app.quarantine_ttl import purge_review_bucket
+
+        try:
+            settings = self._get_settings_impl()
+            cfg = _build_cfg_from_settings_payload(settings)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return purge_review_bucket(cfg, ttl_days=int(ttl_days), dry_run=bool(dry_run))
+
+    def _purge_quarantine_bucket_all_impl(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Vider INTEGRALEMENT le bucket `_review` (sauf `_duplicates_user_decided`).
+
+        Appele par l'UI bouton "Vider maintenant", protege cote front par
+        dangerConfirmModal (countdown 3s si > 50 fichiers, memoire actions
+        dangereuses).
+        """
+        from cinesort.app.quarantine_ttl import purge_review_bucket_all
+
+        try:
+            settings = self._get_settings_impl()
+            cfg = _build_cfg_from_settings_payload(settings)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return purge_review_bucket_all(cfg, dry_run=bool(dry_run))
+
+    def _list_quarantine_bucket_impl(self, limit: int = 500) -> Dict[str, Any]:
+        """Inventaire du bucket `_review` pour le viewer UI (route /quarantine_viewer).
+
+        Retourne files (tries mtime DESC), total, taille, ventilation par
+        sous-dossier. Tronque a `limit` entrees (defaut 500).
+        """
+        from cinesort.app.quarantine_ttl import list_review_bucket_files
+
+        try:
+            settings = self._get_settings_impl()
+            cfg = _build_cfg_from_settings_payload(settings)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return list_review_bucket_files(cfg, limit=int(limit))
+
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
