@@ -38,11 +38,15 @@ _PAUSABLE_DB_STATES = frozenset(
 )
 
 # Etats DB autorises a transiter vers RUNNING via resume.
+# H13 fix (hotfix2) : alignement strict avec la clause SQL de
+# `RunRepository.mark_run_resumed` (`WHERE status IN ('PAUSED', 'SAVED')`).
+# AWAITING_VALIDATION exige une action utilisateur explicite (validation
+# du diff) et ne doit PAS etre repris via cet endpoint generic — sinon
+# l'UI annoncait OK puis la DB refusait la transition (incoherence).
 _RESUMABLE_DB_STATES = frozenset(
     {
         RunStatus.PAUSED.value,
         RunStatus.SAVED.value,
-        RunStatus.AWAITING_VALIDATION.value,
     }
 )
 

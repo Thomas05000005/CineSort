@@ -1000,11 +1000,17 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
 
 
 def _get_save_validation_lock(api: Any, run_id: str) -> "threading.Lock":
-    """BUG-011 (hotfix) : retourne le verrou par-run_id pour save_validation.
+    """BUG-011 (hotfix2) : retourne le verrou par-run_id pour save_validation.
 
     Initialisation lazy de l'attribut `api._save_validation_locks` (dict
     run_id -> Lock) afin de ne pas toucher au constructeur de CineSortAPI
     et preserver la backward compat ABSOLUE.
+
+    REGRESSION FIX (R2-BUG-011) : la creation lazy du Lock par-run_id DOIT
+    se faire SOUS `_runs_lock` avec un pattern double-check locking. Sinon
+    deux threads concurrents creent chacun leur propre Lock distinct, le
+    second ecrase le premier dans le dict, et la mutex exclusive entre les
+    deux threads est PERDUE (race condition restauree sur save_validation).
     """
     locks_map = getattr(api, "_save_validation_locks", None)
     if locks_map is None:
@@ -1021,11 +1027,25 @@ def _get_save_validation_lock(api: Any, run_id: str) -> "threading.Lock":
             locks_map = {}
             api._save_validation_locks = locks_map
 
+    # Fast path sans lock : si le Lock existe deja, on le retourne direct.
+    # Lecture d'un dict Python = atomique (GIL), pas de race sur read-only.
     lock = locks_map.get(run_id)
-    if lock is None:
-        # Best-effort : creer le lock si absent. Race minime acceptable —
-        # au pire deux Lock() sont crees, le 1er save l'emporte mais aucun
-        # n'est perdu (validation.json est atomic_write).
+    if lock is not None:
+        return lock
+
+    # Slow path : creation du Lock SOUS _runs_lock avec double-check.
+    # Sans ce verrou, deux threads concurrents creeraient chacun leur
+    # propre Lock et le second ecraserait le premier => race condition.
+    runs_lock = getattr(api, "_runs_lock", None)
+    if runs_lock is not None:
+        with runs_lock:
+            lock = locks_map.get(run_id)
+            if lock is None:
+                lock = threading.Lock()
+                locks_map[run_id] = lock
+    else:
+        # Fallback degrade : pas de runs_lock disponible, on cree sans
+        # protection (best-effort, comportement pre-existant).
         lock = threading.Lock()
         locks_map[run_id] = lock
     return lock
