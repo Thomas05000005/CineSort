@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual
 from cinesort.domain.perceptual.av1_grain_metadata import extract_av1_film_grain_params
 from cinesort.domain.perceptual.comparison import build_comparison_report, compare_per_frame
@@ -169,7 +170,8 @@ def _validate_and_load_context(
     width = int(video_info.get("width") or 0)
     height = int(video_info.get("height") or 0)
     probe_quality = str(normalized.get("probe_quality") or "")
-    if probe_quality == "FAILED" and width == 0 and height == 0:
+    # BUG-018 (hotfix1) : helper centralise vs == "FAILED" strict case-sensitive.
+    if probe_quality_is_failed(probe_quality) and width == 0 and height == 0:
         return _err_response(
             "Probe echouee (fichier corrompu ou format non supporte).",
             category="runtime",

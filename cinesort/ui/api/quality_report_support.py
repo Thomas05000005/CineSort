@@ -13,6 +13,7 @@ from cinesort.domain.conversions import to_bool
 from cinesort.domain.encode_analysis import analyze_encode_quality
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.mkv_title_check import check_container_title
+from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
@@ -250,7 +251,8 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
             "media_path": str(media_path),
         }
         # Flag integrite si la probe a echoue
-        if pq == "FAILED":
+        # BUG-018 (hotfix1) : helper centralise vs comparaison case-sensitive.
+        if probe_quality_is_failed(pq):
             result["integrity_probe_failed"] = True
         # Analyse d'encodage (upscale, 4K light, re-encode degrade)
         detected_for_encode = metrics_obj.get("detected") or {}

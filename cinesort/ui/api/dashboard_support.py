@@ -15,6 +15,7 @@ from cinesort.app.export_support import export_html_report
 from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
+from cinesort.domain.probe_models import probe_quality_is_failed, probe_quality_is_partial_or_failed
 from cinesort.infra.db import SQLiteStore
 from cinesort.ui.api import notifications_support
 from cinesort.ui.api._responses import err as _err_response
@@ -305,7 +306,8 @@ def _build_dashboard_section(
         detected = metrics.get("detected") if isinstance(metrics.get("detected"), dict) else {}
         thresholds = metrics.get("thresholds_used") if isinstance(metrics.get("thresholds_used"), dict) else {}
         probe_quality = str(metrics.get("probe_quality") or "")
-        if probe_quality.upper() in {"PARTIAL", "FAILED"}:
+        # BUG-018 (hotfix1) : helper centralise (case-insensitive) au lieu de .upper() inline.
+        if probe_quality_is_partial_or_failed(probe_quality):
             probe_partial_count += 1
 
         row_id = str(report.get("row_id") or "")
@@ -391,7 +393,8 @@ def _build_dashboard_section(
                 action="Verifier pistes audio et langues dans le fichier.",
             )
 
-        if probe_quality.upper() == "FAILED":
+        # BUG-018 (hotfix1) : helper centralise vs .upper() inline.
+        if probe_quality_is_failed(probe_quality):
             add_anomaly(
                 "WARN",
                 "PROBE_FAILED",
@@ -837,7 +840,8 @@ def _build_row_payload(
     """Construit le payload d'une row pour le report. Retourne (payload, decision_ok, tier, is_partial)."""
     metrics = quality.get("metrics") if isinstance(quality.get("metrics"), dict) else {}
     probe_quality = str(metrics.get("probe_quality") or "")
-    is_partial = probe_quality.upper() in {"PARTIAL", "FAILED"}
+    # BUG-018 (hotfix1) : helper centralise (case-insensitive) au lieu de .upper() inline.
+    is_partial = probe_quality_is_partial_or_failed(probe_quality)
     tier = str(quality.get("tier") or "").strip()
     decision_ok = to_bool(decision.get("ok"), False)
 
