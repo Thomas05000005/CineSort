@@ -832,7 +832,22 @@ def move_duplicate_losers_to_user_decided(
     if not dry_run:
         duplicates_user_decided_root.mkdir(parents=True, exist_ok=True)
 
-    by_row: Dict[str, "PlanRow"] = {str(r.row_id): r for r in rows if getattr(r, "row_id", None)}
+    # BUG-009 (hotfix) : avant on filtrait silencieusement les row_id falsy
+    # (None, "", 0) via `if getattr(r, "row_id", None)`. Resultat : un loser dont
+    # le row_id etait vide etait absorbe en "row_id introuvable" sans signal clair.
+    # On enforce desormais un row_id non-vide ET on logge un WARN explicite des
+    # qu'un row PlanRow arrive sans row_id, pour faciliter le diagnostic upstream.
+    by_row: Dict[str, "PlanRow"] = {}
+    for r in rows:
+        _rid = getattr(r, "row_id", None)
+        _rid_str = str(_rid) if _rid not in (None, "") else ""
+        if not _rid_str:
+            log(
+                "WARN",
+                f"DUPLICATE_LOSER PlanRow sans row_id (folder={getattr(r, 'folder', '?')}), ignore",
+            )
+            continue
+        by_row[_rid_str] = r
     losers_seen: Set[str] = set()
     for rid in loser_row_ids:
         if rid in losers_seen:
@@ -1161,7 +1176,22 @@ def apply_rows(
         dec = decisions.get(row.row_id, {})
         ok = bool(dec.get("ok", False))
         new_title = (dec.get("title") or row.proposed_title).strip()
-        new_year = int(dec.get("year") or row.proposed_year)
+        # BUG-009 (hotfix) : `int(dec.get("year") or row.proposed_year)` crashait
+        # TypeError/ValueError quand l'UI renvoyait un year sous forme de string
+        # non-numerique ("", "????", "abc") ou que proposed_year etait None
+        # (PlanRow malforme depuis JSON externe). L'exception etait alors absorbee
+        # par le catch global (ValueError, TypeError) -> SKIP_REASON_ERREUR_PRECEDENTE
+        # sans message clair pour l'utilisateur. On secure le cast et on logge
+        # explicitement quand la valeur est inutilisable.
+        _raw_year = dec.get("year") or row.proposed_year or 0
+        try:
+            new_year = int(_raw_year)
+        except (TypeError, ValueError):
+            log(
+                "WARN",
+                f"YEAR_CAST row {row.row_id} : annee invalide ({_raw_year!r}), fallback 0",
+            )
+            new_year = 0
 
         folder = current_folder_path(row.folder)
         if folder.parent == cfg.root:

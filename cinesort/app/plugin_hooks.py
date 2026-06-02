@@ -154,15 +154,51 @@ def _run_plugin(
     env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env["CINESORT_EVENT"] = event
     env["CINESORT_RUN_ID"] = str(data.get("run_id") or "")
+    # BUG-006: forcer encoding UTF-8 pour les scripts Python child afin de
+    # garantir que le JSON sur stdin (ecrit en UTF-8) soit decode correctement
+    # meme si l'environnement parent n'a pas PYTHONIOENCODING defini.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
 
     # Determiner la commande selon l'extension
     ext = plugin_path.suffix.lower()
     if ext == ".py":
         cmd = [sys.executable, str(plugin_path)]
     elif ext == ".bat":
-        cmd = ["cmd.exe", "/c", str(plugin_path)]
+        # BUG-007: cmd.exe herite du code page console (souvent cp1252 sur
+        # Windows FR) ce qui casse le decodage UTF-8 du stdin/stdout.
+        # On bascule la console enfant en UTF-8 (code page 65001) avant
+        # d'executer le .bat. `chcp >nul` masque le bruit "Page de codes
+        # active : 65001". `call` garantit que le exit code du .bat
+        # remonte correctement. Les operateurs `&&` doivent rester des
+        # arguments separes pour que cmd.exe /c les interprete (sinon
+        # cmd.exe traite toute la chaine comme un chemin de fichier).
+        cmd = [
+            "cmd.exe",
+            "/c",
+            "chcp", "65001", ">nul",
+            "&&",
+            "call", str(plugin_path),
+        ]
     elif ext == ".ps1":
-        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(plugin_path)]
+        # BUG-007: PowerShell herite aussi du code page console. On force
+        # InputEncoding/OutputEncoding en UTF-8 avant d'executer le script
+        # cible via le dot-sourcing (.). `-Command` permet d'enchainer
+        # plusieurs instructions; on conserve -ExecutionPolicy Bypass pour
+        # respecter le comportement d'avant le fix.
+        ps_prelude = (
+            "[Console]::InputEncoding=[System.Text.UTF8Encoding]::new();"
+            "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
+            "$OutputEncoding=[System.Text.UTF8Encoding]::new();"
+        )
+        cmd = [
+            "powershell.exe",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-NoProfile",
+            "-Command",
+            f"{ps_prelude} & '{plugin_path}'",
+        ]
     else:
         logger.warning("[plugins] extension non supportee: %s", plugin_path)
         return
