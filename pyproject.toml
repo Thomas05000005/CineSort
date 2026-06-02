@@ -57,6 +57,13 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.152.9,<7",
     "import-linter>=2.0,<3",
+    # hotfix3 2026-06-02 : sqlparse en dev-only pour activer le chemin
+    # complet (literals contenant /*, blocs imbriques) du splitter SQL de
+    # `migration_manager._split_sql_statements`. En prod l absence est
+    # geree via fallback regex + WARNING log (cf. BUG-015 hotfix2).
+    # Pas ajoute en runtime : aucune migration actuelle n utilise /* */
+    # et on prefere garder le bundle minimal.
+    "sqlparse>=0.5,<1",
 ]
 # build : pyinstaller + Pillow (alignement avec requirements-build.txt).
 build = [
