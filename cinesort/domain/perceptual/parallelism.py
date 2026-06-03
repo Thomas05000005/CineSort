@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Any, Callable, Optional, TypeVar
@@ -111,7 +112,7 @@ def run_parallel_tasks(
                 continue
             try:
                 results[name] = (True, fn())
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
                 logger.warning("run_parallel_tasks: tache '%s' a echoue: %s", name, exc)
                 results[name] = (False, exc)
         return results
@@ -133,7 +134,7 @@ def run_parallel_tasks(
             except TimeoutError as exc:
                 logger.warning("run_parallel_tasks: tache '%s' timeout apres %ss", name, timeout_per_task_s)
                 results[name] = (False, exc)
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
                 logger.warning("run_parallel_tasks: tache '%s' a echoue: %s", name, exc)
                 results[name] = (False, exc)
     finally:
@@ -227,7 +228,7 @@ def run_batch_parallel(
                 continue
             try:
                 results[i] = (True, worker_fn(item))
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
                 logger.warning("run_batch_parallel: item %d a echoue: %s", i, exc)
                 results[i] = (False, exc)
         return results
@@ -248,7 +249,7 @@ def run_batch_parallel(
                 continue
             try:
                 results[idx] = (True, fut.result())
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
                 logger.warning("run_batch_parallel: item %d a echoue: %s", idx, exc)
                 results[idx] = (False, exc)
     finally:

@@ -85,6 +85,41 @@ class TestRunParallelTasks(unittest.TestCase):
         self.assertTrue(results["ok2"][0])
         self.assertEqual(results["ok2"][1], "y")
 
+    def test_subprocess_timeout_expired_is_caught(self):
+        """subprocess.TimeoutExpired ne herite pas de RuntimeError/OSError.
+
+        Avant fix : la tache ffmpeg qui timeout faisait remonter l'exception
+        hors du pool et plantait tout le batch.
+        """
+        import subprocess
+
+        def timeout_task():
+            raise subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=10.0)
+
+        def normal_task():
+            return "ok"
+
+        tasks = {"timeout": timeout_task, "ok": normal_task}
+        results = run_parallel_tasks(tasks, max_workers=2)
+        self.assertFalse(results["timeout"][0])
+        self.assertIsInstance(results["timeout"][1], subprocess.TimeoutExpired)
+        self.assertTrue(results["ok"][0])
+        self.assertEqual(results["ok"][1], "ok")
+
+    def test_subprocess_timeout_expired_serial_path(self):
+        """Meme garantie dans le fast-path (workers <= 1)."""
+        import subprocess
+
+        def timeout_task():
+            raise subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=10.0)
+
+        tasks = {"timeout": timeout_task, "ok": lambda: 42}
+        results = run_parallel_tasks(tasks, max_workers=1)
+        self.assertFalse(results["timeout"][0])
+        self.assertIsInstance(results["timeout"][1], subprocess.TimeoutExpired)
+        self.assertTrue(results["ok"][0])
+        self.assertEqual(results["ok"][1], 42)
+
     def test_cancel_event_aborts_pending(self):
         ev = threading.Event()
         ev.set()
