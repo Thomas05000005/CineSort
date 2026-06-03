@@ -591,16 +591,19 @@ class TestCollectWarnings(unittest.TestCase):
         ]
 
     def test_runtime_mismatch_warning(self):
+        # duration_s est au TOP-LEVEL de NormalizedProbe, pas dans video subdict.
         warns = collect_warnings(
             self._cats(),
             0.9,
             7200,
             [],
             "mismatch",
-            {"video": {"duration_s": 8700}},
+            {"duration_s": 8700, "video": {"codec": "hevc"}},
             False,
         )
         self.assertTrue(any("Theatrical" in w or "Extended" in w for w in warns))
+        # La duree affichee doit refleter 8700s = 145 min, pas 0 min.
+        self.assertTrue(any("145 min" in w for w in warns))
 
     def test_dv_profile_5_warning(self):
         warns = collect_warnings(self._cats(), 0.9, 7200, ["dv_profile_5"], None, None, False)
