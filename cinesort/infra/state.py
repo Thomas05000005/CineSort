@@ -84,7 +84,20 @@ def atomic_write_json(p: Path, obj) -> None:
     tmp_name = f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.{uuid.uuid4().hex[:8]}"
     tmp = p.with_name(tmp_name)
     try:
-        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        # flush + fsync avant rename : sans cela, os.replace est atomique cote
+        # VFS mais ne garantit PAS que les pages ecrites dans tmp sont durables.
+        # Sur crash (BSOD, coupure courant), un fichier renomme mais avec
+        # contenu tronque/0 byte est possible (ext4 sans data=ordered, NTFS,
+        # ZFS). Critique pour validation.json et autres fichiers de reprise.
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(obj, ensure_ascii=False, indent=2))
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                # fsync peut echouer sur certains montages reseau / fs en lecture
+                # seule ; on n'echoue pas l'ecriture pour autant (best-effort).
+                pass
         os.replace(tmp, p)
     finally:
         # Best-effort cleanup : tmp.exists() / tmp.unlink() ne peuvent lever
