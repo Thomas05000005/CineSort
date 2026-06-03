@@ -116,13 +116,13 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
         }
     )
     remux_strict["languages"].update({"bonus_vo_present": 3, "bonus_vf_present": 1})
-    remux_strict["tiers"].update({"premium": 90, "bon": 76, "moyen": 60})
+    remux_strict["tiers"].update({"platinum": 90, "gold": 76, "silver": 60, "bronze": 30})
 
     equilibre = copy.deepcopy(base)
     equilibre["id"] = "CinemaLux_Equilibre_v1"
     equilibre["weights"].update({"video": 60, "audio": 30, "extras": 10})
     equilibre["toggles"].update({"enable_4k_light": True, "include_metadata": False, "include_naming": False})
-    equilibre["tiers"].update({"premium": 85, "bon": 68, "moyen": 54})
+    equilibre["tiers"].update({"platinum": 85, "gold": 68, "silver": 54, "bronze": 30})
 
     light = copy.deepcopy(base)
     light["id"] = "CinemaLux_Light_v1"
@@ -149,7 +149,7 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
         }
     )
     light["languages"].update({"bonus_vo_present": 5, "bonus_vf_present": 3})
-    light["tiers"].update({"premium": 80, "bon": 64, "moyen": 50})
+    light["tiers"].update({"platinum": 80, "gold": 64, "silver": 50, "bronze": 30})
 
     # Streaming optimal : profil pour bibliotheques destinees au streaming
     # (Plex/Jellyfin). Tolerant sur l'audio (peu de pertes a 5.1), severe sur
