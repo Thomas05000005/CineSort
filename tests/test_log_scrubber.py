@@ -29,6 +29,21 @@ class ScrubSecretsFunctionTests(unittest.TestCase):
         # Le reste de l'URL doit etre preserve
         self.assertIn("query=Inception", result)
 
+    def test_omdb_apikey_in_query_string_sans_underscore(self) -> None:
+        # OMDb URL format : ?apikey=xxx (sans underscore, contrairement a TMDb)
+        text = "GET http://www.omdbapi.com/?i=tt0111161&apikey=omdbsecret42"
+        result = scrub_secrets(text)
+        self.assertIn("apikey=[REDACTED]", result)
+        self.assertNotIn("omdbsecret42", result)
+        self.assertIn("i=tt0111161", result)
+
+    def test_api_dash_key_in_query_string(self) -> None:
+        text = "URL ?api-key=dashkey99&extra=1"
+        result = scrub_secrets(text)
+        self.assertIn("[REDACTED]", result)
+        self.assertNotIn("dashkey99", result)
+        self.assertIn("extra=1", result)
+
     def test_tmdb_api_key_uppercase(self) -> None:
         text = "URL: API_KEY=SECRETKEY42"
         result = scrub_secrets(text)

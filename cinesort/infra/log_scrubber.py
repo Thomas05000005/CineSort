@@ -32,7 +32,8 @@ from cinesort.infra.log_context import attach_filter_to_handler
 # liste exhaustive.
 _SECRET_PATTERNS: List[Pattern[str]] = [
     # TMDb v3 query string : ?api_key=abc123 ou &api_key=abc123
-    re.compile(r"(api_key=)([^&\s\"'>]+)", re.IGNORECASE),
+    # OMDb : ?apikey=abc123 (sans underscore)
+    re.compile(r"(api[_-]?key=)([^&\s\"'>]+)", re.IGNORECASE),
     # Generique : ?token=xxx ou &token=xxx
     re.compile(r"(token=)([^&\s\"'>]+)", re.IGNORECASE),
     # Jellyfin header : Authorization: MediaBrowser Token="xxx"
