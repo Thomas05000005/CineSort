@@ -248,11 +248,17 @@ def get_or_create_infra(
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
-            # VN-E.2 : nettoyer les apply_batches PENDING-zombi (status='PENDING'
-            # avec started_ts > 1h). Pattern symetrique a reconcile_at_boot
-            # mais cible apply_batches au lieu de apply_pending_moves. Idempotent.
+            # VN-E.2 : nettoyer les apply_batches PENDING-zombi (status='PENDING').
+            # Pattern symetrique a reconcile_at_boot mais cible apply_batches au
+            # lieu de apply_pending_moves. Idempotent.
+            # R5-finding-4 fix : au boot, tout PENDING est par definition zombie
+            # (aucun process apply ne tourne encore, le boot etant le tout premier
+            # acces au store du process courant). Le defaut DEFAULT_MAX_AGE_HOURS=1.0
+            # laissait passer les batches recents (<1h) lors d'une relance rapide
+            # post-crash, ce qui est precisement le cas le plus frequent. On force
+            # max_age_hours=0.0 pour capturer tous les PENDING avec started_ts<now.
             try:
-                batches_report = reconcile_batches_at_boot(store)
+                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
                 if batches_report.get("pending_found", 0) > 0:
                     _logger.info(
                         "reconcile_batches_at_boot: %d PENDING-zombi cleaned "

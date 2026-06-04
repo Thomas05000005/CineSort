@@ -46,6 +46,18 @@ _SEARCH_CACHE_TTL_S = 7 * 24 * 3600  # 7 jours pour les search:* / tv_search:*
 
 # Prefixes de cle qui correspondent a des lookups deterministes (TTL long).
 # Les autres (search, tv_search) utilisent _SEARCH_CACHE_TTL_S.
+#
+# R5-finding-3 (fix minimal) : les cles `movie|{id}`, `find_tmdb|{id}`,
+# `find_imdb|{iid}` n'incluent PAS la langue, parce que les endpoints HTTP
+# correspondants ont leur parametre `language` HARD-PINNED sur "fr-FR" (cf
+# _get_movie_detail_cached, find_by_tmdb_id, find_by_imdb_id). Le contenu
+# cache (title, collection_name, genres) est donc TOUJOURS en francais et
+# cfg.tmdb_language n'affecte PAS ces endpoints.
+# Si la langue devient un jour configurable sur ces 3 endpoints, il FAUT
+# inclure la langue dans la cle de cache (ex: "movie|{language}|{mid}") sinon
+# cross-contamination du cache entre langues. La cle "tv_ep:" inclut deja la
+# langue. La cle "movie_alt_titles|" ne passe pas de parametre language a TMDb
+# (l'API retourne toutes les langues), elle est donc reellement deterministe.
 _DETERMINISTIC_PREFIXES = ("movie|", "movie_alt_titles|", "find_tmdb|", "find_imdb|", "tv_ep:")
 
 
@@ -488,6 +500,13 @@ class TmdbClient:
         if isinstance(cached, dict):
             return cached
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `movie|{mid}` n'inclut PAS la langue. cfg.tmdb_language
+        # n'affecte donc PAS l'output de cet endpoint (collection_name, genres,
+        # production_companies sont toujours retournes en francais). Si la
+        # langue devient un jour configurable ici, il FAUT inclure la langue
+        # dans cache_key (ex: f"movie|{language}|{mid}") pour eviter une
+        # cross-contamination du cache entre langues. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/movie/{mid}"
         params = {
             "api_key": self.api_key,
@@ -625,6 +644,12 @@ class TmdbClient:
                 except TypeError:
                     pass
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `find_tmdb|{mid}` n'inclut PAS la langue. Le `title`
+        # stocke dans le cache est donc toujours en francais, independamment de
+        # cfg.tmdb_language. Si la langue devient un jour configurable ici, il
+        # FAUT inclure la langue dans cache_key (ex: f"find_tmdb|{language}|{mid}")
+        # pour eviter cross-contamination du cache. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/movie/{mid}"
         params = {"api_key": self.api_key, "language": "fr-FR"}
         _t0 = time.monotonic()
@@ -777,6 +802,12 @@ class TmdbClient:
                 return None
             return TmdbResult(**cached) if isinstance(cached, dict) else None
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `find_imdb|{iid}` n'inclut PAS la langue. Le `title`
+        # stocke dans le cache est donc toujours en francais, independamment de
+        # cfg.tmdb_language. Si la langue devient un jour configurable ici, il
+        # FAUT inclure la langue dans cache_key (ex: f"find_imdb|{language}|{iid}")
+        # pour eviter cross-contamination du cache. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/find/{iid}"
         params = {"api_key": self.api_key, "external_source": "imdb_id", "language": "fr-FR"}
         _t0 = time.monotonic()
