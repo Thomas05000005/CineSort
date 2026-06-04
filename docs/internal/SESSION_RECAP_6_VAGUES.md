@@ -18,7 +18,7 @@ souhaitant comprendre l etat actuel sans relire les 17 fichiers
 | 1 | **M** | 9 + 8 quickwins + 1 hotfix | 5 | Cloture refactor #84, hotfix EXE 2.33 GB -> 54 MB |
 | 2 | **N** | 17 | 4 | Chromaprint, scoring unifie, WCAG AA, pause cooperative, apply_audit |
 | 3 | **O** | 4 | 5 | SQLite pragmas profils, scan parallel x2.5, waterfall UI, OpType StrEnum |
-| 4 | **P** | 7 | 9 | apply atomique, tier TRaSH, field locks Jellyfin, tri-etat, optimistic concurrency, TRaSH YAML, tags brackets |
+| 4 | **P** | 7 | 9 | apply atomique, tier TRaSH, field locks Jellyfin, tri-etat, optimistic concurrency, TRaSH YAML, UI library v5 |
 | 5 | **Q** | 3 | 1 | path_utils, quarantaine TTL, check_path_length MAX_PATH |
 | 6 | **R** | 3 | 1 | Fixes mineurs Vague O R2, TODOs propres, bilan consolide |
 
@@ -134,8 +134,12 @@ Roadmap dans `docs/internal/ROADMAP_VAGUE_P.md`. 7 batches sequentiels.
    Refactor `plan_support` en sous-modules thematiques.
 6. **VP-F TRaSH profiles YAML** : import/export Recyclarr YAML format,
    preset TRaSH 2026, 5-axes breakdown (resolution / source / codec / audio / hdr).
-7. **VP-G tags providers brackets** : parsing `[tmdb:550]` / `[imdb:tt0137523]` /
-   `[tvdb:...]` dans filenames -> auto-link sans re-match. Cablage UI library.
+7. **VP-G audit + UI library v5** : cablage final UI library v5 (composants
+   modernes) + audit complementaire chemins critiques (apply, locks, decisions).
+   Note : le parsing INPUT des tags providers `{tmdb-XXX}` / `[imdbid-ttXXX]`
+   depuis les noms de dossier n est PAS implemente (seul l OUTPUT via
+   `naming.py` produit ces tags). Identification deterministe reste via
+   sidecar `.nfo` (tmdbid/imdbid XML). Parsing input deferre Vague Q+.
 
 **Tags poses** : `mini-recovery-p`, `vague-p-batch1` a `vague-p-batch7`, `vague-p-complete`.
 
