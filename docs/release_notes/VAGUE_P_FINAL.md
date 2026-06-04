@@ -50,9 +50,12 @@ Preset TRaSH 2026 livre par defaut. Breakdown 5 axes expose dans l UI.
 ## Batch 7 - VP-G Audit complementaire + integration finale UI library (10h)
 
 Cablage final de l UI library v5 (composants modernes) avec coexistence legacy.
-Audit complementaire sur les chemins critiques (apply, locks, decisions). Tags
-providers `{tmdb-680}` et `[imdbid-tt0133093]` parses dans les noms de dossier
-pour identification deterministe.
+Audit complementaire sur les chemins critiques (apply, locks, decisions). Note :
+le parsing INPUT des tags providers `{tmdb-680}` / `[imdbid-tt0133093]` dans les
+noms de dossier n est PAS encore implemente cote scanner (seul l OUTPUT via
+`naming.py` produit ces tags). Le sidecar `.nfo` reste la seule source
+deterministe d identification (tmdbid/imdbid lus depuis XML). Feature parsing
+input planifiee en Vague Q.
 
 ## Bilan
 
@@ -72,6 +75,6 @@ Vague P apporte la solidite et le controle:
 - Decisions tri-etat : tu peux Reporter une decision au lieu d etre force Accepter/Rejeter
 - Protection contre les modifications concurrentes : HTTP 409 si deux clics simultanes Sauvegarder
 - Profils qualite TRaSH-compatible avec import/export YAML (compatible Recyclarr)
-- Tags providers : ecris {tmdb-680} ou [imdbid-tt0133093] dans le nom de dossier pour identification deterministe
+- Tags providers en SORTIE : le renommage produit `{tmdb-680}` dans le nom de fichier final (compatible Plex/Jellyfin). Pour forcer une identification deterministe en ENTREE (avant scan), utilise un sidecar `.nfo` avec `<tmdbid>` / `<imdbid>` -- le parsing direct des tags depuis le nom de dossier arrive en Vague Q.
 
 L app demarre toujours en 5.32s et pese 53.68MB.
