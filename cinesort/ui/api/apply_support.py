@@ -37,6 +37,7 @@ from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 import contextlib
 
@@ -1247,6 +1248,22 @@ def _execute_apply(
                 log_fn("INFO", f"Mode atomique active pour batch {apply_batch_id}")
             except (sqlite3.Error, AttributeError, OSError, TypeError) as exc:
                 log_fn("WARN", f"Mode atomique non persiste batch {apply_batch_id}: {exc}")
+        elif apply_batch_id is None and bool(apply_atomic):
+            # MEGA-HOTFIX bug #2 : avant ce fix, le mode atomique demande par
+            # l'utilisateur etait silencieusement ignore quand insert_apply_batch
+            # echouait (apply_batch_id reste None). Resultat : l'apply s'execute
+            # en mode NON-atomique sans aucune trace dans les logs, et le
+            # rollback_forward n'est plus declenchable (pas de batch_id pour
+            # tracer les operations). Fallback explicite : on log un WARN clair
+            # indiquant que le mode atomique est desactive faute de batch
+            # persiste, et l'apply continue en mode best-effort (backward compat).
+            log_fn(
+                "WARN",
+                "Mode atomique demande mais desactive : "
+                "insert_apply_batch a echoue (apply_batch_id=None), "
+                "le rollback_forward ne sera pas disponible pour ce batch. "
+                "L'apply continue en mode non-atomique (best-effort).",
+            )
 
         # P2.3 : ouvrir le journal d'audit JSONL pour ce batch (apply réel uniquement)
         try:
@@ -1438,6 +1455,24 @@ def _cleanup_apply(
             )
         except (OSError, TypeError, ValueError) as exc:
             log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except RuntimeError as exc:
+            # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
+            # (sous-classe de RuntimeError, definie dans
+            # cinesort.infra.db.repositories.apply) en cas de transition d'etat
+            # invalide (ex : batch deja CLOSED ou ROLLED_BACK, batch_id
+            # inexistant en base). Avant ce fix, l'exception remontait au
+            # caller et faisait crasher l'apply ALORS QUE l'apply lui-meme
+            # s'est deroule correctement — bug critique : utilisateur voit une
+            # erreur 500 sur un apply reussi. On attrape via la classe parente
+            # RuntimeError (ApplyBatchStateError n'est pas exportee via le
+            # public API du module repositories) et on log un WARN explicite :
+            # le batch est peut-etre deja finalise ailleurs, l'apply reel a
+            # reussi, on preserve la backward compat.
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise (transition d'etat refusee, "
+                f"batch_id={apply_batch_id}) : {exc}",
+            )
     log_fn(
         "INFO",
         "=== APPLY done "
@@ -1727,7 +1762,7 @@ def refresh_jellyfin_library_now(api: Any) -> Dict[str, Any]:
         return {"ok": True, "message": "Refresh Jellyfin declenche."}
     except (IntegrationError, OSError, requests.RequestException) as exc:
         _log.warning("refresh_jellyfin_library_now echoue: %s", exc)
-        return _err_response(f"Echec refresh Jellyfin : {exc}", category="resource", level="error", log_module=__name__)
+        return _safe_integration_error(exc, category="resource", log_module=__name__)
 
 
 def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
@@ -1761,7 +1796,7 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
         return {"ok": True, "message": "Refresh Plex declenche."}
     except (IntegrationError, OSError, requests.RequestException) as exc:
         _log.warning("refresh_plex_library_now echoue: %s", exc)
-        return _err_response(f"Echec refresh Plex : {exc}", category="resource", level="error", log_module=__name__)
+        return _safe_integration_error(exc, category="resource", log_module=__name__)
 
 
 def _snapshot_jellyfin_watched(api: Any, log_fn: Callable[[str, str], None]) -> Optional[Dict[str, Any]]:

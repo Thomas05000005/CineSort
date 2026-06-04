@@ -828,6 +828,19 @@ def apply_tier_hierarchy(
     return current_tier, applied
 
 
+# API publique reservee future Vague S : les helpers suivants restent definis
+# (et restent importables explicitement par leur nom + utilises en interne /
+# tests) mais sont retires de ``__all__`` car aucun caller prod ne les utilise
+# encore en v7.7.0. Ils seront re-exposes quand la Vague S (UI premium badges,
+# affichage seuils dynamiques, plafonnement custom_rules) les consommera :
+#   - tier_label_fr   : libelle FR long ("Platine"/"Or"/...) - future UI badges
+#   - is_premium_tier : decision rapide Platinum/Gold - future UI premium badge
+#   - tier_min_score  : seuil dynamique d'un tier - future UI parametres
+#   - cap_tier        : plafonnement explicite (utilise en INTERNE par
+#                       apply_tier_hierarchy ligne 749, donc fonction conservee)
+# Backward compat ABSOLUE : les fonctions restent inchangees, seul __all__
+# (qui ne controle que ``from tiers_helpers import *``) est reduit. Les
+# imports nommes existants (tests, futurs callers) continuent de fonctionner.
 __all__ = [
     "TIER_ORDER_BEST_FIRST",
     "TIER_ORDER_WORST_FIRST",
@@ -844,11 +857,12 @@ __all__ = [
     "normalize_tiers",
     "tier_order",
     "tier_ordinal",
-    "tier_label_fr",
-    "is_premium_tier",
-    "tier_min_score",
+    # tier_label_fr : reservee future Vague S (UI badges FR)
+    # is_premium_tier : reservee future Vague S (UI premium badge)
+    # tier_min_score : reservee future Vague S (UI parametres)
     "determine_tier",
-    "cap_tier",
+    # cap_tier : utilisee en INTERNE par apply_tier_hierarchy mais aucun
+    # caller prod externe en v7.7.0 - reservee future Vague S
     "to_canonical_v2_tier",
     "reconcile_display_tier",
     "default_hierarchy_config",

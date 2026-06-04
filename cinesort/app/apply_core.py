@@ -722,8 +722,17 @@ def move_file_with_collision_policy(
         # sha1, hash_cache lookup...). Sans cette garde, shutil.move sur
         # Windows ECRASE silencieusement le fichier de destination si un autre
         # process / autre thread l'a cree entre temps = DATA LOSS reel.
+        # Hotfix3 (mega-hotfix) : aligner la garde sur la check initiale (L610-631)
+        # qui distingue file/dir via is_file(). Sans is_file() ici, si un dossier
+        # est cree au meme path entre L610 et L725 (cas rare mais reel : worker
+        # parallele creant dst_dir), on quarantine "race" au lieu de quarantine
+        # "dst not file" : meme resultat (conflict), mais log incoherent et le
+        # path conflicts_root/conflict_context() suppose un fichier en dst.
         if dst_file.exists():
-            log("WARN", f"CONFLICT (race) detected pre-move: {src_file} -> {dst_file}, quarantining")
+            if not dst_file.is_file():
+                log("WARN", f"CONFLICT (race) detected pre-move (dst is not a file): {src_file} -> {dst_file}, quarantining")
+            else:
+                log("WARN", f"CONFLICT (race) detected pre-move: {src_file} -> {dst_file}, quarantining")
             qdst = move_to_review_bucket(
                 src_file,
                 src_anchor=src_anchor,
@@ -839,8 +848,16 @@ def merge_dir_safe(
             planned = unique_path(leftovers_root / core_mod.windows_safe(src_dir.name) / rel)
             log("INFO", f"LEFTOVERS planned: {leftover_file} -> {planned}")
         res.leftovers_moved_count += len(leftover_files)
-        if len(leftover_files) == 0:
-            res.source_dirs_deleted_count += 1
+        # Hotfix3 (mega-hotfix) : aligner la simulation dry_run sur le comportement
+        # reel. En mode reel (L863-864 plus bas), source_dirs_deleted_count
+        # s'incremente DES QUE prune_empty_dirs(src_dir) reussit, ce qui est le
+        # cas chaque fois que tous les fichiers (manages ET non-manages) ont ete
+        # deplaces. La simulation dry_run dit qu'on deplacerait tous les
+        # leftover_files vers leftovers_root, donc src_dir se retrouverait vide
+        # apres apply reel : on doit incrementer source_dirs_deleted_count, peu
+        # importe qu'il y ait eu des leftovers ou non. L'ancien check
+        # `len(leftover_files) == 0` sous-estimait le compteur en preview UI.
+        res.source_dirs_deleted_count += 1
         return
 
     remaining_files = [path for path in src_dir.rglob("*") if path.is_file()]
@@ -920,14 +937,24 @@ def move_duplicate_losers_to_user_decided(
         folder = Path(row.folder)
         video_name = str(row.video or "").strip()
         # Wrap record_op pour injecter le row_id (traçabilité Undo v5).
+        # Hotfix3 (mega-hotfix) : binder `record_op` via default arg explicite
+        # (pas seulement via fermeture) pour eviter une dependance sur la cellule
+        # de fermeture si record_op etait rebind plus tard dans le scope englobant
+        # (defensive contre refactor : la fermeture capturait la *cellule* du nom
+        # `record_op`, le default arg capture *la valeur courante*).
         row_record_op = None
         if record_op is not None:
             _rid_str = str(row.row_id or "")
+            _record_op_ref = record_op
 
-            def row_record_op(payload: Dict[str, Any], _rid_str: str = _rid_str) -> None:
+            def row_record_op(
+                payload: Dict[str, Any],
+                _rid_str: str = _rid_str,
+                _record_op_ref: Callable[[Dict[str, Any]], None] = _record_op_ref,
+            ) -> None:
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _rid_str
-                record_op(payload)
+                _record_op_ref(payload)
 
         # Cas "collection" : on a un video_name dans un dossier partagé →
         # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
@@ -1283,15 +1310,25 @@ def apply_rows(
         )
 
         # Wrap record_op to inject row_id for Undo v5 traceability.
+        # Hotfix3 (mega-hotfix) : binder `record_op` via default arg explicite
+        # (pas seulement via fermeture) pour eviter une dependance sur la cellule
+        # de fermeture si record_op etait rebind plus tard dans le scope englobant
+        # (defensive contre refactor : la fermeture capturait la *cellule* du nom
+        # `record_op`, le default arg capture *la valeur courante*).
         row_record_op = None
         if record_op is not None:
             _current_row_id = str(row.row_id or "")
+            _record_op_ref = record_op
 
-            def row_record_op(payload: Dict[str, Any], _current_row_id: str = _current_row_id) -> None:
+            def row_record_op(
+                payload: Dict[str, Any],
+                _current_row_id: str = _current_row_id,
+                _record_op_ref: Callable[[Dict[str, Any]], None] = _record_op_ref,
+            ) -> None:
                 """Wrapper qui injecte `row_id` dans le payload pour la traçabilité Undo v5."""
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _current_row_id
-                record_op(payload)
+                _record_op_ref(payload)
 
         try:
             if ok:

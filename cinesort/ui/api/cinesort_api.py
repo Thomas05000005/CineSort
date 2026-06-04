@@ -1271,9 +1271,7 @@ class CineSortApi:
             # BUG 2 : utiliser le scan multi-library pour eviter les tronques
             jellyfin_movies = client.get_all_movies_from_all_libraries(jf_user_id)
         except _jellyfin_mod.JellyfinError as exc:
-            return _err_response(
-                f"Connexion Jellyfin echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         report = build_sync_report(local_rows, jellyfin_movies)
         return {"ok": True, "run_id": target_run_id, **report}
@@ -1407,9 +1405,7 @@ class CineSortApi:
             client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except _plex_mod.PlexError as exc:
-            return _err_response(
-                f"Connexion Plex echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         report = build_sync_report(local_rows, plex_movies)
         return {"ok": True, "run_id": target_run_id, **report}
@@ -1487,9 +1483,7 @@ class CineSortApi:
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
         except _radarr_mod.RadarrError as exc:
-            return _err_response(
-                f"Connexion Radarr echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         # Collecter les quality reports pour les upgrade candidates
         qr_map: Dict[str, Dict[str, Any]] = {}
