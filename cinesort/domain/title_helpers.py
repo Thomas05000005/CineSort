@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -13,6 +14,67 @@ logger = logging.getLogger(__name__)
 
 YEAR_RE = re.compile(r"(19\d{2}|20\d{2})")
 PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(19\d{2}|20\d{2})\s*[\)\]\}]")
+
+# --- Provider tags (B02-TAGS-BRACKETS) ------------------------------------
+# Formats supportes cote INPUT (variantes Plex/Jellyfin/Radarr/TRaSH) :
+#   {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345}
+#   [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567]
+# Permet l'auto-link deterministe au scan en plus du parsing NFO sidecar.
+_TMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*tmdb(?:id)?[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    re.IGNORECASE,
+)
+_IMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*imdb(?:id)?[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class ProviderTags:
+    """Tags providers extraits d'un nom de dossier/fichier.
+
+    Attributs None si rien trouve. Utilise pour auto-link deterministe
+    (court-circuit du matching fuzzy) symetrique au flow NFO sidecar.
+    """
+
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+
+def extract_provider_tags(name: str) -> ProviderTags:
+    """Extrait `{tmdb-XXX}` / `[imdbid-ttXXX]` depuis un nom de dossier/fichier.
+
+    Retourne `ProviderTags(None, None)` si rien trouve. Casse-insensible.
+    Tolere les variantes `{tmdb:550}`, `[tmdbid-550]`, etc.
+    """
+    if not name:
+        return ProviderTags()
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    m = _TMDB_TAG_RE.search(name)
+    if m:
+        try:
+            tmdb_id = int(m.group(1))
+        except ValueError:
+            tmdb_id = None
+    m = _IMDB_TAG_RE.search(name)
+    if m:
+        imdb_id = m.group(1).lower()
+    return ProviderTags(tmdb_id=tmdb_id, imdb_id=imdb_id)
+
+
+def strip_provider_tags(name: str) -> str:
+    """Retire les tags providers d'un nom pour le nettoyage de titre.
+
+    Evite que les chiffres TMDb (ex `27205`) ne polluent le titre extrait
+    en etant confondus avec une annee ou un token de scene.
+    """
+    if not name:
+        return name
+    cleaned = _TMDB_TAG_RE.sub(" ", name)
+    cleaned = _IMDB_TAG_RE.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 REMASTER_HINT_RE = re.compile(
     r"\b("
     r"remaster(?:ed)?|restor(?:ed|ation)|restaure(?:e|es|ee|ees)?|"
@@ -193,11 +255,15 @@ def clean_title_guess(text: str) -> str:
     # Phase 6.3 : delegue au scene_parser (regex etendues, edition strip,
     # release group strip, audio residue). Fallback historique conserve si
     # le parser retourne une chaine vide.
-    parsed = parse_scene_title(text)
+    # B02-TAGS-BRACKETS : retire les tags providers ({tmdb-XXX}, [imdbid-ttXXX])
+    # AVANT le pipeline noise pour eviter que les chiffres TMDb (ex 27205) ne
+    # soient confondus avec une annee ou un token de scene.
+    pre_cleaned = strip_provider_tags(text) if text else text
+    parsed = parse_scene_title(pre_cleaned)
     if parsed:
         return parsed
     # Fallback : pipeline historique (cas degenere ou input vide)
-    name = Path(text).stem
+    name = Path(pre_cleaned or "").stem
     name = name.replace(".", " ").replace("_", " ")
     name = re.sub(r"\(\s*(19\d{2}|20\d{2})\s*\)", "", name)
     name = NOISE_RE.sub(" ", name)
@@ -224,6 +290,9 @@ def title_prefix_before_parenthesized_year(text: str) -> str:
 
 
 def _norm_for_tokens(s: str) -> str:
+    # B02-TAGS-BRACKETS : strip {tmdb-XXX}/[imdbid-ttXXX] avant lowercasing
+    # pour eviter que tmdb_id soit tokenise en chiffres / "tmdb" / "imdb".
+    s = strip_provider_tags(s) if s else s
     s = s.lower()
     s = _strip_accents(s)
     s = NOISE_RE.sub(" ", s)

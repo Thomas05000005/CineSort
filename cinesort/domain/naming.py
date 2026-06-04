@@ -15,6 +15,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
+# --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
+# Symetrique a `tmdb_tag` produit par build_naming_context (ligne ~191).
+# Supporte les variantes Plex / Jellyfin / Radarr / TRaSH :
+#   {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345}, {tmdb_12345}
+#   [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567]
+# La regex tolere espaces internes et casse melangee.
+_PROVIDER_TMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*tmdb(?:id)?\s*[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    re.IGNORECASE,
+)
+_PROVIDER_IMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*imdb(?:id)?\s*[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    re.IGNORECASE,
+)
+
 # VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
 # domain<->domain core -> duplicate_support -> (lazy) naming -> core.
 # `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
@@ -158,6 +173,78 @@ PREVIEW_MOCK_CONTEXT: Dict[str, str] = {
     "edition": "",
     "edition-tag": "",
 }
+
+
+# --- Provider tags parsing (B02-TAGS-BRACKETS) ----------------------------
+
+
+@dataclass(frozen=True)
+class ProviderTags:
+    """Tags providers extraits d'un nom de dossier/fichier.
+
+    Tous les champs sont optionnels : `ProviderTags()` est l'absence de tag.
+    `tmdb_id` est un int positif si trouve, `imdb_id` une chaine "ttXXXXXXX"
+    lowercase.
+    """
+
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+    @property
+    def has_any(self) -> bool:
+        """True si au moins un tag a ete extrait."""
+        return self.tmdb_id is not None or self.imdb_id is not None
+
+
+def extract_provider_tags(name: str) -> ProviderTags:
+    """Extrait `{tmdb-XXX}` / `[imdbid-ttXXX]` depuis un nom de dossier/fichier.
+
+    Symetrique a la sortie de `build_naming_context` (cle `tmdb_tag`).
+    Supporte les variantes Plex / Jellyfin / Radarr / TRaSH.
+
+    Args:
+        name: Nom de dossier ou fichier (sans extension).
+
+    Returns:
+        ProviderTags(tmdb_id=..., imdb_id=...) ou ProviderTags() si rien trouve.
+    """
+    if not name:
+        return ProviderTags()
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    m = _PROVIDER_TMDB_TAG_RE.search(name)
+    if m:
+        try:
+            value = int(m.group(1))
+            if value > 0:
+                tmdb_id = value
+        except (ValueError, TypeError):
+            tmdb_id = None
+    m = _PROVIDER_IMDB_TAG_RE.search(name)
+    if m:
+        imdb_id = m.group(1).lower()
+    return ProviderTags(tmdb_id=tmdb_id, imdb_id=imdb_id)
+
+
+def strip_provider_tags(name: str) -> str:
+    """Retire les tags providers d'un nom pour le pipeline de nettoyage.
+
+    A appeler AVANT `clean_title_guess` / `parse_scene_title` afin d'eviter
+    que les chiffres TMDb (ex `27205`) ne polluent le titre extrait ou ne
+    soient confondus avec une annee.
+
+    Args:
+        name: Nom brut (dossier ou fichier).
+
+    Returns:
+        Nom debarrasse des `{tmdb-...}` / `[imdbid-...]`, espaces normalises.
+    """
+    if not name:
+        return name
+    cleaned = _PROVIDER_TMDB_TAG_RE.sub(" ", name)
+    cleaned = _PROVIDER_IMDB_TAG_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 # --- Construction du contexte --------------------------------------------
