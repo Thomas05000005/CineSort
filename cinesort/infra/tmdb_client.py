@@ -490,7 +490,13 @@ class TmdbClient:
         return results
 
     def _get_movie_detail_cached(self, movie_id: int) -> Optional[Dict[str, Any]]:
-        """Recupere le detail d'un film TMDb (cache local). Stocke poster + collection."""
+        """Recupere le detail d'un film TMDb (cache local). Stocke poster + collection.
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : collection_name, genres et
+        production_companies sont toujours en francais.
+        """
         mid = int(movie_id or 0)
         if mid <= 0:
             return None
@@ -625,6 +631,11 @@ class TmdbClient:
         P1.1.c : symétrique à find_by_imdb_id. Permet de cross-checker un NFO
         qui contient <tmdbid>27205</tmdbid> contre le titre officiel TMDb
         (détection NFO pollué/copié-collé).
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : le `title` retourne est toujours en
+        francais.
         """
         try:
             mid = int(str(tmdb_id).strip())
@@ -790,6 +801,11 @@ class TmdbClient:
         """Lookup TMDb via /find endpoint avec un IMDb ID externe.
 
         Retourne le premier film trouve ou None.
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : le `title` retourne est toujours en
+        francais.
         """
         iid = (imdb_id or "").strip()
         if not iid or not iid.startswith("tt"):
