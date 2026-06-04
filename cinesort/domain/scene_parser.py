@@ -94,6 +94,10 @@ _PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(?:19\d{2}|20\d{2})\s*[\)\]\}]")
 # Caracteres de garbage en fin de chaine apres nettoyage
 _TRAILING_GARBAGE_RE = re.compile(r"[\s\-_\.]+$")
 
+# Separateurs orphelins en fin de chaine (- ou _ ou . isoles apres strip).
+# Utilise dans parse_scene_title pour nettoyer apres release group strip.
+_ORPHAN_SEP_RE = re.compile(r"\s+[-_.]+\s*$")
+
 # Release group extraction (Phase Dashboard Podiums).
 # Validation d'un candidat (2-25 chars alphanum + underscore, au moins une lettre).
 _GROUP_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9_]{2,25}$")
@@ -271,13 +275,12 @@ def parse_scene_title(filename: str) -> str:
     #   confond avec un tag standard, laissant un dash orphelin "-" qui empeche
     #   l'after-year noise de matcher.
     # Cap a 4 iterations par securite.
-    _orphan_sep_re = re.compile(r"\s+[-_.]+\s*$")
     for _ in range(4):
         prev = name
         # Release group `-GROUP$`
         name = _RELEASE_GROUP_RE.sub(" ", name)
         # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
-        name = _orphan_sep_re.sub("", name)
+        name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         # Position-aware after-year noise tokens
         name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
