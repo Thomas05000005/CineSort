@@ -315,9 +315,20 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     )
     try:
         server.start()
-    except RuntimeError as exc:
-        # M1 : HTTPS demande mais cert/key invalide — ne pas fallback silencieux
-        print(f"[REST] Serveur REST non demarre: {exc}", file=sys.stderr)
+    except (OSError, RuntimeError) as exc:
+        # R5-finding-1 : OSError = port deja utilise (WinError 10048 / EADDRINUSE).
+        # M1 : RuntimeError = HTTPS demande mais cert/key invalide.
+        import errno
+        if isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048):
+            msg = (
+                f"Le port REST {port} est deja utilise par un autre processus. "
+                "Fermez CineSort dans une autre session Windows ou modifiez "
+                "'rest_api_port' dans settings.json."
+            )
+        else:
+            msg = f"Serveur REST non demarre: {exc}"
+        print(f"[REST] {msg}", file=sys.stderr)
+        _startup_error(msg)
         return None
     proto = "https" if server._is_https else "http"
     # H-4 audit QA 20260428 : si exposition LAN demandee mais retrogradee
