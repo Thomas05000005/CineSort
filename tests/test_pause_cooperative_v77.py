@@ -23,6 +23,10 @@ from typing import Any, Dict, List, Optional
 from cinesort.app.job_runner import JobRunner
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 
+# MEGA-HOTFIX bug (5) : utilisation du helper centralise pour eviter la
+# duplication de `_wait_terminal` dans chaque TestCase.
+from tests._helpers import wait_runner_terminal
+
 
 def _make_store(state_dir: Path) -> SQLiteStore:
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -46,12 +50,8 @@ class ShouldPauseFactoryTests(unittest.TestCase):
         self.runner = JobRunner(self.store)
 
     def _wait_terminal(self, run_id: str, timeout_s: float = 5.0) -> None:
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            snap = self.runner.get_status(run_id)
-            if snap and snap.done:
-                return
-            time.sleep(0.02)
+        # MEGA-HOTFIX bug (5) : delegation au helper centralise.
+        wait_runner_terminal(self.runner, run_id, timeout_s=timeout_s)
 
     def test_factory_returns_false_when_no_pause(self) -> None:
         def long_job(should_cancel):
@@ -114,12 +114,8 @@ class JobFnSignatureInjectionTests(unittest.TestCase):
         self.runner = JobRunner(self.store)
 
     def _wait_terminal(self, run_id: str, timeout_s: float = 5.0) -> None:
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            snap = self.runner.get_status(run_id)
-            if snap and snap.done:
-                return
-            time.sleep(0.02)
+        # MEGA-HOTFIX bug (5) : delegation au helper centralise.
+        wait_runner_terminal(self.runner, run_id, timeout_s=timeout_s)
 
     def test_legacy_job_fn_one_arg_still_works(self) -> None:
         """Backward compat : job_fn(should_cancel) inchange si pas de should_pause kwarg."""

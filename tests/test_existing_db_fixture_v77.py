@@ -55,21 +55,41 @@ class ExistingDbFixtureTests(unittest.TestCase):
             conn.close()
 
     def test_target_version_latest_applies_all_migrations(self):
-        """target=27 (latest reel post-v166) : toutes les migrations appliquees."""
-        db_path, conn = existing_db_fixture(27)
+        """target=31 (latest reel post-v166 + VP-A/VP-C/VP-D) : toutes les
+        migrations appliquees, incl. apply_batch_modes / film_field_locks /
+        film_decisions_v2.
+
+        MEGA-HOTFIX bug (4) : etendre la couverture historique (27) a 31
+        pour acter que les migrations VP-A (029), VP-C (030), VP-D (031)
+        sont desormais le baseline post-Vague P.
+        """
+        db_path, conn = existing_db_fixture(31)
         try:
             cur = conn.execute("PRAGMA user_version")
             user_version = int(cur.fetchone()[0])
-            self.assertEqual(user_version, 27)
+            self.assertEqual(user_version, 31)
 
-            # Migration 012 cree schema_migrations -> 12..27 enregistrees
+            # Migration 012 cree schema_migrations -> 12..31 enregistrees
             rows = conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
             versions = [int(r[0]) for r in rows]
-            # Au moins 12..27 doivent y etre (les < 12 sont retroactives, INSERT OR IGNORE)
-            self.assertIn(27, versions)
+            # Au moins 12..31 doivent y etre (les < 12 sont retroactives, INSERT OR IGNORE)
+            self.assertIn(31, versions)
+            self.assertIn(30, versions)
+            self.assertIn(29, versions)
             self.assertIn(12, versions)
+
+            # Les 3 nouvelles tables Vague P doivent etre presentes.
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            self.assertIn("apply_batch_modes", tables, "VP-A apply_batch_modes")
+            self.assertIn("film_field_locks", tables, "VP-C film_field_locks")
+            self.assertIn("film_decisions_v2", tables, "VP-D film_decisions_v2")
         finally:
             conn.close()
 
@@ -336,8 +356,9 @@ class ExistingDbFixtureTests(unittest.TestCase):
         self.assertTrue(src.is_dir(), "Repo doit contenir cinesort/infra/db/migrations/")
 
         # Verifier nb de fichiers SQL (sanity check)
+        # MEGA-HOTFIX bug (4) : seuil bumpe a 31 (post VP-A/VP-C/VP-D Vague P).
         sql_files = list(src.glob("*.sql"))
-        self.assertGreaterEqual(len(sql_files), 27, "Au moins 27 migrations attendues post-v166")
+        self.assertGreaterEqual(len(sql_files), 31, "Au moins 31 migrations attendues post-Vague P")
 
         db_path, conn = existing_db_fixture(3, migrations_dir=src)
         try:

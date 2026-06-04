@@ -78,6 +78,47 @@ def wait_run_done(api: Any, run_id: str, timeout_s: float = 10.0) -> dict:
     raise AssertionError(f"Timeout {timeout_s}s en attendant run_id={run_id}. Dernier status={last}")
 
 
+def wait_runner_terminal(runner: Any, run_id: str, timeout_s: float = 5.0) -> bool:
+    """Poll `runner.get_status(run_id)` (JobRunner direct) jusqu'a snapshot.done.
+
+    MEGA-HOTFIX bug (5) : factorisation du pattern `_wait_terminal` duplique
+    dans `test_pause_cooperative_v77.py`, `test_apply_atomic_rollback_integration_v77.py`,
+    et `test_job_runner_state_machine_v77.py`. Symetrique de `wait_run_done`
+    mais pour les tests qui interrogent directement le JobRunner sans passer
+    par l'API REST (le snapshot est un `RunSnapshot` dataclass, pas un dict).
+
+    Retourne True si terminal atteint, False si timeout (le caller decide
+    s'il considere ca comme un echec ou un cleanup best-effort).
+    """
+    deadline = time.monotonic() + float(timeout_s)
+    while time.monotonic() < deadline:
+        snap = runner.get_status(run_id)
+        if snap and getattr(snap, "done", False):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def wait_runner_status(
+    runner: Any,
+    run_id: str,
+    status: Any,
+    timeout_s: float = 5.0,
+) -> bool:
+    """Poll `runner.get_status(run_id)` jusqu'a `snapshot.status == status`.
+
+    MEGA-HOTFIX bug (5) : factorisation du pattern `_wait_status` utilise dans
+    les tests de la state machine job_runner.
+    """
+    deadline = time.monotonic() + float(timeout_s)
+    while time.monotonic() < deadline:
+        snap = runner.get_status(run_id)
+        if snap and snap.status == status:
+            return True
+        time.sleep(0.02)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Vague M — Sprint 0 (item M-00) : fixture migration DB pre-existante
 # ---------------------------------------------------------------------------
