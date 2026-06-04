@@ -24,7 +24,7 @@ from cinesort.domain.runtime_hard_filter import (
     WARN_RUNTIME_HARD_KEPT_VIA_EDITION,
     evaluate_runtime_hard_filter,
 )
-from cinesort.domain.title_helpers import _norm_for_tokens
+from cinesort.domain.title_helpers import _norm_for_tokens, extract_provider_tags
 from cinesort.infra.fs_safety import is_dir_accessible, safe_path_exists
 from cinesort.infra.tmdb_client import TmdbClient
 
@@ -363,6 +363,187 @@ def _augment_candidates_from_nfo_tmdb_id(
                 )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         _log.debug("scan: echec TMDb ID lookup %s — %s", nfo.tmdbid, exc)
+
+
+def _augment_candidates_from_name_tags(
+    cfg: "Config",
+    nfo_cands: List[Any],
+    folder_name: str,
+    video_name: str,
+    *,
+    name_year: Optional[int],
+    tmdb: Optional[TmdbClient],
+    log: Callable[[str, str], None],
+    log_ctx: str,
+) -> None:
+    """B02-TAGS-BRACKETS : cross-check des tags providers extraits du NOM.
+
+    Si un dossier/fichier porte `{tmdb-27205}` ou `[imdbid-tt1375666]`, on
+    resout l'ID via TMDb et on l'ajoute aux candidats AVEC le meme garde-fou
+    de similarite titre que `_augment_candidates_from_nfo_tmdb_id` (anti
+    NFO/nom pollue).
+
+    Symetrique aux helpers NFO existants. Source = "name_tmdb" / "name_imdb"
+    pour distinguer dans les logs et les notes.
+    """
+    if not (tmdb and cfg.enable_tmdb):
+        return
+
+    tags_folder = extract_provider_tags(folder_name)
+    tags_video = extract_provider_tags(video_name)
+    # Si rien dans le nom, rien a faire.
+    if not (tags_folder.has_any or tags_video.has_any):
+        return
+
+    # Folder tags priment sur file tags (le dossier est canon pour les films).
+    tmdb_id_tag: Optional[int] = tags_folder.tmdb_id or tags_video.tmdb_id
+    imdb_id_tag: Optional[str] = tags_folder.imdb_id or tags_video.imdb_id
+
+    # --- Resolution via TMDb ID direct ---
+    if tmdb_id_tag is not None:
+        try:
+            tmdb_result = tmdb.find_by_tmdb_id(tmdb_id_tag)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            _log.debug("scan: echec name-tag TMDb lookup %s — %s", tmdb_id_tag, exc)
+            tmdb_result = None
+        if tmdb_result and tmdb_result.id:
+            _accept_name_tag_candidate(
+                cfg,
+                nfo_cands,
+                result=tmdb_result,
+                folder_name=folder_name,
+                video_name=video_name,
+                name_year=name_year,
+                tmdb=tmdb,
+                source="name_tmdb",
+                origin_id=str(tmdb_id_tag),
+                base_score=0.94,  # > nfo_tmdb (0.93) car le tag est cote nom (intentionnel utilisateur).
+                log=log,
+                log_ctx=log_ctx,
+            )
+
+    # --- Resolution via IMDb ID (si pas deja resolu via TMDb ID) ---
+    if imdb_id_tag and not any(
+        getattr(c, "source", "") == "name_tmdb" for c in nfo_cands
+    ):
+        try:
+            imdb_result = tmdb.find_by_imdb_id(imdb_id_tag)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            _log.debug("scan: echec name-tag IMDb lookup %s — %s", imdb_id_tag, exc)
+            imdb_result = None
+        if imdb_result and imdb_result.id:
+            _accept_name_tag_candidate(
+                cfg,
+                nfo_cands,
+                result=imdb_result,
+                folder_name=folder_name,
+                video_name=video_name,
+                name_year=name_year,
+                tmdb=tmdb,
+                source="name_imdb",
+                origin_id=imdb_id_tag,
+                base_score=0.94,
+                log=log,
+                log_ctx=log_ctx,
+            )
+
+
+def _accept_name_tag_candidate(
+    cfg: "Config",
+    nfo_cands: List[Any],
+    *,
+    result: Any,
+    folder_name: str,
+    video_name: str,
+    name_year: Optional[int],
+    tmdb: Optional[TmdbClient],
+    source: str,
+    origin_id: str,
+    base_score: float,
+    log: Callable[[str, str], None],
+    log_ctx: str,
+) -> None:
+    """Garde-fou anti-pollution : verifie sim_titre >= 0.50 avant d'ajouter.
+
+    Meme logique que `_augment_candidates_from_nfo_tmdb_id` mais sourcing
+    explicit `name_tmdb`/`name_imdb`. Factorise pour eviter la duplication.
+    """
+    del cfg  # reserve future hooks
+    title = result.title or ""
+    original = getattr(result, "original_title", "") or ""
+    folder_clean = core_mod.clean_title_guess(folder_name) or folder_name
+    video_clean = core_mod.clean_title_guess(video_name) or video_name
+    sim_folder = max(
+        core_mod._title_similarity(folder_clean, title),
+        core_mod._title_similarity(folder_clean, original) if original else 0.0,
+    )
+    sim_video = max(
+        core_mod._title_similarity(video_clean, title),
+        core_mod._title_similarity(video_clean, original) if original else 0.0,
+    )
+    sim_best = max(sim_folder, sim_video)
+    sim_best, alt_source = _rescore_with_alternative_titles(
+        sim_best,
+        tmdb_id=int(result.id or 0),
+        folder_clean=folder_clean,
+        video_clean=video_clean,
+        tmdb=tmdb,
+    )
+    year_ok = True
+    year_delta: Optional[int] = None
+    if name_year is not None and result.year:
+        year_delta = abs(int(result.year) - int(name_year))
+        if year_delta > 2:
+            year_ok = False
+    accept = (sim_best >= 0.50) or (
+        year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35
+    )
+    if not accept:
+        log(
+            "WARN",
+            f"Tag provider rejete {log_ctx}: {source}={origin_id} -> titre TMDb '{title}' "
+            f"ne correspond pas au dossier (sim={sim_best:.2f}, delta_annee={year_delta}). "
+            "Tag probablement copie/colle errone.",
+        )
+        _log.warning(
+            "scan: name-tag %s %s rejete (sim=%.2f year_delta=%s) tmdb='%s' folder='%s'",
+            source,
+            origin_id,
+            sim_best,
+            year_delta,
+            title,
+            folder_name,
+        )
+        return
+
+    # Eviter doublon si le meme tmdb_id est deja dans la liste (NFO ou name-tag).
+    already_have = any(getattr(c, "tmdb_id", None) == result.id for c in nfo_cands)
+    if already_have:
+        _log.debug(
+            "scan: name-tag %s %s deja present via NFO, skip ajout",
+            source,
+            origin_id,
+        )
+        return
+
+    note_extra = f" via {alt_source}" if alt_source else ""
+    cand = core_mod.Candidate(
+        title=result.title,
+        year=result.year,
+        source=source,
+        tmdb_id=result.id,
+        score=base_score,
+        note=f"Tag {source} {origin_id} verifie, sim={sim_best:.2f}{note_extra}",
+    )
+    nfo_cands.append(cand)
+    _log.info(
+        "scan: name-tag %s %s -> tmdb:%d '%s' (sim=%.2f)",
+        source,
+        origin_id,
+        result.id,
+        result.title,
+        sim_best,
+    )
 
 
 def _build_tmdb_fallback_candidates(
