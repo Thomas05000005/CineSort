@@ -25,12 +25,12 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 ---
 
-## Etat actuel du projet (21 mai 2026)
+## Etat actuel du projet (4 juin 2026)
 
 ### Version
-- **v1.2.0-beta** (publique). Iteration beta post-v1.0.0-beta : polish UI, corrections d'audit C19, alignement docs/realite. Roadmap : v1.0 stable apres retours beta, puis v1.1 features, v2.0 port Linux/Mac.
+- **v1.5.2-beta** (publique). Iteration beta consolidant la cloture de la roadmap initiale 6 vagues (M / N / O / P / Q / R) livree en juin 2026. Build EXE stable a 53.7 MB. Roadmap : v1.0 stable apres retours beta + Vague S+ (Linux port, B8 cleanup, 8 methodes orphelines UI), puis v1.1 features, v2.0 port Linux/Mac.
 
-> Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), pas de regression fonctionnelle vs l'état du 16 mai 2026 ci-dessous.
+> Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta, v1.5.x-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), refactor architectural (#83, #84), et roadmap 6 vagues (juin 2026). Aucune regression fonctionnelle, bundle EXE stabilise a 53.7 MB.
 
 ### Architecture en couches (verrouillee par import-linter en CI)
 
@@ -223,7 +223,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-02.*
+*Last updated : 2026-06-04 (bump version v1.2.0-beta -> v1.5.2-beta, alignement post-Vague R).*
 
 ---
 

@@ -6,9 +6,10 @@ Pour les audits ponctuels, voir [BILAN_AUDIT_TIERS.md](./BILAN_AUDIT_TIERS.md) e
 
 ---
 
-## 5 Vagues completes (juin 2026)
+## 6 Vagues completes (juin 2026)
 
-Cinq vagues consecutives livrees entre le sprint-0-inventory et vague-q-complete.
+Six vagues consecutives livrees entre le sprint-0-inventory et vague-r-complete
+(FIN ROADMAP INITIALE 6 VAGUES).
 Methodologie : multi-agents en parallele dans worktrees isoles, tags git poses a chaque batch
 pour rollback fin, revue adversaire iterative (R1/R2) avant tag de cloture.
 
@@ -21,8 +22,9 @@ pour rollback fin, revue adversaire iterative (R1/R2) avant tag de cloture.
 | **O** | juin 2026 | 4 | SQLite pragmas profils, scan parallel, waterfall UI, OpType StrEnum |
 | **P** | juin 2026 | 7 | apply atomique, tier TRaSH hierarchique, field locks Jellyfin, tri-etat, optimistic concurrency, TRaSH YAML, tags providers brackets |
 | **Q** | fin juin 2026 | 3 | path_utils, quarantaine TTL, check_path_length MAX_PATH |
+| **R** | fin juin 2026 | 3 | Fixes mineurs Vague O R2, TODOs nettoyes, bilan consolide |
 
-**Total : 40+ items livres, 31+ workflows GitHub Actions, 5 migrations SQL neuves (027-031).**
+**Total : 43 items livres (40 fonctionnels + 3 documentaires Vague R), 31+ workflows GitHub Actions, 5 migrations SQL neuves (027-031).**
 
 ---
 
@@ -127,6 +129,29 @@ fin de vague avant le tag `vague-m-quickwins-final`.
 
 ---
 
+### Vague R — Audits manquants + Bilan consolide (3 items)
+
+**Objectif** : cloturer la roadmap initiale 6 vagues, finaliser les coins
+documentaires et les audits residuels des 5 vagues precedentes, produire un
+bilan consolide pour permettre une reprise ulterieure sereine. Pas de nouvelle
+fonctionnalite.
+
+**Items** :
+1. **VR-1 fixes Vague O R2 mineurs** : 5 corrections doc `ROADMAP_VAGUE_O.md`
+   (typo path `plan_support`, enum `OpType KEEP/SKIP` -> `NOOP` x2, open
+   question 7.2 tranchee, ajout sous-section "Fusion backend" VO-C). Backward
+   compat absolue via alias `OP_TYPE_*` preserves.
+2. **VR-2 TODOs nettoyes** : audit `TODO`/`FIXME`/`XXX` accumules apres 5
+   vagues, ~20 cas annotes ou supprimes, references `KEEP/SKIP` obsoletes
+   alignees sur l'enum canonique.
+3. **VR-3 Bilan 5 vagues consolide** : `BILAN_PHASES.md` (recap public) +
+   `SESSION_RECAP_5_VAGUES.md` (synthese long-cours interne, renommee
+   `SESSION_RECAP_6_VAGUES.md` apres ajout de Vague R).
+
+**Tag pose** : `vague-r-complete` (FIN ROADMAP INITIALE 6 VAGUES).
+
+---
+
 ### Evolution du bundle EXE (PyInstaller onefile)
 
 | Version | Taille | Note |
@@ -135,6 +160,7 @@ fin de vague avant le tag `vague-m-quickwins-final`.
 | Mid-vague-M (hotfix) | **2.33 GB** | torch inclus accidentellement (regression) |
 | Post-hotfix vague-M | **54 MB** | Isolation stricte des deps perceptuelles, +5 MB economises vs baseline |
 | Vagues N a Q | 54 MB | Stable, pas de derive |
+| Vague R (doc only) | 53.7 MB | Stable (Vague R = doc only, pas de change code) |
 
 ---
 
@@ -170,6 +196,7 @@ mini-recovery-p
 vague-p-batch1 ... vague-p-batch7
 vague-p-complete
 vague-q-complete
+vague-r-complete
 ```
 
 ---
@@ -198,4 +225,4 @@ Strangler Fig pattern : 104 -> 50 methodes publiques sur CineSortApi via 5 facad
 
 ---
 
-*Last updated : 2026-06-02.*
+*Last updated : 2026-06-04 (post-tag vague-r-complete).*

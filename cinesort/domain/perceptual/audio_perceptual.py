@@ -61,6 +61,22 @@ _RE_PEAK = re.compile(r"Peak level.*?:\s*([-\d.]+)", re.IGNORECASE)
 _RE_NOISE = re.compile(r"Noise floor.*?:\s*([-\d.]+)", re.IGNORECASE)
 _RE_CREST = re.compile(r"Crest factor.*?:\s*([\d.]+)", re.IGNORECASE)
 _RE_DYNRANGE = re.compile(r"Dynamic range.*?:\s*([\d.]+)", re.IGNORECASE)
+# MEGA-HOTFIX bug (1) : ffmpeg astats imprime des blocs par canal AVANT le bloc
+# "Overall". La regex precedente sur .search() prenait la PREMIERE occurrence
+# (donc Channel 1, valeurs faussees sur multi-canal). On extrait d'abord le
+# bloc Overall : soit en-tete "Overall" sur une ligne propre, soit prefixe
+# "Overall <metric>" en-tete par metrique (format des tests + certains builds).
+# Cf. https://ffmpeg.org/ffmpeg-filters.html#astats : "Overall" peut apparaitre
+# comme label de bloc OU prefixe ligne par ligne.
+_RE_OVERALL_BLOCK = re.compile(
+    r"(?:^|\n)[^\n]*?\bOverall\b[^\n]*\n(.*)\Z",
+    re.DOTALL | re.IGNORECASE,
+)
+# MEGA-HOTFIX bug (2) : marqueur de fin de segment dans la sortie astats avec
+# reset>0. Chaque segment se termine par un bloc "Overall" qui est la seule
+# valeur Peak agregee canal-confondus. Sans filtrage on multiplie le compte par
+# le nombre de canaux (ex: 5.1 -> total_segments*6).
+_RE_OVERALL_LINE = re.compile(r"^[^\n]*\bOverall\b[^\n]*$", re.IGNORECASE | re.MULTILINE)
 # Cf issue #53 : on cible specifiquement le bloc loudnorm via la cle
 # 'input_i' (toujours presente dans le JSON loudnorm ffmpeg). Le pattern
 # precedent r'\{[^}]+\}' (1) ne supportait pas le JSON nested et (2)
@@ -211,11 +227,17 @@ def analyze_astats(
     if not stderr:
         return None
 
-    rms = _search_float(_RE_RMS, stderr)
-    peak = _search_float(_RE_PEAK, stderr)
-    noise = _search_float(_RE_NOISE, stderr)
-    crest = _search_float(_RE_CREST, stderr)
-    dynrange = _search_float(_RE_DYNRANGE, stderr)
+    # MEGA-HOTFIX bug (1) : restreindre la recherche au bloc Overall pour
+    # ne plus retourner les stats du canal 1 (premiere occurrence dans la
+    # sortie ffmpeg). On garde un fallback sur le texte complet si aucun
+    # marqueur "Overall" n'est present (compat builds anciens / mono).
+    overall_text = _extract_overall_block(stderr)
+
+    rms = _search_float(_RE_RMS, overall_text)
+    peak = _search_float(_RE_PEAK, overall_text)
+    noise = _search_float(_RE_NOISE, overall_text)
+    crest = _search_float(_RE_CREST, overall_text)
+    dynrange = _search_float(_RE_DYNRANGE, overall_text)
 
     # Verdicts
     noise_verdict = _verdict_noise(noise)
@@ -267,15 +289,49 @@ def analyze_clipping_segments(
     if not stderr:
         return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
 
-    # Compter les lignes Peak level et celles >= seuil
+    # MEGA-HOTFIX bug (2) : avec reset>0 ffmpeg imprime un bloc par canal +
+    # un bloc "Overall" par segment. Compter toutes les lignes "Peak level"
+    # gonfle total_segments par n_channels (5.1 -> x6) et fausse le %.
+    # On filtre les lignes "Peak level" appartenant au bloc Overall, identifiees
+    # soit par le prefixe "Overall ..." sur la ligne meme, soit par la ligne
+    # "Overall" qui precede le bloc agrege.
+    overall_peak_lines = _extract_overall_peak_lines(stderr)
     total = 0
     clipping = 0
-    for m in _RE_PEAK.finditer(stderr):
+    for line in overall_peak_lines:
+        m = _RE_PEAK.search(line)
+        if not m:
+            continue
         val = _safe_float(m.group(1))
-        if val is not None:
-            total += 1
+        if val is None:
+            continue
+        total += 1
+        if val >= CLIPPING_THRESHOLD_DBFS:
+            clipping += 1
+
+    # Fallback : aucun marqueur "Overall" detecte (compat builds anciens, mono,
+    # tests historiques). On normalise par le nombre de canaux detecte via les
+    # blocs "Channel: N", sinon on compte brut.
+    if total == 0:
+        channel_count = _detect_channel_count(stderr) or 1
+        raw_total = 0
+        raw_clipping = 0
+        for m in _RE_PEAK.finditer(stderr):
+            val = _safe_float(m.group(1))
+            if val is None:
+                continue
+            raw_total += 1
             if val >= CLIPPING_THRESHOLD_DBFS:
-                clipping += 1
+                raw_clipping += 1
+        if channel_count > 1:
+            # Normalisation : raw_total = n_segments * n_channels
+            total = raw_total // channel_count
+            # Pour clipping on garde le ratio (au moins 1 canal touche = segment clip)
+            # Approximation conservative : on divise par n_channels aussi.
+            clipping = raw_clipping // channel_count
+        else:
+            total = raw_total
+            clipping = raw_clipping
 
     pct = (clipping / total * 100) if total > 0 else 0.0
 
@@ -387,10 +443,15 @@ def analyze_audio_perceptual(
 
         fpcalc = resolve_fpcalc_path()
         if fpcalc:
+            # MEGA-HOTFIX audio_fingerprint_offset : transmettre ffmpeg_path
+            # pour permettre le seek strict (-ss OFFSET) via pipe stdin et
+            # eviter les faux positifs causes par les logos studios partages
+            # dans les 60 premieres secondes de tous les films.
             fp = compute_audio_fingerprint(
                 media_path,
                 duration_s=float(duration_s or 0.0),
                 fpcalc_path=fpcalc,
+                ffmpeg_path=ffmpeg_path or None,
             )
             if fp:
                 result.audio_fingerprint = fp
@@ -666,6 +727,114 @@ def _search_float(pattern: re.Pattern, text: str) -> Optional[float]:
     if not m:
         return None
     return _safe_float(m.group(1))
+
+
+# MEGA-HOTFIX bug (1) : helper d'extraction du bloc "Overall" d'astats.
+_RE_CHANNEL_LABEL = re.compile(r"Channel\s*:\s*(\d+)", re.IGNORECASE)
+
+
+def _extract_overall_block(text: str) -> str:
+    """Retourne la portion du texte astats correspondant au bloc 'Overall'.
+
+    Deux formats possibles selon les builds ffmpeg :
+    1) Lignes prefixees ``Overall <metric>: <value>`` (format des tests
+       unitaires et de certains builds recents).
+    2) Une ligne ``Overall`` seule en en-tete, suivie des metriques sans
+       prefixe (format ffmpeg historique : bloc agrege apres les blocs
+       ``Channel: N``).
+
+    Strategie : on cherche la PREMIERE occurrence du marqueur ``Overall``
+    APRES le dernier bloc ``Channel: N`` (ou la premiere occurrence si pas
+    de bloc Channel), et on retourne le texte a partir de la. Cela couvre
+    les deux formats : si "Overall" prefixe la metrique on prend la ligne,
+    si "Overall" est un en-tete on inclut les lignes suivantes. Si aucun
+    marqueur n'est trouve, on retourne le texte complet en fallback
+    (compat tests historiques / mono / sortie sans label Overall).
+    """
+    if not text:
+        return text
+    # Cherche le debut du bloc Overall : apres le dernier "Channel: N" si
+    # present, sinon des le debut.
+    search_start = 0
+    last_channel = -1
+    for m in _RE_CHANNEL_LABEL.finditer(text):
+        last_channel = m.end()
+    if last_channel >= 0:
+        search_start = last_channel
+    overall_match = re.search(r"\bOverall\b", text[search_start:], re.IGNORECASE)
+    if overall_match is None:
+        # Pas de "Overall" apres le dernier Channel : essayer dans tout le texte
+        overall_match = re.search(r"\bOverall\b", text, re.IGNORECASE)
+        if overall_match is None:
+            return text  # fallback : pas de marqueur, on garde tout
+        abs_pos = overall_match.start()
+    else:
+        abs_pos = search_start + overall_match.start()
+    # On rembobine au debut de la ligne contenant ce marqueur pour ne pas
+    # couper la metrique courante (ex: "Overall RMS level: -28.4").
+    line_start = text.rfind("\n", 0, abs_pos) + 1
+    return text[line_start:]
+
+
+def _extract_overall_peak_lines(text: str) -> List[str]:
+    """Extrait les lignes 'Peak level' appartenant aux blocs 'Overall' par segment.
+
+    Cf. MEGA-HOTFIX bug (2). Deux formats :
+    1) Ligne prefixee ``Overall Peak level: <value>`` : match direct.
+    2) En-tete ``Overall`` puis lignes de metriques sur les lignes suivantes :
+       on collecte la premiere ligne ``Peak level`` apres chaque en-tete
+       ``Overall`` (avant la prochaine sentinelle ``Channel:`` ou ``Overall``).
+    """
+    if not text:
+        return []
+    results: List[str] = []
+    lines = text.splitlines()
+    in_overall = False
+    seen_peak_in_block = False
+    for line in lines:
+        # Format 1 : ligne explicitement prefixee "Overall ... Peak level"
+        if re.search(r"\bOverall\b.*?\bPeak level\b", line, re.IGNORECASE):
+            results.append(line)
+            in_overall = False
+            seen_peak_in_block = False
+            continue
+        # En-tete de bloc Overall (format 2)
+        if re.search(r"\bOverall\b", line, re.IGNORECASE) and not re.search(
+            r"\bPeak level\b|\bRMS\b|\bNoise\b|\bCrest\b|\bDynamic\b", line, re.IGNORECASE
+        ):
+            in_overall = True
+            seen_peak_in_block = False
+            continue
+        # Nouveau bloc Channel : on sort du bloc Overall
+        if _RE_CHANNEL_LABEL.search(line):
+            in_overall = False
+            seen_peak_in_block = False
+            continue
+        # Dans un bloc Overall, capturer la premiere occurrence Peak level
+        if in_overall and not seen_peak_in_block and re.search(r"\bPeak level\b", line, re.IGNORECASE):
+            results.append(line)
+            seen_peak_in_block = True
+    return results
+
+
+def _detect_channel_count(text: str) -> int:
+    """Detecte le nombre de canaux distincts via les marqueurs 'Channel: N'.
+
+    Retourne 0 si aucun marqueur, sinon le numero max de canal vu (ce qui
+    correspond au nombre total de canaux puisque ffmpeg les numerote
+    consecutivement a partir de 1).
+    """
+    if not text:
+        return 0
+    max_ch = 0
+    for m in _RE_CHANNEL_LABEL.finditer(text):
+        try:
+            n = int(m.group(1))
+            if n > max_ch:
+                max_ch = n
+        except (ValueError, TypeError):
+            continue
+    return max_ch
 
 
 def _verdict_noise(noise: Optional[float]) -> str:

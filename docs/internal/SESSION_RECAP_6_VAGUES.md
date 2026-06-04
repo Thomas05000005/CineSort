@@ -1,6 +1,6 @@
-# Session Recap - 5 vagues completes (M / N / O / P / Q) + cloture Vague R
+# Session Recap - 6 vagues completes (M / N / O / P / Q / R)
 
-**Periode** : debut juin 2026 -> 2 juin 2026
+**Periode** : debut juin 2026 -> 4 juin 2026
 **Tag de cloture** : `vague-r-complete` (FIN ROADMAP INITIALE 6 VAGUES)
 **Tag de demarrage** : `sprint-0-inventory`
 
@@ -325,5 +325,5 @@ Pour reprendre sereinement apres la cloture Vague R :
 
 ---
 
-*Last updated : 2026-06-02 (post-tag vague-r-complete).*
+*Last updated : 2026-06-04 (post-tag vague-r-complete, file renamed from SESSION_RECAP_5_VAGUES.md).*
 *FIN ROADMAP INITIALE 6 VAGUES.*
