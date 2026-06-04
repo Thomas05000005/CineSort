@@ -1679,8 +1679,26 @@ def _apply_jellyfin_key_persistence(
         to_save["jellyfin_api_key"] = existing_jf_key
 
 
-def _build_save_result(state_dir: Path, write_meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Construit le dict resultat retourne au frontend apres write_settings."""
+def _build_save_result(
+    state_dir: Path,
+    write_meta: Dict[str, Any],
+    *,
+    rest_api_token_changed: bool = False,
+    rest_api_token_new: str = "",
+) -> Dict[str, Any]:
+    """Construit le dict resultat retourne au frontend apres write_settings.
+
+    B05-401-INCOHERENT (Fix A — couche persistence) : on remonte au caller
+    deux meta-infos qui lui permettent de hot-swap le token REST en place
+    sans relire `existing_settings` (la persistence connait deja l'ancien
+    et le nouveau, autant les exposer). Cf cinesort_api._save_settings_impl
+    qui consomme `rest_api_token_changed` pour appeler
+    `RestApiServer.update_auth_token(new_token)` apres save.
+
+    Backward compat absolue : ces deux cles sont OPTIONNELLES, le frontend
+    et les tests existants qui ne les connaissent pas continuent de fonctionner
+    inchanges (lecture via `.get()` cote callers).
+    """
     result: Dict[str, Any] = {
         "ok": True,
         "state_dir": str(state_dir),
@@ -1692,6 +1710,16 @@ def _build_save_result(state_dir: Path, write_meta: Dict[str, Any]) -> Dict[str,
         result["tmdb_key_warning"] = str(write_meta.get("tmdb_key_warning") or "")
     if write_meta.get("jellyfin_key_warning"):
         result["jellyfin_key_warning"] = str(write_meta.get("jellyfin_key_warning") or "")
+    # B05-401-INCOHERENT : signale au caller (cinesort_api._save_settings_impl)
+    # qu'il doit hot-swap le token Bearer sur le handler REST en memoire. Cle
+    # ajoutee inconditionnellement (False si pas de changement) pour rendre la
+    # detection explicite cote caller (pas de KeyError ni de defaut implicite).
+    result["rest_api_token_changed"] = bool(rest_api_token_changed)
+    if rest_api_token_changed:
+        # On expose la nouvelle valeur SEULEMENT en cas de changement, pour
+        # eviter de fuir le token dans tous les logs/traces de save. Le caller
+        # qui n'a pas besoin du changement ne voit jamais le token.
+        result["rest_api_token_new"] = str(rest_api_token_new or "")
     return result
 
 
@@ -1793,8 +1821,23 @@ def save_settings_payload(
     _apply_tmdb_key_persistence(to_save, settings, existing_settings)
     _apply_jellyfin_key_persistence(to_save, settings, existing_settings)
 
+    # B05-401-INCOHERENT (Fix A — couche persistence) : on compare l'ancien et le
+    # nouveau token REST APRES toute la normalisation (le helper _save_section_rest_api
+    # strip le token, donc on compare des valeurs deja normalisees pour eviter les
+    # faux positifs sur whitespace). La detection est exposee dans le result via
+    # `_build_save_result` pour que cinesort_api._save_settings_impl puisse appeler
+    # `RestApiServer.update_auth_token(new_token)` sans relire existing_settings.
+    old_token = str(existing_settings.get("rest_api_token") or "").strip()
+    new_token = str(to_save.get("rest_api_token") or "").strip()
+    rest_api_token_changed = old_token != new_token
+
     write_meta = write_settings(state_dir, to_save)
-    return state_dir, _build_save_result(state_dir, write_meta)
+    return state_dir, _build_save_result(
+        state_dir,
+        write_meta,
+        rest_api_token_changed=rest_api_token_changed,
+        rest_api_token_new=new_token if rest_api_token_changed else "",
+    )
 
 
 def test_tmdb_key(
