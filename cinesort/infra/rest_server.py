@@ -770,6 +770,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             logger.warning("REST auth failure from %s for %s", self._client_ip(), path)
             self._send_unauthorized()
             return
+        # B05-401-INCOHERENT (Fix B / S6 audit) : auth ok -> reset compteur
+        # d'echecs pour cette IP. Sans cet appel, un client qui a fait 4 echecs
+        # recents reste au bord du plafond meme apres avoir trouve le bon token
+        # et peut s'auto-ban au moindre hickup reseau ulterieur. Le commentaire
+        # de record_success() decrivait deja l'intention, mais le hookup
+        # manquait.
+        if self.rate_limiter:
+            self.rate_limiter.record_success(self._client_ip())
 
         method_name = path[5:]  # strip "/api/"
         method = self.api_methods.get(method_name)
@@ -941,6 +949,11 @@ class RestApiServer:
         self._rate_limiter = _RateLimiter()
         self._is_https = False  # True si le serveur tourne effectivement en HTTPS
         self.dashboard_url: str = ""  # URL publique du dashboard, remplie au start()
+        # B05-401-INCOHERENT (Fix A) : on garde une ref a la classe handler
+        # creee dynamiquement dans start() pour pouvoir hot-swap le token
+        # sans redemarrer le serveur. L'absence de cette ref etait la cause
+        # racine de l'incoherence 401 apres save_settings.
+        self._handler_cls: Optional[type] = None
 
     @property
     def host(self) -> str:
@@ -1010,6 +1023,9 @@ class RestApiServer:
                 "locales_root": locales_root,
             },
         )
+        # B05-401-INCOHERENT (Fix A) : conserver la ref pour permettre la
+        # mutation runtime du token via update_auth_token().
+        self._handler_cls = handler
 
         self._server = ThreadingHTTPServer((self._host, self._port), handler)
         self._server.daemon_threads = True
@@ -1115,7 +1131,35 @@ class RestApiServer:
                     )
         self._server = None
         self._thread = None
+        # B05-401-INCOHERENT (Fix A) : on jette la ref handler pour eviter
+        # tout hot-swap de token apres stop() (no-op silencieux sinon).
+        self._handler_cls = None
         logger.info("REST API stopped.")
+
+    def update_auth_token(self, new_token: str) -> None:
+        """Hot-swap du token Bearer sans redemarrage du serveur.
+
+        B05-401-INCOHERENT (Fix A) : avant ce patch, le token etait fige a la
+        creation du serveur. Apres save_settings (rest_api_token), le fichier
+        settings.json contenait le nouveau token mais le handler en memoire
+        validait encore avec l'ancien -> tout nouveau client recoit 401.
+
+        On mute ici l'attribut de classe `auth_token` sur la sous-classe
+        Handler creee dans start() ET on reset les compteurs rate-limit :
+        un changement volontaire de token ne doit pas heriter des bans
+        accumules sous l'ancien token.
+
+        No-op si le serveur n'est pas demarre (handler_cls est None).
+        """
+        new_token = str(new_token or "")
+        self._token = new_token
+        if self._handler_cls is not None:
+            self._handler_cls.auth_token = new_token
+            # Reset compteurs : un changement de token volontaire ne doit
+            # pas heriter des bans accumules sous l'ancien token.
+            with contextlib.suppress(Exception):
+                self._rate_limiter.reset()
+            logger.info("REST: auth token hot-swapped (len=%d)", len(new_token))
 
     def join(self) -> None:
         """Block until the server thread ends (standalone mode)."""

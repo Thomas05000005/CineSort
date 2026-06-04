@@ -148,3 +148,63 @@ Tokens `--tier-platinum-solid` (#FFD700), `--tier-gold-solid` (#22C55E),
 | AC-3 | `node --check lib-validation.js` + F12 console verifiees    | OK (cf commit)      |
 | AC-4 | Tier colors hex INVARIANTES (regression visuelle verifiee)  | OK (tokens.css non touche) |
 | AC-5 | Zero action destructive UI library sans `dangerConfirmModal`| OK apres fix #2     |
+
+## 9. Addendum — Incoherence tier-gold dans le legacy CSS (B01-GOLD-GREEN)
+
+### Constat post-audit
+
+L'audit initial declarait section 7 que les tokens `--tier-*-solid` etaient
+inchanges et que la regression visuelle Gold etait verifiee. Une revue
+ulterieure du legacy `web/shared/components.css` revele **8 sites qui
+contredisent le token Gold** en utilisant des hex hardcodes au lieu de
+`var(--tier-gold-solid)`, produisant un rendu visuel different selon l'ecran :
+
+| Ligne | Selecteur                                | Valeur hardcode  | Rendu observe       |
+|-------|------------------------------------------|------------------|---------------------|
+| 3552  | `.v5-notif-item--success .v5-notif-item-icon` | `var(--tier-gold, #10b981)` | vert emeraude (token inexistant) |
+| 4381  | `.accueil-health-fill--gold`             | fallback `#FBBF24` | ambre jaune si token absent |
+| 5457  | `.parametres-tier-badge--gold` (1er)     | `#FBBF24` + rgba | ambre jaune         |
+| 6206  | `.qualite-tier-fill--gold`               | `#d4a017`        | or fonce            |
+| 6868  | `.bibliotheque-tier-badge--gold`         | `#d4a017`        | or fonce            |
+| 7265  | `.parametres-tier-badge--gold` (2eme)    | `#d4a017`        | or fonce (cascade)  |
+| 7594  | `.film-detail-tier-gold`                 | `#ffd700`        | or vif              |
+| 9699  | `.historique-films-history-tier--gold`   | `#ffd700` / `#4a3a00` | or vif sur marron |
+
+Resultat : selon l'ecran, un tier "gold" apparait soit vert emeraude
+(notifications), soit jaune ambre (parametres badges, accueil-health
+fallback), soit or fonce (qualite-fill, bibliotheque-badge, parametres
+duplicate), soit or vif (film-detail, historique). L'invariant "tier colors
+identiques partout" annonce dans le header de `tokens.css` est VIOLE par
+ces 8 sites legacy.
+
+### Decision produit (memo utilisateur)
+
+Le memo utilisateur `feedback_cinesort_v76_ui` impose **`#FFD700` pour Gold,
+INVARIANT** (`Tier colors hex INVARIANTES (#FFD700 Gold ne doit pas etre vert)`).
+Le rendu vert du token `--tier-gold-solid` (#22C55E) actuel dans
+`tokens.css` ligne 22-26 **contredit cette regle** : ce n'est pas un design
+intentionnel mais une derive a corriger dans un lot dedie.
+
+L'AC-4 du present audit VP-G a ete satisfaite en ne touchant pas
+`tokens.css` (perimetre VP-G = library validation, pas refonte palette).
+L'harmonisation reelle est un chantier separe, suivi sous le ticket
+**B01-GOLD-GREEN** :
+
+1. Restaurer `--tier-gold-solid: #FFD700` dans `tokens.css` (or vif).
+2. Differencier Platinum vers une couleur metallique distincte (ex: `#E5E4E2`).
+3. Remplacer dans `components.css` les 8 sites hardcodes par `var(--tier-gold-solid)` :
+   - L4381 : retirer le fallback ambre.
+   - L5457, L6206, L6868, L7265, L7594, L9699 : tokenisation complete.
+   - L3552 : utiliser `var(--sev-success-solid)` (semantique notif success).
+   - L7265 SUPPRIMER (duplicate de L5457, valeur differente -> conflit cascade).
+4. Ajouter test regression CSS : grep automatique qui echoue si
+   `--gold`, `--tier-gold` (sans `-solid`), `#d4a017`, `#ffd700`, `#FBBF24`,
+   `#FB923C` apparaissent ailleurs que dans `tokens.css`.
+
+### Hors perimetre VP-G
+
+Cette harmonisation depasse le perimetre VP-G (library validation UI). Elle
+est trackee comme item separe **B01-GOLD-GREEN** dans la roadmap Vague S+
+ou suivante, avec confirmation produit prealable que Gold = `#FFD700` est
+bien l'intention finale (conforme memo utilisateur).
+
