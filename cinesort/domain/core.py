@@ -52,8 +52,11 @@ from cinesort.domain.title_helpers import (
     _tmdb_prefix_equivalent,
     _norm_for_tokens,
     clean_title_guess,
+    extract_provider_tags,
     extract_year,
     infer_name_year,
+    ProviderTags,
+    strip_provider_tags,
     title_prefix_before_parenthesized_year,
     title_match_score,
     tokens,
@@ -759,16 +762,57 @@ def build_candidates_from_nfo(nfo: NfoInfo) -> List[Candidate]:
 def build_candidates_from_name(
     folder_name: str, video_name: str, *, preferred_year: Optional[int] = None
 ) -> List[Candidate]:
+    # B02 : extraction prealable des tags providers {tmdb-XXX} / [imdbid-ttXXX]
+    # depuis le nom de dossier ET du fichier video. Si un tmdb_id est trouve,
+    # on emet un Candidate haute confiance (source="name_tag", score=0.98) qui
+    # sera ensuite verifie via tmdb.find_by_tmdb_id(...) cote app (symetrique
+    # au flow NFO dans _augment_candidates_from_nfo_tmdb_id). On strippe AUSSI
+    # les tags des noms pour que clean_title_guess()/infer_name_year() ne
+    # voient pas les chiffres TMDb ou les accolades.
+    folder_tags = extract_provider_tags(folder_name)
+    video_tags = extract_provider_tags(video_name)
+    # Priorite : tag du dossier > tag du fichier (le dossier est la source de
+    # verite pour le contenu du film, le fichier peut etre un .partN).
+    tmdb_id_from_tag = folder_tags.tmdb_id or video_tags.tmdb_id
+    imdb_id_from_tag = folder_tags.imdb_id or video_tags.imdb_id
+
+    folder_clean = strip_provider_tags(folder_name) if (folder_tags.tmdb_id or folder_tags.imdb_id) else folder_name
+    video_clean = strip_provider_tags(video_name) if (video_tags.tmdb_id or video_tags.imdb_id) else video_name
+
     y = preferred_year
     if y is None:
-        y, _, _ = infer_name_year(folder_name, video_name)
-    t = clean_title_guess(folder_name)
+        y, _, _ = infer_name_year(folder_clean, video_clean)
+    t = clean_title_guess(folder_clean)
     if not (2 <= len(t) <= 70):
-        t = clean_title_guess(video_name)
-    out = []
+        t = clean_title_guess(video_clean)
+    out: List[Candidate] = []
+
+    # B02 : Candidate deterministe issu du tag provider (court-circuit fuzzy).
+    # On ne l'emet que si on a aussi pu deduire un titre/annee de base (pour
+    # permettre le cross-check de similarite cote app), sinon on degrade
+    # gracieusement vers les Candidates classiques.
+    if tmdb_id_from_tag and t:
+        note_bits = []
+        if folder_tags.tmdb_id:
+            note_bits.append("folder tag")
+        elif video_tags.tmdb_id:
+            note_bits.append("video tag")
+        if imdb_id_from_tag:
+            note_bits.append(f"imdb={imdb_id_from_tag}")
+        out.append(
+            Candidate(
+                title=t,
+                year=y,
+                source="name_tag",
+                tmdb_id=tmdb_id_from_tag,
+                score=0.98,
+                note=", ".join(note_bits),
+            )
+        )
+
     if t and y:
-        folder_y = extract_year(folder_name)
-        video_y = extract_year(video_name)
+        folder_y = extract_year(folder_clean)
+        video_y = extract_year(video_clean)
         score = 0.60
         if folder_y and video_y and folder_y == video_y == y:
             score = 0.72
