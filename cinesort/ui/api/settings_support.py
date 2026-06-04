@@ -32,6 +32,41 @@ from cinesort.ui.api._responses import err
 
 logger = logging.getLogger(__name__)
 
+# Hotfix sentinel : pattern `int(payload.get(k) or DEFAULT)` ecrase 0 (et "" ou None)
+# par DEFAULT. Or l'utilisateur peut legitimement vouloir 0 (ex: perceptual_skip_percent).
+# `_coerce_int_with_default(value, default)` distingue absence/erreur (-> default)
+# de valeur entiere convertible (y compris 0).
+_MISSING = object()
+
+
+def _coerce_int_with_default(value: Any, default: int) -> int:
+    """Convertit value en int en preservant la valeur 0 (vs `x or default` qui l'ecrase).
+
+    - None, "", _MISSING -> default
+    - "0", 0, 0.0 -> 0 (legitime)
+    - ValueError/TypeError -> default
+    """
+    if value is None or value is _MISSING:
+        return default
+    if isinstance(value, bool):
+        # bool est int : on rejette pour eviter True->1 / False->0 silencieux
+        return default
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return default
+        try:
+            return int(cleaned)
+        except (TypeError, ValueError):
+            try:
+                return int(float(cleaned))
+            except (TypeError, ValueError):
+                return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 TMDB_KEY_SECRET_FIELD = "tmdb_api_key_secret"
 TMDB_KEY_PROTECTION_LEGACY = "plaintext_legacy"
 TMDB_KEY_PURPOSE = "tmdb_api_key"
@@ -73,7 +108,9 @@ def _backup_settings_before_write(settings_path: Path) -> Optional[Path]:
         return None
     try:
         # Verifie que le settings actuel est lisible (evite cascade backup d'un fichier corrompu)
-        json.loads(settings_path.read_text(encoding="utf-8"))
+        # Hotfix BOM : utf-8-sig tolere un BOM en tete (sinon json.loads echoue silencieusement
+        # et l'on saute le backup d'un fichier pourtant valide, masquant une corruption ulterieure).
+        json.loads(settings_path.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return None
     # Microsecondes pour rester unique meme si plusieurs writes dans la meme
@@ -163,11 +200,20 @@ def _persist_protected_secret(
     Effet de bord sur `payload` : retire le champ legacy et installe le blob
     chiffre dans `secret_field` en cas de succes.
 
+    Hotfix DPAPI : si `_orig_<secret_field>` existe (blob chiffre legitime que
+    read_settings n'a pas pu dechiffrer), on le reinjecte au lieu d'ecraser
+    par une chaine vide. Ainsi un cycle read->save sans modification ne perd
+    pas le secret.
+
     Retourne (persisted, warning_message).
     """
     raw = str(payload.pop(legacy_field, "") or "").strip()
     payload.pop(secret_field, None)
+    orig_blob = payload.pop(f"_orig_{secret_field}", None)
     if not raw:
+        # Pas de nouvelle valeur claire : on preserve l'eventuel blob original
+        if isinstance(orig_blob, dict):
+            payload[secret_field] = orig_blob
         return False, ""
     ok, blob_b64, error = protect_secret(raw, purpose=purpose)
     if ok and blob_b64:
@@ -176,6 +222,9 @@ def _persist_protected_secret(
             "blob_b64": blob_b64,
         }
         return True, ""
+    # Chiffrement KO : preserve l'original si on en avait un (sinon le secret est perdu)
+    if isinstance(orig_blob, dict):
+        payload[secret_field] = orig_blob
     return False, f"Protection indisponible ({purpose}): {error}" if error else f"Protection indisponible ({purpose})."
 
 
@@ -346,24 +395,38 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Hotfix BOM : utf-8-sig tolere un eventuel BOM (Notepad/PowerShell sous
+        # Windows en ajoutent souvent). utf-8 strict levait UnicodeDecodeError
+        # et toute la config etait perdue silencieusement.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(data, dict):
             return {}
+        # Hotfix DPAPI : on PRESERVE les blobs chiffres originaux dans des
+        # champs _orig_* si le dechiffrement echoue, pour permettre a
+        # write_settings de les reinjecter tels quels (sinon ecrasement
+        # destructif du blob legitime au prochain save).
+        orig_tmdb_blob = data.get(TMDB_KEY_SECRET_FIELD)
         secret_value, protection, warning = extract_tmdb_key_from_settings_payload(data)
         data.pop(TMDB_KEY_SECRET_FIELD, None)
         data["tmdb_api_key"] = secret_value
         data["tmdb_key_protection"] = protection
         if warning:
             data["tmdb_key_warning"] = warning
+            # DPAPI a echoue mais le blob etait valide : conserver pour write_settings
+            if isinstance(orig_tmdb_blob, dict):
+                data["_orig_tmdb_api_key_secret"] = orig_tmdb_blob
         else:
             data.pop("tmdb_key_warning", None)
 
+        orig_jf_blob = data.get(JELLYFIN_KEY_SECRET_FIELD)
         jf_value, jf_protection, jf_warning = extract_jellyfin_key_from_settings_payload(data)
         data.pop(JELLYFIN_KEY_SECRET_FIELD, None)
         data["jellyfin_api_key"] = jf_value
         data["jellyfin_key_protection"] = jf_protection
         if jf_warning:
             data["jellyfin_key_warning"] = jf_warning
+            if isinstance(orig_jf_blob, dict):
+                data["_orig_jellyfin_api_key_secret"] = orig_jf_blob
         else:
             data.pop("jellyfin_key_warning", None)
 
@@ -393,6 +456,7 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
                 "omdb_key_warning",
             ),
         ):
+            orig_blob = data.get(secret_field)
             value, scheme, warning = _extract_protected_secret(
                 data,
                 secret_field=secret_field,
@@ -404,6 +468,9 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
             data[protection_key] = scheme
             if warning:
                 data[warning_key] = warning
+                # Preserve blob chiffre si DPAPI a echoue
+                if isinstance(orig_blob, dict):
+                    data[f"_orig_{secret_field}"] = orig_blob
             else:
                 data.pop(warning_key, None)
 
@@ -506,6 +573,10 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     payload.pop("tmdb_key_protection", None)
     payload.pop("tmdb_key_warning", None)
     payload.pop(TMDB_KEY_SECRET_FIELD, None)
+    # Hotfix DPAPI : si la lecture precedente a echoue a dechiffrer, on a un
+    # blob original preserve dans `_orig_*` qui doit etre reinjecte tel quel
+    # plutot que d'etre ecrase par une chaine vide (data-loss).
+    orig_tmdb_blob = payload.pop("_orig_tmdb_api_key_secret", None)
     remember_key = to_bool(payload.get("remember_key"), False)
 
     protection = SECRET_PROTECTION_NONE
@@ -529,14 +600,21 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 if not error
                 else f"Protection locale Windows indisponible: {error}"
             )
+            # Preserve blob legitime ininterpretable plutot que de l'effacer
+            if isinstance(orig_tmdb_blob, dict):
+                payload[TMDB_KEY_SECRET_FIELD] = orig_tmdb_blob
     else:
         payload["remember_key"] = False if not secret_value else remember_key
+        # Aucune cle clair fournie mais on avait un blob illisible : conserver
+        if not secret_value and isinstance(orig_tmdb_blob, dict):
+            payload[TMDB_KEY_SECRET_FIELD] = orig_tmdb_blob
 
     # --- Jellyfin API key (DPAPI) ---
     jf_secret = str(payload.pop("jellyfin_api_key", "") or "").strip()
     payload.pop("jellyfin_key_protection", None)
     payload.pop("jellyfin_key_warning", None)
     payload.pop(JELLYFIN_KEY_SECRET_FIELD, None)
+    orig_jf_blob = payload.pop("_orig_jellyfin_api_key_secret", None)
     jf_persisted = False
     jf_warning = ""
 
@@ -552,6 +630,10 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             jf_warning = (
                 f"Protection Jellyfin indisponible: {err_jf}" if err_jf else "Protection Jellyfin indisponible."
             )
+            if isinstance(orig_jf_blob, dict):
+                payload[JELLYFIN_KEY_SECRET_FIELD] = orig_jf_blob
+    elif isinstance(orig_jf_blob, dict):
+        payload[JELLYFIN_KEY_SECRET_FIELD] = orig_jf_blob
 
     # --- S4 audit : Plex token / Radarr API key / SMTP password (DPAPI) ---
     # Pour chaque secret, on consomme la cle legacy en clair et on la remplace
@@ -1246,7 +1328,7 @@ def _save_section_scan_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
         "quarantine_unapproved": to_bool(payload.get("quarantine_unapproved"), False),
         "dry_run_apply": to_bool(payload.get("dry_run_apply"), True),
         "auto_approve_enabled": to_bool(payload.get("auto_approve_enabled"), False),
-        "auto_approve_threshold": max(70, min(100, int(payload.get("auto_approve_threshold") or 85))),
+        "auto_approve_threshold": max(70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))),
         # M-2 : auto-quarantine films corrompus (integrity warnings)
         "auto_quarantine_corrupted": to_bool(payload.get("auto_quarantine_corrupted"), False),
         "onboarding_completed": to_bool(payload.get("onboarding_completed"), False),
@@ -1331,14 +1413,14 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_watch(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "watch_enabled": to_bool(payload.get("watch_enabled"), False),
-        "watch_interval_minutes": max(1, min(60, int(payload.get("watch_interval_minutes") or 5))),
+        "watch_interval_minutes": max(1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))),
     }
 
 
 def _save_section_plugins(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "plugins_enabled": to_bool(payload.get("plugins_enabled"), False),
-        "plugins_timeout_s": max(5, min(120, int(payload.get("plugins_timeout_s") or 30))),
+        "plugins_timeout_s": max(5, min(120, _coerce_int_with_default(payload.get("plugins_timeout_s", _MISSING), 30))),
     }
 
 
@@ -1346,7 +1428,7 @@ def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "email_enabled": to_bool(payload.get("email_enabled"), False),
         "email_smtp_host": str(payload.get("email_smtp_host") or "").strip(),
-        "email_smtp_port": max(1, min(65535, int(payload.get("email_smtp_port") or 587))),
+        "email_smtp_port": max(1, min(65535, _coerce_int_with_default(payload.get("email_smtp_port", _MISSING), 587))),
         "email_smtp_user": str(payload.get("email_smtp_user") or "").strip(),
         "email_smtp_password": str(payload.get("email_smtp_password") or ""),
         "email_smtp_tls": to_bool(payload.get("email_smtp_tls"), True),
@@ -1371,15 +1453,15 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         "perceptual_enabled": to_bool(payload.get("perceptual_enabled"), False),
         "perceptual_auto_on_scan": to_bool(payload.get("perceptual_auto_on_scan"), False),
         "perceptual_auto_on_quality": to_bool(payload.get("perceptual_auto_on_quality"), True),
-        "perceptual_timeout_per_film_s": max(30, min(600, int(payload.get("perceptual_timeout_per_film_s") or 120))),
-        "perceptual_frames_count": max(5, min(50, int(payload.get("perceptual_frames_count") or 10))),
-        "perceptual_skip_percent": max(0, min(20, int(payload.get("perceptual_skip_percent") or 5))),
+        "perceptual_timeout_per_film_s": max(30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))),
+        "perceptual_frames_count": max(5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))),
+        "perceptual_skip_percent": max(0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))),
         "perceptual_dark_weight": max(1.0, min(3.0, to_float(payload.get("perceptual_dark_weight"), 1.5))),
         "perceptual_audio_deep": to_bool(payload.get("perceptual_audio_deep"), True),
-        "perceptual_audio_segment_s": max(10, min(120, int(payload.get("perceptual_audio_segment_s") or 30))),
-        "perceptual_comparison_frames": max(10, min(100, int(payload.get("perceptual_comparison_frames") or 20))),
+        "perceptual_audio_segment_s": max(10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))),
+        "perceptual_comparison_frames": max(10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))),
         "perceptual_comparison_timeout_s": max(
-            120, min(1800, int(payload.get("perceptual_comparison_timeout_s") or 600))
+            120, min(1800, _coerce_int_with_default(payload.get("perceptual_comparison_timeout_s", _MISSING), 600))
         ),
         "perceptual_parallelism_mode": _normalize_enum(
             payload.get("perceptual_parallelism_mode"), ("auto", "max", "safe", "serial"), "auto"
@@ -1647,11 +1729,33 @@ def save_settings_payload(
     root_path = roots_paths[0] if roots_paths else Path(default_root)
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    to_save: Dict[str, Any] = {
-        "root": str(root_path),
-        "roots": [str(r) for r in roots_paths],
-        "state_dir": str(state_dir),
-    }
+    # Hotfix : on PART de l'existant (merge read-modify-write) puis on ecrase
+    # avec les sections normalisees. Sinon toute cle non couverte par un
+    # `_save_section_*` (preferences UI futures, settings annexes, blobs
+    # `_orig_*` injectes par read_settings) etait silencieusement effacee a
+    # chaque save (reconstruction from-scratch destructive).
+    # Note : on retire les champs derives masque (-> read_settings les
+    # reinjecte) et les protection/warning qui doivent etre re-derives par
+    # write_settings.
+    to_save: Dict[str, Any] = dict(existing_settings)
+    for derived in (
+        "tmdb_key_protection",
+        "tmdb_key_warning",
+        "jellyfin_key_protection",
+        "jellyfin_key_warning",
+        "plex_token_protection",
+        "plex_token_warning",
+        "radarr_key_protection",
+        "radarr_key_warning",
+        "email_smtp_password_protection",
+        "email_smtp_password_warning",
+        "omdb_key_protection",
+        "omdb_key_warning",
+    ):
+        to_save.pop(derived, None)
+    to_save["root"] = str(root_path)
+    to_save["roots"] = [str(r) for r in roots_paths]
+    to_save["state_dir"] = str(state_dir)
     to_save.update(_save_section_tmdb(settings))
     to_save.update(
         _save_section_cleanup(

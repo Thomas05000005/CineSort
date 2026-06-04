@@ -74,6 +74,7 @@ def compute_audio_fingerprint(
     duration_s: float,
     *,
     fpcalc_path: Optional[str] = None,
+    ffmpeg_path: Optional[str] = None,
     timeout_s: float = AUDIO_FINGERPRINT_TIMEOUT_S,
 ) -> Optional[str]:
     """Calcule le fingerprint Chromaprint d'un segment audio.
@@ -82,6 +83,9 @@ def compute_audio_fingerprint(
         media_path: chemin du fichier video/audio.
         duration_s: duree totale du fichier (pour decider offset).
         fpcalc_path: None = auto-detection via resolve_fpcalc_path.
+        ffmpeg_path: chemin ffmpeg pour seek strict (-ss) via pipe stdin
+            quand un offset > 0 est utilise. None = pas de seek (fallback
+            sur les premieres secondes du fichier, comportement <= v7.5).
         timeout_s: timeout du sous-process fpcalc.
 
     Returns:
@@ -90,7 +94,16 @@ def compute_audio_fingerprint(
 
     Strategie de segment :
         - Si duration_s < AUDIO_FINGERPRINT_MIN_FILE_DURATION_S : tout le fichier.
-        - Sinon : segment [OFFSET=60s, DURATION=120s].
+        - Sinon : segment [OFFSET=60s, DURATION=120s] — necessite ffmpeg_path
+          pour respecter l'offset (sinon fallback sur premieres secondes).
+
+    MEGA-HOTFIX audio_fingerprint_offset : avant ce fix, l'offset etait
+    calcule puis ignore (`_ = offset`), donc fpcalc analysait les 120
+    premieres secondes du fichier — souvent saturees de logos studios
+    (Universal, Marvel, Disney...) communs a tous les films, generant
+    de faux positifs doublons. Maintenant, si `ffmpeg_path` est fourni
+    on pipe `ffmpeg -ss OFFSET -t LENGTH ... | fpcalc -` pour analyser
+    le vrai contenu narratif.
     """
     fpcalc = fpcalc_path or resolve_fpcalc_path()
     if not fpcalc:
@@ -103,49 +116,71 @@ def compute_audio_fingerprint(
         length = float(AUDIO_FINGERPRINT_SEGMENT_DURATION_S)
         offset = float(AUDIO_FINGERPRINT_SEGMENT_OFFSET_S)
 
-    # Note: fpcalc 1.5.1 n'a pas d'option de seek (-ss). On prend les
-    # premieres `length` secondes du fichier. L'offset strict via pipe
-    # ffmpeg reste possible si on constate beaucoup de faux negatifs sur
-    # des films a generique long (raffinement v7.6.0+).
-    _ = offset  # documente mais non utilise pour l'instant
-    cmd = [
-        fpcalc,
-        "-json",
-        "-raw",
-        "-length",
-        str(int(length)),
-        str(media_path),
-    ]
+    # Strategie d'execution :
+    # - offset == 0 OU ffmpeg_path absent : appel direct fpcalc (backward compat).
+    # - offset > 0 ET ffmpeg_path present : pipe ffmpeg (seek strict) -> fpcalc -.
+    use_seek_pipe = offset > 0.0 and bool(ffmpeg_path)
+
+    if not use_seek_pipe:
+        # Comportement historique : fpcalc lit le fichier directement, sans
+        # seek (limite de fpcalc 1.5.1 qui n'a pas d'option -ss native).
+        # Conserve pour les fichiers courts (offset = 0) et comme fallback
+        # quand ffmpeg n'est pas disponible (defense en profondeur).
+        cmd = [
+            fpcalc,
+            "-json",
+            "-raw",
+            "-length",
+            str(int(length)),
+            str(media_path),
+        ]
+
+        try:
+            platform_kwargs = _runner_platform_kwargs()
+            cp = tracked_run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(1.0, float(timeout_s)),
+                encoding="utf-8",
+                errors="replace",
+                **platform_kwargs,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("fpcalc timeout apres %ss sur %s", timeout_s, media_path)
+            return None
+        except OSError as exc:
+            logger.warning("fpcalc OSError sur %s: %s", media_path, exc)
+            return None
+
+        if cp.returncode != 0:
+            logger.warning(
+                "fpcalc returncode=%d sur %s: %s",
+                cp.returncode,
+                media_path,
+                (cp.stderr or "").strip()[:200],
+            )
+            return None
+
+        stdout_text = cp.stdout
+    else:
+        # MEGA-HOTFIX : pipe ffmpeg seek -> fpcalc stdin pour respecter offset.
+        # ffmpeg -ss avant -i = seek rapide (input seeking, peu precis mais
+        # acceptable a +/-1s pour un fingerprint de 120s). Output WAV PCM
+        # 16-bit stereo 44.1kHz, format natif consomme par fpcalc.
+        stdout_text = _run_ffmpeg_pipe_fpcalc(
+            ffmpeg_path=ffmpeg_path,  # type: ignore[arg-type]
+            fpcalc_path=fpcalc,
+            media_path=str(media_path),
+            offset_s=offset,
+            length_s=length,
+            timeout_s=float(timeout_s),
+        )
+        if stdout_text is None:
+            return None
 
     try:
-        platform_kwargs = _runner_platform_kwargs()
-        cp = tracked_run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=max(1.0, float(timeout_s)),
-            encoding="utf-8",
-            errors="replace",
-            **platform_kwargs,
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning("fpcalc timeout apres %ss sur %s", timeout_s, media_path)
-        return None
-    except OSError as exc:
-        logger.warning("fpcalc OSError sur %s: %s", media_path, exc)
-        return None
-
-    if cp.returncode != 0:
-        logger.warning(
-            "fpcalc returncode=%d sur %s: %s",
-            cp.returncode,
-            media_path,
-            (cp.stderr or "").strip()[:200],
-        )
-        return None
-
-    try:
-        data = json.loads(cp.stdout)
+        data = json.loads(stdout_text)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("fpcalc stdout non-JSON sur %s: %s", media_path, exc)
         return None
@@ -162,6 +197,145 @@ def compute_audio_fingerprint(
         return None
 
     return _encode_fingerprint(ints)
+
+
+def _run_ffmpeg_pipe_fpcalc(
+    *,
+    ffmpeg_path: str,
+    fpcalc_path: str,
+    media_path: str,
+    offset_s: float,
+    length_s: float,
+    timeout_s: float,
+) -> Optional[str]:
+    """Pipe ffmpeg (-ss seek + WAV stdout) -> fpcalc (stdin -) et retourne stdout JSON.
+
+    Strategie :
+        ffmpeg -nostdin -ss OFFSET -t LENGTH -i media -vn -ac 2 -ar 44100
+               -f wav -loglevel error -
+            | fpcalc -json -raw -length LENGTH -
+
+    Cleanup garanti via tracked_popen pour les deux process. Si ffmpeg
+    echoue (binaire absent, fichier corrompu), retourne None et log warning.
+    """
+    # Service-locator domain : evite la violation d'architecture
+    # (domain -> infra) detectee par import-linter.
+    from cinesort.domain._runners import tracked_popen
+
+    int_offset = max(0, int(offset_s))
+    int_length = max(1, int(length_s))
+
+    ffmpeg_cmd = [
+        ffmpeg_path,
+        "-nostdin",
+        "-ss",
+        str(int_offset),
+        "-t",
+        str(int_length),
+        "-i",
+        media_path,
+        "-vn",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-f",
+        "wav",
+        "-loglevel",
+        "error",
+        "-",
+    ]
+    fpcalc_cmd = [
+        fpcalc_path,
+        "-json",
+        "-raw",
+        "-length",
+        str(int_length),
+        "-",
+    ]
+
+    platform_kwargs = _runner_platform_kwargs()
+    safe_timeout = max(1.0, float(timeout_s))
+
+    try:
+        with tracked_popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **platform_kwargs,
+        ) as ffmpeg_proc:
+            with tracked_popen(
+                fpcalc_cmd,
+                stdin=ffmpeg_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **platform_kwargs,
+            ) as fpcalc_proc:
+                # Important : fermer notre cote du pipe pour que fpcalc voie EOF
+                # quand ffmpeg se termine. Sinon deadlock potentiel.
+                if ffmpeg_proc.stdout is not None:
+                    ffmpeg_proc.stdout.close()
+                try:
+                    fp_stdout_bytes, fp_stderr_bytes = fpcalc_proc.communicate(
+                        timeout=safe_timeout
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.warning(
+                        "fpcalc (pipe ffmpeg) timeout apres %ss sur %s",
+                        timeout_s,
+                        media_path,
+                    )
+                    return None
+                fpcalc_rc = fpcalc_proc.returncode
+
+                # Attendre la fin de ffmpeg pour eviter zombie + recuperer stderr.
+                try:
+                    _, ff_stderr_bytes = ffmpeg_proc.communicate(timeout=safe_timeout)
+                except subprocess.TimeoutExpired:
+                    logger.warning(
+                        "ffmpeg (pipe fpcalc) timeout apres %ss sur %s",
+                        timeout_s,
+                        media_path,
+                    )
+                    return None
+                ffmpeg_rc = ffmpeg_proc.returncode
+    except OSError as exc:
+        logger.warning(
+            "pipe ffmpeg|fpcalc OSError sur %s: %s (fallback indisponible)",
+            media_path,
+            exc,
+        )
+        return None
+
+    if ffmpeg_rc != 0:
+        ff_err = (ff_stderr_bytes or b"").decode("utf-8", errors="replace").strip()
+        logger.warning(
+            "ffmpeg pipe returncode=%d sur %s (offset=%ss, length=%ss): %s",
+            ffmpeg_rc,
+            media_path,
+            int_offset,
+            int_length,
+            ff_err[:200],
+        )
+        # On ne return PAS ici : si fpcalc a quand meme produit du JSON valide
+        # sur les bytes pre-erreur, on peut l'utiliser. Mais si fpcalc a aussi
+        # echoue, on tombera dans le check juste apres.
+
+    if fpcalc_rc != 0:
+        fp_err = (fp_stderr_bytes or b"").decode("utf-8", errors="replace").strip()
+        logger.warning(
+            "fpcalc (pipe) returncode=%d sur %s: %s",
+            fpcalc_rc,
+            media_path,
+            fp_err[:200],
+        )
+        return None
+
+    try:
+        return (fp_stdout_bytes or b"").decode("utf-8", errors="replace")
+    except (UnicodeDecodeError, AttributeError) as exc:
+        logger.warning("fpcalc (pipe) decode stdout failed sur %s: %s", media_path, exc)
+        return None
 
 
 def compare_audio_fingerprints(fp_a: Optional[str], fp_b: Optional[str]) -> Optional[float]:
