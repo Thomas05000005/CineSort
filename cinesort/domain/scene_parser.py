@@ -31,6 +31,89 @@ from typing import Optional
 
 # --- Patterns -------------------------------------------------------------
 
+# Provider tags (Plex/Jellyfin/Radarr/TRaSH) inseres par l'utilisateur dans
+# les noms de dossier/fichier pour forcer un auto-link deterministe au scan.
+# Formats supportes : {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345},
+#                     [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567].
+# Fix B02-TAGS-BRACKETS : avant ce fix, les chiffres TMDb (ex 27205) restaient
+# dans le titre nettoye et polluaient la query fuzzy. parse_scene_title() doit
+# strip ces tags AVANT le pipeline noise/year/release-group.
+_PROVIDER_TMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*tmdb(?:id)?[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    re.IGNORECASE,
+)
+_PROVIDER_IMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*imdb(?:id)?[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    re.IGNORECASE,
+)
+
+
+def strip_provider_tags(name: str) -> str:
+    """Retire les tags providers (TMDb/IMDb) inseres dans un nom de fichier/dossier.
+
+    Les tags `{tmdb-XXX}` / `[imdbid-ttXXX]` sont inseres par les conventions
+    Plex/Jellyfin/Radarr/TRaSH pour forcer un auto-link deterministe. Ils ne
+    doivent pas se retrouver dans le titre nettoye envoye en query fuzzy TMDb,
+    sinon les chiffres TMDb peuvent etre confondus avec des annees ou polluer
+    la similarite.
+
+    Examples:
+        >>> strip_provider_tags("Inception (2010) {tmdb-27205}")
+        'Inception (2010)'
+        >>> strip_provider_tags("Fight Club [tmdb-550] [imdbid-tt0137523]")
+        'Fight Club'
+        >>> strip_provider_tags("The Matrix (1999) [imdb:tt0133093]")
+        'The Matrix (1999)'
+
+    Args:
+        name: Nom brut de dossier ou fichier (avec ou sans extension).
+
+    Returns:
+        Le nom sans les brackets/braces provider, whitespace collapse.
+    """
+    if not name:
+        return ""
+    cleaned = _PROVIDER_TMDB_TAG_RE.sub(" ", name)
+    cleaned = _PROVIDER_IMDB_TAG_RE.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def extract_provider_tags(name: str) -> tuple[Optional[int], Optional[str]]:
+    """Extrait les ids providers (tmdb_id, imdb_id) depuis un nom.
+
+    Retourne `(None, None)` si rien trouve. Le tmdb_id est cast en `int`, le
+    imdb_id est normalise en lowercase (`tt0133093`).
+
+    Examples:
+        >>> extract_provider_tags("Inception (2010) {tmdb-27205}")
+        (27205, None)
+        >>> extract_provider_tags("Fight Club [tmdb-550] [imdbid-tt0137523]")
+        (550, 'tt0137523')
+        >>> extract_provider_tags("Inception (2010)")
+        (None, None)
+
+    Args:
+        name: Nom brut de dossier ou fichier.
+
+    Returns:
+        Tuple `(tmdb_id, imdb_id)`. Composants `None` si non extractibles.
+    """
+    if not name:
+        return (None, None)
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    m = _PROVIDER_TMDB_TAG_RE.search(name)
+    if m:
+        try:
+            tmdb_id = int(m.group(1))
+        except (ValueError, TypeError):
+            tmdb_id = None
+    m = _PROVIDER_IMDB_TAG_RE.search(name)
+    if m:
+        imdb_id = m.group(1).lower()
+    return (tmdb_id, imdb_id)
+
+
 # Tags techniques uniquement (resolution, codec, audio, source, profil).
 # Volontairement SANS langue ni edition residue : ces tokens peuvent apparaitre
 # dans des vrais titres ("The French Connection", "The Final Cut", "Theatre of
@@ -243,6 +326,16 @@ def parse_scene_title(filename: str) -> str:
     if name.startswith("."):
         # Cas pathologique ".mkv" / ".mp4" - retour vide
         return ""
+
+    # 1.b Strip provider tags `{tmdb-XXX}` / `[imdbid-ttXXX]` (B02-TAGS-BRACKETS).
+    # Doit etre fait AVANT le replace `.` -> ` ` car certains formats peuvent
+    # contenir des dots (peu probable mais defensif), et SURTOUT avant le
+    # pipeline noise/year/release-group : sinon les chiffres TMDb (ex 27205)
+    # peuvent etre confondus avec une annee (annee >= 1900) ou polluer la
+    # similarite de titre. Les ids extraits eux-memes sont disponibles via
+    # `extract_provider_tags()` pour le futur auto-link deterministe.
+    name = strip_provider_tags(name)
+
     name = name.replace(".", " ").replace("_", " ")
 
     # 2. Position-aware strip si annee parenthesee : strip aussi le suffixe
