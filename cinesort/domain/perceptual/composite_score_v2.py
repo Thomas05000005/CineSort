@@ -87,12 +87,15 @@ def weighted_score_with_confidence(
     - Le poids effectif de chaque item = weight * confidence.
     - Si tous les items ont confidence = 0 -> renvoyer (50.0, 0.0) fallback neutre.
     - Si la liste est vide -> (50.0, 0.0).
+    - Les items avec confidence=0 (ex: "reserve" audio) sont exclus du calcul
+      de la confidence moyenne pour ne pas diluer artificiellement la confiance
+      des items reellement mesures.
     """
     if not scores:
         return 50.0, 0.0
     total_eff_weight = 0.0
     weighted_sum = 0.0
-    total_raw_weight = 0.0
+    contributing_weight = 0.0  # somme des poids des items avec confidence > 0
     weighted_conf_sum = 0.0
     for value, weight, confidence in scores:
         w = float(weight)
@@ -100,12 +103,13 @@ def weighted_score_with_confidence(
         eff = w * c
         total_eff_weight += eff
         weighted_sum += float(value) * eff
-        total_raw_weight += w
-        weighted_conf_sum += c * w
+        if c > 0.0:
+            contributing_weight += w
+            weighted_conf_sum += c * w
     if total_eff_weight <= 0:
         return 50.0, 0.0
     score = weighted_sum / total_eff_weight
-    mean_conf = weighted_conf_sum / total_raw_weight if total_raw_weight > 0 else 0.0
+    mean_conf = weighted_conf_sum / contributing_weight if contributing_weight > 0 else 0.0
     return _clamp(score), max(0.0, min(1.0, mean_conf))
 
 
