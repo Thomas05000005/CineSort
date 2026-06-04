@@ -180,7 +180,15 @@ def _build_quality_presets_catalog() -> Dict[str, Dict[str, Any]]:
         }
     )
     remux_strict["languages"].update({"bonus_vo_present": 3, "bonus_vf_present": 1})
-    remux_strict["tiers"].update({"premium": 90, "bon": 76, "moyen": 60})
+    # Hotfix coherence (2026-06-04) : remplacement des cles legacy
+    # (premium/bon/moyen) par les cles canoniques platinum/gold/silver/bronze.
+    # Le dict ``base["tiers"]`` est deja normalise (cf default_quality_profile
+    # v1.5.7) et utiliser des cles legacy via ``update()`` ajoutait des cles
+    # parasites sans normalisation immediate (les seuils legacy etaient ignores
+    # par _determine_tier qui passe par _normalize_tiers_central). Resultat
+    # avant fix : remux_strict heritait des seuils default 70/66/55/40 au lieu
+    # des seuils stricts attendus 90/76/60/40. Bronze conserve a 40 (default).
+    remux_strict["tiers"].update({"platinum": 90, "gold": 76, "silver": 60, "bronze": 40})
 
     equilibre = copy.deepcopy(base)
     equilibre["id"] = "CinemaLux_Equilibre_v1"
@@ -796,21 +804,25 @@ def _score_video(
         add_reason(-8, "Debit video non detecte")
     elif threshold_kbps > 0:
         ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
+        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
+        # l'increment reel applique a video_sub. Avant, les factors reportaient
+        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
+        # faussait les weighted_delta et le top_positive de explain_score.
         if ratio >= 1.35:
             video_sub += 18
-            add_reason(+12, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
+            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
         elif ratio >= 1.15:
             video_sub += 14
-            add_reason(+10, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
+            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
         elif ratio >= 1.0:
             video_sub += 10
-            add_reason(+8, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
+            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
         elif ratio >= 0.85:
             video_sub += 6
-            add_reason(+4, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
         elif ratio >= 0.70:
             video_sub += 1
-            add_reason(0, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
         else:
             if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
                 is_4k_light = True
@@ -893,8 +905,10 @@ def _score_audio(
     audio_sub = 12.0
     best_audio = _best_audio_track(audio_tracks)
     if not best_audio:
+        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
+        # l'increment reel applique a audio_sub (-25 et non -16).
         audio_sub -= 25
-        add_reason(-16, "Aucune piste audio exploitable")
+        add_reason(-25, "Aucune piste audio exploitable")
     else:
         a_codec = str(best_audio.get("codec") or "").lower()
         a_bonus, a_label = _audio_codec_bonus(a_codec, prof)
@@ -918,7 +932,14 @@ def _score_audio(
             elif per_channel < 120:
                 audio_sub -= 3
                 add_reason(-3, "Debit audio faible")
-        if ("truehd" in a_codec or "atmos" in a_codec or "dts-hd" in a_codec) and channels >= 8:
+        # Hotfix coherence (2026-06-04) : precedence operateur explicite.
+        # Avant : ``"truehd" in a_codec or "atmos" in a_codec or "dts-hd" in a_codec and channels >= 8``
+        # Python applique ``and`` avant ``or`` -> equivalait a
+        # ``("truehd" in a_codec) or ("atmos" in a_codec) or ("dts-hd" in a_codec and channels >= 8)``
+        # ce qui declenchait le bonus +4 multicanal pour du TrueHD/Atmos 2.0
+        # ou 5.1 (channels < 8). Le parenthesage explicite restaure la
+        # semantique attendue : codec premium ET >= 8 canaux.
+        if (("truehd" in a_codec) or ("atmos" in a_codec) or ("dts-hd" in a_codec)) and channels >= 8:
             audio_sub += 4
             add_reason(+4, "Audio haut de gamme multicanal")
 
@@ -994,12 +1015,17 @@ def _score_extras(
     #     beneficier de la compensation l.1847 (qui ne se declenche QUE pour
     #     "FAILED" strict). Bug regressif sur les callers legacy qui passaient
     #     un probe-dict sans la cle probe_quality.
+    # Hotfix coherence (2026-06-04) : aligner add_reason delta sur l'increment
+    # reel applique a extras_sub. PARTIAL appliquait +4 a extras_sub mais
+    # reportait -3 dans factors (signe oppose !), ce qui faisait apparaitre
+    # PARTIAL comme penalite dans top_negative de explain_score alors qu'il
+    # bonifie le sous-score.
     if probe_quality == "FULL":
         extras_sub += 20
-        add_reason(+6, "Metadonnees techniques completes")
+        add_reason(+20, "Metadonnees techniques completes")
     elif probe_quality == "PARTIAL":
         extras_sub += 4
-        add_reason(-3, "Metadonnees techniques partielles")
+        add_reason(+4, "Metadonnees techniques partielles")
     elif probe_quality == "UNKNOWN":
         # Pas de penalite ni de bonus : on log un warning a la place du malus.
         logger.warning(
@@ -1009,29 +1035,35 @@ def _score_extras(
     else:
         # FAILED (ou valeur fallback FAILED): probe a echoue, penalite normale.
         extras_sub -= 18
-        add_reason(-10, "Metadonnees techniques indisponibles")
+        add_reason(-18, "Metadonnees techniques indisponibles")
 
+    # Hotfix coherence (2026-06-04) : aligner add_reason delta sur l'increment
+    # reel applique a extras_sub (suite du bloc probe_quality ci-dessus).
     if toggles.get("include_metadata"):
         if probe_quality == "PARTIAL":
             extras_sub -= 6
-            add_reason(-3, "Mode metadata strict: donnees partielles")
+            add_reason(-6, "Mode metadata strict: donnees partielles")
         elif probe_quality == "FAILED":
             extras_sub -= 10
-            add_reason(-4, "Mode metadata strict: donnees absentes")
+            add_reason(-10, "Mode metadata strict: donnees absentes")
         # UNKNOWN : pas de penalite stricte non plus (coherence avec l'absence
         # de signal en mode permissif).
 
     if toggles.get("include_naming"):
         if expected_year and not _folder_has_year(folder_name, expected_year):
             extras_sub -= 20
-            add_reason(-8, "Nommage: annee absente du dossier")
+            add_reason(-20, "Nommage: annee absente du dossier")
         elif expected_year:
-            add_reason(+4, "Nommage: annee presente")
+            # Pas d'increment sur extras_sub : reporter delta=0 pour coherence
+            # (factor info-only). Avant : +4 reportait un bonus qui n'existait
+            # pas reellement dans le sous-score.
+            add_reason(0, "Nommage: annee presente")
         if expected_title and not _title_in_folder(folder_name, expected_title):
             extras_sub -= 10
-            add_reason(-4, "Nommage: titre incomplet dans le dossier")
+            add_reason(-10, "Nommage: titre incomplet dans le dossier")
         elif expected_title:
-            add_reason(+3, "Nommage: titre coherent")
+            # Idem : pas d'increment sur extras_sub -> delta=0.
+            add_reason(0, "Nommage: titre coherent")
 
     # Sous-titres
     if subtitle_info and toggles.get("include_subtitles"):
