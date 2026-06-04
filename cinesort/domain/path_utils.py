@@ -101,10 +101,18 @@ def windows_safe(name: str) -> str:
       l'ajout d'extension + suffixe)
     """
     name = unicodedata.normalize("NFC", name)
-    name = re.sub(r'[<>:"/\\|?*]', "", name).strip().rstrip(".")
+    # Retire les caracteres de controle ASCII (0x00-0x1F et DEL 0x7F) qui sont
+    # interdits dans les noms NTFS et peuvent provoquer des erreurs OS.
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name)
+    name = re.sub(r'[<>:"/\\|?*]', "", name).strip().rstrip(". ")
     name = re.sub(r"\s+", " ", name)
-    if name.lower() in _RESERVED_DOS_NAMES:
+    # Le check DOS doit ignorer l'extension : "CON.mkv" est aussi reserve sous
+    # Windows, pas seulement "CON" strict.
+    stem = name.split(".", 1)[0].lower()
+    if stem in _RESERVED_DOS_NAMES:
         name = f"_{name}"
     if not name:
         name = "_untitled"
-    return name[:180].strip()
+    # Re-applique le strip apres troncature : un nom tronque a 180 chars peut
+    # se terminer par "." ou " " (interdit NTFS / cause CreateFile errors).
+    return name[:180].rstrip(". ").strip()
