@@ -127,15 +127,52 @@ OPERATORS = {
 
 
 # --- Actions -----------------------------------------------------------------
+# Sentinel pour distinguer "absent/invalide" de "0" dans les conversions numeriques.
+_MISSING = object()
+
+
+def _num_strict(x: Any):
+    """Convertit en float, ou retourne _MISSING si non-numerique.
+
+    Contrairement a _num (qui retourne 0.0 silencieusement), permet aux
+    appelants de detecter les valeurs invalides. bool est rejete car bool
+    est une sous-classe de int en Python et causerait des conversions
+    surprenantes (True -> 1.0).
+    """
+    if x is None or isinstance(x, bool):
+        return _MISSING
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, str):
+        try:
+            return float(x.strip())
+        except (TypeError, ValueError):
+            return _MISSING
+    return _MISSING
+
+
 def _clamp(x: Any) -> int:
+    """Clamp [0, 100] avec arrondi (pas troncature).
+
+    Bug fix mega-hotfix #2 (L130-134): int(0.9) -> 0 perdait l'intention
+    utilisateur. round() preserve la valeur la plus proche. Non-numerique
+    retourne 0 (comportement historique pour backward compat).
+    """
+    num = _num_strict(x)
+    if num is _MISSING:
+        return 0
     try:
-        return max(0, min(100, int(x)))
-    except (TypeError, ValueError):
+        return max(0, min(100, int(round(num))))
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
 def _act_score_delta(result, value, reason):
-    delta = int(_num(value))
+    num = _num_strict(value)
+    if num is _MISSING:
+        return
+    # Round pour preserver +0.9 -> +1 plutot que +0.9 -> 0 (mega-hotfix #2)
+    delta = int(round(num))
     result["score"] = _clamp(result["score"] + delta)
     if reason:
         sign = "+" if delta >= 0 else ""
@@ -143,15 +180,20 @@ def _act_score_delta(result, value, reason):
 
 
 def _act_score_mult(result, value, reason):
-    factor = _num(value)
-    new = int(result["score"] * factor)
+    num = _num_strict(value)
+    if num is _MISSING:
+        return
+    factor = num
+    # Round pour eviter truncation (mega-hotfix #2)
+    new = int(round(result["score"] * factor))
     result["score"] = _clamp(new)
     if reason:
         result["reasons"].append(f"x{factor} {reason}")
 
 
 def _act_force_score(result, value, reason):
-    new = _clamp(int(_num(value)))
+    # _clamp gere maintenant le rounding et la validation (mega-hotfix #2)
+    new = _clamp(value)
     result["score"] = new
     if reason:
         result["reasons"].append(f"={new} {reason}")
@@ -166,7 +208,7 @@ def _act_force_tier(result, value, reason):
 
 
 def _act_cap_max(result, value, reason):
-    cap = _clamp(int(_num(value)))
+    cap = _clamp(value)
     if result["score"] > cap:
         result["score"] = cap
         if reason:
@@ -174,7 +216,7 @@ def _act_cap_max(result, value, reason):
 
 
 def _act_cap_min(result, value, reason):
-    cap = _clamp(int(_num(value)))
+    cap = _clamp(value)
     if result["score"] < cap:
         result["score"] = cap
         if reason:
@@ -259,7 +301,15 @@ def apply_custom_rules(
     if not rules or not isinstance(rules, list):
         return result
     active = [r for r in rules if isinstance(r, dict) and r.get("enabled", True)]
-    active.sort(key=lambda r: int(_num(r.get("priority"))))
+    # Tri stable: priorite numerique en cle primaire, ordre d'apparition en cle
+    # secondaire. _num_strict retourne _MISSING pour non-numerique (ex: "abc")
+    # -> on tombe alors sur une priorite tres grande pour deprioriser ces
+    # regles mal formees (mega-hotfix #1, defense en profondeur si la
+    # validation est court-circuitee).
+    def _priority_key(r):
+        p = _num_strict(r.get("priority"))
+        return float("inf") if p is _MISSING else p
+    active.sort(key=_priority_key)
     for rule in active:
         try:
             if not evaluate_rule(rule, context):
@@ -342,6 +392,21 @@ def _validate_single_rule(rule: Any, idx: int) -> Tuple[bool, List[str], Dict[st
     ok_a, errs_a, norm_action = _validate_action(action, idx)
     if not ok_a:
         errs.extend(errs_a)
+    # Bug fix mega-hotfix #1: priority doit etre numerique. Avant, int(_num(x))
+    # transformait silencieusement "abc" en 0 -> ordre de tri imprevisible.
+    # Priority absente reste tolere (default 0, backward compat).
+    raw_priority = rule.get("priority")
+    if raw_priority is None:
+        priority_val = 0
+    else:
+        p_num = _num_strict(raw_priority)
+        if p_num is _MISSING:
+            errs.append(
+                f"Regle {idx + 1}: priority doit etre numerique (recu {raw_priority!r})"
+            )
+            priority_val = 0
+        else:
+            priority_val = int(round(p_num))
     if errs:
         return False, errs, {}
     normalized: Dict[str, Any] = {
@@ -349,12 +414,51 @@ def _validate_single_rule(rule: Any, idx: int) -> Tuple[bool, List[str], Dict[st
         "name": _truncate_str(rule.get("name") or "Regle sans nom", MAX_STRING_LEN),
         "description": _truncate_str(rule.get("description"), MAX_REASON_LEN),
         "enabled": bool(rule.get("enabled", True)),
-        "priority": int(_num(rule.get("priority"))),
+        "priority": priority_val,
         "conditions": norm_conds,
         "match": "any" if str(rule.get("match") or "all").lower() == "any" else "all",
         "action": norm_action,
     }
     return True, [], normalized
+
+
+def _raw_size_estimate(obj: Any, budget: int) -> int:
+    """Estime la taille serialisee sans materialiser le JSON complet.
+
+    Utilise pour bailer tot sur payload adversarial (mega-hotfix #3). Bailout
+    des que budget atteint pour eviter de scanner une structure enorme.
+    Retourne la consommation au point d'arret (>= budget si depasse).
+    """
+    used = 0
+    stack: List[Any] = [obj]
+    while stack and used < budget:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            # encode utf-8 cost approx: 1-4 bytes/char, on prend len(s) + marge
+            used += len(cur.encode("utf-8")) + 2  # +2 pour les guillemets
+        elif isinstance(cur, bool):
+            used += 5  # "true"/"false"
+        elif isinstance(cur, (int, float)):
+            used += 16  # majorant raisonnable pour repr numerique
+        elif cur is None:
+            used += 4  # "null"
+        elif isinstance(cur, dict):
+            used += 2 + len(cur)  # accolades + virgules/colons
+            for k, v in cur.items():
+                stack.append(k)
+                stack.append(v)
+                if used >= budget:
+                    break
+        elif isinstance(cur, list):
+            used += 2 + len(cur)  # crochets + virgules
+            for v in cur:
+                stack.append(v)
+                if used >= budget:
+                    break
+        else:
+            # type inconnu : refus en aval par json.dumps, on compte une marge
+            used += 32
+    return used
 
 
 def validate_rules(rules: Any) -> Tuple[bool, List[str], List[Dict[str, Any]]]:
@@ -363,10 +467,17 @@ def validate_rules(rules: Any) -> Tuple[bool, List[str], List[Dict[str, Any]]]:
         return False, ["custom_rules doit etre une liste"], []
     if len(rules) > MAX_RULES_PER_PROFILE:
         return False, [f"Trop de regles ({len(rules)} > {MAX_RULES_PER_PROFILE})"], []
+    # Bug fix mega-hotfix #3: check taille brute AVANT json.dumps + AVANT
+    # validate_rules per-rule. Une estimation rapide permet de rejeter les
+    # payloads adversariaux sans materialiser un JSON gigantesque, et avant de
+    # faire tout le travail de normalisation par regle.
+    if _raw_size_estimate(rules, MAX_RULES_JSON_BYTES + 1) > MAX_RULES_JSON_BYTES:
+        return False, [f"custom_rules depasse {MAX_RULES_JSON_BYTES} octets"], []
     try:
         payload = json.dumps(rules, ensure_ascii=False)
     except (TypeError, ValueError) as exc:
         return False, [f"custom_rules non serialisable: {exc}"], []
+    # Verification stricte post-serialisation (estimation peut sous-evaluer).
     if len(payload.encode("utf-8")) > MAX_RULES_JSON_BYTES:
         return False, [f"custom_rules depasse {MAX_RULES_JSON_BYTES} octets"], []
     errors: List[str] = []

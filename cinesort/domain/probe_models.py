@@ -99,22 +99,70 @@ class OpType(StrEnum):
             ) from e
 
     @classmethod
-    def try_from_str(cls, value: str) -> Optional["OpType"]:
+    def try_from_str(cls, value: Any) -> Optional["OpType"]:
         """Mode tolerant : retourne None si la valeur n'est pas un OpType valide.
 
         Utile lorsque le vocabulaire d'entree melange RenameProposal et journal
         (MOVE_FILE/MOVE_DIR/etc.) et que l'appelant veut detecter quel
         vocabulaire est en jeu sans crash.
 
-        :param value: chaine source (sensible a la casse normalisee)
+        MEGA-HOTFIX (2026-06-04) : delegue d'abord a from_str (vocabulaire
+        RenameProposal), puis tente le mapping journal -> domain via
+        from_journal_op_type() pour accepter MOVE_FILE/MOVE_DIR comme
+        equivalents de MOVE (backward compat avec dicts serialises depuis
+        le journal/apply). Retourne None pour tout autre vocabulaire inconnu
+        (MKDIR/QUARANTINE_*/UNDO_* n'ont pas d'equivalent RenameProposal).
+
+        :param value: chaine source (sensible a la casse normalisee). Tout
+                      objet non-str est rejete -> None (None, int, etc.).
         :return: OpType correspondant ou None si non match
         """
         if value is None:
             return None
+        if not isinstance(value, str):
+            return None
         try:
             return cls.from_str(value)
         except (ValueError, AttributeError):
+            pass
+        # Fallback : tenter le vocabulaire journal/apply (MOVE_FILE/MOVE_DIR).
+        # MKDIR/QUARANTINE_*/UNDO_* n'ont pas d'equivalent domain -> None.
+        return cls.from_journal_op_type(value)
+
+    @classmethod
+    def from_journal_op_type(cls, value: Any) -> Optional["OpType"]:
+        """Mappe le vocabulaire journal/apply vers OpType (inverse de to_journal_op_type).
+
+        MEGA-HOTFIX (2026-06-04) : permet de reconstruire un OpType domain
+        depuis le vocabulaire journal/apply (MOVE_FILE/MOVE_DIR). Sert au
+        roundtrip backward compat quand un dict provient du journal.
+
+        Mapping :
+            - MOVE_FILE / MOVE_DIR -> OpType.MOVE
+            - NOOP                 -> OpType.NOOP
+            - RENAME               -> OpType.RENAME (idempotent)
+            - MOVE                 -> OpType.MOVE   (idempotent)
+            - MKDIR / QUARANTINE_* / UNDO_* -> None
+              (pas d'equivalent RenameProposal : ces operations sont produites
+              directement par les helpers d'infra hors flux RenameProposal).
+
+        Tolere case mixte et whitespace (upper().strip()), comme from_str.
+
+        :param value: chaine source (vocabulaire journal). None/non-str -> None.
+        :return: OpType correspondant ou None si pas d'equivalent domain.
+        """
+        if value is None or not isinstance(value, str):
             return None
+        try:
+            normalized = value.upper().strip()
+        except (TypeError, AttributeError):
+            return None
+        if normalized in {"MOVE_FILE", "MOVE_DIR"}:
+            return cls.MOVE
+        if normalized in {"RENAME", "MOVE", "NOOP"}:
+            return cls(normalized)
+        # MKDIR/QUARANTINE_*/UNDO_* : pas d'equivalent domain.
+        return None
 
     def to_journal_op_type(self, is_dir: bool = False) -> str:
         """Mappe l'OpType RenameProposal vers le vocabulaire journal/apply.
@@ -361,6 +409,13 @@ class RenameProposal:
         backward compat absolue (un appelant peut avoir stocke un op_type
         custom). Si la valeur est invalide pour OpType, on conserve la
         chaine telle quelle apres upper-strip basique.
+
+        MEGA-HOTFIX (2026-06-04) : normalisation roundtrip complete.
+        try_from_str() couvre desormais aussi le vocabulaire journal
+        (MOVE_FILE/MOVE_DIR -> OpType.MOVE), garantissant qu'un dict
+        provenant du journal/apply soit correctement reconstruit en OpType
+        canonique. Le fallback upper-strip pour valeurs custom est conserve
+        pour backward compat absolue.
         """
         known = {
             "src_path",
@@ -374,17 +429,22 @@ class RenameProposal:
             "reasons",
         }
         filtered = {k: v for k, v in data.items() if k in known}
-        # Normalise op_type via OpType.from_str (upper-strip + validation).
-        # Fallback : si la valeur est invalide pour OpType, on garde la chaine
-        # brute apres normalisation cosmetique (upper-strip) pour eviter de
-        # casser un appelant qui aurait stocke un vocabulaire custom.
+        # Normalise op_type via OpType.try_from_str (upper-strip + validation +
+        # fallback journal MOVE_FILE/MOVE_DIR -> MOVE).
+        # Fallback : si la valeur est invalide pour OpType ET pour le journal,
+        # on garde la chaine brute apres normalisation cosmetique (upper-strip)
+        # pour eviter de casser un appelant qui aurait stocke un vocabulaire
+        # custom (MKDIR/QUARANTINE_*/UNDO_* ou autre).
         raw_op = filtered.get("op_type")
         if isinstance(raw_op, str):
+            # try_from_str gere RENAME/MOVE/NOOP (case-insensitive, strip)
+            # ET MOVE_FILE/MOVE_DIR -> MOVE via from_journal_op_type fallback.
             normalized = OpType.try_from_str(raw_op)
             if normalized is not None:
                 filtered["op_type"] = normalized
             else:
-                # Conserve la valeur brute apres upper-strip pour backward compat.
+                # Conserve la valeur brute apres upper-strip pour backward compat
+                # (ex: MKDIR/QUARANTINE_* ou vocabulaire custom externe).
                 filtered["op_type"] = raw_op.upper().strip()
         return cls(**filtered)
 

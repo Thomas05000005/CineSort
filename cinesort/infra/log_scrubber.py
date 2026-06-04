@@ -31,10 +31,14 @@ from cinesort.infra.log_context import attach_filter_to_handler
 # `email_smtp_password`, `omdb_api_key`, etc. sans devoir maintenir une
 # liste exhaustive.
 _SECRET_PATTERNS: List[Pattern[str]] = [
-    # TMDb v3 query string : ?api_key=abc123 ou &api_key=abc123
-    re.compile(r"(api_key=)([^&\s\"'>]+)", re.IGNORECASE),
-    # Generique : ?token=xxx ou &token=xxx
-    re.compile(r"(token=)([^&\s\"'>]+)", re.IGNORECASE),
+    # SEC-H1 hotfix : URL query string. Couvre toutes les variantes communes :
+    #   - api_key= (TMDb v3, Radarr, Sonarr)
+    #   - apikey=  (OMDb, ce qui leakait avant le fix)
+    #   - api-key= (variante REST occasionnelle)
+    #   - token=   (generique Bearer/REST)
+    # Le `\b` en amont evite de matcher des fragments comme `xapikey=` ou
+    # `mytoken=` (qui pourraient appartenir a un nom de variable parent).
+    re.compile(r"\b((?:api[_-]?key|apikey|token)=)([^&\s\"'>]+)", re.IGNORECASE),
     # Jellyfin header : Authorization: MediaBrowser Token="xxx"
     re.compile(r'(MediaBrowser Token=")([^"]+)(")', re.IGNORECASE),
     # Bearer token generique (REST CineSort, beaucoup d'API)
