@@ -1,4 +1,4 @@
-# Session Recap - 6 vagues completes (M / N / O / P / Q / R)
+﻿# Session Recap - 6 vagues completes (M / N / O / P / Q / R)
 
 **Periode** : debut juin 2026 -> 4 juin 2026
 **Tag de cloture** : `vague-r-complete` (FIN ROADMAP INITIALE 6 VAGUES)
