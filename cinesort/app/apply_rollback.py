@@ -155,6 +155,7 @@ def _revert_one_op(
             "reason": "src_already_exists",
         }
 
+    backup_tmp: Optional[Path] = None
     try:
         src.parent.mkdir(parents=True, exist_ok=True)
         # Hotfix2 H6 : defense TOCTOU. Si src est apparu entre la verification
@@ -198,22 +199,86 @@ def _revert_one_op(
                 }
             # Hash identique : on retire le fichier present pour permettre move
             # (shutil.move sur Windows refuse l'ecrasement, on doit unlink).
+            # HOTFIX data-loss : on backup vers tmp AVANT unlink, et on restaure
+            # si shutil.move echoue ensuite (sinon perte definitive du fichier
+            # user meme s'il etait byte-identique au src originel).
+            backup_tmp = src.with_suffix(src.suffix + ".rollback_bak")
+            # Si un backup_tmp orphelin traine (ancien rollback interrompu),
+            # on le retire d'abord pour eviter conflit sur le rename.
+            if backup_tmp.exists():
+                try:
+                    backup_tmp.unlink()
+                except OSError as orphan_exc:
+                    _audit_log(
+                        audit_fn,
+                        "WARN",
+                        f"rollback_forward: orphan backup unlink FAILED op_id={op_id} "
+                        f"backup={backup_tmp}: {orphan_exc}",
+                    )
             try:
-                src.unlink()
+                # rename atomique src -> backup_tmp (preserve les donnees)
+                src.rename(backup_tmp)
             except OSError as unlink_exc:
                 _audit_log(
                     audit_fn,
                     "ERROR",
-                    f"rollback_forward: unlink dup src FAILED op_id={op_id} "
+                    f"rollback_forward: backup dup src FAILED op_id={op_id} "
                     f"src={src_path}: {unlink_exc}",
                 )
                 return {
                     "id": op_id,
                     "op_index": op_index,
                     "status": "FAILED",
-                    "reason": f"unlink_dup_src: {unlink_exc}",
+                    "reason": f"backup_dup_src: {unlink_exc}",
                 }
-        shutil.move(str(dst), str(src))
+        try:
+            shutil.move(str(dst), str(src))
+        except (OSError, PermissionError) as move_exc:
+            # HOTFIX data-loss : restauration du backup si on en a cree un.
+            # Si on a renomme src -> backup_tmp puis que shutil.move a echoue,
+            # le fichier user serait perdu sans cette restauration.
+            if backup_tmp is not None and backup_tmp.exists():
+                try:
+                    if not src.exists():
+                        backup_tmp.rename(src)
+                        _audit_log(
+                            audit_fn,
+                            "WARN",
+                            f"rollback_forward: move FAILED, backup restored op_id={op_id} "
+                            f"src={src_path}: {move_exc}",
+                        )
+                    else:
+                        # src reapparu (course rare) : on preserve le backup
+                        # sous le suffix .rollback_bak plutot que d'ecraser.
+                        _audit_log(
+                            audit_fn,
+                            "ERROR",
+                            f"rollback_forward: move FAILED and src reappeared op_id={op_id} "
+                            f"src={src_path}: backup preserved at {backup_tmp}: {move_exc}",
+                        )
+                except OSError as restore_exc:
+                    _audit_log(
+                        audit_fn,
+                        "ERROR",
+                        f"rollback_forward: backup restore FAILED op_id={op_id} "
+                        f"backup={backup_tmp} -> src={src_path}: {restore_exc} "
+                        f"(original move error: {move_exc})",
+                    )
+            raise
+        else:
+            # Move succes : on peut retirer le backup_tmp (les donnees du
+            # backup_tmp etaient identiques au contenu maintenant restaure
+            # depuis dst, hash deja verifie ligne ~174).
+            if backup_tmp is not None and backup_tmp.exists():
+                try:
+                    backup_tmp.unlink()
+                except OSError as cleanup_exc:
+                    _audit_log(
+                        audit_fn,
+                        "WARN",
+                        f"rollback_forward: backup cleanup FAILED op_id={op_id} "
+                        f"backup={backup_tmp}: {cleanup_exc} (non-fatal)",
+                    )
     except (OSError, PermissionError) as exc:
         _audit_log(
             audit_fn,
