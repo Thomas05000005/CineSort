@@ -288,11 +288,17 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
             row["warning_flags"] = [f for f in flags if str(f) not in ignored_codes]
             row["_ignored_alerts"] = list(ignored_codes)
 
-    # TMDb poster (taille w500 selon spec 06 §3.1)
-    tmdb_id = 0
+    # Fix R5 bug 2 (verify-r5) : resoudre le chosen tmdb_id AVANT de fetch
+    # poster + extras, sinon le Modal Film re-render avec les infos du candidat
+    # auto (candidates[0]) au lieu de celui choisi par l'utilisateur via
+    # set_film_tmdb_candidate. Le helper _resolve_chosen_tmdb_id applique la
+    # priorite canonique : row.chosen_tmdb_id (override) > row.tmdb_id (auto)
+    # > candidates[0].tmdb_id (fallback top match).
     candidates = row.get("candidates") or []
-    if candidates:
-        tmdb_id = int(candidates[0].get("tmdb_id") or 0)
+    chosen_tmdb_id = _resolve_chosen_tmdb_id(row, candidates)
+    tmdb_id = int(chosen_tmdb_id or 0)
+
+    # TMDb poster (taille w500 selon spec 06 §3.1) -> utilise le chosen tmdb_id
     poster_url = _fetch_poster_url(api, tmdb_id, size="w500") if tmdb_id > 0 else None
 
     # Fix audit 2026-05-25 (v1.5.4) Vague I : garantir UN SEUL candidat marque
@@ -303,7 +309,6 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     # deux etaient highlightes. On expose desormais un seul `chosen_tmdb_id`
     # canonique cote backend, et on annote chaque candidate avec `chosen: bool`
     # (un seul True garanti). Log warning si etat incoherent detecte.
-    chosen_tmdb_id = _resolve_chosen_tmdb_id(row, candidates)
     if isinstance(row, dict) and chosen_tmdb_id:
         row = dict(row)  # copie defensive (deja peut-etre copiee plus haut)
         row["chosen_tmdb_id"] = int(chosen_tmdb_id)
