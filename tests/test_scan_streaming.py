@@ -3,11 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 import cinesort.domain.scan_helpers as core_scan_helpers
-from unittest import mock
 
 
 class ScanStreamingTests(unittest.TestCase):

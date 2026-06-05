@@ -18,10 +18,10 @@ import unittest
 from pathlib import Path
 
 from cinesort.app.plugin_hooks import (
-    discover_plugins,
+    HOOK_EVENTS,
     _events_from_name,
     _run_plugin,
-    HOOK_EVENTS,
+    discover_plugins,
 )
 
 # Migration B (PR #257) : legacy frontend supprime.

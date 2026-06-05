@@ -205,7 +205,42 @@ def _revert_one_op(
             backup_tmp = src.with_suffix(src.suffix + ".rollback_bak")
             # Si un backup_tmp orphelin traine (ancien rollback interrompu),
             # on le retire d'abord pour eviter conflit sur le rename.
+            # REG-DATA-001 : avant d'unlink, on verifie que c'est bien un
+            # backup d'un rollback precedent (hash match expected_src_sha1)
+            # et PAS un fichier user portant fortuitement ce suffixe.
             if backup_tmp.exists():
+                orphan_is_safe = False
+                if expected_src_sha1:
+                    try:
+                        from cinesort.app.apply_core import sha1_quick
+
+                        orphan_sha1 = sha1_quick(backup_tmp)
+                        if orphan_sha1 and orphan_sha1 == expected_src_sha1:
+                            orphan_is_safe = True
+                    except (OSError, ImportError) as orphan_hash_exc:
+                        _audit_log(
+                            audit_fn,
+                            "WARN",
+                            f"rollback_forward: orphan backup hash check FAILED op_id={op_id} "
+                            f"backup={backup_tmp}: {orphan_hash_exc} — assume user file",
+                        )
+                if not orphan_is_safe:
+                    # Soit pas de hash de reference (op anterieure migration 013),
+                    # soit hash different : on REFUSE d'effacer un fichier user
+                    # potentiel. On abort cette op, le rollback de cette entree
+                    # est skipped (memo cohesion avec L194-198).
+                    _audit_log(
+                        audit_fn,
+                        "ERROR",
+                        f"rollback_forward: orphan backup present with unknown content op_id={op_id} "
+                        f"backup={backup_tmp} — refusing to unlink (potential user file), skipped",
+                    )
+                    return {
+                        "id": op_id,
+                        "op_index": op_index,
+                        "status": "SKIPPED",
+                        "reason": "orphan_backup_present",
+                    }
                 try:
                     backup_tmp.unlink()
                 except OSError as orphan_exc:

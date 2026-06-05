@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import inspect
 import logging
-import sqlite3
-from dataclasses import dataclass, replace
-from pathlib import Path
 import os
+import sqlite3
 import threading
 import time
 import traceback
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from cinesort.domain.run_models import RunSnapshot, RunStatus
@@ -210,6 +210,41 @@ class JobRunner:
             RunStatus.SAVED.value,
             RunStatus.AWAITING_VALIDATION.value,
         )
+
+    def _should_skip_terminal(
+        self,
+        run_id: str,
+        *,
+        should_cancel_fn: Optional[Callable[[], bool]] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """STATE-MACHINE-001 fix : decide si la transition terminale doit etre skippee.
+
+        Retourne `(skip, db_status_before)`.
+
+        Logique :
+        - Si la DB est dans un etat user-held (PAUSED/SAVED/AWAITING_VALIDATION),
+          on skippe normalement (protection C4 contre l'ecrasement par un
+          job_fn qui retournerait pendant que l'API pose PAUSE).
+        - SAUF si la cancellation a ete explicitement demandee par l'operateur
+          (`should_cancel_fn()` retourne True). Dans ce cas, l'intention
+          operateur prevaut : on autorise la transition CANCELLED meme si la
+          DB est PAUSED. Sans cette exception, annuler un run paused laisse
+          le run bloque en PAUSED a perpetuite (slot actif jamais libere).
+        """
+        db_status_before = self._current_db_status(run_id)
+        if not self._is_user_held_state(db_status_before):
+            return False, db_status_before
+        # Etat user-held detecte : on skippe SAUF si cancel explicite.
+        if should_cancel_fn is not None:
+            try:
+                if should_cancel_fn():
+                    return False, db_status_before
+            # except Exception : defensif, on retombe sur le skip protecteur
+            except Exception as exc:
+                self._debug(
+                    f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}"
+                )
+        return True, db_status_before
 
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
         if not self._active_run_id:
@@ -415,8 +450,16 @@ class JobRunner:
             # par l'API entre temps. Sans ce guard, `mark_run_done/cancelled`
             # ecrasait silencieusement l'etat operateur (le UPDATE repo n'a pas
             # de clause WHERE status pour des raisons de backward compat).
-            db_status_before = self._current_db_status(run_id)
-            if self._is_user_held_state(db_status_before):
+            #
+            # STATE-MACHINE-001 fix : la cancellation operateur explicite
+            # (request_cancel) DOIT prevaloir sur l'etat user-held. Sans cette
+            # exception, annuler un run paused laissait le run bloque en
+            # PAUSED a vie (slot actif jamais libere par le finally). On passe
+            # should_cancel au helper pour qu'il fasse le bypass.
+            skip_terminal, db_status_before = self._should_skip_terminal(
+                run_id, should_cancel_fn=should_cancel
+            )
+            if skip_terminal:
                 self._debug(
                     f"worker terminal transition SKIPPED — db_status={db_status_before} run_id={run_id}",
                     run_debug,
@@ -481,8 +524,25 @@ class JobRunner:
             # C4 fix (hotfix2) : meme guard que pour DONE/CANCELLED — un
             # crash worker ne doit pas ecraser un PAUSED persiste par l'API.
             # L'erreur reste tracee dans la table `errors` (insert_error).
-            db_status_before = self._current_db_status(run_id)
-            if self._is_user_held_state(db_status_before):
+            #
+            # STATE-MACHINE-001 fix : meme exception que dans le try — si
+            # l'operateur a demande l'annulation, on laisse le worker faire
+            # la transition (ici FAILED si erreur, sinon le bloc try aurait
+            # gere CANCELLED). On consulte le cancel_event directement via
+            # rt.cancel_event pour ne pas depender d'une closure should_cancel
+            # capturee plus haut (qui peut ne pas exister si l'exception a ete
+            # levee avant `should_cancel = self._should_cancel_factory(...)`).
+            def _cancel_check() -> bool:
+                with self._lock:
+                    rt_chk = self._runs.get(run_id)
+                    if not rt_chk:
+                        return False
+                    return rt_chk.cancel_event.is_set()
+
+            skip_terminal, db_status_before = self._should_skip_terminal(
+                run_id, should_cancel_fn=_cancel_check
+            )
+            if skip_terminal:
                 self._debug(
                     f"worker FAILED transition SKIPPED — db_status={db_status_before} run_id={run_id}",
                     run_debug,

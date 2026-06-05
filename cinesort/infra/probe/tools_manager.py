@@ -15,7 +15,6 @@ from cinesort.infra.probe.constants import (
 
 from .tooling import RunnerFn, default_runner
 
-
 _MIN_VERSIONS = {
     "ffprobe": "5.0",
     "mediainfo": "23.0",

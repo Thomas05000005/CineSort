@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # ---------------------------------------------------------------------------
 # Constantes canoniques
 # ---------------------------------------------------------------------------
@@ -597,10 +596,18 @@ def normalize_hierarchy_config(raw: Any) -> Dict[str, Any]:
         raw_section = raw.get(key)
         if isinstance(raw_section, dict):
             # Merge : user > default. Normalise les noms de tier.
+            # Les release groups (group_floors) sont insensibles a la casse :
+            # 'FraMeSToR', 'framestor', 'FRAMESTOR' sont equivalents cote config,
+            # coherent avec quality_score qui lowercase le release_group en input.
             for k, v in raw_section.items():
                 canonical_tier = normalize_tier_string(v)
                 if canonical_tier:
-                    out[key][str(k)] = canonical_tier
+                    canonical_key = (
+                        str(k).strip().lower()
+                        if key == "group_floors"
+                        else str(k)
+                    )
+                    out[key][canonical_key] = canonical_tier
 
     return out
 

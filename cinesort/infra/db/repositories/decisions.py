@@ -37,7 +37,6 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
 
-
 # ---------------------------------------------------------------------------
 # Constantes & helpers backward compat
 # ---------------------------------------------------------------------------

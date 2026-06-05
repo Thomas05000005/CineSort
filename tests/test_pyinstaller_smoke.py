@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+
 from tests._helpers import find_free_port as _find_free_port
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

@@ -407,11 +407,11 @@ def export_recyclarr_yaml(api: Any, profile_id: Optional[str] = None) -> Dict[st
     Retourne {ok, yaml, profile_id, profile_version}.
     """
     try:
-        from cinesort.ui.api import profiles_support_crud as _crud
         from cinesort.domain import (
             list_quality_presets,
             quality_profile_from_preset,
         )
+        from cinesort.ui.api import profiles_support_crud as _crud
 
         profile_json: Optional[Dict[str, Any]] = None
 

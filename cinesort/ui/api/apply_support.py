@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
+import logging
 import shutil
 import sqlite3
 import time
@@ -10,21 +12,17 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import logging
-
 import requests
-
-import cinesort.domain.core as core
-import cinesort.infra.state as state
-from cinesort.ui.api._validators import requires_valid_run_id
-from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 
 # Cf issue #83 : import direct au lieu de via re-export domain.core (qui cree un
 # cycle domain -> app). NB : find_duplicate_targets reste accede via core.X car
 # c'est un wrapper qui injecte 7 helpers internes de domain/core.py — pas un
 # simple re-export.
 import cinesort.app.plan_support as _plan_support_mod
+import cinesort.domain.core as core
 import cinesort.infra.plex_client as _plex_mod
+import cinesort.infra.state as state
+from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
 from cinesort.app.apply_core import sha1_quick_cached
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
@@ -38,8 +36,8 @@ from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -1106,10 +1104,39 @@ def _validate_apply(
         return _err_response(t("errors.plan_empty_or_missing"), category="state", level="warning", log_module=__name__)
 
     incoming = decisions if isinstance(decisions, dict) else {}
+    # Fix R6-02 : projette le tri-etat `decision` -> `ok` AVANT _merge_decisions
+    # et _normalize_decisions_for_rows, sinon un client API qui envoie
+    # `{decision: "accepted"}` sans `ok` voit tous ses films traites comme
+    # rejected (run_data_support.py:292 lit raw.get("ok", False)).
+    # Import tardif pour eviter un cycle au chargement du module.
+    try:
+        from cinesort.ui.api.run_flow_support import (
+            _project_decisions_ok_from_tri_state,
+        )
+        incoming = _project_decisions_ok_from_tri_state(incoming)
+    except ImportError:
+        # Environnement degrade : on continue sans projection (shape legacy
+        # {ok: bool} reste fonctionnelle, backward compat ABSOLUE).
+        pass
     disk_decisions = api._load_decisions_from_validation(run_paths)
     merged_decisions = api._merge_decisions(incoming, disk_decisions)
+    # NB : `decision_presence` (presence = any decided row, approved OR
+    # rejected) reste tel quel car _apply_rows_fn s'en sert pour distinguer
+    # "validation_absente" (pas decidee) de "user_rejected" (decidee mais
+    # ok=False). Changer sa semantique casserait apply_core.py:1296,1436.
     decision_presence = {key for key, value in merged_decisions.items() if isinstance(value, dict)}
     safe_decisions = api._normalize_decisions_for_rows(rows, merged_decisions)
+    # Fix R6-04 : pour le pre-check espace disque, on ne sommerait que les
+    # films APPROUVES (ok=True). Sinon estimate_apply_size inclut les
+    # rejected/deferred (cf disk_space_check.py:67-77) et peut faussement
+    # refuser un apply avec "Espace disque insuffisant" sur un run a 990
+    # rejected + 10 approved. Calcule apres _normalize_decisions_for_rows
+    # qui resout le tri-etat (les decisions deferred deviennent ok=False).
+    approved_keys = {
+        key
+        for key, value in safe_decisions.items()
+        if isinstance(value, dict) and value.get("ok") is True
+    }
     try:
         state.atomic_write_json(run_paths.validation_json, safe_decisions)
     except (OSError, PermissionError) as exc:
@@ -1120,7 +1147,7 @@ def _validate_apply(
     # des fichiers a deplacer (avec marge 10%). Evite l'apply qui s'arrete a
     # mi-parcours, laissant DB/FS dans un etat partiel (cf CR-1).
     if not dry_run:
-        ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, decision_presence)
+        ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, approved_keys)
         if not ok_disk:
             _disk_msg = disk_info.get("message") or t("errors.disk_space_insufficient")
             log_fn("ERROR", _disk_msg)
@@ -1884,8 +1911,15 @@ def apply_changes(
     # locaux (avant ce fix, un crash inattendu laissait le slot bloque).
     with api._apply_slot_guard(run_id) as acquired:
         if not acquired:
+            # R6-HTTP409-001 : conflit de concurrence (slot deja occupe) ->
+            # HTTP 409 (opt-in Phase 11 v7.8.0). Backward compat : data.ok=false
+            # reste inchange, seul le code HTTP change.
             return _err_response(
-                t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
             )
         return _apply_changes_body(
             api,
@@ -2273,8 +2307,15 @@ def build_apply_preview(
     # — leak permanent du run_id).
     with api._apply_slot_guard(run_id) as acquired:
         if not acquired:
+            # R6-HTTP409-001 : conflit de concurrence (slot deja occupe) ->
+            # HTTP 409 (opt-in Phase 11 v7.8.0). Backward compat : data.ok=false
+            # reste inchange, seul le code HTTP change.
             return _err_response(
-                t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
             )
         return _build_apply_preview_body(
             api,

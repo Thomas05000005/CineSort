@@ -59,6 +59,9 @@ def reset_reconciliation_cache_for_tests() -> None:
     # un test suivant (Event jamais sette suite a un crash).
     with _INIT_IN_PROGRESS_LOCK:
         _INIT_IN_PROGRESS.clear()
+    # v1.3 SQLite cloud-sync warning : reset la dedup des notifications cloud
+    # pour qu'un test puisse re-verifier la publication apres reset.
+    _CLOUD_SYNC_NOTIFIED_STATE_DIRS.clear()
 
 
 def state_dir_key(state_dir: Path) -> str:
@@ -80,6 +83,63 @@ def run_paths_for(state_dir: Path, run_id: str, *, ensure_exists: bool) -> state
         summary_txt=run_dir / "summary.txt",
         validation_json=run_dir / "validation.json",
     )
+
+
+# v1.3 : un seul warning UI par session par state_dir pour eviter de spammer
+# la cloche notifications a chaque create/refresh d'infra. La detection cote
+# store est elle-meme idempotente (juste un attribut), mais la publication
+# UI doit etre throttlee.
+_CLOUD_SYNC_NOTIFIED_STATE_DIRS: set = set()
+
+
+def _publish_cloud_sync_warning_if_any(api: Any, store: SQLiteStore, state_dir_id: str) -> None:
+    """v1.3 SQLite cloud-sync warning : publie une notification UI persistante
+    (non-bloquante) si la DB est posee dans un dossier de synchronisation cloud.
+
+    Le store a deja logue un WARNING dans cinesort.log au moment de
+    l'instanciation (cf. SQLiteStore.__init__). On expose ici un dialog non-
+    bloquant via le notification center : niveau "warning", categorie "system",
+    deduplique par state_dir pour ne pas spammer la cloche a chaque appel a
+    get_or_create_infra (qui peut etre tres frequent en UI).
+
+    Pattern symetrique a _publish_integrity_notification_if_any. Tolerant :
+    toute erreur d'import ou de publication est ignoree (best effort).
+    """
+    provider = getattr(store, "cloud_sync_provider", None)
+    if not provider:
+        return
+    if state_dir_id in _CLOUD_SYNC_NOTIFIED_STATE_DIRS:
+        return
+    title = "Base SQLite dans un dossier cloud"
+    body = (
+        f"La base est posee dans un dossier synchronise ({provider}). "
+        "Risque de corruption silencieuse : le moteur de sync peut copier le "
+        "fichier .sqlite alors que des pages sont encore dans le -wal ou "
+        "-shm. Recommandation : deplacer la DB vers "
+        "%LOCALAPPDATA%\\CineSort\\db\\ ou exclure .sqlite/.sqlite-wal/"
+        ".sqlite-shm de la synchronisation. Voir docs/TROUBLESHOOTING.md "
+        "section 8."
+    )
+    try:
+        add_notification(
+            api,
+            event_type="db_cloud_sync",
+            title=title,
+            body=body,
+            level="warning",
+            category="system",
+            data={
+                "provider": provider,
+                "db_path": str(getattr(store, "db_path", "")),
+            },
+        )
+        _CLOUD_SYNC_NOTIFIED_STATE_DIRS.add(state_dir_id)
+        _logger.warning(
+            "v1.3: notification UI publiee — DB SQLite dans dossier cloud (%s)",
+            provider,
+        )
+    except Exception as exc:
+        _logger.warning("v1.3: publication notification cloud-sync echouee: %s", exc)
 
 
 def _publish_integrity_notification_if_any(api: Any, store: SQLiteStore) -> None:
@@ -216,10 +276,35 @@ def get_or_create_infra(
         resolved_db_path = db_path_for_state_dir(state_dir)
         db_local_guard(resolved_db_path)
 
+        # PRAGMA-01 fix : lire le settings storage_profile_override AVANT
+        # d'instancier le store pour propager le choix utilisateur (auto /
+        # local_ssd / nas_smb) au PRAGMA profile applique aux connexions
+        # SQLite. Sans ce kwarg, SQLiteStore autodetectait systematiquement
+        # via detect_storage_type, ignorant le selecteur de l'UI Settings.
+        # Tolerant : tout echec de lecture retombe sur None (autodetect).
+        pragma_profile_kwarg: Optional[str] = None
+        try:
+            from cinesort.ui.api.settings_support import (
+                _normalize_storage_profile,
+                read_settings,
+            )
+
+            _settings_for_profile = read_settings(state_dir)
+            _override = _normalize_storage_profile(
+                _settings_for_profile.get("storage_profile_override")
+            )
+            pragma_profile_kwarg = None if _override == "auto" else _override
+        except Exception as exc:
+            _logger.debug(
+                "PRAGMA-01: lecture storage_profile_override echouee (autodetect): %s",
+                exc,
+            )
+
         store = SQLiteStore(
             resolved_db_path,
             busy_timeout_ms=8000,
             debug_logger=_sqlite_debug,
+            pragma_profile_name=pragma_profile_kwarg,
         )
         version = store.initialize()
         _sqlite_debug(f"SQLite initialized at {store.db_path}, schema version={version}")
@@ -229,6 +314,12 @@ def get_or_create_infra(
         # center au prochain affichage). Independant de la reconciliation, car
         # peut arriver meme sans pending_moves.
         _publish_integrity_notification_if_any(api, store)
+
+        # v1.3 SQLite cloud-sync warning : si la DB est dans un dossier
+        # synchronise (OneDrive/Dropbox/GDrive/iCloud/Box/pCloud/Mega), publier
+        # un dialog non-bloquant dans le notification center. Deduplique par
+        # state_dir pour ne pas spammer la cloche.
+        _publish_cloud_sync_warning_if_any(api, store, key)
 
         # CR-1 audit QA 20260429 : reconciliation des moves orphelins au 1er boot
         # de chaque state_dir. Si un crash a interrompu un apply precedent, on

@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK_FULL
+
 from .constants import (
     AUDIO_WEIGHT_CLIPPING,
     AUDIO_WEIGHT_CREST,
@@ -41,8 +43,6 @@ from .constants import (
     TP_CLIPPING,
     TP_MAX,
 )
-from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK_FULL
-
 from .ffmpeg_runner import run_ffmpeg_text
 from .models import AudioPerceptual
 
@@ -452,6 +452,7 @@ def analyze_audio_perceptual(
                 duration_s=float(duration_s or 0.0),
                 fpcalc_path=fpcalc,
                 ffmpeg_path=ffmpeg_path or None,
+                track_index=idx,
             )
             if fp:
                 result.audio_fingerprint = fp

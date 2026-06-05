@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from contextlib import closing
+import json
 import shutil
 import sqlite3
 import tempfile
 import threading
 import time
-import json
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-import cinesort.ui.api.cinesort_api as backend
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
+import cinesort.ui.api.cinesort_api as backend
 from cinesort.ui.api import cinesort_api as api_mod
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_terminal

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 
 class ReleaseHygieneTests(unittest.TestCase):
@@ -236,6 +236,7 @@ class RecordApplyOpTests(unittest.TestCase):
 
     def test_returns_false_on_failure_and_logs(self) -> None:
         import logging
+
         from cinesort.app.apply_core import record_apply_op
 
         def _broken_recorder(_data: dict) -> None:

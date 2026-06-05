@@ -221,7 +221,13 @@ def analyze_quality_batch(
         return _err_response(t("errors.no_rows_for_quality"), category="state", level="info", log_module=__name__)
 
     if not api._acquire_quality_batch_slot(run_id):
-        return _err_response(t("errors.quality_already_running"), category="state", level="info", log_module=__name__)
+        return _err_response(
+            t("errors.quality_already_running"),
+            category="state",
+            level="info",
+            log_module=__name__,
+            http_status=409,
+        )
 
     try:
         # V5-04 : pre-warm cache probe en parallele AVANT le scoring serie.

@@ -30,7 +30,6 @@ sys.path.insert(0, ".")
 from cinesort.infra.db.connection import connect_sqlite
 from cinesort.infra.db.migration_manager import MigrationManager
 
-
 _REAL_MIG_DIR = Path("cinesort/infra/db/migrations")
 
 

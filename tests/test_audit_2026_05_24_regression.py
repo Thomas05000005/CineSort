@@ -26,7 +26,6 @@ from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.facades import runtime_facade
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 
 

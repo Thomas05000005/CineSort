@@ -5,13 +5,13 @@ Parsing CSV (Letterboxd, IMDb), normalisation titres, matching titre+annee.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import logging
 import re
 import unicodedata
 from typing import Any, Dict, List
-import contextlib
 
 logger = logging.getLogger("cinesort.watchlist")
 

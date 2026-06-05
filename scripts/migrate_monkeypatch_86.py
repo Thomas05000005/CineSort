@@ -37,7 +37,6 @@ import re
 import sys
 from pathlib import Path
 
-
 # Pattern setUp : 2 lignes
 # (indentation) self._<name> = core.MIN_VIDEO_BYTES
 # (indentation) core.MIN_VIDEO_BYTES = <value>

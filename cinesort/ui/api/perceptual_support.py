@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
 from cinesort.domain.i18n_messages import t
-from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual
 from cinesort.domain.perceptual.av1_grain_metadata import extract_av1_film_grain_params
 from cinesort.domain.perceptual.comparison import build_comparison_report, compare_per_frame
@@ -46,6 +45,7 @@ from cinesort.domain.perceptual.upscale_detection import (
     compute_fft_hf_ratio_median,
 )
 from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
+from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
 from cinesort.infra.subprocess_safety import tracked_run
 from cinesort.ui.api._responses import err as _err_response
@@ -166,6 +166,21 @@ def _validate_and_load_context(
             for k in ("audio_fingerprint", "ssim_self_ref", "upscale_verdict", "spectral_cutoff_hz", "lossy_verdict"):
                 if k in existing and existing[k] is not None:
                     metrics[k] = existing[k]
+            # R6-PERC-CACHE-HIT-VOCAB : applique le meme dispatch V1/V2 que le
+            # chemin non-cache (cf lignes 482-505) pour eviter que le cache_hit
+            # expose le vocabulaire V1 (reference/excellent/bon/mediocre/degrade)
+            # alors que VN-B.1 a promu V2 (Platinum/Gold/Silver/Bronze/Reject)
+            # comme source de verite par defaut (composite_score_version=2).
+            score_version = _normalize_composite_score_version(settings.get("composite_score_version"))
+            metrics["composite_score_version"] = score_version
+            if score_version == 2:
+                v2_score = existing.get("global_score_v2")
+                v2_tier = existing.get("global_tier_v2")
+                if v2_score is not None and v2_tier:
+                    metrics["global_score"] = int(round(float(v2_score)))
+                    metrics["global_tier"] = str(v2_tier)
+                else:
+                    metrics["composite_score_version"] = 1
             return {"ok": True, "cache_hit": True, "perceptual": metrics}
 
     state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)

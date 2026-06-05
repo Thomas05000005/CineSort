@@ -35,7 +35,6 @@ from cinesort.app.apply_core import apply_rows
 from cinesort.ui.api.cinesort_api import RunState
 from cinesort.ui.api.run_flow_support import _get_status_impl
 
-
 # ---------------------------------------------------------------------------
 # Helpers : construction minimale de PlanRow / Config / RunState
 # ---------------------------------------------------------------------------

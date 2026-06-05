@@ -720,7 +720,28 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             return
 
         # Fichiers statiques du dashboard distant
-        if clean == _DASHBOARD_PREFIX or path.startswith(_DASHBOARD_PREFIX + "/"):
+        # FIX bug CSS 2026-06-05 : "/dashboard" (sans slash final) doit rediriger
+        # vers "/dashboard/" (avec slash) pour que le navigateur resolve correctement
+        # les chemins relatifs des assets dans index.html (./styles.css, ./app.js, etc.).
+        # Sans cette redirection, ./styles.css est resolu en /styles.css (au lieu de
+        # /dashboard/styles.css) car la base URL "/dashboard" n'a pas de segment final,
+        # donc le navigateur retombe sur la racine "/" et tous les assets renvoient 404
+        # (page HTML brute sans CSS).
+        # On compare sur `path` (et non `clean`) car `clean = path.rstrip("/")`
+        # supprimerait le slash final qui distingue justement les 2 cas.
+        if path == _DASHBOARD_PREFIX:
+            # Preserver la query string eventuelle
+            query = ""
+            if "?" in self.path:
+                query = "?" + self.path.split("?", 1)[1]
+            self.send_response(301)
+            self.send_header("Location", _DASHBOARD_PREFIX + "/" + query)
+            self.send_header("Content-Length", "0")
+            self._send_cors_headers()
+            self._send_request_id_header()
+            self.end_headers()
+            return
+        if path == _DASHBOARD_PREFIX + "/" or path.startswith(_DASHBOARD_PREFIX + "/"):
             self._serve_dashboard_file(path.split("?")[0])
             return
 
@@ -1150,8 +1171,39 @@ class RestApiServer:
         accumules sous l'ancien token.
 
         No-op si le serveur n'est pas demarre (handler_cls est None).
+
+        R2-LAN-TOKEN-BYPASS-HOT-SWAP : si le serveur ecoute reellement sur 0.0.0.0
+        (exposition LAN), on REFUSE le hot-swap vers un token plus court que
+        MIN_LAN_TOKEN_LENGTH. Sans cette garde, un utilisateur pourrait demarrer
+        avec un token long (passant la validation __init__), puis sauvegarder un
+        token court via les settings : le bind 0.0.0.0 resterait actif avec un
+        token faible, contournant silencieusement la protection lan_demoted.
+        L'utilisateur doit restart avec une config valide.
         """
         new_token = str(new_token or "")
+        # Garde anti-bypass LAN : si on ecoute sur 0.0.0.0 et le nouveau token
+        # est trop court, on refuse le swap (ne pas degrader la posture de
+        # securite d'un serveur deja expose au LAN).
+        # DPAPI-R6-02 : EXCEPTION kill-switch — un token vide ("") est une
+        # invalidation volontaire (rotation post-compromission). L'invalidation
+        # immediate est plus prioritaire que la garde anti-degradation : on
+        # autorise toujours le hot-swap vers "" meme sur 0.0.0.0.
+        if (
+            new_token
+            and self._host == "0.0.0.0"
+            and len(new_token) < self.MIN_LAN_TOKEN_LENGTH
+        ):
+            logger.warning(
+                "REST: hot-swap du token REFUSE — le serveur ecoute sur 0.0.0.0 "
+                "(exposition LAN) et le nouveau token est trop court "
+                "(%d caracteres, minimum %d). Token et bind inchanges. "
+                "Pour appliquer ce token, redemarrez le serveur avec une "
+                "configuration valide (token >= %d caracteres ou bind 127.0.0.1).",
+                len(new_token),
+                self.MIN_LAN_TOKEN_LENGTH,
+                self.MIN_LAN_TOKEN_LENGTH,
+            )
+            return
         self._token = new_token
         if self._handler_cls is not None:
             self._handler_cls.auth_token = new_token
@@ -1159,7 +1211,14 @@ class RestApiServer:
             # pas heriter des bans accumules sous l'ancien token.
             with contextlib.suppress(Exception):
                 self._rate_limiter.reset()
-            logger.info("REST: auth token hot-swapped (len=%d)", len(new_token))
+            if not new_token:
+                logger.warning(
+                    "REST: token REST efface — auth desactivee (kill-switch)"
+                )
+            else:
+                logger.info(
+                    "REST: auth token hot-swapped (len=%d)", len(new_token)
+                )
 
     def join(self) -> None:
         """Block until the server thread ends (standalone mode)."""

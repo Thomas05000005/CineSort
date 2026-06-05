@@ -30,7 +30,6 @@ import cinesort.domain.core as core_mod
 import cinesort.domain.naming as naming_mod
 import cinesort.ui.api.dashboard_support as dashboard_support
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = REPO_ROOT / "web" / "dashboard"
 

@@ -34,7 +34,6 @@ from cinesort.app.apply_batches_reconciliation import (
 )
 from tests._helpers import existing_db_fixture
 
-
 # ---------------------------------------------------------------------------
 # Shim store : expose `_managed_conn()` context-manager autour d'une sqlite3
 # connection. C'est le seul attribut de SQLiteStore utilise par le module.

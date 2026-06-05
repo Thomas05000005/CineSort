@@ -193,6 +193,14 @@ def _act_score_mult(result, value, reason):
 
 def _act_force_score(result, value, reason):
     # _clamp gere maintenant le rounding et la validation (mega-hotfix #2)
+    # Bug fix: refuser silencieusement les valeurs non-numeriques au lieu de
+    # forcer le score a 0 (ce qui ferait tomber tout film en Reject sans
+    # avertissement). On preserve le score existant et on logge un warning.
+    if _num_strict(value) is _MISSING:
+        logger.warning(
+            "custom_rules: force_score ignored, non-numeric value=%r", value
+        )
+        return
     new = _clamp(value)
     result["score"] = new
     if reason:
@@ -200,11 +208,20 @@ def _act_force_score(result, value, reason):
 
 
 def _act_force_tier(result, value, reason):
-    tier = str(value or "").strip()
+    # Normalisation defensive : seul un tier canonique connu
+    # (Platinum/Gold/Silver/Bronze/Reject) est accepte. Une chaine inconnue
+    # serait propagee jusqu'au consommateur UI et bypasserait les invariants
+    # de _cap_tier (probe FAILED <= Silver, CAM <= Bronze). Import local pour
+    # eviter un cycle avec quality_score.
+    from .tiers_helpers import normalize_tier_string
+
+    tier = normalize_tier_string(value)
     if tier:
         result["force_tier"] = tier
         if reason:
             result["reasons"].append(f">{tier} {reason}")
+    else:
+        logger.warning("custom_rules: force_tier ignored, invalid tier=%r", value)
 
 
 def _act_cap_max(result, value, reason):
@@ -367,6 +384,20 @@ def _validate_action(action: Any, rule_idx: int) -> Tuple[bool, List[str], Dict[
         errs.append(f"Regle {rule_idx + 1}: type d'action '{atype}' inconnu")
         return False, errs, {}
     value = action.get("value")
+    # Validation amont pour force_tier : refus du profil si tier inconnu
+    # (sinon bypass de _cap_tier downstream, cf invariants probe FAILED/CAM).
+    if atype == "force_tier":
+        from .tiers_helpers import normalize_tier_string
+
+        canonical = normalize_tier_string(value)
+        if not canonical:
+            errs.append(
+                f"Regle {rule_idx + 1}: force_tier value '{value}' inconnu "
+                f"(attendu Platinum/Gold/Silver/Bronze/Reject)"
+            )
+            return False, errs, {}
+        # Stocke la forme canonique uniquement
+        value = canonical
     reason = _truncate_str(action.get("reason"), MAX_REASON_LEN)
     return True, [], {"type": atype, "value": value, "reason": reason}
 

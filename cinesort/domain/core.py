@@ -39,26 +39,30 @@ logger = logging.getLogger(__name__)
 import cinesort.domain.duplicate_support as core_duplicate_support
 from cinesort.domain.confidence_thresholds import (
     CONF_HIGH as _CONF_HIGH,
+)
+from cinesort.domain.confidence_thresholds import (
     CONF_MEDIUM as _CONF_MEDIUM,
 )
 from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
+)
+from cinesort.domain.scan_helpers import (
     iter_videos,
 )
 from cinesort.domain.title_helpers import (
+    ProviderTags,
     _expand_tmdb_queries,
     _extract_trailing_sequel_num,
+    _norm_for_tokens,
     _title_similarity,
     _tmdb_prefix_equivalent,
-    _norm_for_tokens,
     clean_title_guess,
     extract_provider_tags,
     extract_year,
     infer_name_year,
-    ProviderTags,
     strip_provider_tags,
-    title_prefix_before_parenthesized_year,
     title_match_score,
+    title_prefix_before_parenthesized_year,
     tokens,
 )
 
@@ -791,6 +795,12 @@ def build_candidates_from_name(
     # On ne l'emet que si on a aussi pu deduire un titre/annee de base (pour
     # permettre le cross-check de similarite cote app), sinon on degrade
     # gracieusement vers les Candidates classiques.
+    # REG-TAGS-03 : tant que la verification TMDb (tmdb.find_by_tmdb_id) n'est
+    # pas cablee cote app (cf _augment_candidates_from_name_tags actuellement
+    # code mort), on ne peut PAS faire confiance aveuglement au tag : un dossier
+    # malicieux/errone `{tmdb-999999999}` injecterait un faux match deterministe
+    # dominant. On degrade donc gracieusement le score a 0.72 (niveau d'un
+    # name+year+folder_y match) jusqu'a ce que la verification soit cablee.
     if tmdb_id_from_tag and t:
         note_bits = []
         if folder_tags.tmdb_id:
@@ -805,7 +815,7 @@ def build_candidates_from_name(
                 year=y,
                 source="name_tag",
                 tmdb_id=tmdb_id_from_tag,
-                score=0.98,
+                score=0.72,
                 note=", ".join(note_bits),
             )
         )
@@ -1220,6 +1230,12 @@ def compute_confidence(
             score -= 8  # P1.1.b : NFO valide côté folder XOR filename, suspicion
     elif chosen.source == "tmdb":
         score += 48
+    elif chosen.source in ("name_tag", "name_tmdb", "name_imdb"):
+        # REG-TAGS-04 : un tag provider explicite dans le nom (dossier ou fichier)
+        # est une intention utilisateur deterministe. On le traite comme un match
+        # high-confidence (entre nfo_ok=65 et tmdb=48) car l'utilisateur a
+        # explicitement annote le contenu avec un ID provider.
+        score += 60
     else:
         score += 45
 
@@ -1229,7 +1245,7 @@ def compute_confidence(
     if consensus_bonus is not None and consensus_bonus > 0.0:
         score += int(min(0.10, consensus_bonus) * 40)
 
-    if chosen.source == "name" and chosen.year:
+    if chosen.source in ("name", "name_tag") and chosen.year:
         score += 5
 
     if year_delta_reject:

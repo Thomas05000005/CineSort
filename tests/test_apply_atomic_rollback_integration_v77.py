@@ -406,6 +406,7 @@ class ApplyChangesBackwardCompatTests(unittest.TestCase):
     def test_signature_accepts_apply_atomic_kwarg(self) -> None:
         """`apply_atomic` est un kwarg accepte par apply_changes."""
         import inspect
+
         from cinesort.ui.api import apply_support
 
         sig = inspect.signature(apply_support.apply_changes)
@@ -415,6 +416,7 @@ class ApplyChangesBackwardCompatTests(unittest.TestCase):
 
     def test_signature_run_facade_apply_accepts_atomic(self) -> None:
         import inspect
+
         from cinesort.ui.api.facades.run_facade import RunFacade
 
         sig = inspect.signature(RunFacade.apply)
@@ -423,6 +425,7 @@ class ApplyChangesBackwardCompatTests(unittest.TestCase):
 
     def test_signature_apply_impl_accepts_atomic(self) -> None:
         import inspect
+
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         sig = inspect.signature(CineSortApi._apply_impl)

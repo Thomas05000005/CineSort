@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 import logging
+from dataclasses import asdict
 from typing import Any, Dict, List
 
 import cinesort.domain.core as core
@@ -296,9 +296,23 @@ def normalize_decisions_for_rows(
         year = clamp_year(year_raw)
         if year == 0:
             year = clamp_year(int(row.proposed_year or 0))
-        safe[row.row_id] = {
+        entry: Dict[str, Any] = {
             "ok": ok,
             "title": title,
             "year": year,
         }
+        # Fix R6-03 : preserver le tri-etat `decision` lors du round-trip
+        # disque vers validation.json. Sans cela, l'etat `deferred` (Reporter)
+        # est perdu apres save+reload et redevient indistinguable d'un
+        # `rejected` (ok=false). Backward compat : on n'ajoute la cle que si
+        # la valeur entrante est valide dans {accepted, rejected, deferred} ;
+        # sinon on garde la shape legacy `{ok, title, year}`.
+        decision_raw = raw.get("decision")
+        if isinstance(decision_raw, str) and decision_raw in (
+            "accepted",
+            "rejected",
+            "deferred",
+        ):
+            entry["decision"] = decision_raw
+        safe[row.row_id] = entry
     return safe

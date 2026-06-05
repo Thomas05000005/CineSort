@@ -472,14 +472,37 @@ class OmdbClient:
         # Test avec un IMDb id connu (tt0111161 = The Shawshank Redemption).
         # On fait l'appel HTTP DIRECTEMENT (pas via find_by_imdb_id) pour capter
         # le status code et les headers OMDb (X-RateLimit-*) que _http_get masque.
+        # Fix bug 2026-06-05 : on passe par self._breaker.call(_do_get) avec
+        # raise_for_status() pour que les 429 ouvrent bien le circuit (comme
+        # _http_get), sinon un user qui spamme "Tester" sur quota epuise envoie
+        # 1 req/s sans jamais ouvrir le breaker. Inversement, breaker deja
+        # ouvert renvoie immediatement error_code='quota' sans toucher au reseau.
         params = {"i": "tt0111161", "apikey": self.api_key}
         self._rate_limit_wait()
-        try:
-            response = self._session.get(
+
+        def _do_get() -> requests.Response:
+            resp = self._session.get(
                 OMDB_API_BASE,
                 params=params,
                 timeout=self.timeout_s,
             )
+            resp.raise_for_status()
+            return resp
+
+        try:
+            response = self._breaker.call(_do_get)
+        except CircuitOpenError:
+            # Circuit deja ouvert (5+ echecs recents : quota ou panne OMDb).
+            # On ne touche pas au reseau et on retourne immediatement le code
+            # 'quota' (cas le plus probable d'ouverture sur OMDb).
+            return {
+                "ok": False,
+                "message": "Quota depasse pour aujourd'hui",
+                "error_code": "quota",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
         except requests.Timeout:
             return {
                 "ok": False,
@@ -488,6 +511,42 @@ class OmdbClient:
                 "quota_remaining": None,
                 "quota_limit": None,
                 "quota_reset_at": None,
+            }
+        except requests.HTTPError as exc:
+            # raise_for_status a leve : on a une reponse attachee avec status
+            # et headers (notamment X-RateLimit-* sur 429).
+            response = getattr(exc, "response", None)
+            headers = getattr(response, "headers", {}) or {}
+            quota_remaining = _parse_quota_int(headers.get("X-RateLimit-Remaining"))
+            quota_limit = _parse_quota_int(headers.get("X-RateLimit-Limit"))
+            quota_reset_at = headers.get("X-RateLimit-Reset") or None
+            status = int(getattr(response, "status_code", 0) or 0)
+
+            if status == 401:
+                return {
+                    "ok": False,
+                    "message": "Cle API invalide",
+                    "error_code": "auth",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            if status == 429:
+                return {
+                    "ok": False,
+                    "message": "Quota depasse pour aujourd'hui",
+                    "error_code": "quota",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            return {
+                "ok": False,
+                "message": f"Erreur HTTP {status}" if status else "Erreur HTTP",
+                "error_code": "network",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
             }
         except requests.RequestException as exc:
             logger.debug("omdb test_connection network error: %s", exc)
@@ -500,41 +559,11 @@ class OmdbClient:
                 "quota_reset_at": None,
             }
 
-        # Capture des headers de quota (présents sur réponse 2xx OU 429)
+        # 2xx (raise_for_status n'a pas leve) — capture des headers de quota
         headers = getattr(response, "headers", {}) or {}
         quota_remaining = _parse_quota_int(headers.get("X-RateLimit-Remaining"))
         quota_limit = _parse_quota_int(headers.get("X-RateLimit-Limit"))
         quota_reset_at = headers.get("X-RateLimit-Reset") or None
-
-        status = int(getattr(response, "status_code", 0) or 0)
-
-        if status == 401:
-            return {
-                "ok": False,
-                "message": "Cle API invalide",
-                "error_code": "auth",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
-        if status == 429:
-            return {
-                "ok": False,
-                "message": "Quota depasse pour aujourd'hui",
-                "error_code": "quota",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
-        if status >= 400:
-            return {
-                "ok": False,
-                "message": f"Erreur HTTP {status}",
-                "error_code": "network",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
 
         # 2xx — parser le body. OMDb peut renvoyer 200 + Response=False
         # quand la clé est invalide (selon version). On gère ce cas.

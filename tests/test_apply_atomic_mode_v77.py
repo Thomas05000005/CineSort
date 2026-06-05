@@ -28,8 +28,7 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from cinesort.infra.db.migration_manager import MigrationManager
-from tests._helpers import existing_db_fixture, _project_migrations_dir
-
+from tests._helpers import _project_migrations_dir, existing_db_fixture
 
 MIGRATION_FILENAME = "029_apply_atomic_mode.sql"
 TARGET_VERSION = 29

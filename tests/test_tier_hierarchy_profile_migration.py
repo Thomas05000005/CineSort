@@ -28,7 +28,6 @@ from cinesort.domain.tiers_helpers import (
     normalize_hierarchy_config,
 )
 
-
 # Profil V1.5.7 typique (sauvegarde avant VP-B), pre-hierarchy.
 _LEGACY_PROFILE_V157 = {
     "id": "CinemaLux_Legacy_v1",

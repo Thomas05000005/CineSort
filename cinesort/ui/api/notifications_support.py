@@ -23,6 +23,7 @@ Thread-safe: tous les acces passent par _lock.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import threading
@@ -30,7 +31,6 @@ import time
 import uuid
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
-import contextlib
 
 logger = logging.getLogger(__name__)
 

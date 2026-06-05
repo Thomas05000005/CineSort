@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from typing import Dict
 
-
 # Score >= CONF_HIGH      -> label "high"  (UI: Haute / Elevee)
 CONF_HIGH: int = 85
 # CONF_MEDIUM <= score < CONF_HIGH -> label "med" (UI: Moyenne)

@@ -20,7 +20,6 @@ from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
-
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
 # 10% de delta gère les films courts ; 8 min évite de flaguer les remaster/director-cut mineurs.
 _NFO_RUNTIME_MISMATCH_PCT_THRESHOLD = 0.10
@@ -192,7 +191,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 ):
                     probe_quality = str(existing_metrics.get("probe_quality") or "UNKNOWN")
                     confidence, explanation = _extract_confidence_and_explanation(existing_metrics)
-                    return {
+                    cached_result = {
                         "ok": True,
                         **existing,
                         "probe_quality": probe_quality,
@@ -204,6 +203,26 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                         "skipped_existing": True,
                         "media_path": "",
                     }
+                    # R6-QUAL-CACHE-HIT-NO-PERCEPTUAL : enrichir aussi le cache hit
+                    # pour garantir que `result.perceptual` est present sur les 2 chemins
+                    # (sinon le frontend voit un drift apres reload de page).
+                    try:
+                        settings_cached = api.settings.get_settings() if api else {}
+                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                        settings_cached = {}
+                    score_version_cached = _normalize_composite_score_version(
+                        settings_cached.get("composite_score_version")
+                        if isinstance(settings_cached, dict)
+                        else None
+                    )
+                    enrich_quality_report_with_perceptual(
+                        store,
+                        run_id,
+                        row_id,
+                        cached_result,
+                        composite_score_version=score_version_cached,
+                    )
+                    return cached_result
 
         rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
         row = next((item for item in rows if str(item.row_id) == str(row_id)), None)

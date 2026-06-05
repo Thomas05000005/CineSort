@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional, TypeVar
 
 from .constants import (

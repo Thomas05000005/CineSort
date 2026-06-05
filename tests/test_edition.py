@@ -15,14 +15,14 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 
+from cinesort.domain.duplicate_support import movie_key
 from cinesort.domain.edition_helpers import extract_edition, strip_edition
 from cinesort.domain.naming import (
+    _KNOWN_VARS,
     build_naming_context,
     format_movie_folder,
     validate_template,
-    _KNOWN_VARS,
 )
-from cinesort.domain.duplicate_support import movie_key
 
 # Migration B (PR #257) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard
@@ -267,8 +267,8 @@ class EditionIntegrationTests(unittest.TestCase):
 
     def test_strip_then_clean_title(self) -> None:
         """strip_edition + clean_title_guess ne laisse pas de residus edition."""
-        from cinesort.domain.edition_helpers import strip_edition
         import cinesort.domain.core as core
+        from cinesort.domain.edition_helpers import strip_edition
 
         stripped = strip_edition("Inception.Directors.Cut.2010.1080p.BluRay.x264")
         cleaned = core.clean_title_guess(stripped)

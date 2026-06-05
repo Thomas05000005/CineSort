@@ -7,6 +7,7 @@ supprimer un log ni lever d'exception.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import unittest
@@ -17,7 +18,6 @@ from cinesort.infra.log_scrubber import (
     reset_for_tests,
     scrub_secrets,
 )
-import contextlib
 
 
 class ScrubSecretsFunctionTests(unittest.TestCase):

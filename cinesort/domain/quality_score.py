@@ -3,39 +3,54 @@ from __future__ import annotations
 import copy
 import logging
 import re
+
 # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : import top-level
 # pour permettre aux helpers (_estimate_file_size, _build_invalid_profile_result,
 # _apply_custom_rules_helper, _build_quality_metrics_helper, _merge_probe_with_name_hints)
 # d'accepter aussi un NormalizedProbe @dataclass passe directement. Le mutation
 # testing patche dataclasses.is_dataclass -> les tests cassent (preuve).
-from dataclasses import asdict as _asdict, is_dataclass as _is_dc
+from dataclasses import asdict as _asdict
+from dataclasses import is_dataclass as _is_dc
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.confidence_thresholds import confidence_label_fr
-from cinesort.domain.conversions import to_bool as _to_bool, to_float as _to_float, to_int as _to_int
+from cinesort.domain.conversions import to_bool as _to_bool
+from cinesort.domain.conversions import to_float as _to_float
+from cinesort.domain.conversions import to_int as _to_int
 from cinesort.domain.custom_rules import apply_custom_rules as _apply_rules
 from cinesort.domain.explain_score import build_rich_explanation
 from cinesort.domain.genre_rules import (
     adjust_bitrate_threshold as _adj_th,
+)
+from cinesort.domain.genre_rules import (
     compute_genre_adjustments,
+)
+from cinesort.domain.genre_rules import (
     detect_primary_genre as _detect_pg,
 )
+
 # Fix audit 2026-05-25 (v1.5.5) Vague K : parser nom de release pour fallback
 # quand le probe est PARTIAL/FAILED (ex: SMB obsolete, fichier corrompu).
 from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_name
-# SCORE-02 (Vague M, M-06) : helpers tiers centralises (dedup retro-compat
-# legacy premium/bon/moyen -> platinum/gold/silver). Pure delegation sans
-# changement de comportement attendu sur les tiers.
-from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers_central
+
 # VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026). OPT-IN
 # strict (toggle default OFF) - aucune redistribution de tier sur 853 films
 # biblio sans validation user. AC-2 : applique AVANT _cap_tier securite
 # (FAILED/CAM restent autorite finale).
 from cinesort.domain.tiers_helpers import (
     apply_tier_hierarchy as _apply_tier_hierarchy,
-    normalize_hierarchy_config as _normalize_hierarchy_config,
+)
+from cinesort.domain.tiers_helpers import (
     default_hierarchy_config as _default_hierarchy_config,
 )
+from cinesort.domain.tiers_helpers import (
+    normalize_hierarchy_config as _normalize_hierarchy_config,
+)
+
+# SCORE-02 (Vague M, M-06) : helpers tiers centralises (dedup retro-compat
+# legacy premium/bon/moyen -> platinum/gold/silver). Pure delegation sans
+# changement de comportement attendu sur les tiers.
+from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers_central
 
 logger = logging.getLogger(__name__)
 
@@ -636,8 +651,10 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
 
     Tokens canoniques (alignes sur DEFAULT_HIERARCHY_AUDIO_FLOORS) :
     - "truehd_atmos"   : TrueHD avec Atmos (premium lossless multicanal)
+    - "dts_x"          : DTS:X (lossless immersive premium multicanal)
     - "dts_hd_ma"      : DTS-HD Master Audio (lossless)
     - "truehd"         : TrueHD sans Atmos
+    - "atmos"          : Atmos lossy (E-AC-3/DD+ JOC streaming Netflix/Disney+/AppleTV+)
     - "dts"            : DTS standard (lossy)
     - "aac"            : AAC
     - ""               : non identifiable / pas d'audio
@@ -649,10 +666,23 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
         return ""
     if ("truehd" in c) and ("atmos" in c):
         return "truehd_atmos"
+    # Fix trash-r6-002 (2026-06-04) : DTS:X (lossless premium immersive) AVANT
+    # le check 'dts-hd' generique. Variantes : 'dts:x', 'dts-x', 'dtsx', 'dts x'.
+    # Sans ce check, DTS:X retournait 'dts' (lossy) et le preset
+    # 'qualite_max_audio' (audio_floors.dts_x=Gold) etait dead code.
+    if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c) or (" dts x" in (" " + c)):
+        return "dts_x"
     if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
         return "dts_hd_ma"
     if "truehd" in c:
         return "truehd"
+    # Fix trash-r6-004 (2026-06-04) : Atmos lossy (E-AC-3/DD+ JOC) dominant
+    # 2026 chez Netflix/Disney+/Apple TV+. Avant : 'eac3 atmos' -> '' (token
+    # vide -> aucun floor cible). Apres : token 'atmos' distinct de
+    # 'truehd_atmos' (lossless). Aucun floor par defaut (opt-in via override
+    # user) -> backward compat absolue.
+    if "atmos" in c:
+        return "atmos"
     if "dts" in c:
         return "dts"
     if "aac" in c:
@@ -2094,14 +2124,27 @@ def compute_quality_score(
     hierarchy_config = prof.get("tier_hierarchy")
     if hierarchy_config:
         # vr (video result) + best_audio + name_info disponibles dans ce scope.
+        # Fix trash-r6-001 (2026-06-04) : ne pas propager le token HDR canonique
+        # quand le flag provient du fallback nom de release. Sinon un fichier
+        # 720p AAC avec nom mentant '*.DV.*' obtient le floor 'dolby_vision' ->
+        # Gold a tort (promotion de 4 tiers sur un faux DV). Cf docstring
+        # tiers_helpers.py:502-504 ('DV seul ne sera applique qu'en presence
+        # de probe verifie') - garde-fou maintenant effectivement implemente.
+        # Backward compat : les profils sans tier_hierarchy.enabled=True ne sont
+        # PAS impactes (block deja gate par enabled cote _apply_tier_hierarchy).
+        hdr_source = ""
+        sources_video_local = sources.get("video") if isinstance(sources, dict) else None
+        if isinstance(sources_video_local, dict):
+            hdr_source = str(sources_video_local.get("hdr") or "").strip().lower()
+        hdr_is_probe = hdr_source != "name_fallback"
         hierarchy_dimensions: Dict[str, Any] = {
             "resolution_label": vr.get("resolution_label"),
             "resolution_source": vr.get("resolution_source"),
             "video_codec": vr.get("video_codec"),
             "hdr": (
-                "dolby_vision" if vr.get("has_dv")
-                else "hdr10_plus" if vr.get("has_hdr10p")
-                else "hdr10" if vr.get("has_hdr10")
+                "dolby_vision" if (vr.get("has_dv") and hdr_is_probe)
+                else "hdr10_plus" if (vr.get("has_hdr10p") and hdr_is_probe)
+                else "hdr10" if (vr.get("has_hdr10") and hdr_is_probe)
                 else ""
             ),
             "audio_codec": _hierarchy_audio_codec_token(best_audio),

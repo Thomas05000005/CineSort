@@ -22,7 +22,6 @@ from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
-
 # ---------------------------------------------------------------------------
 # Helpers partages
 # ---------------------------------------------------------------------------

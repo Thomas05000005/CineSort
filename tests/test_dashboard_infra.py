@@ -17,15 +17,15 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any, Dict
+
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import (
-    RestApiServer,
-    _RateLimiter,
-    _find_active_run_id,
     _RATE_LIMIT_MAX_FAILURES,
+    RestApiServer,
+    _find_active_run_id,
+    _RateLimiter,
 )
 from tests._helpers import find_free_port as _find_free_port
-
 
 # ---------------------------------------------------------------------------
 # Tests unitaires _RateLimiter (sans serveur HTTP)
@@ -211,11 +211,14 @@ class DashboardStaticFileTests(unittest.TestCase):
         self.assertIn("text/html", headers.get("content-type", ""))
         self.assertIn(b"CineSort", body)
 
-    def test_dashboard_without_slash_serves_index(self) -> None:
-        """GET /dashboard retourne index.html (fallback)."""
+    def test_dashboard_without_slash_redirects_to_slash(self) -> None:
+        """GET /dashboard renvoie 301 vers /dashboard/ pour fixer la resolution
+        des chemins relatifs (./styles.css -> /dashboard/styles.css au lieu
+        de /styles.css). Sans cette redirection, la page de login s'affichait
+        en HTML brut sans CSS (bug confirme screenshot 2026-06-05)."""
         status, body, headers = self._get("/dashboard")
-        self.assertEqual(status, 200)
-        self.assertIn(b"CineSort", body)
+        self.assertEqual(status, 301)
+        self.assertEqual(headers.get("location"), "/dashboard/")
 
     def test_dashboard_index_explicit(self) -> None:
         """GET /dashboard/index.html retourne 200."""

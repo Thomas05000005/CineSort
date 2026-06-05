@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     AUDIO_FINGERPRINT_MIN_FILE_DURATION_S,
     AUDIO_FINGERPRINT_SEGMENT_DURATION_S,
@@ -27,8 +29,6 @@ from .constants import (
     AUDIO_FINGERPRINT_SIMILARITY_PROBABLE,
     AUDIO_FINGERPRINT_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ def compute_audio_fingerprint(
     *,
     fpcalc_path: Optional[str] = None,
     ffmpeg_path: Optional[str] = None,
+    track_index: int = 0,
     timeout_s: float = AUDIO_FINGERPRINT_TIMEOUT_S,
 ) -> Optional[str]:
     """Calcule le fingerprint Chromaprint d'un segment audio.
@@ -86,6 +87,12 @@ def compute_audio_fingerprint(
         ffmpeg_path: chemin ffmpeg pour seek strict (-ss) via pipe stdin
             quand un offset > 0 est utilise. None = pas de seek (fallback
             sur les premieres secondes du fichier, comportement <= v7.5).
+        track_index: index de la piste audio a fingerprinter (default 0).
+            Utilise uniquement en mode pipe ffmpeg (`-map 0:a:{track_index}`)
+            pour s'aligner sur l'index choisi par les autres analyses
+            perceptuelles (loudnorm/astats/clipping). En mode direct fpcalc
+            (offset == 0 ou ffmpeg_path absent), ignore car fpcalc choisit
+            seul sa piste (stream 0 par defaut). Backward compat preservee.
         timeout_s: timeout du sous-process fpcalc.
 
     Returns:
@@ -175,6 +182,7 @@ def compute_audio_fingerprint(
             offset_s=offset,
             length_s=length,
             timeout_s=float(timeout_s),
+            track_index=int(track_index),
         )
         if stdout_text is None:
             return None
@@ -207,16 +215,22 @@ def _run_ffmpeg_pipe_fpcalc(
     offset_s: float,
     length_s: float,
     timeout_s: float,
+    track_index: int = 0,
 ) -> Optional[str]:
     """Pipe ffmpeg (-ss seek + WAV stdout) -> fpcalc (stdin -) et retourne stdout JSON.
 
     Strategie :
-        ffmpeg -nostdin -ss OFFSET -t LENGTH -i media -vn -ac 2 -ar 44100
-               -f wav -loglevel error -
+        ffmpeg -nostdin -ss OFFSET -t LENGTH -i media -map 0:a:IDX
+               -vn -ac 2 -ar 44100 -f wav -loglevel error -
             | fpcalc -json -raw -length LENGTH -
 
     Cleanup garanti via tracked_popen pour les deux process. Si ffmpeg
     echoue (binaire absent, fichier corrompu), retourne None et log warning.
+
+    `track_index` aligne la piste audio fingerprintee avec celle utilisee
+    par loudnorm/astats/clipping (`select_best_audio_track`), pour eviter
+    que deux films identiques aux pistes default differentes generent des
+    fingerprints divergents.
     """
     # Service-locator domain : evite la violation d'architecture
     # (domain -> infra) detectee par import-linter.
@@ -224,6 +238,7 @@ def _run_ffmpeg_pipe_fpcalc(
 
     int_offset = max(0, int(offset_s))
     int_length = max(1, int(length_s))
+    int_track = max(0, int(track_index))
 
     ffmpeg_cmd = [
         ffmpeg_path,
@@ -234,6 +249,8 @@ def _run_ffmpeg_pipe_fpcalc(
         str(int_length),
         "-i",
         media_path,
+        "-map",
+        f"0:a:{int_track}",
         "-vn",
         "-ac",
         "2",

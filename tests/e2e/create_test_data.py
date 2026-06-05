@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-
 # ---------------------------------------------------------------------------
 # 15 films deterministes
 # ---------------------------------------------------------------------------

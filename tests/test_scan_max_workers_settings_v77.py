@@ -238,9 +238,9 @@ class ScanMaxWorkersBuildCfgIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(cfg.scan_max_workers, 16)
 
-    def test_build_cfg_with_auto_mode_falls_back_to_sequential(self) -> None:
+    def test_build_cfg_with_auto_mode_falls_back_to_sequential_when_no_state_dir(self) -> None:
         """En mode auto sans state_dir context, build_cfg retombe sur 1
-        (backward compat : aucune surprise dans le code-path run_row)."""
+        (backward compat : code-path run_row sans state_dir)."""
         settings = {
             "scan_max_workers_mode": "auto",
             "scan_max_workers_value": 8,
@@ -253,6 +253,41 @@ class ScanMaxWorkersBuildCfgIntegrationTests(unittest.TestCase):
             default_residual_cleanup_folder_name="_Nettoyage",
         )
         self.assertEqual(cfg.scan_max_workers, 1)
+
+    def test_build_cfg_with_auto_mode_and_state_dir_uses_detect_storage(self) -> None:
+        """PRAGMA-02 fix : en mode auto + state_dir fourni, build_cfg utilise
+        _detect_storage_profile + _auto_scan_max_workers_for_storage pour que
+        Config.scan_max_workers soit aligne sur l'UI Settings (4 NAS, 8 SSD).
+        """
+        settings = {
+            "scan_max_workers_mode": "auto",
+            "scan_max_workers_value": 1,
+        }
+        with mock.patch.object(
+            settings_support, "_detect_storage_profile", return_value="local_ssd"
+        ):
+            cfg = settings_support.build_cfg_from_settings(
+                settings,
+                root=Path("/tmp/library"),
+                default_collection_folder_name="_Collection",
+                default_empty_folders_folder_name="_Vide",
+                default_residual_cleanup_folder_name="_Nettoyage",
+                state_dir=Path("/tmp/state"),
+            )
+        self.assertEqual(cfg.scan_max_workers, 8)
+
+        with mock.patch.object(
+            settings_support, "_detect_storage_profile", return_value="nas_smb"
+        ):
+            cfg = settings_support.build_cfg_from_settings(
+                settings,
+                root=Path("/tmp/library"),
+                default_collection_folder_name="_Collection",
+                default_empty_folders_folder_name="_Vide",
+                default_residual_cleanup_folder_name="_Nettoyage",
+                state_dir=Path("/tmp/state"),
+            )
+        self.assertEqual(cfg.scan_max_workers, 4)
 
     def test_build_cfg_clamps_manual_too_high(self) -> None:
         settings = {

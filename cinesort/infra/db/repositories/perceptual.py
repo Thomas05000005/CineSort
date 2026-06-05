@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
 
-
 _PERCEPTUAL_TABLES = ("perceptual_reports",)
 
 
@@ -281,6 +280,29 @@ class PerceptualRepository(_BaseRepository):
             )
             row = cur.fetchone()
             return int(row[0] or 0) if row else 0
+
+    def get_perceptual_report_stats(self, *, run_id: str) -> Dict[str, Any]:
+        """Retourne {count, max_ts} pour les rapports perceptuels de ce run.
+
+        Miroir de QualityRepository.get_quality_report_stats : utilise pour la
+        signature du cache dashboard afin que toute modification des
+        perceptual_reports (ex: analyse perceptuelle batch) invalide le cache.
+        """
+        self._ensure_perceptual_tables()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt, MAX(ts) AS max_ts
+                FROM perceptual_reports
+                WHERE run_id=?
+                """,
+                (str(run_id),),
+            )
+            row = cur.fetchone()
+        return {
+            "count": int((row["cnt"] if row else 0) or 0),
+            "max_ts": float((row["max_ts"] if row else 0.0) or 0.0),
+        }
 
     def _parse_perceptual_row(self, row: Any) -> Dict[str, Any]:
         """Parse une ligne de perceptual_reports."""

@@ -22,9 +22,9 @@ from cinesort.app.plan_support_core import (
     resolve_incremental_quick_hash,
 )
 from cinesort.domain.edition_helpers import extract_edition
-from cinesort.domain.scan_helpers import _NOT_A_MOVIE_THRESHOLD, not_a_movie_score
 from cinesort.domain.integrity_check import check_header
 from cinesort.domain.runtime_matching import score_runtime_delta
+from cinesort.domain.scan_helpers import _NOT_A_MOVIE_THRESHOLD, not_a_movie_score
 from cinesort.domain.subtitle_helpers import build_subtitle_report
 from cinesort.domain.tv_helpers import parse_tv_info
 from cinesort.infra.tmdb_client import TmdbClient

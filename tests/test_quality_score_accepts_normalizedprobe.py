@@ -13,7 +13,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from cinesort.domain.probe_models import NormalizedProbe, PROBE_QUALITY_FULL
+from cinesort.domain.probe_models import PROBE_QUALITY_FULL, NormalizedProbe
 from cinesort.domain.quality_score import compute_quality_score, default_quality_profile
 from cinesort.infra.probe.normalize import normalize_probe
 

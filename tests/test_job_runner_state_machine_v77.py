@@ -29,7 +29,6 @@ from typing import Optional
 from cinesort.app.job_runner import JobRunner
 from cinesort.domain.run_models import RunStatus
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
-
 from tests._helpers import wait_runner_status, wait_runner_terminal
 
 

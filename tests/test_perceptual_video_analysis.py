@@ -14,14 +14,13 @@ from __future__ import annotations
 import unittest
 
 from cinesort.domain.perceptual.video_analysis import (
+    _parse_filter_output,
     analyze_video_frames,
     block_variance_stats,
     detect_banding,
     effective_bit_depth,
     luminance_histogram,
-    _parse_filter_output,
 )
-
 
 # ---------------------------------------------------------------------------
 # luminance_histogram (2 tests)

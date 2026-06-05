@@ -5,12 +5,12 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import cinesort.domain.core as core
-from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 

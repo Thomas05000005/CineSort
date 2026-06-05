@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-
 # -- Extensions sous-titres -------------------------------------------
 
 SUBTITLE_EXTS = frozenset({".srt", ".ass", ".sub", ".sup", ".idx"})

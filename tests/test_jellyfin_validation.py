@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 from cinesort.app.jellyfin_validation import build_sync_report
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

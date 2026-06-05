@@ -12,10 +12,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
-from unittest import mock
 
 
 class SettingsRobustnessTests(unittest.TestCase):

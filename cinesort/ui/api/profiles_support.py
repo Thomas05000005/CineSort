@@ -22,14 +22,14 @@ from __future__ import annotations
 
 # Re-exports backward compat ABSOLUE (signatures inchangees).
 from cinesort.ui.api.profiles_support_crud import (
+    _WEIGHT_SUM_TARGET_FRACTION,
+    _WEIGHT_SUM_TARGET_PERCENT,
+    _WEIGHT_SUM_TOLERANCE_FRACTION,
     _build_profile_row,
     _normalize_tiers_decreasing,
     _normalize_weights_sum,
     _read_settings_dict,
     _save_settings_dict,
-    _WEIGHT_SUM_TARGET_FRACTION,
-    _WEIGHT_SUM_TARGET_PERCENT,
-    _WEIGHT_SUM_TOLERANCE_FRACTION,
     get_profiles,
     save_profile,
     set_active_profile,

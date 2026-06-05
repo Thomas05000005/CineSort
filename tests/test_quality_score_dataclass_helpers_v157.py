@@ -25,8 +25,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from cinesort.domain.probe_models import NormalizedProbe, PROBE_QUALITY_FULL
 from cinesort.domain import quality_score as qs
+from cinesort.domain.probe_models import PROBE_QUALITY_FULL, NormalizedProbe
 from cinesort.domain.release_name_parser import parse_release_name
 
 

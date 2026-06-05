@@ -5,13 +5,13 @@ Thread-safe: background threads enqueue, main thread drains.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
 from typing import Any, Dict
 
-from cinesort.infra.notifications import show_balloon, cleanup
-import contextlib
+from cinesort.infra.notifications import cleanup, show_balloon
 
 logger = logging.getLogger(__name__)
 

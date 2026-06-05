@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections import Counter
 import json
 import logging
-from pathlib import Path
 import sqlite3
 import threading
 import time
 import traceback
+from collections import Counter
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 _logger = logging.getLogger(__name__)
@@ -29,7 +29,6 @@ from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
-
 
 # Seuil duplique dans plan_support._ROOT_BULK_WARNING_THRESHOLD.
 _ROOT_BULK_THRESHOLD = 20
@@ -1506,6 +1505,12 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             if not rows:
                 rows = api._load_rows_from_plan_jsonl(rs.paths)
             incoming = decisions if isinstance(decisions, dict) else {}
+            # Fix R6-02 : projette le tri-etat `decision` -> `ok` AVANT
+            # _merge_decisions/_normalize_decisions_for_rows. Sinon un client
+            # qui envoie `{decision: "accepted"}` sans `ok` voit son film
+            # vu comme rejected dans check_duplicates (run_data_support.py:292)
+            # et l'ecart avec apply diverge.
+            incoming = _project_decisions_ok_from_tri_state(incoming)
             disk_decisions = api._load_decisions_from_validation(rs.paths)
             merged = api._merge_decisions(incoming, disk_decisions)
             safe = api._normalize_decisions_for_rows(rows, merged)
@@ -1531,6 +1536,9 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
         incoming = decisions if isinstance(decisions, dict) else {}
+        # Fix R6-02 : projette le tri-etat `decision` -> `ok` (cf branche
+        # rs ci-dessus). Cohere check_duplicates avec apply reel.
+        incoming = _project_decisions_ok_from_tri_state(incoming)
         disk_decisions = api._load_decisions_from_validation(run_paths)
         merged = api._merge_decisions(incoming, disk_decisions)
         safe = api._normalize_decisions_for_rows(rows, merged)
@@ -1541,3 +1549,165 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+
+# ---------------------------------------------------------------------------
+# V2.4 — Fusion doublons Chromaprint + videohash (feature flag opt-in)
+# Backward compat ABSOLUE : la fonction `check_duplicates` ci-dessus est
+# INCHANGEE et reste le chemin actif par defaut. Cette nouvelle fonction est
+# gate par CINESORT_FUSION_DOUBLONS (off par defaut) ; OFF -> stub vide.
+# ---------------------------------------------------------------------------
+
+
+def _row_field(row: Any, *keys: str, default: Any = None) -> Any:
+    """Acces tolerant a un row (dataclass-like ou dict) sur plusieurs cles candidates."""
+    for k in keys:
+        if isinstance(row, dict):
+            if k in row and row[k] is not None:
+                return row[k]
+        else:
+            val = getattr(row, k, None)
+            if val is not None:
+                return val
+    return default
+
+
+def _build_fusion_inputs_from_groups(groups: List[Any], rows: List[Any]) -> List[List[Any]]:
+    """Convertit les groupes doublons legacy en groupes de FilmFusionInput.
+
+    Strategie : on lit les rows referencees par chaque groupe et on cree un
+    FilmFusionInput par film (chemin video, duree, fingerprint Chromaprint
+    deja calcule si dispo). Le pipeline app gerera le calcul videohash et
+    la fusion.
+    """
+    from cinesort.app.duplicate_pipeline import FilmFusionInput
+
+    # Index rapide row_id -> row.
+    row_by_id: Dict[str, Any] = {}
+    for r in rows:
+        rid = _row_field(r, "row_id", "id")
+        if rid:
+            row_by_id[str(rid)] = r
+
+    out: List[List[FilmFusionInput]] = []
+    for grp in groups or []:
+        members = grp.get("members") if isinstance(grp, dict) else getattr(grp, "members", None)
+        if not members or not isinstance(members, list):
+            continue
+        bucket: List[FilmFusionInput] = []
+        for m in members:
+            rid = str(m.get("row_id") if isinstance(m, dict) else getattr(m, "row_id", "") or "")
+            if not rid:
+                continue
+            row = row_by_id.get(rid)
+            video_path = (
+                _row_field(m, "src", "source_path", "path")
+                if isinstance(m, dict)
+                else _row_field(row, "src", "source_path", "path")
+            )
+            duration_s = _row_field(row, "duration_s", "duration", default=0.0)
+            chromaprint = _row_field(row, "audio_fingerprint", "chromaprint", default=None)
+            if not video_path:
+                continue
+            bucket.append(
+                FilmFusionInput(
+                    row_id=rid,
+                    video_path=str(video_path),
+                    duration_s=float(duration_s or 0.0),
+                    chromaprint=str(chromaprint) if chromaprint else None,
+                )
+            )
+        if len(bucket) >= 2:
+            out.append(bucket)
+    return out
+
+
+@requires_valid_run_id
+def check_duplicates_fusion(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    *,
+    audio_weight: Optional[float] = None,
+    video_weight: Optional[float] = None,
+) -> Dict[str, Any]:
+    """V2.4 — Detection doublons via fusion Chromaprint + videohash.
+
+    Backward compat ABSOLUE : ne touche AUCUN appelant existant ; la
+    detection legacy `check_duplicates` reste seule active par defaut.
+    Cet endpoint est gate par `CINESORT_FUSION_DOUBLONS` env var :
+      - OFF -> retourne `{ok: True, enabled: False, pairs: []}` (stub).
+      - ON  -> reutilise le regroupement legacy puis applique la fusion
+              ponderee a chaque paire intra-groupe.
+    """
+    # Lazy import pour eviter d'introduire une dependance forte du module
+    # de support sur le pipeline app au boot (idem pattern des autres helpers).
+    from cinesort.app.duplicate_pipeline import (
+        DEFAULT_AUDIO_WEIGHT,
+        DEFAULT_VIDEO_WEIGHT,
+        compute_fusion_for_groups,
+        is_fusion_enabled,
+        serialize_fusion_pairs,
+    )
+
+    if not is_fusion_enabled():
+        # Feature flag off : aucun calcul, payload minimal pour la UI.
+        return {"ok": True, "enabled": False, "pairs": []}
+
+    if not isinstance(decisions, dict):
+        return _err_response(
+            t("errors.payload_decisions_invalid"),
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+
+    a_w = float(audio_weight) if audio_weight is not None else DEFAULT_AUDIO_WEIGHT
+    v_w = float(video_weight) if video_weight is not None else DEFAULT_VIDEO_WEIGHT
+
+    # On reutilise check_duplicates legacy pour obtenir les groupes candidats,
+    # puis on enrichit chaque paire avec la fusion. Avantage : on profite des
+    # validations et merges de decisions existants (R6-02 etc.), sans dupliquer
+    # la logique. Si jamais la detection legacy renvoie une erreur, on la
+    # propage telle quelle.
+    legacy = check_duplicates(api, run_id, decisions)
+    if not legacy.get("ok"):
+        return legacy
+
+    groups = legacy.get("groups") or legacy.get("duplicates") or []
+
+    # Reconstruit les rows pour avoir acces a duration et fingerprint.
+    rs = api._get_run(run_id)
+    rows: List[Any] = []
+    if rs:
+        rows = rs.rows or api._load_rows_from_plan_jsonl(rs.paths) or []
+    else:
+        found = api._find_run_row(run_id)
+        if found:
+            row, _ = found
+            run_paths = api._run_paths_for(
+                normalize_user_path(row.get("state_dir"), api._state_dir),
+                run_id,
+                ensure_exists=False,
+            )
+            rows = api._load_rows_from_plan_jsonl(run_paths) or []
+
+    try:
+        fusion_groups = _build_fusion_inputs_from_groups(groups, rows)
+        pairs = compute_fusion_for_groups(
+            fusion_groups,
+            audio_weight=a_w,
+            video_weight=v_w,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+    return {
+        "ok": True,
+        "enabled": True,
+        "audio_weight": a_w,
+        "video_weight": v_w,
+        "pairs": serialize_fusion_pairs(pairs),
+        # Echo legacy : la UI peut afficher les groupes brut a cote des paires.
+        "groups": groups,
+    }

@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,7 @@ import cinesort.infra.state as state
 from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.naming import PRESETS, validate_template
+
 # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError doit etre
 # importe pour etre catche dans test_jellyfin_connection (sinon l'exception
 # s'echappe et le caller voit un crash plutot qu'un message utilisateur).
@@ -37,6 +39,27 @@ logger = logging.getLogger(__name__)
 # `_coerce_int_with_default(value, default)` distingue absence/erreur (-> default)
 # de valeur entiere convertible (y compris 0).
 _MISSING = object()
+
+
+# Fix lost-update : verrou par state_dir pour serialiser read-modify-write de
+# save_settings_payload. Deux appels paralleles (UI Parametres + endpoint REST
+# /api/save_settings) lisaient le meme existing_settings et le dernier write
+# ecrasait silencieusement les modifications du premier. Le dict est protege
+# par _SETTINGS_WRITE_LOCKS_GUARD pour eviter une race a la creation du Lock
+# lui-meme. Pattern aligne sur cinesort_api._state_dir_lock.
+_SETTINGS_WRITE_LOCKS: Dict[str, "threading.Lock"] = {}
+_SETTINGS_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _get_settings_write_lock(state_dir: Path) -> "threading.Lock":
+    """Retourne (et cree si necessaire) le Lock dedie a un state_dir donne."""
+    key = str(state_dir)
+    with _SETTINGS_WRITE_LOCKS_GUARD:
+        lock = _SETTINGS_WRITE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SETTINGS_WRITE_LOCKS[key] = lock
+        return lock
 
 
 def _coerce_int_with_default(value: Any, default: int) -> int:
@@ -948,6 +971,7 @@ def build_cfg_from_settings(
     default_collection_folder_name: str,
     default_empty_folders_folder_name: str,
     default_residual_cleanup_folder_name: str,
+    state_dir: Optional[Path] = None,
 ) -> core.Config:
     collection_folder_name = (
         str(settings.get("collection_folder_name") or default_collection_folder_name).strip()
@@ -981,15 +1005,24 @@ def build_cfg_from_settings(
     video_exts = base_video_exts | set(core.VIDEO_EXTS_ALL)
     # VO-B-CONFIG : determine scan_max_workers effectif depuis le payload.
     # - mode="manual" -> on prend value clampe [1..64]
-    # - mode="auto"   -> 1 (la resolution VO-A complete se fait via
-    #     `resolve_effective_scan_max_workers(state_dir)` quand un state_dir
-    #     est disponible). Ici on est dans le code-path sans state_dir
-    #     (build depuis run_row notamment), on retombe sur sequentiel strict
-    #     pour preserver la backward compat.
+    # - mode="auto"  + state_dir fourni -> resolution via
+    #     `_detect_storage_profile(state_dir)` + `_auto_scan_max_workers_for_storage`
+    #     pour que l'UI Settings (qui affiche `effective: 4|8`) corresponde au
+    #     reel des scans (PRAGMA-02 fix).
+    # - mode="auto" sans state_dir (code-path build depuis run_row, settings
+    #     absents...) -> retombe sur 1 (sequentiel strict) pour preserver la
+    #     backward compat.
     cfg_mode = _normalize_scan_max_workers_mode(settings.get("scan_max_workers_mode"))
     cfg_value = _normalize_scan_max_workers_value(settings.get("scan_max_workers_value"))
     if cfg_mode == "manual":
         cfg_scan_workers = cfg_value
+    elif state_dir is not None:
+        # Mode auto + contexte state_dir : aligne sur l'UI (auto_suggestion).
+        try:
+            detected = _detect_storage_profile(state_dir)
+            cfg_scan_workers = _auto_scan_max_workers_for_storage(detected)
+        except (OSError, ValueError, TypeError):
+            cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
     else:
         cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
     return core.Config(
@@ -1112,9 +1145,13 @@ def resolve_roots_from_payload(
 
 
 # Champs secrets masques dans la reponse get_settings (jamais envoyes en clair au frontend).
-# BUG 1 : rest_api_token RETIRE de la liste — c'est le PROPRE token de l'utilisateur,
-# il doit pouvoir le voir pour le donner a ses autres appareils. Le masquer n'apporte
-# rien : le token est deja stocke en clair dans settings.json sur la meme machine.
+# SEC-H3 (fix) : rest_api_token EST de nouveau masque ci-dessous. Le commentaire
+# historique "BUG 1" justifiait son retrait au motif que l'utilisateur doit pouvoir
+# voir son propre token pour le partager a ses appareils. Probleme : un attaquant
+# avec acces transitoire (token LAN temporaire, XSS via CSP style-src 'unsafe-inline',
+# log accidentel) peut exfiltrer le Bearer en UN SEUL appel a /api/settings/get_settings,
+# contournant tout futur kill-switch. La revelation explicite doit passer par un endpoint
+# dedie (reveal_rest_token) avec confirmation UI et restriction localhost (is_remote_request).
 _SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"  # 8 bullets
 # SEC-H2 (Phase 1 remediation v7.8.0) : tmdb_api_key et jellyfin_api_key ajoutees
 # a la liste. Avant ce fix, POST /api/get_settings retournait ces 2 cles en clair,
@@ -1129,6 +1166,10 @@ _SECRET_FIELDS = (
     "email_smtp_password",
     # Phase 6.2 : OMDb API key (cross-check IMDb)
     "omdb_api_key",
+    # SEC-H3 : Bearer token de l'API REST locale. Re-ajoute apres avoir ete
+    # retire par erreur (BUG 1). La revelation explicite doit passer par
+    # l'endpoint dedie POST /api/settings/reveal_rest_token (localhost only).
+    "rest_api_token",
 )
 
 
@@ -1740,6 +1781,41 @@ def save_settings_payload(
         return current_state_dir, {"ok": False, "message": t("errors.payload_settings_invalid")}
 
     state_dir, state_dir_present = resolve_payload_state_dir(settings, default_state_dir=current_state_dir)
+    # Fix lost-update : serialise read_settings/normalize/write_settings par
+    # state_dir. Sans ce verrou, deux saves paralleles peuvent lire le meme
+    # snapshot et le dernier write ecrase silencieusement le premier. Le lock
+    # est resolu AVANT d'acquerir le verrou pour eviter de tenir le guard
+    # global pendant les IO.
+    _settings_write_lock = _get_settings_write_lock(state_dir)
+    with _settings_write_lock:
+        return _save_settings_payload_locked(
+            settings,
+            state_dir=state_dir,
+            state_dir_present=state_dir_present,
+            current_state_dir=current_state_dir,
+            default_root=default_root,
+            default_collection_folder_name=default_collection_folder_name,
+            default_empty_folders_folder_name=default_empty_folders_folder_name,
+            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+            default_probe_backend=default_probe_backend,
+            debug_enabled=debug_enabled,
+        )
+
+
+def _save_settings_payload_locked(
+    settings: Dict[str, Any],
+    *,
+    state_dir: Path,
+    state_dir_present: bool,
+    current_state_dir: Path,
+    default_root: str,
+    default_collection_folder_name: str,
+    default_empty_folders_folder_name: str,
+    default_residual_cleanup_folder_name: str,
+    default_probe_backend: str,
+    debug_enabled: bool,
+) -> Tuple[Path, Dict[str, Any]]:
+    """Section critique de save_settings_payload, executee sous _settings_write_lock."""
     existing_settings = read_settings(state_dir)
     # Restaurer les secrets masques par get_settings_payload (ne pas ecraser avec le masque)
     _unmask_secrets_for_save(settings, existing_settings)
@@ -1987,7 +2063,17 @@ def restore_settings_backup(state_dir: Path, backup_filename: str) -> bool:
 #
 # Le profil "actif" est calcule depuis l'override (si != auto) ou la detection.
 
-_VALID_STORAGE_PROFILES: Tuple[str, ...] = ("auto", "local_ssd", "nas_smb")
+# PRAGMA-04 fix : exposer les 4 profils backend (PROFILES dans
+# infra/db/pragma_profile.py) au lieu de seulement 2. Sans ca, les utilisateurs
+# sur HDD ou NAS lent ne peuvent pas choisir un profil dedie (override edit
+# manuel settings.json est silencieusement remappe sur "auto").
+_VALID_STORAGE_PROFILES: Tuple[str, ...] = (
+    "auto",
+    "local_ssd",
+    "local_hdd",
+    "nas_smb",
+    "nas_smb_slow",
+)
 _DEFAULT_STORAGE_PROFILE: str = "auto"
 
 
@@ -2276,7 +2362,9 @@ def get_advanced_pragma_settings_payload(state_dir: Path) -> Dict[str, Any]:
         "available_profiles": [
             {"v": "auto", "l": "Auto (detection)"},
             {"v": "local_ssd", "l": "SSD local (perf max)"},
+            {"v": "local_hdd", "l": "HDD local (mecanique)"},
             {"v": "nas_smb", "l": "NAS / SMB (securise)"},
+            {"v": "nas_smb_slow", "l": "NAS lent (Wi-Fi / vieux SMB)"},
         ],
         "storage_detected": detected,
         "locking_mode_exclusive": locking_exclusive,

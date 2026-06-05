@@ -20,10 +20,67 @@ Strategie Strangler Fig + Adapter pattern :
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any, Dict, Optional
 
 from cinesort.ui.api import library_actions_support
 from cinesort.ui.api.facades._base import _BaseFacade
+
+logger = logging.getLogger(__name__)
+
+# V2.1 — Feature flag Pydantic strict (defaut 0 = passif).
+# Memoire critique : "BACKWARD COMPAT ABSOLUE : TOUS les changements V2 =
+# migration progressive avec feature flag, ancien code fonctionne TOUJOURS
+# pendant transition. Aucun breaking change."
+# - CINESORT_PYDANTIC_STRICT=0 (defaut) : on tente la validation, on log
+#   un warning si elle echoue, et on retombe sur le dict legacy.
+# - CINESORT_PYDANTIC_STRICT=1 : la validation devient bloquante.
+_PYDANTIC_STRICT_ENV = "CINESORT_PYDANTIC_STRICT"
+
+
+def _pydantic_strict_enabled() -> bool:
+    """Lit le feature flag a chaque appel (toggleable a chaud en dev)."""
+    return os.environ.get(_PYDANTIC_STRICT_ENV, "0").strip() not in ("", "0", "false", "False")
+
+
+def _validate_passive(model_cls: Any, payload: Any, *, endpoint: str) -> Any:
+    """Valide un payload via Pydantic en mode passif (memoire BACKWARD COMPAT).
+
+    - Si pydantic n'est pas importable -> retourne payload tel quel (silencieux).
+    - Si validation OK -> retourne le dict mode_dump (compat REST/dict legacy).
+    - Si validation KO + flag PASSIF -> warning + retourne payload original.
+    - Si validation KO + flag STRICT -> raise ValueError.
+    """
+    try:
+        # Import LAZY pour ne pas casser le boot si pydantic est absent du
+        # bundle (PyInstaller minimal). Le module est dans `requirements.txt`
+        # pour les installs normales.
+        from pydantic import ValidationError  # type: ignore
+    except ImportError:
+        return payload
+
+    try:
+        validated = model_cls.model_validate(payload)
+        # On retourne dict (compat REST/JS frontend qui consomme via JSON).
+        return validated.model_dump(mode="python")
+    except ValidationError as exc:
+        if _pydantic_strict_enabled():
+            raise ValueError(f"Pydantic strict validation failed for {endpoint}: {exc}") from exc
+        logger.warning(
+            "[pydantic-passive] %s validation failed (flag=0, fallback dict): %s",
+            endpoint,
+            exc,
+        )
+        return payload
+    except Exception as exc:  # noqa: BLE001 — defensif : ne JAMAIS casser le run.
+        logger.warning(
+            "[pydantic-passive] %s unexpected error (flag=%s, fallback): %s",
+            endpoint,
+            _pydantic_strict_enabled(),
+            exc,
+        )
+        return payload
 
 
 class RunFacade(_BaseFacade):
@@ -33,8 +90,42 @@ class RunFacade(_BaseFacade):
         """Demarre un scan+plan en thread background.
 
         Cf CineSortApi.start_plan pour la doc complete.
+
+        V2.1 : validation Pydantic PASSIVE (StartPlanRequest/Response).
+        Activable strict via env var CINESORT_PYDANTIC_STRICT=1 (defaut 0).
+        En cas d'echec de validation, on log un warning et on retombe sur la
+        shape `dict[str, Any]` historique (BACKWARD COMPAT ABSOLUE).
         """
-        return self._api._start_plan_impl(settings)
+        # Lazy import (perf : ne pas charger pydantic au boot des imports
+        # legacy de run_facade — cf #83 phase A8 lazy imports).
+        try:
+            from cinesort.ui.api.schemas import StartPlanRequest, StartPlanResponse  # type: ignore
+        except ImportError:
+            # Pydantic absent ou schemas manquants -> shape legacy directe.
+            return self._api._start_plan_impl(settings)
+
+        # Validation passive de l'entree (settings -> StartPlanRequest).
+        # Pour ne pas casser les callers legacy qui envoient un dict plat
+        # SANS cle `library_path`, on adapte avant validation.
+        request_payload: Dict[str, Any]
+        if isinstance(settings, dict) and "library_path" in settings:
+            request_payload = settings
+        else:
+            # Settings legacy : on enrobe pour ne pas faire echouer la
+            # validation passive (extra="allow" preserve tout).
+            request_payload = {
+                "library_path": (settings or {}).get("library_path", ""),
+                "options": settings,
+            }
+        _ = _validate_passive(StartPlanRequest, request_payload, endpoint="start_plan.request")
+
+        # Appel REEL (memoire utilisateur : endpoint REEL = start_plan).
+        result = self._api._start_plan_impl(settings)
+
+        # Validation passive de la sortie (best-effort, ne raise jamais
+        # sauf flag strict).
+        _ = _validate_passive(StartPlanResponse, result, endpoint="start_plan.response")
+        return result
 
     def get_status(self, run_id: str, last_log_index: int = 0) -> Dict[str, Any]:
         """Progression + logs + sante d'un run.
@@ -233,10 +324,35 @@ class RunFacade(_BaseFacade):
         Vague P / VP-A : `apply_atomic=True` (opt-in, default False) declenche
         un rollback FS+DB forward si une exception interrompt le batch. La
         signature retour reste `{ok: bool, ...}` (backward compat ABSOLUE).
+
+        V2.1 : validation Pydantic PASSIVE (ApplyRequest/ApplyResponse).
+        Activable strict via env var CINESORT_PYDANTIC_STRICT=1.
         """
-        return self._api._apply_impl(
-            run_id, decisions, dry_run, quarantine_unapproved, apply_atomic=bool(apply_atomic),
+        try:
+            from cinesort.ui.api.schemas import ApplyRequest, ApplyResponse  # type: ignore
+        except ImportError:
+            return self._api._apply_impl(
+                run_id, decisions, dry_run, quarantine_unapproved,
+                apply_atomic=bool(apply_atomic),
+            )
+
+        _ = _validate_passive(
+            ApplyRequest,
+            {
+                "run_id": run_id,
+                "decisions": decisions or {},
+                "dry_run": bool(dry_run),
+                "quarantine_unapproved": bool(quarantine_unapproved),
+                "apply_atomic": bool(apply_atomic),
+            },
+            endpoint="apply.request",
         )
+        result = self._api._apply_impl(
+            run_id, decisions, dry_run, quarantine_unapproved,
+            apply_atomic=bool(apply_atomic),
+        )
+        _ = _validate_passive(ApplyResponse, result, endpoint="apply.response")
+        return result
 
     def save_validation(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Persiste les decisions de validation dans validation.json (atomique).
@@ -260,8 +376,59 @@ class RunFacade(_BaseFacade):
         return self._api._load_validation_impl(run_id)
 
     def check_duplicates(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Detecte les collisions de destination entre rows approuvees avant apply."""
-        return self._api._check_duplicates_impl(run_id, decisions)
+        """Detecte les collisions de destination entre rows approuvees avant apply.
+
+        V2.1 : validation Pydantic PASSIVE
+        (CheckDuplicatesRequest / CheckDuplicatesResponse avec discriminator='kind'
+        sur les groupes : collision | similarity). Backward compat absolue.
+        """
+        try:
+            from cinesort.ui.api.schemas import (  # type: ignore
+                CheckDuplicatesRequest,
+                CheckDuplicatesResponse,
+            )
+        except ImportError:
+            return self._api._check_duplicates_impl(run_id, decisions)
+
+        _ = _validate_passive(
+            CheckDuplicatesRequest,
+            {"run_id": run_id, "decisions": decisions or {}},
+            endpoint="check_duplicates.request",
+        )
+        result = self._api._check_duplicates_impl(run_id, decisions)
+        _ = _validate_passive(CheckDuplicatesResponse, result, endpoint="check_duplicates.response")
+        return result
+
+    def check_duplicates_fusion(
+        self,
+        run_id: str,
+        decisions: Dict[str, Dict[str, Any]],
+        *,
+        audio_weight: Optional[float] = None,
+        video_weight: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """V2.4 — Detection fusion Chromaprint + videohash (feature flag).
+
+        Backward compat ABSOLUE :
+        - `check_duplicates` legacy ci-dessus reste inchange et seul actif par
+          defaut. Aucun appelant existant n'est impacte (nouvelle methode =
+          nouveau nom, opt-in).
+        - Cet endpoint est gate par `CINESORT_FUSION_DOUBLONS` (off par defaut) ;
+          si le flag est off, retourne `{ok: True, enabled: False, pairs: []}`
+          pour permettre a la UI de tester l'opt-in proprement.
+
+        Args:
+            run_id : id du run plan (deja en `done`).
+            decisions : decisions de validation (meme shape que check_duplicates).
+            audio_weight / video_weight : ponderation optionnelle (None = defaults
+                0.4 / 0.6 du module fusion_score).
+        """
+        return self._api._check_duplicates_fusion_impl(
+            run_id,
+            decisions,
+            audio_weight=audio_weight,
+            video_weight=video_weight,
+        )
 
     def get_cleanup_residual_preview(self, run_id: str) -> Dict[str, Any]:
         """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""

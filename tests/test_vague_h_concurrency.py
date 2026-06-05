@@ -329,8 +329,8 @@ class GetOrCreateInfraConcurrencyTests(unittest.TestCase):
     """
 
     def test_parallel_get_or_create_infra_calls_initialize_once(self) -> None:
-        import threading as _threading
         import tempfile as _tempfile
+        import threading as _threading
         from pathlib import Path as _Path
 
         from cinesort.ui.api import runtime_support

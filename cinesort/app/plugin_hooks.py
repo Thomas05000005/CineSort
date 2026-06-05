@@ -191,13 +191,21 @@ def _run_plugin(
             "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
             "$OutputEncoding=[System.Text.UTF8Encoding]::new();"
         )
+        # PH-002: echapper les apostrophes dans le chemin (doubler ') car la
+        # chaine PS est entouree d'apostrophes simples. Sans cela, un chemin
+        # type "C:/Users/Tom's Documents/..." termine la chaine PS
+        # prematurement et le script ne s'execute pas.
+        plugin_path_escaped = str(plugin_path).replace("'", "''")
+        # PH-001: terminer par '; exit $LASTEXITCODE' pour que PowerShell
+        # -Command propage le code de sortie reel du script vers le process
+        # parent (sinon PS retourne 0/1 selon $? au lieu du vrai exit code).
         cmd = [
             "powershell.exe",
             "-ExecutionPolicy",
             "Bypass",
             "-NoProfile",
             "-Command",
-            f"{ps_prelude} & '{plugin_path}'",
+            f"{ps_prelude} & '{plugin_path_escaped}'; exit $LASTEXITCODE",
         ]
     else:
         logger.warning("[plugins] extension non supportee: %s", plugin_path)

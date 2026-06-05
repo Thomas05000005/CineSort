@@ -17,11 +17,12 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.tiers_helpers import reconcile_display_tier
 from cinesort.infra import state
-from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -1260,6 +1261,31 @@ def set_film_tmdb_candidate(
             level="error",
             log_module=__name__,
         )
+
+    # VP-G-LOCKS-001 (Fix #5 ROADMAP_VAGUE_P) : Identify manuel via Modal Film
+    # provoque la transition path:<sha1> -> tmdb:<new_id>. Sans migration, les
+    # locks poses avant Identify restent orphelins sur l'ancien path:<sha1>
+    # et seront ecrases au prochain rescan/refresh. Pattern identique a
+    # library_actions_support.py:340-361 (_rematch_tmdb_and_update_plan).
+    try:
+        old_film_id = compute_film_id(row)
+        new_film_id = f"tmdb:{tmdb_int}"
+        if old_film_id and old_film_id != new_film_id and is_path_film_id(old_film_id):
+            repo = getattr(store, "field_locks", None)
+            if repo is not None:
+                try:
+                    migrated = repo.migrate_locks(old_film_id, new_film_id)
+                    if migrated:
+                        logger.info(
+                            "field_locks migrate %s -> %s : %d lock(s)",
+                            old_film_id,
+                            new_film_id,
+                            migrated,
+                        )
+                except (OSError, AttributeError, TypeError, ValueError) as exc:
+                    logger.warning("migrate_locks failed: %s", exc)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("field_locks migration failed (best-effort): %s", exc)
 
     return {
         "ok": True,

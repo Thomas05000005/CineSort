@@ -141,8 +141,8 @@ def _score_resolution(video: Any) -> Tuple[float, float, str]:
         return 30.0, 0.9, "reject"  # upscale deguise en 4K
     if width >= 3800 or height >= 2100:
         return 100.0, 1.0, "platinum"  # vrai 4K/UHD
-    if width >= 1900 or height >= 1060:
-        return 85.0, 1.0, "gold"  # 1080p
+    if width >= 1900 or height >= 1000:
+        return 85.0, 1.0, "gold"  # 1080p (seuil aligne sur quality_score._resolution_label)
     if width >= 1280 or height >= 680:
         return 70.0, 1.0, "silver"  # 720p
     if width > 0:

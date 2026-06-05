@@ -13,7 +13,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from cinesort.domain.mkv_title_check import check_container_title, _is_scene_title
+from cinesort.domain.mkv_title_check import _is_scene_title, check_container_title
 from cinesort.domain.probe_models import NormalizedProbe
 from cinesort.infra.probe.normalize import _extract_ffprobe, _extract_mediainfo
 

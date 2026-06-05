@@ -27,7 +27,6 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers
 
-
 # --- Libellés catégories (utilisés dans narrative + UI) -----------------
 
 _CATEGORY_LABELS_FR: Dict[str, str] = {

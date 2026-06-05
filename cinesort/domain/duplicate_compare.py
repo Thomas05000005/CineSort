@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import (
     AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK,
+)
+from cinesort.domain.codec_ranks import (
     format_audio_channels as _format_audio_channels,
 )
 

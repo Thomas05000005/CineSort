@@ -138,8 +138,9 @@ class SnapshotMetricsTests(unittest.TestCase):
     def test_health_snapshot_keys(self) -> None:
         """Le snapshot a les 4 cles attendues."""
         # Simuler un snapshot tel qu'il serait genere
-        from cinesort.domain.librarian import generate_suggestions
         from types import SimpleNamespace
+
+        from cinesort.domain.librarian import generate_suggestions
 
         rows = [
             SimpleNamespace(

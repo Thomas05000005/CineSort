@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from contextlib import closing, contextmanager, suppress
 import json
 import logging
 import sqlite3
 import time
+from contextlib import closing, contextmanager, suppress
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
 
@@ -27,6 +27,43 @@ from .repositories.decisions import DecisionsRepository
 from .repositories.field_locks import FieldLocksRepository
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
+
+# v1.3 SQLite cloud-sync warning : dossiers synchronises (OneDrive, Dropbox,
+# Google Drive, iCloud, Box, pCloud, Mega) sont incompatibles avec SQLite WAL.
+# Le moteur de sync peut copier le fichier .sqlite alors que des pages sont
+# encore dans le -wal ou -shm, ce qui produit une corruption silencieuse
+# (PRAGMA integrity_check FAILED au prochain boot). On detecte ces chemins
+# au demarrage et on logue un WARNING explicite. Detection case-insensitive
+# pour matcher OneDrive, OneDrive - Personal, OneDriveCommercial, etc.
+_CLOUD_SYNC_MARKERS: tuple[str, ...] = (
+    "OneDrive",
+    "Dropbox",
+    "GoogleDrive",
+    "Google Drive",
+    "iCloudDrive",
+    "iCloud Drive",
+    "Box",
+    "pCloud",
+    "Mega",
+)
+
+
+def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
+    """Retourne le nom du provider cloud detecte dans le chemin DB, ou None.
+
+    Detection case-insensitive sur les segments du chemin pour eviter les
+    faux positifs (e.g., un fichier nomme `box.sqlite` dans un dossier
+    normal). On compare segment par segment au lieu de chercher la sous-chaine
+    dans tout le chemin.
+    """
+    try:
+        path_str = str(db_path).lower()
+    except (TypeError, ValueError):
+        return None
+    for marker in _CLOUD_SYNC_MARKERS:
+        if marker.lower() in path_str:
+            return marker
+    return None
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
 # apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap
 # ordonne (toutes les migrations en mode CREATE TABLE IF NOT EXISTS),
@@ -131,12 +168,39 @@ class _StoreBase:
         #          "raw": str, "backup_used": Optional[str], "ts": float}
         self._integrity_event: Optional[Dict[str, Any]] = None
 
+        # v1.3 SQLite cloud-sync warning : on detecte au plus tot (avant meme
+        # toute connexion SQLite) si la DB est posee dans un dossier de
+        # synchronisation cloud, et on logue un WARNING explicite. La detection
+        # est best-effort et ne bloque PAS le demarrage : l'utilisateur peut
+        # choisir d'ignorer (auquel cas integrity_check finira par signaler
+        # une corruption lors d'un futur boot).
+        self._cloud_sync_provider: Optional[str] = _detect_cloud_sync_folder(self.db_path)
+        if self._cloud_sync_provider:
+            logger.warning(
+                "DB SQLite detectee dans un dossier de synchronisation cloud (%s). "
+                "Chemin: %s. Risque de corruption silencieuse: le moteur de sync "
+                "peut copier le fichier .sqlite alors que des pages sont encore "
+                "dans le -wal ou -shm. Recommandation forte: deplacer la DB hors "
+                "du dossier %s, ou exclure les fichiers .sqlite/.sqlite-wal/"
+                ".sqlite-shm de la synchronisation. Voir docs/TROUBLESHOOTING.md "
+                "section 'Stockage DB'.",
+                self._cloud_sync_provider,
+                self.db_path,
+                self._cloud_sync_provider,
+            )
+
         default_migrations_dir = Path(__file__).resolve().parent / "migrations"
         self.migrations_dir = Path(migrations_dir) if migrations_dir else default_migrations_dir
         self.migrations = MigrationManager(
             db_path=self.db_path,
             migrations_dir=self.migrations_dir,
             busy_timeout_ms=self.busy_timeout_ms,
+            # Fix PRAGMA-05 : propager l'override explicite du profil PRAGMA
+            # afin que les connexions ouvertes pendant apply_migrations()
+            # utilisent le meme profil que celui du store (e.g., 'nas_smb'
+            # pour forcer synchronous=FULL pendant les ALTER TABLE /
+            # CREATE INDEX critiques). Sans ca, autodetect uniquement.
+            pragma_profile_name=self.pragma_profile_name,
         )
 
     def _debug(self, message: str) -> None:
@@ -337,6 +401,19 @@ class _StoreBase:
         version = self._ensure_required_schema(version)
         self._debug(f"SQLite initialized, schema version = {version}")
         return version
+
+    @property
+    def cloud_sync_provider(self) -> Optional[str]:
+        """v1.3 : nom du provider cloud detecte dans le chemin DB, ou None.
+
+        Valeurs possibles : "OneDrive", "Dropbox", "GoogleDrive",
+        "Google Drive", "iCloudDrive", "iCloud Drive", "Box", "pCloud",
+        "Mega", ou None si la DB n'est pas dans un dossier synchronise.
+
+        Consomme par la couche UI (runtime_support) pour afficher un dialog
+        non-bloquant au premier boot et inciter l'utilisateur a deplacer la DB.
+        """
+        return self._cloud_sync_provider
 
     @property
     def integrity_status(self) -> str:

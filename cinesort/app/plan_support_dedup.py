@@ -8,9 +8,9 @@ groupes de doublons sur les destinations planifiees.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import fields as dc_fields
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 

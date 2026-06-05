@@ -31,7 +31,6 @@ from cinesort.domain.quality_score import (
     _score_extras,
 )
 
-
 # ============================================================
 # R1-BUG-019 : UNKNOWN doit etre NEUTRE dans _score_extras
 # ============================================================

@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Tuple
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
-from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -221,6 +221,8 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # dashboard l'inverse, run_flow ne lisait que row.total).
     from cinesort.ui.api.run_data_support import (
         compute_total_fallback as _compute_total_fallback,
+    )
+    from cinesort.ui.api.run_data_support import (
         count_plan_rows as _count_plan_rows,
     )
 

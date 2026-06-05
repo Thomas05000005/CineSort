@@ -28,6 +28,20 @@ if TYPE_CHECKING:
     from cinesort.domain.core import ApplyExecutionContext, ApplyResult, Config, PlanRow
 
 
+def _name_eq_fs(a: str, b: str) -> bool:
+    """Compare two file names case-insensitively AND Unicode-normalized (NFC).
+
+    Necessaire car un scan SMB depuis macOS retourne des noms en NFD alors que
+    l'index/plan stocke peut-etre en NFC (ou vice versa). Sans normalisation,
+    la comparaison .lower() rate le fichier et provoque un SKIP avec
+    "video missing" (et compromet l'apply_rollback faute de src_sha1).
+    """
+    return (
+        unicodedata.normalize("NFC", str(a or "")).casefold()
+        == unicodedata.normalize("NFC", str(b or "")).casefold()
+    )
+
+
 def build_apply_context(
     cfg: "Config",
     rows: list["PlanRow"],
@@ -964,7 +978,7 @@ def move_duplicate_losers_to_user_decided(
             if not video.exists():
                 # tolère case-insensitive : iter le dossier
                 try:
-                    matches = [p for p in folder.iterdir() if p.is_file() and p.name.lower() == video_name.lower()]
+                    matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
                     video = matches[0] if matches else video
                 except (OSError, PermissionError):
                     pass
@@ -1286,8 +1300,15 @@ def apply_rows(
         # VN-E.4 : emit row_decision (UI accept/reject) - sortable par row_id.
         if audit_logger is not None:
             try:
+                # Fix R6-05 : preserver le tri-etat `deferred` dans l'audit
+                # row_decision. Sans cela les films reportes par l'utilisateur
+                # apparaissent comme `user_rejected` dans apply_audit.jsonl,
+                # ce qui fausse la tracabilite post-apply (cf apply_audit.py
+                # objectif "pourquoi ce fichier a ete deplace la").
                 _dec_reason = "user_approved" if ok else (
-                    "validation_absente" if row.row_id not in ctx.decision_keys else "user_rejected"
+                    "user_deferred" if dec.get("decision") == "deferred"
+                    else "validation_absente" if row.row_id not in ctx.decision_keys
+                    else "user_rejected"
                 )
                 audit_logger.row_decision(
                     row_id=str(row.row_id),
@@ -1831,7 +1852,7 @@ def apply_collection_item(
         merged_video = None
         try:
             merged_video = next(
-                (path for path in folder.rglob("*") if path.is_file() and path.name.lower() == str(video_name).lower()),
+                (path for path in folder.rglob("*") if path.is_file() and _name_eq_fs(path.name, str(video_name))),
                 None,
             )
         except (OSError, PermissionError):
@@ -1932,7 +1953,7 @@ def apply_tv_episode(
     video = folder / row.video
     if not video.exists():
         try:
-            matches = [p for p in folder.iterdir() if p.is_file() and p.name.lower() == row.video.lower()]
+            matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, row.video)]
             video = matches[0] if matches else video
         except (PermissionError, OSError):
             pass
@@ -2057,7 +2078,7 @@ def quarantine_row(
 
     video = folder / row.video
     if not video.exists():
-        matches = [path for path in folder.iterdir() if path.is_file() and path.name.lower() == row.video.lower()]
+        matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
         video = matches[0] if matches else video
     if not video.exists():
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)

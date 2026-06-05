@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections import Counter
 import csv
 import io
 import json
 import logging
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -241,16 +241,36 @@ def _build_dashboard_section(
     # persistees pour que les KPI cards refletent la realite immediatement
     # apres bulk-approve. Recalcul a chaque appel (cf get_dashboard pour le
     # contournement du cache _load_dashboard_cache).
+    # R6-06 : compteur tri-etat explicite. Les decisions `deferred` sont
+    # persistees avec ok=false (via to_legacy_ok_bool) — sans separation,
+    # elles enflaient rejected_count et la carte "En attente" restait a 0.
+    # On prefere le champ explicite `decision` (accepted/rejected/deferred),
+    # fallback sur `ok` pour les payloads legacy sans `decision`.
     try:
         decisions = api._load_decisions_from_validation(run_paths) or {}
     except (OSError, TypeError, ValueError, AttributeError):
         decisions = {}
-    validated_count = sum(
-        1 for d in decisions.values() if isinstance(d, dict) and d.get("ok") is True
-    )
-    rejected_count = sum(
-        1 for d in decisions.values() if isinstance(d, dict) and d.get("ok") is False
-    )
+    accepted_count = 0
+    rejected_count = 0
+    deferred_count = 0
+    for d in decisions.values():
+        if not isinstance(d, dict):
+            continue
+        decision_val = d.get("decision")
+        if decision_val == "accepted":
+            accepted_count += 1
+        elif decision_val == "rejected":
+            rejected_count += 1
+        elif decision_val == "deferred":
+            deferred_count += 1
+        elif decision_val is None:
+            # Fallback legacy : pas de champ `decision`, on retombe sur `ok`.
+            if d.get("ok") is True:
+                accepted_count += 1
+            elif d.get("ok") is False:
+                rejected_count += 1
+    # Backward compat : validated_count = accepted_count (ancien alias).
+    validated_count = accepted_count
 
     # SCAN-1 : diagnostic scan expose depuis stats_obj pour la carte
     # "Diagnostic scan : N fichiers exclus par categorie". Sans cela
@@ -452,8 +472,12 @@ def _build_dashboard_section(
             "probe_partial_count": probe_partial_count,
             # VAL-1 : exposition validated/rejected pour les KPI cards
             # Traitement (Valides / Rejetes / En attente).
+            # R6-06 : exposition explicite tri-etat (accepted/rejected/
+            # deferred). validated_count == accepted_count (backward compat).
             "validated_count": int(validated_count),
             "rejected_count": int(rejected_count),
+            "accepted_count": int(accepted_count),
+            "deferred_count": int(deferred_count),
         },
         "distributions": {
             "score_bins": bins_payload,
@@ -599,16 +623,30 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         # VAL-1 : recalcul live de validated_count / rejected_count pour que
         # les KPI cards refletent immediatement bulk-approve / annulation sans
         # attendre l'invalidation du cache dashboard.
+        # R6-06 : meme logique tri-etat que _build_dashboard_section.
         try:
             _decisions_live = api._load_decisions_from_validation(run_paths) or {}
         except (OSError, TypeError, ValueError, AttributeError):
             _decisions_live = {}
-        validated_live = sum(
-            1 for d in _decisions_live.values() if isinstance(d, dict) and d.get("ok") is True
-        )
-        rejected_live = sum(
-            1 for d in _decisions_live.values() if isinstance(d, dict) and d.get("ok") is False
-        )
+        accepted_live = 0
+        rejected_live = 0
+        deferred_live = 0
+        for d in _decisions_live.values():
+            if not isinstance(d, dict):
+                continue
+            decision_val = d.get("decision")
+            if decision_val == "accepted":
+                accepted_live += 1
+            elif decision_val == "rejected":
+                rejected_live += 1
+            elif decision_val == "deferred":
+                deferred_live += 1
+            elif decision_val is None:
+                if d.get("ok") is True:
+                    accepted_live += 1
+                elif d.get("ok") is False:
+                    rejected_live += 1
+        validated_live = accepted_live
 
         cached_payload = api._load_dashboard_cache(run_row=run_row, run_paths=run_paths, store=store)
         if isinstance(cached_payload, dict):
@@ -618,6 +656,10 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 cached_kpis = dict(cached_kpis)
                 cached_kpis["validated_count"] = int(validated_live)
                 cached_kpis["rejected_count"] = int(rejected_live)
+                # R6-06 : injection tri-etat dans le cache pour la carte
+                # "En attente" / "Reporte".
+                cached_kpis["accepted_count"] = int(accepted_live)
+                cached_kpis["deferred_count"] = int(deferred_live)
                 cached_payload = {**cached_payload, "kpis": cached_kpis}
             return {
                 "ok": True,

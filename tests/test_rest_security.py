@@ -6,6 +6,7 @@ pas de leak 500, path traversal, CORS non-wildcard.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import tempfile
@@ -17,9 +18,7 @@ from typing import Any, Dict
 
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer, _RateLimiter
-import contextlib
 from tests._helpers import find_free_port as _find_free_port
-
 
 # ---------------------------------------------------------------------------
 # Tests unitaires du rate limiter (pas besoin de serveur)

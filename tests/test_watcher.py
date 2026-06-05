@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cinesort.app.watcher import _snapshot_root, _has_changed, FolderWatcher
+from cinesort.app.watcher import FolderWatcher, _has_changed, _snapshot_root
 
 # Migration B (PR #257) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard

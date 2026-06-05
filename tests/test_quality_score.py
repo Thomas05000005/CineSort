@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import cinesort.ui.api.cinesort_api as backend
 import cinesort.domain.core as core
+import cinesort.ui.api.cinesort_api as backend
 from cinesort.domain.quality_score import (
     compute_quality_score,
     default_quality_profile,

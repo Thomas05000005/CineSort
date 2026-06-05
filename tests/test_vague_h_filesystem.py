@@ -33,7 +33,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # FIX 1 - PermissionError -> message clair + error_messages
 # ---------------------------------------------------------------------------

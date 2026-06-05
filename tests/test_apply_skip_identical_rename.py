@@ -26,8 +26,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import cinesort.domain.core as core
 import cinesort.app.apply_core as apply_core
+import cinesort.domain.core as core
 from cinesort.app.apply_core import apply_single
 from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import wait_run_done as _wait_done

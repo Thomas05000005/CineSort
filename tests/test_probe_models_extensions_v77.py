@@ -14,11 +14,11 @@ from __future__ import annotations
 import unittest
 
 from cinesort.domain.probe_models import (
-    PROBE_QUALITY_FULL,
-    PROBE_QUALITY_FAILED,
     OP_TYPE_MOVE,
     OP_TYPE_NOOP,
     OP_TYPE_RENAME,
+    PROBE_QUALITY_FAILED,
+    PROBE_QUALITY_FULL,
     NormalizedProbe,
     OpType,
     ProbeResult,

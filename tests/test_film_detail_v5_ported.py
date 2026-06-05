@@ -1,6 +1,7 @@
 """V5bis-06 — Vérifie film-detail.js porté en ES module."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

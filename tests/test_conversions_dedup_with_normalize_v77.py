@@ -99,8 +99,9 @@ class TestConversionsDedup(unittest.TestCase):
 
     def test_canonical_module_does_not_import_probe(self) -> None:
         """cinesort.domain.conversions ne doit pas dependre de cinesort.infra.*."""
-        import cinesort.domain.conversions as mod
         import inspect
+
+        import cinesort.domain.conversions as mod
 
         src = inspect.getsource(mod)
         self.assertNotIn("from cinesort.infra", src)

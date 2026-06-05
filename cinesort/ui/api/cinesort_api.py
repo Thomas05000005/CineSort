@@ -98,14 +98,24 @@ from cinesort.ui.api.facades import (
 )
 from cinesort.ui.api.quality_simulator_support import (
     clear_cache as _sim_clear,
+)
+from cinesort.ui.api.quality_simulator_support import (
     run_simulation,
     save_custom_preset,
 )
 from cinesort.ui.api.settings_support import (
     _SECRET_MASK,
+)
+from cinesort.ui.api.settings_support import (
     build_cfg_from_run_row as _build_cfg_from_run_row,
+)
+from cinesort.ui.api.settings_support import (
     build_cfg_from_settings as _build_cfg_from_settings_payload,
+)
+from cinesort.ui.api.settings_support import (
     normalize_user_path as _normalize_user_path,
+)
+from cinesort.ui.api.settings_support import (
     read_settings as _read_settings,
 )
 
@@ -203,6 +213,11 @@ class CineSortApi:
         self._apply_inflight_run_ids: set[str] = set()
         self._quality_batch_guard_lock = threading.Lock()
         self._quality_batch_inflight_run_ids: set[str] = set()
+        # Lock pour proteger la sequence read-modify-write des settings (fix TOCTOU
+        # dans _set_locale_impl : sans ce verrou, un save_settings concurrent
+        # execute entre _get_settings_impl() et _save_settings_impl(current) est
+        # ecrase par le payload 'current' lu avant la mutation parallele).
+        self._settings_write_lock = threading.RLock()
         self._max_terminal_runs_in_memory = MAX_TERMINAL_RUNS_IN_MEMORY
         self._last_event_ts: float = time.time()
         self._last_settings_ts: float = time.time()
@@ -583,12 +598,15 @@ class CineSortApi:
         return runtime_support.generate_unique_run_id(self, store)
 
     def _build_cfg_from_settings(self, settings: Dict[str, Any], root: Path) -> core.Config:
+        # PRAGMA-02 fix : passer state_dir pour que mode "auto" resolve la
+        # valeur effective (4 NAS / 8 SSD) au lieu de retomber sur 1 sequentiel.
         return _build_cfg_from_settings_payload(
             settings,
             root=root,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
             default_empty_folders_folder_name=DEFAULT_EMPTY_FOLDERS_FOLDER_NAME,
             default_residual_cleanup_folder_name=DEFAULT_RESIDUAL_CLEANUP_FOLDER_NAME,
+            state_dir=self._get_state_dir(),
         )
 
     def _cfg_from_run_row(self, row: Dict[str, Any]) -> core.Config:
@@ -712,6 +730,24 @@ class CineSortApi:
         )
 
     def _save_settings_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        # Lock partage avec _set_locale_impl pour serialiser les sequences
+        # read-modify-write des settings et fermer la fenetre TOCTOU.
+        with self._settings_write_lock:
+            return self._save_settings_impl_locked(settings)
+
+    def _save_settings_impl_locked(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        # B05-401-INCOHERENT (Fix A) : capturer l'ancien token AVANT save pour
+        # detecter le changement et hot-reloader le handler REST en memoire.
+        # Sans ce hot-swap, settings.json a le NOUVEAU token mais le handler
+        # valide encore avec l'ANCIEN -> 401 incoherents jusqu'au prochain
+        # restart manuel. Lecture defensive : si _get_settings_impl echoue
+        # pour une raison quelconque, on ne bloque pas la sauvegarde.
+        try:
+            old_settings = self._get_settings_impl()
+        except (OSError, KeyError, TypeError, ValueError):
+            old_settings = {}
+        old_token = str((old_settings or {}).get("rest_api_token") or "").strip()
+
         state_dir, result = settings_support.save_settings_payload(
             settings,
             current_state_dir=self._get_state_dir(),
@@ -735,6 +771,22 @@ class CineSortApi:
             # qu'elle est sauvegardee (i18n_messages.set_locale est tolerant aux
             # valeurs invalides — le clamp a deja eu lieu cote settings).
             self._apply_locale_setting(settings.get("locale"))
+            # B05-401-INCOHERENT (Fix A) : hot-reload du token REST si change
+            # sans redemarrer le serveur (evite la coupure des sessions
+            # legitimes). Si le serveur n'expose pas update_auth_token
+            # (versions anterieures), on no-op silencieusement -> backward compat.
+            new_token = str(settings.get("rest_api_token") or "").strip()
+            if new_token != old_token and self._rest_server is not None:
+                updater_fn = getattr(self._rest_server, "update_auth_token", None)
+                if callable(updater_fn):
+                    try:
+                        updater_fn(new_token)
+                    except (AttributeError, RuntimeError, TypeError) as exc:
+                        logger.warning(
+                            "rest: hot-swap du token REST echoue (%s) — un restart manuel"
+                            " du serveur sera necessaire pour appliquer le nouveau token.",
+                            exc,
+                        )
         return result
 
     # ---------- locale (V6-01 Polish Total v7.7.0) ----------
@@ -780,18 +832,23 @@ class CineSortApi:
         set_locale(normalized)
         # 2) Persistance dans settings.json (passe par save_settings_payload pour
         #    deduper toute la logique de validation/normalisation/backup).
-        try:
-            current = self._get_settings_impl()
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("set_locale: cannot load settings to persist locale: %s", exc)
-            return {"ok": True, "locale": normalized, "persisted": False}
-        current["locale"] = normalized
-        try:
-            self._save_settings_impl(current)
-            persisted = True
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("set_locale: persistence failed: %s", exc)
-            persisted = False
+        # Fix TOCTOU : la sequence get -> mutate -> save doit etre atomique pour
+        # eviter qu'un save_settings concurrent execute entre les deux appels
+        # soit integralement ecrase par le payload 'current' (qui contient les
+        # valeurs lues avant la mutation parallele).
+        with self._settings_write_lock:
+            try:
+                current = self._get_settings_impl()
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning("set_locale: cannot load settings to persist locale: %s", exc)
+                return {"ok": True, "locale": normalized, "persisted": False}
+            current["locale"] = normalized
+            try:
+                self._save_settings_impl(current)
+                persisted = True
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning("set_locale: persistence failed: %s", exc)
+                persisted = False
         return {"ok": True, "locale": normalized, "persisted": persisted}
 
     # ---------- V3-05 — Mode démo wizard (premier-run) ----------
@@ -2127,6 +2184,30 @@ class CineSortApi:
     def _check_duplicates_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Detecte les collisions de destination entre rows approuvees avant apply."""
         return run_flow_support.check_duplicates(self, run_id, decisions)
+
+    def _check_duplicates_fusion_impl(
+        self,
+        run_id: str,
+        decisions: Dict[str, Dict[str, Any]],
+        *,
+        audio_weight: Optional[float] = None,
+        video_weight: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """V2.4 — Detection fusion Chromaprint + videohash (feature flag opt-in).
+
+        Backward compat ABSOLUE :
+        - `_check_duplicates_impl` legacy ci-dessus reste l'unique chemin
+          actif par defaut.
+        - Cette implementation est gate par `CINESORT_FUSION_DOUBLONS` ; si
+          le flag est off, retourne un stub `{ok, enabled: False, pairs: []}`.
+        """
+        return run_flow_support.check_duplicates_fusion(
+            self,
+            run_id,
+            decisions,
+            audio_weight=audio_weight,
+            video_weight=video_weight,
+        )
 
     def _get_cleanup_residual_preview_impl(self, run_id: str) -> Dict[str, Any]:
         """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""

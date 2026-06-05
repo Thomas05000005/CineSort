@@ -19,7 +19,6 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, Set
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = PROJECT_ROOT / "locales"
 DASHBOARD_DIR = PROJECT_ROOT / "web" / "dashboard"

@@ -42,6 +42,13 @@ dependencies = [
     "onnxruntime>=1.26.0,<2.0",
     # zipp epingle Snyk (CVE chain).
     "zipp>=3.23.1",
+    # V2.1 — Pydantic v2.13+ pour validation passive (feature flag
+    # CINESORT_PYDANTIC_STRICT=0 par defaut) et TypeAdapter polymorphic
+    # (PerceptualReport | QualityReport avec discriminator='kind').
+    # Bundle accepte +5 MB (memoire utilisateur : "tout bundle accepte +120MB").
+    # BACKWARD COMPAT ABSOLUE : run_facade garde fallback dict[str, Any] si
+    # la validation echoue (log warning, ne raise pas).
+    "pydantic>=2.13,<3",
 ]
 
 [project.optional-dependencies]
@@ -116,6 +123,7 @@ extend-exclude = [
 # automatiques deja appliques) — empeche toute regression future sur ces idiomes.
 select = [
   "E", "F", "W",
+  "I",  # V1.2 Palier I (step 1/6) : isort — tri imports
   "UP015", "UP024", "UP032", "UP034",
   "SIM105",  # try/except/pass -> contextlib.suppress
   "SIM110",  # reimplemented-builtin (any/all) -> use builtin

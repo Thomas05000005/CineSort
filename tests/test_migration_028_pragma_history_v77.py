@@ -25,8 +25,7 @@ sys.path.insert(0, ".")
 
 from cinesort.infra.db.migration_manager import MigrationManager
 from cinesort.infra.db.pragma_profile import apply_pragmas
-from tests._helpers import existing_db_fixture, _project_migrations_dir
-
+from tests._helpers import _project_migrations_dir, existing_db_fixture
 
 MIGRATION_FILENAME = "028_pragma_history.sql"
 TARGET_VERSION = 28

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from contextlib import closing
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .connection import connect_sqlite
 
@@ -140,13 +140,30 @@ class MigrationManager:
     Applies SQL migrations in ascending order based on numeric file prefix.
     """
 
-    def __init__(self, db_path: Path, migrations_dir: Path, *, busy_timeout_ms: int = 5000):
+    def __init__(
+        self,
+        db_path: Path,
+        migrations_dir: Path,
+        *,
+        busy_timeout_ms: int = 5000,
+        pragma_profile_name: Optional[str] = None,
+    ):
         self.db_path = Path(db_path)
         self.migrations_dir = Path(migrations_dir)
         self.busy_timeout_ms = int(max(1, busy_timeout_ms))
+        # Fix PRAGMA-05 : propager le profil PRAGMA explicite (e.g., 'nas_smb')
+        # aux connexions ouvertes pendant apply_migrations(). Sans ca, les
+        # migrations tournaient en autodetect meme si SQLiteStore avait recu
+        # un override explicite, ouvrant une fenetre de corruption type
+        # Sonarr #1886 sur NAS mal classifie par l'autodetect.
+        self.pragma_profile_name: Optional[str] = pragma_profile_name
 
     def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(str(self.db_path), busy_timeout_ms=self.busy_timeout_ms)
+        return connect_sqlite(
+            str(self.db_path),
+            busy_timeout_ms=self.busy_timeout_ms,
+            profile=self.pragma_profile_name,
+        )
 
     def _list_migrations(self) -> List[Tuple[int, Path]]:
         if not self.migrations_dir.exists():

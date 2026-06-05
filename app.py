@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import traceback
@@ -7,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 
 from cinesort.ui.api.cinesort_api import CineSortApi
-import contextlib
 
 DEV_MODE_ENV_VAR = "DEV_MODE"
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
@@ -278,7 +278,11 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
 
         settings_path = _Path(api._state_dir) / "settings.json" if hasattr(api, "_state_dir") else None
         if settings_path and settings_path.is_file():
-            raw = _json.loads(settings_path.read_text(encoding="utf-8"))
+            # Fix BOM : settings.json peut contenir un BOM UTF-8 (editeurs Windows,
+            # outils PowerShell par defaut). 'utf-8' strict leve UnicodeDecodeError,
+            # le bloc except masque le token avec _SECRET_MASK -> 401 systematique.
+            # 'utf-8-sig' tolere ET supprime le BOM si present.
+            raw = _json.loads(settings_path.read_text(encoding="utf-8-sig"))
             persisted_token = str(raw.get("rest_api_token") or "").strip()
             in_memory_token = str(s.get("rest_api_token") or "").strip()
             if persisted_token:
@@ -454,6 +458,8 @@ def main_api() -> None:
     try:
         from cinesort.app.quarantine_ttl import (
             DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+        )
+        from cinesort.app.quarantine_ttl import (
             start_quarantine_ttl_cron,
         )
 
@@ -493,6 +499,59 @@ def _update_splash(splash_window: object, step: int, text: str, percent: int) ->
         )
     except Exception:
         pass  # splash peut etre deja ferme
+
+
+def _configure_webview2_runtime() -> None:
+    """V3.1 SCAFFOLDING — Configure WebView2 pour utiliser le runtime bundle si dispo.
+
+    Quand le build a embarque le runtime "Fixed Version" via le spec
+    (CINESORT_BUNDLE_WEBVIEW2=1 ; cf CineSort.spec section V3.1), le repertoire
+    `webview2_fixed/` est extrait sous `sys._MEIPASS` au demarrage de l'EXE
+    onefile. On expose alors son chemin via les variables d'environnement
+    standards WebView2 (`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`) et on isole les
+    donnees utilisateur dans `%LOCALAPPDATA%/CineSort/webview2_userdata`.
+
+    Si le bundle est absent (build standard, comportement historique),
+    on ne touche a aucune variable d'env -> WebView2 retombe sur le
+    runtime Evergreen installe par Microsoft Edge (backward-compat ABSOLUE).
+    Aucune erreur n'est levee dans ce chemin.
+    """
+    try:
+        bundle_root = Path(resource_path("webview2_fixed"))
+    except Exception:
+        return
+    if not bundle_root.is_dir():
+        return
+
+    # Sanity-check : msedgewebview2.exe doit etre present a la racine du bundle.
+    if not (bundle_root / "msedgewebview2.exe").is_file():
+        print(
+            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - "
+            "fallback Evergreen.",
+            file=sys.stderr,
+        )
+        return
+
+    # WEBVIEW2_BROWSER_EXECUTABLE_FOLDER : utilise par la loader API
+    # CreateCoreWebView2EnvironmentWithOptions cote WebView2 SDK pour pointer
+    # sur un runtime fixe (cf doc Microsoft Edge WebView2 distribution modes).
+    os.environ.setdefault(
+        "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
+        str(bundle_root),
+    )
+    # Donnees utilisateur (cache, cookies, IndexedDB) — isolees du profil global
+    # pour eviter conflit avec un Edge installe. Doit etre ECRIVABLE (pas dans
+    # sys._MEIPASS qui est read-only).
+    userdata_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview2_userdata"
+    try:
+        userdata_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER", str(userdata_dir))
+    print(
+        f"[WEBVIEW2] Runtime Fixed bundle actif: {bundle_root}",
+        file=sys.stderr,
+    )
 
 
 def _check_dpapi_availability() -> None:
@@ -556,6 +615,13 @@ def main() -> None:
     install_rotating_log(state_dir / "logs", level=boot_level)
 
     _check_dpapi_availability()
+
+    # V3.1 SCAFFOLDING — Si le build a embarque le runtime WebView2 Fixed
+    # Version, expose le chemin via les env vars standards AVANT d'importer
+    # `webview` (les loaders WebView2 lisent l'env au premier
+    # CreateCoreWebView2Environment). En l'absence de bundle, no-op silencieux
+    # -> repli automatique sur le runtime Evergreen installe.
+    _configure_webview2_runtime()
 
     # Cf issue #68 : verrou inter-process avant toute initialisation lourde.
     # Empeche 2 CineSort.exe simultanees sur le meme state_dir (corruption DB
@@ -823,6 +889,8 @@ def main() -> None:
                 try:
                     from cinesort.app.quarantine_ttl import (
                         DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+                    )
+                    from cinesort.app.quarantine_ttl import (
                         start_quarantine_ttl_cron,
                     )
 

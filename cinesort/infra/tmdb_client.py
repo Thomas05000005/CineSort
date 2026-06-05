@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -14,7 +15,6 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import make_session_with_retry
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -303,12 +303,29 @@ class TmdbClient:
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
-            tmp.write_text(
-                json.dumps(self._cache, ensure_ascii=False, separators=(",", ":")),
-                encoding="utf-8",
-            )
-            os.replace(tmp, self.cache_path)
-            self._dirty = False
+            # Fix audit Vague H (parite OmdbClient._save_cache_atomic) : write +
+            # flush + fsync avant rename pour eviter qu'un crash systeme entre
+            # write et os.replace ne promeuve un .tmp partiel en cache officiel
+            # (cache 50-100MB -> JSON corrompu -> re-fetch API sur tous les films).
+            try:
+                payload = json.dumps(self._cache, ensure_ascii=False, separators=(",", ":"))
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())  # force write to disk avant rename
+                if tmp.exists() and tmp.stat().st_size > 0:
+                    os.replace(tmp, self.cache_path)
+                    self._dirty = False
+                else:
+                    logger.warning("tmdb cache tmp write failed, keeping previous cache")
+                    if tmp.exists():
+                        with contextlib.suppress(OSError):
+                            tmp.unlink()
+            except (OSError, PermissionError, ValueError) as exc:
+                logger.debug("tmdb cache save warning: %s", exc)
+                if tmp.exists():
+                    with contextlib.suppress(OSError):
+                        tmp.unlink()
 
     def flush(self) -> None:
         try:

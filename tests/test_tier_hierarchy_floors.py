@@ -19,8 +19,8 @@ import unittest
 
 from cinesort.domain.tiers_helpers import (
     DEFAULT_HIERARCHY_DIMENSIONS_ORDER,
-    DEFAULT_HIERARCHY_RESOLUTION_FLOORS,
     DEFAULT_HIERARCHY_RESOLUTION_CEILINGS,
+    DEFAULT_HIERARCHY_RESOLUTION_FLOORS,
     apply_tier_hierarchy,
     default_hierarchy_config,
     normalize_hierarchy_config,

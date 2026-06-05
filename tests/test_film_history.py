@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 from cinesort.domain.film_history import (
     film_identity_key,
-    identity_key_from_dict,
     get_film_timeline,
+    identity_key_from_dict,
 )
 
 # Migration B (PR #257) : legacy frontend supprime.

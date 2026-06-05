@@ -10,10 +10,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from .constants import (
+    BUDGET_HIGH,
     DNR_BLUR_THRESHOLD,
     ERA_CLASSIC_FILM,
     ERA_TRANSITION,
-    BUDGET_HIGH,
     GRAIN_AV1_AFGS1_BONUS,
     GRAIN_LIGHT,
     GRAIN_MODERATE,

@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
 from cinesort.ui.api import film_history_support
-from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 

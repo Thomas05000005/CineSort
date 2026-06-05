@@ -20,7 +20,6 @@ import unittest
 from cinesort.domain.quality_score import _determine_tier, validate_quality_profile
 from cinesort.domain.tiers_helpers import determine_tier, normalize_tiers, tier_ordinal
 
-
 LEGACY_PROFILES = [
     {
         "id": "legacy_remux_strict",
