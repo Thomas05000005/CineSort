@@ -173,16 +173,24 @@ def cross_check_rows_with_probe(
             continue
         if not probe_result or not probe_result.get("ok"):
             continue
-        normalized = probe_result.get("normalized") if isinstance(probe_result.get("normalized"), dict) else {}
+        normalized_raw = probe_result.get("normalized")
+        normalized = normalized_raw if isinstance(normalized_raw, dict) else {}
         duration_s = normalized.get("duration_s")
-        if not duration_s or float(duration_s) <= 0:
+        # Cf #541 audit 2026-06-06 : float(duration_s) peut lever ValueError
+        # si le backend probe renvoie une chaine non-numerique ("N/A",
+        # "unknown"). On isole la row coupable au lieu de planter tout le scan.
+        try:
+            duration_min = float(duration_s) / 60.0 if duration_s else 0.0
+        except (TypeError, ValueError):
+            duration_min = 0.0
+        if duration_min <= 0:
             n_no_data += 1
             continue
 
         # Apply runtime matching
         edition_label = getattr(row, "edition", None)
         bonus, warning = score_runtime_delta(
-            file_runtime_min=float(duration_s) / 60.0,
+            file_runtime_min=duration_min,
             tmdb_runtime_min=int(tmdb_runtime),
             edition_label=edition_label,
         )
