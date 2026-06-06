@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Callable, List, Optional, Tuple
 
 from cinesort.infra.omdb_client import OmdbClient, OmdbResult
@@ -44,8 +45,16 @@ _YEAR_TOLERANCE = 1
 _NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]")
 
 
+@lru_cache(maxsize=2048)
 def _normalize_title_for_compare(title: str) -> str:
-    """Normalise un titre pour comparaison (lowercase, strip whitespace + punct)."""
+    """Normalise un titre pour comparaison (lowercase, strip whitespace + punct).
+
+    Cf #542 audit 2026-06-06 : la fonction execute 3 re.sub + 2
+    unicodedata.normalize a chaque appel. Sur 5000 rows + multiple comparisons
+    par row, c'est ~20k appels avec haute redondance (memes titres TMDb / OMDb
+    apparaissent regulierement). lru_cache(2048) garde une emp reinte memoire
+    minime (~200 KB) pour eviter la recomputation.
+    """
     if not title:
         return ""
     s = title.lower().strip()
