@@ -27,6 +27,12 @@ _DEBUG_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
 # bibliotheques (50k+ films + recherches multi-fuzzy → 200+ MB sans cap).
 _TMDB_CACHE_MAX_ENTRIES = 100_000
 
+# Borne dure de taille du fichier cache sur disque (DoS). Au-dela on repart
+# propre plutot que de charger 100k+ entrees en RAM via read_text(). Cf #539
+# audit 2026-06-06: le cap LRU agit apres deserialization, pas avant lecture
+# disque, donc un cache corrompu ou un backup invalide peut causer OOM.
+_TMDB_CACHE_MAX_BYTES = 100 * 1024 * 1024  # 100 MB (~ MAX_ENTRIES x 1 KB + marge)
+
 # V5-03 polish v7.7.0 (R5-STRESS-4) : TTL du cache TMDb configurable.
 # Defaut 30 jours = bon compromis : suffisant pour eviter de marteler l'API
 # quand on rescanne souvent, mais assez court pour rattraper les corrections
@@ -177,6 +183,14 @@ class TmdbClient:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.exists():
+                size = self.cache_path.stat().st_size
+                if size > _TMDB_CACHE_MAX_BYTES:
+                    self._debug(
+                        f"cache trop volumineux ({size / 1024 / 1024:.1f} MB > "
+                        f"{_TMDB_CACHE_MAX_BYTES / 1024 / 1024:.0f} MB) — repart propre"
+                    )
+                    self._cache = OrderedDict()
+                    return
                 raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
                 # OrderedDict preserve l'ordre d'insertion JSON. Si le cache
                 # depasse MAX_ENTRIES (cache historique pre-#75), on garde
@@ -250,6 +264,9 @@ class TmdbClient:
         if entry is None:
             try:
                 if self.cache_path.exists():
+                    size = self.cache_path.stat().st_size
+                    if size > _TMDB_CACHE_MAX_BYTES:
+                        return None
                     raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
                     entry = raw.get(key)
             except (OSError, PermissionError, json.JSONDecodeError, ValueError):

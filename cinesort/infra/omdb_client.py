@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -54,6 +55,11 @@ _MIN_INTERVAL_S = 1.0
 # Hard cap LRU sur le cache (eviter de derives RAM si l'utilisateur scanne
 # 100k films sur plusieurs annees).
 _CACHE_MAX_ENTRIES = 50_000
+
+# Borne dure de taille du fichier cache sur disque (DoS). Cf #539 audit 2026-06-06 :
+# read_text() charge tout en RAM avant deserialization, donc un cache corrompu
+# peut OOM. 50 MB couvre largement MAX_ENTRIES x ~700 octets.
+_CACHE_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 @dataclass(frozen=True)
@@ -229,6 +235,14 @@ class OmdbClient:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.exists():
+                size = self.cache_path.stat().st_size
+                if size > _CACHE_MAX_BYTES:
+                    logger.warning(
+                        "omdb cache trop volumineux (%.1f MB) — repart propre",
+                        size / 1024 / 1024,
+                    )
+                    self._cache = {}
+                    return
                 raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     # Hard cap : ne charger que les MAX entries (plus recentes = fin)
@@ -244,10 +258,18 @@ class OmdbClient:
             self._cache = {}
 
     def _save_cache_atomic(self) -> None:
+        # Cf #540 audit 2026-06-06 : fsync entre write et replace pour
+        # durabilite. Sans cela, un crash apres write_text peut laisser un
+        # fichier visible mais tronque/vide au prochain boot (le metadata
+        # rename est flushe avant le data sur la plupart des FS).
         try:
             tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(self._cache, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.cache_path)
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self._cache, f, ensure_ascii=False)
+                f.flush()
+                with contextlib.suppress(OSError):
+                    os.fsync(f.fileno())
+            os.replace(tmp, self.cache_path)
         except (OSError, PermissionError) as exc:
             logger.debug("omdb cache save warning: %s", exc)
 
