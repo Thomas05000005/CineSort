@@ -1,0 +1,90 @@
+{
+  "fetches": [
+    {
+      "url": "devtools://devtools/bundled/Images/record-stop.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/filter-clear.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/search.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/arrow-drop-down-light.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/network-settings.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/import.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/download.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/file-fetch-xhr.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/file-json.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/record-start.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/refresh.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/home.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/bin.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/help.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    }
+  ],
+  "violations_csp_heuristique": [],
+  "image_requests": []
+}

@@ -1,0 +1,12 @@
+{
+  "fetches": [
+    {
+      "url": "devtools://devtools/bundled/Images/right-panel-close.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    }
+  ],
+  "violations_csp_heuristique": [],
+  "image_requests": []
+}

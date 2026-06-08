@@ -1,0 +1,96 @@
+{
+  "fetches": [
+    {
+      "url": "devtools://devtools/bundled/Images/brush.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/right-panel-open.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/warning-filled.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/checker.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/info.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/bezier-curve-filled.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/edge-documentation_book_filled.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/edge-developer-resources.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/edge-sources-search-sources-tab.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/edge-help_tooltips.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/top-panel-close.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/dots-vertical.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/frame.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/cloud.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    },
+    {
+      "url": "devtools://devtools/bundled/Images/right-panel-close.svg",
+      "status": 200,
+      "method": "GET",
+      "resource_type": "image"
+    }
+  ],
+  "violations_csp_heuristique": [],
+  "image_requests": []
+}
