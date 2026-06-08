@@ -637,6 +637,17 @@ def _plan_item(
     cands.extend(tmdb_cands)
     cands.extend(name_cands)
 
+    # Dedup final par tmdb_id (sinon nfo_imdb 0.95 / nfo_tmdb 0.93 / tmdb 0.85
+    # peuvent toutes survivre avec le meme tmdb_id et doubler dans le modal).
+    # On garde le score max pour preserver le ranking de pick_best_candidate.
+    _seen_cands: dict = {}
+    for _c in cands:
+        _k = _c.tmdb_id if _c.tmdb_id else ((_c.title or "").strip().lower(), _c.year)
+        _prev = _seen_cands.get(_k)
+        if _prev is None or (_c.score or 0.0) > (_prev.score or 0.0):
+            _seen_cands[_k] = _c
+    cands = list(_seen_cands.values())
+
     cands, title_ambiguous = _disambiguate_candidates(
         cands,
         nfo=nfo,

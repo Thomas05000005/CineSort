@@ -8,41 +8,53 @@
  * ============================================================================
  */
 
+/* ============================================================================
+ * V1.4 — Cascade @layer (ordre canonique, plus a droite = plus prioritaire)
+ * ----------------------------------------------------------------------------
+ *   reset       : normalize / box-sizing
+ *   tokens      : variables CSS (tokens.css + themes.css)
+ *   primitives  : helpers structurels bas niveau
+ *   components  : composants design system non-prefixes
+ *   utilities   : helpers atomiques (utilities.css)
+ *   legacy      : dashboard/styles.css et autres heritages a migrer
+ *   v5          : composants v5 (.v5-*) — gagne sur legacy en cas de conflit
+ *
+ * Les styles non-wrappes dans un @layer restent inconditionnellement prioritaires
+ * sur tous les layers (regle CSS standard) -> migration progressive sans casse.
+ * Tier hex (Gold #FFD700, Silver #C0C0C0, Bronze #CD7F32, Platinum #E5E4E2)
+ * et severities restent INVARIANTES.
+ * ============================================================================
+ */
+@layer reset, tokens, primitives, components, utilities, legacy, v5;
+
 :root {
   /* ===========================================================
    * Tier colors — INVARIABLES dans tous les themes
    * =========================================================== */
 
-  /* Platinum (or vif) */
-  --tier-platinum-solid:  #FFD700;
-  --tier-platinum-glow:   rgba(255, 215, 0, 0.25);
-  --tier-platinum-bg:     rgba(255, 215, 0, 0.08);
-  --tier-platinum-border: rgba(255, 215, 0, 0.35);
+  /* Platinum (metal platine) */
+  --tier-platinum-solid:  #E5E4E2;
+  --tier-platinum-glow:   rgba(229, 228, 226, 0.25);
+  --tier-platinum-bg:     rgba(229, 228, 226, 0.08);
+  --tier-platinum-border: rgba(229, 228, 226, 0.35);
 
-  /* Gold (vert validation)
-   * DO NOT change to yellow/gold hex (e.g. #FFD700, #d4a017, #FBBF24).
-   * Gold=vert est INTENTIONNEL dans la palette v5 (semantique de tier
-   * "validation passee", pas mimetique du metal). Voir
-   * docs/internal/AUDIT_VP_G_LIB_VALIDATION_V5_LEGACY.md AC-4
-   * "Tier colors hex INVARIANTES (regression visuelle verifiee)".
-   * Tout usage hardcode jaune/or dans components.css doit etre remplace
-   * par var(--tier-gold-solid) / var(--tier-gold-bg). */
-  --tier-gold-solid:  #22C55E;
-  --tier-gold-glow:   rgba(34, 197, 94, 0.25);
-  --tier-gold-bg:     rgba(34, 197, 94, 0.08);
-  --tier-gold-border: rgba(34, 197, 94, 0.35);
+  /* Gold (or vif) */
+  --tier-gold-solid:  #FFD700;
+  --tier-gold-glow:   rgba(255, 215, 0, 0.25);
+  --tier-gold-bg:     rgba(255, 215, 0, 0.08);
+  --tier-gold-border: rgba(255, 215, 0, 0.35);
 
-  /* Silver (bleu neutre positif) */
-  --tier-silver-solid:  #3B82F6;
-  --tier-silver-glow:   rgba(59, 130, 246, 0.25);
-  --tier-silver-bg:     rgba(59, 130, 246, 0.08);
-  --tier-silver-border: rgba(59, 130, 246, 0.35);
+  /* Silver (argent) */
+  --tier-silver-solid:  #C0C0C0;
+  --tier-silver-glow:   rgba(192, 192, 192, 0.25);
+  --tier-silver-bg:     rgba(192, 192, 192, 0.08);
+  --tier-silver-border: rgba(192, 192, 192, 0.35);
 
-  /* Bronze (orange warning doux) */
-  --tier-bronze-solid:  #F59E0B;
-  --tier-bronze-glow:   rgba(245, 158, 11, 0.25);
-  --tier-bronze-bg:     rgba(245, 158, 11, 0.08);
-  --tier-bronze-border: rgba(245, 158, 11, 0.35);
+  /* Bronze (bronze) */
+  --tier-bronze-solid:  #CD7F32;
+  --tier-bronze-glow:   rgba(205, 127, 50, 0.25);
+  --tier-bronze-bg:     rgba(205, 127, 50, 0.08);
+  --tier-bronze-border: rgba(205, 127, 50, 0.35);
 
   /* Reject (rouge action) */
   --tier-reject-solid:  #EF4444;
@@ -86,7 +98,10 @@
 
   --text-primary:   #E8ECF1;
   --text-secondary: #8B97AB;
-  --text-muted:     #6B7A95;
+  /* Fix audit 2026-06-07 a11y AA : #6B7A95 sur fond luxe #0B111A donnait
+     ratio ~3.55:1 < AA 4.5:1 (texte normal). Eclairci vers #9BA8BD
+     (ratio ~5:1) pour conformite AA sur 154 occurrences. */
+  --text-muted:     #9BA8BD;
   --text-disabled:  #4B5563;
   --text-inverse:   #0F1419;
 

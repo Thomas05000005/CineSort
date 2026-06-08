@@ -1,0 +1,193 @@
+/* ============================================================================
+ * CineSort Design System v5 — Typography utilities
+ * ============================================================================
+ * Classes utilitaires de typographie referencant les tokens --font-* / --fs-*
+ * / --fw-* / --lh-* / --ls-* definis dans tokens.css.
+ *
+ * Spec : audit Phase 6 « Design system 100% » — completion du manque typography
+ * (les tokens existent dans tokens.css mais aucun fichier dedie n'exposait les
+ * classes utilitaires reutilisables a travers les vues v5 ESM).
+ *
+ * Conventions de nommage :
+ *   .text-h1 .. .text-h4 : titres hierarchiques (3xl > 2xl > xl > lg)
+ *   .text-body, .text-body-sm, .text-body-lg : corps de texte
+ *   .text-caption, .text-overline : meta / labels secondaires
+ *   .text-mono : police monospace (logs, scores, chemins de fichiers)
+ *   .text-display : hero scores (KPI cards, podium platinum)
+ *   .text-label : label de formulaire / petit titre de section
+ *   .text-muted, .text-secondary, .text-disabled : couleurs invariantes
+ *   .text-tabular : chiffres tabulaires (alignement colonne)
+ *   .text-truncate, .text-clamp-2, .text-clamp-3 : ellipsis controle
+ *
+ * Toutes les classes utilisent les tokens (zero hardcode hex/px) pour rester
+ * coherentes entre les 4 themes Studio/Cinema/Luxe/Neon et le 5e theme AAA.
+ * ============================================================================
+ */
+
+/* ===========================================================
+ * Titres hierarchiques (H1 -> H4)
+ * =========================================================== */
+
+.text-h1 {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-3xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--text-primary);
+}
+
+.text-h2 {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--text-primary);
+}
+
+.text-h3 {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-normal);
+  color: var(--text-primary);
+}
+
+.text-h4 {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-normal);
+  color: var(--text-primary);
+}
+
+/* ===========================================================
+ * Corps de texte (body)
+ * =========================================================== */
+
+.text-body {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+}
+
+.text-body-lg {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+}
+
+.text-body-sm {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+}
+
+/* ===========================================================
+ * Caption / Overline / Label (meta secondaires)
+ * =========================================================== */
+
+.text-caption {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-snug);
+  color: var(--text-secondary);
+}
+
+.text-overline {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-wider);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.text-label {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-secondary);
+}
+
+/* ===========================================================
+ * Display (hero scores, KPI, podium)
+ * =========================================================== */
+
+.text-display {
+  font-family: var(--font-family-base);
+  font-size: var(--fs-3xl);
+  font-weight: var(--fw-black);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===========================================================
+ * Monospace (chemins, logs, scores tabulaires)
+ * =========================================================== */
+
+.text-mono {
+  font-family: var(--font-family-mono);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+}
+
+/* ===========================================================
+ * Couleurs invariantes (utilisables sur n'importe quel theme)
+ * =========================================================== */
+
+.text-primary   { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted     { color: var(--text-muted); }
+.text-disabled  { color: var(--text-disabled); }
+.text-inverse   { color: var(--text-inverse); }
+
+/* ===========================================================
+ * Variantes numerique (alignement colonnes tables)
+ * =========================================================== */
+
+.text-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ===========================================================
+ * Truncate / clamp (ellipsis controle)
+ * =========================================================== */
+
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.text-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

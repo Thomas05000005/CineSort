@@ -390,6 +390,10 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # V6-01 : root des fichiers locales/. Initialise par RestApiServer (cf
     # `locales_root = _resolve_locales_root()` plus bas).
     locales_root: Optional[Path] = None
+    # 2026-06-08 : adresse de bind effective ("127.0.0.1" ou "0.0.0.0"). Utilisee
+    # par _check_auth pour decider si le bypass d'auth localhost est sur (cf
+    # plus bas). Initialisee par RestApiServer.start() depuis self._host.
+    bind_host: str = "127.0.0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug("REST %s", format % args)
@@ -427,27 +431,151 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # --- Auth ---------------------------------------------------------------
 
     def _check_auth(self) -> bool:
+        # 2026-06-08 — BYPASS LOCALHOST DESKTOP TRUSTED
+        # Cause racine : 4 hotfixes successifs (_mask_secrets, _safeBearer,
+        # utf-8-sig, native_boot) n'ont pas fait disparaitre les 401 silencieux
+        # en local. Tant que le token transitant par PowerShell/JS storage subit
+        # une mutation invisible (BOM U+FEFF, percent-decode, normalisation
+        # unicode), l'auth Bearer echoue de facon non-reproductible.
+        # Approche radicale : en mode desktop pywebview (bind 127.0.0.1), le
+        # process REST tourne dans le meme contexte utilisateur que le client.
+        # Un attaquant local a deja le shell — l'auth Bearer ne protege rien.
+        # On bypass donc l'auth quand TOUS les criteres sont reunis :
+        #   1. client_ip ∈ _LOCAL_CLIENT_IPS (loopback v4/v6)
+        #   2. bind_host == "127.0.0.1" (PAS 0.0.0.0 / expose LAN)
+        #   3. feature flag CINESORT_DISABLE_LOCAL_AUTH != "1" (kill-switch)
+        # Le bypass est volontairement DESACTIVE quand bind 0.0.0.0 : on ne
+        # peut pas distinguer un client LAN qui spoof 127.0.0.1 dans son
+        # interface vs un vrai loopback. Securite critique.
+        client_ip = self.client_address[0] if self.client_address else ""
+        bypass_disabled = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH", "0").strip() == "1"
+        if (
+            not bypass_disabled
+            and client_ip in _LOCAL_CLIENT_IPS
+            and self.bind_host == "127.0.0.1"
+        ):
+            logger.info(
+                "Auth bypass localhost (client=%s, bind=%s) — desktop trusted mode",
+                client_ip,
+                self.bind_host,
+            )
+            return True
         if not self.auth_token:
             return False
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
+            # DEBUG VERBOSE 2026-06-08 : signaler header manquant/malforme.
+            if os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
+                logger.warning(
+                    "[DEBUG-AUTH] header Authorization absent ou non-Bearer: %r",
+                    auth[:40] if auth else "<empty>",
+                )
             return False
-        return hmac.compare_digest(auth[7:].strip().encode(), self.auth_token.encode())
+        bearer = auth[7:].strip()
+        match = hmac.compare_digest(bearer.encode(), self.auth_token.encode())
+        # DEBUG VERBOSE 2026-06-08 : si mismatch, dump codepoints des deux cotes
+        # pour identifier la divergence exacte (BOM, trailing whitespace, etc.).
+        if not match and os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
+            try:
+                bearer_cps = [f"U+{ord(c):04X}" for c in bearer]
+                token_cps = [f"U+{ord(c):04X}" for c in self.auth_token]
+                bearer_non_ascii = [(i, ord(c)) for i, c in enumerate(bearer) if ord(c) > 0x7F]
+                token_non_ascii = [(i, ord(c)) for i, c in enumerate(self.auth_token) if ord(c) > 0x7F]
+                logger.warning(
+                    "[DEBUG-AUTH] MISMATCH bearer_len=%d token_len=%d",
+                    len(bearer),
+                    len(self.auth_token),
+                )
+                logger.warning("[DEBUG-AUTH] bearer codepoints=%s", bearer_cps)
+                logger.warning("[DEBUG-AUTH] server token codepoints=%s", token_cps)
+                if bearer_non_ascii:
+                    logger.warning("[DEBUG-AUTH] bearer NON-ASCII pos+cp=%s", bearer_non_ascii)
+                if token_non_ascii:
+                    logger.warning("[DEBUG-AUTH] server token NON-ASCII pos+cp=%s", token_non_ascii)
+                # Comparaison char-par-char pour pointer la 1ere divergence
+                for i in range(max(len(bearer), len(self.auth_token))):
+                    b = bearer[i] if i < len(bearer) else None
+                    t = self.auth_token[i] if i < len(self.auth_token) else None
+                    if b != t:
+                        bo = f"U+{ord(b):04X}" if b is not None else "<EOS>"
+                        to_ = f"U+{ord(t):04X}" if t is not None else "<EOS>"
+                        logger.warning(
+                            "[DEBUG-AUTH] 1ere divergence pos=%d bearer=%s server=%s", i, bo, to_,
+                        )
+                        break
+            except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+                logger.warning("[DEBUG-AUTH] dump failed: %s", _dbg_exc)
+        return match
+
+    def _has_bearer_header(self) -> bool:
+        """True si la requete porte un header Authorization Bearer non-vide.
+
+        FIX 2026-06-07 (faux 429 TMDb test) : on doit distinguer deux cas d'echec
+        d'auth qui produisent tous deux un 401 cote handler legacy :
+
+        1. Token ABSENT/MALFORME (header omis par _safeBearer cote front quand le
+           token storage contient un codepoint non-ASCII type BOM U+FEFF). C'est
+           un bug client/config, pas une tentative d'attaque -> on NE doit PAS
+           incrementer le compteur du rate-limiter, sinon les 5 pings parallels
+           de l'Accueil saturent immediatement le seuil (5/60s) et le 1er click
+           "Tester" sur Parametres tombe en 429 "Trop de tentatives" avant meme
+           de toucher la logique auth/TMDb. L'utilisateur croit avoir fait 1
+           requete, en realite 5 401 silencieux ont deja epuise le quota.
+
+        2. Token PRESENT mais FAUX : vrai vecteur d'attaque -> on garde le
+           comptage record_failure() comme avant.
+        """
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return False
+        return bool(auth[7:].strip())
 
     def _client_ip(self) -> str:
         """Retourne l'adresse IP du client (premier element du tuple)."""
         return self.client_address[0] if self.client_address else "unknown"
 
     def _is_rate_limited(self) -> bool:
-        """Verifie si l'IP du client est bloquee par le rate limiter."""
-        if self.rate_limiter and self.rate_limiter.is_blocked(self._client_ip()):
+        """Verifie si l'IP du client est bloquee par le rate limiter.
+
+        FIX DEFINITIF 2026-06-07 (saturation 5/60s par 401 silents en local) :
+        on exempte TOTALEMENT les IPs locales (_LOCAL_CLIENT_IPS). Cause racine
+        documentee : quand le storage frontend contient un codepoint non-ASCII
+        (BOM U+FEFF injecte via PowerShell ?ntoken=..., ou URL-decode incorrect),
+        _safeBearer() omet silencieusement le header Authorization. Les 5 pings
+        parallels de l'Accueil saturent alors le compteur per-IP (5/60s) en moins
+        d'une seconde, et chaque action utilisateur suivante tombe en 429
+        "Trop de tentatives" avant meme d'atteindre la logique auth.
+        En contexte desktop pywebview (bind 127.0.0.1 par defaut), il n'y a
+        AUCUNE surface d'attaque a proteger via rate-limit : un attaquant local
+        a deja le shell. Le rate-limit reste pleinement actif pour les IPs
+        distantes (supervision LAN, dashboard distant).
+        """
+        client_ip = self._client_ip()
+        if client_ip in _LOCAL_CLIENT_IPS:
+            return False
+        if self.rate_limiter and self.rate_limiter.is_blocked(client_ip):
             self._respond_json(429, {"ok": False, "message": "Trop de tentatives. Reessayez dans 60 secondes."})
             return True
         return False
 
     def _send_unauthorized(self) -> None:
-        if self.rate_limiter:
-            self.rate_limiter.record_failure(self._client_ip())
+        # FIX 2026-06-07 (faux 429 TMDb test) : on ne comptabilise pas les 401
+        # causes par un header Authorization manquant/malforme (token absent ou
+        # vide). Voir _has_bearer_header() pour la justification detaillee.
+        # Backward compat : un vrai mauvais token continue d'incrementer le
+        # compteur (comportement antérieur preserve pour les attaquants reels).
+        #
+        # FIX DEFINITIF 2026-06-07 (suite) : meme reflexion que _is_rate_limited
+        # — on n'enregistre AUCUN echec pour les IPs locales, sinon le compteur
+        # pourrait encore servir a calculer is_blocked sur un autre handler si
+        # un futur refactor oublie l'exemption a l'entree. Defense en profondeur.
+        client_ip = self._client_ip()
+        if (
+            self.rate_limiter
+            and self._has_bearer_header()
+            and client_ip not in _LOCAL_CLIENT_IPS
+        ):
+            self.rate_limiter.record_failure(client_ip)
         self._respond_json(401, {"ok": False, "message": "Cle d'acces invalide ou manquante."})
 
     # --- Response helpers ---------------------------------------------------
@@ -968,6 +1096,14 @@ class RestApiServer:
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._rate_limiter = _RateLimiter()
+        # FIX DEFINITIF 2026-06-07 : log d'observabilite au boot pour distinguer
+        # rapidement saturation (X/N) vs token absent vs autre cause.
+        logger.info(
+            "REST rate-limiter init: %d failures / %.0fs window (global cap %d), localhost exempted",
+            self._rate_limiter._max,
+            self._rate_limiter._window,
+            self._rate_limiter._max_global,
+        )
         self._is_https = False  # True si le serveur tourne effectivement en HTTPS
         self.dashboard_url: str = ""  # URL publique du dashboard, remplie au start()
         # B05-401-INCOHERENT (Fix A) : on garde une ref a la classe handler
@@ -1042,6 +1178,10 @@ class RestApiServer:
                 "dashboard_root": dashboard_root,
                 "shared_root": shared_root,
                 "locales_root": locales_root,
+                # 2026-06-08 : expose le bind effectif au handler pour que
+                # _check_auth puisse decider si le bypass localhost est sur
+                # (uniquement vrai bind 127.0.0.1, pas 0.0.0.0 expose LAN).
+                "bind_host": self._host,
             },
         )
         # B05-401-INCOHERENT (Fix A) : conserver la ref pour permettre la

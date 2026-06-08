@@ -5,9 +5,10 @@
 La Vague P cloture le cycle "Apply atomique & Verrous" avec 7 batches livres (VP-A a VP-G)
 representant 83h reelles sur un budget plan de 109h. Elle introduit la solidite
 transactionnelle (apply rollback-able), la hierarchie de qualite TRaSH/Radarr a axes
-multiples, les field locks Jellyfin-style, les decisions tri-etat, la protection contre
-les modifications concurrentes (HTTP 409), les profils qualite TRaSH-compatibles avec
-import/export YAML Recyclarr, et le cablage final de l UI library.
+multiples, les field locks Jellyfin-style, les decisions tri-etat, la serialisation
+des Sauvegarder concurrents (verrou mutex par run_id, last-write-wins protege), les
+profils qualite TRaSH-compatibles avec import/export YAML Recyclarr, et le cablage
+final de l UI library.
 
 Build EXE : 53.68MB, startup 5.32s, healthcheck OK.
 
@@ -73,7 +74,7 @@ Vague P apporte la solidite et le controle:
 - Hierarchie qualite juste : un 4K HDR Dolby Vision bat TOUJOURS un 720p meme tres bien score (TRaSH/Radarr)
 - Field locks Jellyfin-style : tes corrections manuelles de titre/annee resistent au rescan TMDb
 - Decisions tri-etat : tu peux Reporter une decision au lieu d etre force Accepter/Rejeter
-- Protection contre les modifications concurrentes : HTTP 409 si deux clics simultanes Sauvegarder
+- Sauvegardes concurrentes serialisees : un verrou mutex par run_id evite que deux clics simultanes Sauvegarder se marchent dessus (le second ecrit apres le premier, last-write-wins protege). La detection de version mismatch avec HTTP 409 arrivera en Vague Q.
 - Profils qualite TRaSH-compatible avec import/export YAML (compatible Recyclarr)
 - Tags providers en SORTIE : le renommage produit `{tmdb-680}` dans le nom de fichier final (compatible Plex/Jellyfin). Pour forcer une identification deterministe en ENTREE (avant scan), utilise un sidecar `.nfo` avec `<tmdbid>` / `<imdbid>` -- le parsing direct des tags depuis le nom de dossier arrive en Vague Q.
 

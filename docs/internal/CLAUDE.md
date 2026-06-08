@@ -32,47 +32,66 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 > Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta, v1.5.x-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), refactor architectural (#83, #84), et roadmap 6 vagues (juin 2026). Aucune regression fonctionnelle, bundle EXE stabilise a 53.7 MB.
 
+### Cycle adversarial en cours (3-4 juin 2026)
+- **Branche** : `fix/v150-batch-bugs` (152 commits ahead vs origin, jamais pousses)
+- **Etat** : 30 fichiers modifies en working tree, 543 commits sur 30 derniers jours
+- **Vagues** : M / N / O / P / Q / **R completes** (tags `vague-r-complete`, `vague-r-hotfix1/2/3-full`)
+- **Hotfix cycles** : 5 rounds adversarial bug hunts (R1=10crit, R2=5crit, R3=3, R4=1crit+17high, audit=0crit+16high) + 4 hotfixes precedents (post-fix rates 79%/93%/100%/100%) + hotfix6 (92% postfix, 1 revert auto)
+- **Hotfix7 EN COURS** (worktree `w4yqqdf25`) : BugHunt R6 sur 10 angles + sequence corrigee. Tests biblio virtuelle: 11 bugs identifies -> 3 reels confirmes, 8 false positives.
+- **Tag le plus recent** : `verify-fix-retest-complete` (2026-06-04)
+- **Mega-hotfix** : tag `mega-hotfix` (2026-06-04) consolide les fixes B01-B05 du verify-cycle
+- **Worktrees actifs** : 2 (CineSort principal sur fix/v150-batch-bugs + CineSort-B4 sur main)
+
 ### Architecture en couches (verrouillee par import-linter en CI)
 
 ```
 ui/      <- (anti-corruption layer cote desktop + web)
-  api/   <- Facades par bounded context (run/settings/quality/integrations/library)
+  api/   <- 6 Facades par bounded context (run/settings/quality/integrations/library/runtime)
+           + 47 modules *_support.py orchestrant les use-cases
     ^
     | (depend de)
     v
-app/     <- Orchestration (apply_core, plan_support, jellyfin_sync, etc.)
+app/     <- Orchestration (apply_core, plan_support, jellyfin_sync, etc.) - 35 modules
   ^
   | (depend de)
   v
-domain/  <- Logique metier pure (scoring, parsing, perceptual, naming)
+domain/  <- Logique metier pure (scoring, parsing, perceptual, naming) - 32 modules
   ^
   | (depend de)
   v
-infra/   <- I/O (SQLite + Repositories, TMDb/Jellyfin/Plex/Radarr clients, REST server)
+infra/   <- I/O (SQLite + 11 Repositories, TMDb/Jellyfin/Plex/Radarr clients, REST server)
 ```
 
 **Contracts d'architecture** (`.importlinter`) :
-1. `domain` ne peut PAS importer `app`, `infra`, `ui`
-2. `infra` ne peut PAS importer `app`, `ui`
-3. `app` ne peut PAS importer `ui`
+1. `domain` ne peut PAS importer `app`, `infra`, `ui` (domain_pure)
+2. `infra` ne peut PAS importer `app`, `ui` (infra_bounded)
+3. `app` ne peut PAS importer `ui` (app_bounded)
 
 Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A1-A8). Toute regression est bloquee par `lint-imports` en CI (job `Architecture contracts` dans `.github/workflows/ci.yml`).
 
+**Modules recents centralisateurs** (vagues M-R, juin 2026) :
+- `domain/path_utils.py` (VQ-1) : feuille du graphe, casse cycle core->duplicate_support->naming->core, expose `norm_win_path`/`_norm_win_path`/`windows_safe`
+- `domain/codec_ranks.py` : centralise `AUDIO_CODEC_RANK_PATTERNS` (substring+label) + `AUDIO_CODEC_RANK` (dict exact) + `format_audio_channels` (VN-F.1)
+- `domain/tiers_helpers.py` (Vague M / SCORE-02) : `TIER_ORDER_BEST_FIRST=[Platinum,Gold,Silver,Bronze,Reject]`, defaults 70/66/55/40 (calibration v1.5.7 853 films), AUCUNE couleur hex
+- `domain/probe_models.py` : constantes `PROBE_QUALITY_FULL/PARTIAL/FAILED` + helpers (BUG-018 hotfix1)
+- `infra/db/pragma_profile.py` (VO-A) : 4 profils SQLite (local_ssd/local_hdd/nas_smb/nas_smb_slow) + detection auto Windows
+- `ui/api/_run_state.py` (ARCH-08 / M-07) : `RunState` extraite de cinesort_api.py (-165 LOC), thread-safe, `MAX_RUN_LOG_ITEMS=5000`
+
 ### Patterns architecturaux
 
-- **Repository pattern (infra/db/repositories/)** : chaque domaine SQL (probe, anomaly, scan, perceptual, quality, run, apply) a son repository. `SQLiteStore` les instancie et expose `store.probe`, `store.anomaly`, etc. Le pattern coexiste encore avec les `_XxxMixin` legacy (thin wrappers de delegation) pour preserver `store.upsert_probe()`. Future : phase B8 supprimera l'heritage MRO une fois valide en prod.
-- **Strangler Fig / Facade pattern (ui/api/facades.py)** : 5 facades (`run`, `settings`, `quality`, `integrations`, `library`) groupent 50 methodes publiques sur `CineSortApi`. Les anciennes methodes directes `api.X(...)` sont marquees `_X_impl` (deprecated).
+- **Repository pattern (infra/db/repositories/)** : chaque domaine SQL a son repository — 11 repos (`anomaly`, `apply`, `decisions`, `field_locks`, `film_modal`, `perceptual`, `probe`, `quality`, `run`, `scan` + `_base`). `SQLiteStore` les instancie et expose `store.probe`, `store.anomaly`, etc. Le pattern coexiste encore avec les `_XxxMixin` legacy (thin wrappers de delegation) pour preserver `store.upsert_probe()`. Future : phase B8 supprimera l'heritage MRO une fois valide en prod.
+- **Strangler Fig / Facade pattern (ui/api/facades/)** : **6 facades** (`run`, `settings`, `quality`, `integrations`, `library`, `runtime`) groupent ~166 methodes publiques sur `CineSortApi` via `_BaseFacade` composition wrapper. Les anciennes methodes directes `api.X(...)` sont marquees `_X_impl` (deprecated). Repartition methodes: Run 36, Settings 20, Quality 40, Integrations 15, Library 23, Runtime 32.
 - **Module-style imports pour tests mockes** : quand un test fait `patch("cinesort.infra.plex_client.PlexClient")`, le module qui appelle PlexClient doit l'importer en `import ... as _mod` pas en `from ... import`. Pattern documente dans `cinesort/ui/api/apply_support.py`, `cinesort_api.py`, `perceptual_support.py`.
 
 ### Stack technique
 
 - **Python 3.13** + pywebview >= 5.0 (UI desktop) + http.server stdlib (REST server)
-- **SQLite WAL** (21 migrations, schema v21)
+- **SQLite WAL** (31 migrations, schema v31 — derniere: `031_tri_etat_decisions.sql`)
 - **Dependances clefs** : `requests`, `rapidfuzz` (matching), `segno` (QR), `onnxruntime` + `numpy` (LPIPS perceptuel)
 - **Probe** : ffprobe + mediainfo (binaires externes)
-- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard)
+- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **441 fichiers test_*.py** (396 racine + 45 sous-dossiers), 35 tests v77, top modules: phase (54), perceptual (15), apply (13), quality (12), tmdb (10)
 - **Qualite** : ruff (lint + format), import-linter, pre-commit, codecov (coverage), bandit, mypy
-- **Build** : PyInstaller (~50 MB onefile EXE Windows)
+- **Build** : PyInstaller (~54 MB onefile EXE Windows — **`dist/CineSort.exe` est le livrable final**, `build/CineSort/` est intermediaire PyInstaller a ignorer)
 
 ### Conventions de code
 
@@ -84,7 +103,75 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 
 ---
 
+## Memoires user INVIOLABLES (rappel)
+
+Ces regles sont issues des memoires user persistantes et doivent etre respectees a toute iteration :
+
+1. **Reponses en francais** (sauf code en anglais).
+2. **Couleurs tier hex INVARIANTES** : Platinum `#E5E4E2`, Gold `#FFD700`, Silver `#C0C0C0`, Bronze `#CD7F32`. Definies UNIQUEMENT dans `web/shared/tokens.css`. Aucune duplication dans `domain/` (qui ne contient que l'ordre et les seuils).
+3. **Backward compat ABSOLUE** : toute migration/refactor doit preserver les anciennes API publiques (Strangler Fig). Exemple : `031_tri_etat_decisions.sql` coexiste avec la persistance JSON `validation.json` via helper `to_legacy_ok_bool`.
+4. **`perceptual_reports` != `quality_reports`** : tables et modules distincts, ne jamais merger. `domain/perceptual/` (24 fichiers) est independant de `domain/quality_score.py`.
+5. **DPAPI** : tokens d'auth jamais stockes en clair. Utiliser le wrapper Windows DPAPI pour chiffrer au repos.
+6. **Architecture verrouillee par import-linter** : 3 contracts (`domain_pure`, `infra_bounded`, `app_bounded`). Toute regression bloque la CI.
+7. **Actions dangereuses UI** : suppression/marquage/reset doit demander confirmation supplementaire, modale avec liste elements + consequence + delai 3s si > 50 elements.
+8. **Subprocess direct > wrappers Python** pour binaires externes (ffprobe, mediainfo).
+9. **Multi-agents en parallele** dans worktrees isoles pour chantiers >= 2 taches independantes (pas de sequentiel).
+10. **SQLite migrations** : ordre `CREATE TABLE -> CREATE INDEX`, `IF NOT EXISTS` partout, pas d'`ALTER`, idempotentes, tester avec base PRE-EXISTANTE (pas uniquement fraiche).
+11. **Bundle size** : pas un frein. Tout inclure dans le bundle plutot que DL au 1er usage. Qualite > optimisation taille.
+12. **MAJ CLAUDE.md + BILAN_PHASES.md obligatoire** en fin de session/phase.
+
+---
+
+## API REST (architecture dispatcher)
+
+Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, pas de Flask/FastAPI).
+
+### Format d'URL canonique
+- **Actif** : `POST /api/<facade>/<methode>` avec body JSON (params kwargs)
+  - Exemple : `POST /api/run/start_plan` (PAS `POST /api/start_plan`)
+  - 6 facades : `run`, `settings`, `quality`, `integrations`, `library`, `runtime`
+- **Legacy DESACTIVE** depuis 2026-05 (P0 #233) : `POST /api/<methode>` direct renvoie **410 Gone**, sauf si `CINESORT_REST_LEGACY_PASS1_ENABLED=1`.
+
+### Endpoints non-dispatcher
+- `GET /api/health` (+`active_run_id`, `last_event_ts`)
+- `GET /api/spec` (OpenAPI 3.0.3 auto-genere)
+- `GET /dashboard/*`, `/shared/*`, `/locales/*`
+
+### Securite
+- Auth Bearer token via `hmac.compare_digest` (rest_server.py:435)
+- Rate-limit : 5 echecs / 60s / IP + global 4x
+- Bind `127.0.0.1` par defaut
+- `_MAX_BODY_SIZE = 16 MB`
+- Convention `http_status` opt-in (Phase 11 v7.8.0) dans return dict pour codes metier 4xx/5xx sans casser `ok=true`.
+
+---
+
 ## Sessions recentes
+
+### 3-4 juin 2026 — Vague R complete + cycle hotfix6/7 (BugHunt R6) 🟡 EN COURS
+
+Cycle adversarial intensif post-Vague Q, 30 tags poses entre le 02 et le 04 juin :
+
+**Vague R cloturee** (`vague-r-complete`, `vague-r-hotfix1/2/3-full`) puis cycle `verify-cycle` sur bugs B01-B05 (`mega-hotfix`, `verify-fix-retest-complete`).
+
+**Recap rounds adversariaux** :
+- R1 : 10 critiques identifies
+- R2 : 5 critiques (convergence)
+- R3 : 3 / R4 : 1 critique + 17 high / Audit : 0 critique + 16 high
+- 4 hotfixes precedents : post-fix rates 79% / 93% / 100% / 100%
+- Hotfix6 : 92% postfix (11/12), 1 revert auto, retests 0/4 (sequence cassee)
+- **Hotfix7 EN COURS** dans worktree `w4yqqdf25` : BugHunt R6 sur 10 angles + sequence corrigee
+
+**Tests biblio virtuelle** : 11 bugs candidats -> 3 reels confirmes (8 false positives).
+
+**Migrations 027-031 deployees** (Vagues L+O+P) :
+- 027 : self_healing_023_v2 (re-applique IF NOT EXISTS pour ignored_alerts/film_marked_for_deletion/film_tmdb_overrides)
+- 028 : pragma_history (audit bascules profil SQLite)
+- 029 : apply_atomic_mode (rollback forward enum 5 valeurs)
+- 030 : field_locks Jellyfin-style (lecon bug Jellyfin #15549)
+- 031 : tri_etat_decisions (`accepted`/`rejected`/`deferred` avec CHECK, coexiste validation.json via `to_legacy_ok_bool`)
+
+**Backlog** : 152 commits non pousses sur `fix/v150-batch-bugs`, 30 fichiers modifies en working tree.
 
 ### 2 juin 2026 — Bilan 5 vagues completes (M / N / O / P / Q) ✅
 
@@ -223,7 +310,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-04 (bump version v1.2.0-beta -> v1.5.2-beta, alignement post-Vague R).*
+*Last updated : 2026-06-04 (Vague R complete + hotfix7 en cours, migrations 27->31, facades 5->6 avec runtime, memoires user rappelees, API REST /api/<facade>/<methode>).*
 
 ---
 

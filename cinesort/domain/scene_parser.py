@@ -164,6 +164,16 @@ _AFTER_YEAR_NOISE_RE = re.compile(
 # 2-25 chars alphanum + _, evite de manger "Toy Story 4" -> "Toy Story" (le 4 n'a pas de tiret).
 _RELEASE_GROUP_RE = re.compile(r"\s-\s*[A-Za-z0-9_]{2,25}\s*$")
 
+# Tags langue trailing sans annee prealable. Couvre les cas type
+# "L'arme Fatale 2 - FR EN mHDgz.mkv" ou les tokens FR/EN/VF/VO/MULTI/VOSTFR
+# en fin de chaine ne sont pas precedes d'une annee (donc _AFTER_YEAR_NOISE_RE
+# ne match pas). On strip ces tokens (1-3 tokens consecutifs max) y compris
+# avec un release group court qui suit.
+_TRAILING_LANG_TOKENS_RE = re.compile(
+    r"(?:\s+(?:fr|en|vf|vo|vff|vfq|vfi|vof|vostfr|vostr|vost|multi)\b){1,3}\s*$",
+    re.IGNORECASE,
+)
+
 # Residus audio : "DTS-HD MA", "DTS-HD HRA", "5.1", "7.1", "2.0", "Atmos".
 # NOISE_RE catch "dts-hd" mais pas "ma" / "hra" standalone, et pas les channel counts.
 _AUDIO_RESIDUE_RE = re.compile(
@@ -374,6 +384,11 @@ def parse_scene_title(filename: str) -> str:
         name = re.sub(r"\s+", " ", name).strip()
         # Position-aware after-year noise tokens
         name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        # Trailing language tokens sans annee prealable
+        # (cas "L'arme Fatale 2 - FR EN ...")
+        name = _TRAILING_LANG_TOKENS_RE.sub("", name)
+        name = _orphan_sep_re.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         if name == prev:
             break

@@ -37,6 +37,30 @@ GENERIC_EXTRA_VIDEO_NAMES = {
 }
 
 
+def file_name_looks_bonus(name: str) -> bool:
+    """Filtrage textuel uniquement (pas de stat) : detecte les fichiers video
+    qui sont vraisemblablement des bonus/making-of/extras d'apres leur nom seul.
+
+    Reproduit la closure interne `_file_looks_bonus` de discover_candidate_folders
+    pour exposer la verification a d'autres modules (ex: plan_support_core qui
+    veut filtrer les videos BONUS d'un dossier "collection" type 'Star Wars/').
+
+    Args:
+        name: Nom du fichier (avec ou sans chemin parent).
+
+    Returns:
+        True si le nom matche un pattern bonus (sample/trailer/teaser) ou un
+        nom generique de bonus (bonus/extras/featurette/...).
+    """
+    if not name:
+        return False
+    if IGNORE_VIDEO_NAME_RE.search(name):
+        return True
+    stem = name.rsplit(".", 1)[0].lower().replace(".", " ").replace("_", " ").replace("-", " ")
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return stem in GENERIC_EXTRA_VIDEO_NAMES
+
+
 def _bump_stats_reject(stats: Any, key: str, *, path: str | None = None) -> None:
     """Incremente stats.analyse_ignores_par_raison[key] avec defense en profondeur.
 

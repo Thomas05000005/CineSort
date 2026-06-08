@@ -28,6 +28,9 @@ let _cache = { items: [], unread: 0 };
 // (ou sur le drawer recree) → cumul O(n) listeners apres N open/close cycles.
 let _overlayClickHandler = null;
 let _drawerClickHandler = null;
+// A11y WCAG 2.1.1 : handler keydown Enter/Space sur <li role=button>, tracke
+// pour cleanup avec les autres listeners au closeNotifications().
+let _drawerKeydownHandler = null;
 
 function _svg(inner, size = 16) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
@@ -88,8 +91,14 @@ function _itemHtml(it) {
   const time = _formatRelative(it.created_ts);
   const category = it.category || "event";
   const cls = `v5-notif-item v5-notif-item--${level} ${it.read ? "is-read" : "is-unread"}`;
+  // A11y WCAG 2.1.1 : <li> est cliquable pour marquer-lu -> doit etre focusable
+  // au clavier (tabindex=0) et expose comme button. aria-label decrit l'action.
+  // Si deja lu, on ne propose pas l'action (pas de tabindex/role button).
+  const a11yAttrs = it.read
+    ? ""
+    : ` tabindex="0" role="button" aria-label="Marquer comme lu: ${escapeHtml(it.title || "")}"`;
   return `
-    <li class="${cls}" data-notif-id="${escapeHtml(it.id)}" role="listitem">
+    <li class="${cls}" data-notif-id="${escapeHtml(it.id)}"${a11yAttrs}>
       <div class="v5-notif-item-icon">${icon}</div>
       <div class="v5-notif-item-body">
         <div class="v5-notif-item-header">
@@ -206,6 +215,22 @@ function _bindDrawer(drawer) {
     }
   };
   drawer.addEventListener("click", _drawerClickHandler);
+  // A11y WCAG 2.1.1 (Keyboard) : permettre Enter/Space sur les <li> notifs
+  // role=button pour marquer comme lu. Sans ca, utilisateurs clavier/SR
+  // ne peuvent pas marquer une notif lue (seul le bouton supprimer leur etait
+  // accessible). On reutilise _drawerClickHandler via dispatch click pour
+  // garder la logique centralisee (filtres, dismiss, mark-as-read).
+  _drawerKeydownHandler = (e) => {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    const itemEl = e.target.closest("[data-notif-id][role='button']");
+    if (!itemEl) return;
+    // Ne pas declencher si focus est sur un bouton interne (dismiss)
+    if (e.target.closest("[data-notif-dismiss]")) return;
+    e.preventDefault();
+    const id = itemEl.dataset.notifId;
+    apiPost("runtime/mark_notification_read", { notification_id: id }).then(() => refreshNotifications()).catch(() => {});
+  };
+  drawer.addEventListener("keydown", _drawerKeydownHandler);
 }
 
 export function refreshNotifications() {
@@ -271,6 +296,10 @@ export function closeNotifications() {
       drawer.removeEventListener("click", _drawerClickHandler);
       _drawerClickHandler = null;
     }
+    if (_drawerKeydownHandler) {
+      drawer.removeEventListener("keydown", _drawerKeydownHandler);
+      _drawerKeydownHandler = null;
+    }
     drawer.remove();
   }
   document.body.classList.remove("v5-notif-lock");
@@ -299,7 +328,16 @@ export function startNotificationPolling(intervalMs) {
   _pollTimer = window.setInterval(() => {
     getUnreadCount().then((n) => _updateBadge(n));
   }, ms);
-  getUnreadCount().then((n) => _updateBadge(n));
+  // FIX 2026-06-05 (avalanche boot natif) : on DIFFERE le tick initial de
+  // 3s au lieu de tirer immediatement. Sans ca, l'appel get_notifications_unread_count
+  // partait a t=0 en concurrence avec les 4 fetchs initiaux d'accueil.js +
+  // les 2 fetchs cachedGetSettings du shell -> 7 requetes simultanees au
+  // boot sur un backend qui rate-limit a 5/s -> 429 garanti.
+  // Le delai 3s laisse le boot se stabiliser (token+ shell + accueil rendus).
+  window.setTimeout(() => {
+    if (_pollTimer == null) return; // stop entre temps
+    getUnreadCount().then((n) => _updateBadge(n));
+  }, 3000);
 }
 
 export function stopNotificationPolling() {

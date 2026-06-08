@@ -237,6 +237,7 @@ def _augment_candidates_from_nfo_imdb(
                 year=imdb_result.year,
                 source="nfo_imdb",
                 tmdb_id=imdb_result.id,
+                poster_url=core_mod.tmdb_poster_thumb_url(getattr(imdb_result, "poster_path", None)),
                 score=0.95,
                 note=f"IMDb lookup {nfo.imdbid} → tmdb:{imdb_result.id}, sim={sim_best:.2f}{note_extra}",
             )
@@ -329,6 +330,7 @@ def _augment_candidates_from_nfo_tmdb_id(
                     year=tmdb_result.year,
                     source="nfo_tmdb",
                     tmdb_id=tmdb_result.id,
+                    poster_url=core_mod.tmdb_poster_thumb_url(getattr(tmdb_result, "poster_path", None)),
                     score=0.93,
                     note=f"TMDb ID {nfo.tmdbid} verifie, sim={sim_best:.2f}{note_extra}",
                 )
@@ -532,6 +534,7 @@ def _accept_name_tag_candidate(
         year=result.year,
         source=source,
         tmdb_id=result.id,
+        poster_url=core_mod.tmdb_poster_thumb_url(getattr(result, "poster_path", None)),
         score=base_score,
         note=f"Tag {source} {origin_id} verifie, sim={sim_best:.2f}{note_extra}",
     )

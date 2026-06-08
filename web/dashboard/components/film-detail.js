@@ -191,8 +191,10 @@ function _renderHero(data) {
   const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 
   // Chemin + fichier
-  const sourcePath = row.source_path || row.source_folder || "";
-  const videoFilename = row.video_filename || "";
+  // Compat ascendante : PlanRow expose `folder` (chemin) et `video` (nom fichier),
+  // tandis que get_film_full historique utilisait `source_path` / `video_filename`.
+  const sourcePath = row.source_path || row.source_folder || row.folder || "";
+  const videoFilename = row.video_filename || row.video || "";
   const sizeStr = _formatBytes(row.size_bytes);
 
   // Score circle
@@ -819,7 +821,7 @@ async function _doSubmitScoreFeedback(userTier, runId, rowId, comment, btn) {
     _renderTabPanel();
   } catch (e) {
     console.error("[film-detail] submit_score_feedback:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; }
   }
 }
@@ -842,7 +844,7 @@ async function _deleteScoreFeedback(btn) {
     _renderTabPanel();
   } catch (e) {
     console.error("[film-detail] delete_score_feedback:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; }
   }
 }
@@ -897,7 +899,7 @@ async function _refreshPosterUnit(tmdbId, btn) {
   } catch (e) {
     console.error("[film-detail] refresh-poster:", e);
     if (img) img.style.opacity = "1";
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -925,7 +927,7 @@ async function _chooseCandidate(tmdbId, btn) {
     await _reload();
   } catch (e) {
     console.error("[film-detail] choose-candidate:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; btn.textContent = "Choisir"; }
   }
 }
@@ -1129,14 +1131,15 @@ async function _validateFilm(btn, runId, rowId) {
     }
     showToast({ type: "success", text: "Film validé pour le prochain apply." });
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "✓ Valider"; }
   }
 }
 
 async function _openFolder(row) {
-  const path = row.source_path || row.source_folder || row.current_path || "";
+  // Compat ascendante : PlanRow expose `folder` (champ canonique).
+  const path = row.source_path || row.source_folder || row.current_path || row.folder || "";
   if (!path) {
     showToast({ type: "warn", text: "Aucun chemin de dossier disponible." });
     return;
@@ -1149,7 +1152,7 @@ async function _openFolder(row) {
     }
     showToast({ type: "success", text: "Dossier ouvert dans l'explorateur." });
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   }
 }
 
@@ -1168,7 +1171,7 @@ async function _rescanRow(btn, runId, rowId) {
     showToast({ type: "success", text: "Re-scan terminé. Mise à jour de la fiche..." });
     await _reload();
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) {
       btn.disabled = false;
       btn.textContent = btn.dataset.originalText || "↻ Re-scanner";
@@ -1195,7 +1198,7 @@ function _markForDeletionWithConfirm(row, runId, rowId) {
         }
         showToast({ type: "success", text: "Film marqué pour suppression." });
       } catch (e) {
-        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+        showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
       }
     },
   });
@@ -1261,7 +1264,7 @@ async function _handleAlertAction(kind, code) {
           }, 240);
         }
       } catch (e) {
-        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+        showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
       }
       break;
     }

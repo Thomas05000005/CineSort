@@ -971,10 +971,27 @@ def _row_subs_missing_fr(row: Dict[str, Any]) -> bool:
 
 
 def _row_unidentified(row: Dict[str, Any]) -> bool:
-    """True si la row n'a pas ete identifiee par TMDb (cf domain/librarian.py)."""
-    src = str(row.get("proposed_source") or "").strip().lower()
+    """True si la row n'a pas ete identifiee par TMDb (cf domain/librarian.py).
+
+    Critere robuste : absence de tmdb_id resolu (None/0) OU confidence sous le
+    seuil low (60). Les anciens critères (proposed_source=='unknown' / conf==0)
+    sont conserves comme fallback pour rester compatibles avec d'anciens runs
+    qui n'auraient pas persiste tmdb_id sur les rows.
+    """
+    tmdb_id = row.get("tmdb_id")
+    try:
+        tmdb_id_int = int(tmdb_id) if tmdb_id is not None else 0
+    except (TypeError, ValueError):
+        tmdb_id_int = 0
+    if tmdb_id_int <= 0:
+        return True
     conf = int(row.get("confidence") or 0)
-    return src in ("unknown", "") or conf == 0
+    if conf < 60:
+        return True
+    src = str(row.get("proposed_source") or "").strip().lower()
+    if src in ("unknown", ""):
+        return True
+    return False
 
 
 def _row_recently_modified(row: Dict[str, Any], now_ts: float, window_s: float) -> bool:

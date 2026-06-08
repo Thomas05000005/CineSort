@@ -68,8 +68,8 @@
     "nav": {
       "home": "Accueil",
       "processing": "Traitement",
-      "library": "Bibliotheque",
-      "quality": "Qualite",
+      "library": "Bibliothèque",
+      "quality": "Qualité",
       "history": "Historique",
       "qij": "QIJ",
       "settings": "Parametres",
@@ -88,7 +88,7 @@
   },
   "topbar": {
     "search_label": "Rechercher...",
-    "search_aria": "Ouvrir la recherche (Cmd+K)",
+    "search_aria": "Ouvrir la recherche ({{shortcut}})",
     "notifications_aria": "Notifications ({{count}} non lues)",
     "theme_change_aria": "Changer de theme",
     "help_fab_aria": "Aide raccourcis clavier (?)",

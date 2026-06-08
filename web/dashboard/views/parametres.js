@@ -30,7 +30,7 @@ import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
 // natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
-import { dangerConfirmModal } from "../components/modal.js";
+import { dangerConfirmModal, showModal } from "../components/modal.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -41,7 +41,12 @@ export const PARAMETRES_GROUPS = [
     id: "sources", label: "Sources", icon: "📂",
     sections: [
       { id: "roots", label: "Dossiers racines", fields: [
-        { key: "roots", label: "Chemins racine", type: "multi-path", hint: "Un par ligne (ou séparés par ;)", required: true },
+        // Fix audit 2026-06-07 UX medium : label "Chemins racine" est jargonneux.
+        // L'utilisateur cherche "Dossier de films" ou "Bibliotheque". Hint plus
+        // explicite pour expliquer ce qui est attendu.
+        { key: "roots", label: "Dossiers de films à analyser", type: "multi-path",
+          hint: "Un dossier par ligne (ou séparés par ;). Ex : D:\\Films, E:\\Cinéma. Au moins un dossier est requis pour scanner.",
+          required: true },
       ]},
       { id: "exclusions", label: "Exclusions", fields: [
         { key: "excluded_patterns", label: "Patterns d'exclusion (glob)", type: "multi-path",
@@ -153,24 +158,36 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "jellyfin", label: "Jellyfin", fields: [
         { key: "jellyfin_enabled", label: "Activer", type: "toggle" },
-        { key: "jellyfin_url", label: "URL Jellyfin", type: "text", placeholder: "http://jellyfin.local:8096" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL aligne sur TMDb/OMDb.
+        { key: "jellyfin_url", label: "URL Jellyfin", type: "text", placeholder: "http://jellyfin.local:8096",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:8096). À trouver dans Tableau de bord > Réseau de Jellyfin." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver la cle API.
         { key: "jellyfin_api_key", label: "Clé API", type: "api-key",
-          testMethod: "integrations/test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" } },
+          testMethod: "integrations/test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" },
+          hint: "À créer dans Jellyfin > Tableau de bord > Clés API > +. Nommez-la « CineSort » pour la retrouver facilement." },
         { key: "jellyfin_refresh_on_apply", label: "Refresh auto après apply", type: "toggle" },
         { key: "jellyfin_sync_watched", label: "Sync watched", type: "toggle" },
       ]},
       { id: "plex", label: "Plex", fields: [
         { key: "plex_enabled", label: "Activer", type: "toggle" },
-        { key: "plex_url", label: "URL Plex", type: "text", placeholder: "http://plex.local:32400" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL.
+        { key: "plex_url", label: "URL Plex", type: "text", placeholder: "http://plex.local:32400",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:32400). Port Plex par défaut : 32400." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver le token Plex.
         { key: "plex_token", label: "Token Plex", type: "api-key",
-          testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" } },
+          testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" },
+          hint: "À récupérer dans Plex Web > Compte > Avancées : valeur du paramètre X-Plex-Token (visible dans l'URL d'un média via « Obtenir les informations »)." },
         { key: "plex_refresh_on_apply", label: "Refresh après apply", type: "toggle" },
       ]},
       { id: "radarr", label: "Radarr", fields: [
         { key: "radarr_enabled", label: "Activer", type: "toggle" },
-        { key: "radarr_url", label: "URL Radarr", type: "text", placeholder: "http://radarr.local:7878" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL.
+        { key: "radarr_url", label: "URL Radarr", type: "text", placeholder: "http://radarr.local:7878",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:7878). Port Radarr par défaut : 7878." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver la cle API.
         { key: "radarr_api_key", label: "Clé API", type: "api-key",
-          testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
+          testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" },
+          hint: "À récupérer dans Radarr > Paramètres > Général > Sécurité > API Key." },
       ]},
       { id: "omdb", label: "OMDb", fields: [
         { key: "omdb_enabled", label: "Activer le cross-check IMDb", type: "toggle",
@@ -233,6 +250,15 @@ export const PARAMETRES_GROUPS = [
   {
     id: "apparence", label: "Apparence", icon: "🎨",
     sections: [
+      // Fix audit 2026-06-07 UX high : selecteur de langue manquant alors que
+      // le backend persiste deja `locale` (cinesort_api._apply_locale_setting).
+      // Sans ce champ, l'utilisateur ne peut pas changer la langue UI depuis
+      // les parametres (memoire user : francais).
+      { id: "langue", label: "Langue", fields: [
+        { key: "locale", label: "Langue de l'interface", type: "select", options: [
+          { v: "fr", l: "Français" }, { v: "en", l: "English" },
+        ], hint: "Le changement est appliqué à la prochaine ouverture des pages." },
+      ]},
       { id: "theme", label: "Thème", fields: [
         { key: "theme", label: "Thème de l'interface", type: "select", options: [
           {v:"studio",l:"Studio"},{v:"cinema",l:"Cinéma"},{v:"luxe",l:"Luxe"},{v:"neon",l:"Neon"},
@@ -699,7 +725,7 @@ function _refreshOmdbStatusPanel(container) {
  * auto, MAJ). Refresh in-place via _refreshProbeToolsPanel.
  * Endpoints :
  *   runtime/get_probe_tools_status  -> chargement initial (cache 90s)
- *   runtime/recheck_probe_tools     -> force recheck (boutton Tester)
+ *   runtime/recheck_probe_tools     -> force recheck (bouton « Vérifier »)
  *   runtime/auto_install_probe_tools -> HTTP download winget-free
  *   runtime/update_probe_tools       -> winget upgrade
  * ============================================================= */
@@ -714,8 +740,8 @@ function _formatBundledSize(bytes) {
 
 /**
  * Rend une ligne du tableau outils. `info` = entree status.tools[key].
- * `kind` : "managed" (ffprobe/mediainfo : actions Tester+Reinstaller)
- *        | "bundled-exe" (fpcalc : Tester uniquement)
+ * `kind` : "managed" (ffprobe/mediainfo : actions Vérifier + Réinstaller)
+ *        | "bundled-exe" (fpcalc : bundled, pas d'action utilisateur)
  *        | "bundled-asset" (LPIPS : pas d'action, juste affichage).
  */
 function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
@@ -743,8 +769,8 @@ function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
   let actionsHtml = "";
   if (kind === "managed") {
     actionsHtml = `
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tool-action="test" data-probe-tool="${_esc(toolKey)}">Tester</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-probe-tool-action="reinstall" data-probe-tool="${_esc(toolKey)}">Réinstaller</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tool-action="test" data-probe-tool="${_esc(toolKey)}" title="Re-vérifier si ${_esc(displayLabel)} est installé sur le système">Vérifier</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-probe-tool-action="reinstall" data-probe-tool="${_esc(toolKey)}" title="Réinstaller via winget (Microsoft Store)">Réinstaller</button>
     `;
   } else if (kind === "bundled-exe") {
     actionsHtml = `<span class="parametres-muted">(bundled)</span>`;
@@ -908,7 +934,10 @@ function _renderProbeToolsTable(status) {
     return `<div class="parametres-tools-loading parametres-muted">Vérification des outils externes…</div>`;
   }
   if (!status || typeof status !== "object") {
-    return `<div class="parametres-tools-loading parametres-muted">Statut non disponible. Cliquez sur « Tester » pour vérifier.</div>`;
+    return `<div class="parametres-tools-loading parametres-muted">
+      Statut des outils externes non disponible.
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="recheck" style="margin-left:8px">↻ Détecter maintenant</button>
+    </div>`;
   }
   const tools = (status.tools && typeof status.tools === "object") ? status.tools : {};
   const rows = [
@@ -936,9 +965,9 @@ function _renderProbeToolsTable(status) {
       <tbody>${rows}</tbody>
     </table>
     <div class="parametres-tools-actions">
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck">↻ Recheck (force)</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install">⬇ Installer auto (ffprobe + MediaInfo)</button>
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update">⇧ Mettre à jour (winget)</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck" title="Re-détecter les outils installés sur le système (ignore le cache)">↻ Vérifier (forcer la détection)</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~30-60s, ~50 Mo)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update" title="Mettre à jour via winget (nécessite Windows Package Manager)">⇧ Mettre à jour (winget)</button>
     </div>
     <p class="parametres-tools-message" data-probe-tools-message></p>
   </div>`;
@@ -1070,8 +1099,15 @@ function _renderField(field, value, query) {
     }
 
     case "api-key": {
+      // Fix audit 2026-06-08 UX medium : label "Tester" trop ambigu (declenche un
+      // appel reseau reel). Pour OMDb, on precise que ca consomme du quota.
+      const isOmdbTest = field.key === "omdb_api_key";
+      const testLabel = isOmdbTest ? "Tester (consomme 1 appel quota)" : "Tester la connexion";
+      const testTitle = isOmdbTest
+        ? "Effectue un appel reel a OMDb pour valider la cle. Consomme 1 requete de votre quota quotidien."
+        : "Effectue un appel reseau reel au service pour valider la cle/URL.";
       const testBtn = field.testMethod
-        ? `<button type="button" class="v5-btn v5-btn--sm" data-test-method="${_esc(field.testMethod)}" data-test-field="${_esc(field.key)}">Tester</button>`
+        ? `<button type="button" class="v5-btn v5-btn--sm" data-test-method="${_esc(field.testMethod)}" data-test-field="${_esc(field.key)}" title="${_esc(testTitle)}">${_esc(testLabel)}</button>`
         : "";
       return `<div class="parametres-field"${advAttr}>
         <label class="parametres-field-label" for="${id}">${labelHtml}</label>
@@ -1566,32 +1602,81 @@ async function _saveProfileAsNew() {
     _showProfilMessage(`Erreur : somme des poids = ${total.toFixed(2)}, doit être ~1.00 (± 5 %).`, "error");
     return;
   }
-  const name = window.prompt("Nom du nouveau profil :", "MonProfil_v1");
-  if (!name) return;
-  const profile = {
-    id: String(name).trim(),
-    label: String(name).trim(),
-    description: "Profil personnalisé",
-    version: 1,
-    tiers: draft.tiers,
-    weights: draft.weights,
-    // VP-B : transmet la config hierarchie (OFF par defaut). Backend
-    // normalise via validate_quality_profile -> normalize_hierarchy_config.
-    tier_hierarchy: draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY },
-  };
-  try {
-    const res = await apiPost("settings/save_profile", { profile });
-    if (res && res.data && res.data.ok) {
-      _showProfilMessage(`✓ Profil "${name}" sauvegardé.`, "ok");
-      await _loadProfiles();
-      _rerenderActiveCategory();
-    } else {
-      const errs = res?.data?.errors ? ` (${res.data.errors.join(" ; ")})` : "";
-      _showProfilMessage(`Erreur : ${res?.data?.message || "sauvegarde refusée"}${errs}`, "error");
+  // Fix audit 2026-06-07 UX medium : window.prompt natif est interdit (memoire
+  // user actions_dangereuses + casse l'UX WebView2). Remplacement par une
+  // modale custom avec validation cote UI (regex + longueur).
+  await _promptNewProfileName(async (name) => {
+    const profile = {
+      id: String(name).trim(),
+      label: String(name).trim(),
+      description: "Profil personnalisé",
+      version: 1,
+      tiers: draft.tiers,
+      weights: draft.weights,
+      // VP-B : transmet la config hierarchie (OFF par defaut). Backend
+      // normalise via validate_quality_profile -> normalize_hierarchy_config.
+      tier_hierarchy: draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY },
+    };
+    try {
+      const res = await apiPost("settings/save_profile", { profile });
+      if (res && res.data && res.data.ok) {
+        _showProfilMessage(`✓ Profil "${name}" sauvegardé.`, "ok");
+        await _loadProfiles();
+        _rerenderActiveCategory();
+      } else {
+        const errs = res?.data?.errors ? ` (${res.data.errors.join(" ; ")})` : "";
+        _showProfilMessage(`Erreur : ${res?.data?.message || "sauvegarde refusée"}${errs}`, "error");
+      }
+    } catch (err) {
+      _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
     }
-  } catch (err) {
-    _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
-  }
+  });
+}
+
+/**
+ * Modale custom pour demander un nom de profil. Remplace window.prompt() natif
+ * (incompatible WebView2, viole la memoire user "JAMAIS window.prompt/confirm/alert").
+ * Validation inline : regex [A-Za-z0-9 _-]+, longueur 3..40.
+ */
+function _promptNewProfileName(onSubmit) {
+  return new Promise((resolve) => {
+    const NAME_RE = /^[A-Za-z0-9 _\-]{3,40}$/;
+    const bodyHtml = `
+      <p>Saisissez un nom pour le nouveau profil qualité.</p>
+      <label class="parametres-profile-name-label" for="parametres-profile-name-input">Nom du profil</label>
+      <input id="parametres-profile-name-input" type="text" class="v5-input" value="MonProfil_v1"
+             autocomplete="off" spellcheck="false" data-parametres-profile-name-input
+             style="width:100%;margin-top:4px;">
+      <p class="text-muted font-sm mt-2" data-parametres-profile-name-error
+         style="min-height:1.2em;color:#DC2626;">
+        3 à 40 caractères. Lettres, chiffres, espaces, tirets, underscores uniquement.
+      </p>
+    `;
+    showModal({
+      title: "Nouveau profil qualité",
+      body: bodyHtml,
+      actions: [
+        { label: "Annuler", cls: "", onClick: () => { resolve(); } },
+        { label: "Créer", cls: "btn-primary", onClick: () => {
+          const overlay = document.getElementById("dashModal");
+          const input = overlay?.querySelector("[data-parametres-profile-name-input]");
+          const errEl = overlay?.querySelector("[data-parametres-profile-name-error]");
+          const value = input?.value?.trim() || "";
+          if (!NAME_RE.test(value)) {
+            if (errEl) {
+              errEl.textContent = "Nom invalide : 3 à 40 caractères, lettres / chiffres / espaces / - / _.";
+              errEl.style.color = "#DC2626";
+            }
+            // Empecher closeModal automatique en re-ouvrant
+            setTimeout(() => { _promptNewProfileName(onSubmit).then(resolve); }, 0);
+            return;
+          }
+          // OK : execute la callback puis resolve
+          Promise.resolve(onSubmit(value)).finally(() => resolve());
+        } },
+      ],
+    });
+  });
 }
 
 async function _recomputeScores() {
@@ -1722,10 +1807,14 @@ function _updateSavedIndicator() {
     return;
   }
   if (_state.savedAt) {
-    el.innerHTML = `<span class="parametres-saved-indicator--ok">✓ Sauvegardé</span>`;
-    setTimeout(() => {
-      if (el.querySelector(".parametres-saved-indicator--ok")) el.innerHTML = "";
-    }, 2500);
+    // Fix audit 2026-06-07 UX high : badge persistant avec horodatage HH:MM:SS
+    // au lieu d'un toast 2500ms qui disparait. L'utilisateur a tout moment voit
+    // la derniere heure de sauvegarde, meme s'il scrolle ou regarde ailleurs.
+    let timeLabel = "";
+    try {
+      timeLabel = _state.savedAt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch (_e) { timeLabel = ""; }
+    el.innerHTML = `<span class="parametres-saved-indicator--ok">✓ Sauvegardé${timeLabel ? ` à ${_esc(timeLabel)}` : ""}</span>`;
   } else {
     el.innerHTML = "";
   }
@@ -1733,9 +1822,20 @@ function _updateSavedIndicator() {
 
 async function _loadSettings() {
   const res = await apiPost("settings/get_settings", {});
-  if (res && res.data && typeof res.data === "object") {
-    _state.settings = res.data.data || res.data || {};
+  // BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est
+  // un objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
+  // silencieusement a `_state.settings`, ce qui faisait croire que le
+  // chargement avait reussi. Au premier toggle (Mode expert), `_scheduleSave`
+  // partait POSTer cet objet d'erreur + retombait sur le meme 401 -> badge
+  // rouge "Authentification refusee par le backend." dans l'indicateur de
+  // sauvegarde, alors que la vraie cause est l'echec initial. On detecte
+  // explicitement l'erreur et on throw pour que `initParametres` affiche le
+  // banner d'erreur avec bouton "Reessayer" (parcours UX clair).
+  if (!res || !res.data || typeof res.data !== "object" || res.data.ok === false) {
+    const msg = res?.data?.message || `Erreur ${res?.status || "inconnue"}.`;
+    throw new Error(msg);
   }
+  _state.settings = res.data.data || res.data || {};
 }
 
 /* =============================================================
@@ -2040,6 +2140,13 @@ function _bindFields(container) {
         _state.omdbLastTest = null;
         _refreshOmdbStatusPanel(container);
       }
+      // Fix audit 2026-06-08 UX medium : si le champ a un testMethod, effacer le
+      // resultat affiche apres modification (sinon "✓ Connexion réussie" reste
+      // affiche pour une valeur differente non encore testee).
+      if (field.testMethod) {
+        const resEl = container.querySelector(`[data-test-result-for="${key}"]`);
+        if (resEl) { resEl.textContent = ""; resEl.className = "parametres-test-result"; }
+      }
       _scheduleSave();
     };
     if (field.type === "toggle" || field.type === "select") fieldEl.addEventListener("change", handler);
@@ -2093,7 +2200,22 @@ function _bindFields(container) {
           _refreshOmdbStatusPanel(container);
           if (resultEl) { resultEl.textContent = ""; resultEl.className = "parametres-test-result"; }
         } else if (resultEl) {
-          resultEl.textContent = ok ? "✓ Connexion réussie" : `✗ Échec : ${payload.message || payload.error || "inconnu"}`;
+          // Fix audit 2026-06-08 UX medium : afficher infos de diagnostic riches
+          // retournees par le backend (server_name, version, movies_count,
+          // libraries) au lieu d'un simple "Connexion reussie".
+          if (ok) {
+            const parts = [];
+            if (payload.server_name) parts.push(String(payload.server_name));
+            if (payload.version) parts.push(`v${payload.version}`);
+            const counts = [];
+            if (typeof payload.movies_count === "number") counts.push(`${payload.movies_count} films`);
+            else if (Array.isArray(payload.libraries) && payload.libraries.length) counts.push(`${payload.libraries.length} bibliothèques`);
+            const head = parts.length ? ` — ${parts.join(" ")}` : "";
+            const tail = counts.length ? ` (${counts.join(", ")} détectés)` : "";
+            resultEl.textContent = `✓ Connexion réussie${head}${tail}`;
+          } else {
+            resultEl.textContent = `✗ Échec : ${payload.message || payload.error || "inconnu"}`;
+          }
           resultEl.className = `parametres-test-result parametres-test-result--${ok ? "ok" : "error"}`;
         }
       } catch (err) {
@@ -2734,7 +2856,21 @@ function _bindProbeToolsActions(container) {
           await _loadProbeToolsStatus(container, { force: true });
           _setProbeToolsMessage(container, "✓ Statut rafraîchi.", "ok");
         } else if (action === "auto_install") {
-          _setProbeToolsMessage(container, "Installation auto en cours… (téléchargement HTTP, ~30-60s)", "info");
+          // Confirmation : DL HTTP ~50 Mo + écriture dans %LOCALAPPDATA% — action sensible.
+          const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                "Installer automatiquement ffprobe et MediaInfo ?\n\n"
+                + "• Téléchargement HTTP : environ 50 Mo\n"
+                + "• Durée estimée : 30 à 60 secondes\n"
+                + "• Destination : dossier utilisateur (pas besoin d'admin)\n\n"
+                + "Confirmer l'installation ?",
+              )
+            : true;
+          if (!ok) {
+            _setProbeToolsMessage(container, "Installation annulée.", "info");
+            return;
+          }
+          _setProbeToolsMessage(container, "Installation en cours… (téléchargement HTTP, environ 30-60 s)", "info");
           const res = await apiPost("runtime/auto_install_probe_tools", {});
           const data = res && res.data ? res.data : res;
           if (data && data.ok) {
@@ -2750,6 +2886,18 @@ function _bindProbeToolsActions(container) {
             await _loadProbeToolsStatus(container, { force: true });
           }
         } else if (action === "update") {
+          const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                "Mettre à jour ffprobe et MediaInfo via winget ?\n\n"
+                + "• Utilise Windows Package Manager (doit être installé)\n"
+                + "• Met à jour vers les dernières versions disponibles\n\n"
+                + "Confirmer la mise à jour ?",
+              )
+            : true;
+          if (!ok) {
+            _setProbeToolsMessage(container, "Mise à jour annulée.", "info");
+            return;
+          }
           _setProbeToolsMessage(container, "Mise à jour winget en cours…", "info");
           const res = await apiPost("runtime/update_probe_tools", {});
           const data = res && res.data ? res.data : res;
@@ -2784,9 +2932,22 @@ function _bindProbeToolsActions(container) {
       all.forEach((b) => { b.disabled = true; });
       try {
         if (action === "test") {
-          _setProbeToolsMessage(container, `Test ${tool}…`, "info");
+          _setProbeToolsMessage(container, `Vérification de ${tool} en cours…`, "info");
           await _loadProbeToolsStatus(container, { force: true });
+          _setProbeToolsMessage(container, `✓ ${tool} vérifié.`, "ok");
         } else if (action === "reinstall") {
+          const okR = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                `Réinstaller ${tool} via winget ?\n\n`
+                + "• Utilise Windows Package Manager\n"
+                + "• Remplace la version existante\n\n"
+                + "Confirmer la réinstallation ?",
+              )
+            : true;
+          if (!okR) {
+            _setProbeToolsMessage(container, "Réinstallation annulée.", "info");
+            return;
+          }
           _setProbeToolsMessage(container, `Réinstallation de ${tool} (winget)…`, "info");
           const res = await apiPost("runtime/install_probe_tools", { options: { tools: [tool], scope: "user" } });
           const data = res && res.data ? res.data : res;

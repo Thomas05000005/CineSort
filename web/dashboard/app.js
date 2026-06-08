@@ -13,7 +13,7 @@
 window.__APP_JS_LOADED = "parse-start";
 
 import { $$ } from "./core/dom.js";
-import { hasToken, setToken, onClearToken } from "./core/state.js";
+import { hasToken, setToken, onClearToken, markTokenReady, markTokenAbsent } from "./core/state.js";
 
 window.__APP_JS_LOADED = "imports-done";
 
@@ -25,18 +25,26 @@ window.__APP_JS_LOADED = "imports-done";
     if (_errorBannerShown) return;
     _errorBannerShown = true;
     try {
-      // Cf issue #67 : construction DOM safe (createElement + textContent)
-      // au lieu de innerHTML — empeche XSS via msg quand window.onerror
-      // recoit un Error.message contenant du HTML/JS arbitraire.
+      // Fix audit 2026-06-07 UX : message generique francais actionable a la place
+      // du brut technique (TypeError, NetworkError...). Details internes restent
+      // logges console + data-attribute pour copy-debug. Memoire user : pas de
+      // jargon, pas d'Error 500, action explicite (recharger).
       const banner = document.createElement("div");
       banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:#DC2626;color:#fff;padding:8px 16px;z-index:99999;font-family:sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
+      banner.dataset.cinesortErrorDetails = String(msg || "").substring(0, 400);
 
       const label = document.createElement("strong");
-      label.textContent = "Erreur JS :";
+      label.textContent = "Une erreur inattendue est survenue.";
       banner.appendChild(label);
-      // Fix audit 2026-05-25 (v1.5.4) Vague I : limite portee a 400 chars
-      // pour laisser passer message + location (file:line:col).
-      banner.appendChild(document.createTextNode(" " + String(msg || "Erreur inconnue").substring(0, 400) + " "));
+      banner.appendChild(document.createTextNode(" Recharger la page ? "));
+
+      const reloadBtn = document.createElement("button");
+      reloadBtn.style.cssText = "margin-left:8px;background:#fff;border:1px solid #fff;color:#DC2626;padding:2px 10px;border-radius:4px;cursor:pointer;font-weight:600";
+      reloadBtn.textContent = "Recharger";
+      reloadBtn.addEventListener("click", () => {
+        try { window.location.reload(); } catch (e) { /* noop */ }
+      });
+      banner.appendChild(reloadBtn);
 
       const closeBtn = document.createElement("button");
       closeBtn.style.cssText = "float:right;background:transparent;border:1px solid #fff;color:#fff;padding:2px 8px;border-radius:4px;cursor:pointer";
@@ -71,6 +79,9 @@ window.__APP_JS_LOADED = "imports-done";
   }
   window.addEventListener("error", (ev) => {
     console.error("[window.onerror]", ev.message, ev.filename, ev.lineno, ev.colno, ev.error);
+    // Fix audit 2026-06-07 UX critical : details internes (loc, message brut)
+    // restent en console + data-attribute du banner pour copy-debug, banner
+    // affiche un message generique francais actionable.
     const loc = _formatLocation(ev);
     _showErrorBanner(loc ? `${ev.message} | ${loc}` : ev.message);
   });
@@ -115,7 +126,7 @@ const NATIVE_FLAG_KEY = "cinesort.native";
       try { localStorage.setItem(NATIVE_FLAG_KEY, "1"); } catch { /* no-op */ }
     }
     if (ntoken) {
-      setToken(ntoken, true);  // persist
+      setToken(ntoken, true);  // persist (setToken appelle markTokenReady en interne)
       // Purger le token de l'URL pour ne pas le laisser dans l'historique.
       const url = new URL(window.location.href);
       url.searchParams.delete("ntoken");
@@ -133,9 +144,39 @@ const NATIVE_FLAG_KEY = "cinesort.native";
         : currentHash;
       // Garder ?native=1 si present
       window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + targetHash);
+    } else {
+      // V1.5.0 fix bug #1 : pas de ntoken dans l'URL. Soit on a deja un
+      // token en storage (boot natif sur reload WebView2 cache, ou mode
+      // web avec token persiste "Rester connecte"), soit on n'en aura
+      // jamais (mode web pre-login). Dans tous les cas, on debloque les
+      // requetes apiPost/apiGet pour qu'elles partent avec le token
+      // actuel (ou sans, et echouent proprement avec 401 -> redirect
+      // login en mode web).
+      try {
+        const hasStored = !!(sessionStorage.getItem("cinesort.dashboard.token")
+                          || (localStorage.getItem("cinesort.dashboard.persist") === "1"
+                              && localStorage.getItem("cinesort.dashboard.token")));
+        if (hasStored) {
+          markTokenReady();
+        } else {
+          // FIX 2026-06-05 : en mode natif sans token, on differe le deblocage
+          // pour eviter la salve 401 sur les 4 fetchs initiaux (un retry de
+          // setToken peut arriver via pywebview entre temps). En mode web,
+          // c'est immediat (la 401 redirige vers /login normalement).
+          const _nativeBoot = !!(window.__CINESORT_NATIVE__
+                              || (window.chrome && window.chrome.webview)
+                              || (window.location && (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost")));
+          markTokenAbsent({ native: _nativeBoot });
+        }
+      } catch {
+        markTokenAbsent();
+      }
     }
   } catch (e) {
     console.warn("[dash-boot] detection native echouee", e);
+    // En cas d'erreur de detection, on debloque les requetes pour eviter
+    // un hang. Le deadline 2s dans state.js sert de filet de secours.
+    try { markTokenAbsent(); } catch { /* no-op */ }
   }
 })();
 
@@ -196,6 +237,10 @@ import { initCopyToClipboard } from "./components/copy-to-clipboard.js";
 import { initAutoTooltip } from "./components/auto-tooltip.js";
 import { initGlossaryTooltips } from "./components/glossary-tooltip.js";
 import { decorateMainButtons } from "./components/shortcut-tooltip.js";
+// mega-hotfix frontend_ui_polish (#6) : banniere globale "scan en cours" pour
+// que l'utilisateur ne perde plus de vue qu'un scan tourne quand il navigue
+// hors de la vue Traitement.
+import { initScanBanner } from "./components/scan-banner.js";
 // Confetti : side-effect import (expose window.launchConfetti)
 import "./components/confetti.js";
 
@@ -381,12 +426,22 @@ async function _mountV5Shell() {
   } catch (e) { console.warn("[shell] cachedGetSettings", e); }
 
   // Top-bar v5 (search + notif + theme switcher)
+  // FIX 2026-06-07 : fetch unread count AVANT render pour eviter le flash
+  // "cloche sans badge" pendant ~3s (delai anti-avalanche de startNotificationPolling).
+  // En cas d'echec (backend KO, 401 token), on retombe sur 0 — le polling
+  // mettra a jour le badge au prochain tick.
+  let initialNotifCount = 0;
+  try {
+    if (typeof notifCenter.getUnreadCount === "function") {
+      initialNotifCount = await notifCenter.getUnreadCount().catch(() => 0);
+    }
+  } catch (e) { console.warn("[shell] notifCenter.getUnreadCount", e); }
   try {
     topBarV5.render(topBarMount, {
       title: "CineSort",
       subtitle: "",
       theme,
-      notificationCount: 0,
+      notificationCount: initialNotifCount,
       onSearchClick: () => window.dispatchEvent(new CustomEvent("cinesort:command-palette")),
       onNotifClick: () => notifCenter.toggleNotifications(),
       onThemeChange: _applyTheme,
@@ -551,6 +606,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   try { initAutoTooltip(); } catch (e) { console.warn("[boot] initAutoTooltip", e); }
   try { initGlossaryTooltips(); } catch (e) { console.warn("[boot] initGlossaryTooltips", e); }
   try { decorateMainButtons(); } catch (e) { console.warn("[boot] decorateMainButtons", e); }
+  // mega-hotfix frontend_ui_polish (#6) : banniere persistante "scan en cours".
+  try { initScanBanner(); } catch (e) { console.warn("[boot] initScanBanner", e); }
   // V2-C R4-MEM-5 : purge drafts review.js expires (TTL 30j) — cleanup global au boot.
   try { cleanupExpiredDrafts(); } catch (e) { console.warn("[boot] cleanupExpiredDrafts", e); }
 
@@ -635,6 +692,25 @@ async function _initSidebarFeatures() {
   await _loadSidebarCounters();
   if (_sidebarCountersInterval == null) {
     _sidebarCountersInterval = setInterval(_loadSidebarCounters, 30000);
+  }
+  // Fix bug "polling sidebar 30s tourne meme onglet cache" :
+  // BILAN_CORRECTIONS.md:846 annoncait visibility toggle, jamais implemente.
+  // Pause le polling quand document.hidden, reprend au focus + reload immediat.
+  if (!window.__cinesort_sidebar_visibility_bound__) {
+    window.__cinesort_sidebar_visibility_bound__ = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (_sidebarCountersInterval != null) {
+          clearInterval(_sidebarCountersInterval);
+          _sidebarCountersInterval = null;
+        }
+      } else {
+        _loadSidebarCounters();
+        if (_sidebarCountersInterval == null) {
+          _sidebarCountersInterval = setInterval(_loadSidebarCounters, 30000);
+        }
+      }
+    });
   }
   await _checkIntegrationNav();
   await _checkUpdateBadge();
@@ -741,7 +817,16 @@ _updateBadgeInterval = setInterval(_checkUpdateBadge, 3600000);
 /* === V7.6.0 Notification center — polling 30s ============= */
 
 async function _initNotificationPolling() {
+  // FIX 2026-06-05 (avalanche boot natif) : exclusion mutuelle stricte.
+  // Si notifCenter.startNotificationPolling existe, on l'utilise EXCLUSIVEMENT
+  // et on early-return AVANT toute condition pour empecher le fallback de
+  // se demarrer en parallele (sinon : double polling sur l'unread_count -> 429).
   if (typeof notifCenter.startNotificationPolling === "function") {
+    // S'assurer qu'aucun fallback precedemment cree ne survive.
+    if (_notificationFallbackInterval != null) {
+      clearInterval(_notificationFallbackInterval);
+      _notificationFallbackInterval = null;
+    }
     notifCenter.startNotificationPolling(30000);
     return;
   }

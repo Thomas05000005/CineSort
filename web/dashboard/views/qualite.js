@@ -814,7 +814,10 @@ function _bindEvents(container) {
     row.style.cursor = "pointer";
   });
 
-  // Clic sur card Reject -> inspecteur (mode C) ; navigation /film/:id si dispo
+  // Clic sur card Reject -> inspecteur (mode C) avec warnings/score V2
+  // Fix audit 2026-06-07 : la navigation immediate vers /film/:id demontait la
+  // vue Qualite et rendait le contexte inspecteur 'reject_card' invisible.
+  // L'inspecteur expose desormais un bouton 'Ouvrir la fiche' pour naviguer.
   container.querySelectorAll("[data-qualite-reject-card]").forEach((card) => {
     card.addEventListener("click", () => {
       const idx = Number(card.dataset.qualiteRejectIndex);
@@ -823,10 +826,6 @@ function _bindEvents(container) {
       _state.inspectorSection = "reject_card";
       _state.inspectorPayload = { film };
       _updateInspector();
-      // Ouverture inline via /film/:id (sinon inspecteur seul affiche les details)
-      if (film.row_id) {
-        navigateTo(`/film/${encodeURIComponent(film.row_id)}`);
-      }
     });
   });
 
@@ -928,7 +927,7 @@ function _confirmRecompute() {
     consequence: `Cette opération va re-scorer ${total > 0 ? total + " " : ""}films classés à partir du profil de qualité actuel. ${eta}. Aucune modification sur les fichiers du disque. Réversible.`,
     confirmLabel: "Lancer le re-calcul",
     cancelLabel: "Annuler",
-    countdownSeconds: 0,
+    countdownSeconds: total > 50 ? 3 : 0,
     onConfirm: async () => {
       await _startRecompute();
     },

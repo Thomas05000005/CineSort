@@ -23,6 +23,10 @@
  * ============================================================================
  */
 
+/* V1.4 — themes wrappes dans @layer tokens (cf tokens.css pour ordre canonique).
+   Les tier hex et severities restent INVARIANTES. */
+@layer tokens {
+
 /* ===========================================================
  * Theme STUDIO (defaut, technique, bleu accent)
  * =========================================================== */
@@ -261,3 +265,5 @@
 }
 
 /* AAA : pas d'overlay atmospherique (eviterait de baisser le contraste). */
+
+} /* @layer tokens */

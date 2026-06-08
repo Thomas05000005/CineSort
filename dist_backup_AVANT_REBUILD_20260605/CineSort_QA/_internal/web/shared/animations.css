@@ -1,0 +1,213 @@
+/* ============================================================================
+ * CineSort Design System v5 — Animations
+ * ============================================================================
+ * Keyframes et classes utilitaires. Respectent prefers-reduced-motion
+ * (defini dans tokens.css).
+ * ============================================================================
+ */
+
+/* ===========================================================
+ * Keyframes
+ * =========================================================== */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes slideOutRight {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(110%); opacity: 0; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.96); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ===========================================================
+ * KPI grid stagger fadeIn (utilise dans Home)
+ * =========================================================== */
+
+@keyframes kpiFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ===========================================================
+ * Score circle : stroke-dashoffset fill
+ * =========================================================== */
+
+@keyframes scoreCircleFill {
+  from { stroke-dashoffset: var(--circle-circumference); }
+  to   { stroke-dashoffset: var(--circle-offset-target); }
+}
+
+/* ===========================================================
+ * Gauge : width fill animation
+ * =========================================================== */
+
+@keyframes gaugeFill {
+  from { width: 0%; }
+  to   { width: var(--gauge-target); }
+}
+
+/* ===========================================================
+ * Modal : scale + fade entry
+ * =========================================================== */
+
+@keyframes modalEnter {
+  from { transform: scale(0.96); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes overlayEnter {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to   { opacity: 1; backdrop-filter: blur(8px); }
+}
+
+/* ===========================================================
+ * View transition : crossfade
+ * =========================================================== */
+
+@keyframes viewEnter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ===========================================================
+ * Accordion : expand / collapse
+ * =========================================================== */
+
+@keyframes accordionExpand {
+  from { max-height: 0; }
+  to   { max-height: 800px; }
+}
+
+/* ===========================================================
+ * Skeleton shimmer (placeholders loading)
+ * =========================================================== */
+
+@keyframes skeletonShimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+/* ===========================================================
+ * Classes utilitaires reutilisables
+ * =========================================================== */
+
+.anim-fade-in {
+  animation: fadeIn var(--dur-base) var(--ease-out) forwards;
+}
+
+.anim-slide-down {
+  animation: slideDown var(--dur-base) var(--ease-out) forwards;
+}
+
+.anim-slide-up {
+  animation: slideUp var(--dur-base) var(--ease-out) forwards;
+}
+
+.anim-scale-in {
+  animation: scaleIn var(--dur-base) var(--ease-out) forwards;
+}
+
+.anim-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.anim-spin {
+  animation: spin 1s linear infinite;
+}
+
+.view-enter {
+  animation: viewEnter var(--dur-base) var(--ease-out) forwards;
+}
+
+/* ===========================================================
+ * Stagger pour listes (utilisation : style="--order: N" sur chaque enfant)
+ * =========================================================== */
+
+.stagger-item {
+  opacity: 0;
+  animation: kpiFadeIn var(--dur-base) var(--ease-out) forwards;
+  animation-delay: calc(var(--order, 0) * var(--stagger-base));
+}
+
+.stagger-item-slow {
+  opacity: 0;
+  animation: kpiFadeIn var(--dur-smooth) var(--ease-out) forwards;
+  animation-delay: calc(var(--order, 0) * var(--stagger-slow));
+}
+
+/* ===========================================================
+ * V5A-04 V2-08 — Skeleton loading states pour la home
+ * =========================================================== */
+
+@keyframes v5-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.v5-skeleton {
+  display: grid;
+  gap: var(--space-md, 12px);
+  margin-bottom: var(--space-lg, 16px);
+}
+
+.v5-skeleton-card,
+.v5-skeleton-chart {
+  border-radius: var(--radius-md, 8px);
+  background: linear-gradient(
+    90deg,
+    var(--bg-raised, rgba(255,255,255,0.04)) 25%,
+    var(--bg-base, rgba(255,255,255,0.08)) 50%,
+    var(--bg-raised, rgba(255,255,255,0.04)) 75%
+  );
+  background-size: 200% 100%;
+  animation: v5-skeleton-shimmer 1.5s infinite linear;
+}
+
+.v5-skeleton-card--kpi { height: 88px; }
+.v5-skeleton-chart    { height: 220px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v5-skeleton-card,
+  .v5-skeleton-chart { animation: none; }
+}

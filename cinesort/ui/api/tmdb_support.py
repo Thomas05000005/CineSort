@@ -38,7 +38,15 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         settings = api.settings.get_settings()
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
-            return {"ok": True, "posters": {}}
+            # Audit 2026-06-08 : sans indicateur explicite, le frontend ne peut
+            # pas distinguer 'TMDB non configure' de 'tmdb_id introuvable',
+            # resultat = 100% des cartes affichent le clap generique sans
+            # explication. On ajoute un `reason` pour que bibliotheque.js puisse
+            # afficher une banniere/toast 'Configurez TMDB dans Parametres'.
+            # Backward compat preservee : ok=True + posters={} inchange, le
+            # champ `reason` est purement additif et ignore par les anciens
+            # consommateurs.
+            return {"ok": True, "posters": {}, "reason": "tmdb_not_configured"}
 
         state_dir = api._normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         # V5-03 polish v7.7.0 : propager le TTL configurable.

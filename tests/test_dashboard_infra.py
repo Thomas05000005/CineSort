@@ -361,15 +361,23 @@ class RateLimitHttpTests(unittest.TestCase):
         return status
 
     def test_rate_limit_blocks_after_5_failures(self) -> None:
-        """Apres 5 echecs 401, la 6e requete retourne 429."""
-        # Envoyer 5 requetes avec mauvais token
-        for i in range(_RATE_LIMIT_MAX_FAILURES):
+        """FIX DEFINITIF 2026-06-07 : localhost (127.0.0.1) est exempte du
+        rate-limiter pour eviter la saturation par 401 silents (_safeBearer
+        omet le header Authorization quand le token contient un codepoint
+        non-ASCII type BOM U+FEFF). Le contrat HTTP devient donc :
+        127.0.0.1 -> toujours 401 sur mauvais token, jamais 429.
+        Le scenario "apres N echecs -> bloque" reste couvert pour les IPs
+        distantes via les tests unitaires `_RateLimiter` (10.0.0.1).
+        """
+        # Envoyer 7 requetes avec mauvais token : aucune ne doit etre 429
+        # car localhost est exempte du rate-limiter.
+        for i in range(_RATE_LIMIT_MAX_FAILURES + 2):
             status = self._post("/api/get_settings", token="bad-token")
-            self.assertEqual(status, 401, f"Iteration {i}: expected 401, got {status}")
-
-        # La 6e devrait etre 429
-        status = self._post("/api/get_settings", token="bad-token")
-        self.assertEqual(status, 429)
+            self.assertEqual(
+                status,
+                401,
+                f"Iteration {i}: expected 401 (localhost exempte), got {status}",
+            )
 
     def test_rate_limit_does_not_block_valid_requests_before_threshold(self) -> None:
         """Un bon token passe si on n'a pas atteint le seuil (nouveau serveur necessaire)."""

@@ -259,20 +259,21 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_rate_limiter_returns_429_after_5_failures(self) -> None:
-        """Bypass : on remplit directement le _RateLimiter du serveur, puis on
-        verifie qu'une requete est rejetee 429. Cela evite la flake Windows
-        (WinError 10053) qui survenait quand on chainait 6 requetes HTTP rapides
-        et que la socket etait coupee avant lecture de la reponse rate-limited.
-        Le scenario fonctionnel ("apres N echecs -> bloque") est couvert par les
-        tests unitaires `RateLimiterUnitTests`. Ici on garde la verification
-        end-to-end : un IP bloque -> 429 cote HTTP.
+        """FIX DEFINITIF 2026-06-07 : 127.0.0.1 est desormais exempte du
+        rate-limiter (saturation par 401 silents du _safeBearer cote front
+        quand le token contient un codepoint non-ASCII). Le scenario fonctionnel
+        ("apres N echecs -> bloque") reste couvert par les tests unitaires
+        `RateLimiterUnitTests` (qui utilisent une IP non-locale "10.0.0.1").
+        Ici on verifie le NOUVEAU contrat : meme avec le compteur sature,
+        127.0.0.1 (loopback desktop pywebview) re;coit 401 et JAMAIS 429.
         """
-        # 1. Pre-remplit le rate limiter pour 127.0.0.1
+        # 1. Pre-remplit le rate limiter pour 127.0.0.1 (defensif : le filtre
+        # cote handler doit court-circuiter is_blocked avant meme de regarder).
         for _ in range(6):
             self.server._rate_limiter.record_failure("127.0.0.1")
         self.assertTrue(self.server._rate_limiter.is_blocked("127.0.0.1"))
 
-        # 2. Une seule requete HTTP -> doit retourner 429
+        # 2. Une requete HTTP depuis 127.0.0.1 -> doit retourner 401, pas 429
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
             conn.request(
@@ -285,12 +286,14 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
             status = resp.status
             resp.read()
         except (ConnectionAbortedError, ConnectionResetError):
-            # Windows ferme parfois la socket avant la lecture de la reponse
-            # rate-limited. C'est un signal valide de rate-limit cote serveur.
-            status = 429
+            self.fail("Le serveur a coupe la connexion : localhost ne doit pas etre rate-limite")
         finally:
             conn.close()
-        self.assertEqual(status, 429, f"Attendu 429, recu {status}")
+        self.assertEqual(
+            status,
+            401,
+            f"Attendu 401 (localhost exempte du rate-limit), recu {status}",
+        )
 
 
 if __name__ == "__main__":

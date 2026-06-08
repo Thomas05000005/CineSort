@@ -161,21 +161,39 @@ function _renderLastRunCard(latestRun, kpis) {
  * configuree mais hors ligne ⚠.
  */
 const _INTEGRATIONS = [
-  { key: "tmdb", label: "TMDb", settingKey: "tmdb_api_key" },
-  { key: "jellyfin", label: "Jellyfin", settingKey: "jellyfin_enabled" },
-  { key: "plex", label: "Plex", settingKey: "plex_enabled" },
-  { key: "radarr", label: "Radarr", settingKey: "radarr_enabled" },
-  { key: "omdb", label: "OMDb", settingKey: "omdb_enabled" },
+  // settingKeys[] : on considere l'integration "configuree" si AU MOINS UNE
+  // des clefs est renseignee (string non vide) OU le flag *_enabled === true.
+  // Fix bug #1 : avant on ne regardait que *_enabled, donc un Jellyfin/Plex/
+  // Radarr/OMDb avec url+api_key mais sans flag enabled passait "Non configuré".
+  { key: "tmdb", label: "TMDb", settingKeys: ["tmdb_api_key"] },
+  { key: "jellyfin", label: "Jellyfin", settingKeys: ["jellyfin_enabled", "jellyfin_url", "jellyfin_api_key"] },
+  { key: "plex", label: "Plex", settingKeys: ["plex_enabled", "plex_url", "plex_token"] },
+  { key: "radarr", label: "Radarr", settingKeys: ["radarr_enabled", "radarr_url", "radarr_api_key"] },
+  { key: "omdb", label: "OMDb", settingKeys: ["omdb_enabled", "omdb_api_key"] },
 ];
+
+/** Retourne true si AU MOINS UNE des settingKeys de l'integration est renseignee
+ *  (string non vide) OU egale à true (flag *_enabled).
+ */
+function _isIntegrationConfigured(integration, settings) {
+  const settingsObj = settings || {};
+  // Backward compat : tolere l'ancien champ settingKey (singulier).
+  const keys = Array.isArray(integration.settingKeys)
+    ? integration.settingKeys
+    : (integration.settingKey ? [integration.settingKey] : []);
+  for (const k of keys) {
+    const val = settingsObj[k];
+    if ((typeof val === "string" && val.trim() !== "") || val === true) return true;
+  }
+  return false;
+}
 
 /** Etat de chaque integration : "ok" (configuré + ping OK),
  *  "off" (non configuré) ou "offline" (configuré mais ping fail).
  *  Phase 5 spec §1 : la pastille passe à ⚠ orange si hors ligne.
  */
 function _integrationState(integration, settings, pingResults) {
-  const settingsObj = settings || {};
-  const val = settingsObj[integration.settingKey];
-  const configured = (typeof val === "string" && val.trim() !== "") || val === true;
+  const configured = _isIntegrationConfigured(integration, settings);
   if (!configured) return "off";
   const pr = pingResults && pingResults[integration.key];
   if (pr === false) return "offline";
@@ -310,9 +328,10 @@ async function _pingIntegration(key, settings, signal) {
  */
 function _runEnvironmentPingsBackground(container, settings, signal) {
   for (const it of _INTEGRATIONS) {
-    const val = (settings || {})[it.settingKey];
-    const configured = (typeof val === "string" && val.trim() !== "") || val === true;
-    if (!configured) continue;
+    // Fix bug #1 : utilise _isIntegrationConfigured (multi-keys) au lieu de
+    // tester uniquement *_enabled, sinon on ne ping pas un Jellyfin/Plex/etc.
+    // configure via url+api_key sans flag enabled.
+    if (!_isIntegrationConfigured(it, settings)) continue;
     // Cache hit ? Applique direct sans refetch.
     const cached = _pingCacheGet(it.key);
     if (cached !== undefined) {
@@ -348,7 +367,12 @@ function _applyPingResultToDom(container, key, ok) {
     pill.classList.add("is-offline");
     if (sym) sym.textContent = "⚠";
     pill.dataset.integrationState = "offline";
-    const label = pill.textContent.trim();
+    // Fix bug #3 : textContent inclut le symbole ☑/⚠/☐ du <span> (DOM concat
+    // tout le sous-arbre). Au lieu de pill.textContent.trim() on lit le label
+    // canonique depuis _INTEGRATIONS via data-integration -> evite "TMDb⚠" colle.
+    const intKey = pill.dataset.integration || "";
+    const intMeta = _INTEGRATIONS.find((i) => i.key === intKey);
+    const label = (intMeta && intMeta.label) || intKey || "Integration";
     pill.title = `${label} configuré mais hors ligne — clique pour diagnostiquer`;
   }
 }
@@ -395,7 +419,9 @@ function _renderCtaScan(roots, scanProgress) {
         <p class="accueil-cta-scan-targets">Sur ${rootsLabel}</p>
       </div>
       <div class="accueil-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan-direct">▶ Démarrer</button>
+        <!-- Fix audit 2026-06-07 UX medium : harmoniser verbe "Lancer" (titre H2,
+             raccourci aide.js, traitement.js) entre titre et CTA, eviter incoherence. -->
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan-direct">▶ Lancer le scan</button>
         <button type="button" class="v5-btn v5-btn--secondary" data-accueil-action="open-scan-options">⚙ Options…</button>
       </div>
     </section>
@@ -688,8 +714,16 @@ function _renderRecentActivity(runs) {
                  aria-label="${escapeHtml(tooltip)}"></button>`;
     }).join("");
     const isToday = c.label === "Auj.";
+    // Fix bug #4 : c.date est construit en heure locale (minuit local). Un
+    // toISOString() le convertit en UTC -> sur fuseau negatif (ou proche de
+    // minuit positif) data-day-iso renvoie le jour calendaire precedent et
+    // casse les selecteurs e2e. On construit l'ISO YYYY-MM-DD localement.
+    const _y = c.date.getFullYear();
+    const _mm = String(c.date.getMonth() + 1).padStart(2, "0");
+    const _dd = String(c.date.getDate()).padStart(2, "0");
+    const _dayIsoLocal = `${_y}-${_mm}-${_dd}`;
     return `
-      <div class="accueil-timeline-day ${isToday ? "is-today" : ""}" data-day-iso="${escapeHtml(c.date.toISOString().slice(0, 10))}">
+      <div class="accueil-timeline-day ${isToday ? "is-today" : ""}" data-day-iso="${escapeHtml(_dayIsoLocal)}">
         <div class="accueil-timeline-bullets">${bullets}</div>
         <div class="accueil-timeline-day-label">
           <span class="accueil-timeline-day-name">${escapeHtml(c.label)}</span>
@@ -909,10 +943,15 @@ function _buildInspectorSections(payload, stats, settings) {
     },
     {
       title: "Raccourcis",
+      // Fix bug #2 : raccourcis alignes sur la vraie table de core/keyboard.js.
+      // Ctrl+S = save-request (PAS "Nouveau scan"). Les vrais raccourcis utiles
+      // pour la navigation depuis l'Accueil sont Alt+1..7, plus Ctrl+B/I/K/, et ?.
       html: `
         <dl class="accueil-inspector-shortcuts">
-          <div><dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Nouveau scan</dd></div>
-          <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Recherche / palette</dd></div>
+          <div><dt><kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>7</kbd></dt><dd>Navigation directe (Accueil → Aide)</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Recherche / palette de commandes</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>B</kbd></dt><dd>Replier / déplier la sidebar</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>I</kbd></dt><dd>Afficher / masquer l'inspecteur</dd></div>
           <div><dt><kbd>Ctrl</kbd>+<kbd>,</kbd></dt><dd>Paramètres</dd></div>
           <div><dt><kbd>?</kbd></dt><dd>Aide</dd></div>
         </dl>
@@ -950,11 +989,14 @@ async function _triggerStartPlan(container, btn) {
     // et un start_plan en erreur metier (res.data.ok=false) passait silencieux.
     const _payload = (res && res.data) || res || {};
     if (_payload.ok === false) {
-      const msg = (_payload.message || _payload.error || "Échec du démarrage.").toString();
-      _showErrorBanner(container, msg);
+      // Fix audit 2026-06-07 UX : ne plus exposer le message brut du backend
+      // (souvent jargon technique anglais). Log technique + message UX clair.
+      const technicalMsg = (_payload.message || _payload.error || "").toString();
+      if (technicalMsg) console.error("[accueil] start_plan refused:", technicalMsg);
+      _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "▶ Démarrer";
+        btn.textContent = "▶ Lancer le scan";
       }
       return;
     }
@@ -963,17 +1005,21 @@ async function _triggerStartPlan(container, btn) {
       // Démarrer le polling pour transitionner la card vers "scan en cours".
       _startScanPolling(container);
     } else {
-      _showErrorBanner(container, "Aucun run_id retourné par start_plan.");
+      // Fix audit 2026-06-07 UX high : retirer jargon "run_id"/"start_plan".
+      _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "▶ Démarrer";
+        btn.textContent = "▶ Lancer le scan";
       }
     }
   } catch (err) {
-    _showErrorBanner(container, err && err.message ? String(err.message) : "Erreur réseau lors du démarrage.");
+    // Fix audit 2026-06-07 UX high : err.message brut expose du jargon (TypeError,
+    // NetworkError…). Log technique en console, message UX clair a l'ecran.
+    console.error("[accueil] start_plan failed:", err);
+    _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "▶ Démarrer";
+      btn.textContent = "▶ Lancer le scan";
     }
   }
 }
@@ -1088,7 +1134,7 @@ function _openScanOptionsDrawer(container) {
       </label>
       <div class="accueil-scan-drawer-actions">
         <button type="button" class="v5-btn v5-btn--ghost" data-accueil-scan-drawer-cancel>Annuler</button>
-        <button type="button" class="v5-btn v5-btn--primary" data-accueil-scan-drawer-start>▶ Démarrer</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-scan-drawer-start>▶ Lancer le scan</button>
       </div>
     </div>
   `;

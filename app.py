@@ -272,6 +272,33 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     # on persiste IMMEDIATEMENT le token de `s` (ainsi tout get_settings ulterieur
     # renvoie la meme valeur). Si non vide, on reutilise celui du disque pour
     # eviter toute divergence.
+    # DEBUG VERBOSE 2026-06-08 : trace exhaustif si CINESORT_DEBUG actif. Cible
+    # le bug auth persistant apres 4 hotfixes (_mask_secrets / _safeBearer /
+    # utf-8-sig / native_boot). Logue codepoints char-par-char du token AVANT
+    # url-encode pour identifier tout caractere > 0x7F qui casse _safeBearer.
+    _DEBUG_TOKEN = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+    def _dbg_codepoints(label: str, value: str) -> None:
+        """Logue codepoint-par-codepoint un token, signale tout > 0x7F."""
+        if not _DEBUG_TOKEN:
+            return
+        try:
+            length = len(value)
+            cps = [f"U+{ord(c):04X}" for c in value]
+            non_ascii = [(i, c, ord(c)) for i, c in enumerate(value) if ord(c) > 0x7F]
+            print(f"[DEBUG-TOKEN] {label} len={length}", file=sys.stderr)
+            print(f"[DEBUG-TOKEN] {label} codepoints={cps}", file=sys.stderr)
+            if non_ascii:
+                for i, c, o in non_ascii:
+                    print(
+                        f"[DEBUG-TOKEN] {label} NON-ASCII pos={i} char={c!r} U+{o:04X}",
+                        file=sys.stderr,
+                    )
+            else:
+                print(f"[DEBUG-TOKEN] {label} 100% ASCII OK", file=sys.stderr)
+        except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+            print(f"[DEBUG-TOKEN] {label} dump failed: {_dbg_exc}", file=sys.stderr)
+
     try:
         import json as _json
         from pathlib import Path as _Path
@@ -282,14 +309,28 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
             # outils PowerShell par defaut). 'utf-8' strict leve UnicodeDecodeError,
             # le bloc except masque le token avec _SECRET_MASK -> 401 systematique.
             # 'utf-8-sig' tolere ET supprime le BOM si present.
+            _raw_bytes = settings_path.read_bytes()
+            if _DEBUG_TOKEN:
+                print(
+                    f"[DEBUG-TOKEN] settings.json bytes_len={len(_raw_bytes)} "
+                    f"first_4_bytes={_raw_bytes[:4]!r}",
+                    file=sys.stderr,
+                )
             raw = _json.loads(settings_path.read_text(encoding="utf-8-sig"))
             persisted_token = str(raw.get("rest_api_token") or "").strip()
             in_memory_token = str(s.get("rest_api_token") or "").strip()
+            _dbg_codepoints("persisted_token (settings.json)", persisted_token)
+            _dbg_codepoints("in_memory_token (api.settings)", in_memory_token)
             if persisted_token:
                 # Source de verite = disque. Synchronise s en cas de drift.
                 token = persisted_token
                 if persisted_token != in_memory_token:
                     s = {**s, "rest_api_token": persisted_token}
+                    if _DEBUG_TOKEN:
+                        print(
+                            "[DEBUG-TOKEN] DRIFT detecte persisted!=in_memory, sync vers disque",
+                            file=sys.stderr,
+                        )
             elif in_memory_token:
                 # Disque vide mais memoire a un token (auto-gen) : persister maintenant
                 # AVANT de demarrer le serveur, pour eviter qu'un autre get_settings
@@ -304,6 +345,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     except Exception as exc:
         token = str(s.get("rest_api_token") or "").strip()
         print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
+    _dbg_codepoints("token FINAL passe a RestApiServer", token)
     port = int(s.get("rest_api_port") or 8642)
     is_public = bool(s.get("rest_api_enabled"))
     host = "0.0.0.0" if is_public else "127.0.0.1"
@@ -739,17 +781,65 @@ def main() -> None:
 
             port = getattr(rest_server, "_port", 8642)
             proto = "https" if getattr(rest_server, "_is_https", False) else "http"
-            _desktop_dashboard_token = str(settings_early.get("rest_api_token") or "")
+            # CAUSE RACINE 2026-06-07 : api.settings.get_settings() passe par
+            # get_settings_payload() -> _mask_secrets() qui remplace rest_api_token
+            # par 8 bullets U+2022. URL-encoded en %E2%80%A2 x8, le frontend les
+            # decode, _URLSAFE_TOKEN_RE = /^[A-Za-z0-9_\-]{1,128}$/ rejette,
+            # setToken() ne stocke rien -> 401 systematiques + saturation rate-limit
+            # (ce dernier desormais corrige par exemption localhost, mais le token
+            # absent doit etre fixe a la source).
+            # FIX : on utilise rest_server._token, deja resolu (et clair) dans
+            # _start_rest_server via lecture brute settings.json en utf-8-sig.
+            # Defense en profondeur : strip + suppression d'eventuel BOM U+FEFF.
+            _desktop_dashboard_token = str(getattr(rest_server, "_token", "") or "")
+            # Defense en profondeur : strip whitespace + suppression d'un eventuel
+            # BOM UTF-8 (U+FEFF / ZWNBSP) qui pourrait survivre a la lecture brute
+            # si settings.json a ete sauve par PowerShell sans -Encoding utf8.
+            _desktop_dashboard_token = _desktop_dashboard_token.strip().replace("﻿", "")
+            # DEBUG VERBOSE 2026-06-08 : dump codepoints du token tel quel
+            # APRES recuperation depuis rest_server._token + strip. Permet de
+            # detecter une corruption survenue entre _start_rest_server et ici.
+            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            if _DEBUG_NB:
+                try:
+                    cps = [f"U+{ord(c):04X}" for c in _desktop_dashboard_token]
+                    non_ascii = [(i, c, ord(c)) for i, c in enumerate(_desktop_dashboard_token) if ord(c) > 0x7F]
+                    print(
+                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} "
+                        f"codepoints={cps}",
+                        file=sys.stderr,
+                    )
+                    for i, c, o in non_ascii:
+                        print(
+                            f"[DEBUG-NTOKEN] NON-ASCII pos={i} char={c!r} U+{o:04X}",
+                            file=sys.stderr,
+                        )
+                except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+                    print(f"[DEBUG-NTOKEN] dump failed: {_dbg_exc}", file=sys.stderr)
             if _desktop_dashboard_token:
-                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={quote(_desktop_dashboard_token)}&native=1"
+                _encoded_token = quote(_desktop_dashboard_token)
+                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={_encoded_token}&native=1"
                 # DEBUG : afficher l'URL injectee (token tronque pour lisibilite)
                 print(
                     f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
                     file=sys.stderr,
                 )
+                if _DEBUG_NB:
+                    print(
+                        f"[DEBUG-NTOKEN] url-encoded ntoken={_encoded_token!r} "
+                        f"(len_raw={len(_desktop_dashboard_token)} len_encoded={len(_encoded_token)})",
+                        file=sys.stderr,
+                    )
+                    # Detecter si l'encodage a transforme un % qui revele BOM/non-ASCII
+                    if "%" in _encoded_token:
+                        print(
+                            f"[DEBUG-NTOKEN] ATTENTION : ntoken contient %-escapes "
+                            f"(probable codepoint > 0x7F encode) -> {_encoded_token}",
+                            file=sys.stderr,
+                        )
             else:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
-                print("[REST] AVERTISSEMENT : main_url SANS ntoken (token vide dans settings_early)", file=sys.stderr)
+                print("[REST] AVERTISSEMENT : main_url SANS ntoken (rest_server._token vide)", file=sys.stderr)
         else:
             # Fallback : charger l'index local (mode preview ou serveur REST mort)
             index = resource_path(index_rel)

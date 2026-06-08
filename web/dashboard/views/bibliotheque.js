@@ -499,6 +499,24 @@ function _renderTableRow(row) {
 
 function _renderGrid() {
   if (_state.rows.length === 0 && !_state.loading) {
+    // Fix audit 2026-06-07 : distinguer bibliotheque totalement vide (0 film
+    // en base) vs filtres actifs avec 0 resultat. Le message + CTA "Effacer
+    // les filtres" sont trompeurs quand l'utilisateur n'a juste pas encore
+    // scanne sa bibliotheque.
+    const hasActiveFilters = (
+      (_state.tierFilter && _state.tierFilter !== "all") ||
+      (_state.activeChips && _state.activeChips.size > 0) ||
+      (_state.search && _state.search.length > 0) ||
+      _state.advancedActive
+    );
+    if (_state.total === 0 && !hasActiveFilters) {
+      return `
+        <div class="bibliotheque-empty">
+          <p>Votre bibliothèque est vide. Lancez un scan pour découvrir vos films.</p>
+          <a class="v5-btn v5-btn--primary" href="#/processing?step=scan" data-route="/processing?step=scan">Lancer un scan</a>
+        </div>
+      `;
+    }
     return `
       <div class="bibliotheque-empty">
         <p>Aucun film ne correspond à ces filtres.</p>
@@ -713,6 +731,9 @@ async function _fetchLibrary({ append = false } = {}) {
     _state.rowsByPage = new Map();
     _state.rows = [];
     _state.page = 1;
+    // Fix audit 2026-06-07 : reset focus-by-click au reload (filtre/tri
+    // change) pour ne pas figer le hover sur un focus obsolete.
+    _state._focusedByClick = false;
   } else {
     _state.loadingMore = true;
   }
@@ -778,7 +799,34 @@ async function _fetchLibrary({ append = false } = {}) {
     _render();
 
     if (!append) {
-      void _fetchCounters().then(() => { if (_state) _render(); });
+      void _fetchCounters().then(() => {
+        if (!_state) return;
+        // Fix audit 2026-06-07 : _render() detruit innerHTML et tue le focus
+        // de la search input (10k films -> counters lents -> utilisateur tape
+        // pendant le delai -> caracteres perdus). On preserve activeElement +
+        // selection + valeur courante autour du _render().
+        const active = document.activeElement;
+        const wasSearch = !!(active && active.matches && active.matches("[data-bibliotheque-search]"));
+        let savedValue = "";
+        let savedStart = 0;
+        let savedEnd = 0;
+        if (wasSearch) {
+          savedValue = active.value || "";
+          try {
+            savedStart = active.selectionStart || 0;
+            savedEnd = active.selectionEnd || 0;
+          } catch (_e) { /* certains inputs ne supportent pas selectionStart */ }
+        }
+        _render();
+        if (wasSearch && _container) {
+          const inp = _container.querySelector("[data-bibliotheque-search]");
+          if (inp) {
+            // Restaure la valeur tapee pendant le fetch (peut differer de _state.search).
+            if (savedValue && savedValue !== inp.value) inp.value = savedValue;
+            try { inp.focus(); inp.setSelectionRange(savedStart, savedEnd); } catch (_e) { /* noop */ }
+          }
+        }
+      });
     }
   } catch (err) {
     if (err && err.name === "AbortError") return;
@@ -1156,6 +1204,9 @@ function _bindEvents(container) {
     const card = t.closest(".bibliotheque-card");
     if (card && card.dataset.rowId) {
       _state.focusedRowId = card.dataset.rowId;
+      // Fix audit 2026-06-07 : flag focus-by-click empeche le hover (mouseover
+      // delegation) d'ecraser la selection quand l'utilisateur bouge la souris.
+      _state._focusedByClick = true;
       _updateInspector();
       return;
     }
@@ -1163,6 +1214,7 @@ function _bindEvents(container) {
     const tr = t.closest(".bibliotheque-table-row");
     if (tr && t.tagName !== "INPUT" && tr.dataset.rowId) {
       _state.focusedRowId = tr.dataset.rowId;
+      _state._focusedByClick = true;
       _updateInspector();
     }
   }, opts);
@@ -1198,6 +1250,16 @@ function _bindEvents(container) {
       if (_state.selected.has(rowId)) _state.selected.delete(rowId);
       else _state.selected.add(rowId);
       _render();
+      // Fix audit 2026-06-07 : _render() detruit l'arbre DOM via innerHTML,
+      // la carte focusee disparait et le focus retombe au body -> impossible
+      // d'enchainer Space/Fleche/Space (a11y keyboard-first cassee).
+      // On restaure le focus sur la nouvelle carte avec le meme rowId.
+      if (_container) {
+        const restored = _container.querySelector(`[data-row-id="${rowId}"]`);
+        if (restored && typeof restored.focus === "function") {
+          try { restored.focus(); } catch (_e) { /* noop */ }
+        }
+      }
     }
   }, opts);
 
@@ -1217,6 +1279,11 @@ function _bindEvents(container) {
       if (!tr || !tr.dataset.rowId) return;
       // Anti-flood : ne refocus que si on change de ligne.
       if (_state.focusedRowId === tr.dataset.rowId) return;
+      // Fix audit 2026-06-07 : si l'utilisateur a une selection active OU a
+      // explicitement focuse une ligne par clic, le hover ne doit PAS ecraser
+      // l'inspecteur. Sinon la selection saute en continu vers la ligne survolee.
+      if (_state.selected && _state.selected.size > 0) return;
+      if (_state._focusedByClick) return;
       _state.focusedRowId = tr.dataset.rowId;
       _updateInspector();
     });
@@ -1285,7 +1352,10 @@ function _handleBulkAction(action) {
     return; // ignore le 2eme click pendant que le 1er est en cours
   }
   _state.bulkInFlight = true;
-  const bulkBtns = Array.from(document.querySelectorAll("[data-biblio-bulk-action]"));
+  // Fix audit 2026-06-07 : selecteur corrige. Les boutons sont rendus avec
+  // data-bibliotheque-bulk (cf _renderBulkToolbar l.323-328), pas
+  // data-biblio-bulk-action -> aucun bouton n'etait jamais disable visuellement.
+  const bulkBtns = Array.from(document.querySelectorAll("[data-bibliotheque-bulk]"));
   bulkBtns.forEach((b) => { b.disabled = true; b.dataset.bulkPending = "1"; });
   const release = () => {
     _state.bulkInFlight = false;
@@ -1690,8 +1760,10 @@ function _confirmDeletePlaylist(playlistId) {
     actions: [
       { label: "Annuler", cls: "", onClick: () => {} },
       {
+        // Fix audit 2026-06-07 UX high : migration vers v5-btn--danger (cohesion
+        // visuelle avec les autres confirmations destructives v5).
         label: "Supprimer",
-        cls: "btn-danger",
+        cls: "v5-btn v5-btn--danger",
         onClick: () => {
           try { closeModal(); } catch (_e) { /* noop */ }
           void _doDeletePlaylist(playlistId);

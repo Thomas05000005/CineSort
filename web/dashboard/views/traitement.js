@@ -37,8 +37,8 @@ const STEPS = [
   { id: "analyse", label: "Analyse", desc: "Scan des dossiers racines" },
   { id: "verification", label: "Vérification", desc: "Cas à vérifier (priorités)" },
   { id: "validation", label: "Validation", desc: "Approuver / rejeter les films" },
-  { id: "doublons", label: "Doublons", desc: "Choisir le winner pour chaque groupe" },
-  { id: "apply", label: "Apply", desc: "Renommer / déplacer sur disque" },
+  { id: "doublons", label: "Doublons", desc: "Choisir le film à conserver pour chaque groupe" },
+  { id: "apply", label: "Application", desc: "Renommer / déplacer sur disque" },
 ];
 
 const STATUS_COLORS = {
@@ -58,6 +58,27 @@ const POLL_INTERVAL_ANALYSE = 2000; // 2s pendant scan en cours (etape 1)
 // Fix APPLY-2 (2026-05-30) : polling rapide pendant apply en cours (etape 5).
 const POLL_INTERVAL_APPLY = 1500;
 const UNDO_COUNTDOWN_INTERVAL_MS = 60_000; // Spec 08 §3.5 : refresh carte undo / 60s
+
+/**
+ * mega-hotfix frontend_ui_polish (#5) : countdown gradue lineaire pour
+ * dangerConfirmModal. Avant : cliff effect a 50/51 (0s a 50 elements, 3s
+ * direct a 51 elements). Maintenant : transition lineaire entre 30 et 100.
+ *   - <= 30 : 0s
+ *   - 30 < n <= 50 : interpolation arrondie (0..3s)
+ *   - > 50 : 3s (regle utilisateur "actions dangereuses : countdown 3s si >50")
+ *
+ * Fix regression UI-OVERLAYS-02-COUNTDOWN-RULE-VIOLATION-TRAITEMENT :
+ * la version precedente (>= 100 : 3s, sinon interpolation) pouvait retourner
+ * 1s ou 2s pour n entre 51 et 99, violant la regle utilisateur obligatoire.
+ * Clamp ajoute : > 50 -> 3s pour garantir conformite.
+ */
+function _gradedCountdownSeconds(count) {
+  const n = Number(count) || 0;
+  if (n <= 30) return 0;
+  if (n > 50) return 3;
+  const linear = ((n - 30) / (100 - 30)) * 3;
+  return Math.max(0, Math.min(3, Math.round(linear)));
+}
 
 let _currentStep = "analyse";
 let _runInfo = null;
@@ -274,17 +295,23 @@ function _stopPolling() {
   }
 }
 
+function _computePollInterval() {
+  // Fix audit 2026-06-08 medium : centralise la decision pour pouvoir la
+  // re-evaluer a chaque tick (cf _startPolling). Avant : capture figee au
+  // moment de _startPolling, donc le polling restait a l'ancien intervalle
+  // apres une transition (ex: analyse 2s -> verification 5s, ou apply.running
+  // qui passe a true).
+  if (_currentStep === "analyse") return POLL_INTERVAL_ANALYSE;
+  if (_currentStep === "apply" && _applyStatus?.running) return POLL_INTERVAL_APPLY;
+  return POLL_INTERVAL_RUNNING;
+}
+
 function _startPolling() {
   _stopPolling();
   // Fix APPLY-2 (2026-05-30) : polling rapide pendant un apply en cours sur
   // l'etape 5, pour que la barre de progression et le fichier en cours
   // refletent la realite serveur sans attendre 5s.
-  let interval = POLL_INTERVAL_RUNNING;
-  if (_currentStep === "analyse") {
-    interval = POLL_INTERVAL_ANALYSE;
-  } else if (_currentStep === "apply" && _applyStatus?.running) {
-    interval = POLL_INTERVAL_APPLY;
-  }
+  let interval = _computePollInterval();
   _pollTimer = setInterval(async () => {
     // Fix audit 2026-05-24 : avant on poll-ait infiniment meme apres run done
     // -> 1 call/2-5s a vie tant que vue montee. Arret propre quand run termine.
@@ -315,6 +342,15 @@ function _startPolling() {
     await _loadRunStatus();
     await _loadRunInfo();
     _renderInPlace();
+    // Fix audit 2026-06-08 medium : re-armer le polling si l'intervalle
+    // cible a change (transition step ou bascule apply.running). Sinon le
+    // timer continue a l'ancien intervalle (capture au moment du _startPolling).
+    const nextInterval = _computePollInterval();
+    if (nextInterval !== interval) {
+      interval = nextInterval;
+      _stopPolling();
+      _startPolling();
+    }
   }, interval);
 }
 
@@ -328,12 +364,14 @@ function _shortRunId(rid) {
 
 function _renderHeaderRun() {
   if (!_runInfo || !_runInfo.runId) {
+    // Fix audit 2026-06-08 UX high : un seul CTA "Lancer un scan" sur l'ecran
+    // vide (l'autre est dans _renderStepPanel placeholder ci-dessous). Avant :
+    // doublon visible quand _runInfo=null car _renderTraitement concatene les
+    // deux blocs. On garde seulement la mention textuelle ici, le CTA est dans
+    // le panel step (qui demarre nativement via data-traitement-action).
     return `
       <header class="traitement-header-run traitement-header-run--empty">
         <p class="traitement-header-empty">Aucun run actif détecté.</p>
-        <div class="traitement-header-actions">
-          <a href="#/processing" class="v5-btn v5-btn--primary">▶ Lancer un scan</a>
-        </div>
       </header>
     `;
   }
@@ -343,11 +381,20 @@ function _renderHeaderRun() {
   const isRunning = status === "RUNNING" || status === "PENDING";
   const isPaused = status === "PAUSED" || status === "SAVED";
   const idx = _runStatus?.idx || 0;
-  const total = _runStatus?.total || _runInfo.total || 0;
+  // Fix audit 2026-06-08 high : pendant un run actif (RUNNING/PENDING/PAUSED),
+  // n'utiliser QUE _runStatus.total (total cible decouvert par le scanner).
+  // _runInfo.total (kpis.total_movies = rows persistees) diverge tant que
+  // _runStatus n'est pas converge, ce qui causait des sauts ETA (12min -> 2h).
+  const total = (isRunning || isPaused)
+    ? (_runStatus?.total || 0)
+    : (_runStatus?.total || _runInfo.total || 0);
   const etaSeconds = _runStatus?.eta_s || 0;
   // ETA derive : si pas d'eta_s, calcule depuis progress + elapsed
   let etaLabel = "—";
-  if (etaSeconds > 0) {
+  // Fix audit 2026-06-08 high : ne JAMAIS afficher "X restant" quand le run
+  // est termine/annule/echoue (DONE/CANCELLED/FAILED). Sans ce gate, la branche
+  // etaSeconds>0 affichait "Termine - 29min restant" (incoherence signalee).
+  if (etaSeconds > 0 && (isRunning || isPaused)) {
     etaLabel = `${formatDuration(etaSeconds)} restant`;
   } else if (isRunning && idx > 0 && total > 0 && _runInfo.startedTs > 0) {
     const elapsed = Date.now() / 1000 - _runInfo.startedTs;
@@ -381,8 +428,8 @@ function _renderHeaderRun() {
       <div class="traitement-header-actions">
         ${isRunning ? `<button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="pause">⏸ Pause</button>` : ""}
         ${isPaused ? `<button type="button" class="v5-btn v5-btn--primary" data-traitement-action="resume">▶ Reprendre</button>` : ""}
-        <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="save" title="Sauvegarde le run en cours pour le reprendre plus tard depuis l Historique">💾 Sauvegarder</button><!-- Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high UX-04 : tooltip explicite, distingue "Sauvegarder le run" (header) de "Sauver les decisions" (validation). -->
-        <button type="button" class="v5-btn v5-btn--danger" data-traitement-action="cancel">⏹ Annuler</button>
+        ${(isRunning || isPaused) ? `<button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="save">💾 Enregistrer le run</button>` : ""}<!-- Fix audit 2026-06-07 UX high : harmonisation "Enregistrer + objet" sur les 3 sites (header / validation / dirty-state). Tooltip retire car libelle desormais explicite. -->
+        ${(isRunning || isPaused) ? `<button type="button" class="v5-btn v5-btn--danger" data-traitement-action="cancel">⏹ Annuler</button>` : ""}
       </div>
     </header>
   `;
@@ -429,13 +476,21 @@ function _renderStat(label, value, suffix) {
 function _renderStepStats(stepId) {
   if (!_runInfo) return "";
   switch (stepId) {
-    case "analyse":
+    case "analyse": {
+      // Fix audit 2026-06-08 high : pendant un scan en cours, "Films scannes"
+      // doit refleter le progres reel (_runStatus.idx) et non _runInfo.total
+      // (total cible / final), sinon desync visible avec la barre "167/856".
+      const _isRunning = _runStatus?.running;
+      const scanned = _isRunning
+        ? `${Number(_runStatus?.idx || 0)} / ${Number(_runStatus?.total || _runInfo.total || 0)}`
+        : _runInfo.total;
       return `
         <div class="traitement-stats">
-          ${_renderStat("Films scannés", _runInfo.total)}
+          ${_renderStat("Films scannés", scanned)}
           ${_renderStat("Score moyen", _runInfo.score ? _runInfo.score.toFixed(0) : "—", "/100")}
         </div>
       `;
+    }
     case "verification":
       return `
         <div class="traitement-stats">
@@ -481,8 +536,15 @@ function _renderStepStats(stepId) {
 function _renderAnalyseStep() {
   const isRunning = _runStatus?.running;
   const idx = _runStatus?.idx || 0;
-  const total = _runStatus?.total || _runInfo?.total || 0;
+  // Fix audit 2026-06-08 medium : utiliser strictement _runStatus.total
+  // pour le calcul de la barre de progression pendant le scan. Le fallback
+  // _runInfo.total (kpis.total_movies = rows persistees) divergeait souvent
+  // de la cible reelle du scanner, ce qui faisait sauter la barre a >100%
+  // ou bondir d'un coup quand _runStatus arrivait.
+  const total = isRunning ? Number(_runStatus?.total || 0) : (_runStatus?.total || _runInfo?.total || 0);
   const progressPct = total > 0 ? Math.round((idx * 100) / total) : 0;
+  // Mode indeterminate tant que _runStatus.total n'est pas converge.
+  const isDiscovering = isRunning && total === 0;
   const logs = _logsState.items || [];
 
   return `
@@ -493,28 +555,28 @@ function _renderAnalyseStep() {
 
       <details class="traitement-scan-drawer" ${isRunning ? "" : "open"}>
         <summary>Options de scan</summary>
-        <div class="traitement-scan-options">
+        <fieldset class="traitement-scan-options" ${isRunning ? "disabled" : ""}>
           <label class="checkbox-row">
-            <input type="checkbox" data-scan-opt="perceptual" ${_scanOptions.perceptual ? "checked" : ""}>
+            <input type="checkbox" data-scan-opt="perceptual" ${_scanOptions.perceptual ? "checked" : ""} ${isRunning ? "disabled" : ""}>
             Analyse perceptuelle (LPIPS V2)
           </label>
           <label class="checkbox-row">
-            <input type="checkbox" data-scan-opt="subtitles" ${_scanOptions.subtitles ? "checked" : ""}>
+            <input type="checkbox" data-scan-opt="subtitles" ${_scanOptions.subtitles ? "checked" : ""} ${isRunning ? "disabled" : ""}>
             Détection sous-titres manquants (FR/EN)
           </label>
           <label class="checkbox-row">
-            <input type="checkbox" data-scan-opt="omdb" ${_scanOptions.omdb ? "checked" : ""}>
+            <input type="checkbox" data-scan-opt="omdb" ${_scanOptions.omdb ? "checked" : ""} ${isRunning ? "disabled" : ""}>
             OMDb cross-check (rating + IMDb id)
           </label>
           <label class="checkbox-row">
-            <input type="checkbox" data-scan-opt="nfo" ${_scanOptions.nfo ? "checked" : ""}>
+            <input type="checkbox" data-scan-opt="nfo" ${_scanOptions.nfo ? "checked" : ""} ${isRunning ? "disabled" : ""}>
             Vérification cohérence NFO/Kodi
           </label>
           <label class="traitement-scan-slider-row">
             Parallélisme : <strong data-scan-parallelism-label>${_scanOptions.parallelism}</strong>
-            <input type="range" min="1" max="8" value="${_scanOptions.parallelism}" data-scan-opt="parallelism" class="traitement-scan-slider">
+            <input type="range" min="1" max="8" value="${_scanOptions.parallelism}" data-scan-opt="parallelism" class="traitement-scan-slider" ${isRunning ? "disabled" : ""}>
           </label>
-        </div>
+        </fieldset>
       </details>
 
       ${isRunning ? `
@@ -523,9 +585,11 @@ function _renderAnalyseStep() {
             <div class="traitement-scan-progress-fill" style="--progress: ${progressPct / 100}"></div>
           </div>
           <div class="traitement-scan-progress-meta">
-            <span>${escapeHtml(String(idx))}/${escapeHtml(String(total))} films</span>
-            <span>${progressPct}%</span>
-            ${_runStatus?.eta_s ? `<span>~${escapeHtml(formatDuration(_runStatus.eta_s))} restant</span>` : ""}
+            ${isDiscovering
+              ? `<span>Découverte en cours…</span>`
+              : `<span>${escapeHtml(String(idx))}/${escapeHtml(String(total))} films</span>
+                 <span>${progressPct}%</span>
+                 ${_runStatus?.eta_s ? `<span>~${escapeHtml(formatDuration(_runStatus.eta_s))} restant</span>` : ""}`}
           </div>
         </div>
         <div class="traitement-scan-current">
@@ -552,16 +616,20 @@ function _renderAnalyseStep() {
 
 function _renderVerificationStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
-  const flagged = rows.filter((r) => {
-    const flags = String(r.warning_flags || "").split(",").filter(Boolean);
-    return flags.length > 0;
-  });
+  // Fix audit 2026-06-08 medium : warning_flags est un List[str] cote backend
+  // (cinesort/domain/core.py PlanRow). Travailler directement sur le tableau
+  // et matcher par prefixe pour eviter qu'un futur flag 'subtitle_ok' pollue
+  // le filtre subs (.includes('subtitle') matchait par sous-chaine).
+  const _readFlags = (r) => Array.isArray(r.warning_flags)
+    ? r.warning_flags
+    : String(r.warning_flags || "").split(",").filter(Boolean);
+  const flagged = rows.filter((r) => _readFlags(r).length > 0);
   const filtered = flagged.filter((r) => {
     if (_verifFilter === "all") return true;
-    const flags = String(r.warning_flags || "");
-    if (_verifFilter === "subs") return flags.includes("subtitle");
-    if (_verifFilter === "dups") return flags.includes("duplicate");
-    if (_verifFilter === "nfo") return flags.includes("nfo");
+    const flags = _readFlags(r);
+    if (_verifFilter === "subs") return flags.some((f) => String(f).startsWith("subtitle"));
+    if (_verifFilter === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
+    if (_verifFilter === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
     return true;
   });
 
@@ -569,7 +637,7 @@ function _renderVerificationStep() {
   // silencieusement la liste. Si > 500 lignes, un info banner est affiche
   // pour suggerer l'usage des filtres de confiance.
   const tableRows = filtered.map((r) => {
-    const flags = String(r.warning_flags || "").split(",").filter(Boolean);
+    const flags = _readFlags(r);
     return `
       <tr data-row-id="${escapeHtml(r.row_id || "")}">
         <td class="traitement-verif-title">${escapeHtml(r.proposed_title || "—")}</td>
@@ -661,8 +729,14 @@ function _sortValidationRows(rows, sort) {
       va = Number(a.proposed_year) || 0;
       vb = Number(b.proposed_year) || 0;
     } else if (key === "score") {
-      va = Number(a.score) || 0;
-      vb = Number(b.score) || 0;
+      // Fix audit 2026-06-08 medium : PlanRow backend n'expose pas de champ
+      // 'score' (cf cinesort/domain/core.py PlanRow + run_data_support._parse_basic_fields).
+      // Le sort score etait donc un no-op (tous a 0, ordre instable). Fallback
+      // sur confidence (signal de qualite disponible) pour eviter l'UX
+      // "header cliquable sans effet". Voir aussi _renderValidationStep ou
+      // la colonne Score n'est plus rendue.
+      va = Number(a.confidence) || 0;
+      vb = Number(b.confidence) || 0;
     } else {
       // confidence (defaut)
       va = Number(a.confidence) || 0;
@@ -745,7 +819,10 @@ function _renderValidationStep() {
       ? String(stState.year)
       : String(r.proposed_year || "");
 
-    const flags = String(r.warning_flags || "").split(",").filter(Boolean);
+    // Fix audit 2026-06-08 medium : warning_flags est un List[str] cote backend.
+    const flags = Array.isArray(r.warning_flags)
+      ? r.warning_flags
+      : String(r.warning_flags || "").split(",").filter(Boolean);
     const candidates = Array.isArray(r.candidates) ? r.candidates.slice(0, 3) : [];
 
     const baseRow = `
@@ -758,7 +835,10 @@ function _renderValidationStep() {
         <td class="traitement-validation-year">
           <input type="number" min="1900" max="2099" value="${escapeHtml(yearForRender)}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
         </td>
-        <td class="traitement-validation-score">${escapeHtml(String(r.score ?? "—"))}</td>
+        <!-- Fix audit 2026-06-08 high : colonne 'Score' retiree (PlanRow backend
+             n'expose pas de champ score, cf cinesort/domain/core.py PlanRow).
+             Avant : affichait "—" pour TOUTES les lignes => UX morte / trompeuse.
+             A reintroduire quand _parse_basic_fields propagera quality.score. -->
         <td class="traitement-validation-source">${escapeHtml(String(r.proposed_source || "—"))}</td>
         <td class="traitement-validation-actions">
           <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost"
@@ -795,7 +875,7 @@ function _renderValidationStep() {
 
     return `${baseRow}
       <tr class="traitement-validation-row-expand">
-        <td colspan="7">
+        <td colspan="6">
           <div class="traitement-validation-reasons">
             ${flagsHtml}
             ${yearReason}
@@ -861,11 +941,8 @@ function _renderValidationStep() {
                   aria-sort="${ariaSort("annee")}"
                   role="columnheader"
                   tabindex="0">Année${sortIndicator("annee")}</th>
-              <th class="is-sort ${sortKey === "score" ? "is-active is-" + sortDir : ""}"
-                  data-traitement-validation-sort="score"
-                  aria-sort="${ariaSort("score")}"
-                  role="columnheader"
-                  tabindex="0">Score${sortIndicator("score")}</th>
+              <!-- Fix audit 2026-06-08 high : header 'Score' retire (cf cellule plus haut)
+                   pour eviter un tri cliquable sans donnees. -->
               <th>Source</th>
               <th></th>
             </tr>
@@ -880,7 +957,7 @@ function _renderValidationStep() {
       `}
 
       <div class="traitement-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-traitement-action="save-validation">💾 Sauver les décisions</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-traitement-action="save-validation">💾 Enregistrer les décisions</button>
         <button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="go-doublons">→ Passer aux Doublons</button>
       </div>
     </section>
@@ -893,7 +970,7 @@ function _renderDoublonsStep() {
   return `
     <section class="traitement-panel traitement-panel--doublons" aria-labelledby="traitement-panel-title">
       <h2 id="traitement-panel-title" class="traitement-panel-title">Étape 4 — Doublons</h2>
-      <p class="traitement-panel-desc">Choisir le winner pour chaque groupe de doublons</p>
+      <p class="traitement-panel-desc">Choisir le film à conserver pour chaque groupe de doublons</p>
       <div id="traitement-doublons-mount" class="traitement-doublons-mount"></div>
       <div class="traitement-actions">
         <button type="button" class="v5-btn v5-btn--primary" data-traitement-action="go-apply">→ Passer à l'application</button>
@@ -1301,14 +1378,18 @@ function _renderStepPanel(stepId) {
   }
   if (!_runInfo) {
     const step = STEPS.find((s) => s.id === stepId) || STEPS[0];
+    // Fix audit 2026-06-08 UX high : 1 seul CTA "Lancer un scan" (le header
+    // empty-state n'en rend plus). Bouton avec data-traitement-action="start-scan"
+    // pour rester dans la vue Traitement plutot que de rediriger vers
+    // une vue tierce (#/processing) inexistante ou redondante.
     return `
       <section class="traitement-panel" aria-labelledby="traitement-panel-title">
         <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(step.label)}</h2>
         <p class="traitement-placeholder">
-          Aucun run actif détecté. Lance un scan depuis la vue Processing pour démarrer le workflow.
+          Aucun run actif détecté. Lance un scan pour démarrer le workflow.
         </p>
         <div class="traitement-actions">
-          <a href="#/processing" class="v5-btn v5-btn--primary">▶ Lancer un scan</a>
+          <button type="button" class="v5-btn v5-btn--primary" data-traitement-action="start-scan">▶ Lancer un scan</button>
         </div>
       </section>
     `;
@@ -1339,7 +1420,7 @@ function _renderTraitement() {
         <div class="traitement-header-row">
           <h1 class="traitement-title">Traitement</h1>
         </div>
-        <p class="traitement-subtitle">Workflow d'un scan : analyse → validation → apply</p>
+        <p class="traitement-subtitle">Workflow d'un scan : analyse → validation → application</p>
       </header>
       ${_renderHeaderRun()}
       ${showBreadcrumb ? _renderBreadcrumb(_currentStep) : ""}
@@ -1388,7 +1469,8 @@ async function _handleHeaderAction(action) {
         await _loadRunStatus();
         _renderInPlace();
       } else {
-        showToast({ type: "warn", text: "Endpoint pause indisponible (PR backend en attente)." });
+        console.warn("Endpoint pause indisponible (PR backend en attente).");
+        showToast({ type: "warn", text: "La mise en pause n'est pas disponible pour ce run." });
       }
     } catch {
       showToast({ type: "error", text: "Erreur lors de la pause." });
@@ -1401,7 +1483,8 @@ async function _handleHeaderAction(action) {
         await _loadRunStatus();
         _renderInPlace();
       } else {
-        showToast({ type: "warn", text: "Endpoint resume indisponible (PR backend en attente)." });
+        console.warn("Endpoint resume indisponible (PR backend en attente).");
+        showToast({ type: "warn", text: "La reprise du run n'est pas disponible." });
       }
     } catch {
       showToast({ type: "error", text: "Erreur lors de la reprise." });
@@ -1412,7 +1495,8 @@ async function _handleHeaderAction(action) {
       if (res?.data?.ok) {
         showToast({ type: "success", text: "Run sauvegardé. Retrouvez-le dans l'Historique." });
       } else {
-        showToast({ type: "warn", text: "Endpoint save_for_later indisponible (PR backend en attente)." });
+        console.warn("Endpoint save_for_later indisponible (PR backend en attente).");
+        showToast({ type: "warn", text: "La sauvegarde du run n'est pas encore disponible." });
       }
     } catch {
       showToast({ type: "error", text: "Erreur lors de la sauvegarde." });
@@ -1557,11 +1641,23 @@ function _computeBulkApproveTargets(filter) {
   const sureThr = getConfidenceThresholdsSync().high;
   for (const r of _validationPlan.rows) {
     const conf = Number(r.confidence || 0);
-    const flags = String(r.warning_flags || "");
+    // Fix audit 2026-06-08 medium : warning_flags est un List[str] cote
+    // backend (cinesort/domain/core.py PlanRow). On bossait par coincidence
+    // sur String(arr) = 'a,b' mais .includes('subtitle') matchait par
+    // sous-chaine (fragile : 'subtitle_ok' aurait pollue subs).
+    const flags = Array.isArray(r.warning_flags)
+      ? r.warning_flags
+      : String(r.warning_flags || "").split(",").filter(Boolean);
+    // Fix audit 2026-06-08 high : PlanRow n'a pas de champ 'tier'. Le preset
+    // 'Platinum + Gold' etait donc silencieusement inerte (approvedCount = 0).
+    // Alignement avec bibliotheque.js:166-172 : lecture display_tier puis
+    // tier_v2 (single source of truth Vague N batch 2). On compare en
+    // minuscules pour matcher les variantes serveur (platinum/Platinum/PLATINUM).
+    const tierKey = String(r.display_tier || r.tier_v2 || r.tier || "").toLowerCase();
     let match = false;
     if (filter === "sure") match = conf >= sureThr;
-    else if (filter === "no-alert") match = !flags;
-    else if (filter === "platinum-gold") match = ["Platinum", "Gold"].includes(String(r.tier || ""));
+    else if (filter === "no-alert") match = flags.length === 0;
+    else if (filter === "platinum-gold") match = tierKey === "platinum" || tierKey === "gold";
     if (match) {
       targetIds.add(r.row_id);
       targetRows.push(r);
@@ -1588,7 +1684,21 @@ async function _handleBulkApprove(filter) {
 
   const { targetIds, targetRows } = _computeBulkApproveTargets(filter);
   const approvedCount = targetIds.size;
-  if (approvedCount === 0) return;
+  if (approvedCount === 0) {
+    // Fix audit 2026-06-08 high : feedback explicite quand le preset ne
+    // matche aucune ligne (ex: aucun film Platinum/Gold dans ce run, ou
+    // aucun film sans alerte). Avant : sortie silencieuse => UX trompeuse.
+    let msg = "Aucun film ne correspond à ce preset.";
+    if (filter === "platinum-gold") {
+      msg = "Aucun film Platinum ou Gold dans ce run.";
+    } else if (filter === "no-alert") {
+      msg = "Aucun film sans alerte dans ce run.";
+    } else if (filter === "sure") {
+      msg = "Aucun film à confiance haute dans ce run.";
+    }
+    showToast({ type: "info", text: msg });
+    return;
+  }
 
   // VN-C.3 (Vague N batch 2) : seuil de protection "actions dangereuses".
   // Au-dela de 50 films impactes d'un coup, on impose dangerConfirmModal
@@ -1606,7 +1716,9 @@ async function _handleBulkApprove(filter) {
       consequence: `${approvedCount} films seront marqués comme approuvés. Vous pourrez encore les décocher individuellement avant Apply.`,
       confirmLabel: `✓ Approuver ${approvedCount} films`,
       cancelLabel: "Annuler",
-      countdownSeconds: 3,
+      // mega-hotfix frontend_ui_polish (#5) : countdown gradue (0-3s entre 30-100).
+      // approvedCount > 50 ici (gate DANGER_THRESHOLD ci-dessus), donc valeur ~1.5-3s.
+      countdownSeconds: _gradedCountdownSeconds(approvedCount),
       onConfirm: async () => {
         await _applyBulkApprove(targetIds, approvedCount);
       },
@@ -1626,6 +1738,11 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   // depuis _decisionsState (source de verite JS). Capture TOUTES les rows du
   // plan, pas seulement celles visibles dans le DOM apres filtre. Sans ca,
   // l'undo ne restaurait que les rows visibles -> perte silencieuse.
+  // Fix race condition (2026-06-05) : on memorise aussi le timestamp du
+  // snapshot. Au rollback (echec API ou undo), les decisions utilisateur
+  // intervenues pendant l'await fetch (decided_at > snapshot_ts) sont
+  // preservees au lieu d'etre ecrasees par un wipe-and-replace de la Map.
+  const snapshot_ts = Date.now();
   const stateSnapshot = new Map();
   for (const [rid, st] of _decisionsState.entries()) {
     stateSnapshot.set(rid, { ...st });
@@ -1662,9 +1779,23 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   if (!saveOk) {
     // VN-C.2 : rollback du state JS (source de verite) + DOM visible. Le
     // snapshot couvre toutes les rows du plan (pas seulement les visibles).
-    _decisionsState = new Map();
-    for (const [rid, st] of stateSnapshot.entries()) {
-      _decisionsState.set(rid, { ...st });
+    // Fix race condition (2026-06-05) : merge selectif au lieu de wipe.
+    // Toute decision (clic checkbox / edit year) faite par l'utilisateur
+    // pendant l'await save_validation a decided_at > snapshot_ts et doit
+    // etre preservee. On rollback uniquement les rows qu'on a effectivement
+    // mutees ci-dessus (targetIds) et dont l'utilisateur n'a pas retouche
+    // la decision depuis.
+    for (const rid of targetIds) {
+      const current = _decisionsState.get(rid);
+      const prev = stateSnapshot.get(rid);
+      // Si l'utilisateur a re-modifie cette row apres notre snapshot,
+      // on respecte son intent et on ne rollback pas.
+      if (current && current.decided_at > snapshot_ts) continue;
+      if (prev) {
+        _decisionsState.set(rid, { ...prev });
+      } else {
+        _decisionsState.delete(rid);
+      }
     }
     if (_activeContainer) {
       _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
@@ -1682,6 +1813,18 @@ async function _applyBulkApprove(targetIds, approvedCount) {
 
   // Recharge les KPIs frais (validated_count / rejected_count) puis re-render.
   await _loadRunInfo();
+  // Fix audit 2026-06-08 critical : mutation locale de row.decision pour
+  // chaque rowId approuve apres save reussi. Sans ca, _hasUnsavedValidationDecisions()
+  // comparait _decisionsState[rid].ok=true au defaultOk derive de l'ancien
+  // row.decision (souvent PENDING), provoquant la modale "Decisions non
+  // enregistrees" juste apres le toast "X films approuves" => contradiction
+  // signalee. Plus rapide qu'un _loadPlan() complet (pas de round-trip).
+  if (_validationPlan?.rows) {
+    for (const row of _validationPlan.rows) {
+      const rid = String(row.row_id || "");
+      if (targetIds.has(rid)) row.decision = "APPROVED";
+    }
+  }
   _renderInPlace();
 
   // Fix TOAST-1 (2026-05-30) : remplacement de persistent: true par
@@ -1699,9 +1842,19 @@ async function _applyBulkApprove(targetIds, approvedCount) {
         if (!_activeContainer) return;
         // VN-C.2 : restaurer le state JS au snapshot (toutes rows, pas seulement
         // visibles) puis refleter sur le DOM visible.
-        _decisionsState = new Map();
-        for (const [rid, st] of stateSnapshot.entries()) {
-          _decisionsState.set(rid, { ...st });
+        // Fix race condition (2026-06-05) : merge selectif (cf rollback ci-dessus).
+        // Les decisions utilisateur posterieures au snapshot sont preservees ;
+        // on ne rollback que les rows qu'on a bulk-approuvees et qui n'ont pas
+        // ete retouchees depuis.
+        for (const rid of targetIds) {
+          const current = _decisionsState.get(rid);
+          const prev = stateSnapshot.get(rid);
+          if (current && current.decided_at > snapshot_ts) continue;
+          if (prev) {
+            _decisionsState.set(rid, { ...prev });
+          } else {
+            _decisionsState.delete(rid);
+          }
         }
         _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
           const prev = _decisionsState.get(cb.dataset.rowId);
@@ -1861,6 +2014,54 @@ async function _handleApplyNow() {
   });
 }
 
+/* --- Step transition guard (Fix audit 2026-06-08 high) --- */
+
+// Centralise le check des decisions de validation non enregistrees pour
+// TOUTES les transitions hors-Validation (go-doublons, go-apply, breadcrumb,
+// hashchange, unmount). Avant : la modale ne s'affichait QUE sur go-doublons,
+// les autres chemins (clic apply-now, navigation URL, breadcrumb) faisaient
+// perdre silencieusement les modifs JS de _decisionsState.
+//
+// Mode: "auto-save" pour les transitions internes silencieuses (hashchange,
+// unmount) afin d'eviter de bloquer la navigation systeme avec une modale.
+// Mode: "modal" pour les actions utilisateur explicites.
+//
+// Retourne true si la transition peut continuer immediatement, false si une
+// modale est affichee (le callback onConfirm decidera).
+function _guardStepTransition(onConfirm, opts) {
+  const mode = opts?.mode || "modal";
+  // Le guard ne s'applique que quand on quitte la step Validation.
+  if (_currentStep !== "validation") {
+    onConfirm();
+    return true;
+  }
+  if (!_hasUnsavedValidationDecisions()) {
+    onConfirm();
+    return true;
+  }
+  if (mode === "auto-save") {
+    // Hashchange / unmount : on tente un auto-save silencieux best-effort.
+    _handleSaveValidation().finally(() => onConfirm());
+    return false;
+  }
+  // Modal classique avec 3 choix.
+  showModal({
+    title: "Décisions non enregistrées",
+    body: `<p>Vous avez modifié des décisions de validation sans cliquer sur <strong>"Enregistrer les décisions"</strong>.</p>
+           <p>Si vous continuez maintenant, vos modifications seront perdues au prochain rechargement.</p>
+           <p><strong>Enregistrer avant de continuer ?</strong></p>`,
+    actions: [
+      { label: "Annuler", cls: "", onClick: () => {} },
+      { label: "Continuer sans enregistrer", cls: "v5-btn--secondary", onClick: () => onConfirm() },
+      { label: "Enregistrer puis continuer", cls: "btn-primary v5-btn--primary", onClick: async () => {
+        await _handleSaveValidation();
+        onConfirm();
+      } },
+    ],
+  });
+  return false;
+}
+
 /* --- Event binding --- */
 
 // Fix audit 2026-05-25 (v1.5.3) Vague G Fix 2 : event delegation centralisée.
@@ -1879,9 +2080,14 @@ function _onContainerClick(event) {
   if (stepBtn && container.contains(stepBtn)) {
     if (stepBtn.disabled) return;
     const stepId = stepBtn.dataset.traitementStep;
-    _currentStep = stepId;
-    _writeStep(stepId);
-    _renderInPlace();
+    // Fix audit 2026-06-08 high : guard sur transition breadcrumb si on quitte
+    // Validation avec decisions non enregistrees.
+    if (stepId === _currentStep) return;
+    _guardStepTransition(() => {
+      _currentStep = stepId;
+      _writeStep(stepId);
+      _renderInPlace();
+    });
     return;
   }
 
@@ -1905,7 +2111,8 @@ function _onContainerClick(event) {
     } else if (action === "start-scan") {
       _handleScanStart();
     } else if (action === "view-logs") {
-      showToast({ type: "info", text: "Ouverture du journal complet…" });
+      // Fix 2026-06-07 : pas de toast intermediaire, la navigation est instantanee
+      // (le toast s'afficherait sur la vue Logs et serait du bruit UX).
       window.location.hash = "#/logs";
     } else if (action === "go-validation") {
       _currentStep = "validation";
@@ -1920,19 +2127,21 @@ function _onContainerClick(event) {
       // appele. Maintenant : modal explicite "Sauvegarder avant de continuer ?"
       // avec 3 choix (Sauver puis continuer / Continuer sans sauver / Annuler).
       if (_hasUnsavedValidationDecisions()) {
+        // Fix audit 2026-06-07 UX high : harmonisation verbe "Enregistrer" + complement
+        // sur les 3 sites traitement.js (header / validation / dirty-state modal).
         showModal({
-          title: "Decisions non sauvegardees",
-          body: `<p>Vous avez modifie des decisions de validation sans cliquer sur <strong>"Sauver les decisions"</strong>.</p>
+          title: "Décisions non enregistrées",
+          body: `<p>Vous avez modifié des décisions de validation sans cliquer sur <strong>"Enregistrer les décisions"</strong>.</p>
                  <p>Si vous passez aux Doublons maintenant, vos modifications seront perdues au prochain rechargement.</p>
-                 <p><strong>Sauvegarder avant de continuer ?</strong></p>`,
+                 <p><strong>Enregistrer avant de continuer ?</strong></p>`,
           actions: [
             { label: "Annuler", cls: "", onClick: () => {} },
-            { label: "Continuer sans sauver", cls: "v5-btn--secondary", onClick: () => {
+            { label: "Continuer sans enregistrer", cls: "v5-btn--secondary", onClick: () => {
               _currentStep = "doublons";
               _writeStep("doublons");
               _renderInPlace();
             } },
-            { label: "Sauver puis continuer", cls: "btn-primary v5-btn--primary", onClick: async () => {
+            { label: "Enregistrer puis continuer", cls: "btn-primary v5-btn--primary", onClick: async () => {
               await _handleSaveValidation();
               _currentStep = "doublons";
               _writeStep("doublons");
@@ -1962,7 +2171,8 @@ function _onContainerClick(event) {
         dangerConfirmModal({
           title: `Passer à Apply avec ${pendingDups} doublon${pendingDups > 1 ? "s" : ""} non décidé${pendingDups > 1 ? "s" : ""} ?`,
           consequence: "Les choix par défaut (premier fichier de chaque groupe) seront appliqués. Les autres fichiers de doublons peuvent être supprimés/déplacés selon votre profil.",
-          countdownSeconds: pendingDups > 50 ? 3 : 0,
+          // mega-hotfix frontend_ui_polish (#5) : countdown gradue (au lieu de cliff a 50).
+          countdownSeconds: _gradedCountdownSeconds(pendingDups),
           confirmLabel: "Continuer vers Apply",
           cancelLabel: "Retourner aux Doublons",
           onConfirm: () => {
@@ -2104,6 +2314,12 @@ function _onContainerChange(event) {
   // Scan options (checkbox + range)
   const scanInput = event.target.closest("[data-scan-opt]");
   if (scanInput && container.contains(scanInput)) {
+    // Fix audit 2026-06-08 high : ne PAS muter _scanOptions pendant un scan
+    // en cours. Sinon la modification (faite via un clic sur un input non
+    // disabled si l'attribut sautait) faussait le prochain start_plan et
+    // donnait l'illusion de modifier le scan courant. Defense en profondeur :
+    // les inputs sont aussi disabled dans le HTML (cf _renderAnalyseStep).
+    if (_runStatus?.running) return;
     const key = scanInput.dataset.scanOpt;
     if (scanInput.type === "checkbox") {
       _scanOptions[key] = scanInput.checked;
@@ -2220,6 +2436,18 @@ async function _handleSaveValidation() {
     if (res?.data?.ok !== false) {
       showToast({ type: "success", text: "Décisions sauvegardées." });
       await _loadRunInfo();
+      // Fix audit 2026-06-08 critical : mutation locale de row.decision pour
+      // chaque rowId du payload save. Sans ca, _hasUnsavedValidationDecisions()
+      // continuait de detecter des "divergences" apres sauvegarde reussie car
+      // row.decision restait fige a PENDING. Mapping ok=true -> APPROVED,
+      // ok=false -> REJECTED (aligne sur le contrat backend save_validation).
+      if (_validationPlan?.rows) {
+        for (const row of _validationPlan.rows) {
+          const rid = String(row.row_id || "");
+          const d = decisions[rid];
+          if (d) row.decision = d.ok ? "APPROVED" : "REJECTED";
+        }
+      }
       _renderInPlace();
     } else {
       showToast({ type: "error", text: "Échec de la sauvegarde." });
@@ -2236,6 +2464,14 @@ function _onHashChange() {
   const nextRun = _readTargetRunId();
   let changed = false;
   if (next !== _currentStep) {
+    // Fix audit 2026-06-08 high : transition via URL hash (back/forward navigateur
+    // ou clic externe sur lien #step-xxx). Auto-save silencieux best-effort si
+    // on quitte Validation avec decisions non enregistrees -> evite la perte
+    // silencieuse non-couverte par les guards de boutons internes.
+    if (_currentStep === "validation" && _hasUnsavedValidationDecisions()) {
+      // Best effort, on n'attend pas la promesse (le hashchange est synchrone).
+      _handleSaveValidation();
+    }
     _currentStep = next;
     changed = true;
   }
@@ -2295,6 +2531,12 @@ export async function initTraitement(container) {
 }
 
 export function unmountTraitement() {
+  // Fix audit 2026-06-08 high : auto-save silencieux best-effort sur unmount
+  // si on quitte Validation avec decisions non enregistrees. Sans ca, fermer
+  // la vue ou changer d'onglet perdait silencieusement les modifs JS.
+  if (_currentStep === "validation" && _hasUnsavedValidationDecisions()) {
+    _handleSaveValidation();
+  }
   _stopPolling();
   _stopUndoCountdown();
   // Fix audit 2026-05-24 : abort tous les apiPost en vol avant remise à null

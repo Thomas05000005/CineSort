@@ -1,0 +1,55 @@
+REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+REST API started on http://127.0.0.1:8642 (167 endpoints)
+network: IP locale detectee = 192.168.27.172 (UDP)
+REST: dashboard accessible a http://192.168.27.172:8642/dashboard/
+[REST] API demarree sur http://127.0.0.1:8642 (local only)
+[REST] main_url = http://127.0.0.1:8642/dashboard/?ntoken=jr9d7MJF...&native=1
+splash: etape 1 — Initialisation
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+splash: etape 2 — Chargement des reglages
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/runtime/get_update_info -> 200 (0ms)
+main_window: dashboard charge (events.loaded firing)
+REST POST /api/settings/get_settings -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+splash: etape 3 — Base de donnees
+splash: etape 4 — Interface
+splash: etape 5 — Serveur API (deja actif)
+V5-03 : purge cache TMDb (TTL 42j) — checked=0 purged=0 preserved_legacy=0
+retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+splash: etape finale — Pret
+splash: fenetre principale chargee, splash detruit
+backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260608-105919-533410Z.pre_migration.bak (92944.0 KB)
+rotate_backups: supprime cinesort.20260607-103318-192252Z.pre_migration.bak
+reconcile_pending_batches: no pending batches to reconcile
+REST POST /api/run/get_sidebar_counters -> 200 (547ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/runtime/get_update_info -> 200 (0ms)
+REST POST /api/run/get_dashboard -> 200 (1000ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_status -> 200 (31ms)
+REST POST /api/run/get_global_stats -> 200 (1265ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+api err [validation]: URL du serveur Jellyfin vide.
+REST POST /api/integrations/test_jellyfin_connection -> 200 (0ms)
+REST POST /api/runtime/is_demo_mode_active -> 200 (16ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/runtime/get_update_info -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/integrations/test_omdb_connection -> 200 (234ms)
+REST POST /api/runtime/get_probe_tools_status -> 200 (344ms)
+REST POST /api/integrations/test_tmdb_key -> 200 (469ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_dashboard -> 200 (188ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_status -> 200 (16ms)

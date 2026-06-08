@@ -1,6 +1,6 @@
 /* core/api.js — Client HTTP pour l'API REST CineSort */
 
-import { getToken, clearToken } from "./state.js";
+import { getToken, clearToken, awaitToken } from "./state.js";
 import { isCacheable, saveSnapshot, loadSnapshot, formatStaleness } from "./cache.js";
 
 /* --- Indicateur de connexion (C8) ---------------------------- */
@@ -40,6 +40,69 @@ function baseUrl() {
   return window.location.origin;
 }
 
+/* --- V1.5.0 BUG #2 : Backoff exponentiel + dedup in-flight ---
+ *
+ * Symptome console : 4 retries en 30ms apres 401 -> avalanche 429 sur
+ * settings/get_settings (x2), notifications_unread_count, probe_tools_status.
+ *
+ * Strategie :
+ *  - Backoff : delais 100/200/400/800 ms, max 3 retries, UNIQUEMENT sur 5xx
+ *    et erreurs reseau. PAS de retry sur 401 (auth) ni sur 429 (deja rate-limit,
+ *    on laisse l'UI afficher le feedback).
+ *  - Dedup : Map<key, Promise> ou key = method+url+hash(body). Tant qu'une
+ *    requete identique est en vol, les appelants concurrents recoivent la
+ *    MEME Promise => 1 seul appel reseau effectif.
+ */
+const _RETRY_DELAYS_MS = [100, 200, 400, 800];
+const _MAX_RETRIES = 3;
+const _inFlightRequests = new Map();
+
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Hash FNV-1a 32-bit d'une chaine. Suffisant pour distinguer des bodies JSON
+ * differents (collisions OK : pire cas = un appel manquant la dedup, pas un
+ * bug fonctionnel).
+ */
+function _hashString(s) {
+  if (!s) return "0";
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16);
+}
+
+function _dedupKey(method, url, body) {
+  return `${method}|${url}|${_hashString(body || "")}`;
+}
+
+/**
+ * Wrap d'un executor avec dedup in-flight. Si une requete identique est deja
+ * en vol, retourne sa Promise. Sinon execute et libere a la fin (succes ou
+ * echec).
+ */
+function _dedupExec(key, executor) {
+  const existing = _inFlightRequests.get(key);
+  if (existing) return existing;
+  const p = executor().finally(() => {
+    _inFlightRequests.delete(key);
+  });
+  _inFlightRequests.set(key, p);
+  return p;
+}
+
+/**
+ * Indique si un statut HTTP doit declencher un retry. PAS de retry sur 401
+ * (auth, l'UI doit gerer) ni sur 429 (rate limit, on laisse l'UI feedback).
+ */
+function _isRetryableStatus(status) {
+  return status >= 500 && status < 600;
+}
+
 /**
  * Detecte si on tourne en mode pywebview desktop local. 4 signaux
  * independants — UN SEUL suffit pour considerer qu'on est en natif :
@@ -64,16 +127,127 @@ function _isNativeMode() {
 }
 
 /**
+ * Construit la valeur "Bearer <token>" pour le header Authorization en
+ * VERIFIANT que le token est 100% ASCII. Les headers HTTP transitent par
+ * fetch() dans une representation ISO-8859-1 ; tout codepoint > 0xFF
+ * declenche un TypeError "String contains non ISO-8859-1 code point"
+ * silencieux qui fait rejeter la promise fetch et casse l'Accueil.
+ *
+ * Causes connues d'un token pollue (cf MEMORY cinesort_settings_utf8_bom) :
+ *  - BOM UTF-8 (U+FEFF) ajoute par PowerShell quand il ecrit settings.json
+ *  - Em-dash (U+2014) ou guillemets typographiques copies-colles
+ *  - URL-decode automatique de %EF%BB%BF dans ?ntoken=... au boot natif
+ *
+ * Si le token contient un caractere non-ASCII, on omet le header (la requete
+ * partira sans Authorization -> 401 propre cote serveur, geree par l'UI)
+ * plutot que de laisser fetch() crasher. On logge le codepoint exact pour
+ * faciliter le diag cote backend (token corrompu vs config defaillante).
+ *
+ * @param {string|null} token
+ * @returns {string|null} "Bearer <token>" si safe, null sinon
+ */
+function _safeBearer(token) {
+  // DEBUG VERBOSE 2026-06-08 : signaler explicitement l absence de token au boot.
+  if (!token) {
+    try { console.error("[dash-api] _safeBearer: token absent ou vide (token=%o)", token); } catch { /* no-op */ }
+    return null;
+  }
+  // FIX 2026-06-07 (faux 429 TMDb test) : avant d'abdiquer, on tente une
+  // normalisation defensive du token. Le cas dominant identifie en prod est
+  // un BOM UTF-8 (U+FEFF) prefixe par PowerShell quand il a ecrit settings.json
+  // (cf MEMORY cinesort_settings_utf8_bom). On strippe aussi les espaces
+  // typographiques courants (NBSP U+00A0) qui resultent d'un copy-paste.
+  // Sans cette normalisation, le header etait OMIS silencieusement -> 5 pings
+  // de l'Accueil generaient 5x 401 -> rate-limiter sature -> faux 429 au 1er
+  // click "Tester" sur Parametres.
+  let normalized = token;
+  // Strip BOM eventuels (debut/n'importe ou) + NBSP -> espace simple.
+  if (/[﻿ ]/.test(normalized)) {
+    // DEBUG VERBOSE 2026-06-08 : avant de normaliser, logger ce qui declenche la branche (BOM ou NBSP detecte).
+    try {
+      var preCps = [];
+      for (var k = 0; k < normalized.length; k++) {
+        preCps.push("U+" + normalized.charCodeAt(k).toString(16).padStart(4, "0").toUpperCase());
+      }
+      console.error("[dash-api] _safeBearer BOM/NBSP detecte AVANT normalisation len=%d codepoints=%o", normalized.length, preCps);
+    } catch (_e) { /* no-op */ }
+    normalized = normalized.replace(/﻿/g, "").replace(/ /g, " ").trim();
+  }
+  for (let i = 0; i < normalized.length; i++) {
+    const cp = normalized.charCodeAt(i);
+    if (cp > 127) {
+      // DEBUG VERBOSE 2026-06-08 : dump TOUS les codepoints du token rejete
+      // (pas seulement le premier non-ASCII). Identifie la nature exacte de
+      // la corruption (BOM seul, em-dash insere, double encoding, etc.).
+      try {
+        var allCps = [];
+        var nonAscii = [];
+        for (var j = 0; j < normalized.length; j++) {
+          var c = normalized.charCodeAt(j);
+          allCps.push("U+" + c.toString(16).padStart(4, "0").toUpperCase());
+          if (c > 127) nonAscii.push({ pos: j, codepoint: "U+" + c.toString(16).padStart(4, "0").toUpperCase() });
+        }
+        console.error(
+          "[dash-api] _safeBearer REJECT token non-ASCII U+" +
+            cp.toString(16).padStart(4, "0").toUpperCase() +
+            " pos=" + i + " len=" + normalized.length + " (Authorization OMIS)",
+        );
+        console.error("[dash-api] _safeBearer rejected token full codepoints=%o", allCps);
+        console.error("[dash-api] _safeBearer rejected token non-ASCII positions=%o", nonAscii);
+      } catch (_e) { /* no-op */ }
+      return null;
+    }
+  }
+  return "Bearer " + normalized;
+}
+
+/**
  * Appel GET generique avec gestion auth et erreurs.
+ * V1.5.0 BUG #2 : dedup in-flight + backoff exp sur 5xx (3 retries max).
  * @returns {Promise<{status: number, data: any}>}
  */
-export async function apiGet(path) {
+export function apiGet(path) {
+  const url = `${baseUrl()}${path}`;
+  const key = _dedupKey("GET", url, "");
+  return _dedupExec(key, () => _apiGetImpl(path, url));
+}
+
+async function _apiGetImpl(path, url) {
+  // V1.5.0 fix bug #1 : attendre que le token soit injecte avant de
+  // partir (sinon salve de 401 au boot natif - cf state.js awaitToken).
+  await awaitToken();
   const token = getToken();
   const headers = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const bearer = _safeBearer(token);
+  if (bearer) headers["Authorization"] = bearer;
 
-  const _t0 = performance.now();
-  const resp = await fetch(`${baseUrl()}${path}`, { method: "GET", headers });
+  // V1.5.0 BUG #2 : boucle retry avec backoff exp. PAS de retry sur 401/429.
+  let lastResp = null;
+  for (let attempt = 0; attempt <= _MAX_RETRIES; attempt++) {
+    let resp;
+    try {
+      resp = await fetch(url, { method: "GET", headers });
+    } catch (err) {
+      // Erreur reseau : retry si attempts restants, sinon propage
+      if (attempt < _MAX_RETRIES) {
+        await _sleep(_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      _noteFailure();
+      throw err;
+    }
+
+    // 5xx -> retry avec backoff (sauf si dernier essai)
+    if (_isRetryableStatus(resp.status) && attempt < _MAX_RETRIES) {
+      lastResp = resp;
+      await _sleep(_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    lastResp = resp;
+    break;
+  }
+
+  const resp = lastResp;
 
   if (resp.status === 401) {
     // Mode pywebview desktop : un 401 ne doit JAMAIS purger le token ni
@@ -88,10 +262,11 @@ export async function apiGet(path) {
     return { status: 401, data: { ok: false, message: "Clé d'accès invalide." } };
   }
   if (resp.status === 429) {
+    // PAS de retry sur 429 : on laisse l'UI feedback (cf V1.5.0 BUG #2).
     return { status: 429, data: { ok: false, message: "Trop de tentatives. Reessayez dans 60 secondes." } };
   }
   if (resp.status >= 500) {
-    console.error("[dash-api] GET %s -> %d (serveur indisponible)", path, resp.status);
+    console.error("[dash-api] GET %s -> %d (serveur indisponible, %d retries epuises)", path, resp.status, _MAX_RETRIES);
     _noteFailure();
     return { status: resp.status, data: { ok: false, message: `Serveur indisponible (HTTP ${resp.status}). Reessayez dans quelques instants.` } };
   }
@@ -108,6 +283,10 @@ export async function apiGet(path) {
 
 /**
  * Appel POST generique vers /api/{method} avec body JSON.
+ * V1.5.0 BUG #2 : dedup in-flight + backoff exp sur 5xx (3 retries max).
+ * Note : on ne dedup PAS quand un opts.signal externe est fourni (l'appelant
+ * controle son cycle de vie, et 2 appelants distincts pourraient l'abort
+ * indirectement). Le timeoutMs interne reste dedupable.
  * @param {string} method - nom de la methode API
  * @param {object} params - parametres JSON
  * @param {object} [opts] - options : { signal?: AbortSignal, timeoutMs?: number }
@@ -115,42 +294,102 @@ export async function apiGet(path) {
  *                          - timeoutMs : abort auto apres ce delai (anti memory leak)
  * @returns {Promise<{status: number, data: any}>}
  */
-export async function apiPost(method, params = {}, opts = {}) {
+export function apiPost(method, params = {}, opts = {}) {
+  const url = `${baseUrl()}/api/${method}`;
+  const body = JSON.stringify(params);
+  // FIX 2026-06-05 (avalanche boot natif) : auparavant, la presence d'un
+  // opts.signal externe DESACTIVAIT la dedup in-flight. Resultat : accueil.js
+  // partait 4 fetchs concurrents avec un signal partage, et la dedup centrale
+  // etait court-circuitee -> settings/get_settings tire 2 fois (boot shell +
+  // accueil), get_dashboard 2 fois, etc. Salve 401/429 garantie au boot a froid.
+  //
+  // Nouvelle strategie : on dedup TOUJOURS. Si un signal externe est fourni,
+  // on l'observe pour pouvoir abort le fetch quand TOUS les callers concurrents
+  // ont abort. Le signal effectif passe au fetch est compose via _composeSignal.
+  const key = _dedupKey("POST", url, body);
+  return _dedupExec(key, () => _apiPostImpl(method, params, opts, url, body));
+}
+
+/**
+ * Compose un AbortSignal "any-of" sans depender de AbortSignal.any (pas
+ * universellement dispo). Le signal resultant est abort des qu'UN des
+ * signaux d'entree est abort. Renvoie le signal du nouveau controller.
+ * Utilise par _apiPostImpl quand l'appelant fournit son propre opts.signal
+ * et qu'on veut ajouter un timeout interne.
+ */
+function _composeSignal(signals) {
+  const real = signals.filter(Boolean);
+  if (real.length === 0) return null;
+  if (real.length === 1) return real[0];
+  const ctrl = new AbortController();
+  const onAbort = () => { try { ctrl.abort(); } catch { /* no-op */ } };
+  for (const s of real) {
+    if (s.aborted) { onAbort(); break; }
+    try { s.addEventListener("abort", onAbort, { once: true }); } catch { /* no-op */ }
+  }
+  return ctrl.signal;
+}
+
+async function _apiPostImpl(method, params, opts, url, body) {
+  // V1.5.0 fix bug #1 : attendre que le token soit injecte avant de
+  // partir. Au boot natif, _detectNativeBoot pose le token de maniere
+  // synchrone mais les modules ES qui font Promise.all (accueil.js)
+  // peuvent partir AVANT setToken si le browser parse hors-ordre.
+  // awaitToken() resout immediatement si markTokenReady() a deja ete
+  // appele, sinon attend (deadline 2s max - cf state.js).
+  await awaitToken();
   const token = getToken();
   const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const bearer = _safeBearer(token);
+  if (bearer) headers["Authorization"] = bearer;
 
-  // V2-C R4-MEM-3 : support timeout via AbortSignal.timeout. Si timeoutMs et
-  // signal sont fournis, le signal explicite a priorite (l'appelant decide).
-  let signal = opts.signal || null;
-  if (!signal && opts.timeoutMs) {
+  // V2-C R4-MEM-3 + fix 2026-06-05 : support timeout via AbortSignal.timeout.
+  // Si signal externe ET timeoutMs : on COMPOSE les deux (abort si un seul
+  // est abort). Avant le fix, le signal externe avait priorite et ecrasait
+  // le timeout.
+  let timeoutSignal = null;
+  if (opts.timeoutMs) {
     if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-      signal = AbortSignal.timeout(opts.timeoutMs);
+      timeoutSignal = AbortSignal.timeout(opts.timeoutMs);
     } else {
-      // Fallback : controller manuel + setTimeout pour vieux navigateurs.
       const ctrl = new AbortController();
       setTimeout(() => ctrl.abort(), opts.timeoutMs);
-      signal = ctrl.signal;
+      timeoutSignal = ctrl.signal;
     }
   }
+  const signal = _composeSignal([opts.signal || null, timeoutSignal]);
 
-  const _t0 = performance.now();
-  let resp;
-  try {
-    resp = await fetch(`${baseUrl()}/api/${method}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(params),
-      signal,
-    });
-  } catch (err) {
-    // AbortError (timeout ou abort manuel) : pas un echec serveur, on remonte
-    // tel quel pour que l'appelant decide quoi faire (silencieux ou retry).
-    if (err && (err.name === "AbortError" || err.name === "TimeoutError")) {
+  // V1.5.0 BUG #2 : boucle retry avec backoff exp. PAS de retry sur 401/429.
+  let resp = null;
+  for (let attempt = 0; attempt <= _MAX_RETRIES; attempt++) {
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal,
+      });
+    } catch (err) {
+      // AbortError (timeout ou abort manuel) : pas un echec serveur, on remonte
+      // tel quel pour que l'appelant decide quoi faire (silencieux ou retry).
+      if (err && (err.name === "AbortError" || err.name === "TimeoutError")) {
+        throw err;
+      }
+      // Erreur reseau : retry avec backoff si attempts restants.
+      if (attempt < _MAX_RETRIES) {
+        await _sleep(_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      _noteFailure();
       throw err;
     }
-    _noteFailure();
-    throw err;
+
+    // 5xx -> retry avec backoff (sauf si dernier essai).
+    if (_isRetryableStatus(resp.status) && attempt < _MAX_RETRIES) {
+      await _sleep(_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    break;
   }
 
   if (resp.status === 401) {
@@ -163,7 +402,23 @@ export async function apiPost(method, params = {}, opts = {}) {
     return { status: 401, data: { ok: false, message: "Clé d'accès invalide." } };
   }
   if (resp.status === 429) {
+    // PAS de retry sur 429 : on laisse l'UI feedback (cf V1.5.0 BUG #2).
     return { status: 429, data: { ok: false, message: "Trop de tentatives. Reessayez dans 60 secondes." } };
+  }
+  if (resp.status === 409) {
+    // R6-HTTP409-003 : message dedie + flag _conflict pour permettre aux
+    // call-sites d'afficher un toast "operation en cours" specifique plutot
+    // qu'un banner d'erreur generique. Backward-compat : data.ok === false
+    // reste lisible comme avant.
+    const data = await resp.json().catch(() => ({}));
+    return {
+      status: 409,
+      data: {
+        ok: false,
+        message: data.message || "Operation deja en cours. Reessayez dans quelques instants.",
+        _conflict: true,
+      },
+    };
   }
   if (resp.status >= 500) {
     console.error("[dash-api] POST /api/%s -> %d (serveur indisponible)", method, resp.status);
@@ -341,8 +596,15 @@ export function getConfidenceThresholdsSync() {
 export async function testConnection(token) {
   const headers = {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`,
   };
+  const bearer = _safeBearer(token);
+  if (bearer) {
+    headers["Authorization"] = bearer;
+  } else if (token) {
+    // Token non vide mais non-ASCII : on retourne une erreur explicite
+    // plutot que de tenter le fetch (qui crasherait en TypeError).
+    return { ok: false, message: "Clé d'accès invalide (caractères non autorisés)." };
+  }
 
   // On valide le token via un POST authentifie sur la facade settings.
   // Issue #233 : avant le refactor #84 PR 10, l'endpoint etait /api/get_settings.

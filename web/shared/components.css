@@ -7,6 +7,10 @@
  * ============================================================================
  */
 
+/* V1.4 — composants v5 wrappes dans @layer v5 (cf tokens.css pour ordre).
+   v5 > legacy : en cas de conflit, le design system gagne. */
+@layer v5 {
+
 /* ===========================================================
  * BUTTONS
  * =========================================================== */
@@ -712,6 +716,32 @@
 .v5-sidebar-item:hover .v5-sidebar-shortcut,
 .v5-sidebar-item.is-active .v5-sidebar-shortcut {
   opacity: 1;
+}
+
+/* Fix bug "compteurs sidebar 939/86 affiches en texte brut" :
+ * la classe .v5-sidebar-badge generee par sidebar-v5.js n'avait aucune regle CSS.
+ * Pastille discrete a droite, active (accent) si count > 0. */
+.v5-sidebar-badge {
+  display: none;
+  min-width: 18px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+.v5-sidebar-badge--active {
+  display: inline-flex;
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent, var(--text-1));
+}
+.v5-sidebar.is-collapsed .v5-sidebar-badge {
+  display: none;
 }
 
 .v5-sidebar-footer {
@@ -4879,6 +4909,68 @@ body.v5-notif-lock {
   font-size: var(--fs-sm);
 }
 
+/* Update card (spec audit 2026-05-24 v1.5.2) -------------------------- */
+.accueil-update-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-3) 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--accent, #60A5FA);
+  border-radius: var(--radius-md);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+.accueil-update-card-msg {
+  flex: 1 1 auto;
+}
+
+.accueil-update-card-actions {
+  display: inline-flex;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+/* Setup banner (onboarding / TMDb manquant) --------------------------- */
+.accueil-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-3) 0;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+  border-left: 4px solid var(--text-3);
+  color: var(--text-1);
+}
+
+.accueil-setup-banner a {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: var(--fw-semibold);
+  flex-shrink: 0;
+}
+
+.accueil-setup-banner--alert {
+  background: rgba(245, 158, 11, 0.12);
+  border-left-color: var(--sev-warning-solid, #F59E0B);
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.accueil-setup-banner--info {
+  background: rgba(96, 165, 250, 0.10);
+  border-left-color: var(--accent, #60A5FA);
+  color: var(--text-2);
+}
+
 /* Sidebar Traitement dimmed (spec 05 §3) ------------------------------ */
 .v5-sidebar-item--dimmed {
   opacity: 0.5;
@@ -4889,6 +4981,22 @@ body.v5-notif-lock {
 .v5-sidebar-item--dimmed:hover {
   opacity: 0.9;
   filter: grayscale(0);
+}
+
+/* V1-13 : badge "MAJ disponible" sur item Parametres (puce accent positionnee). */
+.v5-sidebar-update-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--surface-1);
 }
 
 /* ===========================================================
@@ -5194,6 +5302,171 @@ body.v5-notif-lock {
   gap: var(--sp-3);
 }
 
+/* Outils externes (ffprobe / MediaInfo / fpcalc / LPIPS) ----------------- */
+/* Classes utilisees par parametres.js _renderProbeToolsTable + _renderProbeToolRow */
+.parametres-field--probe-tools {
+  width: 100%;
+}
+
+.parametres-tools-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.parametres-tools-loading {
+  padding: var(--sp-4);
+  text-align: center;
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.parametres-tools-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.parametres-tools-table thead th {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-1);
+  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+}
+
+.parametres-tools-row {
+  border-bottom: 1px solid var(--border-1);
+}
+
+.parametres-tools-row:last-child {
+  border-bottom: none;
+}
+
+.parametres-tools-cell {
+  padding: var(--sp-2) var(--sp-3);
+  vertical-align: middle;
+  color: var(--text-1);
+}
+
+.parametres-tools-cell--label {
+  font-weight: var(--fw-medium);
+}
+
+.parametres-tools-cell--actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Status par outil (Manquant / Trop ancien / Installe) */
+.parametres-tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+.parametres-tool-status--ok {
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tool-status--warn {
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.parametres-tool-status--ko {
+  color: var(--sev-danger-solid, #EF4444);
+  font-weight: 600;
+}
+
+/* Chemin du binaire detecte (monospace tronque) */
+.parametres-tool-path {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  padding: 2px 6px;
+  background: var(--surface-2, transparent);
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* Actions globales (Recheck / Installer auto / Update winget) */
+.parametres-tools-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+  align-items: center;
+}
+
+/* Message de retour (succes/erreur/info) sous la table */
+.parametres-tools-message {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: 0;
+  min-height: 1.2em;
+}
+
+.parametres-tools-message--ok {
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tools-message--error {
+  color: var(--sev-danger-solid, #EF4444);
+}
+
+.parametres-tools-message--info {
+  color: var(--text-2);
+}
+
+/* Badge de mode (hybride / degrade / desactive / aucun) */
+.parametres-tools-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  width: fit-content;
+}
+
+.parametres-tools-mode--ok {
+  background: var(--sev-success-bg, rgba(16, 185, 129, 0.1));
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tools-mode--warn {
+  background: var(--sev-warning-bg, rgba(245, 158, 11, 0.1));
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.parametres-tools-mode--ko {
+  background: var(--sev-danger-bg, rgba(239, 68, 68, 0.1));
+  color: var(--sev-danger-solid, #EF4444);
+}
+
+.parametres-tools-mode--muted {
+  background: var(--surface-2, rgba(127, 127, 127, 0.1));
+  color: var(--text-3);
+}
+
 .parametres-empty {
   padding: var(--sp-4);
   text-align: center;
@@ -5454,7 +5727,7 @@ body.v5-notif-lock {
 }
 
 .parametres-tier-badge--platinum { background: rgba(229, 231, 235, 0.2); color: #E5E7EB; }
-.parametres-tier-badge--gold { background: var(--tier-gold-bg); color: var(--tier-gold-solid); }
+.parametres-tier-badge--gold { background: rgba(251,191,36,0.2); color: #FBBF24; }
 .parametres-tier-badge--silver { background: rgba(156, 163, 175, 0.2); color: #9CA3AF; }
 .parametres-tier-badge--bronze { background: rgba(180, 83, 9, 0.2); color: #B45309; }
 
@@ -6202,10 +6475,14 @@ body.v5-notif-lock {
 /* Audit C17 P1 : transition: width -> transform: scaleX (compositor only, no reflow).
  * width: 100% + transform-origin: left -> scaleX(0..1) via --progress. */
 .qualite-tier-fill { display: block; height: 100%; width: 100%; transform: scaleX(var(--progress, 0)); transform-origin: left center; transition: transform 0.3s; }
-.qualite-tier-fill--platinum { background: #8b5cf6; }
+/* INVARIANTES tier hex (charte) : Platinum #E5E4E2 / Gold #FFD700 /
+ * Silver #C0C0C0 / Bronze #CD7F32. Utilise les tokens --tier-X-solid
+ * (cf tokens.css) au lieu de hex en dur pour preserver les invariantes
+ * sur tous les themes. */
+.qualite-tier-fill--platinum { background: var(--tier-platinum-solid); }
 .qualite-tier-fill--gold { background: var(--tier-gold-solid); }
-.qualite-tier-fill--silver { background: #94a3b8; }
-.qualite-tier-fill--bronze { background: #b45309; }
+.qualite-tier-fill--silver { background: var(--tier-silver-solid); }
+.qualite-tier-fill--bronze { background: var(--tier-bronze-solid); }
 .qualite-tier-fill--reject { background: #b91c1c; }
 .qualite-tier-fill--unknown { background: #6b7280; }
 .qualite-tier-count { text-align: right; font-weight: var(--fw-semibold); color: var(--text-1); }
@@ -6864,10 +7141,10 @@ body.v5-notif-lock {
 .bibliotheque-card-check input { cursor: pointer; }
 .bibliotheque-card-warn { position: absolute; top: 6px; right: 6px; background: var(--warning, #d97706); color: #fff; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 .bibliotheque-tier-badge { position: absolute; bottom: 6px; left: 6px; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: #fff; background: #6b7280; }
-.bibliotheque-tier-badge--platinum { background: #8b5cf6; }
-.bibliotheque-tier-badge--gold { background: var(--tier-gold-solid); }
-.bibliotheque-tier-badge--silver { background: #94a3b8; color: #0f172a; }
-.bibliotheque-tier-badge--bronze { background: #b45309; }
+.bibliotheque-tier-badge--platinum { background: var(--tier-platinum-solid); color: #111; }
+.bibliotheque-tier-badge--gold { background: var(--tier-gold-solid); color: #111; }
+.bibliotheque-tier-badge--silver { background: var(--tier-silver-solid); color: #111; }
+.bibliotheque-tier-badge--bronze { background: var(--tier-bronze-solid); color: #111; }
 .bibliotheque-tier-badge--reject { background: #b91c1c; }
 .bibliotheque-tier-badge--unknown { background: #6b7280; }
 .bibliotheque-card-info { padding: 0 var(--sp-2) var(--sp-2); }
@@ -7261,10 +7538,10 @@ body.v5-notif-lock {
 .parametres-tier-row label { display: flex; align-items: center; gap: var(--sp-2); }
 .parametres-tier-row input { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); }
 .parametres-tier-badge { display: inline-block; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: #fff; }
-.parametres-tier-badge--platinum { background: #8b5cf6; }
-.parametres-tier-badge--gold { background: var(--tier-gold-solid); }
-.parametres-tier-badge--silver { background: #94a3b8; color: #0f172a; }
-.parametres-tier-badge--bronze { background: #b45309; }
+.parametres-tier-badge--platinum { background: var(--tier-platinum-solid); color: #111; }
+.parametres-tier-badge--gold { background: var(--tier-gold-solid); color: #111; }
+.parametres-tier-badge--silver { background: var(--tier-silver-solid); color: #111; }
+.parametres-tier-badge--bronze { background: var(--tier-bronze-solid); color: #111; }
 .parametres-profils-message { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-sm); border-left: 3px solid var(--accent); }
 .parametres-profils-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
@@ -7591,7 +7868,7 @@ body.v5-notif-lock {
 }
 
 .film-detail-tier-platinum { color: #e5e4e2; }
-.film-detail-tier-gold { color: var(--tier-gold-solid); }
+.film-detail-tier-gold { color: #ffd700; }
 .film-detail-tier-silver { color: #c0c0c0; }
 .film-detail-tier-bronze { color: #cd7f32; }
 .film-detail-tier-reject { color: #e25555; }
@@ -8193,7 +8470,13 @@ body.v5-notif-lock {
   padding: var(--sp-4);
 }
 .duplicate-modal {
-  background: var(--surface-1);
+  /* Fix bug "overlay transparent montre fond" : --surface-1 et --surface-2
+   * sont definis en rgba(...,0.035-0.12) sur tous les themes (themes.css),
+   * ce qui rend la modale quasi transparente malgre l'overlay 0.78.
+   * On force un fond opaque hex (avec fallback --bg-base si defini).
+   * Cf memoire project_cinesort_tier_duplication_historique : verifier
+   * en runtime via Playwright getComputedStyle. */
+  background: var(--bg-base, #1a1a1a);
   color: var(--text-1);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-1);
@@ -9805,3 +10088,5 @@ body.v5-notif-lock {
   .score-waterfall-row--custom { grid-template-columns: 1fr; }
   .score-waterfall-detail { grid-column: 1 / -1; }
 }
+
+} /* end @layer v5 */

@@ -693,8 +693,26 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
 def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
     c = str(codec or "").strip().lower()
     bonuses = profile["audio_bonuses"]
-    if ("truehd" in c) or ("atmos" in c):
+    # Fix audit (atmos lossy / DTS-HD HRA) : distinguer les codecs lossless
+    # premium (TrueHD Atmos / DTS-HD MA) des codecs lossy haut-debit
+    # (E-AC-3 Atmos JOC streaming, DTS-HD HRA) qui ne meritent pas le meme bonus.
+    # Priorite : TrueHD (lossless) > Atmos lossy > DTS-HD MA (lossless) >
+    # DTS-HD HRA (lossy) > DTS > AAC.
+    if "truehd" in c:
         return int(bonuses["truehd_atmos_bonus"]), "Audio TrueHD/Atmos"
+    if "atmos" in c:
+        # E-AC-3 / DD+ JOC Atmos = lossy. Si le profil ne definit pas
+        # atmos_lossy_bonus, on fallback sur la moitie de truehd_atmos_bonus
+        # (preserve la backward compat : avant le bonus etait identique).
+        lossy = bonuses.get("atmos_lossy_bonus")
+        if lossy is None:
+            lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
+        return int(lossy), "Audio Atmos (lossy)"
+    if "hra" in c and "dts" in c:
+        # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
+        # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
+        hra = bonuses.get("dts_hd_hra_bonus", bonuses["dts_bonus"])
+        return int(hra), "Audio DTS-HD HRA"
     # BUG-3 (v7.8.0) : parentheses explicites. Avant : `... or "ma" in c and "dts" in c`
     # se lisait comme `or ("ma" in c and "dts" in c)` (precedence Python : and > or).
     # Comportement preserve, juste rendu lisible et resistant au refactor.

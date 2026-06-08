@@ -277,8 +277,14 @@ def find_duplicate_targets(
             year = int(dec.get("year") or row.proposed_year)
         except (ValueError, TypeError):
             year = int(row.proposed_year or 0)
-        if not (1900 <= year <= 2100):
-            continue
+        # Fix bug TV series / BONUS Star Wars : ne plus skip silencieusement les
+        # rows avec year invalide. On flag 'year_missing' et on continue avec
+        # un movie_key construit sur le title seul (year=0 -> norme via movie_key).
+        year_invalid = not (1900 <= year <= 2100)
+        if year_invalid:
+            if hasattr(row, "warning_flags") and "year_missing" not in row.warning_flags:
+                row.warning_flags.append("year_missing")
+            year = 0
 
         total_checked += 1
         row_edition = getattr(row, "edition", None)

@@ -1369,9 +1369,11 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     # Constituer une map par date
     by_date: Dict[str, Dict[str, Any]] = {r["date"]: r for r in raw}
 
-    # Generer 30 points consecutifs
+    # Generer exactement 30 points consecutifs (J-29 .. J0).
+    # Fix : range(30,-1,-1) produisait 31 points (de 30 a 0 inclus), decalait
+    # la fenetre et dupliquait la donnee de J-30.
     points: List[Dict[str, Any]] = []
-    for i in range(30, -1, -1):
+    for i in range(29, -1, -1):
         ts = now - i * 86400.0
         date_str = time.strftime("%Y-%m-%d", time.localtime(ts))
         pt = by_date.get(date_str)

@@ -27,7 +27,7 @@ from cinesort.app._local_candidate import (
     resolve_scan_max_workers,
 )
 from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
-from cinesort.domain.scan_helpers import discover_candidate_folders
+from cinesort.domain.scan_helpers import discover_candidate_folders, file_name_looks_bonus
 from cinesort.infra.fs_safety import safe_path_exists
 from cinesort.infra.tmdb_client import TmdbClient
 
@@ -708,11 +708,25 @@ def _classify_and_plan_folder(
         for video in sorted(videos, key=lambda path: path.name.lower()):
             if ctx.check_cancel():
                 break
-            ctx.rows.extend(
-                _plan_collection_item(
-                    ctx.cfg, folder, video, ctx.tmdb, ctx.log, should_cancel=ctx.should_cancel, **ctx.v2_kwargs
-                )
+            # Fix bug "Star Wars BONUS" : un dossier collection qui contient des
+            # videos bonus (making-of, featurettes, behind-the-scenes...) ne doit
+            # pas generer de PlanRow distincte par bonus avec le meme proposed_title.
+            # On marque ces lignes kind='extra' + warning_flag 'bonus_video' pour
+            # que l'UI puisse les regrouper/filtrer par defaut.
+            looks_bonus = file_name_looks_bonus(video.name)
+            new_rows = _plan_collection_item(
+                ctx.cfg, folder, video, ctx.tmdb, ctx.log, should_cancel=ctx.should_cancel, **ctx.v2_kwargs
             )
+            if looks_bonus:
+                for r in new_rows:
+                    try:
+                        r.kind = "extra"
+                    except (AttributeError, TypeError):
+                        pass
+                    flags = getattr(r, "warning_flags", None)
+                    if flags is not None and "bonus_video" not in flags:
+                        flags.append("bonus_video")
+            ctx.rows.extend(new_rows)
         ctx.stats.collection_rows_generated += max(0, len(ctx.rows) - before_len)
         return ctx.check_cancel()
 

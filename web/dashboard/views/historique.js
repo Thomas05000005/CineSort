@@ -205,6 +205,34 @@ function _matchesSearchQuery(run, q) {
   return false;
 }
 
+// Fix bug audit : la recherche par nom de film ne fonctionnait QUE sur les runs
+// deja consultes (cache rempli par _ensureHistoryStats au clic). Resultat : faux
+// negatif silencieux. Solution : prefetch les films pour tous les runs non encore
+// cachees lors d'une recherche, puis re-render pour appliquer le filtre.
+let _prefetchInflight = false;
+async function _prefetchFilmsForSearch(container) {
+  if (_prefetchInflight) return;
+  if (!_searchQuery || !_searchQuery.trim()) return;
+  const missing = _runs.filter((r) => r && r.run_id && !_filmsCacheByRun.has(r.run_id));
+  if (missing.length === 0) return;
+  _prefetchInflight = true;
+  try {
+    // Sequentiel pour ne pas saturer le rate-limiter backend (5/60s).
+    for (const r of missing) {
+      if (!_searchQuery || !_searchQuery.trim()) break; // user a vide la recherche
+      try {
+        await _ensureHistoryStats(r.run_id);
+      } catch (_e) { /* noop par run */ }
+    }
+  } finally {
+    _prefetchInflight = false;
+    // Re-render uniquement si le container existe encore.
+    if (container && container.isConnected) {
+      try { _rerender(container); } catch (_e) { /* noop */ }
+    }
+  }
+}
+
 function _filterRuns(runs) {
   const cutoffMin = _periodCutoff();
   const cutoffMax = _periodUpperBound();
@@ -542,7 +570,7 @@ function _buildInspectorSections(selectedRun) {
         <div class="historique-inspector-actions">
           <button type="button" class="v5-btn v5-btn--secondary" data-historique-action="view-report" data-run-id="${escapeHtml(selectedRun.run_id)}">📄 Voir rapport complet</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="resume" data-run-id="${escapeHtml(selectedRun.run_id)}">↻ Reprendre ce run</button>
-          ${isApply ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : ""}
+          ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
         </div>
       `,
@@ -898,10 +926,23 @@ function _bindEvents(container) {
     });
   });
   // Custom date pickers
+  // Fix bug audit : validation si _customPeriodTo < _customPeriodFrom. Auto-swap
+  // pour eviter une liste vide silencieuse + toast informatif a l'utilisateur.
+  const _swapDatesIfInverted = () => {
+    if (_customPeriodFrom && _customPeriodTo && _customPeriodTo < _customPeriodFrom) {
+      const oldFrom = _customPeriodFrom;
+      _customPeriodFrom = _customPeriodTo;
+      _customPeriodTo = oldFrom;
+      try {
+        showToast({ type: "info", text: "Date de fin avant date de début — dates inversées automatiquement." });
+      } catch (_e) { /* noop si toast indisponible */ }
+    }
+  };
   const fromInput = container.querySelector("[data-historique-custom-from]");
   if (fromInput) {
     fromInput.addEventListener("change", (ev) => {
       _customPeriodFrom = String(ev.target.value || "") || null;
+      _swapDatesIfInverted();
       _visibleCount = BATCH_SIZE;
       _rerender(container);
     });
@@ -910,6 +951,7 @@ function _bindEvents(container) {
   if (toInput) {
     toInput.addEventListener("change", (ev) => {
       _customPeriodTo = String(ev.target.value || "") || null;
+      _swapDatesIfInverted();
       _visibleCount = BATCH_SIZE;
       _rerender(container);
     });
@@ -931,6 +973,9 @@ function _bindEvents(container) {
         // Restore focus dans la search box.
         const next = container.querySelector("[data-historique-search]");
         if (next) { next.focus(); next.setSelectionRange(value.length, value.length); }
+        // Fix bug audit : prefetch films pour tous les runs non caches pour
+        // que la recherche par nom de film fonctionne meme sur runs non consultes.
+        if (value && value.trim()) _prefetchFilmsForSearch(container);
       }, 200);
     });
   }
@@ -1153,6 +1198,10 @@ function _onActionClick(ev) {
       break;
     case "undo-apply":
       // Action dangereuse — dangerConfirmModal (P0 #233, cf feedback-cinesort-actions-dangereuses).
+      // Fix audit 2026-06-07 UX medium : cancelLabel par defaut "Annuler" vs
+      // confirmLabel "Annuler l'apply" cree une ambiguite cognitive (deux
+      // boutons "Annuler" aux sens opposes). Pattern traitement.js "Garder
+      // le run" => "Garder l'apply".
       dangerConfirmModal({
         title: `Annuler l'apply du run ${runId} ?`,
         items: [`Run ${runId}`],
@@ -1161,6 +1210,7 @@ function _onActionClick(ev) {
           "Réversible tant qu'un nouvel apply n'a pas eu lieu.",
         countdownSeconds: 3,
         confirmLabel: "✗ Annuler l'apply",
+        cancelLabel: "Garder l'apply",
         onConfirm: () => _doUndoApply(runId),
       });
       break;

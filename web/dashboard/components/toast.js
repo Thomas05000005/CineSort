@@ -53,6 +53,14 @@ const _DEFAULT_DURATIONS = {
 //     les 2000ms suivants fusionnent en un badge "xN" sur le toast existant.
 //   - _PERSISTENT_MAX_MS : meme un toast persistent: true se ferme apres
 //     20s, safety net pour eviter qu'il reste 1h+ a l'ecran.
+//
+// mega-hotfix frontend_ui_polish (#4) : FIFO policy documentee explicitement.
+// Quand `_MAX_STACK` est atteint, la strategie d'eviction est FIFO strict :
+// le toast le plus ancien (root.firstElementChild, ordre d'insertion DOM) est
+// ferme via son close() (cf boucle while plus bas). Cette regle garantit
+// que les nouveaux messages restent visibles tout en evitant l'accumulation
+// indemontable. Lorsque la stack est saturee (drop d'un toast a cause de
+// _MAX_STACK), un console.warn est emis pour faciliter le diagnostic.
 const _MAX_STACK = 4;
 const _DEDUP_WINDOW_MS = 2000;
 const _PERSISTENT_MAX_MS = 20000;
@@ -109,10 +117,22 @@ export function showToast(opts) {
       existing.countBadge = badge;
     }
     badge.textContent = `x${existing.count}`;
-    // Reset du timer de close pour prolonger la visibilite du toast fusionne.
+    // Fix audit 2026-06-07 : borner la duree TOTALE d'un toast fusionne via
+    // `firstShownAt` (timestamp original, jamais reset). Sans ce garde-fou,
+    // un appelant qui re-emet le meme toast toutes les 1.9s prolonge le
+    // dismissTimer indefiniment et le badge xN croit sans limite. On plafonne
+    // donc la prochaine duree au temps restant avant _PERSISTENT_MAX_MS depuis
+    // le premier affichage. Si le plafond est atteint, fermer immediatement.
     if (existing.dismissTimer != null) {
       clearTimeout(existing.dismissTimer);
-      const nextDuration = persistent ? _PERSISTENT_MAX_MS : Math.max(1500, duration);
+      const elapsedSinceFirst = now - (existing.firstShownAt || existing.lastShownAt);
+      const remainingTotal = _PERSISTENT_MAX_MS - elapsedSinceFirst;
+      if (remainingTotal <= 0) {
+        existing.close();
+        return;
+      }
+      const baseDuration = persistent ? _PERSISTENT_MAX_MS : Math.max(1500, duration);
+      const nextDuration = Math.min(baseDuration, remainingTotal);
       existing.dismissTimer = setTimeout(existing.close, nextDuration);
     }
     return;
@@ -121,6 +141,15 @@ export function showToast(opts) {
   // Fix audit 2026-05-30 (v1.5.9) TOAST-1 garde-fou (b) MAX-STACK : avant
   // d'ajouter un nouveau toast, si on en a deja _MAX_STACK, fermer le plus
   // ancien (root.firstElementChild = premier insere dans le DOM order).
+  // mega-hotfix frontend_ui_polish (#4) : strategie d'eviction = FIFO strict.
+  // On warn une seule fois par "vague de saturation" pour faciliter le diag
+  // (sans flooder la console si un appelant emet 100 toasts d'affilee).
+  const _initialStackSize = root.querySelectorAll(".toast").length;
+  if (_initialStackSize >= _MAX_STACK) {
+    try {
+      console.warn(`[toast] stack saturee (${_initialStackSize}/${_MAX_STACK}) - FIFO drop du plus ancien pour afficher "${text.slice(0, 60)}"`);
+    } catch (_e) { /* console inaccessible : noop */ }
+  }
   while (root.querySelectorAll(".toast").length >= _MAX_STACK) {
     const oldest = root.firstElementChild;
     if (!oldest) break;
@@ -195,6 +224,7 @@ export function showToast(opts) {
     node,
     count: 1,
     countBadge: null,
+    firstShownAt: now,
     lastShownAt: now,
     dismissTimer,
     close,

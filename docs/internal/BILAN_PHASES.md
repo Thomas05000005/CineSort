@@ -201,6 +201,104 @@ vague-r-complete
 
 ---
 
+## Phase Q.5 — Hotfix6/7 stabilisation (juin 2026, en cours)
+
+**Objectif** : consolider les Vagues M-R via un cycle adversarial intensif (5 rounds + audit)
+suivi de 7 hotfixes ciblees. Pas de nouvelle feature ; uniquement durcissement, regressions
+attrapees, et false positives ecartes. Mode autonomie totale, ultracode.
+
+### Rounds adversariaux R1-R5 + audit — Convergence des bugs critiques
+
+Sequence de bug hunts iteratifs (find -> verify -> judge) lances sur la branche
+`fix/v150-batch-bugs` apres cloture Vague R. Chaque round affine le diagnostic precedent
+en re-questionnant les fixes appliques.
+
+| Round | Critical bugs | Notes |
+|-------|---------------|-------|
+| R1 | 10 critiques | Premier passage exhaustif post-Vague R |
+| R2 | 5 critiques | Convergence, certains R1 invalides |
+| R3 | 3 critiques | Re-tri, reduction du bruit |
+| R4 | 1 critique + 17 high | Stabilisation critiques, focus high |
+| R5 (audit) | 0 critique + 16 high | Plus aucun critical non explique |
+
+**Verdict R1-R5** : convergence saine, plus aucun critical residuel apres R5. Reste
+16 high signales en audit a traiter en Vague S+ (non bloquants release beta).
+
+### Hotfixes 1-7 — Post-fix rates et regressions
+
+Sept hotfixes consecutives appliquees entre les rounds, chacune avec son cycle
+verify-fix-retest. Le "post-fix rate" mesure le % de bugs corriges du premier coup
+(sans regression introduite).
+
+| Hotfix | Post-fix rate | Regressions | Reverts | Notes |
+|--------|---------------|-------------|---------|-------|
+| Hotfix 1 | 79 % | 1 mineure | 0 | Premier passage, calibration |
+| Hotfix 2 | 93 % | 0 | 0 | Maturation methodologie |
+| Hotfix 3 | 100 % | 0 | 0 | Pic de stabilite |
+| Mega-hotfix | 100 % | 0 | 0 | Consolide B01-B05 verify-cycle (tag `mega-hotfix`) |
+| Hotfix 6 | 92 % (11/12) | 1 (auto-revert) | 1 | Sequence retest cassee, 0/4 retests OK |
+| Hotfix 7 | EN COURS | — | — | BugHunt R6 sur 10 angles + sequence corrigee (worktree `w4yqqdf25`) |
+
+**Convergence** : 4 premieres hotfixes ont stabilise les bugs structurels (79 -> 100 %).
+Hotfix6 a touche un edge case dans la sequence de retest (revert auto declenche). Hotfix7
+remet la sequence d'aplomb et lance le 6e round adversarial sur 10 angles d'attaque
+distincts.
+
+### Tests biblio virtuelle — 11 bugs verifies, 3 reels, 8 false positives
+
+Suite de tests sur bibliotheque virtuelle synthetique (films generes proceduralement
+pour couvrir les edge cases naming/tier/perceptuel). Lance pour valider hotfix7.
+
+- **11 bugs candidats identifies** par l'adversarial harness
+- **3 bugs reels confirmes** apres reproduction manuelle + verification cross-module
+- **8 false positives** ecartes (artefacts du harness, conditions non-reproductibles en prod,
+  attentes mal formulees du test virtuel)
+
+Ratio 27 % de vrais positifs — coherent avec la convergence R5 (la plupart des
+findings restants sont du bruit ou de l'over-fitting au harness).
+
+### Etat actuel de l'architecture
+
+Modules recents centralisateurs (extraits pendant Vagues M-R + hotfixes Q.5) :
+
+- `domain/path_utils.py` (VQ-1) : feuille du graphe, casse cycle
+  `core->duplicate_support->naming->core`, expose `norm_win_path`/`_norm_win_path`/`windows_safe`
+- `domain/codec_ranks.py` : centralise `AUDIO_CODEC_RANK_PATTERNS` + `AUDIO_CODEC_RANK`
+  + `format_audio_channels` (VN-F.1)
+- `domain/tiers_helpers.py` (Vague M / SCORE-02) : `TIER_ORDER_BEST_FIRST`, defaults 70/66/55/40
+  (calibration v1.5.7 853 films), AUCUNE couleur hex (couleurs invariantes dans
+  `web/shared/tokens.css` uniquement)
+- `domain/probe_models.py` : constantes `PROBE_QUALITY_FULL/PARTIAL/FAILED` + helpers
+  (BUG-018 hotfix1)
+- `infra/db/pragma_profile.py` (VO-A) : 4 profils SQLite (`local_ssd`/`local_hdd`/`nas_smb`/
+  `nas_smb_slow`) + detection auto Windows
+- `ui/api/_run_state.py` (ARCH-08 / M-07) : `RunState` extraite de `cinesort_api.py`
+  (-165 LOC), thread-safe, `MAX_RUN_LOG_ITEMS=5000`
+- 6 facades `ui/api/facades/` : `run` (36) + `settings` (20) + `quality` (40) +
+  `integrations` (15) + `library` (23) + `runtime` (32) = **166 methodes**
+- 47 modules `*_support.py` orchestrent les use-cases
+
+Architecture verrouillee par `import-linter` (3 contracts : `domain_pure`, `infra_bounded`,
+`app_bounded`). Aucune regression de cycle depuis cloture #83 en mai 2026.
+
+### Reste a faire
+
+1. **BugHunt R6 (hotfix7)** : finaliser les 10 angles d'attaque sur worktree `w4yqqdf25`,
+   verifier la sequence retest corrigee, mesurer le post-fix rate final
+2. **Audit complet post-hotfix7** : nouveau round adversarial complet une fois hotfix7
+   merge, pour confirmer 0 critical et reduire les 16 high audit R5
+3. **Audit 2026** : audit exhaustif annuel (Tier 1 statique + Tier 2 multi-agents + Tier 3
+   docs) prevu apres stabilisation des hotfixes, vise v1.0 stable
+4. **Push backlog** : 152 commits non pousses sur `fix/v150-batch-bugs` + 30 fichiers en
+   working tree a integrer apres validation hotfix7
+5. **Vague S+** (deferree) : Linux port, B8 cleanup (suppression mixins SQLite),
+   8 methodes UI orphelines, traitement des 16 high audit R5
+
+**Tags poses (Q.5)** : `verify-fix-retest-complete`, `mega-hotfix`, `vague-r-hotfix1-full`,
+`vague-r-hotfix2-full`, `vague-r-hotfix3-full` (2026-06-02 / 2026-06-04).
+
+---
+
 ## Historique des phases anterieures
 
 ### Phases A1-A8 / B1-B7 (mai 2026) — Refactor architectural
@@ -225,4 +323,26 @@ Strangler Fig pattern : 104 -> 50 methodes publiques sur CineSortApi via 5 facad
 
 ---
 
-*Last updated : 2026-06-04 (post-tag vague-r-complete).*
+## Note 2026-06-05 - Trakt non concerne
+
+**Contexte** : la deadline du 30 juin 2026 concernant la refonte de l'API Trakt a souleve
+la question de l'impact sur CineSort.
+
+**Verification effectuee** :
+
+```bash
+grep -r 'trakt' --include='*.py' --include='*.js' cinesort/
+```
+
+**Resultat** : aucune utilisation en production.
+- Occurrences `.venv/` : lexers Pygments (faux positifs, hors code projet).
+- Occurrence test : `tests/test_log_scrubber.py` (1 reference isolee, sans appel API).
+- Aucun module `infra/`, `app/`, `domain/`, `ui/` ne reference Trakt.
+- Aucune dependance `trakt` / `pytrakt` / `trakt.py` dans `requirements*.txt` ni `pyproject.toml`.
+
+**Action** : **AUCUNE**. La deadline 30 juin 2026 (refonte API Trakt) n'est pas applicable
+a CineSort. Le projet integre TMDb, Jellyfin, Plex, Radarr et OMDb, mais pas Trakt.
+
+---
+
+*Last updated : 2026-06-05 (note Trakt non concerne — verification grep complete, deadline 30 juin 2026 non applicable). Precedent : 2026-06-04 (post-tag vague-r-complete + ajout Phase Q.5 Hotfix6/7 stabilisation).*

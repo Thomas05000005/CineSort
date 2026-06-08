@@ -23,6 +23,10 @@
  *   initProcessing(container, opts?)  // opts.step = "scan" | "review" | "apply"
  */
 import { apiPost, escapeHtml } from "./_v5_helpers.js";
+// Fix audit 2026-06-07 UX high : feedback utilisateur sur erreurs reseau
+// (start_scan, cancel_run, pollStatus). Sans toast, l'utilisateur reste
+// bloque sans aucune indication que le serveur ne repond pas.
+import { showToast } from "../components/toast.js";
 import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 
 const STEPS = [
@@ -157,8 +161,8 @@ function _applyDraftDecisions(draft) {
   if (!draft || typeof draft !== "object") return;
   for (const [rowId, value] of Object.entries(draft)) {
     const dec = value && value.decision;
-    if (dec === "approve" || dec === "reject") {
-      _state.decisions[rowId] = { decision: dec };
+    if (dec === "accepted" || dec === "rejected") {
+      _state.decisions[rowId] = { decision: dec, ok: dec === "accepted" };
     }
   }
   _renderActiveStep();
@@ -211,15 +215,15 @@ function _renderInspectorMobileDrawer() {
 
 function _buildInspectorContent(rowId) {
   const decision = _state.decisions[rowId];
-  const label = decision?.decision === "approve" ? "Approuve"
-    : decision?.decision === "reject" ? "Rejete" : "En attente";
+  const label = decision?.decision === "accepted" ? "Approuve"
+    : decision?.decision === "rejected" ? "Rejete" : "En attente";
   return `
     <div class="v5-inspector-content">
       <p class="v5u-text-muted" style="margin-top:0">Film <code>${_esc(rowId)}</code></p>
       <p>Decision actuelle : <strong>${_esc(label)}</strong></p>
       <div style="display:flex;gap:.5em;flex-wrap:wrap">
-        <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-inspector-action="approve" data-row-id="${_esc(rowId)}">Approuver</button>
-        <button type="button" class="v5-btn v5-btn--sm v5-btn--danger" data-inspector-action="reject" data-row-id="${_esc(rowId)}">Rejeter</button>
+        <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-inspector-action="accepted" data-row-id="${_esc(rowId)}">Approuver</button>
+        <button type="button" class="v5-btn v5-btn--sm v5-btn--danger" data-inspector-action="rejected" data-row-id="${_esc(rowId)}">Rejeter</button>
       </div>
     </div>
   `;
@@ -246,7 +250,7 @@ function _openInspectorDrawer(rowId) {
       const rid = btn.dataset.rowId;
       const action = btn.dataset.inspectorAction;
       if (!rid || !action) return;
-      _state.decisions[rid] = { decision: action };
+      _state.decisions[rid] = { decision: action, ok: action === "accepted" };
       _scheduleDraftSave(_state.currentRunId, _state.decisions);
       await _saveDecisions();
       _closeInspectorDrawer();
@@ -419,6 +423,8 @@ async function _startScan() {
   const settingsRes = results[0];
   if (settingsRes.status !== "fulfilled" || !settingsRes.value?.ok) {
     console.error("[processing] start_scan: get_settings failed", settingsRes.reason || settingsRes.value?.error);
+    // Fix audit 2026-06-07 UX high : feedback utilisateur (pas de silence).
+    showToast({ type: "error", text: "Impossible de lire les paramètres. Réessayer ?" });
     return;
   }
   try {
@@ -426,9 +432,14 @@ async function _startScan() {
     if (res.ok && res.data?.run_id) {
       _state.currentRunId = res.data.run_id;
       _pollStatus();
+    } else {
+      // Backend a refuse (ok=false). Feedback utilisateur clair.
+      showToast({ type: "error", text: "Le serveur n'a pas pu démarrer l'analyse. Réessayer ?" });
     }
   } catch (e) {
+    // Fix audit 2026-06-07 UX high : auparavant silencieux. Log technique + toast clair.
     console.error("[processing] start_scan:", e);
+    showToast({ type: "error", text: "Le serveur n'a pas pu démarrer l'analyse. Réessayer ?" });
   }
 }
 
@@ -437,7 +448,9 @@ async function _cancelRun() {
   try {
     await apiPost("run/cancel_run", { run_id: _state.currentRunId });
   } catch (e) {
+    // Fix audit 2026-06-07 UX high : auparavant silencieux.
     console.error("[processing] cancel:", e);
+    showToast({ type: "error", text: "Impossible d'annuler l'analyse. Réessayer ?" });
   }
 }
 
@@ -445,17 +458,26 @@ function _pollStatus() {
   if (_state.pollTimer) clearTimeout(_state.pollTimer);
   if (!_state.currentRunId) return;
 
+  let _consecutivePollErrors = 0;
   const tick = async () => {
     try {
       const res = await apiPost("run/get_status", { run_id: _state.currentRunId, last_log_index: 0 });
       _state.status = res.data;
+      _consecutivePollErrors = 0;
       if (_state.activeStep === "scan") _renderActiveStep();
       if (_state.status && _state.status.status !== "running") {
         _state.pollTimer = null;
         return;
       }
     } catch (e) {
+      // Fix audit 2026-06-07 UX high : auparavant silencieux. Toast affiche
+      // uniquement apres N echecs consecutifs (eviter le bruit sur un blip
+      // reseau ponctuel pendant un polling 2s).
       console.error("[processing] poll:", e);
+      _consecutivePollErrors += 1;
+      if (_consecutivePollErrors === 3) {
+        showToast({ type: "error", text: "Le serveur ne répond plus. Vérifier la connexion." });
+      }
     }
     _state.pollTimer = setTimeout(tick, 2000);
   };
@@ -538,8 +560,8 @@ function _updateReviewCounters(panel, rows) {
   const total = rows.length;
   for (const r of rows) {
     const d = _state.decisions[r.row_id];
-    if (d?.decision === "approve") approved += 1;
-    else if (d?.decision === "reject") rejected += 1;
+    if (d?.decision === "accepted") approved += 1;
+    else if (d?.decision === "rejected") rejected += 1;
   }
   const pending = total - approved - rejected;
   _state.rowCounts = { approved, rejected, pending };
@@ -591,8 +613,8 @@ function _renderReviewTable(body, rows) {
     btn.addEventListener("click", async () => {
       const action = btn.dataset.bulk;
       rows.forEach((r) => {
-        if (action === "approve-all") _state.decisions[r.row_id] = { decision: "approve" };
-        else if (action === "reject-all") _state.decisions[r.row_id] = { decision: "reject" };
+        if (action === "approve-all") _state.decisions[r.row_id] = { decision: "accepted", ok: true };
+        else if (action === "reject-all") _state.decisions[r.row_id] = { decision: "rejected", ok: false };
         else if (action === "clear") delete _state.decisions[r.row_id];
       });
       _renderReviewTable(body, rows);
@@ -608,7 +630,7 @@ function _renderReviewTable(body, rows) {
     btn.addEventListener("click", async () => {
       const rowId = btn.dataset.rowId;
       const decision = btn.dataset.rowAction;
-      _state.decisions[rowId] = { decision };
+      _state.decisions[rowId] = { decision, ok: decision === "accepted" };
       _renderReviewTable(body, rows);
       _updateReviewCounters(_state.containerRef, rows);
       // V2-03 : draft save debounce
@@ -629,8 +651,8 @@ function _renderReviewTable(body, rows) {
 function _renderReviewRow(r) {
   const d = _state.decisions[r.row_id];
   const decisionLabel = d?.decision || "pending";
-  const rowClass = decisionLabel === "approve" ? "row-approved"
-    : decisionLabel === "reject" ? "row-rejected" : "";
+  const rowClass = decisionLabel === "accepted" ? "row-approved"
+    : decisionLabel === "rejected" ? "row-rejected" : "";
   const conf = Number(r.confidence || 0);
   const confClass = conf >= 80 ? "tier-gold" : conf >= 60 ? "tier-silver" : "tier-bronze";
 
@@ -641,12 +663,12 @@ function _renderReviewRow(r) {
       <td><span class="v5u-tabular-nums ${confClass}">${conf.toFixed(0)}%</span></td>
       <td>
         <div class="v5-processing-decision-btns">
-          <button type="button" class="v5-btn v5-btn--sm ${decisionLabel === "approve" ? "v5-btn--primary" : "v5-btn--ghost"}"
-                  data-row-action="approve" data-row-id="${_esc(r.row_id)}" aria-label="Approuver">
+          <button type="button" class="v5-btn v5-btn--sm ${decisionLabel === "accepted" ? "v5-btn--primary" : "v5-btn--ghost"}"
+                  data-row-action="accepted" data-row-id="${_esc(r.row_id)}" aria-label="Approuver">
             ${_svg(ICON_CHECK, 12)}
           </button>
-          <button type="button" class="v5-btn v5-btn--sm ${decisionLabel === "reject" ? "v5-btn--danger" : "v5-btn--ghost"}"
-                  data-row-action="reject" data-row-id="${_esc(r.row_id)}" aria-label="Rejeter">
+          <button type="button" class="v5-btn v5-btn--sm ${decisionLabel === "rejected" ? "v5-btn--danger" : "v5-btn--ghost"}"
+                  data-row-action="rejected" data-row-id="${_esc(r.row_id)}" aria-label="Rejeter">
             &times;
           </button>
           <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost v5-btn-inspect-mobile"

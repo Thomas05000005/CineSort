@@ -31,9 +31,9 @@ export const NAV_ITEMS = [
   { id: "history",      labelKey: "sidebar.nav.history",     shortcut: "Alt+5",
     svg: '<polyline points="3 12 3 4 21 4 21 20 3 20 3 12"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="20"/>' },
   { id: "_separator" },
-  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+,",
+  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+6",
     svg: '<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/>' },
-  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "?",
+  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "Alt+7",
     svg: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
 ];
 
@@ -180,12 +180,21 @@ export function updateSidebarBadges(counters) {
 export function markIntegrationState(itemId, enabled, label) {
   const el = document.querySelector(`.v5-sidebar-item[data-route="${itemId}"]`);
   if (!el) return;
+  // Fix bug "tooltip Jellyfin desactive persiste apres reactivation" :
+  // memoriser le title d'origine pour le restaurer quand enabled=true.
+  if (el.dataset.titleDefault == null) {
+    el.dataset.titleDefault = el.getAttribute("title") || "";
+  }
   el.classList.toggle("v5-sidebar-item--disabled", !enabled);
   if (!enabled) {
     el.setAttribute("title", t("sidebar.integration_disabled_title", { label }));
     el.setAttribute("aria-disabled", "true");
   } else {
     el.removeAttribute("aria-disabled");
+    // Restaurer le titre d'origine "Alt+X" si stocke, sinon retirer.
+    const defaultTitle = el.dataset.titleDefault || "";
+    if (defaultTitle) el.setAttribute("title", defaultTitle);
+    else el.removeAttribute("title");
   }
 }
 

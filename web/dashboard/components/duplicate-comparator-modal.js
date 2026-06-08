@@ -55,10 +55,15 @@ let _focusTrapTarget = null;
 /* --- Helpers --- */
 
 function _fmtSize(bytes) {
+  // Fix incoherence labels : on garde la base 1024 (Mio/Gio) pour rester
+  // coherent avec l'affichage natif Windows Explorer mais on corrige le label
+  // (avant : "Mo"/"Go" decimal SI alors qu'on divisait par 1024^N).
+  // TODO centraliser ce helper dans core/format.js (doublons.js et film-detail.js
+  // ont la meme implementation).
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mio`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Gio`;
 }
 
 function _fmtPercent(num) {
@@ -245,10 +250,17 @@ function _criteriaList(comparison) {
 
 function _renderApercu() {
   const { comparison } = _state;
+  // Fix bug "fichier B score 0/100 alors que data complete" : en mode readOnly
+  // (compare ad-hoc depuis Modal Perceptuelle), comparison peut etre null.
+  // Plutot que d'afficher "Score 0/100 · —" qui est trompeur, on masque le
+  // bloc score/taille quand on n'a pas les donnees.
+  const hasComparison = comparison && typeof comparison === "object";
   const c = comparison || {};
   const winner = String(c.winner || "").toLowerCase();
   const scoreA = Math.round(Number(c.total_score_a) || 0);
   const scoreB = Math.round(Number(c.total_score_b) || 0);
+  const hasSizeA = c.file_a_size != null && Number(c.file_a_size) > 0;
+  const hasSizeB = c.file_b_size != null && Number(c.file_b_size) > 0;
   const sizeA = _fmtSize(c.file_a_size);
   const sizeB = _fmtSize(c.file_b_size);
   const fileA = c.file_a_name || "Fichier A";
@@ -256,6 +268,8 @@ function _renderApercu() {
   const reco = c.recommendation || "";
   const savings = _fmtSize(c.size_savings);
   const criteria = _criteriaList(comparison);
+  const showScoreA = hasComparison && (c.total_score_a != null || hasSizeA);
+  const showScoreB = hasComparison && (c.total_score_b != null || hasSizeB);
 
   return `
     <div class="duplicate-modal-tab-content" data-tab="apercu">
@@ -266,7 +280,7 @@ function _renderApercu() {
             ${winner === "a" ? `<span class="duplicate-decision-badge duplicate-decision-badge--reco">🏆 Recommandé</span>` : ""}
           </h3>
           <p class="duplicate-apercu-side-filename"><code>${escapeHtml(fileA)}</code></p>
-          <p class="duplicate-apercu-side-meta">Score ${scoreA}/100 · ${escapeHtml(sizeA)}</p>
+          ${showScoreA ? `<p class="duplicate-apercu-side-meta">Score ${scoreA}/100 · ${escapeHtml(sizeA)}</p>` : ""}
         </div>
         <div class="duplicate-apercu-side${winner === "b" ? " is-winner" : ""}">
           <h3 class="duplicate-apercu-side-title">
@@ -274,7 +288,7 @@ function _renderApercu() {
             ${winner === "b" ? `<span class="duplicate-decision-badge duplicate-decision-badge--reco">🏆 Recommandé</span>` : ""}
           </h3>
           <p class="duplicate-apercu-side-filename"><code>${escapeHtml(fileB)}</code></p>
-          <p class="duplicate-apercu-side-meta">Score ${scoreB}/100 · ${escapeHtml(sizeB)}</p>
+          ${showScoreB ? `<p class="duplicate-apercu-side-meta">Score ${scoreB}/100 · ${escapeHtml(sizeB)}</p>` : ""}
         </div>
       </div>
       ${reco ? `<p class="duplicate-apercu-reco">💡 ${escapeHtml(reco)}${c.size_savings ? ` — Économie disque : ${escapeHtml(savings)}` : ""}</p>` : ""}

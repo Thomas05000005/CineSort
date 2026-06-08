@@ -57,7 +57,7 @@ function _buildHtml(opts) {
       </div>
       <div class="v5-top-bar-actions">
         <button type="button" class="v5-top-bar-search" data-v5-search-trigger
-                aria-label="${escapeHtml(t("topbar.search_aria"))}">
+                aria-label="${escapeHtml(t("topbar.search_aria", { shortcut: paletteShortcut }))}">
           <span class="v5-top-bar-search-icon">${ICON_SEARCH}</span>
           <span class="v5-top-bar-search-label">${escapeHtml(t("topbar.search_label"))}</span>
           <kbd class="v5-top-bar-search-shortcut">${escapeHtml(paletteShortcut)}</kbd>
