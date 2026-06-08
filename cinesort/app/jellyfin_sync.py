@@ -221,8 +221,15 @@ def restore_watched(
                 still_pending[new_norm] = old_norm
                 continue
 
-            # Film trouve, restaurer le statut watched
-            ok = bool(client.mark_played(user_id, item_id))
+            # Film trouve, restaurer le statut watched.
+            # Wrap dans try/except : une exception reseau (ConnectionError,
+            # TimeoutError) ou un cas inattendu cote client tuait toute la
+            # boucle restore et perdait les pending non encore restaures.
+            try:
+                ok = bool(client.mark_played(user_id, item_id))
+            except (ConnectionError, OSError, TimeoutError, ValueError) as exc:
+                _log.warning("[jellyfin] mark_played echec item_id=%s: %s", item_id, exc)
+                ok = False
             if ok:
                 result.restored += 1
                 result.details.append(

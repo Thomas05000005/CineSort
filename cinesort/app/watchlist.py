@@ -94,6 +94,10 @@ def compare_watchlist(
     # Index local par titre normalise + annee
     local_keys: set[str] = set()
     local_title_only: set[str] = set()
+    # Titres locaux SANS annee connue (year == 0). Permet le fallback
+    # "watchlist a annee mais local non" sans matcher des films avec une
+    # annee DIFFERENTE (ex: Dune 2021 watchlist vs Dune 1984 local).
+    local_title_only_no_year: set[str] = set()
     for row in local_rows:
         title = str(getattr(row, "proposed_title", "") or "")
         year = int(getattr(row, "proposed_year", 0) or 0)
@@ -102,6 +106,8 @@ def compare_watchlist(
             local_title_only.add(norm)
             if year:
                 local_keys.add(f"{norm}|{year}")
+            else:
+                local_title_only_no_year.add(norm)
 
     owned: List[Dict[str, Any]] = []
     unmatched: List[Dict[str, Any]] = []
@@ -118,8 +124,10 @@ def compare_watchlist(
         elif norm and not year and norm in local_title_only:
             matched = True
         elif norm and year:
-            # Fallback : titre seul (sans annee) si la watchlist a une annee mais le local non
-            if norm in local_title_only:
+            # Fallback : titre seul si watchlist a une annee MAIS le local
+            # n'en a pas. Restreint a local_title_only_no_year pour eviter
+            # le faux positif "Dune 2021 watchlist matche Dune 1984 local".
+            if norm in local_title_only_no_year:
                 matched = True
 
         entry = {"title": title, "year": year}
