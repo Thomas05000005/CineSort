@@ -1461,6 +1461,13 @@ def apply_tv_episode(
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     """Rename/move a TV episode into Série (année)/Saison NN/S01E01 - Titre.ext structure."""
+    # Garde-fou : row.video vide -> `folder / ""` == folder, .exists() == True,
+    # atomic_move() deplacerait le DOSSIER COMPLET. Refuse plutot que tenter le move.
+    if not row.video:
+        log("WARN", f"TV episode video field empty: {folder}")
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+        return
+
     video = folder / row.video
     if not video.exists():
         try:
@@ -1576,7 +1583,13 @@ def quarantine_row(
 
     video = folder / row.video
     if not video.exists():
-        matches = [path for path in folder.iterdir() if path.is_file() and path.name.lower() == row.video.lower()]
+        # Symetrique de apply_tv_episode L1466-L1470 : protege contre folder disparu
+        # (move concurrent) ou permission denied -> sinon plantage tue l'apply en plein
+        # batch de quarantaine et perd toutes les rows non traitees.
+        try:
+            matches = [path for path in folder.iterdir() if path.is_file() and path.name.lower() == row.video.lower()]
+        except (OSError, PermissionError):
+            matches = []
         video = matches[0] if matches else video
     if not video.exists():
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
