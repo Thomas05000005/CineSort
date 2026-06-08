@@ -204,14 +204,29 @@ def observe_dashboard(
     target_state.mkdir(parents=True, exist_ok=True)
 
     # Si une biblio test est fournie, on ecrit un settings.json minimaliste qui
-    # pointe vers elle. [HYPOTHESE] roots = [library] est suffisant pour booter.
+    # pointe vers elle.
+    # [FIGE] B ETAPE 2 fix harness 2026-06-08 : resoudre chemin absolu et
+    # detecter les sous-racines (RootA/RootB/... au 1er niveau) pour les
+    # enregistrer explicitement dans roots. Sinon le scan rate les films
+    # car settings.get('roots') contenait une chaine relative non resolue
+    # vs cwd app. [HYPOTHESE] sous-racines = dirs au 1er niveau contenant
+    # un sous-dossier 'Movies' ou 'Shows'; fallback : library elle-meme.
     if library is not None and library.exists():
+        library_abs = library.resolve()
         settings_path = target_state / "settings.json"
         if not settings_path.exists():
             try:
+                detected_roots: list[str] = []
+                for child in sorted(library_abs.iterdir()):
+                    if not child.is_dir():
+                        continue
+                    if (child / "Movies").is_dir() or (child / "Shows").is_dir():
+                        detected_roots.append(str(child))
+                if not detected_roots:
+                    detected_roots = [str(library_abs)]
                 seed = {
-                    "root": str(library),
-                    "roots": [str(library)],
+                    "root": detected_roots[0],
+                    "roots": detected_roots,
                     "state_dir": str(target_state),
                     "tmdb_enabled": False,
                     "auto_check_updates": False,
