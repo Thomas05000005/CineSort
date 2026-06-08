@@ -1,0 +1,814 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+observe.py — Outillage d'observation reutilisable CineSort (Section 0.6).
+
+Lance l'application (EXE prefere si dispo, sinon `python app.py --dev`) en mode
+CDP (Chrome DevTools Protocol) et passe sur chaque vue dashboard pour capturer :
+
+    docs/internal/observe/<YYYY-MM-DD_HHMMSS>/<view>/
+        screenshot.png      — capture pleine fenetre
+        network.json        — fetch+xhr + statuts HTTP + violations CSP
+        console.log         — messages console (error + warning + info)
+        violations_csp.json — sous-ensemble specifique CSP (analyse posters)
+
+Egalement :
+    docs/internal/observe/<timestamp>/cinesort.log.tail.txt
+        — 50 dernieres lignes scrubbees du log app (issues/.../logs/cinesort.log)
+    docs/internal/observe/<timestamp>/summary.json
+        — recapitulatif machine-lisible des vues + erreurs majeures + CSP
+
+Marqueurs :
+    [FIGE]          — invariants verifies (chemins, ports, structure)
+    [HYPOTHESE]     — defaut applique en l'absence de signal explicite
+    [OPERATIONNEL]  — etape executee live (lancement, navigation, capture)
+
+AUCUNE PUBLICATION. AUCUN FIX SOURCE. Scrubbe les cles/secrets.
+
+Usage :
+    python scripts/observe.py --library test_library --modes dashboard
+    python scripts/observe.py --library test_library --modes dashboard,desktop
+    python scripts/observe.py --output docs/internal/observe/2026-06-08_T1
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# Constantes [FIGE]
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DIST_EXE = PROJECT_ROOT / "dist" / "CineSort.exe"
+APP_PY = PROJECT_ROOT / "app.py"
+DEFAULT_CDP_PORT = 9223  # different de 9222 (utilise par e2e tests)
+DEFAULT_OUTPUT_PARENT = PROJECT_ROOT / "docs" / "internal" / "observe"
+
+# Routes dashboard a observer. [FIGE] depuis app.js registerRoute.
+# Format : (view_label_pour_dossier, hash_a_naviguer)
+# Sub-vues dashboard : traitement#step-* (workflow 5 etapes), parametres#*.
+DASHBOARD_VIEWS: list[tuple[str, str]] = [
+    ("accueil", "#/accueil"),
+    ("traitement", "#/traitement"),
+    ("traitement_step_analyse", "#/traitement#step-analyse"),
+    ("traitement_step_verification", "#/traitement#step-verification"),
+    ("traitement_step_validation", "#/traitement#step-validation"),
+    ("traitement_step_doublons", "#/traitement#step-doublons"),
+    ("traitement_step_apply", "#/traitement#step-apply"),
+    ("bibliotheque", "#/bibliotheque"),
+    ("qualite", "#/qualite"),
+    ("historique", "#/historique"),
+    ("jellyfin", "#/parametres#integrations-jellyfin"),
+    ("parametres", "#/parametres"),
+    ("parametres_sources", "#/parametres#sources"),
+    ("parametres_integrations", "#/parametres#integrations"),
+    ("parametres_retention", "#/parametres#retention"),
+    ("aide", "#/aide"),
+    ("doublons", "#/doublons"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Scrub helpers [FIGE] — protection cles/secrets (token, paths utilisateur)
+# ---------------------------------------------------------------------------
+
+# Patterns conservateurs : token bearer, query ntoken=, JWT-like, paths persos.
+_RE_BEARER = re.compile(r"(Bearer\s+)[A-Za-z0-9_\-\.]+", re.IGNORECASE)
+_RE_NTOKEN_QS = re.compile(r"([?&]ntoken=)[^&\s\"']+", re.IGNORECASE)
+_RE_TOKEN_FIELD = re.compile(
+    r"(\"(?:rest_api_token|api_key|tmdb_api_key|jellyfin_api_key|password)\"\s*:\s*\")[^\"]+(\")",
+    re.IGNORECASE,
+)
+_RE_USER_HOME = re.compile(r"C:\\\\Users\\\\[^\\\\\"]+", re.IGNORECASE)
+_RE_USER_HOME_FW = re.compile(r"C:/Users/[^/\"]+", re.IGNORECASE)
+
+
+def scrub(text: str) -> str:
+    """Scrubbe les valeurs sensibles d'une chaine. Sur."""
+    if not text:
+        return text
+    out = text
+    out = _RE_BEARER.sub(r"\1<REDACTED>", out)
+    out = _RE_NTOKEN_QS.sub(r"\1<REDACTED>", out)
+    out = _RE_TOKEN_FIELD.sub(r"\1<REDACTED>\2", out)
+    out = _RE_USER_HOME.sub(r"C:\\Users\\<USER>", out)
+    out = _RE_USER_HOME_FW.sub("C:/Users/<USER>", out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Helpers process / port
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_port(host: str, port: int, timeout_s: int = 60) -> bool:
+    """Attend qu'un port TCP accepte une connexion. [OPERATIONNEL]"""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            s = socket.create_connection((host, port), timeout=1)
+            s.close()
+            return True
+        except (ConnectionRefusedError, OSError):
+            time.sleep(1)
+    return False
+
+
+def _detect_app_command(prefer_exe: bool = True) -> tuple[list[str], str]:
+    """Retourne (cmd, mode_label).
+
+    [HYPOTHESE] prefere EXE existant, sinon `python app.py --dev`.
+    """
+    if prefer_exe and DIST_EXE.is_file():
+        return ([str(DIST_EXE)], "exe")
+    return ([sys.executable, str(APP_PY), "--dev"], "dev")
+
+
+def _make_state_dir_isolated(out_dir: Path) -> Path:
+    """Cree un state_dir isole pour ne pas polluer %LOCALAPPDATA%/CineSort.
+
+    [HYPOTHESE] : on isole pour observation reproductible. Si l'utilisateur
+    veut observer son etat reel, il peut passer --use-local-state (TODO).
+    """
+    state = out_dir / "_state"
+    state.mkdir(parents=True, exist_ok=True)
+    return state
+
+
+def _scrub_log_tail(log_path: Path, n_lines: int = 50) -> str:
+    """Lit les n dernieres lignes du log, applique scrub. [OPERATIONNEL]"""
+    if not log_path.is_file():
+        return f"<absent: {log_path}>"
+    try:
+        # Lecture binaire en queue pour eviter de tout charger.
+        size = log_path.stat().st_size
+        chunk = min(size, 256 * 1024)
+        with open(log_path, "rb") as f:
+            f.seek(max(0, size - chunk))
+            data = f.read()
+        try:
+            text = data.decode("utf-8", errors="replace")
+        except Exception:
+            text = data.decode("latin-1", errors="replace")
+        lines = text.splitlines()[-n_lines:]
+        return scrub("\n".join(lines))
+    except OSError as exc:
+        return f"<erreur lecture: {exc}>"
+
+
+# ---------------------------------------------------------------------------
+# Observer principal (mode dashboard via CDP+Playwright)
+# ---------------------------------------------------------------------------
+
+
+def observe_dashboard(
+    out_dir: Path,
+    library: Path | None,
+    cdp_port: int,
+    prefer_exe: bool,
+    headless_timeout: int = 90,
+) -> dict[str, Any]:
+    """Lance l'app + navigue chaque vue. Retourne un summary dict.
+
+    [OPERATIONNEL] : capture screenshot/network/console par vue.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {
+            "ok": False,
+            "error": "playwright non installe (pip install playwright)",
+            "views": [],
+        }
+
+    cmd, mode_label = _detect_app_command(prefer_exe=prefer_exe)
+    env = os.environ.copy()
+    env["CINESORT_E2E"] = "1"
+    env["CINESORT_CDP_PORT"] = str(cdp_port)
+    # Isole le state pour ne pas casser la config courante de l'utilisateur.
+    state_dir = _make_state_dir_isolated(out_dir)
+    env["LOCALAPPDATA"] = str(state_dir.parent)  # CineSort cree state_dir/CineSort
+    # Pre-cree state cible attendu (LOCALAPPDATA/CineSort).
+    target_state = state_dir.parent / "CineSort"
+    target_state.mkdir(parents=True, exist_ok=True)
+
+    # Si une biblio test est fournie, on ecrit un settings.json minimaliste qui
+    # pointe vers elle. [HYPOTHESE] roots = [library] est suffisant pour booter.
+    if library is not None and library.exists():
+        settings_path = target_state / "settings.json"
+        if not settings_path.exists():
+            try:
+                seed = {
+                    "root": str(library),
+                    "roots": [str(library)],
+                    "state_dir": str(target_state),
+                    "tmdb_enabled": False,
+                    "auto_check_updates": False,
+                    "rest_api_port": 8650,
+                }
+                settings_path.write_text(
+                    json.dumps(seed, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                print(f"[observe] settings seed echoue: {exc}", file=sys.stderr)
+
+    print(
+        f"[observe] [OPERATIONNEL] lancement app mode={mode_label} cdp={cdp_port}",
+        file=sys.stderr,
+    )
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    summary: dict[str, Any] = {
+        "ok": False,
+        "mode": mode_label,
+        "cdp_port": cdp_port,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "views": [],
+        "views_with_broken_posters": [],
+        "console_errors_major": [],
+    }
+
+    try:
+        if not _wait_for_port("127.0.0.1", cdp_port, timeout_s=headless_timeout):
+            summary["error"] = f"port CDP {cdp_port} indisponible apres {headless_timeout}s"
+            return summary
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+            if not browser.contexts:
+                summary["error"] = "aucun contexte CDP retourne par pywebview"
+                return summary
+            ctx = browser.contexts[0]
+            if not ctx.pages:
+                summary["error"] = "aucune page CDP retournee par pywebview"
+                return summary
+            page = ctx.pages[0]
+
+            # Attendre que le dashboard ait amorce __APP_READY__ (best effort).
+            try:
+                page.wait_for_function(
+                    "() => window.__APP_READY__ === true || document.readyState === 'complete'",
+                    timeout=30_000,
+                )
+            except Exception as exc:
+                summary["app_ready_warning"] = scrub(str(exc))
+
+            for label, hash_target in DASHBOARD_VIEWS:
+                view_dir = out_dir / label
+                view_dir.mkdir(parents=True, exist_ok=True)
+                view_summary: dict[str, Any] = {
+                    "label": label,
+                    "hash": hash_target,
+                    "network": [],
+                    "console": [],
+                    "csp_violations": [],
+                }
+
+                # Listeners locaux a la vue.
+                network_records: list[dict[str, Any]] = []
+                console_records: list[dict[str, Any]] = []
+                csp_violations: list[dict[str, Any]] = []
+                # [FIGE 0.7.1] Detection durcie posters : separer image_requests
+                # (uniquement requetes vers image.tmdb.org ou /api/poster) du
+                # bruit reseau general.
+                image_requests: list[dict[str, Any]] = []
+
+                def _is_poster_url(url: str) -> bool:
+                    if not url:
+                        return False
+                    lower = url.lower()
+                    return "image.tmdb.org" in lower or "/api/poster" in lower
+
+                def _on_response(resp, _bucket=network_records, _img=image_requests):
+                    try:
+                        url = scrub(resp.url)
+                        rec = {
+                            "url": url,
+                            "status": resp.status,
+                            "method": resp.request.method,
+                            "resource_type": resp.request.resource_type,
+                        }
+                        _bucket.append(rec)
+                        # [FIGE 0.7.1] Capture explicite des requetes poster.
+                        if _is_poster_url(resp.url):
+                            _img.append({
+                                "url": url,
+                                "status": resp.status,
+                                "ok": 200 <= resp.status < 400,
+                            })
+                    except Exception:
+                        pass
+
+                def _on_requestfailed(req, _img=image_requests):
+                    # [FIGE 0.7.1] Capture echecs reseau (CSP, DNS, etc.).
+                    try:
+                        if not _is_poster_url(req.url):
+                            return
+                        failure = ""
+                        try:
+                            f = req.failure
+                            failure = f.get("errorText", "") if isinstance(f, dict) else str(f or "")
+                        except Exception:
+                            failure = "<unknown>"
+                        _img.append({
+                            "url": scrub(req.url),
+                            "status": None,
+                            "ok": False,
+                            "failure": scrub(failure),
+                        })
+                    except Exception:
+                        pass
+
+                def _on_console(msg, _bucket=console_records, _csp=csp_violations):
+                    try:
+                        text = scrub(msg.text)
+                        entry = {"type": msg.type, "text": text}
+                        _bucket.append(entry)
+                        # Detection CSP violation heuristique (msg type "error" +
+                        # mot-cle CSP / Content Security Policy / Refused to).
+                        lower = text.lower()
+                        if (
+                            "content security policy" in lower
+                            or "refused to load" in lower
+                            or "violates the following" in lower
+                            or "csp" in lower
+                        ):
+                            _csp.append(entry)
+                    except Exception:
+                        pass
+
+                def _on_pageerror(err, _bucket=console_records):
+                    try:
+                        _bucket.append({"type": "pageerror", "text": scrub(str(err))})
+                    except Exception:
+                        pass
+
+                page.on("response", _on_response)
+                page.on("requestfailed", _on_requestfailed)
+                page.on("console", _on_console)
+                page.on("pageerror", _on_pageerror)
+
+                # [FIGE 0.7.1] Instrumentation CSP cote page AVANT navigation :
+                # init bucket window.__cspV + listener securitypolicyviolation.
+                # Sera relu apres montage de la vue via evaluate().
+                csp_init_snippet = r"""
+                () => {
+                    try {
+                        if (!window.__cspV) {
+                            window.__cspV = [];
+                            window.addEventListener("securitypolicyviolation", (e) => {
+                                try {
+                                    window.__cspV.push({
+                                        blockedURI: e.blockedURI || "",
+                                        violatedDirective: e.violatedDirective || "",
+                                        sourceFile: e.sourceFile || "",
+                                    });
+                                } catch (_) {}
+                            });
+                        }
+                    } catch (_) {}
+                    return true;
+                }
+                """
+                try:
+                    page.evaluate(csp_init_snippet)
+                except Exception:
+                    pass
+
+                # Verdict par vue [FIGE 0.7.1]
+                posters_expected = 0
+                posters_rendered = 0
+                csp_events_page: list[dict[str, Any]] = []
+
+                try:
+                    # Navigation hash : on assigne location.hash et on attend.
+                    page.evaluate(
+                        "(h) => { window.location.hash = h.replace(/^#/,''); }",
+                        hash_target,
+                    )
+                    # Laisser le router monter la vue + faire ses fetchs.
+                    page.wait_for_timeout(2500)
+
+                    # [FIGE 0.7.1] Comptage img poster + background-image +
+                    # collecte des CSP events page (window.__cspV).
+                    poster_probe_snippet = r"""
+                    () => {
+                        const isPoster = (u) => {
+                            if (!u) return false;
+                            return /image\.tmdb\.org|\/api\/poster/i.test(u);
+                        };
+                        // Tag <img>
+                        const imgs = Array.from(document.querySelectorAll("img"));
+                        const posterImgs = imgs.filter((i) => isPoster(i.currentSrc || i.src));
+                        let renderedImgs = 0;
+                        for (const i of posterImgs) {
+                            if (i.complete && i.naturalWidth > 0) renderedImgs += 1;
+                        }
+                        // background-image (heuristique : tout element avec
+                        // background-image dont l'URL ressemble a un poster).
+                        let bgExpected = 0;
+                        let bgRendered = 0;
+                        try {
+                            const all = document.querySelectorAll("*");
+                            for (const el of all) {
+                                const bg = getComputedStyle(el).backgroundImage;
+                                if (!bg || bg === "none") continue;
+                                // Extraire url(...)
+                                const m = bg.match(/url\(["']?([^"')]+)["']?\)/);
+                                if (!m) continue;
+                                const u = m[1];
+                                if (!isPoster(u)) continue;
+                                bgExpected += 1;
+                                // Verifier via Resource Timing si la ressource
+                                // a ete chargee (transferSize > 0 ou decodedBodySize > 0).
+                                try {
+                                    const entries = performance.getEntriesByName(u, "resource");
+                                    if (entries && entries.length > 0) {
+                                        const e0 = entries[entries.length - 1];
+                                        if ((e0.transferSize || 0) > 0
+                                            || (e0.decodedBodySize || 0) > 0) {
+                                            bgRendered += 1;
+                                        }
+                                    }
+                                } catch (_) {}
+                            }
+                        } catch (_) {}
+                        const csp = Array.isArray(window.__cspV)
+                            ? window.__cspV.slice()
+                            : [];
+                        // Reset pour ne pas accumuler entre vues.
+                        try { window.__cspV = []; } catch (_) {}
+                        return {
+                            posterImgsCount: posterImgs.length,
+                            renderedImgsCount: renderedImgs,
+                            bgExpected: bgExpected,
+                            bgRendered: bgRendered,
+                            csp: csp,
+                        };
+                    }
+                    """
+                    try:
+                        probe = page.evaluate(poster_probe_snippet) or {}
+                        posters_expected = int(probe.get("posterImgsCount") or 0) \
+                            + int(probe.get("bgExpected") or 0)
+                        posters_rendered = int(probe.get("renderedImgsCount") or 0) \
+                            + int(probe.get("bgRendered") or 0)
+                        raw_csp = probe.get("csp") or []
+                        if isinstance(raw_csp, list):
+                            for ev in raw_csp:
+                                if isinstance(ev, dict):
+                                    csp_events_page.append({
+                                        "blockedURI": scrub(str(ev.get("blockedURI") or "")),
+                                        "violatedDirective": str(ev.get("violatedDirective") or ""),
+                                        "sourceFile": scrub(str(ev.get("sourceFile") or "")),
+                                    })
+                    except Exception as exc:
+                        view_summary["poster_probe_error"] = scrub(str(exc))
+
+                    # Screenshot complet de la fenetre. [OPERATIONNEL]
+                    ss_path = view_dir / "screenshot.png"
+                    try:
+                        page.screenshot(path=str(ss_path), full_page=True)
+                        view_summary["screenshot"] = str(ss_path.relative_to(out_dir))
+                    except Exception as exc:
+                        view_summary["screenshot_error"] = scrub(str(exc))
+
+                except Exception as exc:
+                    view_summary["nav_error"] = scrub(str(exc))
+                finally:
+                    # Detacher les listeners pour eviter cross-contamination.
+                    try:
+                        page.remove_listener("response", _on_response)
+                        page.remove_listener("requestfailed", _on_requestfailed)
+                        page.remove_listener("console", _on_console)
+                        page.remove_listener("pageerror", _on_pageerror)
+                    except Exception:
+                        pass
+
+                # Persistance des journaux par vue.
+                try:
+                    (view_dir / "network.json").write_text(
+                        json.dumps(
+                            {
+                                "fetches": network_records,
+                                "violations_csp_heuristique": csp_violations,
+                                "image_requests": image_requests,
+                            },
+                            indent=2,
+                            ensure_ascii=False,
+                        ),
+                        encoding="utf-8",
+                    )
+                except OSError as exc:
+                    view_summary["network_write_error"] = scrub(str(exc))
+
+                try:
+                    log_lines = []
+                    for rec in console_records:
+                        log_lines.append(f"[{rec.get('type','?')}] {rec.get('text','')}")
+                    (view_dir / "console.log").write_text(
+                        "\n".join(log_lines) + ("\n" if log_lines else ""),
+                        encoding="utf-8",
+                    )
+                except OSError as exc:
+                    view_summary["console_write_error"] = scrub(str(exc))
+
+                try:
+                    # [FIGE 0.7.1] On combine les violations CSP heuristiques
+                    # (depuis console.log) et les events reels captures via
+                    # window.__cspV (securitypolicyviolation listener).
+                    (view_dir / "violations_csp.json").write_text(
+                        json.dumps(
+                            {
+                                "console_heuristic": csp_violations,
+                                "events_page": csp_events_page,
+                            },
+                            indent=2,
+                            ensure_ascii=False,
+                        ),
+                        encoding="utf-8",
+                    )
+                except OSError as exc:
+                    view_summary["csp_write_error"] = scrub(str(exc))
+
+                # [FIGE 0.7.1] Verdict par vue durci.
+                posters_failed = max(0, posters_expected - posters_rendered)
+                # Considere aussi comme failed les image_requests en echec
+                # (status >= 400 ou failure renseigne) — peuvent porter sur des
+                # URLs non encore rendues (preload, retry) mais sont quand meme
+                # des signaux. On en augmente le compte sans doubler les img.
+                failed_requests = [
+                    r for r in image_requests
+                    if (r.get("ok") is False) or (r.get("status") and int(r["status"]) >= 400)
+                ]
+                # Raisons collectees pour traçabilite.
+                reasons: list[str] = []
+                for ev in csp_events_page:
+                    d = ev.get("violatedDirective", "")
+                    b = ev.get("blockedURI", "")
+                    if d or b:
+                        reasons.append(f"CSP {d} blockedURI={b}")
+                for v in csp_violations:
+                    t = v.get("text", "")
+                    if t:
+                        reasons.append(f"console: {t[:200]}")
+                for fr in failed_requests:
+                    reasons.append(
+                        f"image {fr.get('url','')} status={fr.get('status')} "
+                        f"failure={fr.get('failure','')}"
+                    )
+
+                if posters_expected == 0:
+                    verdict = "POSTERS_ABSENTS"
+                elif posters_failed == 0 and not failed_requests:
+                    verdict = "POSTERS_OK"
+                else:
+                    verdict = "POSTERS_KO"
+
+                view_summary["posters_expected"] = posters_expected
+                view_summary["posters_rendered"] = posters_rendered
+                view_summary["posters_failed"] = posters_failed
+                view_summary["csp_violations"] = csp_events_page
+                view_summary["image_requests"] = image_requests
+                view_summary["verdict"] = verdict
+                if reasons and verdict == "POSTERS_KO":
+                    view_summary["reasons"] = reasons[:25]
+
+                # [FIGE] Backward compat : on garde l'ancien flag
+                # broken_posters_detected pour ne pas casser d'eventuels
+                # consommateurs externes du summary.json.
+                broken_posters = verdict == "POSTERS_KO"
+                view_summary["broken_posters_detected"] = broken_posters
+                if broken_posters:
+                    summary["views_with_broken_posters"].append(label)
+
+                # Erreurs majeures (type "error" ou pageerror).
+                for rec in console_records:
+                    if rec.get("type") in {"error", "pageerror"}:
+                        line = f"{label}: [{rec['type']}] {rec.get('text','')}"
+                        summary["console_errors_major"].append(line)
+
+                view_summary["counts"] = {
+                    "network": len(network_records),
+                    "console": len(console_records),
+                    "csp_violations": len(csp_violations),
+                    "csp_events_page": len(csp_events_page),
+                    "image_requests": len(image_requests),
+                }
+                summary["views"].append(view_summary)
+
+            browser.close()
+            summary["ok"] = True
+    except Exception as exc:
+        summary["error"] = scrub(str(exc))
+    finally:
+        # Arret propre du process app.
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        except Exception:
+            pass
+
+    summary["ended_at"] = datetime.now().isoformat(timespec="seconds")
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Mode desktop (capture fenetre native via mss/PID handle) — methode standardisee
+# ---------------------------------------------------------------------------
+
+
+def observe_desktop_window(out_dir: Path, pid_hint: int | None = None) -> dict[str, Any]:
+    """Capture la fenetre native CineSort via mss (fallback monitor 0 si pas de
+    PID handle). [HYPOTHESE] : sans handle natif, on capture le monitor principal.
+
+    Methode standardisee documentee :
+        - prefere pywebview debug=True + devtools (mode dev) qui expose CDP ;
+        - sinon fallback mss capture sur la fenetre via PID handle Win32
+          (FindWindowEx + GetWindowRect) ; si indisponible, monitor 0.
+    """
+    result: dict[str, Any] = {"ok": False}
+    try:
+        import mss  # type: ignore
+    except ImportError:
+        result["error"] = "mss non installe (pip install mss)"
+        return result
+
+    desktop_dir = out_dir / "_desktop_capture"
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with mss.mss() as sct:
+            monitor = sct.monitors[0]  # entier desktop virtuel
+            shot = sct.grab(monitor)
+            from mss.tools import to_png  # type: ignore
+
+            png_path = desktop_dir / "desktop_full.png"
+            to_png(shot.rgb, shot.size, output=str(png_path))
+            result["ok"] = True
+            result["screenshot"] = str(png_path)
+    except Exception as exc:
+        result["error"] = scrub(str(exc))
+
+    if pid_hint is not None:
+        result["pid_hint"] = pid_hint
+    return result
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="observe.py",
+        description="Observation reutilisable CineSort (capture multi-vues).",
+    )
+    parser.add_argument(
+        "--library",
+        type=Path,
+        default=None,
+        help="Chemin biblio test (seed settings.json). Optionnel.",
+    )
+    parser.add_argument(
+        "--modes",
+        type=str,
+        default="dashboard",
+        help="Modes separes par virgule : dashboard,desktop,both.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Dossier de sortie. Defaut : docs/internal/observe/<timestamp>/.",
+    )
+    parser.add_argument(
+        "--timestamp",
+        type=str,
+        default=None,
+        help="Timestamp YYYY-MM-DD_HHMMSS (sinon genere maintenant).",
+    )
+    parser.add_argument(
+        "--cdp-port",
+        type=int,
+        default=DEFAULT_CDP_PORT,
+        help=f"Port CDP (defaut {DEFAULT_CDP_PORT}).",
+    )
+    parser.add_argument(
+        "--prefer-dev",
+        action="store_true",
+        help="Force `python app.py --dev` meme si dist/CineSort.exe existe.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Ne lance pas l'app, ecrit juste la structure + un manifeste.",
+    )
+    return parser.parse_args(argv)
+
+
+def _resolve_modes(value: str) -> set[str]:
+    modes = {m.strip().lower() for m in (value or "").split(",") if m.strip()}
+    if "both" in modes:
+        modes.discard("both")
+        modes.update({"dashboard", "desktop"})
+    return modes
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+
+    ts = args.timestamp or datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    out_dir = args.output or (DEFAULT_OUTPUT_PARENT / ts)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    modes = _resolve_modes(args.modes) or {"dashboard"}
+    print(f"[observe] [OPERATIONNEL] timestamp={ts} out={out_dir} modes={sorted(modes)}", file=sys.stderr)
+
+    manifest: dict[str, Any] = {
+        "timestamp": ts,
+        "out_dir": str(out_dir),
+        "modes": sorted(modes),
+        "library": str(args.library) if args.library else None,
+        "cdp_port": args.cdp_port,
+        "dry_run": bool(args.dry_run),
+    }
+
+    summary: dict[str, Any] = {"manifest": manifest, "dashboard": None, "desktop": None}
+
+    if args.dry_run:
+        (out_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        print("[observe] [OPERATIONNEL] dry-run termine.", file=sys.stderr)
+        return 0
+
+    if "dashboard" in modes:
+        summary["dashboard"] = observe_dashboard(
+            out_dir=out_dir,
+            library=args.library,
+            cdp_port=args.cdp_port,
+            prefer_exe=not args.prefer_dev,
+        )
+
+    if "desktop" in modes:
+        summary["desktop"] = observe_desktop_window(out_dir=out_dir)
+
+    # Tail cinesort.log (state isole d'abord, sinon LOCALAPPDATA standard).
+    candidates = [
+        out_dir / "_state" / "CineSort" / "logs" / "cinesort.log",
+        Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "logs" / "cinesort.log",
+    ]
+    tail_text = ""
+    for c in candidates:
+        if c.is_file():
+            tail_text = _scrub_log_tail(c, n_lines=50)
+            summary["cinesort_log_source"] = str(c)
+            break
+    (out_dir / "cinesort.log.tail.txt").write_text(
+        tail_text or "<aucun log cinesort.log trouve>",
+        encoding="utf-8",
+    )
+
+    (out_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+
+    # Resume console.
+    dash = summary.get("dashboard") or {}
+    if isinstance(dash, dict):
+        print(
+            f"[observe] [OPERATIONNEL] dashboard ok={dash.get('ok')} "
+            f"views={len(dash.get('views') or [])} "
+            f"broken_posters={dash.get('views_with_broken_posters')}",
+            file=sys.stderr,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
