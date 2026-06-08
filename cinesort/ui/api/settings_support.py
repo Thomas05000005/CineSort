@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import secrets
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -806,9 +808,7 @@ def apply_settings_defaults(
 
     # BUG 1 : generer un token REST aleatoire au premier lancement plutot que vide
     if not str(payload.get("rest_api_token") or "").strip():
-        import secrets as _secrets
-
-        payload["rest_api_token"] = _secrets.token_urlsafe(24)
+        payload["rest_api_token"] = secrets.token_urlsafe(24)
 
     # V6-01 (R4-I18N-4) : locale clamp via _normalize_locale a {"fr", "en"}, defaut "fr"
     payload["locale"] = _normalize_locale(payload.get("locale"))
@@ -1407,9 +1407,7 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "update_github_repo" in payload:
         repo = str(payload.get("update_github_repo") or "").strip()
         # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
-        import re as _re
-
-        if not repo or _re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+        if not repo or re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
             out["update_github_repo"] = repo
     if "worker_count" in payload:
         out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
