@@ -28,7 +28,7 @@ from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 # Seuil duplique dans plan_support._ROOT_BULK_WARNING_THRESHOLD.
 _ROOT_BULK_THRESHOLD = 20
@@ -611,12 +611,53 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
         }
 
 
+def _hydrate_settings_from_store(
+    api: Any,
+    settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    """ITER4 fix racine C : merge le settings on-disk dans le payload caller.
+
+    Le caller REST envoie `POST /api/run/start_plan` avec un body souvent
+    minimal (`{settings: {library_path: ...}}`). Sans ce merge, les cles
+    persistees (tmdb_api_key dechiffree DPAPI, tmdb_enabled, omdb_api_key,
+    ...) sont absentes du dict, ce qui declenche silencieusement la branche
+    `elif tmdb_enabled` de `_init_tmdb_client` (api_key vide) et desactive
+    TMDb a tort.
+
+    Priorite : **requete OVERRIDE on-disk** pour preserver l'opt-in explicite
+    du caller (ex: tests qui passent tmdb_api_key="test_xyz" doivent rester
+    inchanges, cf tests/test_plan_tmdb_enrichment_guard.py L51-56).
+
+    Backward compat : si on-disk n'existe pas ou que la lecture leve, on
+    retourne le settings d'origine sans alterer.
+    """
+    if not isinstance(settings, dict):
+        return settings
+    try:
+        state_dir, _present = api._resolve_payload_state_dir(settings)
+        persisted = read_settings(state_dir)
+    except (OSError, PermissionError, KeyError, TypeError, ValueError):
+        return settings
+    if not isinstance(persisted, dict) or not persisted:
+        return settings
+    merged: Dict[str, Any] = dict(persisted)
+    # Requete override on-disk : on ecrase persisted par les cles du caller.
+    for key, value in settings.items():
+        merged[key] = value
+    return merged
+
+
 def _start_plan_impl(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
     """Implementation reelle de start_plan, sans wrap global (Vague G)."""
     if not isinstance(settings, dict):
         return _err_response(
             t("errors.payload_settings_invalid"), category="validation", level="info", log_module=__name__
         )
+
+    # ITER4 fix racine C (rupture AMONT settings) : hydrater le dict caller
+    # avec le settings.json on-disk AVANT toute resolution (tmdb_api_key
+    # DPAPI dechiffree, tmdb_enabled, etc.). Priorite caller > on-disk.
+    settings = _hydrate_settings_from_store(api, settings)
 
     state_dir, _ = api._resolve_payload_state_dir(settings)
     debug_enabled = api._debug_enabled(settings if isinstance(settings, dict) else None)
