@@ -1689,7 +1689,21 @@ def apply_single(
     # VQ-3 : kill-switch MAX_PATH Windows. Si le path cible > 259 chars on
     # skip proprement plutot que tenter le rename et generer un OSError
     # obscur (ou pire un rename partiel laissant le FS incoherent).
-    _path_err = check_path_length_killswitch(str(dst))
+    # Fix item #15 2026-06-08 : on verifie le path du dossier renomme ET le path
+    # du fichier interne le plus long (post-rename), car windows_safe tronque
+    # le nom de dossier a 180 chars mais l'ajout du nom de fichier interne
+    # (ex: "movie.mkv" ou un sidecar long) peut faire exceder MAX_PATH.
+    # Sans ce check on laisse passer un rename qui generera un OSError obscur
+    # au premier acces FS sur le fichier interne, ou un rename partiel.
+    _longest_inner: str = ""
+    try:
+        for _p in folder.iterdir():
+            if _p.name and len(_p.name) > len(_longest_inner):
+                _longest_inner = _p.name
+    except (OSError, PermissionError):
+        _longest_inner = ""
+    _candidate_inner_path = str(dst / _longest_inner) if _longest_inner else str(dst)
+    _path_err = check_path_length_killswitch(str(dst)) or check_path_length_killswitch(_candidate_inner_path)
     if _path_err is not None:
         log("WARN", _path_err)
         try:
