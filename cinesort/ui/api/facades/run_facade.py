@@ -67,14 +67,20 @@ def _validate_passive(model_cls: Any, payload: Any, *, endpoint: str) -> Any:
     except ValidationError as exc:
         if _pydantic_strict_enabled():
             raise ValueError(f"Pydantic strict validation failed for {endpoint}: {exc}") from exc
-        logger.warning(
+        # ITER3 2026-06-08 (branche ii.b PYDANTIC SILENCIEUX) : on conserve le
+        # fallback dict pour la BACKWARD COMPAT ABSOLUE (le run ne doit JAMAIS
+        # casser sur une validation passive), mais on ELEVE le niveau de log a
+        # ERROR pour rendre l'avalage visible dans les diagnostics. Un warning
+        # passait inapercu et masquait des shapes d'entree appauvries (ex:
+        # settings sans tmdb_api_key -> TMDb silencieusement desactive).
+        logger.error(
             "[pydantic-passive] %s validation failed (flag=0, fallback dict): %s",
             endpoint,
             exc,
         )
         return payload
     except Exception as exc:  # noqa: BLE001 — defensif : ne JAMAIS casser le run.
-        logger.warning(
+        logger.error(
             "[pydantic-passive] %s unexpected error (flag=%s, fallback): %s",
             endpoint,
             _pydantic_strict_enabled(),
@@ -105,18 +111,25 @@ class RunFacade(_BaseFacade):
             return self._api._start_plan_impl(settings)
 
         # Validation passive de l'entree (settings -> StartPlanRequest).
-        # Pour ne pas casser les callers legacy qui envoient un dict plat
-        # SANS cle `library_path`, on adapte avant validation.
+        # ITER3 2026-06-08 fix racine (branche ii.b) : le schema
+        # `StartPlanRequest` exige une cle top-level `settings: PlanSettings`
+        # (cf cinesort/ui/api/schemas/run.py L56). Le caller REST passe
+        # directement le dict `settings` en kwarg a `start_plan(settings=...)`,
+        # donc on doit RE-WRAPPER avant validation. L'ancienne adaptation
+        # construisait `{library_path, options}` SANS cle `settings`, ce qui
+        # faisait echouer la validation a 100% (Field required: settings) et
+        # masquait des deviations reelles via le fallback passif.
+        # Backward compat : on tolere aussi un caller qui passerait deja le
+        # wrapper `{settings: {...}}` (cas hypothetique de migration future).
         request_payload: Dict[str, Any]
-        if isinstance(settings, dict) and "library_path" in settings:
+        if isinstance(settings, dict) and "settings" in settings and isinstance(settings["settings"], dict):
+            # Caller deja conforme au wrapper StartPlanRequest.
             request_payload = settings
         else:
-            # Settings legacy : on enrobe pour ne pas faire echouer la
-            # validation passive (extra="allow" preserve tout).
-            request_payload = {
-                "library_path": (settings or {}).get("library_path", ""),
-                "options": settings,
-            }
+            # Cas nominal : `settings` est le dict plat des options de scan,
+            # on l'enrobe pour matcher le schema. extra="allow" sur PlanSettings
+            # preserve toutes les cles legacy (tmdb_api_key, tmdb_enabled, ...).
+            request_payload = {"settings": settings if isinstance(settings, dict) else {}}
         _ = _validate_passive(StartPlanRequest, request_payload, endpoint="start_plan.request")
 
         # Appel REEL (memoire utilisateur : endpoint REEL = start_plan).
