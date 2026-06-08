@@ -25,10 +25,46 @@ Marqueurs :
 
 AUCUNE PUBLICATION. AUCUN FIX SOURCE. Scrubbe les cles/secrets.
 
+================================================================================
+GATE FRAICHEUR ETAT (etape 5 diag 2026-06-08) — `--fresh`
+================================================================================
+
+Le diag DIAG_OBSERVE_FRESHNESS_2026-06-08.md a demontre que les mesures observe.py
+peuvent etre polluees par 3 sources de staleness :
+
+    H1 staleness EXE pre-fix
+        => `dist/CineSort.exe` peut etre anterieur au code source courant
+        (verifie 2026-06-08 : EXE 11:56 vs fix ii.b commit `7df3af3e`).
+    H2 staleness DB / runs derives
+        => `%LOCALAPPDATA%\\CineSort\\db\\cinesort.sqlite` + `runs\\tri_films_*`
+        accumulent un etat residuel.
+    H4 staleness WebView2 userdata
+        => `%LOCALAPPDATA%\\CineSort\\webview\\EBWebView` conserve
+        sessionStorage / localStorage / Cache HTTP / cookies.
+
+Le flag `--fresh` declenche AVANT le lancement de l'app :
+    a. force mode `python app.py --dev` (jamais l'EXE pre-fix) ;
+    b. reset etat derive scope test_library (DB + runs/tri_films_*),
+       protege les donnees utilisateur reelles (`\\\\OMV\\Media` etc.) ;
+    c. purge WebView2 userdata (`webview/EBWebView` du LOCALAPPDATA cible).
+
+Le flag n'a JAMAIS d'effet sur :
+    - settings.json (etat operateur, garde la cle TMDb, le token REST, ...) ;
+    - omdb_cache.json / tmdb_cache.json (caches partages indexes par titre) ;
+    - les donnees utilisateur reelles hors scope test_library.
+
+Protocole complet : `docs/internal/observe_protocol.md`.
+
+Mode manuel : sans `--fresh`, executer les 3 pre-etapes a la main (voir
+observe_protocol.md section "Procedure GATE manuelle").
+
+================================================================================
+
 Usage :
     python scripts/observe.py --library test_library --modes dashboard
     python scripts/observe.py --library test_library --modes dashboard,desktop
     python scripts/observe.py --output docs/internal/observe/2026-06-08_T1
+    python scripts/observe.py --library test_library --fresh   # gate H1+H2+H4
 """
 
 from __future__ import annotations
@@ -129,9 +165,21 @@ def _detect_app_command(prefer_exe: bool = True) -> tuple[list[str], str]:
     """Retourne (cmd, mode_label).
 
     [HYPOTHESE] prefere EXE existant, sinon `python app.py --dev`.
+
+    [HARNESS DIAG 2026-06-08 etape 2a] Force temporairement `python app.py --dev`
+    car le dist/CineSort.exe (date 2026-06-08 11:56) est anterieur au fix ii.b
+    (commit 7df3af3e). Sans ce switch, observe.py mesure un binaire pre-fix et
+    masque l'effet de la correction. A retirer apres rebuild EXE et fin du
+    diag observe-freshness. Branche: loop/correction-2026-06.
     """
-    if prefer_exe and DIST_EXE.is_file():
-        return ([str(DIST_EXE)], "exe")
+    # [HARNESS DIAG] Bypass force mode dev. Variables d'env :
+    #   - CINESORT_OBSERVE_FORCE_DEV=1 force python app.py --dev (gate freshness).
+    #   - CINESORT_OBSERVE_USE_EXE=1 restaure le comportement EXE-prefere.
+    if os.environ.get("CINESORT_OBSERVE_FORCE_DEV") == "1":
+        return ([sys.executable, str(APP_PY), "--dev"], "dev")
+    if os.environ.get("CINESORT_OBSERVE_USE_EXE") == "1":
+        if prefer_exe and DIST_EXE.is_file():
+            return ([str(DIST_EXE)], "exe")
     return ([sys.executable, str(APP_PY), "--dev"], "dev")
 
 
@@ -144,6 +192,326 @@ def _make_state_dir_isolated(out_dir: Path) -> Path:
     state = out_dir / "_state"
     state.mkdir(parents=True, exist_ok=True)
     return state
+
+
+# ---------------------------------------------------------------------------
+# GATE FRAICHEUR (etape 5 verrouillage piege) [OPERATIONNEL]
+# ---------------------------------------------------------------------------
+#
+# Pre-etapes appliquees automatiquement avec --fresh. Chaque fonction est
+# IDEMPOTENTE et NE TOUCHE PAS aux donnees utilisateur reelles : elle agit
+# uniquement sur le LOCALAPPDATA cible (par defaut le state isole observe.py,
+# ou %LOCALAPPDATA% si --use-local-state est fourni).
+
+
+def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
+    """Supprime `<LOCALAPPDATA>\\CineSort\\webview\\` (cache WebView2 evergreen).
+
+    Idempotent : si le dossier n'existe pas, retourne ok=True purged=False.
+    Ne touche PAS aux autres dossiers (db, runs, logs, settings.json).
+
+    [HARNESS DIAG 2026-06-08 etape 2c+5] traite H4 staleness userdata.
+    """
+    target = localappdata / "CineSort" / "webview"
+    result: dict[str, Any] = {
+        "ok": True,
+        "target": str(target),
+        "purged": False,
+        "bytes_freed": 0,
+    }
+    try:
+        if not target.exists():
+            result["note"] = "absent (rien a purger)"
+            return result
+        # Mesure taille avant.
+        total = 0
+        try:
+            for p in target.rglob("*"):
+                if p.is_file():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        result["bytes_freed"] = total
+        # Best effort kill des process WebView2 lies (silencieux).
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "msedgewebview2.exe"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+        # Suppression recursive.
+        import shutil
+        shutil.rmtree(target, ignore_errors=True)
+        result["purged"] = not target.exists()
+        if not result["purged"]:
+            result["ok"] = False
+            result["error"] = "purge incomplete (handles ouverts ?)"
+    except Exception as exc:
+        result["ok"] = False
+        result["error"] = scrub(str(exc))
+    return result
+
+
+def _reset_test_library_state(
+    localappdata: Path,
+    library: Path | None,
+) -> dict[str, Any]:
+    """Reset etat derive scope test_library.
+
+    Cible :
+        - runs `tri_films_*` qui referencent test_library
+        - lignes DB SQLite (runs/quality_reports/probe_cache/...) liees
+
+    PROTEGE :
+        - donnees utilisateur reelles (\\\\OMV\\Media, etc.) preservees ;
+        - settings.json / omdb_cache.json / tmdb_cache.json non touches ;
+        - backup `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` cree avant tout DELETE.
+
+    [HARNESS DIAG 2026-06-08 etape 2b+5] traite H2 staleness DB/runs derives.
+
+    Si la DB n'existe pas (premier run, isolation propre) -> no-op ok=True.
+    Si la library n'est pas test_library (ou non resolvable) -> skip reset DB,
+    purge seulement les runs orphelins eventuels.
+    """
+    result: dict[str, Any] = {
+        "ok": True,
+        "scope": str(library) if library else None,
+        "runs_deleted": 0,
+        "db_rows_deleted": {},
+        "backup": None,
+        "skipped_reasons": [],
+    }
+    db_path = localappdata / "CineSort" / "db" / "cinesort.sqlite"
+    runs_dir = localappdata / "CineSort" / "runs"
+
+    if not db_path.is_file() and not runs_dir.is_dir():
+        result["skipped_reasons"].append("etat derive absent (premier run)")
+        return result
+
+    # Resolution scope : seul un chemin contenant 'test_library' est reset.
+    scope_marker: str | None = None
+    if library is not None:
+        try:
+            lib_abs = library.resolve()
+            if "test_library" in str(lib_abs).lower():
+                scope_marker = str(lib_abs)
+            else:
+                result["skipped_reasons"].append(
+                    "library hors scope test_library, donnees utilisateur PROTEGEES"
+                )
+        except OSError as exc:
+            result["skipped_reasons"].append(f"library non resolvable: {exc}")
+
+    # Etape DB.
+    if db_path.is_file() and scope_marker:
+        try:
+            import sqlite3
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup = db_path.with_suffix(f".sqlite.bak_BEFORE_FRESH_{ts}")
+            import shutil
+            shutil.copy2(db_path, backup)
+            result["backup"] = str(backup)
+            conn = sqlite3.connect(str(db_path))
+            try:
+                cur = conn.cursor()
+                # 1. Identifier les run_ids lies a test_library
+                # (run.root LIKE OU plan.jsonl evoque le scope).
+                cur.execute(
+                    "SELECT run_id FROM runs WHERE LOWER(root) LIKE ?",
+                    (f"%test_library%",),
+                )
+                run_ids = [r[0] for r in cur.fetchall()]
+                deleted: dict[str, int] = {}
+                if run_ids:
+                    placeholders = ",".join("?" for _ in run_ids)
+                    # Inventorier tables avec colonne run_id.
+                    cur.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                    tables = [r[0] for r in cur.fetchall()]
+                    for tbl in tables:
+                        try:
+                            cur.execute(f"PRAGMA table_info({tbl})")
+                            cols = [c[1] for c in cur.fetchall()]
+                            if "run_id" in cols:
+                                cur.execute(
+                                    f"DELETE FROM {tbl} WHERE run_id IN ({placeholders})",
+                                    run_ids,
+                                )
+                                if cur.rowcount > 0:
+                                    deleted[tbl] = cur.rowcount
+                        except sqlite3.Error:
+                            continue
+                # probe_cache : DELETE par path LIKE
+                try:
+                    cur.execute(
+                        "DELETE FROM probe_cache WHERE LOWER(path) LIKE ?",
+                        (f"%test_library%",),
+                    )
+                    if cur.rowcount > 0:
+                        deleted["probe_cache_by_path"] = cur.rowcount
+                except sqlite3.Error:
+                    pass
+                conn.commit()
+                result["db_rows_deleted"] = deleted
+                result["run_ids_scope"] = run_ids
+            finally:
+                conn.close()
+        except Exception as exc:
+            result["ok"] = False
+            result["error_db"] = scrub(str(exc))
+
+    # Etape runs/.
+    if runs_dir.is_dir() and scope_marker:
+        try:
+            import shutil
+            deleted_runs = 0
+            for run_dir in runs_dir.glob("tri_films_*"):
+                if not run_dir.is_dir():
+                    continue
+                # Detecter les runs lies a test_library via plan.jsonl ou ui_log.txt.
+                marker_found = False
+                for marker_file in ("plan.jsonl", "ui_log.txt", "summary.txt"):
+                    f = run_dir / marker_file
+                    if not f.is_file():
+                        continue
+                    try:
+                        # Lecture economique : 64 KB suffisent pour reperer le marker.
+                        with open(f, "rb") as fh:
+                            chunk = fh.read(64 * 1024)
+                        if b"test_library" in chunk.lower():
+                            marker_found = True
+                            break
+                    except OSError:
+                        continue
+                if marker_found:
+                    try:
+                        shutil.rmtree(run_dir, ignore_errors=True)
+                        if not run_dir.exists():
+                            deleted_runs += 1
+                    except OSError:
+                        pass
+            result["runs_deleted"] = deleted_runs
+        except Exception as exc:
+            result["ok"] = False
+            result["error_runs"] = scrub(str(exc))
+
+    return result
+
+
+def _rebuild_exe_if_needed() -> dict[str, Any]:
+    """No-op informatif : signale juste si l'EXE est anterieur au HEAD git.
+
+    On NE rebuilde PAS automatiquement (15 min, lock release).
+    En mode --fresh on force `python app.py --dev` (cf. _detect_app_command +
+    CINESORT_OBSERVE_FORCE_DEV=1) ; ce helper sert uniquement de trace au summary.
+
+    [HARNESS DIAG 2026-06-08 etape 2a+5] traite H1 staleness EXE pre-fix.
+    """
+    result: dict[str, Any] = {
+        "ok": True,
+        "exe_present": DIST_EXE.is_file(),
+        "exe_mtime": None,
+        "head_commit_ts": None,
+        "is_stale": None,
+        "action": "force_dev_mode",
+    }
+    if DIST_EXE.is_file():
+        try:
+            result["exe_mtime"] = datetime.fromtimestamp(
+                DIST_EXE.stat().st_mtime
+            ).isoformat(timespec="seconds")
+        except OSError:
+            pass
+    try:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%cI"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if out.returncode == 0:
+            result["head_commit_ts"] = out.stdout.strip()
+            if result["exe_mtime"] and result["head_commit_ts"]:
+                # Comparaison ISO lexicographique suffit.
+                result["is_stale"] = result["exe_mtime"] < result["head_commit_ts"]
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return result
+
+
+def run_freshness_gate(
+    out_dir: Path,
+    library: Path | None,
+    use_local_state: bool,
+) -> dict[str, Any]:
+    """Orchestre les 3 pre-etapes freshness avant lancement observe.
+
+    [OPERATIONNEL] s'execute si l'utilisateur a fourni `--fresh`.
+
+    Returns :
+        gate_report dict serialise dans <out_dir>/freshness_gate.json.
+    """
+    if use_local_state:
+        # On opere sur le LOCALAPPDATA reel de l'utilisateur.
+        local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+        scope_note = "LOCALAPPDATA reel (--use-local-state)"
+    else:
+        # On opere sur le state isole d'observe.py (cree par _make_state_dir_isolated
+        # plus tard ; ici on agit en pre-bootstrap, donc cible "_state").
+        local_appdata = out_dir / "_state"
+        local_appdata.mkdir(parents=True, exist_ok=True)
+        scope_note = "state isole observe.py (_state)"
+
+    report: dict[str, Any] = {
+        "ok": True,
+        "scope_note": scope_note,
+        "localappdata_target": str(local_appdata),
+        "library": str(library) if library else None,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    print(
+        f"[observe.fresh] [OPERATIONNEL] gate localappdata={local_appdata} "
+        f"library={library}",
+        file=sys.stderr,
+    )
+
+    # Pre-etape A : EXE staleness check (informatif + force dev mode plus tard).
+    report["h1_exe"] = _rebuild_exe_if_needed()
+    # Pre-etape B : reset DB+runs scope test_library.
+    report["h2_state"] = _reset_test_library_state(local_appdata, library)
+    if not report["h2_state"].get("ok"):
+        report["ok"] = False
+    # Pre-etape C : purge WebView2 userdata.
+    report["h4_webview2"] = _purge_webview2_userdata(local_appdata)
+    if not report["h4_webview2"].get("ok"):
+        report["ok"] = False
+
+    report["ended_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        (out_dir / "freshness_gate.json").write_text(
+            json.dumps(report, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"[observe.fresh] WARN ecriture gate report echouee: {exc}", file=sys.stderr)
+
+    print(
+        f"[observe.fresh] [OPERATIONNEL] gate ok={report['ok']} "
+        f"runs_del={report['h2_state'].get('runs_deleted')} "
+        f"db_del={sum(report['h2_state'].get('db_rows_deleted', {}).values())} "
+        f"webview_purged={report['h4_webview2'].get('purged')}",
+        file=sys.stderr,
+    )
+    return report
 
 
 def _scrub_log_tail(log_path: Path, n_lines: int = 50) -> str:
@@ -741,6 +1109,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Ne lance pas l'app, ecrit juste la structure + un manifeste.",
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "Active le GATE FRAICHEUR avant lancement : "
+            "(a) force python app.py --dev, "
+            "(b) reset DB+runs scope test_library (backup auto), "
+            "(c) purge WebView2 userdata. "
+            "Voir docs/internal/observe_protocol.md."
+        ),
+    )
+    parser.add_argument(
+        "--use-local-state",
+        action="store_true",
+        help=(
+            "Avec --fresh : agit sur %%LOCALAPPDATA%%\\CineSort reel "
+            "au lieu du state isole observe.py. "
+            "ATTENTION : ne touche que le scope test_library, mais les "
+            "donnees utilisateur reelles sont preservees par defaut."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -769,9 +1158,27 @@ def main(argv: list[str] | None = None) -> int:
         "library": str(args.library) if args.library else None,
         "cdp_port": args.cdp_port,
         "dry_run": bool(args.dry_run),
+        "fresh": bool(args.fresh),
+        "use_local_state": bool(args.use_local_state),
     }
 
-    summary: dict[str, Any] = {"manifest": manifest, "dashboard": None, "desktop": None}
+    summary: dict[str, Any] = {
+        "manifest": manifest,
+        "dashboard": None,
+        "desktop": None,
+        "freshness_gate": None,
+    }
+
+    # GATE FRAICHEUR : pre-etapes avant lancement (etape 5 du diag).
+    if args.fresh and not args.dry_run:
+        gate_report = run_freshness_gate(
+            out_dir=out_dir,
+            library=args.library,
+            use_local_state=args.use_local_state,
+        )
+        summary["freshness_gate"] = gate_report
+        # Force le mode dev dans l'env du subprocess app (cf. _detect_app_command).
+        os.environ["CINESORT_OBSERVE_FORCE_DEV"] = "1"
 
     if args.dry_run:
         (out_dir / "manifest.json").write_text(
