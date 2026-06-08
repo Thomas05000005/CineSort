@@ -1,0 +1,50 @@
+2026-06-08 12:59:42,122 [INFO] cinesort.infra.rest_server [run=- req=ac34e0ad] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-08 12:59:42,520 [INFO] cinesort.infra.rest_server [run=- req=97a3bf79] REST POST /api/run/get_dashboard -> 200 (1093ms)
+2026-06-08 12:59:42,528 [INFO] cinesort.infra.rest_server [run=- req=cdaf6dda] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,562 [INFO] cinesort.infra.rest_server [run=- req=cdaf6dda] REST POST /api/run/get_status -> 200 (32ms)
+2026-06-08 12:59:42,795 [INFO] cinesort.infra.rest_server [run=- req=0fc50ee4] REST POST /api/run/get_global_stats -> 200 (1359ms)
+2026-06-08 12:59:42,803 [INFO] cinesort.infra.rest_server [run=- req=ab3ac1ac] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,804 [INFO] cinesort.infra.rest_server [run=- req=b3889f3b] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,804 [INFO] cinesort.infra.rest_server [run=- req=229b5c57] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,806 [INFO] cinesort.ui.api [run=- req=b3889f3b] api err [validation]: URL du serveur Jellyfin vide.
+2026-06-08 12:59:42,807 [INFO] cinesort.infra.rest_server [run=- req=806da0d1] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,807 [INFO] cinesort.infra.rest_server [run=- req=b3889f3b] REST POST /api/integrations/test_jellyfin_connection -> 200 (0ms)
+2026-06-08 12:59:42,828 [INFO] cinesort.infra.rest_server [run=- req=806da0d1] REST POST /api/runtime/is_demo_mode_active -> 200 (15ms)
+2026-06-08 12:59:42,869 [INFO] cinesort.infra.rest_server [run=- req=889b376f] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,871 [INFO] cinesort.infra.rest_server [run=- req=889b376f] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-08 12:59:42,878 [INFO] cinesort.infra.rest_server [run=- req=f8f9231c] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:42,991 [INFO] cinesort.infra.rest_server [run=- req=f8f9231c] REST POST /api/runtime/get_probe_tools_status -> 200 (125ms)
+2026-06-08 12:59:43,053 [INFO] cinesort.infra.rest_server [run=- req=229b5c57] REST POST /api/integrations/test_omdb_connection -> 200 (250ms)
+2026-06-08 12:59:43,254 [INFO] cinesort.infra.rest_server [run=- req=ab3ac1ac] REST POST /api/integrations/test_tmdb_key -> 200 (453ms)
+2026-06-08 12:59:45,125 [INFO] cinesort.infra.rest_server [run=- req=a03adfb6] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:45,125 [INFO] cinesort.infra.rest_server [run=- req=a03adfb6] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-08 12:59:46,333 [INFO] cinesort.infra.rest_server [run=- req=603a4267] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:46,338 [INFO] cinesort.infra.rest_server [run=- req=603a4267] REST POST /api/settings/get_settings -> 200 (0ms)
+2026-06-08 12:59:46,343 [INFO] cinesort.infra.rest_server [run=- req=329a6d13] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:46,343 [INFO] cinesort.infra.rest_server [run=- req=329a6d13] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-08 12:59:46,349 [INFO] cinesort.infra.rest_server [run=- req=8bc84c18] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:46,352 [INFO] cinesort.infra.rest_server [run=- req=8bc84c18] REST POST /api/runtime/get_probe_tools_status -> 200 (0ms)
+2026-06-08 12:59:46,427 [INFO] cinesort.infra.rest_server [run=- req=4f327666] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:46,674 [INFO] cinesort.infra.rest_server [run=- req=4f327666] REST POST /api/run/get_dashboard -> 200 (234ms)
+2026-06-08 12:59:46,683 [INFO] cinesort.infra.rest_server [run=- req=6aae35c2] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 12:59:46,724 [INFO] cinesort.infra.rest_server [run=- req=6aae35c2] REST POST /api/run/get_status -> 200 (46ms)
+2026-06-08 12:59:58,270 [INFO] cinesort.infra.rest_server [run=- req=-] REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+2026-06-08 12:59:58,286 [INFO] cinesort.tmdb.purge [run=- req=-] V5-03 : purge cache TMDb (TTL 42j) — checked=0 purged=0 preserved_legacy=0
+2026-06-08 12:59:58,286 [INFO] cinesort.app.retention_cleanup [run=- req=-] retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+2026-06-08 12:59:58,286 [INFO] cinesort.app.quarantine_ttl [run=- req=-] quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+2026-06-08 12:59:58,286 [INFO] cinesort.infra.rest_server [run=- req=-] REST API started on http://127.0.0.1:8642 (167 endpoints)
+2026-06-08 12:59:58,286 [INFO] cinesort.infra.network_utils [run=- req=-] network: IP locale detectee = 192.168.27.172 (UDP)
+2026-06-08 12:59:58,286 [INFO] cinesort.infra.rest_server [run=- req=-] REST: dashboard accessible a http://192.168.27.172:8642/dashboard/
+2026-06-08 13:19:44,370 [INFO] cinesort.infra.rest_server [run=- req=-] REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+2026-06-08 13:19:44,372 [INFO] cinesort.tmdb.purge [run=- req=-] V5-03 : purge cache TMDb (TTL 42j) — checked=0 purged=0 preserved_legacy=0
+2026-06-08 13:19:44,372 [INFO] cinesort.app.retention_cleanup [run=- req=-] retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+2026-06-08 13:19:44,373 [INFO] cinesort.app.quarantine_ttl [run=- req=-] quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+2026-06-08 13:19:44,382 [INFO] cinesort.infra.rest_server [run=- req=-] REST API started on http://127.0.0.1:54913 (167 endpoints)
+2026-06-08 13:19:44,382 [INFO] cinesort.infra.network_utils [run=- req=-] network: IP locale detectee = 192.168.27.172 (UDP)
+2026-06-08 13:19:44,383 [INFO] cinesort.infra.rest_server [run=- req=-] REST: dashboard accessible a http://192.168.27.172:54913/dashboard/
+2026-06-08 13:20:44,376 [WARNING] cinesort.app.quarantine_ttl [run=- req=-] purge_quarantine cron: reponse inattendue ttl=30j resp={'ok': False, 'error': "build_cfg_failed: build_cfg_from_settings() missing 4 required keyword-only arguments: 'root', 'default_collection_folder_name', 'default_empty_folders_folder_name', and 'default_residual_cleanup_folder_name'"}
+2026-06-08 13:20:44,735 [INFO] cinesort.infra.db.backup [run=- req=-] backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260608-112044-505390Z.pre_migration.bak (93028.0 KB)
+2026-06-08 13:20:44,744 [INFO] cinesort.infra.db.backup [run=- req=-] rotate_backups: supprime cinesort.20260608-111555-591827Z.pre_migration.bak
+2026-06-08 13:20:44,767 [INFO] cinesort.app.apply_batches_reconciliation [run=- req=-] reconcile_pending_batches: no pending batches to reconcile
+2026-06-08 13:20:44,784 [INFO] cinesort.ui.api.history_support [run=- req=-] cleanup_old_runs: deleted 0 runs older than 90 days
+2026-06-08 13:20:44,784 [INFO] cinesort.app.retention_cleanup [run=- req=-] cleanup_old_runs: deleted 0 runs older than 90 days

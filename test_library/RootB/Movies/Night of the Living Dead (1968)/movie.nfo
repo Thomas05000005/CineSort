@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>Night of the Living Dead</title>
+  <year>1968</year>
+  <imdbid>tt0063350</imdbid>
+  <uniqueid type="imdb" default="true">tt0063350</uniqueid>
+</movie>

@@ -1,0 +1,50 @@
+2026-06-08 20:03:06,064 [INFO] cinesort.infra.rest_server [run=- req=b87ac7a0] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:06,953 [INFO] cinesort.infra.rest_server [run=- req=db16f91c] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:07,171 [INFO] cinesort.infra.rest_server [run=- req=db16f91c] REST POST /api/run/get_dashboard -> 200 (219ms)
+2026-06-08 20:03:07,176 [INFO] cinesort.infra.rest_server [run=- req=c6c717c2] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:07,177 [INFO] cinesort.infra.rest_server [run=- req=c6c717c2] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:08,075 [INFO] cinesort.infra.rest_server [run=- req=db91544a] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:08,078 [INFO] cinesort.infra.rest_server [run=- req=db91544a] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:10,105 [INFO] cinesort.infra.rest_server [run=- req=16b25a84] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:10,106 [INFO] cinesort.infra.rest_server [run=- req=16b25a84] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:11,949 [INFO] cinesort.infra.rest_server [run=- req=dd5b9a0d] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:12,130 [INFO] cinesort.infra.rest_server [run=- req=53170c4c] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:12,133 [INFO] cinesort.infra.rest_server [run=- req=53170c4c] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:12,171 [INFO] cinesort.infra.rest_server [run=- req=dd5b9a0d] REST POST /api/run/get_dashboard -> 200 (219ms)
+2026-06-08 20:03:12,176 [INFO] cinesort.infra.rest_server [run=- req=d688304c] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:12,177 [INFO] cinesort.infra.rest_server [run=- req=d688304c] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:13,073 [INFO] cinesort.infra.rest_server [run=- req=305d4d97] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:13,080 [INFO] cinesort.infra.rest_server [run=- req=c7f2d0d2] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:13,082 [INFO] cinesort.infra.rest_server [run=- req=c7f2d0d2] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-08 20:03:13,115 [INFO] cinesort.infra.rest_server [run=- req=305d4d97] REST POST /api/run/get_sidebar_counters -> 200 (31ms)
+2026-06-08 20:03:14,154 [INFO] cinesort.infra.rest_server [run=- req=c0fe25ac] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:14,154 [INFO] cinesort.infra.rest_server [run=- req=c0fe25ac] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:16,168 [INFO] cinesort.infra.rest_server [run=- req=5b4130b8] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:16,173 [INFO] cinesort.infra.rest_server [run=- req=5b4130b8] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:16,949 [INFO] cinesort.infra.rest_server [run=- req=5ee6fe29] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:17,185 [INFO] cinesort.infra.rest_server [run=- req=5ee6fe29] REST POST /api/run/get_dashboard -> 200 (234ms)
+2026-06-08 20:03:17,190 [INFO] cinesort.infra.rest_server [run=- req=01011cd6] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:17,192 [INFO] cinesort.infra.rest_server [run=- req=01011cd6] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:18,194 [INFO] cinesort.infra.rest_server [run=- req=3b9abfd1] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:18,196 [INFO] cinesort.infra.rest_server [run=- req=3b9abfd1] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:20,214 [INFO] cinesort.infra.rest_server [run=- req=fabe7f98] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:20,217 [INFO] cinesort.infra.rest_server [run=- req=fabe7f98] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:21,949 [INFO] cinesort.infra.rest_server [run=- req=2abd9aa3] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:22,202 [INFO] cinesort.infra.rest_server [run=- req=2abd9aa3] REST POST /api/run/get_dashboard -> 200 (250ms)
+2026-06-08 20:03:22,207 [INFO] cinesort.infra.rest_server [run=- req=a7421c53] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:22,209 [INFO] cinesort.infra.rest_server [run=- req=a7421c53] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:22,244 [INFO] cinesort.infra.rest_server [run=- req=3bbc9f70] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:22,247 [INFO] cinesort.infra.rest_server [run=- req=3bbc9f70] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-08 20:03:24,275 [INFO] cinesort.infra.rest_server [run=- req=15167230] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:24,275 [INFO] cinesort.infra.rest_server [run=- req=15167230] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:26,291 [INFO] cinesort.infra.rest_server [run=- req=4144239d] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:26,292 [INFO] cinesort.infra.rest_server [run=- req=4144239d] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-08 20:03:26,946 [INFO] cinesort.infra.rest_server [run=- req=11ce8288] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:27,091 [INFO] cinesort.infra.rest_server [run=- req=11ce8288] REST POST /api/run/get_dashboard -> 200 (157ms)
+2026-06-08 20:03:27,094 [INFO] cinesort.infra.rest_server [run=- req=d4112c3a] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:27,095 [INFO] cinesort.infra.rest_server [run=- req=d4112c3a] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:28,309 [INFO] cinesort.infra.rest_server [run=- req=c1259461] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:28,309 [INFO] cinesort.infra.rest_server [run=- req=c1259461] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-08 20:03:30,336 [INFO] cinesort.infra.rest_server [run=- req=78794022] Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+2026-06-08 20:03:30,338 [INFO] cinesort.infra.rest_server [run=- req=78794022] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-08 20:03:32,356 [INFO] cinesort.infra.rest_server [run=- req=-] REST API stopped.
