@@ -718,7 +718,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                 "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "font-src 'self'; "
-                "img-src 'self' data:; "
+                "img-src 'self' data: https://image.tmdb.org; "
                 "connect-src 'self'; "
                 "frame-ancestors 'none'; "
                 "base-uri 'self'",
@@ -732,7 +732,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                 "script-src 'self'; "
                 "style-src 'self'; "
                 "font-src 'self'; "
-                "img-src 'self' data:; "
+                "img-src 'self' data: https://image.tmdb.org; "
                 "connect-src 'self'; "
                 "frame-ancestors 'none'; "
                 "base-uri 'self'",
