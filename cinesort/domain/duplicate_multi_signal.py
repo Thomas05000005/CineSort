@@ -25,6 +25,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy as _normalize_for_fuzzy
+
 logger = logging.getLogger(__name__)
 
 # Seuils Phase B (fuzzy title)
@@ -99,16 +101,15 @@ class MultiSignalResult:
 
 
 def _normalize_title_for_fuzzy(title: str) -> str:
-    """Normalisation legere pour fuzzy (delegue a _fuzzy_utils si possible).
+    """Normalisation legere pour fuzzy (delegue au module domain dedie).
 
-    On fait un import lazy pour eviter un cycle si _fuzzy_utils evolue.
+    Refactor iter4b 2026-06-09: l'ancien import lazy `from cinesort.app
+    ._fuzzy_utils import normalize_for_fuzzy` violait `domain_pure`
+    (domain -> app). La fonction est maintenant rangee dans
+    `cinesort.domain._fuzzy_normalize` (pure string, sans dependance) et
+    importee top-level.
     """
-    try:
-        from cinesort.app._fuzzy_utils import normalize_for_fuzzy
-        return normalize_for_fuzzy(title)
-    except ImportError:
-        # Fallback minimal si _fuzzy_utils introuvable (defense en profondeur)
-        return (title or "").lower().strip()
+    return _normalize_for_fuzzy(title)
 
 
 def _index_token(norm_title: str) -> str:

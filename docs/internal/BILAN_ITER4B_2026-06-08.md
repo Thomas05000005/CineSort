@@ -132,10 +132,134 @@ Pour V1 (PREEXISTANTE, mecanique), trois options par ordre de preference:
 - Violations PREEXISTANTES exigeant choix design fondamental: **0** (V1 est mecanique, corrigible par deplacement)
 - **STOP REMONTE non declenche.** Peut continuer vers etape 2 (refactor de forme).
 
-## 2. Refactor architecture (forme) [WIP]
-_En cours._
+## 2. Refactor architecture (forme) [OPERATIONNEL]
 
-## GATE Archi [WIP]
+### 2.1 Strategie retenue (FIGE)
+
+Option A retenue (cf 1.6) pour V1: deplacement mecanique de la fonction
+`normalize_for_fuzzy` (pure string normalization) depuis `cinesort.app._fuzzy_utils`
+vers `cinesort.domain._fuzzy_normalize`. Re-export depuis `app._fuzzy_utils`
+pour preserver backward compat absolue. Aucun choix design fondamental.
+
+### 2.2 Diff applique (FIGE)
+
+| Fichier | Action |
+|---|---|
+| `cinesort/domain/_fuzzy_normalize.py` | **CREE** : nouveau module domain pur contenant `normalize_for_fuzzy` (lowercase + unicodedata NFD + strip ponctuation + collapse whitespace). Aucune dependance app/infra/ui. |
+| `cinesort/app/_fuzzy_utils.py` | **MODIFIE** : import top-level `from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy` (re-export). `unicodedata` retire des imports. Ajout `__all__` explicite pour figer l'API publique (backward compat). |
+| `cinesort/domain/duplicate_multi_signal.py` | **MODIFIE** : ajout import top-level `from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy as _normalize_for_fuzzy`. La fonction interne `_normalize_title_for_fuzzy` ne contient plus de try/except lazy ni de fallback; elle delegue directement. |
+
+Note: le fallback `(title or "").lower().strip()` est supprime car (a) il avait
+une semantique differente du vrai normalize (pas de strip accents ni de ponctuation),
+ce qui constituait un piege silencieux; (b) il etait dead-code en pratique
+puisque `cinesort.domain._fuzzy_normalize` est maintenant in-tree et ne peut
+plus disparaitre. Defense en profondeur deplacee au niveau de l'importeur:
+si le module domain disparait, `ImportError` au chargement du module
+`duplicate_multi_signal` (fail-fast), pas un silencieux mauvais matching.
+
+### 2.3 Verifications (OPERATIONNEL)
+
+| Check | Commande | Resultat |
+|---|---|---|
+| py_compile (3 fichiers) | `python -m py_compile cinesort/domain/_fuzzy_normalize.py cinesort/domain/duplicate_multi_signal.py cinesort/app/_fuzzy_utils.py` | `PYCOMPILE_OK` |
+| Import basique paquet | `python -c "import cinesort"` | `IMPORT_OK` |
+| Backward compat re-export | `from cinesort.app._fuzzy_utils import normalize_for_fuzzy` retourne meme objet que `from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy` | `BACKWARD_COMPAT_OK` (identite verifiee via `is`) |
+| Comportement `_normalize_title_for_fuzzy` | input `'Le Seigneur des Anneaux: La Communauté'` -> `'le seigneur des anneaux la communaute'` (lowercase + strip accents + strip `:`) ; input `''` -> `''` ; input `None` -> `''` | `NORMALIZE_BEHAVIOR_OK` |
+| Tests fuzzy + duplicate_multi_signal | `python -m pytest tests/ -k "fuzzy or duplicate_multi_signal or _fuzzy_utils" -q --timeout=60` | **32 passed, 74 skipped, 0 failed** |
+| **lint-imports** | `lint-imports` (cwd `C:/Users/blanc/projects/CineSort`) | **3 kept, 0 broken** (Domain pure KEPT, Infra bounded KEPT, App bounded KEPT) |
+
+### 2.4 Acquis posters preserves (FIGE)
+
+Aucun fichier touche par ce refactor n'intersecte le perimetre des acquis
+comportement posters / CSP / harness :
+
+- `a37852aa` (fix posters racine C) : touche `cinesort/ui/api/run_facade.py`, `cinesort/app/plan_support.py`, NON touches ici.
+- `242cf339` (CSP img-src) : touche `cinesort/infra/rest_server.py` + templates web, NON touches ici.
+- `7df3af3e` (fix ii.b) : touche modules apply, NON touches ici.
+- `6193e02b` (harness frais) : NON touche.
+- `06f74ad` (#15) : NON touche.
+
+Les 3 fichiers modifies (`domain/_fuzzy_normalize.py` cree, `app/_fuzzy_utils.py`,
+`domain/duplicate_multi_signal.py`) sont exclusivement dans le perimetre
+"detection de doublons par fuzzy title" (Phase B du pipeline anti-dup) et
+n'ont aucun chemin d'execution vers le pipeline TMDb posters / CSP /
+fetching d'images. Le comportement de detection fuzzy lui-meme est strictement
+identique (meme fonction `normalize_for_fuzzy`, meme objet Python via re-export).
+
+### 2.5 Bilan etape 2 (OPERATIONNEL)
+
+- Violations PREEXISTANTES corrigees: **1/1** (V1 fermee par deplacement mecanique).
+- Violations NOUVELLES introduites par ce refactor: **0**.
+- Tests `fuzzy/duplicate_multi_signal/_fuzzy_utils`: **32/32 verts**.
+- `lint-imports`: **VERT** (3 contracts KEPT, 0 broken).
+- Backward compat: **PRESERVEE** (re-export verifie par identite Python).
+- Comportement posters: **INCHANGE** (perimetre disjoint, fichiers non touches).
+- Forme uniquement, pas de choix design, pas de changement de comportement.
+
+**Etape 2 cloturee.** Pret pour GATE Archi.
+
+## GATE Archi [PASS - VERT]
+
+_Mesure fraiche : 2026-06-09._
+
+### Commande executee
+
+```
+cd C:/Users/blanc/projects/CineSort
+lint-imports
+```
+
+### Sortie
+
+```
+=============
+Import Linter
+=============
+
+
+---------
+Contracts
+---------
+
+Analyzed 225 files, 564 dependencies.
+-------------------------------------
+
+Domain ne doit importer ni app, ni infra, ni ui KEPT
+Infra ne doit importer ni app, ni ui KEPT
+App ne doit pas importer ui KEPT
+
+Contracts: 3 kept, 0 broken.
+```
+
+### Verification des 3 contrats
+
+1. **domain_pure** : `Domain ne doit importer ni app, ni infra, ni ui` -> **KEPT**
+   - domain ne depend de rien d'au-dessus (couche feuille).
+2. **infra_bounded** : `Infra ne doit importer ni app, ni ui` -> **KEPT**
+   - infra n'importe pas app/ui.
+3. **app_bounded** : `App ne doit pas importer ui` -> **KEPT**
+   - app n'importe pas ui.
+
+### Statistiques
+
+- 225 fichiers analyses.
+- 564 dependances inspectees.
+- **3 contracts kept, 0 broken.**
+
+### Verdict
+
+**GATE Archi : PASS (VERT).**
+
+Aucune violation residuelle. Les 3 contrats de l'architecture en couches
+(domain / infra / app / ui) sont integralement respectes apres la cloture
+de l'etape 2 (V1 fermee par deplacement mecanique de `normalize_for_fuzzy`
+vers `domain/_fuzzy_normalize.py`).
+
+Pre-requis "lint-imports VERT" pour la cloture iter4b satisfait.
+La condition d'acceptation conjointe (lint-imports VERT ET mesure fraiche
+posters OK) est partiellement remplie cote archi ; reste a confirmer la
+non-regression posters dans la section suivante.
+
 ## GATE Non-regression posters [WIP]
 
 ## 3. Solder 4 tests rouges [WIP]
