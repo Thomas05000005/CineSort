@@ -192,6 +192,23 @@ class TestComparison(unittest.TestCase):
         self.assertEqual(r.n_pairs_evaluated, 3)
         self.assertEqual(mock_dist.call_count, 3)
 
+    @patch("cinesort.domain.perceptual.lpips_compare.compute_lpips_distance_pair")
+    @patch("cinesort.domain.perceptual.lpips_compare._resolve_model_path")
+    @patch("cinesort.domain.perceptual.lpips_compare._is_ort_available", return_value=True)
+    def test_missing_pixels_skipped(self, _ort, _path, mock_dist):
+        """Issue #440 : frame sans pixels_a/b -> skip (pas de ValueError 'or []')."""
+        _path.return_value = "fake/path.onnx"
+        mock_dist.return_value = 0.1
+        aligned = [
+            {"pixels_a": [50] * 64, "pixels_b": [50] * 64, "width": 8, "height": 8},
+            {"width": 8, "height": 8},  # frame sans pixels_a/b
+            {"pixels_a": None, "pixels_b": [50] * 64, "width": 8, "height": 8},  # pa None
+            {"pixels_a": [50] * 64, "pixels_b": [50] * 64, "width": 8, "height": 8},
+        ]
+        r = compute_lpips_comparison(aligned)
+        self.assertEqual(r.n_pairs_evaluated, 2)
+        self.assertEqual(mock_dist.call_count, 2)
+
 
 # ---------------------------------------------------------------------------
 # LpipsResult dataclass

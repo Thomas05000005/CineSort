@@ -367,8 +367,13 @@ def compute_lpips_comparison(
     for frame in selected:
         w = int(frame.get("width", 0))
         h = int(frame.get("height", 0))
-        pa = frame.get("pixels_a") or []
-        pb = frame.get("pixels_b") or []
+        pa = frame.get("pixels_a")
+        pb = frame.get("pixels_b")
+        # Cf issue #440 : `or []` levait ValueError sur ndarray vide
+        # ("The truth value of an array with more than one element is ambiguous").
+        # On skip explicitement la frame quand les pixels sont absents.
+        if pa is None or pb is None:
+            continue
         pre_a = preprocess_frame_for_lpips(pa, w, h)
         pre_b = preprocess_frame_for_lpips(pb, w, h)
         if pre_a is None or pre_b is None:
