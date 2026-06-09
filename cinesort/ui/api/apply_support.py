@@ -1369,6 +1369,11 @@ def _execute_apply(
                 # le toggle OFF est silencieusement neutralise sur les apply
                 # multi-root).
                 lowercase_extensions=cfg.lowercase_extensions,
+                # ITER7 etape 3 : meme propagation pour le selecteur UI
+                # "Separateur". Sans cette ligne, le default " " ecraserait la
+                # valeur utilisateur sur les recopies multi-root (cause racine
+                # secondaire identifiee G.e pour lowercase_extensions).
+                separator=getattr(cfg, "separator", " "),
             )
         else:
             cfg_for_root = cfg

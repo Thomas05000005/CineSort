@@ -261,6 +261,18 @@ class Config:
     # True = .MKV source -> .mkv cible ; False = preservation casse source.
     lowercase_extensions: bool = True
 
+    # ITER7 etape 3 - Reglage UI "Separateur" (selecteur {".", " ", "_", "-"})
+    # Persiste par _save_section_naming (ui/api/settings_support.py L1611-1613)
+    # avec coerce-and-default (sep in {".", " ", "_", "-"} sinon ".").
+    # Approvisionne le pipeline Domain -> App via cfg.separator. Exposee comme
+    # variable opt-in `{sep}` dans le contexte template (build_naming_context),
+    # ce qui permet aux templates custom de l'utiliser sans rupture (templates
+    # existants type "{title} ({year})" ne referencent pas {sep} donc rendu
+    # strictement inchange : STOP_FORK CUSTOM TEMPLATE preserve).
+    # Default " " (espace) aligne sur le comportement historique du template
+    # "{title} ({year})" et sur le sentinel "valeur saine" du selecteur UI.
+    separator: str = " "
+
     def normalized(self) -> "Config":
         collection_name = windows_safe(str(self.collection_root_name or "_Collection")) or "_Collection"
         empty_name = windows_safe(str(self.empty_folders_folder_name or "_Vide")) or "_Vide"
@@ -305,6 +317,14 @@ class Config:
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
             lowercase_extensions=bool(self.lowercase_extensions),
+            # ITER7 etape 3 : coerce-and-default identique a _save_section_naming
+            # pour proteger les configs anciennes ou editees a la main contre une
+            # valeur invalide qui sortirait du jeu {".", " ", "_", "-"}.
+            separator=(
+                str(self.separator)
+                if str(self.separator) in {".", " ", "_", "-"}
+                else " "
+            ),
         )
 
 

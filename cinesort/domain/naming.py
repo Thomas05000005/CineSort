@@ -73,6 +73,10 @@ _KNOWN_VARS = frozenset(
         # Edition (Director's Cut, Extended, IMAX, etc.)
         "edition",
         "edition-tag",
+        # ITER7 etape 3 : variable opt-in alimentee par cfg.separator (UI).
+        # Permet aux templates custom d'utiliser le selecteur "Separateur" sans
+        # casser les templates existants qui n'y font pas reference.
+        "sep",
     }
 )
 
@@ -172,6 +176,7 @@ PREVIEW_MOCK_CONTEXT: Dict[str, str] = {
     "ep_title": "",
     "edition": "",
     "edition-tag": "",
+    "sep": " ",
 }
 
 
@@ -264,6 +269,7 @@ def build_naming_context(
     tv_episode: int = 0,
     tv_episode_title: str = "",
     edition: str = "",
+    separator: Optional[str] = None,
 ) -> Dict[str, str]:
     """Construit le dictionnaire de variables pour le template de renommage."""
     ctx: Dict[str, str] = {}
@@ -313,6 +319,17 @@ def build_naming_context(
     ed = str(edition or "").strip()
     ctx["edition"] = ed
     ctx["edition-tag"] = f"{{edition-{ed}}}" if ed else ""
+
+    # ITER7 etape 3 : variable opt-in {sep} approvisionnee depuis cfg.separator.
+    # Coerce-and-default identique a Config.normalized()/_save_section_naming.
+    # Templates existants ("{title} ({year})") ne referencent pas {sep} -> rendu
+    # strictement inchange (STOP_FORK CUSTOM TEMPLATE preserve, voir
+    # docs/internal/BILAN_ITER7_2026-06-08.md section 1.d). Cle absente ou
+    # invalide -> defaut " " (espace) aligne sur le sentinel save UI.
+    sep_value = str(separator) if separator is not None else " "
+    if sep_value not in {".", " ", "_", "-"}:
+        sep_value = " "
+    ctx["sep"] = sep_value
 
     return ctx
 

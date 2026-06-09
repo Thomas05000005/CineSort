@@ -1064,6 +1064,15 @@ def build_cfg_from_settings(
         naming_movie_template=cfg_movie_template,
         naming_tv_template=cfg_tv_template,
         lowercase_extensions=to_bool(settings.get("lowercase_extensions"), True),
+        # ITER7 etape 3 : approvisionnement separator Domain (drop silencieux
+        # historique au save). Le coerce-and-default est aussi applique cote
+        # _save_section_naming (settings_support.py:1611-1613) mais on duplique
+        # la garde ici pour resister aux settings.json edites a la main.
+        separator=(
+            str(settings.get("separator") or " ")
+            if str(settings.get("separator") or " ") in {".", " ", "_", "-"}
+            else " "
+        ),
     )
 
 

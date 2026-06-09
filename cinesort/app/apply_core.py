@@ -1696,7 +1696,15 @@ def apply_single(
         log("WARN", f"Single folder missing, skip: {folder}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
-    _naming_ctx = build_naming_context(title=title, year=year, edition=edition or "")
+    # ITER7 etape 3 : approvisionnement cfg.separator -> ctx["sep"] via
+    # build_naming_context. Templates existants {title} ({year}) inchanges,
+    # templates custom peuvent referencer {sep} (opt-in, STOP_FORK preserve).
+    _naming_ctx = build_naming_context(
+        title=title,
+        year=year,
+        edition=edition or "",
+        separator=getattr(cfg, "separator", " "),
+    )
     new_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
 
     # Si collection TMDb + collection_folder_enabled → placer dans _Collection/Saga/
@@ -1899,7 +1907,13 @@ def apply_collection_item(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED if merged_video else core_mod.SKIP_REASON_AUTRE)
         return
 
-    _naming_ctx = build_naming_context(title=title, year=year, edition=edition or "")
+    # ITER7 etape 3 : approvisionnement cfg.separator (cf. site apply_single).
+    _naming_ctx = build_naming_context(
+        title=title,
+        year=year,
+        edition=edition or "",
+        separator=getattr(cfg, "separator", " "),
+    )
     sub_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
     sub_dir = folder / sub_name
     core_mod.ensure_inside_root(cfg, sub_dir)
@@ -2008,6 +2022,7 @@ def apply_tv_episode(
     ep_title = str(row.tv_episode_title or "").strip()
 
     # Build target path: root / Série (année) / Saison NN / S01E01 - Titre.ext
+    # ITER7 etape 3 : approvisionnement cfg.separator (cf. site apply_single).
     _naming_ctx = build_naming_context(
         title=str(row.proposed_title or ""),
         year=year,
@@ -2015,6 +2030,7 @@ def apply_tv_episode(
         tv_season=season,
         tv_episode=episode,
         tv_episode_title=ep_title,
+        separator=getattr(cfg, "separator", " "),
     )
     series_folder_name = format_tv_series_folder(cfg.naming_tv_template, _naming_ctx)
     season_folder_name = f"Saison {season:02d}" if season else "Saison 00"
