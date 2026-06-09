@@ -17,6 +17,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.conversions import to_bool
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -327,6 +328,48 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
             processed += 1
             if processed % 10 == 0 or processed == total:
                 _set_job_status(job_id, progress=processed, errors=errors)
+
+        # ITER8 cluster settings — fix `perceptual_auto_on_quality` no-op silencieux.
+        # Toggle UI Parametres > "Analyse perceptuelle apres recompute qualite"
+        # etait sauvegarde par _save_section_perceptual (L1523) et expose par
+        # _build_settings_dict (perceptual_support L1433 alias `auto_on_quality`)
+        # mais ZERO lecture dans le chemin reel (_recompute_worker / run_flow_support
+        # apres recompute_all_scores). Pattern : meme contrat que perceptual_auto_on_scan
+        # fixe en 12b3721 (background, best-effort, log WARN bruyant si echec
+        # d'approvisionnement, silencieux si toggle=OFF). Lance analyze_perceptual_batch
+        # sur les row_ids du run. Pre-requis `perceptual_enabled` (false par defaut)
+        # car le moteur n'est pas operationnel sans la cle activee : WARN explicite
+        # si l'utilisateur a active l'auto sans avoir active le moteur, pour honorer
+        # le contrat ii.b (echec d'approvisionnement bruyant).
+        try:
+            settings = api.settings.get_settings().get("settings") or {}
+            auto_perc_q = to_bool(settings.get("perceptual_auto_on_quality"), True)
+            if auto_perc_q and row_ids:
+                perc_enabled = to_bool(settings.get("perceptual_enabled"), False)
+                if not perc_enabled:
+                    logger.warning(
+                        "perceptual_auto_on_quality active mais perceptual_enabled=False "
+                        "-> analyse perceptuelle skip (active aussi le moteur)."
+                    )
+                else:
+                    from cinesort.ui.api import perceptual_support
+
+                    logger.info(
+                        "recompute_worker launching auto perceptual batch (%d films)",
+                        len(row_ids),
+                    )
+                    perc_result = perceptual_support.analyze_perceptual_batch(
+                        api, run_id, row_ids, options=None
+                    )
+                    if isinstance(perc_result, dict) and perc_result.get("ok"):
+                        logger.info(
+                            "recompute_worker auto perceptual started success_count=%s",
+                            perc_result.get("success_count"),
+                        )
+                    else:
+                        logger.debug("recompute_worker auto perceptual skipped: %s", perc_result)
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+            logger.warning("recompute_worker auto perceptual warning: %s", exc)
 
         _set_job_status(
             job_id,
