@@ -448,14 +448,72 @@ def _rebuild_exe_if_needed() -> dict[str, Any]:
     return result
 
 
+def _kill_residual_processes() -> dict[str, Any]:
+    """Pre-etape A0 : kill best-effort des process residuels d'un run anterieur.
+
+    [HARNESS REMEDIATION ITER8B C1 2026-06-09] Le bilan ITER8B Section 2.1 a
+    documente que la pre-etape kill systematique de `CineSort.exe`,
+    `python.exe` et `msedgewebview2.exe` etait appliquee MANUELLEMENT entre
+    chaque checkout pour eviter la pollution inter-runs (process lock sur
+    WebView2 userdata residuel, summary.json + screenshots ABSENTS sur les 17
+    vues lors de la capture ITER8_NONREG_GLOBAL initiale).
+
+    On internalise cette pre-etape dans le harness pour rendre l'isolation
+    inter-runs automatique : un run observe.py --fresh ne dependra plus d'un
+    nettoyage operateur manuel.
+
+    Idempotent + best-effort + silencieux : taskkill /F /IM <exe> retourne
+    code 128 si aucun process ne tourne (cas normal premier run).
+
+    NE TUE PAS le process Python courant (observe.py) lui-meme :
+        - `python.exe` n'est cible que par PID different (filtre /FI "PID ne ...")
+          plus complique a fiabiliser cross-shell ; on prefere ne PAS tuer python
+          pour eviter le suicide.
+        - On cible donc UNIQUEMENT `CineSort.exe` (l'EXE PyInstaller) et
+          `msedgewebview2.exe` (WebView2). Le risque de double subprocess
+          `python app.py --dev` orphelin est negligeable (chaque run lance son
+          propre subprocess et le tue en fin de capture via _start_app).
+
+    Returns:
+        dict { ok: bool, killed: { exe: bool, ... }, errors: [...] }
+    """
+    result: dict[str, Any] = {
+        "ok": True,
+        "killed": {},
+        "errors": [],
+    }
+    # Liste figee : EXE livrable + WebView2. PAS python.exe (suicide-risk).
+    targets = ["CineSort.exe", "msedgewebview2.exe"]
+    for exe in targets:
+        try:
+            cp = subprocess.run(
+                ["taskkill", "/F", "/IM", exe],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            # rc==0 : au moins un process tue ; rc==128 : "process not found" (cas normal).
+            result["killed"][exe] = cp.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            result["killed"][exe] = False
+            result["errors"].append(f"{exe}: {scrub(str(exc))}")
+    return result
+
+
 def run_freshness_gate(
     out_dir: Path,
     library: Path | None,
     use_local_state: bool,
 ) -> dict[str, Any]:
-    """Orchestre les 3 pre-etapes freshness avant lancement observe.
+    """Orchestre les pre-etapes freshness avant lancement observe.
 
     [OPERATIONNEL] s'execute si l'utilisateur a fourni `--fresh`.
+
+    Sequence :
+        A0. kill process residuels (CineSort.exe + msedgewebview2.exe).
+        A.  H1 staleness EXE (informatif + force dev mode).
+        B.  H2 reset DB + runs scope test_library.
+        C.  H4 purge WebView2 userdata.
 
     Returns :
         gate_report dict serialise dans <out_dir>/freshness_gate.json.
@@ -484,6 +542,12 @@ def run_freshness_gate(
         file=sys.stderr,
     )
 
+    # Pre-etape A0 : kill process residuels (CineSort.exe + msedgewebview2.exe).
+    # [HARNESS REMEDIATION ITER8B C1 2026-06-09] Evite l'incident inter-runs
+    # documente dans BILAN_ITER8B_2026-06-08.md Sections 2.1+3.5 :
+    # process lock sur WebView2 userdata residuel -> summary.json + screenshots
+    # ABSENTS sur les 17 vues (capture ITER8_NONREG_GLOBAL initiale).
+    report["a0_kill_residual"] = _kill_residual_processes()
     # Pre-etape A : EXE staleness check (informatif + force dev mode plus tard).
     report["h1_exe"] = _rebuild_exe_if_needed()
     # Pre-etape B : reset DB+runs scope test_library.
