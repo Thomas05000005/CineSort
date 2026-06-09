@@ -1,0 +1,50 @@
+2026-06-09 09:37:33,606 [INFO] cinesort.infra.rest_server [run=- req=-] REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+2026-06-09 09:37:33,927 [INFO] cinesort.startup [run=- req=-] splash: etape 1 — Initialisation
+2026-06-09 09:37:34,438 [INFO] cinesort.infra.rest_server [run=- req=05929b11] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:37:34,440 [INFO] cinesort.infra.rest_server [run=- req=96d2e791] REST POST /api/settings/get_settings -> 200 (0ms)
+2026-06-09 09:37:34,440 [INFO] cinesort.startup [run=- req=-] main_window: dashboard charge (events.loaded firing)
+2026-06-09 09:37:34,444 [INFO] cinesort.infra.rest_server [run=- req=f698cf1a] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-09 09:37:34,463 [INFO] cinesort.startup [run=- req=-] splash: etape 2 — Chargement des reglages
+2026-06-09 09:37:34,566 [INFO] cinesort.startup [run=- req=-] splash: etape 3 — Base de donnees
+2026-06-09 09:37:34,668 [INFO] cinesort.startup [run=- req=-] splash: etape 4 — Interface
+2026-06-09 09:37:34,670 [INFO] cinesort.startup [run=- req=-] splash: etape 5 — Serveur API (deja actif)
+2026-06-09 09:37:34,670 [INFO] cinesort.tmdb.purge [run=- req=-] V5-03 : purge cache TMDb (TTL 42j) — checked=42 purged=0 preserved_legacy=0
+2026-06-09 09:37:34,670 [INFO] cinesort.app.retention_cleanup [run=- req=-] retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+2026-06-09 09:37:34,676 [INFO] cinesort.app.quarantine_ttl [run=- req=-] quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+2026-06-09 09:37:34,676 [INFO] cinesort.startup [run=- req=-] splash: etape finale — Pret
+2026-06-09 09:37:34,678 [INFO] cinesort.startup [run=- req=-] splash: fenetre principale chargee, splash detruit
+2026-06-09 09:37:34,800 [INFO] cinesort.infra.db.backup [run=- req=5aecba4e] backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260609-073734-587067Z.pre_migration.bak (102596.0 KB)
+2026-06-09 09:37:34,807 [INFO] cinesort.infra.db.backup [run=- req=5aecba4e] rotate_backups: supprime cinesort.20260609-063256-928125Z.pre_migration.bak
+2026-06-09 09:37:34,833 [INFO] cinesort.app.apply_batches_reconciliation [run=- req=5aecba4e] reconcile_pending_batches: no pending batches to reconcile
+2026-06-09 09:37:34,899 [INFO] cinesort.infra.rest_server [run=- req=305d8b9d] REST POST /api/run/get_sidebar_counters -> 200 (453ms)
+2026-06-09 09:37:34,901 [INFO] cinesort.infra.rest_server [run=- req=e2f3305e] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:37:35,128 [INFO] cinesort.infra.rest_server [run=- req=5aecba4e] REST POST /api/run/get_dashboard -> 200 (688ms)
+2026-06-09 09:37:35,170 [INFO] cinesort.infra.rest_server [run=- req=779d7162] REST POST /api/run/get_status -> 200 (32ms)
+2026-06-09 09:37:35,236 [INFO] cinesort.infra.rest_server [run=- req=9a06be95] REST POST /api/run/get_global_stats -> 200 (797ms)
+2026-06-09 09:37:35,244 [INFO] cinesort.ui.api [run=- req=6adc5408] api err [validation]: URL du serveur Jellyfin vide.
+2026-06-09 09:37:35,247 [INFO] cinesort.infra.rest_server [run=- req=6adc5408] REST POST /api/integrations/test_jellyfin_connection -> 200 (0ms)
+2026-06-09 09:37:35,307 [INFO] cinesort.infra.rest_server [run=- req=afd9d264] REST POST /api/runtime/is_demo_mode_active -> 200 (15ms)
+2026-06-09 09:37:35,316 [INFO] cinesort.infra.rest_server [run=- req=a7d32c9d] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:37:35,501 [INFO] cinesort.infra.rest_server [run=- req=9a6a3cdd] REST POST /api/runtime/get_probe_tools_status -> 200 (188ms)
+2026-06-09 09:37:35,591 [INFO] cinesort.infra.rest_server [run=- req=44fe3474] REST POST /api/integrations/test_omdb_connection -> 200 (343ms)
+2026-06-09 09:37:35,802 [INFO] cinesort.infra.rest_server [run=- req=c0902cd3] REST POST /api/integrations/test_tmdb_key -> 200 (562ms)
+2026-06-09 09:37:37,910 [INFO] cinesort.infra.rest_server [run=- req=6889ecde] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-09 09:37:39,538 [INFO] cinesort.infra.rest_server [run=- req=57ec0d09] REST POST /api/run/get_dashboard -> 200 (110ms)
+2026-06-09 09:37:39,557 [INFO] cinesort.infra.rest_server [run=- req=165eb7ec] REST POST /api/run/get_status -> 200 (15ms)
+2026-06-09 09:37:44,542 [INFO] cinesort.infra.rest_server [run=- req=651a7ab7] REST POST /api/run/get_dashboard -> 200 (110ms)
+2026-06-09 09:37:44,563 [INFO] cinesort.infra.rest_server [run=- req=28f842ef] REST POST /api/run/get_status -> 200 (0ms)
+2026-06-09 09:37:49,563 [INFO] cinesort.infra.rest_server [run=- req=f6f49851] REST POST /api/run/get_dashboard -> 200 (125ms)
+2026-06-09 09:37:49,579 [INFO] cinesort.infra.rest_server [run=- req=9f413cca] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-09 11:29:09,721 [INFO] cinesort.infra.rest_server [run=- req=-] REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+2026-06-09 11:29:09,724 [INFO] cinesort.app.retention_cleanup [run=- req=-] retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+2026-06-09 11:29:09,724 [INFO] cinesort.app.quarantine_ttl [run=- req=-] quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+2026-06-09 11:29:09,732 [INFO] cinesort.infra.rest_server [run=- req=-] REST API started on http://127.0.0.1:8642 (167 endpoints)
+2026-06-09 11:29:09,732 [INFO] cinesort.infra.network_utils [run=- req=-] network: IP locale detectee = 10.2.0.2 (UDP)
+2026-06-09 11:29:09,732 [INFO] cinesort.infra.rest_server [run=- req=-] REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+2026-06-09 11:29:09,732 [INFO] cinesort.tmdb.purge [run=- req=-] V5-03 : purge cache TMDb (TTL 42j) — checked=42 purged=0 preserved_legacy=0
+2026-06-09 11:30:09,741 [WARNING] cinesort.app.quarantine_ttl [run=- req=-] purge_quarantine cron: reponse inattendue ttl=30j resp={'ok': False, 'error': "build_cfg_failed: build_cfg_from_settings() missing 4 required keyword-only arguments: 'root', 'default_collection_folder_name', 'default_empty_folders_folder_name', and 'default_residual_cleanup_folder_name'"}
+2026-06-09 11:30:10,047 [INFO] cinesort.infra.db.backup [run=- req=-] backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260609-093009-879457Z.pre_migration.bak (102640.0 KB)
+2026-06-09 11:30:10,049 [INFO] cinesort.infra.db.backup [run=- req=-] rotate_backups: supprime cinesort.20260609-072927-501091Z.pre_migration.bak
+2026-06-09 11:30:10,068 [INFO] cinesort.app.apply_batches_reconciliation [run=- req=-] reconcile_pending_batches: no pending batches to reconcile
+2026-06-09 11:30:10,085 [INFO] cinesort.ui.api.history_support [run=- req=-] cleanup_old_runs: deleted 0 runs older than 90 days
+2026-06-09 11:30:10,085 [INFO] cinesort.app.retention_cleanup [run=- req=-] cleanup_old_runs: deleted 0 runs older than 90 days
