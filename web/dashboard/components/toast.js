@@ -230,3 +230,41 @@ export function showToast(opts) {
     close,
   });
 }
+
+/**
+ * Purge defensive de tous les toasts actifs et de leurs timers.
+ *
+ * Fix iter11 famille B (2026-06-08) — garde-fou unmount toast (prolonge 5b3a62c) :
+ * permet a un appelant (cleanup global dashboard, navigation hash, logout) de
+ * forcer la fermeture immediate de tous les toasts actifs et de nettoyer leurs
+ * `setTimeout(close, duration)` pendants. Sans cette API, un toast persistent:true
+ * declenche au moment T peut rester planifie jusqu'a T+20000ms (_PERSISTENT_MAX_MS)
+ * meme si l'utilisateur quitte la dashboard, ce qui rappelle exactement la
+ * categorie de fuite corrigee par 5b3a62c (timers/handlers non nettoyes).
+ *
+ * Idempotent : appelable plusieurs fois sans erreur. Si aucun toast actif, no-op.
+ * Pas exportee par defaut comme API canonique — usage cleanup defensif uniquement.
+ */
+export function clearAllToasts() {
+  // Snapshot des entries pour iteration safe (close() mute _activeToasts).
+  const entries = Array.from(_activeToasts.values());
+  for (const entry of entries) {
+    try {
+      if (entry && entry.dismissTimer != null) {
+        clearTimeout(entry.dismissTimer);
+        entry.dismissTimer = null;
+      }
+      if (entry && typeof entry.close === "function") {
+        entry.close();
+      } else if (entry && entry.node && entry.node.parentNode) {
+        // Fallback : suppression brutale si close() indisponible.
+        entry.node.remove();
+      }
+    } catch (_e) {
+      // Cleanup defensif : aucune erreur ne doit propager.
+    }
+  }
+  // Defense en profondeur : purger le registre meme si certains close() ont
+  // echoue silencieusement (entrees orphelines avec node detache).
+  _activeToasts.clear();
+}
