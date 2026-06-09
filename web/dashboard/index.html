@@ -8,7 +8,7 @@
        les clients qui ne l'enverraient pas).
        V4-09 : retire frame-ancestors du meta (ignore par les browsers, doit etre
        en HTTP header — voir rest_server.py X-Frame-Options). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://image.tmdb.org; connect-src 'self'; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <title>CineSort — Dashboard</title>
   <!-- V4-09 : favicon SVG inline (pas de fichier separe, evite 404 Lighthouse BP) -->
