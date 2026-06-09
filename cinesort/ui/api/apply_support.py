@@ -1364,6 +1364,11 @@ def _execute_apply(
                 enable_tmdb=cfg.enable_tmdb,
                 tmdb_language=cfg.tmdb_language,
                 incremental_scan_enabled=cfg.incremental_scan_enabled,
+                # ITER7 : propager le reglage UI "Extensions en minuscule" au
+                # cfg recopie multi-root (sinon le default True s'applique et
+                # le toggle OFF est silencieusement neutralise sur les apply
+                # multi-root).
+                lowercase_extensions=cfg.lowercase_extensions,
             )
         else:
             cfg_for_root = cfg

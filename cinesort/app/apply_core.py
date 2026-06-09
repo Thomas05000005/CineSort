@@ -42,6 +42,30 @@ def _name_eq_fs(a: str, b: str) -> bool:
     )
 
 
+def _video_ext(cfg: "Config", video: Path) -> str:
+    """Retourne le suffixe de `video` en respectant cfg.lowercase_extensions.
+
+    ITER7 fix LOWERCASE_EXTENSIONS : la cle UI "lowercase_extensions"
+    (settings.json, persistee par _save_section_naming) etait sauvegardee
+    mais JAMAIS lue. Path.suffix preserve la casse FS source (".MKV" reste
+    ".MKV"). Ce helper applique la regle Domain (cfg.lowercase_extensions)
+    sur le suffixe. True = ".mkv", False = preservation casse source.
+    """
+    suffix = video.suffix
+    if getattr(cfg, "lowercase_extensions", True):
+        return suffix.lower()
+    return suffix
+
+
+def _video_name_with_ext_case(cfg: "Config", video: Path) -> str:
+    """Retourne `video.name` (stem + suffixe) en respectant cfg.lowercase_extensions.
+
+    Stem preserve, seule la casse du suffixe est ajustee selon le reglage UI.
+    Utilise pour single/collection/quarantine ou le nom final = nom source.
+    """
+    return f"{video.stem}{_video_ext(cfg, video)}"
+
+
 def build_apply_context(
     cfg: "Config",
     rows: list["PlanRow"],
@@ -1883,7 +1907,9 @@ def apply_collection_item(
     # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
     # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
     # peut exceder 260 chars meme si sub_dir reste valide.
-    _candidate_video_path = sub_dir / video.name
+    # ITER7 : cfg.lowercase_extensions ajuste la casse du suffixe cible
+    # (n'allonge pas le chemin, mais on garde la coherence avec dst_video).
+    _candidate_video_path = sub_dir / _video_name_with_ext_case(cfg, video)
     _path_err = check_path_length_killswitch(str(_candidate_video_path))
     if _path_err is not None:
         log("WARN", _path_err)
@@ -1925,7 +1951,7 @@ def apply_collection_item(
         elif status in {"conflict", "sidecar_conflict"}:
             core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
 
-    dst_video = sub_dir / video.name
+    dst_video = sub_dir / _video_name_with_ext_case(cfg, video)
     if dedup_seen_ops is not None:
         op_key = (str(core_mod._norm_win_path(video)), str(core_mod._norm_win_path(dst_video)), "collection_video")
         if op_key in dedup_seen_ops:
@@ -1992,10 +2018,11 @@ def apply_tv_episode(
     )
     series_folder_name = format_tv_series_folder(cfg.naming_tv_template, _naming_ctx)
     season_folder_name = f"Saison {season:02d}" if season else "Saison 00"
+    _ep_ext = _video_ext(cfg, video)
     if ep_title:
-        target_filename = f"S{season:02d}E{episode:02d} - {core_mod.windows_safe(ep_title)}{video.suffix}"
+        target_filename = f"S{season:02d}E{episode:02d} - {core_mod.windows_safe(ep_title)}{_ep_ext}"
     else:
-        target_filename = f"S{season:02d}E{episode:02d}{video.suffix}"
+        target_filename = f"S{season:02d}E{episode:02d}{_ep_ext}"
 
     target_dir = cfg.root / series_folder_name / season_folder_name
     target_file = target_dir / target_filename
@@ -2119,7 +2146,7 @@ def quarantine_row(
             )
         res.quarantined += 1
 
-    dst_video = base / video.name
+    dst_video = base / _video_name_with_ext_case(cfg, video)
     if not dst_video.exists():
         log("INFO", f"QUARANTINE MOVE: {video} -> {dst_video}")
         if not dry_run:

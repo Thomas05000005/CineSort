@@ -254,6 +254,13 @@ class Config:
     naming_movie_template: str = "{title} ({year})"
     naming_tv_template: str = "{series} ({year})"
 
+    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)"
+    # Persiste par _save_section_naming (ui/api/settings_support.py L1608-1609)
+    # Consomme par apply_core (ext_case_for_video) pour ajuster la casse de
+    # l'extension du fichier video cible (single, collection, TV, quarantine).
+    # True = .MKV source -> .mkv cible ; False = preservation casse source.
+    lowercase_extensions: bool = True
+
     def normalized(self) -> "Config":
         collection_name = windows_safe(str(self.collection_root_name or "_Collection")) or "_Collection"
         empty_name = windows_safe(str(self.empty_folders_folder_name or "_Vide")) or "_Vide"
@@ -297,6 +304,7 @@ class Config:
             scan_max_workers=max(1, int(self.scan_max_workers or 1)),
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
+            lowercase_extensions=bool(self.lowercase_extensions),
         )
 
 

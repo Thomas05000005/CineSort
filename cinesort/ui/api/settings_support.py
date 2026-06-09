@@ -1063,6 +1063,7 @@ def build_cfg_from_settings(
         scan_max_workers=cfg_scan_workers,
         naming_movie_template=cfg_movie_template,
         naming_tv_template=cfg_tv_template,
+        lowercase_extensions=to_bool(settings.get("lowercase_extensions"), True),
     )
 
 
