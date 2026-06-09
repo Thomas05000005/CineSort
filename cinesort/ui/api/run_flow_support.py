@@ -521,6 +521,56 @@ def _build_plan_job_fn(
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn auto recompute warning: {exc}")
 
+            # ITER6 cluster settings — fix `perceptual_auto_on_scan` no-op silencieux.
+            # Toggle UI Parametres > "Analyse perceptuelle apres chaque scan"
+            # etait sauvegarde par _save_section_perceptual mais jamais relu
+            # dans le chemin start_plan reel (run_flow / _build_plan_job_fn).
+            # Pattern : meme contrat que auto_recompute_quality_on_scan ci-dessus
+            # (background, best-effort, log bruyant si echec d'approvisionnement,
+            # silencieux si toggle=OFF). Lance analyze_perceptual_batch sur les
+            # row_ids du run -- thread daemon non bloquant. Pre-requis
+            # `perceptual_enabled` (false par defaut) car le moteur perceptuel
+            # n'est pas operationnel sans la cle activee : on logue WARN explicite
+            # si l'utilisateur a active l'auto sans avoir active le moteur, pour
+            # honorer le contrat ii.b (echec d'approvisionnement bruyant).
+            try:
+                auto_perceptual = to_bool(settings.get("perceptual_auto_on_scan"), False)
+                if auto_perceptual and rows:
+                    perceptual_enabled = to_bool(settings.get("perceptual_enabled"), False)
+                    if not perceptual_enabled:
+                        rs.log(
+                            "WARN",
+                            "perceptual_auto_on_scan active mais perceptual_enabled=False "
+                            "-> analyse perceptuelle skip (active aussi le moteur).",
+                        )
+                        dlog("job_fn auto perceptual skipped: perceptual_enabled=False")
+                    else:
+                        from cinesort.ui.api import perceptual_support
+
+                        row_ids = [
+                            str(getattr(r, "row_id", "") or "")
+                            for r in rows
+                            if str(getattr(r, "row_id", "") or "").strip()
+                        ]
+                        if row_ids:
+                            dlog(
+                                f"job_fn launching auto perceptual batch ({len(row_ids)} films)"
+                            )
+                            perc_result = perceptual_support.analyze_perceptual_batch(
+                                api, run_id, row_ids, options=None
+                            )
+                            if isinstance(perc_result, dict) and perc_result.get("ok"):
+                                dlog(
+                                    "job_fn auto perceptual started success_count="
+                                    f"{perc_result.get('success_count')}"
+                                )
+                            else:
+                                dlog(f"job_fn auto perceptual skipped: {perc_result}")
+                        else:
+                            dlog("job_fn auto perceptual skipped: no row_ids")
+            except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+                dlog(f"job_fn auto perceptual warning: {exc}")
+
             _save_plan_artifacts(rs, rows, stats, root, state_dir, dlog)
 
             # Capturer le snapshot sante bibliotheque dans les stats
