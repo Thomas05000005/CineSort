@@ -11,6 +11,7 @@ Couvre :
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -44,6 +45,17 @@ class DashboardShellHttpTests(unittest.TestCase):
             }
         )
 
+        # ITER 5 — Re-ancrage non-loopback : le test #3 (et frere "valid_token")
+        # doit exercer l'auth Bearer reelle, pas le bypass loopback inconditionnel
+        # introduit le 2026-06-08 (rest_server.py:_check_auth L443-462). Le kill-
+        # switch CINESORT_DISABLE_LOCAL_AUTH=1 est volontairement prevu pour les
+        # tests : il desactive le bypass et force l'evaluation du token, simulant
+        # ainsi un client externe non-loopback (memoire user "ACCEPTATION AUTH =
+        # check runtime non-loopback simulant client externe"). Cf bilan ITER 5
+        # section 1c (Y=ARTEFACT LOOPBACK) et section 3.4 (preuve fix unifie).
+        cls._prev_disable_local_auth = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH")
+        os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = "1"
+
         cls.port = _find_free_port()
         cls.token = "shell-test-token"
         cls.server = RestApiServer(cls.api, port=cls.port, token=cls.token)
@@ -53,6 +65,11 @@ class DashboardShellHttpTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.stop()
+        # Restaurer l'env var pour ne pas polluer les tests suivants.
+        if cls._prev_disable_local_auth is None:
+            os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
+        else:
+            os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = cls._prev_disable_local_auth
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def _get(self, path: str) -> tuple[int, bytes, dict]:
@@ -191,7 +208,15 @@ class DashboardShellHttpTests(unittest.TestCase):
         self.assertIn("root", data)
 
     def test_login_invalid_token_returns_401(self) -> None:
-        """Un mauvais token retourne 401."""
+        """Un mauvais token retourne 401.
+
+        ITER 5 — exerce l'auth Bearer reelle (bypass loopback desactive via
+        CINESORT_DISABLE_LOCAL_AUTH=1 dans setUpClass), simulant ainsi un
+        client externe non-loopback. Sans ce kill-switch, le test serait un
+        faux vert : le bypass design (rest_server.py L443-462) renverrait 200
+        pour TOUT client 127.0.0.1 sur un serveur bind=127.0.0.1, sans lire
+        le header Authorization. Cf bilan ITER 5 sections 1c + 3.4.
+        """
         status, data = self._post("/api/settings/get_settings", body={}, token="wrong-token")
         self.assertEqual(status, 401)
         self.assertFalse(data["ok"])

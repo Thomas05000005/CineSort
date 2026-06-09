@@ -1,0 +1,459 @@
+[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG
+[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG
+REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+[REST] CineSort API standalone sur http://127.0.0.1:8642 (localhost only)
+[REST] Astuce : ajoutez --public pour autoriser l'acces depuis le LAN.
+[REST] Ctrl+C pour arreter.
+retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+REST API started on http://127.0.0.1:8642 (167 endpoints)
+network: IP locale detectee = 10.2.0.2 (UDP)
+REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+V5-03 : purge cache TMDb (TTL 42j) — checked=42 purged=0 preserved_legacy=0
+REST "GET /api/health HTTP/1.1" 200 -
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260609-053916-692770Z.pre_migration.bak (97332.0 KB)
+rotate_backups: supprime cinesort.20260608-233106-250467Z.pre_migration.bak
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+reconcile_pending_batches: no pending batches to reconcile
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+api: start_plan run_id=20260609_073917_071
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+job: demarrage thread run_id=20260609_073917_071
+REST "POST /api/run/start_plan HTTP/1.1" 200 -
+REST POST /api/run/start_plan -> 200 (1141ms)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootA\Movies (incremental=False)
+scan: phase 1 decouverte = 9 dossiers en 0.00s
+scan: VO-B phase 1 parallele = 9 candidates (workers=4)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Big Buck Bunny (2008)' video='Big Buck Bunny (2008).mp4'
+naming: template='{title} ({year})' result='Big Buck Bunny (2008)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Dune (2021)' video='Dune (2021).mkv'
+naming: template='{title} ({year})' result='D\u0171ne (2020)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Dune Part Two (2024)' video='Dune Part Two (2024).mkv'
+naming: template='{title} ({year})' result='Dune Deuxième partie (2024)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Inception (2010)' video='Inception (2010).mkv'
+naming: template='{title} ({year})' result='Inception (2010)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Le Fabuleux Destin d Amelie Poulain (2001)' video='Le Fabuleux Destin d Amelie Poulain (2001).mkv'
+naming: template='{title} ({year})' result='Le Fabuleux Destin d'Amélie Poulain (2001)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Parasite' video='Parasite.mkv'
+infer_name_year: folder='Parasite' video='Parasite.mkv'
+naming: template='{title} ({year})' result='Parasite (2019)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Sen to Chihiro no Kamikakushi (2001)' video='Sen to Chihiro no Kamikakushi (2001).mkv'
+naming: template='{title} ({year})' result='Sen to Chihiro no Kamikakushi (2001)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Sintel (2010)' video='Sintel (2010).mp4'
+naming: template='{title} ({year})' result='Sintel (2010)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='the.matrix.1999.brrip' video='the matrix.avi'
+naming: template='{title} ({year})' result='the matrix 1999 (1999)'
+scan: termine C:\Users\blanc\projects\CineSort\test_library\RootA\Movies -> 9 rows
+scan: cache stats folder_hits=0 row_hits=0 row_misses=0
+scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootB\Movies (incremental=False)
+scan: phase 1 decouverte = 6 dossiers en 0.00s
+scan: VO-B phase 1 parallele = 6 candidates (workers=4)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='BadReencode (2019)' video='BadReencode (2019).mp4'
+naming: template='{title} ({year})' result='BadReencode (2019)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='FakeUpscale (2020)' video='FakeUpscale (2020) 2160p.mp4'
+naming: template='{title} ({year})' result='FakeUpscale (2020)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Night of the Living Dead (1968)' video='Night of the Living Dead (1968).mkv'
+nfo_consistency: folder='Night of the Living Dead (1968)' video='Night of the Living Dead (1968).mkv' titles=1 -> ok=True folder=True(cov=1.00,seq=1.00) file=True(cov=1.00,seq=1.00)
+scan: .nfo IMDb tt0063350 \u2192 tmdb:10331 'La Nuit des morts-vivants' (sim=1.00)
+naming: template='{title} ({year})' result='La Nuit des morts-vivants (1968)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Nosferatu (1922)' video='Nosferatu (1922).mkv'
+naming: template='{title} ({year})' result='Nosferatu (1922)'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='Tears of Steel (2012)' video='Tears of Steel (2012) 1080p.mkv'
+infer_name_year: folder='Tears of Steel (2012)' video='Tears of Steel (2012) 720p.mkv'
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+infer_name_year: folder='The Matrix (1999)' video='The Matrix (1999) 1080p.mkv'
+infer_name_year: folder='The Matrix (1999)' video='The Matrix (1999) 720p.mkv'
+scan: termine C:\Users\blanc\projects\CineSort\test_library\RootB\Movies -> 8 rows
+scan: cache stats folder_hits=0 row_hits=0 row_misses=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+Notification added: [scan_done] Analyse terminée
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+api: get_plan run_id=20260609_073917_071
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+job: termine run_id=20260609_073917_071 en 1.0s
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=38848kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=['und'] sub=7.0
+scoring: score=33 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=28 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=32 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=32 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=30 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=38848kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=['und'] sub=7.0
+scoring: score=33 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=mpeg-4 visual ffprobe=mpeg4 (flag pour audit)
+probe_parity: bitrate video divergent mediainfo=335800 ffprobe=89841006 (>5%, flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=mpeg4 res=720p bitrate=89841kbps hdr=False dv=False 4k_light=False sub=22.0
+_score_audio: codec=mp3 channels=1 langs=[] sub=3.0
+scoring: score=25 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=MP3 (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=38848kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=['und'] sub=7.0
+scoring: score=33 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=38848kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=['und'] sub=7.0
+scoring: score=33 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=32 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+probe_parity: codec divergent mediainfo=avc ffprobe=h264 (flag pour audit)
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+_score_video: codec=h264 res=720p bitrate=91764kbps hdr=False dv=False 4k_light=False sub=28.0
+_score_audio: codec=aac channels=1 langs=[] sub=10.0
+scoring: score=34 tier=Reject
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+audio: best=AAC (1.0), commentary=False, dupes=0
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+apply_pragmas[local_ssd]: readback = {'journal_mode': 'wal', 'synchronous': 1, 'busy_timeout': 5000, 'mmap_size': 268435456, 'cache_size': -20000, 'wal_autocheckpoint': 1000}
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST "POST /api/run/get_status HTTP/1.1" 200 -
+REST POST /api/run/get_status -> 200 (31ms)
