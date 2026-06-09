@@ -1369,8 +1369,12 @@ function _renderStepPanel(stepId) {
     // Avant : "Chargement de l'état du run…" sur une ligne -> écran quasi-vide
     // pendant 3-5s -> utilisateur confus (vue cassée ? backend lent ?). Pattern
     // emprunté à doublons.js:393 qui combine header + skeletons + détail attente.
+    // ITER11 fix(ui): aria-busy="true" + aria-live="polite" pour annoncer le
+    // chargement aux lecteurs d'ecran. Le cycle de vie est: appear (skeleton) ->
+    // remplace par _runInfo render ou par empty-state (jamais skeleton infini :
+    // si fetch echoue, _loading repasse a false et l'empty-state s'affiche).
     return `
-      <section class="traitement-panel">
+      <section class="traitement-panel" aria-busy="true" aria-live="polite">
         <div class="traitement-loading-header">⏳ Chargement de l'état du run…</div>
         ${[1, 2, 3].map(() => `<div class="v5-skeleton" style="height:48px;margin:8px 0;"></div>`).join("")}
       </section>

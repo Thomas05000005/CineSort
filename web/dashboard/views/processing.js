@@ -274,9 +274,12 @@ function _closeInspectorDrawer() {
 
 function _renderSkeletonForStep(stepEl, stepId) {
   if (!stepEl) return;
+  // ITER11 fix(ui): aria-busy="true" sur le wrapper step content pour annoncer
+  // le chargement aux lecteurs d'ecran (cycle de vie appear -> remplace par
+  // contenu reel ou par message d'erreur, jamais skeleton infini).
   if (stepId === "scan") {
     stepEl.innerHTML = `
-      <div class="v5-processing-step-content">
+      <div class="v5-processing-step-content" aria-busy="true">
         <div class="v5-skeleton v5-skeleton--scan" style="height:24px;width:40%;margin-bottom:1em"></div>
         <div class="v5-skeleton" style="height:14px;width:70%;margin-bottom:.6em"></div>
         <div class="v5-skeleton" style="height:14px;width:55%;margin-bottom:1.2em"></div>
@@ -285,13 +288,13 @@ function _renderSkeletonForStep(stepEl, stepId) {
   } else if (stepId === "review") {
     const rows = "<div class='v5-skeleton v5-skeleton-row' style='height:32px;margin-bottom:.4em'></div>".repeat(10);
     stepEl.innerHTML = `
-      <div class="v5-processing-step-content">
+      <div class="v5-processing-step-content" aria-busy="true">
         <div class="v5-skeleton" style="height:24px;width:35%;margin-bottom:1em"></div>
         <div class="v5-skeleton-table">${rows}</div>
       </div>`;
   } else if (stepId === "apply") {
     stepEl.innerHTML = `
-      <div class="v5-processing-step-content">
+      <div class="v5-processing-step-content" aria-busy="true">
         <div class="v5-skeleton v5-skeleton--apply" style="height:24px;width:40%;margin-bottom:1em"></div>
         <div class="v5-skeleton" style="height:80px;margin-bottom:.8em"></div>
         <div class="v5-skeleton" style="height:48px;width:30%"></div>
