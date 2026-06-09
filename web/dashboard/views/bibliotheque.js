@@ -27,7 +27,7 @@
  *   integrations/get_tmdb_posters(tmdb_ids, size) — recharger posters batch
  */
 
-import { escapeHtml } from "../core/dom.js";
+import { escapeHtml, posterProxyUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
@@ -413,8 +413,13 @@ function _renderFilmCard(row) {
   // aucun feedback "non identifie" -> capture 5/6 du rapport audit montraient
   // 853 cartes identiques sans differenciation.
   let poster;
-  if (row.poster_url) {
-    poster = `<img class="bibliotheque-card-poster-img" src="${escapeHtml(row.poster_url)}" alt="${escapeHtml(title)}" loading="lazy">`;
+  // Iter12 ETAPE 2 : prioriser le proxy `/api/poster?id=...&size=w185` quand
+  // `tmdb_id` est disponible (CSP resserree en section 4 sans casser l'affichage).
+  // Fallback sur `poster_url` direct pour backward compat (acquis 242cf339).
+  const proxiedPoster = posterProxyUrl(row.tmdb_id, "w185");
+  const posterSrc = proxiedPoster || row.poster_url || "";
+  if (posterSrc) {
+    poster = `<img class="bibliotheque-card-poster-img" src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="lazy">`;
   } else if (row.tmdb_id) {
     poster = `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true">🎬</div>`;
   } else {

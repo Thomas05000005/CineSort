@@ -34,7 +34,7 @@
  *   closeFilmDetail()       ferme le mode C (overlay) actif
  */
 
-import { escapeHtml } from "../core/dom.js";
+import { escapeHtml, posterProxyUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 import { dangerConfirmModal, showModal, closeModal } from "./modal.js";
@@ -185,8 +185,13 @@ function _renderHero(data) {
               title="Rafraîchir le poster depuis TMDb"
               aria-label="Rafraîchir le poster depuis TMDb">🔄</button>`
     : "";
-  const posterInner = posterUrl
-    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)}" loading="eager">`
+  // Iter12 ETAPE 2 : prioriser le proxy `/api/poster` (size w342 pour fiche film).
+  // tmdbIdForRefresh est deja resolu plus haut depuis row/topCand. Fallback
+  // sur `posterUrl` direct preserve backward compat (acquis 242cf339).
+  const proxiedPosterUrl = posterProxyUrl(tmdbIdForRefresh, "w342");
+  const posterSrc = proxiedPosterUrl || posterUrl || "";
+  const posterInner = posterSrc
+    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager">`
     : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
   const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 

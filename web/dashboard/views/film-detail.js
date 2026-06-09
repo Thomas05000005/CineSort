@@ -21,6 +21,7 @@
  */
 import { apiPost, escapeHtml, renderError } from "./_v5_helpers.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
+import { posterProxyUrl } from "../core/dom.js";
 
 const _state = {
   rowId: null,
@@ -147,11 +148,17 @@ function _buildHero(data) {
     ? window.ScoreV2.scoreCircleHtml({ score, tier })
     : (score != null ? `<div class="v5-film-score-fallback tier-${escapeHtml(tier)}">${score}/100</div>` : "");
 
-  const backdropStyle = data.poster_url
-    ? `background-image: url('${escapeHtml(data.poster_url)}')`
+  // Iter12 ETAPE 2 : prioriser le proxy `/api/poster` quand `tmdb_id` est connu.
+  // Fiche film -> w342 (poster grande, hero band). Fallback `poster_url` direct
+  // pour backward compat (acquis 242cf339 CSP img-src image.tmdb.org).
+  const rowTmdbId = row.chosen_tmdb_id || row.tmdb_id || (candidates[0] && candidates[0].tmdb_id) || null;
+  const proxiedPoster = posterProxyUrl(rowTmdbId, "w342");
+  const posterSrc = proxiedPoster || data.poster_url || "";
+  const backdropStyle = posterSrc
+    ? `background-image: url('${escapeHtml(posterSrc)}')`
     : "";
-  const posterHtml = data.poster_url
-    ? `<img class="v5-film-poster" src="${escapeHtml(data.poster_url)}" alt="${escapeHtml(title)}" loading="eager"/>`
+  const posterHtml = posterSrc
+    ? `<img class="v5-film-poster" src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager"/>`
     : `<div class="v5-film-poster v5-film-poster--placeholder">${_svg('<rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>', 40)}</div>`;
 
   const resolution = video.width && video.height

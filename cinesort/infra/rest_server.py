@@ -847,6 +847,56 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             self._respond_json(200, self.openapi_spec)
             return
 
+        # Iter12 / ETAPE 1b : proxy poster TMDb avec validation stricte
+        # anti-SSRF/anti-open-relay + cache disque local.
+        # Cf cinesort/infra/integrations/poster_proxy.py (whitelist sizes,
+        # regex id, scrub cle API). Pas d'auth Bearer requise sur cette
+        # route : sert directement <img src="/api/poster?id=...&size=..."> et
+        # le bypass loopback du _check_auth de cette classe couvre deja le
+        # cas pywebview natif. Note : on n'invoque PAS self._check_auth ici
+        # car le navigateur ne peut pas mettre d'header Authorization sur
+        # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
+        # serait de toute facon active.
+        if clean == "/api/poster":
+            from urllib.parse import parse_qs  # noqa: PLC0415
+
+            from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
+            from cinesort.infra.state import default_state_dir  # noqa: PLC0415
+            # Resoudre state_dir : preferer l'API si disponible, sinon
+            # default_state_dir() (compat tests sans API monte).
+            api = getattr(self, "api", None)
+            state_dir = None
+            if api is not None:
+                get_state = getattr(api, "_get_state_dir", None)
+                if callable(get_state):
+                    try:
+                        state_dir = get_state()
+                    except Exception:  # noqa: BLE001 — boundary
+                        state_dir = None
+            if state_dir is None:
+                state_dir = default_state_dir()
+            cache_root = Path(state_dir) / "cache" / "posters"
+            # Parser la query string (premier raw seulement, jamais liste).
+            raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
+            parsed = parse_qs(raw_query, keep_blank_values=True)
+            flat_query: Dict[str, str] = {}
+            for key, values in parsed.items():
+                if values:
+                    flat_query[key] = values[0]
+            try:
+                poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+                logger.debug(
+                    "REST GET /api/poster client disconnect (%s, %.0fms)",
+                    type(exc).__name__,
+                    (time.monotonic() - _t0) * 1000,
+                )
+            except Exception as exc:  # noqa: BLE001 — boundary
+                logger.exception("REST 500 /api/poster: %s", exc)
+                with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                    self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
+            return
+
         # Fichiers statiques du dashboard distant
         # FIX bug CSS 2026-06-05 : "/dashboard" (sans slash final) doit rediriger
         # vers "/dashboard/" (avec slash) pour que le navigateur resolve correctement
