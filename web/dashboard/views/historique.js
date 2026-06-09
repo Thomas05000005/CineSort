@@ -35,6 +35,37 @@ import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
 
+/* --- Labels FR centralises (iter11 LABELS_APPLY_HISTORIQUE) ---------- */
+/* Dict: traduit les op_type/run_type bruts (anglais) en libelles FR
+ * uniformes affiches dans la vue Historique. Cf carto iter11 4.5.1-3. */
+
+const _OP_TYPE_LABELS_FR = Object.freeze({
+  rename: "renommage",
+  move: "déplacement",
+  move_file: "déplacement",
+  move_dir: "renommage dossier",
+  quarantine: "quarantaine",
+  delete_mark: "marquage suppression",
+  mark_delete: "marquage suppression",
+  other: "autre",
+});
+
+const _RUN_TYPE_LABELS_FR = Object.freeze({
+  apply: "Application",
+  undo: "Annulation",
+  plan: "Plan",
+});
+
+function _opTypeLabelFr(opType) {
+  const key = String(opType || "").toLowerCase();
+  return _OP_TYPE_LABELS_FR[key] || (key ? key : "autre");
+}
+
+function _runTypeLabelFr(runType) {
+  const key = String(runType || "").toLowerCase();
+  return _RUN_TYPE_LABELS_FR[key] || _RUN_TYPE_LABELS_FR.plan;
+}
+
 /* --- Format dates ----------------------------------------------------- */
 
 const _ONE_DAY_MS = 86400000;
@@ -400,7 +431,7 @@ function _renderRunRow(run, selected) {
   const statusClass = _statusClass(status);
   const total = Number(run.total_rows || 0);
   const type = _runType(run);
-  const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
+  const typeLabel = _runTypeLabelFr(type);
   return `
     <li class="historique-run ${selected ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(run.run_id)}">
       <span class="historique-run-time">${escapeHtml(time)}</span>
@@ -444,7 +475,7 @@ function _renderTable(runs, selectedId) {
     const status = _deriveStatus(r);
     const total = Number(r.total_rows || 0);
     const type = _runType(r);
-    const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
+    const typeLabel = _runTypeLabelFr(type);
     return `
       <tr class="${r.run_id === selectedId ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(r.run_id)}">
         <td>${escapeHtml(d ? d.toLocaleString("fr-FR") : "—")}</td>
@@ -663,7 +694,10 @@ function _opLabel(op) {
   }
   if (t === "quarantine") return { icon: "⚠", text: `Quarantaine bucket _review/ — ${srcShort}` };
   if (t === "delete_mark" || t === "mark_delete") return { icon: "🗑", text: `Marqué suppression — ${srcShort}` };
-  return { icon: "•", text: `${op.op_type || "Op"} : ${srcShort}${dst ? " → " + dstShort : ""}` };
+  // Fallback FR : libelle traduit au lieu d'op_type brut anglais (iter11).
+  const labelFr = _opTypeLabelFr(op.op_type) || "Opération";
+  const labelCap = labelFr.charAt(0).toUpperCase() + labelFr.slice(1);
+  return { icon: "•", text: `${labelCap} : ${srcShort}${dst ? " → " + dstShort : ""}` };
 }
 
 function _renderApplyOps(runStats) {
@@ -685,7 +719,7 @@ function _renderApplyOps(runStats) {
     acc[t] = (acc[t] || 0) + 1;
     return acc;
   }, {});
-  const countersHtml = Object.entries(counts).map(([t, n]) => `<span class="historique-apply-counter">${escapeHtml(t)}: <strong>${n}</strong></span>`).join("");
+  const countersHtml = Object.entries(counts).map(([t, n]) => `<span class="historique-apply-counter">${escapeHtml(_opTypeLabelFr(t))}: <strong>${n}</strong></span>`).join("");
   const opsHtml = ops.map((o) => {
     const lbl = _opLabel(o);
     return `<li class="historique-apply-op"><span class="historique-apply-op-icon">${escapeHtml(lbl.icon)}</span><span class="historique-apply-op-text">${escapeHtml(lbl.text)}</span></li>`;
