@@ -1025,6 +1025,23 @@ def build_cfg_from_settings(
             cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
     else:
         cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    # Cluster settings iter6 — naming_preset resync au call site :
+    # `_apply_naming_preset` (L1239-1261) reecrit `naming_movie_template` /
+    # `naming_tv_template` UNIQUEMENT au save. Si `settings.json` est edite
+    # hors UI ou via migration en ecrivant `naming_preset="plex"` sans
+    # resynchroniser les templates, `build_cfg_from_settings` lisait alors
+    # les anciens templates -> preset utilisateur silencieusement avale.
+    # Resync deterministe ici : preset != "custom" -> on prend les templates
+    # du preset (source de verite identique a `_apply_naming_preset`),
+    # preset == "custom" ou absent -> on garde les templates persistes.
+    cfg_naming_preset = str(settings.get("naming_preset") or "").strip().lower()
+    if cfg_naming_preset in _VALID_NAMING_PRESETS and cfg_naming_preset != "custom":
+        _preset_profile = PRESETS.get(cfg_naming_preset) or PRESETS["default"]
+        cfg_movie_template = _preset_profile.movie_template
+        cfg_tv_template = _preset_profile.tv_template
+    else:
+        cfg_movie_template = str(settings.get("naming_movie_template") or "{title} ({year})")
+        cfg_tv_template = str(settings.get("naming_tv_template") or "{series} ({year})")
     return core.Config(
         root=root,
         enable_collection_folder=to_bool(settings.get("collection_folder_enabled"), True),
@@ -1044,8 +1061,8 @@ def build_cfg_from_settings(
         incremental_scan_enabled=to_bool(settings.get("incremental_scan_enabled"), False),
         enable_tv_detection=to_bool(settings.get("enable_tv_detection"), False),
         scan_max_workers=cfg_scan_workers,
-        naming_movie_template=str(settings.get("naming_movie_template") or "{title} ({year})"),
-        naming_tv_template=str(settings.get("naming_tv_template") or "{series} ({year})"),
+        naming_movie_template=cfg_movie_template,
+        naming_tv_template=cfg_tv_template,
     )
 
 
