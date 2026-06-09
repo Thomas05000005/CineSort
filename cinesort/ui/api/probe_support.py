@@ -22,6 +22,12 @@ def probe_settings_from_dict(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "probe_backend": normalize_probe_backend(raw.get("probe_backend")),
         "mediainfo_path": str(raw.get("mediainfo_path") or "").strip(),
         "ffprobe_path": str(raw.get("ffprobe_path") or "").strip(),
+        # ITER8 fix (couple probe parallel) : auparavant filtre silencieusement
+        # ce qui fait avaler le toggle utilisateur cote _prewarm_probe_cache
+        # (default True/auto applique meme avec OFF). _normalize_probe_settings
+        # (service.py L44-70) clamp/normalise deja en aval — on traverse brut.
+        "probe_workers": raw.get("probe_workers"),
+        "probe_parallelism_enabled": raw.get("probe_parallelism_enabled"),
     }
 
 
