@@ -53,38 +53,43 @@ db: migration 029_apply_atomic_mode.sql appliquee -> v29
 db: migration 030_field_locks.sql appliquee -> v30
 db: migration 031_tri_etat_decisions.sql appliquee -> v31
 reconcile_pending_batches: no pending batches to reconcile
-api: start_plan run_id=20260609_130654_926
-job: demarrage thread run_id=20260609_130654_926
-REST POST /api/run/start_plan -> 200 (219ms)
+api: start_plan run_id=20260609_131808_219
+job: demarrage thread run_id=20260609_131808_219
+REST POST /api/run/start_plan -> 200 (203ms)
 Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
 REST POST /api/run/get_status -> 200 (0ms)
-Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
-REST POST /api/run/get_plan -> 200 (0ms)
 scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootA\Movies (incremental=False)
 scan: phase 1 decouverte = 9 dossiers en 0.00s
 scan: VO-B phase 1 parallele = 9 candidates (workers=4)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_plan -> 200 (0ms)
 scan: termine C:\Users\blanc\projects\CineSort\test_library\RootA\Movies -> 9 rows
 scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootB\Movies (incremental=False)
 scan: phase 1 decouverte = 6 dossiers en 0.00s
 scan: VO-B phase 1 parallele = 6 candidates (workers=4)
 scan: termine C:\Users\blanc\projects\CineSort\test_library\RootB\Movies -> 8 rows
 scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootB\Shows (incremental=False)
-scan: phase 1 decouverte = 2 dossiers en 0.00s
+scan: phase 1 decouverte = 2 dossiers en 0.02s
 scan: VO-B phase 1 parallele = 2 candidates (workers=4)
 scan: termine C:\Users\blanc\projects\CineSort\test_library\RootB\Shows -> 3 rows
-job: termine run_id=20260609_130654_926 en 0.1s
+job: termine run_id=20260609_131808_219 en 0.1s
 Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
-REST POST /api/run/get_status -> 200 (0ms)
-Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
-REST POST /api/run/get_plan -> 200 (0ms)
+REST POST /api/run/get_status -> 200 (31ms)
 Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
 REST POST /api/run/get_plan -> 200 (0ms)
 Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
-api: build_apply_preview run_id=20260609_130654_926
-apply: 9 rows a traiter (dry_run=True)
-apply: termine — renames=1 moves=0 skipped=8 quarantined=0 errors=0 (dry_run=True)
-apply: 8 rows a traiter (dry_run=True)
-apply: termine — renames=0 moves=4 skipped=4 quarantined=0 errors=0 (dry_run=True)
-apply: 3 rows a traiter (dry_run=True)
-apply: termine — renames=0 moves=2 skipped=1 quarantined=0 errors=0 (dry_run=True)
-REST POST /api/run/build_apply_preview -> 200 (46ms)
+REST POST /api/run/get_plan -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+api: apply run_id=20260609_131808_219 dry_run=False atomic=True
+apply: 9 rows a traiter (dry_run=False)
+apply: termine — renames=1 moves=0 skipped=8 quarantined=0 errors=0 (dry_run=False)
+apply: 8 rows a traiter (dry_run=False)
+apply: termine — renames=0 moves=4 skipped=4 quarantined=0 errors=0 (dry_run=False)
+apply: 3 rows a traiter (dry_run=False)
+apply: termine — renames=0 moves=2 skipped=1 quarantined=0 errors=0 (dry_run=False)
+backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260609-111813-792823Z.post_apply.bak (356.0 KB)
+rotate_backups: supprime cinesort.20260609-073734-587067Z.pre_migration.bak
+REST POST /api/run/apply -> 200 (422ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+api: undo run_id=20260609_131808_219 dry_run=False atomic=True
+REST POST /api/run/undo_last_apply -> 200 (438ms)
