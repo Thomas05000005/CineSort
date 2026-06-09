@@ -564,12 +564,21 @@ def observe_dashboard(
     env = os.environ.copy()
     env["CINESORT_E2E"] = "1"
     env["CINESORT_CDP_PORT"] = str(cdp_port)
-    # Isole le state pour ne pas casser la config courante de l'utilisateur.
-    state_dir = _make_state_dir_isolated(out_dir)
-    env["LOCALAPPDATA"] = str(state_dir.parent)  # CineSort cree state_dir/CineSort
-    # Pre-cree state cible attendu (LOCALAPPDATA/CineSort).
-    target_state = state_dir.parent / "CineSort"
-    target_state.mkdir(parents=True, exist_ok=True)
+    # [GATE 1a iter4] Permet de cibler le LOCALAPPDATA reel (run existant
+    # apres start_plan REST) sans casser le mode isole par defaut.
+    use_real_localappdata = os.environ.get("CINESORT_OBSERVE_USE_REAL_LOCALAPPDATA") == "1"
+    if use_real_localappdata:
+        # Garde le LOCALAPPDATA reel inherited (pas d'override).
+        target_state = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "CineSort"
+        state_dir = target_state  # juste pour le journal/manifeste
+        target_state.mkdir(parents=True, exist_ok=True)
+    else:
+        # Isole le state pour ne pas casser la config courante de l'utilisateur.
+        state_dir = _make_state_dir_isolated(out_dir)
+        env["LOCALAPPDATA"] = str(state_dir.parent)  # CineSort cree state_dir/CineSort
+        # Pre-cree state cible attendu (LOCALAPPDATA/CineSort).
+        target_state = state_dir.parent / "CineSort"
+        target_state.mkdir(parents=True, exist_ok=True)
 
     # Si une biblio test est fournie, on ecrit un settings.json minimaliste qui
     # pointe vers elle.
@@ -579,7 +588,7 @@ def observe_dashboard(
     # car settings.get('roots') contenait une chaine relative non resolue
     # vs cwd app. [HYPOTHESE] sous-racines = dirs au 1er niveau contenant
     # un sous-dossier 'Movies' ou 'Shows'; fallback : library elle-meme.
-    if library is not None and library.exists():
+    if library is not None and library.exists() and not use_real_localappdata:
         library_abs = library.resolve()
         settings_path = target_state / "settings.json"
         if not settings_path.exists():
@@ -643,7 +652,19 @@ def observe_dashboard(
             if not ctx.pages:
                 summary["error"] = "aucune page CDP retournee par pywebview"
                 return summary
-            page = ctx.pages[0]
+            # [GATE 1a iter4] Pas pages[0] : peut etre DevTools quand
+            # CINESORT_DEBUG=1. On cible explicitement la page dashboard.
+            page = None
+            for p in ctx.pages:
+                try:
+                    if "/dashboard" in (p.url or ""):
+                        page = p
+                        break
+                except Exception:
+                    continue
+            if page is None:
+                page = ctx.pages[0]
+            summary["selected_page_url"] = scrub(page.url or "")
 
             # Attendre que le dashboard ait amorce __APP_READY__ (best effort).
             try:

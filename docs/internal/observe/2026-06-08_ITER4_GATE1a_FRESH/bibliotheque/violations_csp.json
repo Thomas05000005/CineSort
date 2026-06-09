@@ -1,0 +1,1563 @@
+{
+  "console_heuristic": [
+    {
+      "type": "info",
+      "text": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-XdBOYbqPQ72M2zU/COjbDXAJqyCM3nJbd1zy6jUwilU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "info",
+      "text": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-XdBOYbqPQ72M2zU/COjbDXAJqyCM3nJbd1zy6jUwilU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "info",
+      "text": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-XdBOYbqPQ72M2zU/COjbDXAJqyCM3nJbd1zy6jUwilU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "info",
+      "text": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-XdBOYbqPQ72M2zU/COjbDXAJqyCM3nJbd1zy6jUwilU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "info",
+      "text": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-XdBOYbqPQ72M2zU/COjbDXAJqyCM3nJbd1zy6jUwilU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "info",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The policy is report-only, so the violation has been logged but no further action has been taken."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    },
+    {
+      "type": "error",
+      "text": "Loading the image 'https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+    }
+  ],
+  "events_page": [
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/bibliotheque.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/bibliotheque.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/bibliotheque.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/bibliotheque.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/bibliotheque.js"
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/i9jJzvoXET4D9pOkoEwncSdNNER.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/iRNbRAIGQQr5diGnjpwJFm0dgt4.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/qpyaW4xUPeIiYA5ckg5zAZFHvsb.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/lX5cA957idlD9Muke5kxZ9V6Rsf.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7dkCfOJ4rjEZNrNJQReht5od7aW.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/pEoqbqtLc4CcwDUDqxmEDSWpWTZ.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/9WUpFfsUIHuiY4MwTEw46Rvf1Od.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/7hLSzZX2jROmEXz2aEoh6JKUFy2.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/12TAqK0AUgdcYE9ZYZ9r7ASbH5Q.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/4BMG9hk9NvSBeQvC82sVmVRK140.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    },
+    {
+      "blockedURI": "https://image.tmdb.org/t/p/w92/8qy3jRmaHR7f8VZh3iXCqCWfFsH.jpg",
+      "violatedDirective": "img-src",
+      "sourceFile": ""
+    }
+  ]
+}
