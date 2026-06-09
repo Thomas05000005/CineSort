@@ -34,6 +34,23 @@ import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
+import { buildEmptyState } from "../components/empty-state.js";
+
+/* --- Helper EMPTY_STATE uniforme (iter11 4.3.x) ---------------------- */
+/* Tous les messages "rien a afficher" de l'historique transitent par ce
+ * helper afin d'utiliser le composant v2 .empty-state (styles unifies,
+ * a11y aria-label, icone optionnelle) au lieu de <p class=historique-
+ * empty-msg> inline. La classe .historique-empty-msg reste preservee
+ * via la classe wrapper externe pour back-compat CSS absolue (cf
+ * components.css L6371-6372 / web/shared). */
+function _emptyInline(message, icon) {
+  return `<div class="historique-empty-msg">${buildEmptyState({
+    variant: "inline",
+    icon: icon || "history",
+    title: "",
+    message,
+  })}</div>`;
+}
 
 /* --- Labels FR centralises (iter11 LABELS_APPLY_HISTORIQUE) ---------- */
 /* Dict: traduit les op_type/run_type bruts (anglais) en libelles FR
@@ -448,7 +465,7 @@ function _renderTimeline(runs, selectedId) {
   if (groups.length === 0) {
     return `
       <section class="historique-section historique-empty">
-        <p class="historique-empty-msg">Aucun run ne correspond aux filtres actuels.</p>
+        ${_emptyInline("Aucun run ne correspond aux filtres actuels.", "history")}
       </section>
     `;
   }
@@ -466,7 +483,7 @@ function _renderTable(runs, selectedId) {
   if (runs.length === 0) {
     return `
       <section class="historique-section historique-empty">
-        <p class="historique-empty-msg">Aucun run ne correspond aux filtres actuels.</p>
+        ${_emptyInline("Aucun run ne correspond aux filtres actuels.", "history")}
       </section>
     `;
   }
@@ -570,7 +587,7 @@ function _buildInspectorSections(selectedRun) {
     return [
       {
         title: "Inspecteur",
-        html: `<p class="historique-empty-msg">Sélectionnez un run dans la liste pour voir son détail.</p>`,
+        html: _emptyInline("Sélectionnez un run dans la liste pour voir son détail.", "inbox"),
       },
     ];
   }
@@ -648,7 +665,7 @@ function _renderFilmsList(runStats, runId) {
         <a href="#/bibliotheque?run_id=${encodeURIComponent(runId)}" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir dans Bibliothèque</a>
       `;
     }
-    return `<p class="historique-empty-msg">Aucun film associé à ce run.</p>`;
+    return _emptyInline("Aucun film associé à ce run.", "film");
   }
   const items = films.map((f) => {
     const st = _filmStatusLabel(f);
@@ -710,7 +727,7 @@ function _renderApplyOps(runStats) {
       <p class="historique-tab-stat"><strong>${applied}</strong> film${applied > 1 ? "s" : ""} appliqué${applied > 1 ? "s" : ""}</p>
       <p class="historique-tab-stat"><strong>${Math.max(0, total - applied)}</strong> non appliqué${total - applied > 1 ? "s" : ""}</p>
       <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""}</p>
-      ${applied > 0 ? `<p class="historique-empty-msg">Détail des opérations non disponible pour ce run.</p>` : `<p class="historique-empty-msg">Aucun apply effectué.</p>`}
+      ${applied > 0 ? _emptyInline("Détail des opérations non disponible pour ce run.", "history") : _emptyInline("Aucun apply effectué.", "history")}
     `;
   }
   // Compter par type
@@ -738,7 +755,7 @@ function _renderDoublonsList(runStats) {
   if (decided.length === 0 && skipped.length === 0) {
     return `
       <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
-      ${dupGroups > 0 ? `<p class="historique-empty-msg">Détail des groupes non disponible pour ce run.</p><a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : `<p class="historique-empty-msg">Aucun doublon dans ce run.</p>`}
+      ${dupGroups > 0 ? `${_emptyInline("Détail des groupes non disponible pour ce run.", "history")}<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : _emptyInline("Aucun doublon dans ce run.", "history")}
     `;
   }
   const decidedHtml = decided.map((g) => {
@@ -767,7 +784,7 @@ function _renderLogViewer(runStats, runId) {
       <div class="historique-log-viewer-actions">
         <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-historique-action="reload-log" data-run-id="${escapeHtml(runId)}">↻ Recharger</button>
       </div>
-      <p class="historique-empty-msg">Aucun log disponible pour ce run.</p>
+      ${_emptyInline("Aucun log disponible pour ce run.", "history")}
     `;
   }
   const content = lines.map((l) => escapeHtml(String(l))).join("\n");

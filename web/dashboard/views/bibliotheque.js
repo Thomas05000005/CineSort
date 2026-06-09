@@ -33,6 +33,7 @@ import { getNavSignal } from "../core/nav-abort.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { renderFilmDetail } from "../components/film-detail.js";
 import { showToast } from "../components/toast.js";
+import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 import {
   openLibraryAdvancedDrawer,
   ADVANCED_DRAWER_DEFAULTS,
@@ -510,16 +511,32 @@ function _renderGrid() {
       _state.advancedActive
     );
     if (_state.total === 0 && !hasActiveFilters) {
+      // iter11 EMPTY_STATE 4.3.1 : composant uniforme buildEmptyState. Wrapper
+      // .bibliotheque-empty conserve pour back-compat CSS (components.css L7166).
       return `
         <div class="bibliotheque-empty">
-          <p>Votre bibliothèque est vide. Lancez un scan pour découvrir vos films.</p>
-          <a class="v5-btn v5-btn--primary" href="#/processing?step=scan" data-route="/processing?step=scan">Lancer un scan</a>
+          ${buildEmptyState({
+            variant: "card",
+            icon: "library",
+            title: "Aucun film importé",
+            message: "Votre bibliothèque est vide. Lancez un scan pour découvrir vos films.",
+            ctaLabel: "Lancer un scan",
+            ctaRoute: "/processing?step=scan",
+            testId: "bibliotheque-empty-cta",
+          })}
         </div>
       `;
     }
+    // iter11 EMPTY_STATE 4.3.2 : composant uniforme. Bouton reset conserve son
+    // attribut data-bibliotheque-reset via class + handler delegue (L1087).
     return `
       <div class="bibliotheque-empty">
-        <p>Aucun film ne correspond à ces filtres.</p>
+        ${buildEmptyState({
+          variant: "card",
+          icon: "search",
+          title: "Aucun résultat",
+          message: "Aucun film ne correspond à ces filtres.",
+        })}
         <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-reset>Effacer les filtres</button>
       </div>
     `;
@@ -591,6 +608,9 @@ function _render() {
   _bindGridDragSelect();
   _setupScrollObserver();
   _updateInspector();
+  // iter11 EMPTY_STATE : cabler navigation CTA empty-state (route hash).
+  // Idempotent : bindEmptyStateCta marque chaque bouton via dataset.
+  try { bindEmptyStateCta(_container); } catch (_e) { /* tolerant */ }
 }
 
 /* --- Inspecteur droit --- */
