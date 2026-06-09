@@ -1,0 +1,50 @@
+2026-06-09 09:36:02,742 [INFO] cinesort.infra.rest_server [run=- req=-] REST API started on http://0.0.0.0:8642 (167 endpoints)
+2026-06-09 09:36:02,742 [INFO] cinesort.infra.network_utils [run=- req=-] network: IP locale detectee = 10.2.0.2 (UDP)
+2026-06-09 09:36:02,742 [INFO] cinesort.infra.rest_server [run=- req=-] REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+2026-06-09 09:36:02,743 [INFO] cinesort.startup [run=- req=-] DevTools active (mode developpeur detecte)
+2026-06-09 09:36:03,063 [INFO] cinesort.startup [run=- req=-] splash: etape 1 — Initialisation
+2026-06-09 09:36:03,746 [INFO] cinesort.infra.rest_server [run=- req=b5722917] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:36:03,749 [INFO] cinesort.infra.rest_server [run=- req=a420e45f] REST POST /api/settings/get_settings -> 200 (0ms)
+2026-06-09 09:36:03,755 [INFO] cinesort.infra.rest_server [run=- req=a353f354] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-09 09:36:03,755 [INFO] cinesort.startup [run=- req=-] main_window: dashboard charge (events.loaded firing)
+2026-06-09 09:36:03,774 [INFO] cinesort.startup [run=- req=-] splash: etape 2 — Chargement des reglages
+2026-06-09 09:36:03,877 [INFO] cinesort.startup [run=- req=-] splash: etape 3 — Base de donnees
+2026-06-09 09:36:03,979 [INFO] cinesort.startup [run=- req=-] splash: etape 4 — Interface
+2026-06-09 09:36:03,979 [INFO] cinesort.startup [run=- req=-] splash: etape 5 — Serveur API (deja actif)
+2026-06-09 09:36:03,983 [INFO] cinesort.tmdb.purge [run=- req=-] V5-03 : purge cache TMDb (TTL 42j) — checked=42 purged=0 preserved_legacy=0
+2026-06-09 09:36:03,983 [INFO] cinesort.app.retention_cleanup [run=- req=-] retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+2026-06-09 09:36:03,986 [INFO] cinesort.app.quarantine_ttl [run=- req=-] quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+2026-06-09 09:36:03,986 [INFO] cinesort.startup [run=- req=-] splash: etape finale — Pret
+2026-06-09 09:36:03,988 [INFO] cinesort.startup [run=- req=-] splash: fenetre principale chargee, splash detruit
+2026-06-09 09:36:04,215 [INFO] cinesort.infra.db.backup [run=- req=6a08aa84] backup_db: cinesort.sqlite -> C:\Users\blanc\AppData\Local\CineSort\db\backups\cinesort.20260609-073603-912859Z.pre_migration.bak (102340.0 KB)
+2026-06-09 09:36:04,224 [INFO] cinesort.infra.db.backup [run=- req=6a08aa84] rotate_backups: supprime cinesort.20260609-063255-842449Z.pre_migration.bak
+2026-06-09 09:36:04,256 [INFO] cinesort.app.apply_batches_reconciliation [run=- req=6a08aa84] reconcile_pending_batches: no pending batches to reconcile
+2026-06-09 09:36:04,390 [INFO] cinesort.infra.rest_server [run=- req=c435989f] REST POST /api/run/get_sidebar_counters -> 200 (625ms)
+2026-06-09 09:36:04,394 [INFO] cinesort.infra.rest_server [run=- req=ede562b4] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:36:04,699 [INFO] cinesort.infra.rest_server [run=- req=6a08aa84] REST POST /api/run/get_dashboard -> 200 (953ms)
+2026-06-09 09:36:04,743 [INFO] cinesort.infra.rest_server [run=- req=2ae242a9] REST POST /api/run/get_status -> 200 (47ms)
+2026-06-09 09:36:04,789 [INFO] cinesort.infra.rest_server [run=- req=af1dc8e9] REST POST /api/run/get_global_stats -> 200 (1047ms)
+2026-06-09 09:36:04,807 [INFO] cinesort.ui.api [run=- req=ce647156] api err [validation]: URL du serveur Jellyfin vide.
+2026-06-09 09:36:04,808 [INFO] cinesort.infra.rest_server [run=- req=ce647156] REST POST /api/integrations/test_jellyfin_connection -> 200 (0ms)
+2026-06-09 09:36:04,883 [INFO] cinesort.infra.rest_server [run=- req=51794048] REST POST /api/runtime/is_demo_mode_active -> 200 (15ms)
+2026-06-09 09:36:04,887 [INFO] cinesort.infra.rest_server [run=- req=cd22f0ce] REST POST /api/runtime/get_update_info -> 200 (0ms)
+2026-06-09 09:36:04,985 [INFO] cinesort.infra.rest_server [run=- req=4a014eee] REST POST /api/runtime/get_probe_tools_status -> 200 (94ms)
+2026-06-09 09:36:05,206 [INFO] cinesort.infra.rest_server [run=- req=c4896a8b] REST POST /api/integrations/test_omdb_connection -> 200 (391ms)
+2026-06-09 09:36:05,471 [INFO] cinesort.infra.rest_server [run=- req=1597fddf] REST POST /api/integrations/test_tmdb_key -> 200 (656ms)
+2026-06-09 09:36:07,416 [INFO] cinesort.infra.rest_server [run=- req=c5e02d16] REST POST /api/runtime/get_notifications_unread_count -> 200 (0ms)
+2026-06-09 09:36:07,464 [INFO] cinesort.infra.rest_server [run=- req=eccfbecc] REST POST /api/settings/get_confidence_thresholds -> 200 (0ms)
+2026-06-09 09:36:07,691 [INFO] cinesort.infra.rest_server [run=- req=c3dece45] REST POST /api/run/get_dashboard -> 200 (219ms)
+2026-06-09 09:36:07,727 [INFO] cinesort.infra.rest_server [run=- req=ba079705] REST POST /api/run/get_status -> 200 (31ms)
+2026-06-09 09:36:07,768 [INFO] cinesort.infra.rest_server [run=- req=53ea721a] REST POST /api/run/get_plan -> 200 (31ms)
+2026-06-09 09:36:09,966 [INFO] cinesort.infra.rest_server [run=- req=6c9fa069] REST POST /api/run/get_dashboard -> 200 (171ms)
+2026-06-09 09:36:09,997 [INFO] cinesort.infra.rest_server [run=- req=a4347e12] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-09 09:36:10,033 [INFO] cinesort.infra.rest_server [run=- req=85ac8ae4] REST POST /api/run/get_plan -> 200 (16ms)
+2026-06-09 09:36:10,323 [INFO] cinesort.infra.rest_server [run=- req=810b4e65] REST POST /api/run/get_dashboard -> 200 (188ms)
+2026-06-09 09:36:10,365 [INFO] cinesort.infra.rest_server [run=- req=54007256] REST POST /api/run/get_status -> 200 (32ms)
+2026-06-09 09:36:10,400 [INFO] cinesort.infra.rest_server [run=- req=0ae5f0c4] REST POST /api/run/get_plan -> 200 (31ms)
+2026-06-09 09:36:12,602 [INFO] cinesort.infra.rest_server [run=- req=97ee148f] REST POST /api/run/get_dashboard -> 200 (187ms)
+2026-06-09 09:36:12,624 [INFO] cinesort.infra.rest_server [run=- req=219a2464] REST POST /api/run/get_status -> 200 (16ms)
+2026-06-09 09:36:12,655 [INFO] cinesort.infra.rest_server [run=- req=9e9dacaa] REST POST /api/run/get_plan -> 200 (31ms)
+2026-06-09 09:36:15,865 [INFO] cinesort.infra.rest_server [run=- req=031a27ef] REST POST /api/run/get_dashboard -> 200 (172ms)
+2026-06-09 09:36:15,903 [INFO] cinesort.infra.rest_server [run=- req=4b349774] REST POST /api/run/get_status -> 200 (31ms)
+2026-06-09 09:36:15,932 [INFO] cinesort.infra.rest_server [run=- req=c80546ad] REST POST /api/run/get_plan -> 200 (15ms)
