@@ -554,7 +554,16 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         if client_ip in _LOCAL_CLIENT_IPS:
             return False
         if self.rate_limiter and self.rate_limiter.is_blocked(client_ip):
-            self._respond_json(429, {"ok": False, "message": "Trop de tentatives. Reessayez dans 60 secondes."})
+            # ITER14 RATE_LIMIT_429_FACADE : Retry-After indique au client le delai
+            # avant retry (RFC 7231 §7.1.3). Valeur = window_s (60s par defaut)
+            # = duree maximale residuelle avant que le compteur per-IP se vide.
+            # Seuil 5 echecs / 60s INCHANGE (cf _RATE_LIMIT_MAX_FAILURES / _RATE_LIMIT_WINDOW_S).
+            retry_after = str(int(self.rate_limiter._window))
+            self._respond_json(
+                429,
+                {"ok": False, "message": "Trop de tentatives. Reessayez dans 60 secondes."},
+                extra_headers={"Retry-After": retry_after},
+            )
             return True
         return False
 
@@ -592,7 +601,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         with contextlib.suppress(AttributeError, OSError):
             self.send_header("X-Request-ID", rid)
 
-    def _respond_json(self, status: int, data: Any) -> None:
+    def _respond_json(self, status: int, data: Any, extra_headers: Optional[Dict[str, str]] = None) -> None:
         try:
             body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError) as exc:
@@ -605,6 +614,11 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # V3-04 : header X-Request-ID systematique sur les reponses JSON
         # (succes ET erreurs 4xx/5xx).
         self._send_request_id_header()
+        # ITER14 RATE_LIMIT_429_FACADE : extra headers optionnels (ex: Retry-After
+        # sur les 429). Backward compat : extra_headers=None ne change rien.
+        if extra_headers:
+            for hname, hvalue in extra_headers.items():
+                self.send_header(hname, hvalue)
         self.end_headers()
         self.wfile.write(body)
 
