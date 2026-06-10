@@ -147,9 +147,25 @@ function _isNativeMode() {
  * @returns {string|null} "Bearer <token>" si safe, null sinon
  */
 function _safeBearer(token) {
+  // ITER15 5.2 : reduire verbosite token en mode natif+localhost. En desktop
+  // (pywebview, bind 127.0.0.1), le bypass loopback cote serveur rend ces
+  // diagnostics largement bruyants pour la console F12. En mode web/LAN, on
+  // garde le niveau ERROR : la c'est un vrai bug auth a investiguer.
+  // GARDE-FOU : ce changement n'affecte PAS l'auth (matrice iter5/iter14
+  // no/wrong→401, valid→200, loopback bypass — strictement identique).
+  let _isQuietContext = false;
+  try {
+    if (typeof window !== "undefined") {
+      const _isNative = window.__CINESORT_NATIVE__ === true;
+      const _host = window.location && window.location.hostname;
+      const _isLocalhost = _host === "127.0.0.1" || _host === "localhost";
+      _isQuietContext = _isNative && _isLocalhost;
+    }
+  } catch { /* no-op */ }
+  const _log = _isQuietContext ? console.debug : console.error;
   // DEBUG VERBOSE 2026-06-08 : signaler explicitement l absence de token au boot.
   if (!token) {
-    try { console.error("[dash-api] _safeBearer: token absent ou vide (token=%o)", token); } catch { /* no-op */ }
+    try { _log("[dash-api] _safeBearer: token absent ou vide (token=%o)", token); } catch { /* no-op */ }
     return null;
   }
   // FIX 2026-06-07 (faux 429 TMDb test) : avant d'abdiquer, on tente une
@@ -169,7 +185,7 @@ function _safeBearer(token) {
       for (var k = 0; k < normalized.length; k++) {
         preCps.push("U+" + normalized.charCodeAt(k).toString(16).padStart(4, "0").toUpperCase());
       }
-      console.error("[dash-api] _safeBearer BOM/NBSP detecte AVANT normalisation len=%d codepoints=%o", normalized.length, preCps);
+      _log("[dash-api] _safeBearer BOM/NBSP detecte AVANT normalisation len=%d codepoints=%o", normalized.length, preCps);
     } catch (_e) { /* no-op */ }
     normalized = normalized.replace(/﻿/g, "").replace(/ /g, " ").trim();
   }
@@ -187,13 +203,13 @@ function _safeBearer(token) {
           allCps.push("U+" + c.toString(16).padStart(4, "0").toUpperCase());
           if (c > 127) nonAscii.push({ pos: j, codepoint: "U+" + c.toString(16).padStart(4, "0").toUpperCase() });
         }
-        console.error(
+        _log(
           "[dash-api] _safeBearer REJECT token non-ASCII U+" +
             cp.toString(16).padStart(4, "0").toUpperCase() +
             " pos=" + i + " len=" + normalized.length + " (Authorization OMIS)",
         );
-        console.error("[dash-api] _safeBearer rejected token full codepoints=%o", allCps);
-        console.error("[dash-api] _safeBearer rejected token non-ASCII positions=%o", nonAscii);
+        _log("[dash-api] _safeBearer rejected token full codepoints=%o", allCps);
+        _log("[dash-api] _safeBearer rejected token non-ASCII positions=%o", nonAscii);
       } catch (_e) { /* no-op */ }
       return null;
     }

@@ -819,12 +819,16 @@ def main() -> None:
             if _desktop_dashboard_token:
                 _encoded_token = quote(_desktop_dashboard_token)
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={_encoded_token}&native=1"
-                # DEBUG : afficher l'URL injectee (token tronque pour lisibilite)
-                print(
-                    f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
-                    file=sys.stderr,
-                )
+                # ITER15 5.2 : reduire verbosite — l'URL main_url avec ntoken
+                # tronque est un detail de boot natif normal, pas une condition
+                # d'erreur. Logge uniquement en mode CINESORT_DEBUG. Le bypass
+                # loopback rend de toute facon l'absence de token benigne en
+                # local. GARDE-FOU : ne change pas la matrice auth iter5/iter14.
                 if _DEBUG_NB:
+                    print(
+                        f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
+                        file=sys.stderr,
+                    )
                     print(
                         f"[DEBUG-NTOKEN] url-encoded ntoken={_encoded_token!r} "
                         f"(len_raw={len(_desktop_dashboard_token)} len_encoded={len(_encoded_token)})",
@@ -839,7 +843,18 @@ def main() -> None:
                         )
             else:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
-                print("[REST] AVERTISSEMENT : main_url SANS ntoken (rest_server._token vide)", file=sys.stderr)
+                # ITER15 5.2 : token vide reste une condition d'erreur (en mode
+                # web/LAN, l'utilisateur ne peut pas se connecter ; en mode natif,
+                # le bypass loopback peut sauver mais reste un signal anormal).
+                # On migre vers logger.error pour beneficier du scrubber et de
+                # la categorisation centralisee (deja preparee iter5).
+                # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
+                import logging as _logging_nb
+                _logger_nb = _logging_nb.getLogger("cinesort.app.native_boot")
+                _logger_nb.error(
+                    "REST main_url sans ntoken (rest_server._token vide) — "
+                    "auth web/LAN impossible, bypass loopback requis pour mode natif"
+                )
         else:
             # Fallback : charger l'index local (mode preview ou serveur REST mort)
             index = resource_path(index_rel)
