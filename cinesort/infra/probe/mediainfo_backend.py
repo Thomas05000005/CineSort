@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,6 +20,15 @@ def run_mediainfo_json(
     cmd = [str(tool_path), "--Output=JSON", str(media_path)]
     try:
         rc, out, err = runner(cmd, timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        # ITER13 RETRY_BACKOFF : meme symetrie que `ffprobe_backend`. Apres
+        # epuisement des retries (`default_runner`), TimeoutExpired surface
+        # ici plutot que d'exploser jusqu'au REST handler.
+        messages.append(
+            f"MediaInfo timeout apres {getattr(exc, 'timeout', timeout_s):.0f}s "
+            f"(retries epuises): {exc}"
+        )
+        return None, messages
     except (ImportError, OSError, TypeError, ValueError) as exc:
         messages.append(f"MediaInfo echec execution: {exc}")
         return None, messages

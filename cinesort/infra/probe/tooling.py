@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from cinesort.infra.probe._retry_backoff import retry_with_backoff
 from cinesort.infra.probe.constants import VERSION_PROBE_TIMEOUT_S
 from cinesort.infra.subprocess_safety import tracked_run
 
@@ -50,7 +51,28 @@ class ToolStatus:
         }
 
 
-def default_runner(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
+def _runner_label(cmd: List[str]) -> str:
+    """Extrait un label court (basename de l'exe) pour les logs de retry.
+
+    Pas de dependance domain/app : reste pur infra. Utilise pour rendre les
+    messages "ffprobe retry attempt 2/4" lisibles plutot que "probe retry...".
+    """
+    if not cmd:
+        return "probe"
+    first = str(cmd[0])
+    for sep in ("\\", "/"):
+        if sep in first:
+            first = first.rsplit(sep, 1)[-1]
+    lower = first.lower()
+    for ext in (".exe", ".cmd", ".bat"):
+        if lower.endswith(ext):
+            first = first[: -len(ext)]
+            break
+    return first or "probe"
+
+
+def _run_once(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
+    """Execution simple sans retry. Conserve le comportement historique."""
     platform_kwargs = _runner_platform_kwargs()
     cp = tracked_run(
         cmd,
@@ -62,6 +84,31 @@ def default_runner(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
         **platform_kwargs,
     )
     return int(cp.returncode), str(cp.stdout or ""), str(cp.stderr or "")
+
+
+def default_runner(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
+    """Runner avec retry exponentiel sur echec transitoire.
+
+    ITER13 (mecanisme RETRY_BACKOFF) : enveloppe `_run_once` dans
+    `retry_with_backoff` pour absorber les pannes transitoires :
+    - `subprocess.TimeoutExpired` (NAS lent, gros 4K HEVC)
+    - `BrokenPipeError` (pipe ferme abruptement)
+    - `OSError` reseau (UNC injoignable transitoire, winerror 121)
+
+    Defaults : 3 retries, backoff 1s/2s/4s/8s plafond. Configurable via env
+    `CINESORT_PROBE_RETRY_MAX` (cf `_retry_backoff.py`).
+
+    NB : NE retry PAS sur erreurs deterministes (FileNotFoundError=ENOENT,
+    PermissionError=EACCES, subprocess rc!=0) — c'est au caller (backends,
+    `get_tools_status`) de decider quoi faire d'un echec final.
+
+    Backward-compatible : meme signature `(cmd, timeout_s) -> (rc, out, err)`.
+    """
+    label = _runner_label(cmd)
+    return retry_with_backoff(
+        lambda: _run_once(cmd, timeout_s),
+        label=label,
+    )
 
 
 def _resolve_tool_path(explicit_value: str, tool_name: str, which_fn: WhichFn) -> str:
