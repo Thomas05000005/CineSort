@@ -878,11 +878,17 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
                     ctx.stats.folders_rejected_scandir_error or 0
                 ) + delta_scandir
 
-            # Si AUCUN rejet detaille n'a ete enregistre (dossier vide, ou tous
-            # fichiers non-video sans matche), on retombe sur ignore_non_supporte
-            # pour preserver le comportement historique et l'UI 'X films exclus'.
-            if (delta_ext + delta_size + delta_name + delta_scandir) == 0:
-                core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
+            # ITER15 #1 (2026-06-10) : `ignore_non_supporte` est le compteur
+            # ROLLUP DOSSIER ("aucun fichier video exploitable", cf. core.py L1365
+            # et UI dashboard "format non supporte"). Les deltas ci-dessus sont
+            # des compteurs FILE-level qui s'additionnent independamment. Quand
+            # `videos == []`, on a toujours un dossier sans video exploitable :
+            # on bump donc systematiquement ignore_non_supporte. La regression
+            # vient de 198a33a (fix SCAN-1 v166) qui n'incrementait ce compteur
+            # que si AUCUN rejet detaille — cassant alors le breakdown
+            # extensions (test_plan_library_collects_ignored_extensions_breakdown
+            # passait de >=1 a 0 pour les dossiers de 'bruit' txt/jpg/nfo).
+            core_mod._stats_add_ignore(ctx.stats, "ignore_non_supporte")
 
             # Inventaire des extensions presentes (pour bandeau diagnostic UI).
             # VO-B : reutilise le calcul Phase 1 si dispo, evite un 2e scandir NAS.
