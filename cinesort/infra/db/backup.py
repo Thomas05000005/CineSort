@@ -242,6 +242,16 @@ def restore_backup(backup_path: Path, target_path: Path) -> Path:
 
     # Restore : lit le backup et ecrit dans target via API natif
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Purge les sidecars WAL/SHM residuels avant restore : sinon, ouvrir
+    # une nouvelle connexion sur la cible peut rejouer un WAL orphelin
+    # par-dessus le contenu restaure (cf #468). Cas typique : auto-restore
+    # post-corruption ou la cible a des sidecars sales.
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(target.name + suffix)
+        try:
+            sidecar.unlink(missing_ok=True)
+        except OSError as exc:
+            _logger.warning("restore_backup: purge sidecar %s impossible: %s", sidecar.name, exc)
     with closing(sqlite3.connect(str(backup))) as src_conn, closing(sqlite3.connect(str(target))) as dst_conn:
         src_conn.backup(dst_conn)
     _logger.info("restore_backup: %s -> %s", backup.name, target)
