@@ -59,6 +59,16 @@ const POLL_INTERVAL_ANALYSE = 2000; // 2s pendant scan en cours (etape 1)
 const POLL_INTERVAL_APPLY = 1500;
 const UNDO_COUNTDOWN_INTERVAL_MS = 60_000; // Spec 08 §3.5 : refresh carte undo / 60s
 
+// Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : backoff exponentiel cote UI sur
+// erreur reseau / payload anormal (ex: ok=false, _runStatus=null apres tentative).
+// Avant : setInterval fixe (2-5s) qui martelait /api/run/get_status meme quand le
+// backend etait DEGRADED (probe hang ~35s, cf BILAN_ITER13 section 2 "Polling UI
+// sans backoff sur degradation"). Maintenant : on degrade en sequence 1s/2s/4s/8s
+// jusqu'au plafond, on remet a 0 sur premier succes. Affichage "Reconnexion dans Xs"
+// visible dans le header pour informer l'utilisateur.
+const POLL_BACKOFF_SEQUENCE_MS = [1000, 2000, 4000, 8000]; // plafond 8s
+const POLL_BACKOFF_MAX_ATTEMPTS = 8; // borne souple : passe au plafond apres le 4eme
+
 /**
  * mega-hotfix frontend_ui_polish (#5) : countdown gradue lineaire pour
  * dangerConfirmModal. Avant : cliff effect a 50/51 (0s a 50 elements, 3s
@@ -86,6 +96,15 @@ let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
 let _loading = false;
 let _targetRunId = null; // Phase 5 spec §2 : fragment #run-XXX = run cible à afficher.
 let _pollTimer = null;
+// Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : state du backoff exponentiel.
+// _pollErrorStreak : nombre d'echecs consecutifs (>=1 : on est en backoff).
+// _pollNextRetryAt : timestamp (ms epoch) du prochain tick de polling, sert au
+//   countdown affiche dans le header (mis a jour par _renderInPlace au render).
+// _pollLastError : derniere cause d'echec (texte court), affichee a cote du
+//   countdown pour donner un signal honnete (vs disparition silencieuse).
+let _pollErrorStreak = 0;
+let _pollNextRetryAt = 0;
+let _pollLastError = null;
 let _undoCountdownTimer = null; // Spec 08 §3.5 : refresh carte annulation post-apply.
 let _logsState = { items: [], nextIndex: 0 };
 let _scanOptions = {
@@ -176,6 +195,9 @@ function _writeStep(stepId) {
 
 async function _loadRunInfo() {
   _loading = true;
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : on retourne un boolean
+  // succes/echec consomme par la boucle de polling pour ajuster le backoff.
+  let _ok = false;
   try {
     // Phase 5 : si fragment #run-XXX présent, charge ce run précis.
     const targetId = _targetRunId;
@@ -187,7 +209,9 @@ async function _loadRunInfo() {
     const res = await apiPost("run/get_dashboard", params, { signal: _signal() });
     if (!res || res.data?.ok === false) {
       _runInfo = null;
-      return;
+      _pollLastError = "Reponse get_dashboard invalide";
+      _loading = false;
+      return false;
     }
     const data = res.data || res;
     // Fix audit 2026-05-24 : si le run actif change (nouveau scan lancé,
@@ -227,14 +251,23 @@ async function _loadRunInfo() {
           }
         : null,
     };
-  } catch (_err) {
+    _ok = true;
+  } catch (err) {
     _runInfo = null;
+    // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : capture la cause pour
+    // l'affichage user (transparence non silencieuse).
+    _pollLastError = err && err.name === "AbortError"
+      ? null // unmount en cours, pas un vrai echec
+      : `Erreur reseau get_dashboard${err && err.message ? ` : ${String(err.message).slice(0, 80)}` : ""}`;
   }
   _loading = false;
+  return _ok;
 }
 
 async function _loadRunStatus() {
-  if (!_runInfo || !_runInfo.runId) return;
+  if (!_runInfo || !_runInfo.runId) return true;
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : retourne un boolean pour
+  // alimenter le backoff (idem _loadRunInfo).
   try {
     const res = await apiPost("run/get_status", {
       run_id: _runInfo.runId,
@@ -243,7 +276,8 @@ async function _loadRunStatus() {
     const data = res?.data || res;
     if (!data || data.ok === false) {
       _runStatus = null;
-      return;
+      _pollLastError = "Reponse get_status invalide";
+      return false;
     }
     _runStatus = {
       status: String(data.status || "UNKNOWN"),
@@ -281,8 +315,13 @@ async function _loadRunStatus() {
       _logsState.items = (_logsState.items || []).concat(newLogs).slice(-30);
     }
     _logsState.nextIndex = Number(data.next_log_index || _logsState.nextIndex);
-  } catch (_err) {
+    return true;
+  } catch (err) {
     /* on garde l'ancien _runStatus */
+    _pollLastError = err && err.name === "AbortError"
+      ? null
+      : `Erreur reseau get_status${err && err.message ? ` : ${String(err.message).slice(0, 80)}` : ""}`;
+    return false;
   }
 }
 
@@ -290,9 +329,15 @@ async function _loadRunStatus() {
 
 function _stopPolling() {
   if (_pollTimer) {
-    clearInterval(_pollTimer);
+    // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : on est passe d'un setInterval
+    // a un setTimeout recursif (chaque tick programme le suivant en fonction du
+    // backoff). clearTimeout suffit donc, mais on garde clearInterval pour la
+    // backward-compat avec un eventuel hot-reload qui aurait deja installe un
+    // ancien timer setInterval. clearTimeout/clearInterval acceptent le meme id.
+    clearTimeout(_pollTimer);
     _pollTimer = null;
   }
+  _pollNextRetryAt = 0;
 }
 
 function _computePollInterval() {
@@ -306,52 +351,93 @@ function _computePollInterval() {
   return POLL_INTERVAL_RUNNING;
 }
 
+// Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : interval effectif a appliquer
+// au prochain tick. En mode degrade (_pollErrorStreak >= 1) on bascule sur la
+// sequence exponentielle (1s -> 2s -> 4s -> 8s plafond), sinon on retombe sur
+// l'interval contextuel calcule par _computePollInterval.
+function _effectivePollInterval() {
+  if (_pollErrorStreak >= 1) {
+    const idx = Math.min(_pollErrorStreak - 1, POLL_BACKOFF_SEQUENCE_MS.length - 1);
+    return POLL_BACKOFF_SEQUENCE_MS[idx];
+  }
+  return _computePollInterval();
+}
+
+// Helper : remaining ms avant prochain tick, expose pour le rendu du header
+// ("Reconnexion dans Xs"). Plafonne a 0 pour ne pas afficher de duree negative
+// si setTimeout a deja firé mais que l'UI n'a pas encore reflete le reset.
+function _pollNextRetryRemainingMs() {
+  if (!_pollNextRetryAt) return 0;
+  return Math.max(0, _pollNextRetryAt - Date.now());
+}
+
+async function _pollTick() {
+  // Fix audit 2026-05-24 : avant on poll-ait infiniment meme apres run done
+  // -> 1 call/2-5s a vie tant que vue montee. Arret propre quand run termine.
+  // Un refresh manuel ou un nouveau scan re-arme via _startPolling().
+  // Fix APPLY-2 (2026-05-30) : ne PAS stopper le polling tant qu'un apply
+  // est en cours, meme si le scan top-level est done.
+  if (_runStatus && _runStatus.done && (!_applyStatus || _applyStatus.done || !_applyStatus.running)) {
+    _stopPolling();
+    if (_currentStep === "analyse") {
+      _currentStep = "verification";
+      _writeStep("verification");
+      await _loadPlan();
+    }
+    _renderInPlace();
+    return;
+  }
+  const okStatus = await _loadRunStatus();
+  const okInfo = await _loadRunInfo();
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : un seul des deux echoue
+  // suffit a degrader. Sur succes, reset complet du streak ET de l'erreur
+  // affichee (signal visible que la connexion est revenue).
+  if (okStatus && okInfo) {
+    if (_pollErrorStreak > 0) {
+      _pollErrorStreak = 0;
+      _pollLastError = null;
+    }
+  } else {
+    _pollErrorStreak = Math.min(_pollErrorStreak + 1, POLL_BACKOFF_MAX_ATTEMPTS);
+    // log console minimal (debug) : visible en F12 pour traquer la source.
+    try {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[traitement] polling backoff attempt ${_pollErrorStreak}/${POLL_BACKOFF_MAX_ATTEMPTS}`,
+        _pollLastError || "(no error message)",
+      );
+    } catch { /* console indispo */ }
+  }
+  _renderInPlace();
+  // Re-arme le prochain tick avec l'interval effectif (contextuel ou backoff).
+  _scheduleNextPoll();
+}
+
+function _scheduleNextPoll() {
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : ordonnancement recursif
+  // setTimeout (vs ancien setInterval) pour reposer chaque delai sur le
+  // resultat du tick precedent. _pollNextRetryAt est consomme par
+  // _renderHeaderRun pour afficher "Reconnexion dans Xs" en cas de backoff.
+  if (_pollTimer) {
+    clearTimeout(_pollTimer);
+    _pollTimer = null;
+  }
+  const interval = _effectivePollInterval();
+  _pollNextRetryAt = Date.now() + interval;
+  _pollTimer = setTimeout(_pollTick, interval);
+}
+
 function _startPolling() {
   _stopPolling();
   // Fix APPLY-2 (2026-05-30) : polling rapide pendant un apply en cours sur
   // l'etape 5, pour que la barre de progression et le fichier en cours
   // refletent la realite serveur sans attendre 5s.
-  let interval = _computePollInterval();
-  _pollTimer = setInterval(async () => {
-    // Fix audit 2026-05-24 : avant on poll-ait infiniment meme apres run done
-    // -> 1 call/2-5s a vie tant que vue montee. Arret propre quand run termine.
-    // Un refresh manuel ou un nouveau scan re-arme via _startPolling().
-    // Fix APPLY-2 (2026-05-30) : ne PAS stopper le polling tant qu'un apply
-    // est en cours, meme si le scan top-level est done.
-    if (_runStatus && _runStatus.done && (!_applyStatus || _applyStatus.done || !_applyStatus.running)) {
-      _stopPolling();
-      // Fix audit 2026-05-24 (v1.5.2) : auto-transition Analyse -> Verification
-      // quand le scan vient de se terminer. Avant : utilisateur restait sur
-      // l'ecran Analyse avec uniquement le bouton "Lancer scan", aucun CTA
-      // pour passer a l'etape suivante -> impasse UX. Le workflow est lineaire
-      // et deterministe, pas de raison de rester sur Analyse quand done. Le
-      // breadcrumb permet de revenir d'un clic au besoin.
-      if (_currentStep === "analyse") {
-        _currentStep = "verification";
-        _writeStep("verification");
-        // Fix audit 2026-05-26 (v1.5.6) Vague L (step-1) :
-        // _renderInPlace seul affichait la Verification avec _validationPlan vide
-        // (ou stale d'un run precedent). On charge le plan AVANT le render final
-        // pour eviter l'ecran "0 films a verifier" trompeur juste apres la fin
-        // de scan. _loadPlan est idempotent et s'auto-protege si runId absent.
-        await _loadPlan();
-      }
-      _renderInPlace(); // render final manquant (avant return)
-      return;
-    }
-    await _loadRunStatus();
-    await _loadRunInfo();
-    _renderInPlace();
-    // Fix audit 2026-06-08 medium : re-armer le polling si l'intervalle
-    // cible a change (transition step ou bascule apply.running). Sinon le
-    // timer continue a l'ancien intervalle (capture au moment du _startPolling).
-    const nextInterval = _computePollInterval();
-    if (nextInterval !== interval) {
-      interval = nextInterval;
-      _stopPolling();
-      _startPolling();
-    }
-  }, interval);
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : reset du streak + erreur
+  // a l'armement pour ne pas heriter d'un etat degrade laisse par une
+  // session de polling precedente.
+  _pollErrorStreak = 0;
+  _pollLastError = null;
+  _scheduleNextPoll();
 }
 
 /* --- Header run actif (spec §2) --- */
@@ -407,6 +493,31 @@ function _renderHeaderRun() {
     ? `Démarré ${formatRelative(_runInfo.startedTs)}`
     : "";
 
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : badge "Reconnexion dans Xs"
+  // quand le polling est en mode degrade. Donne un signal honnete a l'utilisateur
+  // (vs "Polling silencieux qui reessaie toutes les 2s sans rien afficher").
+  // Memoire violee avant : "degradation JAMAIS silencieuse - qualite indisponible
+  // visible PAS score invente PAS ligne disparue PAS 0 trompeur". Le label retry
+  // rend la latence backend visible cote UI.
+  let backoffBadge = "";
+  if (_pollErrorStreak > 0) {
+    const remaining = Math.ceil(_pollNextRetryRemainingMs() / 1000);
+    const retryLbl = remaining > 0
+      ? `Reconnexion dans ${remaining}s`
+      : "Reconnexion en cours…";
+    const errLbl = _pollLastError
+      ? ` (${escapeHtml(_pollLastError)})`
+      : "";
+    backoffBadge = `
+      <div class="traitement-run-backoff" role="status" aria-live="polite"
+           title="Connexion serveur degradee. Backoff exponentiel en cours.">
+        <span class="traitement-run-backoff-dot" aria-hidden="true">⚠</span>
+        <span class="traitement-run-backoff-label">${escapeHtml(retryLbl)}</span>
+        <span class="traitement-run-backoff-detail">${errLbl}</span>
+      </div>
+    `;
+  }
+
   return `
     <header class="traitement-header-run ${escapeHtml(meta.cls)}">
       <div class="traitement-header-run-top">
@@ -425,6 +536,7 @@ function _renderHeaderRun() {
           ${etaLabel !== "—" ? `<span>·</span><span class="traitement-run-eta">${escapeHtml(etaLabel)}</span>` : ""}
         </div>
       </div>
+      ${backoffBadge}
       <div class="traitement-header-actions">
         ${isRunning ? `<button type="button" class="v5-btn v5-btn--secondary" data-traitement-action="pause">⏸ Pause</button>` : ""}
         ${isPaused ? `<button type="button" class="v5-btn v5-btn--primary" data-traitement-action="resume">▶ Reprendre</button>` : ""}
@@ -2580,6 +2692,12 @@ export function unmountTraitement() {
   _validationExpanded = new Set();
   // Fix APPLY-2 (2026-05-30) : reset etat apply.
   _applyStatus = null;
+  // Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : reset du state backoff au
+  // unmount pour qu'un futur remount reparte sain (pas de fantome "Reconnexion
+  // dans Xs" sur une vue qui vient juste d'etre remontée).
+  _pollErrorStreak = 0;
+  _pollNextRetryAt = 0;
+  _pollLastError = null;
   _logsState = { items: [], nextIndex: 0 };
   void navigateTo;
 }
