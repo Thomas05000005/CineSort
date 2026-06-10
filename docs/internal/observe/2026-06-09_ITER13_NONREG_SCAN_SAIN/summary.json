@@ -1,0 +1,487 @@
+{
+  "manifest": {
+    "timestamp": "2026-06-09_ITER13_NONREG_SCAN_SAIN",
+    "out_dir": "docs\\internal\\observe\\2026-06-09_ITER13_NONREG_SCAN_SAIN",
+    "modes": [
+      "dashboard",
+      "desktop"
+    ],
+    "library": "test_library",
+    "cdp_port": 9223,
+    "dry_run": false,
+    "fresh": false,
+    "use_local_state": false
+  },
+  "dashboard": {
+    "ok": true,
+    "mode": "dev",
+    "cdp_port": 9223,
+    "started_at": "2026-06-10T03:05:29",
+    "views": [
+      {
+        "label": "accueil",
+        "hash": "#/accueil",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "accueil\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement",
+        "hash": "#/traitement",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "traitement\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement_step_analyse",
+        "hash": "#/traitement#step-analyse",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "traitement_step_analyse\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement_step_verification",
+        "hash": "#/traitement#step-verification",
+        "network": [],
+        "console": [],
+        "csp_violations": [
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          }
+        ],
+        "screenshot": "traitement_step_verification\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 3,
+          "csp_violations": 3,
+          "csp_events_page": 3,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement_step_validation",
+        "hash": "#/traitement#step-validation",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "traitement_step_validation\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement_step_doublons",
+        "hash": "#/traitement#step-doublons",
+        "network": [],
+        "console": [],
+        "csp_violations": [
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/traitement.js"
+          }
+        ],
+        "screenshot": "traitement_step_doublons\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 3,
+          "csp_violations": 3,
+          "csp_events_page": 3,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "traitement_step_apply",
+        "hash": "#/traitement#step-apply",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "traitement_step_apply\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "bibliotheque",
+        "hash": "#/bibliotheque",
+        "network": [],
+        "console": [],
+        "csp_violations": [
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/bibliotheque.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/bibliotheque.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/bibliotheque.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/bibliotheque.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/bibliotheque.js"
+          }
+        ],
+        "screenshot": "bibliotheque\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 7,
+          "csp_violations": 5,
+          "csp_events_page": 5,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "qualite",
+        "hash": "#/qualite",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "qualite\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "historique",
+        "hash": "#/historique",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "historique\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "jellyfin",
+        "hash": "#/parametres#integrations-jellyfin",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "jellyfin\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "parametres",
+        "hash": "#/parametres",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "parametres\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 0,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "parametres_sources",
+        "hash": "#/parametres#sources",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "parametres_sources\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 0,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "parametres_integrations",
+        "hash": "#/parametres#integrations",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "parametres_integrations\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 0,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "parametres_retention",
+        "hash": "#/parametres#retention",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "parametres_retention\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 0,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "aide",
+        "hash": "#/aide",
+        "network": [],
+        "console": [],
+        "csp_violations": [],
+        "screenshot": "aide\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 1,
+          "csp_violations": 0,
+          "csp_events_page": 0,
+          "image_requests": 0
+        }
+      },
+      {
+        "label": "doublons",
+        "hash": "#/doublons",
+        "network": [],
+        "console": [],
+        "csp_violations": [
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/doublons.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/doublons.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/doublons.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/doublons.js"
+          },
+          {
+            "blockedURI": "inline",
+            "violatedDirective": "style-src-attr",
+            "sourceFile": "http://127.0.0.1:8650/dashboard/views/doublons.js"
+          }
+        ],
+        "screenshot": "doublons\\screenshot.png",
+        "posters_expected": 0,
+        "posters_rendered": 0,
+        "posters_failed": 0,
+        "image_requests": [],
+        "verdict": "POSTERS_ABSENTS",
+        "broken_posters_detected": false,
+        "counts": {
+          "network": 0,
+          "console": 6,
+          "csp_violations": 5,
+          "csp_events_page": 5,
+          "image_requests": 0
+        }
+      }
+    ],
+    "views_with_broken_posters": [],
+    "console_errors_major": [
+      "accueil: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "traitement: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "traitement_step_analyse: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "traitement_step_validation: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "traitement_step_apply: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "bibliotheque: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "bibliotheque: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "qualite: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "historique: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "jellyfin: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "aide: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+      "doublons: [error] [dash-api] _safeBearer: token absent ou vide (token=%o) "
+    ],
+    "selected_page_url": "http://127.0.0.1:8650/dashboard/?native=1#/accueil",
+    "ended_at": "2026-06-10T03:06:21"
+  },
+  "desktop": {
+    "ok": true,
+    "screenshot": "docs\\internal\\observe\\2026-06-09_ITER13_NONREG_SCAN_SAIN\\_desktop_capture\\desktop_full.png"
+  },
+  "freshness_gate": null,
+  "cinesort_log_source": "C:\\Users\\blanc\\AppData\\Local\\CineSort\\logs\\cinesort.log"
+}
