@@ -10,7 +10,19 @@ from typing import Any, Dict, List, Optional
 from cinesort.domain.probe_models import NormalizedProbe
 from cinesort.infra.db import SQLiteStore
 
+from ._source_circuit_breaker import (
+    SourceCircuitBreaker,
+    SourceDegradedError,
+    extract_network_source,
+    get_default_breaker,
+)
+from .adaptive_timeout import (
+    AdaptiveTimeoutConfig,
+    compute_adaptive_timeout,
+    resolve_adaptive_timeout_config,
+)
 from .constants import FILE_PROBE_TIMEOUT_S, PROBE_WORKERS_AUTO_CAP, PROBE_WORKERS_MAX
+from .disk_cache import get_disk_cache, upsert_disk_cache
 from .ffprobe_backend import run_ffprobe_json
 from .mediainfo_backend import run_mediainfo_json
 from .normalize import normalize_probe
@@ -77,6 +89,7 @@ class ProbeService:
         *,
         runner: RunnerFn = default_runner,
         which_fn: Optional[WhichFn] = None,
+        source_breaker: Optional[SourceCircuitBreaker] = None,
     ) -> None:
         self.store = store
         self.runner = runner
@@ -93,6 +106,13 @@ class ProbeService:
         # changement de signature (cf invalidate_tools_status_cache).
         self._tools_status_cache: Optional[Dict[str, Any]] = None
         self._tools_status_cache_sig: str = ""
+        # Iter13 CIRCUIT_BREAKER : breaker par source UNC (defaut singleton
+        # process). Permet d'isoler un partage reseau en panne sans casser
+        # les probes des autres sources (disque local, autre NAS).
+        # Cf cinesort/infra/probe/_source_circuit_breaker.py.
+        self._source_breaker: SourceCircuitBreaker = (
+            source_breaker if source_breaker is not None else get_default_breaker()
+        )
 
     def invalidate_tools_status_cache(self) -> None:
         """Force le prochain appel a get_tools_status() a recharger les binaires.
@@ -226,13 +246,95 @@ class ProbeService:
             "tool": str(backend),
         }
 
+    def _get_probe_cache_combined(self, cache_key: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """ITER13 CACHE_PROBE : lecture cache DB + fallback cache disque JSON.
+
+        Ordre :
+        1. DB (autoritatif, rapide local SSD).
+        2. Si DB miss ou DB exception (NAS lent, BrokenPipeError, lock SQLite),
+           tente le cache disque JSON.
+        3. Si hit disque mais DB miss, on retour-promote vers la DB en best-effort
+           (warm-up DB pour les prochains scans).
+
+        Backward-compat : si la DB est OK et hit, comportement strictement
+        identique a l'ancien code (un seul lookup DB).
+        """
+        try:
+            cached = self.store.probe.get_probe_cache(**cache_key)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            # DB indisponible (NAS lent, lock SQLite, BrokenPipeError) -> on
+            # tente quand meme le cache disque.
+            logger.warning(
+                "Cache probe DB lecture echouee path=%s err=%s (fallback disque)",
+                cache_key.get("path"),
+                exc,
+            )
+            cached = None
+
+        if cached:
+            return cached
+
+        # Fallback : cache disque JSON. Couche secondaire, ne casse jamais.
+        disk_cached = get_disk_cache(**cache_key)
+        if disk_cached is None:
+            return None
+
+        # Warm-up DB : si hit disque, on tente de re-promouvoir vers la DB
+        # pour que les prochains lookups soient rapides. Best-effort.
+        try:
+            self.store.probe.upsert_probe_cache(
+                **cache_key,
+                raw_json=disk_cached["raw_json"],
+                normalized_json=disk_cached["normalized_json"],
+                ts=disk_cached.get("ts", time.time()),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.debug("Warm-up DB depuis cache disque ignore path=%s err=%s", cache_key.get("path"), exc)
+        return disk_cached
+
+    def _upsert_probe_cache_combined(
+        self,
+        cache_key: Dict[str, Any],
+        *,
+        raw_json: Dict[str, Any],
+        normalized_dict: Dict[str, Any],
+    ) -> None:
+        """ITER13 CACHE_PROBE : ecrit dans cache DB ET cache disque.
+
+        Best-effort : si l'une des deux ecritures echoue, on logue mais on
+        continue. La DB reste autoritative pour les futurs lookups via
+        ProbeRepository ; le disque est resilience supplementaire.
+        """
+        ts_now = time.time()
+        # DB d'abord (compat existant).
+        try:
+            self.store.probe.upsert_probe_cache(
+                **cache_key,
+                raw_json=raw_json,
+                normalized_json=normalized_dict,
+                ts=ts_now,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Ecriture cache probe DB ignoree path=%s err=%s",
+                cache_key.get("path"),
+                exc,
+            )
+        # Disque ensuite (best-effort, n'altere jamais le retour probe).
+        upsert_disk_cache(
+            **cache_key,
+            raw_json=raw_json,
+            normalized_json=normalized_dict,
+            ts=ts_now,
+        )
+
     def probe_file(self, *, media_path: Path, settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         cfg = _normalize_probe_settings(settings)
         backend = cfg["probe_backend"]
 
         cache_key = self._cache_key(media_path, backend)
         if cache_key is not None and backend != "none":
-            cached = self.store.probe.get_probe_cache(**cache_key)
+            cached = self._get_probe_cache_combined(cache_key)
             if cached:
                 normalized_cached = (
                     cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}
@@ -262,6 +364,22 @@ class ProbeService:
         mediainfo_tool: ToolStatus = tools["mediainfo"]
         ffprobe_tool: ToolStatus = tools["ffprobe"]
 
+        # ITER13 TIMEOUT_ADAPTATIF : remplace le couperet unique cfg["probe_timeout_s"]
+        # par un timeout proportionne a la taille du fichier (base + per_gb * GB,
+        # borne [floor, ceiling]). Le settings legacy `probe_timeout_s` reste utilise
+        # comme base si pas de `probe_timeout_base_s` (retro-compat ABSOLUE).
+        # Cf cinesort/infra/probe/adaptive_timeout.py.
+        adaptive_cfg = resolve_adaptive_timeout_config(settings)
+        adaptive_timeout_s = compute_adaptive_timeout(media_path, config=adaptive_cfg)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Probe timeout adaptatif path=%s timeout=%.1fs (base=%.1fs per_gb=%.1fs)",
+                media_path,
+                adaptive_timeout_s,
+                adaptive_cfg.base_s,
+                adaptive_cfg.per_gb_s,
+            )
+
         if backend == "none":
             messages.append("Probe desactivee (probe_backend=none).")
         elif backend == "mediainfo":
@@ -272,7 +390,7 @@ class ProbeService:
                     tool_path=mediainfo_tool.path,
                     media_path=media_path,
                     runner=self.runner,
-                    timeout_s=cfg["probe_timeout_s"],
+                    timeout_s=adaptive_timeout_s,
                 )
                 messages.extend(mi_msgs)
         elif backend == "ffprobe":
@@ -283,7 +401,7 @@ class ProbeService:
                     tool_path=ffprobe_tool.path,
                     media_path=media_path,
                     runner=self.runner,
-                    timeout_s=cfg["probe_timeout_s"],
+                    timeout_s=adaptive_timeout_s,
                 )
                 messages.extend(ff_msgs)
         else:  # auto
@@ -296,7 +414,7 @@ class ProbeService:
                     tool_path=mediainfo_tool.path,
                     media_path=media_path,
                     runner=self.runner,
-                    timeout_s=cfg["probe_timeout_s"],
+                    timeout_s=adaptive_timeout_s,
                 )
                 messages.extend(mi_msgs)
             if ffprobe_tool.available:
@@ -304,7 +422,7 @@ class ProbeService:
                     tool_path=ffprobe_tool.path,
                     media_path=media_path,
                     runner=self.runner,
-                    timeout_s=cfg["probe_timeout_s"],
+                    timeout_s=adaptive_timeout_s,
                 )
                 messages.extend(ff_msgs)
 
@@ -346,16 +464,12 @@ class ProbeService:
             )
 
         if cache_key is not None and backend != "none" and not tool_unavailable:
-            try:
-                self.store.probe.upsert_probe_cache(
-                    **cache_key,
-                    raw_json=raw_json,
-                    normalized_json=normalized_dict,
-                    ts=time.time(),
-                )
-            except (OSError, TypeError, ValueError) as exc:
-                # Le cache ne doit jamais casser la route probe.
-                logger.warning("Ecriture cache probe ignoree path=%s backend=%s err=%s", media_path, backend, exc)
+            # ITER13 CACHE_PROBE : ecrit DB + disque (best-effort, jamais bloquant).
+            self._upsert_probe_cache_combined(
+                cache_key,
+                raw_json=raw_json,
+                normalized_dict=normalized_dict,
+            )
         elif tool_unavailable:
             logger.debug(
                 "Cache probe NON ecrit pour %s (tool indisponible, evite pollution)",
@@ -376,6 +490,9 @@ class ProbeService:
     def _try_cache_lookup(self, media_path: Path, backend: str) -> Optional[Dict[str, Any]]:
         """V5-04 : cache lookup utilise AVANT submit au pool — evite subprocess inutile.
 
+        ITER13 CACHE_PROBE : passe par `_get_probe_cache_combined` (DB +
+        fallback disque JSON). Comportement DB-hit identique a avant.
+
         Retourne le resultat formatte si hit, None sinon (ou si cache desactive).
         """
         if backend == "none":
@@ -383,7 +500,7 @@ class ProbeService:
         cache_key = self._cache_key(media_path, backend)
         if cache_key is None:
             return None
-        cached = self.store.probe.get_probe_cache(**cache_key)
+        cached = self._get_probe_cache_combined(cache_key)
         if not cached:
             return None
         normalized_cached = cached.get("normalized_json") if isinstance(cached.get("normalized_json"), dict) else {}
