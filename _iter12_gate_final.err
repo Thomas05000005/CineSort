@@ -1,0 +1,11 @@
+REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+[REST] CineSort API standalone sur http://127.0.0.1:8642 (localhost only)
+[REST] Astuce : ajoutez --public pour autoriser l'acces depuis le LAN.
+[REST] Ctrl+C pour arreter.
+V5-03 : purge cache TMDb (TTL 42j) — checked=44 purged=0 preserved_legacy=0
+retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+REST API started on http://127.0.0.1:8642 (167 endpoints)
+network: IP locale detectee = 10.2.0.2 (UDP)
+REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+Secret 'tmdb_api_key' migre DPAPI legacy -> DPAPI-NG (silent re-encrypt).

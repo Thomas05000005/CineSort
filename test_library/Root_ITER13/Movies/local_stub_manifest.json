@@ -1,0 +1,10 @@
+{
+  "scenario": "b_local_stub",
+  "out_dir": "C:\\Users\\blanc\\projects\\CineSort\\test_library\\Root_ITER13\\Movies",
+  "count": 2,
+  "files": [
+    "C:\\Users\\blanc\\projects\\CineSort\\test_library\\Root_ITER13\\Movies\\Fake.Movie.000.2024.2160p.WEB-DL.x265-HARNESS\\Fake.Movie.000.2024.2160p.WEB-DL.x265-HARNESS.mkv",
+    "C:\\Users\\blanc\\projects\\CineSort\\test_library\\Root_ITER13\\Movies\\Fake.Movie.001.2024.2160p.WEB-DL.x265-HARNESS\\Fake.Movie.001.2024.2160p.WEB-DL.x265-HARNESS.mkv"
+  ],
+  "note": "Fichiers locaux vides (0 byte) simulant un partage SMB qui repond mais renvoie des donnees corrompues. Probe DOIT signaler 'qualite indisponible' et NE PAS inventer un score. Identification (filename->TMDb) reste possible."
+}

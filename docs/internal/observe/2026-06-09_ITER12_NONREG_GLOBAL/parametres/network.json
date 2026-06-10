@@ -1,0 +1,72 @@
+{
+  "fetches": [
+    {
+      "url": "http://127.0.0.1:8642/api/settings/get_settings",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/settings/get_profiles",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/quality/get_upgrade_until_score",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_dashboard",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_status",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_dashboard",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_status",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/runtime/get_notifications_unread_count",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_sidebar_counters",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_dashboard",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/run/get_status",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    }
+  ],
+  "violations_csp_heuristique": [],
+  "image_requests": []
+}

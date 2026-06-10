@@ -1,0 +1,18 @@
+{
+  "fetches": [
+    {
+      "url": "http://127.0.0.1:8642/api/runtime/get_probe_tools_status",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    },
+    {
+      "url": "http://127.0.0.1:8642/api/runtime/get_notifications_unread_count",
+      "status": 200,
+      "method": "POST",
+      "resource_type": "fetch"
+    }
+  ],
+  "violations_csp_heuristique": [],
+  "image_requests": []
+}

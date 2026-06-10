@@ -1,0 +1,30 @@
+{
+  "console_heuristic": [],
+  "events_page": [
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/doublons.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/doublons.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/doublons.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/doublons.js"
+    },
+    {
+      "blockedURI": "inline",
+      "violatedDirective": "style-src-attr",
+      "sourceFile": "http://127.0.0.1:8642/dashboard/views/doublons.js"
+    }
+  ]
+}
