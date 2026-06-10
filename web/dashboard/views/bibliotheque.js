@@ -581,7 +581,7 @@ function _renderBody() {
     return `
       <div class="bibliotheque-section">
         <div class="bibliotheque-loading-header">⏳ Chargement de la bibliothèque…</div>
-        ${[1,2,3,4,5].map(() => `<div class="v5-skeleton" style="height:64px;margin:8px 0;"></div>`).join("")}
+        ${[1,2,3,4,5].map(() => `<div class="v5-skeleton v5-skeleton-row"></div>`).join("")}
       </div>
     `;
   }

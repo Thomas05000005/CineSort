@@ -557,6 +557,16 @@
   display: block;
 }
 
+/* ITER15 5.3 : ligne skeleton dediee (64px) — migration des styles inline
+ * encore presents dans bibliotheque.js. Dimensions FIGEES (cycle iter11 prouve
+ * present->remplace). Les hauteurs 60px (doublons) et 48px (traitement) restent
+ * en style inline car valeurs DIFFERENTES (perimetre strict, pas d'uniformisation).
+ */
+.v5-skeleton-row {
+  height: 64px;
+  margin: 8px 0;
+}
+
 /* ===========================================================
  * SIDEBAR (Vague 1)
  * =========================================================== */
