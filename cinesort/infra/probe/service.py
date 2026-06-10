@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -328,6 +329,48 @@ class ProbeService:
             ts=ts_now,
         )
 
+    def _degraded_source_payload(
+        self, media_path: Path, backend: str, exc: SourceDegradedError
+    ) -> Dict[str, Any]:
+        """Payload retourne quand la source UNC est DEGRADED (Iter13 CIRCUIT_BREAKER).
+
+        Le payload est `ok=true` (la route REST a fonctionne) mais
+        `degraded_source=true`, `normalized` reflete probe FAILED, et un message
+        lisible est attache. Le caller (quality_report_support) DOIT detecter
+        `degraded_source` pour afficher "indisponible" en clair :
+        PAS score invente, PAS ligne disparue, PAS 0 trompeur (memoire user
+        "degradation JAMAIS silencieuse").
+
+        Identification DECOUPLEE preservee : l'item reste identifiable+renommable
+        via TMDb/NFO/filename, on ne lit juste pas les metadonnees techniques
+        cote probe (acquis iter4).
+        """
+        source = extract_network_source(media_path) or ""
+        message = (
+            f"Source reseau '{source}' degradee (circuit breaker ouvert) : probe non tente. "
+            f"Detail : {exc}"
+        )
+        normalized_obj = normalize_probe(
+            media_path=media_path,
+            raw_mediainfo=None,
+            raw_ffprobe=None,
+            backend=backend,
+            messages=[message],
+        )
+        return {
+            "ok": True,
+            "cache_hit": False,
+            "degraded_source": True,
+            "source": source,
+            "normalized": normalized_obj.to_dict(),
+            "raw_json": {"mediainfo": None, "ffprobe": None},
+            "sources": {
+                "backend": backend,
+                "tools": {},
+                "breaker_message": message,
+            },
+        }
+
     def probe_file(self, *, media_path: Path, settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         cfg = _normalize_probe_settings(settings)
         backend = cfg["probe_backend"]
@@ -354,6 +397,21 @@ class ProbeService:
                         "tools": {},
                     },
                 }
+
+        # Iter13 CIRCUIT_BREAKER : si la source UNC est DEGRADED, on saute
+        # le subprocess immediatement (pas de timeout 30s gaspille). No-op
+        # sur paths locaux (C:\, D:\). Le payload retourne marque
+        # `degraded_source=true` -> la couche quality affiche "indisponible".
+        if backend != "none":
+            try:
+                self._source_breaker.check_or_raise(media_path)
+            except SourceDegradedError as breaker_exc:
+                logger.info(
+                    "Probe skip (source degraded) path=%s reason=%s",
+                    media_path,
+                    breaker_exc,
+                )
+                return self._degraded_source_payload(media_path, backend, breaker_exc)
 
         # PERF-1 : utilise le cache au lieu de relancer 2 subprocess `--version` par film
         tools = self._get_tools_cached(cfg)
@@ -476,6 +534,26 @@ class ProbeService:
                 media_path,
             )
 
+        # Iter13 CIRCUIT_BREAKER : enregistrer succes / echec sur la source UNC.
+        # On NE penalise PAS quand le tool est globalement indisponible (binaire
+        # absent du PATH) : c'est une cause locale, pas un probleme de la source.
+        # Idem si backend == "none" (probe desactive).
+        # No-op sur paths locaux (extract_network_source retourne None).
+        if backend != "none" and not tool_unavailable:
+            probe_succeeded = raw_mediainfo is not None or raw_ffprobe is not None
+            if probe_succeeded:
+                self._source_breaker.record_success(media_path)
+            else:
+                just_degraded = self._source_breaker.record_failure(media_path)
+                if just_degraded:
+                    # Notification visible : la source UNC vient juste de
+                    # basculer en DEGRADED, l'utilisateur doit etre informe.
+                    logger.warning(
+                        "Source reseau DEGRADED pour %s : circuit breaker ouvert "
+                        "(probes suivantes immediates jusqu'a reset)",
+                        extract_network_source(media_path),
+                    )
+
         return {
             "ok": True,
             "cache_hit": False,
@@ -586,6 +664,19 @@ class ProbeService:
                 mp = future_to_path[future]
                 try:
                     results[str(mp)] = future.result()
+                except subprocess.TimeoutExpired as exc:
+                    # ITER13 RETRY_BACKOFF : symetrie avec les backends. Avant,
+                    # TimeoutExpired pas dans le tuple -> casse `as_completed`
+                    # pour tout le batch parallel (cf BILAN_ITER13 §2).
+                    logger.warning("Probe parallel timeout path=%s err=%s", mp, exc)
+                    results[str(mp)] = {
+                        "ok": False,
+                        "cache_hit": False,
+                        "normalized": {},
+                        "raw_json": {"mediainfo": None, "ffprobe": None},
+                        "sources": {"backend": backend, "tools": {}},
+                        "error": f"timeout: {exc}",
+                    }
                 except (OSError, RuntimeError, TypeError, ValueError) as exc:
                     logger.warning("Probe parallel failed path=%s err=%s", mp, exc)
                     results[str(mp)] = {
