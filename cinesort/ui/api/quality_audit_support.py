@@ -142,6 +142,12 @@ def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) ->
 
     films_out: List[Dict[str, Any]] = []
     for r in filtered[:lim]:
+        # Iter13 etape 4 (2026-06-10) : propager probe_quality / quality_unavailable
+        # depuis library_support pour que l'UI Qualite distingue un score reel
+        # mesure d'un score base sur le nom seul (probe FAILED apres retry+breaker).
+        # Sans cette propagation, get_films_by_tier renvoyait un score numerique
+        # nu - l'UI affichait un score Silver-cap comme si c'etait une mesure
+        # fiable (degradation silencieuse, contraire a l'acquis iter4).
         films_out.append(
             {
                 "row_id": str(r.get("row_id") or ""),
@@ -151,6 +157,8 @@ def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) ->
                 "tier": str(r.get("tier_v2") or "unknown").lower(),
                 "poster_url": r.get("poster_url"),
                 "warnings": list(r.get("warnings") or []),
+                "probe_quality": str(r.get("probe_quality") or "UNKNOWN").upper(),
+                "quality_unavailable": bool(r.get("quality_unavailable")),
             }
         )
 

@@ -208,7 +208,16 @@ function _renderRejectSection(stats) {
     const rowId = String(f.row_id || "");
     const title = String(f.title || "(sans titre)");
     const year = f.year ? Number(f.year) : null;
-    const score = f.score_v2 != null ? Math.round(Number(f.score_v2)) : null;
+    // Iter13 etape 4 (2026-06-10) : degradation visible. Quand le probe a
+    // echoue (apres retry+breaker iter1-3), on AFFICHE EXPLICITEMENT
+    // "Indisponible" plutot qu'un score Silver-cap trompeur. Le film reste
+    // identifie et renommable (acquis racine C iter4) ; seule la mesure
+    // qualite manque - et on le dit franchement a l'utilisateur.
+    const qualityUnavailable = Boolean(f.quality_unavailable)
+      || String(f.probe_quality || "").toUpperCase() === "FAILED";
+    const score = (!qualityUnavailable && f.score_v2 != null)
+      ? Math.round(Number(f.score_v2))
+      : null;
     const poster = f.poster_url || "";
     const warningsCount = Array.isArray(f.warnings) ? f.warnings.length : 0;
     return `
@@ -217,12 +226,14 @@ function _renderRejectSection(stats) {
           ${poster
             ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" />`
             : `<div class="qualite-reject-poster-empty" aria-hidden="true">🎬</div>`}
-          ${score != null ? `<span class="qualite-reject-score" title="Score V2">${score}</span>` : ""}
+          ${qualityUnavailable
+            ? `<span class="qualite-reject-score qualite-reject-unavailable" title="Probe indisponible : qualite non mesuree">Indispo</span>`
+            : (score != null ? `<span class="qualite-reject-score" title="Score V2">${score}</span>` : "")}
         </div>
         <div class="qualite-reject-meta">
           <span class="qualite-reject-title">${escapeHtml(title)}</span>
           <span class="qualite-reject-year">${year || "—"}</span>
-          ${warningsCount > 0 ? `<span class="qualite-reject-warnings">⚠ ${warningsCount}</span>` : ""}
+          ${qualityUnavailable ? `<span class="qualite-reject-warnings" title="Qualite non verifiee">⚠ Qualite indisponible</span>` : (warningsCount > 0 ? `<span class="qualite-reject-warnings">⚠ ${warningsCount}</span>` : "")}
         </div>
       </button>
     `;
@@ -595,7 +606,15 @@ function _buildInspectorSections() {
       contextual = {
         title: `Tier ${escapeHtml(tierLabel)}`,
         html: films.length > 0
-          ? `<ul class="qualite-inspector-list">${films.slice(0, 10).map((f) => `<li><strong>${escapeHtml(String(f.title || "?"))}</strong>${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""} <span class="qualite-inspector-score">${f.score_v2 != null ? Math.round(Number(f.score_v2)) : "—"}/100</span></li>`).join("")}</ul>`
+          ? `<ul class="qualite-inspector-list">${films.slice(0, 10).map((f) => {
+              // Iter13 etape 4 : afficher "Indisponible" si probe FAILED.
+              const unavailable = Boolean(f.quality_unavailable)
+                || String(f.probe_quality || "").toUpperCase() === "FAILED";
+              const scoreLabel = unavailable
+                ? `<span class="qualite-inspector-score qualite-reject-unavailable" title="Probe indisponible">Indisponible</span>`
+                : `<span class="qualite-inspector-score">${f.score_v2 != null ? Math.round(Number(f.score_v2)) : "—"}/100</span>`;
+              return `<li><strong>${escapeHtml(String(f.title || "?"))}</strong>${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""} ${scoreLabel}</li>`;
+            }).join("")}</ul>`
           : `<p class="qualite-empty-msg">Aucun film dans ce tier.</p>`,
       };
       break;
@@ -611,8 +630,12 @@ function _buildInspectorSections() {
           html: `
             <dl class="qualite-inspector-dl">
               <div><dt>Année</dt><dd>${film.year || "—"}</dd></div>
-              <div><dt>Score V2</dt><dd>${film.score_v2 != null ? Math.round(Number(film.score_v2)) + "/100" : "—"}</dd></div>
-              <div><dt>Tier</dt><dd>${escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")}</dd></div>
+              <div><dt>Score V2</dt><dd>${(Boolean(film.quality_unavailable) || String(film.probe_quality || "").toUpperCase() === "FAILED")
+                ? `<span class="qualite-reject-unavailable" title="Probe indisponible apres retry+breaker">Indisponible</span>`
+                : (film.score_v2 != null ? Math.round(Number(film.score_v2)) + "/100" : "—")}</dd></div>
+              <div><dt>Tier</dt><dd>${(Boolean(film.quality_unavailable) || String(film.probe_quality || "").toUpperCase() === "FAILED")
+                ? `<span title="Qualite non verifiee : tier base sur le nom seul">${escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")} <em>(estime)</em></span>`
+                : escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")}</dd></div>
             </dl>
             <p class="qualite-inspector-warnings-title">Warnings :</p>
             ${warningsList}

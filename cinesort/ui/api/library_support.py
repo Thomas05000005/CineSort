@@ -406,6 +406,15 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             # Voir cinesort/domain/tiers_helpers.py::reconcile_display_tier docstring.
             **_build_display_tier_fields(perc, qual),
             "score_v2": (perc or {}).get("global_score_v2") or (qual or {}).get("score"),
+            # Iter13 etape 4 (2026-06-10) : EXPOSER probe_quality pour signaler
+            # explicitement a l'UI quand les metadonnees qualite sont indisponibles
+            # (probe FAILED apres retry+breaker iter1-3). Sans ce flag, l'UI
+            # affichait un score Silver-cap silencieux (degradation INVISIBLE) au
+            # lieu d'un marqueur "Indisponible" honnete. Acquis racine C iter4 :
+            # identification (titre/year/tmdb_id) reste DECOUPLEE du probe et
+            # le film reste renommable meme avec probe FAILED.
+            "probe_quality": str(metrics.get("probe_quality") or "UNKNOWN").upper(),
+            "quality_unavailable": str(metrics.get("probe_quality") or "").upper() == "FAILED",
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
