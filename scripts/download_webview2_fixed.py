@@ -39,6 +39,15 @@ import sys
 import urllib.request
 from pathlib import Path
 
+# ITER15 5.4 : forcer UTF-8 sur stdout/stderr pour eviter UnicodeEncodeError
+# sur les caracteres non-ASCII (em-dash a L61 "CineSort V3.1 — Bundle ..."
+# sous Windows cp1252). errors="replace" garde le script robuste.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        pass
+
 # Page officielle Microsoft d'ou recuperer le lien direct "Fixed Version".
 # Le lien CDN direct change a chaque release Edge -> on ne hardcode PAS ici.
 WEBVIEW2_LANDING_URL = (

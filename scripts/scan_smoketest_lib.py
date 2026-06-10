@@ -15,6 +15,16 @@ import tempfile
 import time
 from pathlib import Path
 
+# ITER15 5.4 : forcer UTF-8 sur stdout/stderr pour eviter UnicodeEncodeError
+# sur les caracteres non-ASCII (em-dash, accents) sous Windows cp1252. Le
+# fallback errors="replace" garantit qu'un caractere non encodable ne fait
+# pas planter le script (cas observe L96 avec "—").
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        pass
+
 # Repo root
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

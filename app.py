@@ -843,17 +843,25 @@ def main() -> None:
                         )
             else:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
-                # ITER15 5.2 : token vide reste une condition d'erreur (en mode
-                # web/LAN, l'utilisateur ne peut pas se connecter ; en mode natif,
-                # le bypass loopback peut sauver mais reste un signal anormal).
-                # On migre vers logger.error pour beneficier du scrubber et de
-                # la categorisation centralisee (deja preparee iter5).
+                # ITER15 5.2 + 5.4 : token vide reste une condition d'erreur (en
+                # mode web/LAN, l'utilisateur ne peut pas se connecter ; en mode
+                # natif, le bypass loopback peut sauver mais reste un signal
+                # anormal). On migre vers logger.error pour beneficier du
+                # scrubber et de la categorisation centralisee (deja preparee
+                # iter5). ITER15 5.4 enrichit le contexte diagnostic (proto,
+                # port, native, type) pour faciliter le tri post-mortem.
                 # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
                 import logging as _logging_nb
                 _logger_nb = _logging_nb.getLogger("cinesort.app.native_boot")
+                _token_type = type(_desktop_dashboard_token).__name__
                 _logger_nb.error(
-                    "REST main_url sans ntoken (rest_server._token vide) — "
-                    "auth web/LAN impossible, bypass loopback requis pour mode natif"
+                    "REST main_url sans ntoken — auth web/LAN impossible, "
+                    "bypass loopback requis pour mode natif "
+                    "[diag: proto=%s port=%s token_type=%s token_falsy=%r native=1]",
+                    proto,
+                    port,
+                    _token_type,
+                    not _desktop_dashboard_token,
                 )
         else:
             # Fallback : charger l'index local (mode preview ou serveur REST mort)

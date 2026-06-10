@@ -315,11 +315,16 @@ class MigrationManager:
         except sqlite3.Error as exc:
             # BUG-013 (hotfix1) : capter sqlite3.Error (parent de OperationalError,
             # DatabaseError, IntegrityError, etc.) au lieu du seul DatabaseError, et
-            # logger en warning au lieu d'un pass silencieux. La migration principale
+            # logger en debug au lieu d'un pass silencieux. La migration principale
             # a deja ete committee (user_version a jour) ; on accepte que le tracking
             # dans schema_migrations puisse echouer (table absente avant migration 012,
-            # DB lock transitoire, etc.) mais on trace pour diagnostiquer plus tard.
-            logger.warning(
+            # DB lock transitoire, etc.).
+            # ITER15 5.4 : downgrade warning -> debug. Le cas dominant en pratique
+            # est "no such table: schema_migrations" pour v1..v11 sur DB neuve, AVANT
+            # que la migration 012 ne cree la table de tracking. Idempotent, non
+            # critique, et bruyant au boot (11 lignes / boot). On garde la trace
+            # mais hors du niveau WARNING par defaut. Aucun effet runtime.
+            logger.debug(
                 "db: tracking schema_migrations a echoue pour v%d (%s): %s",
                 int(version),
                 name,
