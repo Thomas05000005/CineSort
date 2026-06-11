@@ -10,14 +10,20 @@ from cinesort.ui.api import tmdb_support
 
 
 def _make_api(api_key: str = "fake_key", state_dir: str = "/tmp/state", timeout_s: float = 10.0) -> MagicMock:
-    """Construit un faux objet api compatible avec get_tmdb_posters."""
+    """Construit un faux objet api compatible avec get_tmdb_posters.
+
+    AUDIT 2026-06-10 : get_tmdb_posters/search_tmdb lisent desormais
+    _internal_settings (secrets en clair) et normalize_user_path module-level
+    (api._normalize_user_path n'existait pas -> 500).
+    """
     api = MagicMock()
-    api.settings.get_settings.return_value = {
+    _settings = {
         "tmdb_api_key": api_key,
         "state_dir": state_dir,
         "tmdb_timeout_s": timeout_s,
     }
-    api._normalize_user_path.return_value = Path(state_dir)
+    api._internal_settings.return_value = _settings
+    api.settings.get_settings.return_value = _settings
     return api
 
 
@@ -86,7 +92,7 @@ class TestGetTmdbPostersNoApiKey(unittest.TestCase):
 
     def test_none_api_key_returns_empty_posters(self):
         api = MagicMock()
-        api.settings.get_settings.return_value = {"tmdb_api_key": None, "state_dir": "/tmp", "tmdb_timeout_s": 10}
+        api._internal_settings.return_value = {"tmdb_api_key": None, "state_dir": "/tmp", "tmdb_timeout_s": 10}
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
         self.assertTrue(result["ok"])
         self.assertEqual(result["posters"], {})
@@ -240,7 +246,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         mock_client_cls.return_value = client
 
         api = MagicMock()
-        api.settings.get_settings.return_value = {
+        api._internal_settings.return_value = {
             "tmdb_api_key": "k",
             "state_dir": "/tmp",
             # tmdb_timeout_s absent
@@ -281,7 +287,8 @@ class TestGetTmdbPostersErrors(unittest.TestCase):
 
     def test_get_settings_raises_keyerror_returns_error(self):
         api = MagicMock()
-        api.settings.get_settings.side_effect = KeyError("settings missing")
+        # AUDIT 2026-06-10 : la lecture settings passe par _internal_settings.
+        api._internal_settings.side_effect = KeyError("settings missing")
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
 
         self.assertFalse(result["ok"])
@@ -289,7 +296,7 @@ class TestGetTmdbPostersErrors(unittest.TestCase):
 
     def test_get_settings_raises_typeerror_returns_error(self):
         api = MagicMock()
-        api.settings.get_settings.side_effect = TypeError("api broken")
+        api._internal_settings.side_effect = TypeError("api broken")
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
 
         self.assertFalse(result["ok"])
