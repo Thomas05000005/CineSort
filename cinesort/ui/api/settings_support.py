@@ -1538,12 +1538,14 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # `perceptual_workers` clampe a [0, 16] (0 = auto). `perceptual_parallelism_enabled`
         # est un bool (defaut True) qui agit comme kill-switch global du pool batch.
         "perceptual_parallelism_enabled": to_bool(payload.get("perceptual_parallelism_enabled"), True),
-        # AUDIT 2026-06-11 (R3) : l'UI (parametres.js) n'envoie QUE l'alias
-        # perceptual_workers_count, pas perceptual_workers. Avant, cette section
-        # (executee APRES _save_section_advanced) ecrivait inconditionnellement
-        # perceptual_workers depuis payload.get("perceptual_workers")=None ->
-        # fallback 0 (auto) -> la valeur saisie etait toujours ecrasee. On lit
-        # l'alias en fallback. Clamp canonique [0..16] (0=auto).
+        # AUDIT 2026-06-11 (R4-P1, corrige R3/191b916) : la cle du champ UI est
+        # desormais la CANONIQUE perceptual_workers (parametres.js, section
+        # perceptual). Le fallback R3 sur l'alias perceptual_workers_count etait
+        # MORT dans le flux UI reel : l'UI POST l'objet settings ENTIER (echo du
+        # GET qui contient toujours perceptual_workers via _LITERAL_DEFAULTS),
+        # donc la canonique perimee primait sur la saisie alias. L'alias reste
+        # accepte en fallback pour les payloads partiels (REST legacy)
+        # UNIQUEMENT quand la canonique est absente. Clamp [0..16] (0=auto).
         "perceptual_workers": max(0, min(16, _coerce_workers_int(
             payload.get("perceptual_workers", payload.get("perceptual_workers_count"))
         ))),

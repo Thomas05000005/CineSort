@@ -84,8 +84,12 @@ export const PARAMETRES_GROUPS = [
       { id: "perceptual", label: "Analyse perceptuelle", fields: [
         { key: "perceptual_enabled", label: "Activer l'analyse perceptuelle", type: "toggle" },
         { key: "perceptual_auto_on_scan", label: "Auto-lancer sur scan", type: "toggle" },
-        { key: "perceptual_workers_count", label: "Workers parallèles (scan)", type: "number", min: 1, max: 16, default: 2,
-          hint: "Nombre de films analysés en parallèle. Auto si parallélisme = Auto.", advanced: true },
+        // AUDIT 2026-06-11 (R4-P1) : clé CANONIQUE perceptual_workers (= celle du GET
+        // et du moteur). L'ancien alias perceptual_workers_count n'était jamais
+        // renvoyé par le GET, et le POST de l'objet settings entier écrasait la
+        // saisie avec l'écho canonique périmé -> réglage ignoré + champ figé au défaut.
+        { key: "perceptual_workers", label: "Workers parallèles (scan)", type: "number", min: 0, max: 16, default: 0,
+          hint: "0 = auto. Nombre de films analysés en parallèle.", advanced: true },
         { key: "perceptual_frames_count", label: "Frames analysées par film", type: "number", min: 5, max: 30, advanced: true },
         { key: "perceptual_timeout_per_film_s", label: "Timeout par film (s)", type: "number", min: 30, max: 600, advanced: true },
         { key: "perceptual_audio_deep", label: "Audio analyse approfondie", type: "toggle", advanced: true },

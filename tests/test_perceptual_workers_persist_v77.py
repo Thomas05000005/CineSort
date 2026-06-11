@@ -49,7 +49,11 @@ class PerceptualWorkersPersistTests(unittest.TestCase):
         )
 
     def test_canonical_key_still_wins(self) -> None:
-        # Si le backend envoie directement la cle canonique, elle prime.
+        # AUDIT 2026-06-11 (R4-P1) : la canonique prime — et c'est desormais le
+        # contrat CORRECT car la cle du champ UI (parametres.js) EST la canonique
+        # perceptual_workers. L'alias *_count n'est plus qu'un fallback legacy
+        # pour payloads partiels REST. Cf test_perceptual_workers_ui_roundtrip_v77
+        # pour le GATE du flux UI reel (GET complet -> edition -> save).
         section = _save_section_perceptual(
             {"perceptual_workers": 4, "perceptual_workers_count": 99}
         )
