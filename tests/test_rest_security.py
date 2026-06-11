@@ -129,28 +129,41 @@ class RestSecurityHttpTests(unittest.TestCase):
         self, method: str, path: str, body: Any = None, token: str | None = None,
         origin: str | None = None,
     ) -> tuple:
-        """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS)."""
-        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
-        try:
-            headers: Dict[str, str] = {"Content-Type": "application/json"}
-            if token is not None:
-                headers["Authorization"] = f"Bearer {token}"
-            if origin is not None:
-                headers["Origin"] = origin
-            payload = json.dumps(body or {}) if body is not None else ""
-            conn.request(method, path, body=payload.encode("utf-8"), headers=headers)
-            resp = conn.getresponse()
-            status = resp.status
-            data_raw = resp.read()
-            headers_out = {k: v for k, v in resp.getheaders()}
-        finally:
-            with contextlib.suppress(OSError):
+        """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS).
+
+        Meme retry que _request sur ConnectionAborted/Reset Windows (WinError
+        10053/10054) : ces aborts transitoires apparaissent en suite full sous
+        charge socket. Sans ce retry, le helper etait flaky (cf AUDIT 2026-06-11).
+        """
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+            try:
+                headers: Dict[str, str] = {"Content-Type": "application/json"}
+                if token is not None:
+                    headers["Authorization"] = f"Bearer {token}"
+                if origin is not None:
+                    headers["Origin"] = origin
+                payload = json.dumps(body or {}) if body is not None else ""
+                conn.request(method, path, body=payload.encode("utf-8"), headers=headers)
+                resp = conn.getresponse()
+                status = resp.status
+                data_raw = resp.read()
+                headers_out = {k: v for k, v in resp.getheaders()}
+            except (ConnectionAbortedError, ConnectionResetError) as exc:
+                last_exc = exc
                 conn.close()
-        try:
-            data = json.loads(data_raw.decode("utf-8")) if data_raw else {}
-        except json.JSONDecodeError:
-            data = {"_raw": data_raw.decode("utf-8", errors="replace")}
-        return status, data, headers_out
+                time.sleep(0.05 * (attempt + 1))
+                continue
+            finally:
+                with contextlib.suppress(OSError):
+                    conn.close()
+            try:
+                data = json.loads(data_raw.decode("utf-8")) if data_raw else {}
+            except json.JSONDecodeError:
+                data = {"_raw": data_raw.decode("utf-8", errors="replace")}
+            return status, data, headers_out
+        raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
     # 26
     def test_request_without_auth_returns_401(self) -> None:
