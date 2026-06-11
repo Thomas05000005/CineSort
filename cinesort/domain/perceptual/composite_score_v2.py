@@ -160,9 +160,14 @@ def _score_hdr(video: Any, normalized_probe: Optional[Dict[str, Any]]) -> Tuple[
         return 50.0, 0.0, flags
 
     video_data = (normalized_probe or {}).get("video") or {}
-    has_hdr10 = bool(video_data.get("has_hdr10"))
-    has_hdr10_plus = bool(getattr(video, "has_hdr10_plus_detected", False)) or bool(video_data.get("has_hdr10_plus"))
-    has_dv = bool(video_data.get("has_dv"))
+    # AUDIT 2026-06-10 (REAL 2/2) : le probe normalise expose hdr10 /
+    # hdr_dolby_vision / hdr10_plus / dv_present (cf _normalize_ffprobe.py:93-111),
+    # PAS has_hdr10 / has_dv / has_hdr10_plus. Avec les mauvaises cles, tout
+    # contenu HDR10/Dolby Vision etait score comme SDR (60.0, confiance 0.3) et
+    # les flags dv_profile_5 / hdr_metadata_missing jamais leves.
+    has_hdr10 = bool(video_data.get("hdr10"))
+    has_hdr10_plus = bool(getattr(video, "has_hdr10_plus_detected", False)) or bool(video_data.get("hdr10_plus"))
+    has_dv = bool(video_data.get("hdr_dolby_vision")) or bool(video_data.get("dv_present"))
     dv_profile = str(video_data.get("dv_profile") or "").strip()
     max_cll = video_data.get("max_cll")
     max_fall = video_data.get("max_fall")
@@ -590,7 +595,11 @@ def apply_contextual_adjustments(
             video_subs = _patch(video_subs, "resolution", ADJUSTMENT_IMAX_TYPED_BONUS, "imax_typed")
 
     # Regle 6 — fake lossless (codec claim lossless mais cutoff spectral bas)
-    audio_tracks = (normalized_probe or {}).get("audio") or []
+    # AUDIT 2026-06-10 (REAL 2/2) : la cle reelle du probe normalise est
+    # `audio_tracks` (cf _normalize_ffprobe.py:185), pas `audio` -> avant, la
+    # liste etait toujours vide, has_lossless_codec toujours False et le malus
+    # fake-lossless + warning ne se declenchaient jamais.
+    audio_tracks = (normalized_probe or {}).get("audio_tracks") or []
     has_lossless_codec = any(
         str((t or {}).get("codec", "")).lower() in ("flac", "truehd", "dts-hd ma", "mlp")
         for t in (audio_tracks if isinstance(audio_tracks, list) else [])

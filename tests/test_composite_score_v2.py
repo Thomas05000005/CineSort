@@ -177,13 +177,13 @@ class TestBuildVideoSubscores(unittest.TestCase):
 
     def test_dv_profile_5_flag(self):
         v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
-        probe = {"video": {"has_dv": True, "dv_profile": "5"}}
+        probe = {"video": {"hdr_dolby_vision": True, "dv_profile": "5"}}
         _, flags = build_video_subscores(v, None, probe, None)
         self.assertIn("dv_profile_5", flags)
 
     def test_hdr10_without_maxcll_flag(self):
         v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
-        probe = {"video": {"has_hdr10": True, "max_cll": None, "max_fall": None}}
+        probe = {"video": {"hdr10": True, "max_cll": None, "max_fall": None}}
         _, flags = build_video_subscores(v, None, probe, None)
         self.assertIn("hdr_metadata_missing", flags)
 
@@ -432,7 +432,7 @@ class TestContextualAdjustments(unittest.TestCase):
             confidence=0.8,
             label_fr="L",
         )
-        probe = {"audio": [{"codec": "flac"}]}
+        probe = {"audio_tracks": [{"codec": "flac"}]}
         _, a, trace = apply_contextual_adjustments(
             _v_subs(70),
             audio_subs,
@@ -520,7 +520,7 @@ class TestOrchestrator(unittest.TestCase):
             film_era_v2="uhd_native_dolby_vision",
             grain_nature="film_grain",
         )
-        probe = {"video": {"has_hdr10": True, "max_cll": 1000, "max_fall": 400}, "audio": [{"codec": "truehd"}]}
+        probe = {"video": {"hdr10": True, "max_cll": 1000, "max_fall": 400}, "audio_tracks": [{"codec": "truehd"}]}
         r = compute_global_score_v2(
             v,
             a,

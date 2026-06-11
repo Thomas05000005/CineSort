@@ -1467,6 +1467,39 @@ def _load_probe(api: Any, store: Any, run_row: Any, media_path: Any) -> Dict[str
     return probe.probe_file(media_path=media_path, settings=probe_settings)
 
 
+def _build_tmdb_client(api: Any):
+    """Construit un TmdbClient depuis les settings (secrets en clair), ou None.
+
+    AUDIT 2026-06-10 (REAL 2/2) : `api._tmdb_client()` n'existe pas sur
+    CineSortApi -> AttributeError (hors du except de _load_tmdb_metadata) qui
+    remontait dans _video_task et faisait echouer TOUTE l'analyse video
+    perceptuelle (grain, fake-4K, HDR10+, etc.) pour tout film avec un tmdb_id.
+    On construit le client correctement, avec la cle dé-masquee.
+    """
+    try:
+        settings = api._internal_settings()
+        api_key = str(settings.get("tmdb_api_key") or "").strip()
+        if not api_key:
+            return None
+        from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
+        from cinesort.ui.api.settings_support import normalize_user_path  # noqa: PLC0415
+        import cinesort.infra.state as _state  # noqa: PLC0415
+        state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+        try:
+            cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        except (TypeError, ValueError):
+            cache_ttl_days = 30
+        return TmdbClient(
+            api_key=api_key,
+            cache_path=state_dir / "tmdb_cache.json",
+            timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+            cache_ttl_days=cache_ttl_days,
+        )
+    except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("perceptual: build TmdbClient failed (best-effort): %s", exc)
+        return None
+
+
 def _load_tmdb_metadata(api: Any, row: Any) -> Optional[Dict[str, Any]]:
     """Charge les metadata TMDb pour l'analyse grain (genres, budget, companies)."""
     tmdb_id = 0
@@ -1476,10 +1509,10 @@ def _load_tmdb_metadata(api: Any, row: Any) -> Optional[Dict[str, Any]]:
     if tmdb_id <= 0:
         return None
     try:
-        tmdb = api._tmdb_client()
+        tmdb = _build_tmdb_client(api)
         if tmdb:
             return tmdb.get_movie_metadata_for_perceptual(tmdb_id)
-    except (ImportError, KeyError, OSError, TypeError, ValueError):
+    except (ImportError, AttributeError, KeyError, OSError, TypeError, ValueError):
         pass
     return None
 
