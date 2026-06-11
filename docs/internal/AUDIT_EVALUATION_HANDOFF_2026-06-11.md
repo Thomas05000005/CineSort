@@ -4,8 +4,11 @@
 > sans avoir assisté à la session. Tout est factuel et vérifiable. Les limites et les
 > points faibles sont listés explicitement pour que l'évaluation soit équitable.
 >
-> Branche : `loop/correction-2026-06`. **Aucun push effectué.** 20 commits de correction
-> (+ 6 commits docs). Modèle utilisé : Fable 5 sur toute la session.
+> Branche : `loop/correction-2026-06`. **Aucun push effectué.** 21 commits de correction
+> (+ commits docs). Modèle utilisé : Fable 5 sur toute la session.
+>
+> MISE À JOUR 2026-06-11 (2e passe) : 6 fixes backend supplémentaires ajoutés après le 1er
+> handoff (Vague 5 ci-dessous). Le total de fixes Python testés par GATE passe à **17**.
 
 ---
 
@@ -71,7 +74,7 @@ pytest possible).
 ## 3. Playbook de vérification (commandes exactes)
 
 ```bash
-cd C:\Users\blanc\projects\CineSort
+cd <racine_du_repo_CineSort>   # chemin local non inscrit ici (test no_personal_strings)
 
 # (a) Tous les GATE de la session passent (159 attendus) — hors e2e/chromium :
 python -m pytest \
@@ -248,15 +251,67 @@ Légende « Points à scruter » = ce qu'un évaluateur sceptique devrait vérif
 - Points à scruter : **aucun test runtime.** Vérifier par lecture que `detached` n'introduit pas de
   régression (pas de render sur container détaché). À valider sur l'EXE.
 
+### VAGUE 5 — Contrats backend + invariants + résilience (2e passe, 6 fixes)
+
+**[16] `330f60c` — get_dashboard expose `status` + `active_run_id`**
+- Bug : `runs_history` n'avait pas de `status` (CTA "Reprendre la validation" accueil + filtres
+  Statut/Undone historique ne matchaient jamais) ; `active_run_id` absent du payload (carte "Scan en
+  cours" jamais affichée — il n'existait que sur `/api/health`).
+- Fix : ajout de `status` (source `runs.status`) et `active_run_id` (logique de
+  `rest_server._find_active_run_id`) aux 3 payloads.
+- GATE : `test_dashboard_status_active_run_v77` (status='DONE', clé active_run_id, détection run en cours).
+- Points à scruter : le détail de progression (total/current/phase) reste à brancher côté JS via polling
+  `/run/get_status` — ce fix restaure seulement la DÉTECTION (le JS affiche la carte), pas les chiffres
+  fins. À compléter en runtime.
+
+**[17] `02c3424` — couleurs tier de l'export HTML (invariant user)**
+- Bug : `export_support._TIER_COLORS` codait des hex faux (gold=#f59e0b…) → rapports HTML avec des
+  couleurs de tier différentes de l'app, violation de l'invariant CLAUDE.md #2.
+- Fix : alignement sur l'invariant (Platinum #E5E4E2 / Gold #FFD700 / Silver #C0C0C0 / Bronze #CD7F32).
+- GATE : `test_tier_colors_are_invariant`. Risque ~nul.
+
+**[18] `889d07a` — l'extension `.ts` n'est plus détectée comme CAM (REAL 2/2)**
+- Bug : pattern CAM `\bTS\b` matchait l'extension `.ts` (le caller passe le nom avec extension) → tout
+  fichier MPEG-TS légitime marqué CAM → tier capé Bronze, facteur -30, message faux.
+- Fix : retirer l'extension finale (`\.[A-Za-z0-9]{1,4}$`) avant la détection CAM (un vrai token TS est
+  mid-name).
+- GATE : `test_release_name_cam_ts_v77` (.ts non CAM ; TS/HDTS/HDCAM mid-name toujours CAM).
+- Points à scruter : 161 tests de scoring passent (pas de régression sur les vrais CAM).
+
+**[19] `c2b5605` — circuit breaker TMDb compte les 5xx/429 (REAL 2/2)**
+- Bug : même classe que omdb-1 — `raise_for_status` après `_breaker.call`, session `raise_on_status=False`
+  → 5xx jamais vu par le breaker → circuit jamais ouvert (retries × 5000 films sur TMDb en panne).
+- Fix : `raise_for_status` DANS le lambda UNIQUEMENT pour 5xx/429 (les 4xx passent intacts pour
+  `validate_connection` qui gère le 401 gracieusement).
+- GATE : `test_tmdb_breaker_5xx_v77` (breaker s'ouvre sur 503 répétés ; 404 ne lève pas dans le lambda).
+- Points à scruter : la distinction 5xx-only est volontaire — vérifier qu'aucun caller ne dépend d'un
+  5xx renvoyé brut (tous font `raise_for_status` après sauf l'auth qui gère 4xx).
+
+**[20] `933c43b` — un TypeError du corps d'un job ne rejoue plus le job (REAL 2/2)**
+- Bug : `_invoke_job_fn` entourait l'appel d'un `except TypeError → job_fn(should_cancel)`. La signature
+  ayant déjà confirmé `should_pause`, un TypeError vient du CORPS (données invalides) → l'ancien code
+  rejouait le job ENTIER (double déplacements de fichiers, journal, notifs).
+- Fix : valider la liaison via `sig.bind()` (sans exécuter) ; un TypeError du corps se propage.
+- GATE : `test_body_typeerror_does_not_rerun_job` (job exécuté 1× ; should_pause toujours injecté).
+
+> Note : le fix `status`/`active_run_id` n'ajoute PAS le champ `undone`/`is_undo`/`type` (détection des
+> runs d'undo) — sous-finding plus petit, laissé pour plus tard.
+
 ---
 
 ## 5. Ce qui n'a PAS été fait (et pourquoi)
 
-1. **Reste de la Vague 4** : findings dont le fix exige soit un **ajout de contrat backend** (accueil
-   progression / `showResume` status : `get_dashboard` devrait exposer `active_run_id`/`progress` ;
-   drawer options dry_run/skip_duplicates), soit une **décision sur du code mort** (processing.js
-   4 étapes ; vues `status.js`/`qij.js`/`quality.js` jamais routées). → nécessitent l'EXE/Playwright
-   pour mesurer le comportement réel avant de toucher. Faits en aveugle = risque de régression.
+1. **`scan_helpers.py:280` fast-path dossier `(YYYY)` (REAL 2/2, DÉLIBÉRÉMENT MIS DE CÔTÉ)** : un
+   dossier `Avatar (2009)/` matchant `(YYYY)` devient candidat SANS être descendu → un film en
+   sous-dossier release imbriqué (`Avatar (2009)/Avatar.2009.1080p-GRP/film.mkv`) est silencieusement
+   absent du plan. Le fix est dans le **cœur du scan** : le rendre candidat ET le descendre risque de
+   dupliquer des films (cas vidéo directe) ou de planifier des featurettes comme films. **Trop risqué
+   en aveugle** — nécessite une validation sur de vrais layouts de bibliothèque. → délégué runtime/Opus.
+2. **Détail de progression accueil / drawer options / processing.js / vues mortes** : le contrat
+   `active_run_id`/`status` est maintenant fourni (fix [16]), mais les CHIFFRES de progression
+   (total/current/phase) demandent un polling JS `/run/get_status` ; les options du drawer
+   (dry_run/skip_duplicates) et les 4 étapes de `processing.js` demandent une décision (brancher vs
+   supprimer du code mort). → nécessitent l'EXE/Playwright pour mesurer avant de toucher.
 2. **Les 37 findings CONTESTÉS** : bug source réel mais chemin mort/flag off (ex toute la famille
    `views/library/lib-*.js` jamais montée). Non corrigés : latents, pas actifs. À traiter par
    suppression de code mort ou re-branchement — décision produit.
