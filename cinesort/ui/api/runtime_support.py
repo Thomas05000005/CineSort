@@ -360,6 +360,21 @@ def get_or_create_infra(
                     )
             except Exception as exc:
                 _logger.warning("reconcile_batches_at_boot: erreur ignoree (boot continue): %s", exc)
+            # AUDIT 2026-06-11 (R4-P6) : re-masquer les secrets des
+            # runs.config_json HISTORIQUES (ecrits en clair avant le fix R1b
+            # 63517d7). Idempotent, best-effort, ne bloque jamais le boot.
+            try:
+                from cinesort.ui.api.run_flow_support import scrub_historical_run_configs  # noqa: PLC0415
+
+                scrub_report = scrub_historical_run_configs(store)
+                if scrub_report.get("scrubbed", 0) > 0:
+                    _logger.info(
+                        "scrub_historical_run_configs: %d/%d runs.config_json re-masques",
+                        scrub_report["scrubbed"],
+                        scrub_report["scanned"],
+                    )
+            except Exception as exc:
+                _logger.warning("scrub_historical_run_configs: erreur ignoree (boot continue): %s", exc)
             # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
             # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
             # en BDD pour toujours. On les marque FAILED avec message de crash.

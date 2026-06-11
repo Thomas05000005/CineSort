@@ -729,6 +729,58 @@ def _scrub_secrets_for_persist(settings: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def scrub_historical_run_configs(store: Any) -> Dict[str, int]:
+    """Re-masque les secrets des runs.config_json HISTORIQUES (boot-cleanup).
+
+    AUDIT 2026-06-11 (R4-P6) : les runs crees AVANT le fix R1b (63517d7) ont
+    persiste les settings avec secrets EN CLAIR dans runs.config_json — R1b ne
+    protege que les NOUVEAUX runs. Ce cleanup au boot re-masque les
+    _SECRET_FIELDS non-masques des lignes existantes (top-level + sous-dict
+    'settings' defensif). Idempotent : une 2e passe ne touche plus rien
+    (valeurs deja au masque). Best-effort : JSON invalide ignore, table runs
+    absente toleree (DB pre-v1), le caller wrappe pour ne jamais bloquer le boot.
+
+    Retourne {"scanned": N, "scrubbed": M}.
+    """
+    report = {"scanned": 0, "scrubbed": 0}
+    if store is None:
+        return report
+    with store._managed_conn() as conn:  # type: ignore[attr-defined]
+        try:
+            rows = conn.execute(
+                "SELECT run_id, config_json FROM runs "
+                "WHERE config_json IS NOT NULL AND config_json != ''"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return report
+        for row in rows:
+            run_id, raw = str(row[0]), str(row[1] or "")
+            report["scanned"] += 1
+            try:
+                cfg = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(cfg, dict):
+                continue
+            changed = False
+            targets = [cfg]
+            if isinstance(cfg.get("settings"), dict):
+                targets.append(cfg["settings"])
+            for target in targets:
+                for field in _SECRET_FIELDS:
+                    value = target.get(field)
+                    if isinstance(value, str) and value.strip() and value != _SECRET_MASK:
+                        target[field] = _SECRET_MASK
+                        changed = True
+            if changed:
+                conn.execute(
+                    "UPDATE runs SET config_json = ? WHERE run_id = ?",
+                    (json.dumps(cfg, ensure_ascii=False, sort_keys=True), run_id),
+                )
+                report["scrubbed"] += 1
+    return report
+
+
 def _start_plan_impl(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
     """Implementation reelle de start_plan, sans wrap global (Vague G)."""
     if not isinstance(settings, dict):
