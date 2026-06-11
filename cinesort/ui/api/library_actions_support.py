@@ -329,20 +329,14 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
 
     kind = "collection" if str(target.get("kind") or "") == "collection" else "single"
 
-    # AUDIT 2026-06-11 (R3e, gap[3]) : passer la VRAIE racine du scan a replan.
-    # cfg a ete construit avec root=folder_path (dossier du film), donc sans
-    # racine explicite folder_name serait derive du stem fichier au lieu du
-    # dossier propre -> replan non idempotent vs scan initial. On lit la racine
-    # d'origine du run en base.
-    scan_root: Optional[Path] = None
-    try:
-        found = api._find_run_row(run_id)
-        if found:
-            root_str = str(found[0].get("root") or "").strip()
-            if root_str:
-                scan_root = Path(root_str)
-    except (OSError, AttributeError, KeyError, TypeError, ValueError):
-        scan_root = None
+    # AUDIT 2026-06-11 (R3e gap[3] + R4-P4) : passer la VRAIE racine du scan a
+    # replan (cfg a root=folder_path, donc sans racine explicite folder_name
+    # serait derive du stem fichier -> replan non idempotent). R4-P4 : en
+    # multi-roots, runs.root ne stocke que roots[0] ; passer roots[0] pour un
+    # film d'un root SECONDAIRE faussait folder_name (un film pose a la racine
+    # de R2 heritait du nom du dossier R2 au lieu du stem). On choisit donc le
+    # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
+    scan_root = _resolve_scan_root_for_replan(api, run_id, folder_path)
 
     new_row = replan_single_row(
         cfg, folder_path, video_path, tmdb=tmdb, kind=kind, library_root=scan_root
@@ -408,6 +402,56 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
             tmdb.flush()
 
     return new_row_json
+
+
+def _resolve_scan_root_for_replan(api: Any, run_id: str, folder_path: Path) -> Optional[Path]:
+    """Retourne la racine du scan qui CONTIENT folder_path, ou None.
+
+    AUDIT 2026-06-11 (R4-P4) : runs.root ne stocke que roots[0] (compat). Les
+    roots complets d'un scan multi-roots sont dans runs.config_json ('roots',
+    fallback 'root'/'library_path'). Un candidat n'est retenu que s'il est
+    folder_path lui-meme ou un de ses ancetres : passer un root etranger a
+    replan_single_row fausserait _folder_is_root (un film pose a la racine d'un
+    root secondaire perdrait son stem). None = compat pre-R3e (cfg.root==folder).
+    """
+    try:
+        found = api._find_run_row(run_id)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if not found:
+        return None
+    row = found[0]
+
+    candidates: List[str] = []
+    root_str = str(row.get("root") or "").strip()
+    if root_str:
+        candidates.append(root_str)
+    cfg_raw = row.get("config_json")
+    try:
+        cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) and cfg_raw.strip() else cfg_raw
+    except (TypeError, ValueError, json.JSONDecodeError):
+        cfg = None
+    if isinstance(cfg, dict):
+        roots_raw = cfg.get("roots")
+        if isinstance(roots_raw, list):
+            candidates.extend(str(r) for r in roots_raw if str(r or "").strip())
+        for key in ("root", "library_path"):
+            val = str(cfg.get(key) or "").strip()
+            if val:
+                candidates.append(val)
+
+    try:
+        folder_res = folder_path.resolve()
+    except (OSError, ValueError):
+        folder_res = folder_path
+    for cand in candidates:
+        try:
+            cand_p = Path(cand).resolve()
+        except (OSError, ValueError):
+            continue
+        if cand_p == folder_res or cand_p in folder_res.parents:
+            return Path(cand)
+    return None
 
 
 def _build_cfg_for_row(api: Any, settings: Dict[str, Any], *, root: Path):
