@@ -353,4 +353,5 @@ python app.py --api                                              # REST seul, sa
 - [REFACTOR_PLAN_83.md](./REFACTOR_PLAN_83.md) — plan original casser cycle (acheve)
 - [REFACTOR_PLAN_84.md](./REFACTOR_PLAN_84.md) — plan facades (acheve)
 - [BILAN_CORRECTIONS.md](./BILAN_CORRECTIONS.md) — bilan audits successifs
+- [AUDIT_RELECTURE_2026-06-10.md](./AUDIT_RELECTURE_2026-06-10.md) - relecture integrale du code 2026-06-10 (317 findings confirmes : 6 CRITICAL, 143 HIGH bruts), backlog de correction prioritaire
 - [BILAN_PHASES.md](./BILAN_PHASES.md) — recap des grandes vagues (M / N / O / P / Q)
