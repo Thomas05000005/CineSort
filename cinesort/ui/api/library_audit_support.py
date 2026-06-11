@@ -232,14 +232,31 @@ def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[
         # On reutilise le client TMDb existant sur api si dispo.
         client = getattr(api, "_tmdb_client", None)
         if client is None:
-            # Best-effort : instancier via settings
+            # AUDIT 2026-06-10 (REAL 2/2) : `getattr(api, "_tmdb_client")` est
+            # toujours None (attribut inexistant) et TmdbClient(api_key=api_key)
+            # OMETTAIT le parametre requis cache_path -> TypeError avale ->
+            # _fetch_collection_parts retournait toujours None ->
+            # get_incomplete_sagas retournait toujours sagas:[] (feature morte).
+            # On construit le client correctement, avec cle dé-masquee + cache_path.
             from cinesort.infra.tmdb_client import TmdbClient
+            from cinesort.ui.api.settings_support import normalize_user_path
+            import cinesort.infra.state as _state
 
-            settings = api.settings.get_settings()
+            settings = api._internal_settings()
             api_key = str(settings.get("tmdb_api_key") or "").strip()
             if not api_key:
                 return None
-            client = TmdbClient(api_key=api_key)
+            state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+            try:
+                cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+            except (TypeError, ValueError):
+                cache_ttl_days = 30
+            client = TmdbClient(
+                api_key=api_key,
+                cache_path=state_dir / "tmdb_cache.json",
+                timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+                cache_ttl_days=cache_ttl_days,
+            )
         # Appel direct collection/{id}
         url = f"https://api.themoviedb.org/3/collection/{int(collection_id)}"
         params = {"api_key": getattr(client, "api_key", None), "language": "fr-FR"}
