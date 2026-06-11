@@ -20,6 +20,7 @@ from typing import Any, Dict
 sys.path.insert(0, ".")
 
 from cinesort.domain import default_quality_profile
+from cinesort.infra.db import db_path_for_state_dir
 from cinesort.ui.api import profiles_support, reset_support
 
 
@@ -401,7 +402,8 @@ class ResetDatabaseTests(unittest.TestCase):
 
     def test_backup_created_before_wipe(self) -> None:
         # Cree une fausse DB
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"SQLite format 3\x00" + b"DUMMY DATABASE CONTENT")
 
         out = reset_support.reset_database(self.api)
@@ -417,7 +419,8 @@ class ResetDatabaseTests(unittest.TestCase):
         self.assertFalse(db_path.exists())
 
     def test_backup_contents_preserved(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         magic = b"SQLite format 3\x00CONTENU_MAGIQUE"
         db_path.write_bytes(magic)
         out = reset_support.reset_database(self.api)
@@ -426,18 +429,20 @@ class ResetDatabaseTests(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), magic)
 
     def test_wal_and_shm_files_deleted(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"db")
-        (self.state_dir / "cinesort.db-wal").write_bytes(b"wal")
-        (self.state_dir / "cinesort.db-shm").write_bytes(b"shm")
+        (db_path.with_name(db_path.name + "-wal")).write_bytes(b"wal")
+        (db_path.with_name(db_path.name + "-shm")).write_bytes(b"shm")
         out = reset_support.reset_database(self.api)
         self.assertTrue(out["ok"], out)
         self.assertFalse(db_path.exists())
-        self.assertFalse((self.state_dir / "cinesort.db-wal").exists())
-        self.assertFalse((self.state_dir / "cinesort.db-shm").exists())
+        self.assertFalse((db_path.with_name(db_path.name + "-wal")).exists())
+        self.assertFalse((db_path.with_name(db_path.name + "-shm")).exists())
 
     def test_close_infra_called(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"db")
         reset_support.reset_database(self.api)
         self.assertTrue(self.api._close_infra_called)
