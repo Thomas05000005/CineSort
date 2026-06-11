@@ -215,18 +215,13 @@ _SCENE_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# AUDIT 2026-06-10 (REAL 2/2) : marqueur TECHNIQUE seul (sans l'annee). Utilise
-# par parse_scene_title pour ne stripper un "-GROUP" final QUE si le nom est une
-# vraie release scene (resolution/codec/source presents). Sans ce garde,
-# "Thor - Ragnarok (2017)" devenait "Thor", "Blade - Trinity" -> "Blade",
-# "Cloverfield - Paradox" -> "Cloverfield" : le sous-titre apres " - " etait pris
-# pour un release group. L'annee est EXCLUE car un titre propre peut en contenir.
-_TECH_MARKER_RE = re.compile(
-    r"\b(?:1080p|2160p|720p|480p|x264|x265|h\.?264|h\.?265|"
-    r"hevc|avc|av1|bluray|blu[\s.-]?ray|brrip|bdrip|web[\s.-]?dl|web[\s.-]?rip|"
-    r"hdtv|hdrip|dvdrip|remux|truehd|dts|atmos|aac|ac3|10bit|hdr|uhd)\b",
-    re.IGNORECASE,
-)
+# AUDIT 2026-06-11 (R1a) : le garde "vraie release scene" de parse_scene_title
+# reutilise directement _NOISE_RE (source unique des tags techniques, defini plus
+# bas) AU LIEU d'une liste dupliquee. La 1re version (2026-06-10) avait un
+# _TECH_MARKER_RE trop ETROIT (omettait xvid/divx/eac3/ddp/hdlight/amzn...) :
+# pour "Old.Movie.1998.XviD-DEiTY" -> "Old Movie 1998 -DEiTY" (release group plus
+# strippe -> polluait la query TMDb). _NOISE_RE couvre tous ces tags ET n'inclut
+# PAS l'annee (un titre propre comme "Thor - Ragnarok (2017)" reste preserve).
 
 # Source extraction (Phase Dashboard Podiums).
 # Detecte la source scene (BluRay, WEB-DL, HDTV, Remux, DVDRip, etc.) dans
@@ -375,11 +370,13 @@ def parse_scene_title(filename: str) -> str:
 
     name = name.replace(".", " ").replace("_", " ")
 
-    # AUDIT 2026-06-10 (REAL 2/2) : on ne strippe un "-GROUP" final QUE si le nom
-    # est une vraie release scene (marqueur TECHNIQUE present). Calcule AVANT le
-    # strip noise (qui retire ces marqueurs). Sinon "Thor - Ragnarok (2017)" ->
-    # "Thor". L'annee seule ne compte pas (un titre propre peut en avoir).
-    had_tech_marker = bool(_TECH_MARKER_RE.search(name))
+    # AUDIT 2026-06-10/11 (REAL 2/2 + R1a) : on ne strippe un "-GROUP" final QUE si
+    # le nom est une vraie release scene (au moins un tag technique present).
+    # Calcule AVANT le strip noise (qui retire ces marqueurs). Sinon
+    # "Thor - Ragnarok (2017)" -> "Thor". On reutilise _NOISE_RE (source unique
+    # des tags : xvid/divx/eac3/ddp/hdlight/x264/web-dl/... ; SANS l'annee, donc
+    # un titre propre avec annee reste preserve).
+    had_tech_marker = bool(_NOISE_RE.search(name))
 
     # 2. Position-aware strip si annee parenthesee : strip aussi le suffixe
     # "(year) LANG" → garde uniquement le titre avant la parenthese.

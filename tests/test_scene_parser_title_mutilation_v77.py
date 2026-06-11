@@ -50,6 +50,17 @@ class RealReleaseStillCleanedTests(unittest.TestCase):
             "Dune Part Two 2024",
         )
 
+    def test_release_group_stripped_with_legacy_codec_markers(self) -> None:
+        # GATE R1a (regression introduite par le 1er fix) : les tags techniques
+        # autres que x264/1080p (XviD, DivX, EAC3, HDLight) doivent AUSSI declencher
+        # le strip du release group. _NOISE_RE est la source unique.
+        self.assertEqual(parse_scene_title("Old.Movie.1998.XviD-DEiTY.avi"), "Old Movie 1998")
+        self.assertEqual(parse_scene_title("Film.2020.DVDRip.DivX-ABC.avi"), "Film 2020")
+        self.assertEqual(parse_scene_title("Film.1998.HDLight-DEiTY.mkv"), "Film 1998")
+        # EAC3 : le release group -NTb doit etre retire (le residu AMZN/WEB est un
+        # autre sujet, non couvert ici).
+        self.assertNotIn("-NTb", parse_scene_title("Movie.2023.AMZN.WEB.EAC3-NTb.mkv"))
+
 
 if __name__ == "__main__":
     unittest.main()
