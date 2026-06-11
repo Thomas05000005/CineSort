@@ -230,7 +230,41 @@ def discover_candidate_folders(
         stem = re.sub(r"\s+", " ", stem).strip()
         return stem in GENERIC_EXTRA_VIDEO_NAMES
 
-    def _walk(current: Path, depth: int) -> None:
+    def _yyyy_folder_shape(path: Path) -> tuple[bool, bool]:
+        """Inspecte un dossier `(YYYY)` en UN scandir.
+
+        Retourne (a_video_directe_non_bonus, a_des_sous_dossiers). Sert au
+        fast-path `(YYYY)` a decider entre candidat-direct (film pose dans le
+        dossier annee) et descente (film dans un sous-dossier release imbrique).
+        Tout echec scandir → (False, False) : le dossier reste candidat (le
+        comportement historique d'avant ce fix), iter_videos tranchera en phase 2.
+        """
+        try:
+            sub = os.scandir(str(path))
+        except (OSError, PermissionError, FileNotFoundError) as exc:
+            logger.warning("scan: scandir (YYYY)-shape failed on %s: %s", path, exc)
+            _bump_stats_reject(stats, "ignore_scandir_error", path=str(path))
+            return (False, False)
+        has_direct_video = False
+        has_subdirs = False
+        try:
+            for e in sub:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        has_subdirs = True
+                        continue
+                except OSError:
+                    continue
+                en = e.name
+                d = en.rfind(".")
+                if d >= 0 and en[d:].lower() in video_exts and not _file_looks_bonus(en):
+                    has_direct_video = True
+        finally:
+            with contextlib.suppress(OSError, AttributeError):
+                sub.close()
+        return (has_direct_video, has_subdirs)
+
+    def _walk(current: Path, depth: int, in_year_descent: bool = False) -> None:
         if depth > max_depth:
             # SCAN-1 (L122) : tracer les dossiers abandonnes par depasement
             # de profondeur pour permettre un diagnostic UI.
@@ -249,6 +283,9 @@ def discover_candidate_folders(
             _bump_stats_reject(stats, "ignore_scandir_error", path=str(current))
             return
         subdirs: List[Path] = []
+        # Sous-dossiers `(YYYY)` dont le film est imbrique (pas de video directe
+        # non-bonus) et qu'il faut donc DESCENDRE au lieu de marquer candidat.
+        yyyy_descend: List[Path] = []
         any_file = False
         video_files: List[str] = []
         try:
@@ -275,10 +312,28 @@ def discover_candidate_folders(
                         # Skip le dossier _Collection au niveau 1 du root
                         continue
                     entry_path = Path(entry.path)
-                    # BUG 5 : fast-path — si le nom contient `(YYYY)`, candidat
-                    # direct, pas de scandir supplementaire. Phase 2 verifiera.
+                    # BUG 5 : fast-path — si le nom contient `(YYYY)`, on suppose
+                    # un dossier de film. SCAN-FIX (Opus 2026-06-11) : un dossier
+                    # `Avatar (2009)/` peut contenir le film DIRECTEMENT (cas plat,
+                    # majoritaire) OU dans un sous-dossier release imbrique
+                    # (`Avatar (2009)/Avatar.2009.1080p-GRP/film.mkv`). iter_videos
+                    # en phase 2 est NON-recursif : marquer candidat sans descendre
+                    # rendait le film imbrique invisible (absent du plan).
+                    # Decision en 1 scandir :
+                    #   - video directe non-bonus presente  -> candidat seul (rapide,
+                    #     PAS de descente : evite de planifier featurettes/extras des
+                    #     sous-dossiers comme films + evite tout doublon).
+                    #   - pas de video directe MAIS sous-dossiers -> DESCENTE (_walk)
+                    #     qui appliquera sa propre logique candidat/bonus a chaque
+                    #     niveau (le film imbrique redevient detectable).
+                    #   - ni l'un ni l'autre (feuille sans video / non-video) ->
+                    #     candidat (comportement historique, iter_videos tranchera).
                     if depth >= 0 and _FILM_FOLDER_NAME_RE.search(nm):
-                        candidates.append(entry_path)
+                        has_direct_video, has_subdirs = _yyyy_folder_shape(entry_path)
+                        if not has_direct_video and has_subdirs:
+                            yyyy_descend.append(entry_path)
+                        else:
+                            candidates.append(entry_path)
                     else:
                         subdirs.append(entry_path)
                 else:
@@ -299,6 +354,14 @@ def discover_candidate_folders(
             if non_bonus_root_videos:
                 candidates.append(current)
 
+        # SCAN-FIX (Opus 2026-06-11) : descendre dans les dossiers `(YYYY)` dont le
+        # film est imbrique (decides ci-dessus). On le fait dans tous les cas, meme
+        # quand `subdirs` est vide, sinon le film imbrique resterait invisible. On
+        # propage in_year_descent=True pour que le tri bonus s'applique aux feuilles
+        # de la release imbriquee (ex: un `Extras/` voisin ne doit pas devenir film).
+        for yd in yyyy_descend:
+            _walk(yd, depth + 1, in_year_descent=True)
+
         if subdirs:
             # Dossier avec sous-dossiers : candidat uniquement si au moins un fichier
             # video non-bonus est present au niveau courant.
@@ -306,14 +369,21 @@ def discover_candidate_folders(
             if depth >= 1 and non_bonus_videos:
                 candidates.append(current)
             for sd in subdirs:
-                _walk(sd, depth + 1)
+                _walk(sd, depth + 1, in_year_descent=in_year_descent)
         else:
-            # Dossier feuille : candidat si au moins un fichier est present.
-            # On ne filtre PAS les bonus ici car certains dossiers legitimes
-            # n'ont que des videos renommees bizarrement — iter_videos fera
-            # le tri en phase 2 avec le min_video_bytes.
+            # Dossier feuille (du point de vue des sous-dossiers "normaux") :
+            # candidat si au moins un fichier est present. On ne filtre PAS les
+            # bonus ici par defaut car certains dossiers legitimes n'ont que des
+            # videos renommees bizarrement — iter_videos fera le tri en phase 2.
+            # SCAN-FIX (Opus 2026-06-11) : EXCEPTION en descente `(YYYY)` — une
+            # feuille dont TOUTES les videos sont des bonus (Extras/, Featurettes/,
+            # bonus.mkv...) ne doit pas etre planifiee comme film. Hors descente
+            # `(YYYY)`, le comportement historique est strictement preserve.
             if depth >= 1 and any_file:
-                candidates.append(current)
+                if in_year_descent and video_files and all(_file_looks_bonus(v) for v in video_files):
+                    _bump_stats_reject(stats, "ignore_bonus_only_folder", path=str(current))
+                else:
+                    candidates.append(current)
 
     _walk(root, depth=0)
     candidates.sort(key=lambda p: (str(p.parent).lower(), p.name.lower()))
