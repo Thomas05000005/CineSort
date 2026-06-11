@@ -328,7 +328,25 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     from cinesort.app.plan_support import plan_row_to_jsonable, replan_single_row  # noqa: PLC0415
 
     kind = "collection" if str(target.get("kind") or "") == "collection" else "single"
-    new_row = replan_single_row(cfg, folder_path, video_path, tmdb=tmdb, kind=kind)
+
+    # AUDIT 2026-06-11 (R3e, gap[3]) : passer la VRAIE racine du scan a replan.
+    # cfg a ete construit avec root=folder_path (dossier du film), donc sans
+    # racine explicite folder_name serait derive du stem fichier au lieu du
+    # dossier propre -> replan non idempotent vs scan initial. On lit la racine
+    # d'origine du run en base.
+    scan_root: Optional[Path] = None
+    try:
+        found = api._find_run_row(run_id)
+        if found:
+            root_str = str(found[0].get("root") or "").strip()
+            if root_str:
+                scan_root = Path(root_str)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError):
+        scan_root = None
+
+    new_row = replan_single_row(
+        cfg, folder_path, video_path, tmdb=tmdb, kind=kind, library_root=scan_root
+    )
     if new_row is None:
         return None
 

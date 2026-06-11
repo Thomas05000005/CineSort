@@ -524,6 +524,7 @@ def _plan_item(
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
     row_cache_stats: Optional[Dict[str, int]] = None,
     subtitle_expected_languages: Optional[List[str]] = None,
+    library_root: Optional[Path] = None,
 ) -> List["PlanRow"]:
     """Orchestre la construction d'une PlanRow pour un fichier video.
 
@@ -533,6 +534,15 @@ def _plan_item(
     Pipeline : cache lookup -> contexte folder/edition -> NFO + cross-checks
     IMDb/TMDb -> TMDb fallback -> disambiguation -> PlanRow -> enrichissements
     (sous-titres, non-film, integrite) -> cache store.
+
+    AUDIT 2026-06-11 (R3e, gap[3]) : `library_root` (optionnel) est la VRAIE
+    racine de bibliotheque, utilisee pour decider si le film est pose
+    directement a la racine (folder_name = stem fichier) ou dans son propre
+    dossier (folder_name = folder.name). En replan, le caller met cfg.root =
+    dossier du film, donc sans cette racine explicite `_folder_is_root` serait
+    toujours True -> folder_name = stem du fichier au lieu du dossier propre,
+    rendant le replan NON idempotent. Defaut None -> comportement scan inchange
+    (compare contre cfg.root).
     """
     # Import paresseux : plan_support_dedup importe ce module (replan_single_row
     # n'a aucune dependance dedup, mais _plan_item utilise le pipeline scoring).
@@ -564,7 +574,13 @@ def _plan_item(
     if cached_row is not None:
         return [cached_row]
 
-    folder_name, log_ctx, detected_edition = _resolve_folder_context(cfg, folder, video, is_collection=is_collection)
+    # AUDIT 2026-06-11 (R3e, gap[3]) : si une racine biblio explicite est
+    # fournie (replan), on compare folder contre ELLE et non contre cfg.root
+    # (qui vaut le dossier du film en replan) -> folder_name idempotent.
+    _ctx_root_resolved = _resolve_path_cached(str(library_root)) if library_root is not None else None
+    folder_name, log_ctx, detected_edition = _resolve_folder_context(
+        cfg, folder, video, is_collection=is_collection, cfg_root_resolved=_ctx_root_resolved
+    )
 
     name_year, name_year_reason, remaster_hint = core_mod.infer_name_year(folder_name, video.name)
     name_cands = core_mod.build_candidates_from_name(folder_name, video.name, preferred_year=name_year)
@@ -812,6 +828,7 @@ def replan_single_row(
     kind: str = "single",
     log: Optional[Callable[[str, str], None]] = None,
     subtitle_expected_languages: Optional[List[str]] = None,
+    library_root: Optional[Path] = None,
 ) -> Optional["PlanRow"]:
     """Spec 06 §3.6 : reconstruit une PlanRow pour 1 seul fichier video.
 
@@ -820,6 +837,12 @@ def replan_single_row(
     -> enrichissements sous-titres/integrite/not-a-movie). Aucune mise en
     cache (cfg_sig/scan_index volontairement vides) : on force un rescan
     a froid pour ce row.
+
+    AUDIT 2026-06-11 (R3e, gap[3]) : `library_root` doit etre la racine de
+    bibliotheque d'origine du scan (cf. caller `_rematch_tmdb_and_update_plan`).
+    Le caller construit cfg avec root=dossier_du_film, donc sans cette racine
+    explicite le folder_name serait derive du stem fichier au lieu du dossier
+    propre -> replan non idempotent. Si None, on retombe sur cfg.root (compat).
 
     Returns:
         La nouvelle PlanRow (jamais cachee), ou None si le pipeline n'a
@@ -847,6 +870,7 @@ def replan_single_row(
         run_hash_cache=None,
         row_cache_stats=None,
         subtitle_expected_languages=subtitle_expected_languages,
+        library_root=library_root,
     )
     if not rows:
         return None
