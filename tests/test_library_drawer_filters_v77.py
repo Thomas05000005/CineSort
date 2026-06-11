@@ -94,10 +94,15 @@ class DrawerFilterTests(unittest.TestCase):
         )
 
     def test_multi_tag_is_not_a_language(self) -> None:
-        """R4-P14 : le tag de piste 'multi' (mappe '' par _LANG_MAP) ne compte
-        ni comme 2e langue ni comme langue hors fr/en."""
+        """R4-P14 : le tag de piste 'multi' (mappe '' par _LANG_MAP) n'est pas
+        une LANGUE : il ne compte pas comme langue hors fr/en ('Autre') ni dans
+        le comptage >=2. En revanche il matche le filtre 'Multi' par
+        intersection DIRECTE (le conteneur declare lui-meme multi-langues)."""
         self.assertFalse(_row_matches(self._row(audio_languages=["fra", "multi"]), {"audio_languages": ["Autre"]}))
-        self.assertFalse(_row_matches(self._row(audio_languages=["eng", "multi"]), {"audio_languages": ["multi"]}))
+        # Intersection directe voulue : piste taguee multi -> filtre Multi matche.
+        self.assertTrue(_row_matches(self._row(audio_languages=["eng", "multi"]), {"audio_languages": ["multi"]}))
+        # Mais 'multi' seul ne fabrique pas un comptage >=2 avec une non-langue.
+        self.assertFalse(_row_matches(self._row(audio_languages=["und", "mul"]), {"audio_languages": ["Autre"]}))
 
     def test_special_tag_track_is_still_a_subtitle(self) -> None:
         # Une piste 'forced' EST un sous-titre : ne matche pas 'Aucun'.
