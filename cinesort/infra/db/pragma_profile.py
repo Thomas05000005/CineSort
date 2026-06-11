@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 # les callers et les requetes de debug puissent compter dessus.
 _VALID_PRAGMA_HISTORY_SOURCES = ("auto", "manual_settings", "env_override")
 
+# AUDIT REAL 2/2 (pragma_profile.py:219) : _record_pragma_history insere une
+# ligne a CHAQUE ouverture de connexion (chaque methode repository en ouvre 1-3),
+# et AUCUNE purge n'existait -> croissance non bornee de pragma_history (des
+# dizaines de milliers de lignes JSON par scan de bibliotheque). On borne la
+# table a ce nombre de lignes (les plus recentes) apres chaque insert : c'est
+# une table d'audit/debug, l'historique ancien n'a aucune valeur metier. La
+# purge se fait par id (PK AUTOINCREMENT monotone) -> un DELETE range indexe.
+_PRAGMA_HISTORY_MAX_ROWS = 500
+
 
 # ---------------------------------------------------------------------------
 # Profils PRAGMA. Chaque profil est un mapping nom_pragma -> valeur attendue.
@@ -230,6 +239,20 @@ def _record_pragma_history(
                 str(source),
             ),
         )
+        # AUDIT REAL 2/2 : purge bornee DANS la meme transaction implicite que
+        # l'INSERT (un seul commit plus bas). On garde les _PRAGMA_HISTORY_MAX_ROWS
+        # lignes les plus recentes (par id, PK AUTOINCREMENT monotone). Le DELETE
+        # range `id <= max_id - cap` est indexe et O(rows supprimees). Tolerant :
+        # un echec de purge ne doit pas perdre l'INSERT (on log en debug et on
+        # commit quand meme la ligne inseree).
+        try:
+            row = conn.execute("SELECT MAX(id) FROM pragma_history").fetchone()
+            max_id = int(row[0]) if row and row[0] is not None else 0
+            cutoff = max_id - _PRAGMA_HISTORY_MAX_ROWS
+            if cutoff > 0:
+                conn.execute("DELETE FROM pragma_history WHERE id <= ?", (cutoff,))
+        except sqlite3.Error as purge_exc:
+            logger.debug("_record_pragma_history: purge bornee ignoree (%s)", purge_exc)
         # COMMIT immediat : libere la transaction implicite ouverte par INSERT.
         # En cas d'echec ici, on ROLLBACK pour ne pas laisser de pending tx
         # (un connect_sqlite suivi d'un BEGIN doit toujours fonctionner).
