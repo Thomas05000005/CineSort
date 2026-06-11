@@ -23,10 +23,11 @@ class ResolveToolPathTests(unittest.TestCase):
     """Tests de la resolution avec validation disque (FIX 1, Vague K)."""
 
     def test_explicit_path_existing_returns_explicit(self) -> None:
-        """Path explicite + fichier existe sur disque -> retourne explicite."""
+        """Path explicite + fichier existe + nom whiteliste -> retourne explicite."""
         with mock.patch("cinesort.infra.probe.tooling.Path") as mock_path_cls:
             instance = mock.MagicMock()
             instance.is_file.return_value = True
+            instance.name = "ffprobe.exe"  # nom whiteliste (AUDIT 2026-06-10)
             mock_path_cls.return_value = instance
             which_fn = mock.MagicMock(return_value="C:/winget/ffprobe.exe")
 
@@ -39,6 +40,22 @@ class ResolveToolPathTests(unittest.TestCase):
             self.assertEqual(result, "C:/custom/ffprobe.exe")
             # which_fn NE doit PAS etre appele si le path explicit est valide
             which_fn.assert_not_called()
+
+    def test_explicit_path_non_whitelisted_binary_falls_back(self) -> None:
+        """GATE AUDIT 2026-06-10 : un fichier existant mais dont le nom n'est PAS
+        whiteliste (ex calc.exe configure via save_settings) est IGNORE et on
+        retombe sur le PATH — empeche l'execution d'un binaire arbitraire."""
+        with mock.patch("cinesort.infra.probe.tooling.Path") as mock_path_cls:
+            instance = mock.MagicMock()
+            instance.is_file.return_value = True
+            instance.name = "calc.exe"  # nom NON whiteliste
+            mock_path_cls.return_value = instance
+            which_fn = mock.MagicMock(return_value="C:/winget/ffprobe.exe")
+
+            result = _resolve_tool_path("C:/evil/calc.exe", "ffprobe", which_fn)
+
+            self.assertEqual(result, "C:/winget/ffprobe.exe", "doit ignorer le binaire non whiteliste")
+            which_fn.assert_called_once_with("ffprobe")
 
     def test_explicit_path_missing_falls_back_to_PATH(self) -> None:
         """Path explicite + fichier absent (obsolete) -> fallback which_fn PATH."""

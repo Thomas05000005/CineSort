@@ -13,7 +13,7 @@ from cinesort.infra.probe.constants import (
     WINGET_INSTALL_TIMEOUT_S,
 )
 
-from .tooling import RunnerFn, default_runner
+from .tooling import EXPECTED_BINARY_NAMES, RunnerFn, default_runner
 
 _MIN_VERSIONS = {
     "ffprobe": "5.0",
@@ -45,10 +45,9 @@ _SUPPORTED_TOOLS = ("ffprobe", "mediainfo")
 # Mapping tool_name -> noms acceptes (sensible casse-insensible). On accepte
 # le nom Windows (.exe) et le nom Unix (sans extension) pour la portabilite
 # tests/CI Linux.
-_EXPECTED_BINARY_NAMES = {
-    "ffprobe": frozenset({"ffprobe.exe", "ffprobe"}),
-    "mediainfo": frozenset({"mediainfo.exe", "mediainfo", "MediaInfo.exe"}),
-}
+# Source de verite unique dans tooling.py (applique aussi par _resolve_tool_path
+# AVANT execution, cf AUDIT 2026-06-10). Alias pour compat des references locales.
+_EXPECTED_BINARY_NAMES = EXPECTED_BINARY_NAMES
 _STATUS_OK = "ok"
 _STATUS_MISSING = "missing"
 _STATUS_INVALID = "invalid_executable"

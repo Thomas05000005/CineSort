@@ -17,6 +17,29 @@ logger = logging.getLogger(__name__)
 RunnerFn = Callable[[List[str], float], Tuple[int, str, str]]
 WhichFn = Callable[[str], Optional[str]]
 
+# Cf issue #71 + AUDIT 2026-06-10 : whitelist des noms de binaires acceptes par
+# outil. Source de verite unique (tools_manager.validate_tool_path l'importe).
+# Empeche d'executer n'importe quel .exe configure via les settings (calc.exe,
+# cmd.exe, malware.exe...) avec des arguments de probe.
+EXPECTED_BINARY_NAMES: Dict[str, frozenset] = {
+    "ffprobe": frozenset({"ffprobe.exe", "ffprobe"}),
+    "mediainfo": frozenset({"mediainfo.exe", "mediainfo", "MediaInfo.exe"}),
+}
+
+
+def _binary_name_allowed(tool_name: str, path: str) -> bool:
+    """True si le nom de fichier de `path` correspond a l'outil attendu."""
+    expected = EXPECTED_BINARY_NAMES.get(str(tool_name or "").strip().lower())
+    if not expected:
+        # Outil hors whitelist connue : on n'autorise pas un chemin explicite
+        # arbitraire (fail-closed).
+        return False
+    try:
+        name = Path(path).name.lower()
+    except (OSError, ValueError):
+        return False
+    return name in {n.lower() for n in expected}
+
 
 def _runner_platform_kwargs() -> Dict[str, object]:
     """
@@ -120,16 +143,29 @@ def _resolve_tool_path(explicit_value: str, tool_name: str, which_fn: WhichFn) -
         # cause 100% des probes en FAILED sans aucun feedback utilisateur :
         # subprocess leve WinError 2 (file not found) sur chaque appel.
         try:
-            if Path(explicit).is_file():
-                return explicit
+            is_file = Path(explicit).is_file()
         except (OSError, ValueError):
             # Path mal forme (ex: caracteres invalides Windows) -> fallback PATH
-            pass
-        logger.warning(
-            "Tool %s configure (%s) introuvable sur disque, fallback PATH",
-            tool_name,
-            explicit,
-        )
+            is_file = False
+        if is_file:
+            # AUDIT 2026-06-10 : valider le NOM du binaire AVANT de retourner un
+            # chemin qui sera ensuite execute ([path, -version] puis args probe).
+            # Le whitelist n'etait applique que dans validate_tool_path() ; un
+            # enregistrement via le save_settings generique le contournait et
+            # get_tools_status() executait alors n'importe quel .exe configure.
+            if _binary_name_allowed(tool_name, explicit):
+                return explicit
+            logger.warning(
+                "Tool %s configure (%s) : nom de binaire non whiteliste, ignore (fallback PATH)",
+                tool_name,
+                Path(explicit).name,
+            )
+        else:
+            logger.warning(
+                "Tool %s configure (%s) introuvable sur disque, fallback PATH",
+                tool_name,
+                explicit,
+            )
     return str(which_fn(tool_name) or "")
 
 
