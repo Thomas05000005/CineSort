@@ -93,6 +93,12 @@ class DrawerFilterTests(unittest.TestCase):
             "fra+commentary n'a pas de vraie langue hors fr/en",
         )
 
+    def test_multi_tag_is_not_a_language(self) -> None:
+        """R4-P14 : le tag de piste 'multi' (mappe '' par _LANG_MAP) ne compte
+        ni comme 2e langue ni comme langue hors fr/en."""
+        self.assertFalse(_row_matches(self._row(audio_languages=["fra", "multi"]), {"audio_languages": ["Autre"]}))
+        self.assertFalse(_row_matches(self._row(audio_languages=["eng", "multi"]), {"audio_languages": ["multi"]}))
+
     def test_special_tag_track_is_still_a_subtitle(self) -> None:
         # Une piste 'forced' EST un sous-titre : ne matche pas 'Aucun'.
         self.assertFalse(_row_matches(self._row(subtitle_languages=["forced"]), {"subtitle_languages": ["none"]}))

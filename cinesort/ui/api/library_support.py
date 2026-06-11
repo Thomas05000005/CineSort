@@ -334,7 +334,14 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
                     raw_lang = (track.get("language") or "").strip().lower()
                     if not raw_lang:
                         continue
-                    normalized = _normalize_iso639(raw_lang)
+                    # AUDIT 2026-06-11 (R4-P14) : conserver le code BRUT quand
+                    # _normalize_iso639 ne le connait pas (hin, tam...) — sinon la
+                    # piste disparait de la row et un film sous-titre hindi matche
+                    # encore "Aucun" malgre le fix filtre (cause amont du residuel
+                    # P3 confirme par la revue adversaire). Symetrique de
+                    # _to_iso639_1. Les tags speciaux (forced/sdh...) sont ensuite
+                    # neutralises au filtrage par _NON_LANG_CODES.
+                    normalized = _normalize_iso639(raw_lang) or raw_lang
                     if normalized and normalized not in embedded_langs:
                         embedded_langs.append(normalized)
             except (ImportError, AttributeError, KeyError, TypeError, ValueError):
@@ -517,7 +524,7 @@ def _media_source_label(video_name: str) -> str:
 # comme fausses langues) + la plage ISO 639-2 usage local qaa..qtz (convention
 # pistes commentaire), via _is_non_language_code (520 codes, pas de frozenset).
 _NON_LANG_CODES = frozenset(
-    {"und", "unknown", "zxx", "mis", "mul", "forced", "sdh", "cc", "commentary"}
+    {"und", "unknown", "zxx", "mis", "mul", "multi", "forced", "sdh", "cc", "commentary"}
 )
 
 
