@@ -58,6 +58,23 @@ def film_identity_key(row: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_run_dir(state_dir: Path, run_id: str) -> Path:
+    """Resout le dossier d'un run. AUDIT 2026-06-10 (REAL 2/2) : les vrais
+    dossiers sont `runs/tri_films_<run_id>` (infra.state.new_run), pas
+    `runs/<run_id>` -> get_film_history/list_films_with_history ne trouvaient
+    jamais plan.jsonl et retournaient 0 evenement / 0 film. domain ne peut pas
+    importer infra.state (import-linter) : on duplique la convention de nommage,
+    en tolerant aussi un dossier non prefixe (robustesse)."""
+    runs = state_dir / "runs"
+    prefixed = runs / f"tri_films_{run_id}"
+    if prefixed.exists():
+        return prefixed
+    bare = runs / run_id
+    if bare.exists():
+        return bare
+    return prefixed  # defaut : convention canonique
+
+
 def _load_plan_rows_from_jsonl(plan_path: Path) -> List[Dict[str, Any]]:
     """Charge un plan.jsonl et retourne les dicts bruts. Skip les lignes invalides."""
     rows: List[Dict[str, Any]] = []
@@ -140,7 +157,7 @@ def get_film_timeline(
             continue
 
         # Chemin du plan.jsonl pour ce run
-        run_dir = state_dir / "runs" / run_id
+        run_dir = _resolve_run_dir(state_dir, run_id)
         plan_path = run_dir / "plan.jsonl"
         plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
@@ -262,7 +279,7 @@ def list_films_overview(
         return []
 
     run_id = str(last_run.get("run_id") or "")
-    run_dir = state_dir / "runs" / run_id
+    run_dir = _resolve_run_dir(state_dir, run_id)
     plan_path = run_dir / "plan.jsonl"
     plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
