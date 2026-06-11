@@ -172,8 +172,22 @@ class TmdbClient:
         Leve `CircuitOpenError` si le breaker est ouvert (caller doit traiter
         ca comme un echec reseau normal — typiquement fallback gracieux qui
         retourne None / liste vide).
+
+        AUDIT 2026-06-10 (REAL 2/2, meme classe que omdb-1) : la Session a
+        `raise_on_status=False`, donc un 5xx/429 ne levait aucune HTTPError dans
+        le lambda et le breaker NE comptait PAS l'echec -> 100 reponses 503
+        laissaient le circuit ferme (le scenario #76 inoperant : ~3,5s de retries
+        x 5000 films). On leve raise_for_status DANS le lambda UNIQUEMENT pour les
+        statuts serveur-down (5xx/429) afin que le breaker les voie ; les 4xx
+        (401 cle invalide, 404...) passent intacts pour ne pas casser les callers
+        qui les gerent gracieusement (ex validate_connection).
         """
-        return self._breaker.call(lambda: self._session.get(url, params=params, timeout=self.timeout_s))
+        def _do_get() -> requests.Response:
+            resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            if resp.status_code >= 500 or resp.status_code == 429:
+                resp.raise_for_status()
+            return resp
+        return self._breaker.call(_do_get)
 
     def _debug(self, message: str) -> None:
         if str(os.environ.get("CINESORT_DEBUG", "")).strip().lower() not in _DEBUG_ENV_VALUES:
