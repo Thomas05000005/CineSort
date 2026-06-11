@@ -9,6 +9,11 @@
 >
 > MISE À JOUR 2026-06-11 (2e passe) : 6 fixes backend supplémentaires ajoutés après le 1er
 > handoff (Vague 5 ci-dessous). Le total de fixes Python testés par GATE passe à **17**.
+>
+> MISE À JOUR 2026-06-11 (3e passe — « fais les tous ») : sur demande de tout finir, **16 fixes
+> supplémentaires** (Vague 6 ci-dessous) couvrant les **4 CRITICAL** restants + la famille perceptuelle
+> (contrats testables) + les endpoints morts. Total : **35 commits de fix**, ~50 fichiers de GATE.
+> Restent délégués au runtime (documenté en §5) : les bugs de PARSING de sortie ffmpeg.
 
 ---
 
@@ -297,6 +302,45 @@ Légende « Points à scruter » = ce qu'un évaluateur sceptique devrait vérif
 > Note : le fix `status`/`active_run_id` n'ajoute PAS le champ `undone`/`is_undo`/`type` (détection des
 > runs d'undo) — sous-finding plus petit, laissé pour plus tard.
 
+### VAGUE 6 — 4 CRITICAL restants + perceptuel + endpoints morts (3e passe, 16 fixes)
+
+**CRITICAL**
+- **`79ba75a` — 3 crashes ndarray perceptuel** (`video_analysis`/`grain_analysis`) : `if not pixels:`/`if
+  pixels:` sur un `np.ndarray` (refactor B3) → `ValueError` → toute l'analyse vidéo perceptuelle plantait
+  (avalée en warning). Fix : check `np.size()` (valide list+ndarray). GATE `test_perceptual_ndarray_guards_v77`.
+- **`a8ad081` — `tmdb_support` AttributeError** : `api._normalize_user_path` inexistant → 500 sur
+  get_tmdb_posters/search_tmdb. Fix : `normalize_user_path` module-level + clé dé-masquée. GATE.
+- **`222534c` — endpoints quarantaine** : `_build_cfg_from_settings_payload(settings)` sans les 4 kwargs →
+  TypeError → viewer/purge/**cron TTL morts** (rendait le fix TTL [1] inopérant). Fix : helper
+  `_build_quarantine_cfg`. GATE.
+
+**Perceptuel (contrats testables sans ffmpeg)**
+- **`cef8f30` — composite_v2 clés probe** : `has_hdr10`/`has_dv` vs `hdr10`/`hdr_dolby_vision` (HDR scoré SDR) ;
+  `audio` vs `audio_tracks` (fake-lossless jamais détecté) ; `api._tmdb_client()` inexistant (analyse vidéo
+  échouait). GATEs + tests composite ré-ancrés.
+- **`0919fdc` — index audio relatif** : `best["index"]` (absolu conteneur) utilisé comme index audio-relatif
+  dans `-map 0:a:N` → loudnorm/astats/clipping échouaient. GATE.
+
+**Endpoints morts par drift de contrat**
+- **`9874fb9` — reset_database** : mauvais chemin DB (`cinesort.db` vs `db/cinesort.sqlite`) → wipe jamais
+  effectué. Tests ré-ancrés. 
+- **`771c30c` — modal film timeline** (clé `events` vs `history`) + **analyze_quality_batch scope=validated**
+  (`api.load_validation` → `api.run.load_validation`, 500). 
+- **`17571e0` — champs TV/sous-titres** non restaurés à la désérialisation (cache + restart) → renommage
+  **`S00E00`**. GATE round-trip sur les 2 chemins.
+- **`65212b3` — historique par film** : run dir `runs/<id>` vs `runs/tri_films_<id>` → 0 événement. GATE.
+- **`c373e85` — sagas incomplètes** : `TmdbClient(api_key=...)` sans cache_path → TypeError → feature morte. GATE.
+- **`0ad9c99` — timeline Jellyfin** : `get_movies` (inexistant) → `get_all_movies` + clé dé-masquée. Test ré-ancré.
+
+Non-régression Vague 6 : 39 nouveaux GATE + 200 sur suites impactées (perceptuel/scene/plan/quality/timeline/
+reset), import-linter vert. Tests ré-ancrés signalés (composite, reset, library_timeline — encodaient les
+mauvaises clés/chemins).
+
+> Points à scruter Vague 6 : (a) le check `np.size()` suppose que `pixels` est None/list/ndarray (jamais un
+> scalaire 0-d) — vrai pour des frames. (b) Les fixes "clé masquée" réutilisent `_internal_settings` (mécanisme
+> déjà GATE en Vague 3). (c) `_resolve_run_dir`/`_resolve_db_path` dupliquent une convention de nommage de
+> `infra` dans `domain`/`ui` (import-linter interdit l'import) — à garder synchronisé si la convention change.
+
 ---
 
 ## 5. Ce qui n'a PAS été fait (et pourquoi)
@@ -312,6 +356,16 @@ Légende « Points à scruter » = ce qu'un évaluateur sceptique devrait vérif
    (total/current/phase) demandent un polling JS `/run/get_status` ; les options du drawer
    (dry_run/skip_duplicates) et les 4 étapes de `processing.js` demandent une décision (brancher vs
    supprimer du code mort). → nécessitent l'EXE/Playwright pour mesurer avant de toucher.
+3. **Bugs de PARSING de sortie ffmpeg (perceptuel audio/vidéo)** : `-v quiet` qui supprime le JSON
+   loudnorm, `signalstats` sans `metadata=print`, bloc astats « Overall » sans crest/dynamic range,
+   `mpdecimate` loggé en debug. Le « fix » consiste à changer la commande ffmpeg ET le parsing, et sa
+   validité dépend du **format de sortie exact de la version de ffmpeg bundlée**. Vérifiés par l'audit
+   « empiriquement avec ffmpeg 8.x » mais le binaire livré peut différer → **DÉLÉGUÉS au runtime**
+   (lancer l'app + ffmpeg réel et constater la sortie avant de toucher). Les fixes de CONTRAT du
+   perceptuel (clés probe, index audio, crashes ndarray, tmdb_client) sont eux faits (Vague 6).
+4. **`quality_simulator_support._store`** (REAL au code, CONTESTÉ runtime) : `api._store` n'existe pas →
+   simulateur G5 mort, MAIS le modal G5 n'est monté par aucune route vivante (vue morte) → latent.
+5. **134 MEDIUM + 33 LOW** : non traités (priorité aux CRITICAL/HIGH REAL 2/2).
 2. **Les 37 findings CONTESTÉS** : bug source réel mais chemin mort/flag off (ex toute la famille
    `views/library/lib-*.js` jamais montée). Non corrigés : latents, pas actifs. À traiter par
    suppression de code mort ou re-branchement — décision produit.
