@@ -40,6 +40,7 @@ def _try_lookup_row_cache(
     folder: Path,
     video: Path,
     *,
+    kind: str,
     cfg_sig: str,
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]],
@@ -48,6 +49,13 @@ def _try_lookup_row_cache(
     """Tente un hit dans le cache row v2. Retourne la PlanRow cachee ou None.
 
     Met a jour row_cache_stats (row_hits / row_misses) en place.
+
+    AUDIT 2026-06-11 (R3e, gap[2]) : la cle de cache est (root_path, video_path,
+    cfg_sig) SANS kind, mais un meme fichier bascule single<->collection quand on
+    ajoute/retire une 2e video au dossier (les octets/NFO ne changent pas). Sans
+    comparer `kind`, le check de validite passait et renvoyait la row stale du
+    MAUVAIS kind (row_id prefix S vs C, collection_name, semantique de rename
+    divergents). On compare donc le kind stocke au kind demande.
     """
     if not (cfg_sig and scan_index is not None and hasattr(scan_index, "get_incremental_row_cache")):
         return None
@@ -75,6 +83,7 @@ def _try_lookup_row_cache(
                 and int(cached.get("video_mtime_ns") or 0) == v_mtime
                 and str(cached.get("video_hash") or "") == v_hash
                 and cached.get("nfo_sig") == nfo_sig
+                and str(cached.get("kind") or "single") == str(kind or "single")
             ):
                 row_obj = plan_row_from_jsonable(cached.get("row_json") or {})
                 if row_obj is not None:
@@ -546,6 +555,7 @@ def _plan_item(
         cfg,
         folder,
         video,
+        kind=kind,
         cfg_sig=cfg_sig,
         scan_index=scan_index,
         run_hash_cache=run_hash_cache,
