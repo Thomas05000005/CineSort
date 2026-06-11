@@ -279,7 +279,10 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
           transition `path:<sha1>` -> `tmdb:<id>` (fix #5 ROADMAP_VAGUE_P).
     """
     try:
-        settings = api.settings.get_settings()
+        # AUDIT 2026-06-10 : _internal_settings (secrets en clair) au lieu du
+        # payload masque -> _build_tmdb_client_optional construisait sinon un
+        # TmdbClient avec tmdb_api_key="••••••••" et tout re-match echouait 401.
+        settings = api._internal_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
