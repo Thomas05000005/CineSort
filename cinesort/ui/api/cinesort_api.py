@@ -2649,6 +2649,21 @@ class CineSortApi:
         return history_support.cleanup_old_runs(self, retention_days=retention_days)
 
     # ---------- VQ-2 QUARANTAINE-TTL (bucket _review filesystem) ----------
+    def _build_quarantine_cfg(self) -> core.Config:
+        """Construit la cfg pour les operations quarantaine (bucket root/_review).
+
+        AUDIT 2026-06-10 (CRITICAL) : les 3 endpoints appelaient
+        `_build_cfg_from_settings_payload(settings)` avec UN seul argument alors
+        que build_cfg_from_settings exige root + 3 noms de dossiers keyword-only
+        -> TypeError systematique avale -> {ok:False, build_cfg_failed} ->
+        viewer + "Vider maintenant" morts ET le cron TTL ne purgeait JAMAIS le
+        bucket (rendant le fix TTL inoperant). On passe par le helper correct
+        _build_cfg_from_settings qui fournit les 4 kwargs.
+        """
+        settings = self._get_settings_impl()
+        root = _normalize_user_path(settings.get("root"), Path(DEFAULT_ROOT))
+        return self._build_cfg_from_settings(settings, root)
+
     def _purge_quarantine_bucket_impl(
         self, ttl_days: int = 30, dry_run: bool = False
     ) -> Dict[str, Any]:
@@ -2662,8 +2677,7 @@ class CineSortApi:
         from cinesort.app.quarantine_ttl import purge_review_bucket
 
         try:
-            settings = self._get_settings_impl()
-            cfg = _build_cfg_from_settings_payload(settings)
+            cfg = self._build_quarantine_cfg()
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             return {"ok": False, "error": f"build_cfg_failed: {exc}"}
         return purge_review_bucket(cfg, ttl_days=int(ttl_days), dry_run=bool(dry_run))
@@ -2678,8 +2692,7 @@ class CineSortApi:
         from cinesort.app.quarantine_ttl import purge_review_bucket_all
 
         try:
-            settings = self._get_settings_impl()
-            cfg = _build_cfg_from_settings_payload(settings)
+            cfg = self._build_quarantine_cfg()
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             return {"ok": False, "error": f"build_cfg_failed: {exc}"}
         return purge_review_bucket_all(cfg, dry_run=bool(dry_run))
@@ -2693,8 +2706,7 @@ class CineSortApi:
         from cinesort.app.quarantine_ttl import list_review_bucket_files
 
         try:
-            settings = self._get_settings_impl()
-            cfg = _build_cfg_from_settings_payload(settings)
+            cfg = self._build_quarantine_cfg()
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             return {"ok": False, "error": f"build_cfg_failed: {exc}"}
         return list_review_bucket_files(cfg, limit=int(limit))
