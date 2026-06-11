@@ -271,7 +271,8 @@ class CineSortApi:
     def _dispatch_email(self, event: str, data: Dict[str, Any]) -> None:
         """Dispatch un rapport email si email_enabled. Non-bloquant."""
         try:
-            settings = self._get_settings_impl()
+            # AUDIT 2026-06-10 : secrets en clair (email_smtp_password) pour SMTP.
+            settings = self._internal_settings()
             # NB : module-style pour permettre patch("cinesort.app.email_report.dispatch_email").
             _email_report_mod.dispatch_email(settings, event, data)
         except (ImportError, KeyError, OSError, TypeError, ValueError):
@@ -728,6 +729,23 @@ class CineSortApi:
             default_probe_backend=DEFAULT_PROBE_BACKEND,
             debug_enabled=_env_truthy("CINESORT_DEBUG"),
         )
+
+    def _internal_settings(self) -> Dict[str, Any]:
+        """Settings AVEC defaults mais secrets EN CLAIR — usage interne uniquement
+        (jamais renvoye au frontend). Pour les consommateurs qui construisent un
+        client Jellyfin/Plex/Radarr/SMTP : sans ca ils relisaient le masque
+        "••••••••" et l'envoyaient comme credential (AUDIT 2026-06-10 -> 401).
+
+        Implementation : on part du payload masque (_get_settings_impl, mockable
+        en test) puis on dé-masque chaque secret depuis le disque — extension du
+        pattern _unmask_or_stored a tout le payload. Un secret deja en clair
+        (valeur != masque, ex cle de test injectee) est conserve tel quel."""
+        settings = self._get_settings_impl()
+        raw = _read_settings(self._get_state_dir())
+        for field in settings_support._SECRET_FIELDS:
+            if str(settings.get(field) or "").strip() == _SECRET_MASK:
+                settings[field] = str(raw.get(field) or "").strip()
+        return settings
 
     def _save_settings_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         # Lock partage avec _set_locale_impl pour serialiser les sequences
@@ -1259,7 +1277,7 @@ class CineSortApi:
     # ---------- Email ----------
     def _test_email_report_impl(self) -> Dict[str, Any]:
         """Envoie un email test avec des donnees mock."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # secrets en clair pour SMTP (AUDIT 2026-06-10)
         if not settings.get("email_smtp_host") or not settings.get("email_to"):
             return _err_response(
                 "Configurez d'abord le serveur SMTP et le destinataire.",
@@ -1279,7 +1297,7 @@ class CineSortApi:
     # ---------- Jellyfin validation croisee ----------
     def _get_jellyfin_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Jellyfin. Retourne le rapport de coherence."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # jellyfin_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("jellyfin_enabled"):
             return _err_response("Jellyfin non configure.", category="state", level="info", log_module=__name__)
         jf_url = str(settings.get("jellyfin_url") or "").strip()
@@ -1402,7 +1420,7 @@ class CineSortApi:
         purl = (url or "").strip()
         ptok = (token or "").strip()
         if not purl or not ptok:
-            settings = self._get_settings_impl()
+            settings = self._internal_settings()  # plex_token en clair (AUDIT 2026-06-10)
             purl = purl or str(settings.get("plex_url") or "").strip()
             ptok = ptok or str(settings.get("plex_token") or "").strip()
         if not purl or not ptok:
@@ -1419,7 +1437,7 @@ class CineSortApi:
 
     def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Plex."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # plex_token en clair (AUDIT 2026-06-10)
         if not settings.get("plex_enabled"):
             return _err_response("Plex non configure.", category="state", level="info", log_module=__name__)
         purl = str(settings.get("plex_url") or "").strip()
@@ -1499,7 +1517,7 @@ class CineSortApi:
 
     def _get_radarr_status_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Rapport Radarr : matching, upgrade candidates."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # radarr_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("radarr_enabled"):
             return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
@@ -1557,7 +1575,7 @@ class CineSortApi:
 
     def _request_radarr_upgrade_impl(self, radarr_movie_id: int) -> Dict[str, Any]:
         """Demande a Radarr de chercher une meilleure version d'un film."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # radarr_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("radarr_enabled"):
             return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
