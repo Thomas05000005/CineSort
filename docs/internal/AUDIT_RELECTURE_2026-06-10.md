@@ -22,8 +22,22 @@ apply/quarantine/rollback/journal. 2 echecs PRE-EXISTANTS hors perimetre
 (`test_apply_op_labels`, `RecordApplyOpTests::test_returns_false_on_failure_and_logs`
 — a traiter separement, ils echouaient deja avant ces fixes).
 
-**Vagues suivantes (a faire)** : (2) securite (CORS+loopback, SHA256 archives, scrubber) ->
-(3) secrets masques (~12 chemins, fix centralise) -> (4) contrats JS vivants (doublons, accueil, traitement).
+**Vague 2 — securite (6/6 corrigees, 2026-06-11)** :
+
+| Finding | Commit | Statut |
+|---|---|---|
+| `rest_server.py` CORS * + bypass loopback = CSRF (REAL 2/2) | `b1dd226` | corrige + 7 GATE (garde Origin same-site + CORS sans wildcard) |
+| `omdb_client.py:43` OMDb en HTTP clair | `5dc70ea` | corrige (HTTPS) |
+| `log_scrubber.py:113` args non-str non scrubbes + `:150` install avant basicConfig | `e20d2c0` | corrige + 3 GATE |
+| `tooling.py:122` whitelist binaire contournable | `8a387f2` | corrige + GATE (fail-closed, source unique) |
+| `auto_install.py:53` archives sans SHA256 | `9ef5457` | mitige : pin via env var (rolling release, pas de hash fabrique) ; hash reel = tache release |
+
+Non-regression Vague 2 : 120+ passed sur la suite REST/scrubber/probe. Echecs hors perimetre :
+4 PRE-EXISTANTS (legacy 410 sur `/api/get_settings`) + 1 fuite d'etat rate-limiter inter-fichiers
+(`test_x_request_id_on_unauthorized_post` passe en isolation).
+
+**Vagues suivantes (a faire)** : (3) secrets masques (~12 chemins, fix centralise) ->
+(4) contrats JS vivants (doublons, accueil, traitement).
 
 ---
 
