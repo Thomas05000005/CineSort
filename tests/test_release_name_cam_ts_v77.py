@@ -24,6 +24,15 @@ class ReleaseNameCamTsTests(unittest.TestCase):
         info = parse_release_name("MonFilm.ts")
         self.assertFalse(info.is_cam)
 
+    def test_ts_extension_not_cam_source_hint(self) -> None:
+        # GATE R2.3 : l'extension .ts ne doit PAS non plus forcer source_hint='cam'
+        # via _PATTERNS_SOURCE (residu non couvert par le 1er fix 889d07a).
+        self.assertNotEqual(parse_release_name("MonFilm.ts").source_hint, "cam")
+        self.assertEqual(parse_release_name("Inception.2010.1080p.BluRay.x264-GRP.ts").source_hint, "bluray")
+        self.assertEqual(parse_release_name("Film.2020.HDTV.ts").source_hint, "hdtv")
+        # un vrai TS mid-name reste source 'cam'
+        self.assertEqual(parse_release_name("Movie.2024.TS.x264-GRP.mkv").source_hint, "cam")
+
     def test_real_ts_token_midname_still_cam(self) -> None:
         # Un vrai TeleSync au milieu du nom reste detecte.
         info = parse_release_name("SomeMovie.2024.TS.x264-GRP.mkv")
