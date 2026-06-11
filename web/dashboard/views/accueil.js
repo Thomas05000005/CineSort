@@ -1320,17 +1320,26 @@ export async function initAccueil(container) {
     return;
   }
 
-  if (!dashRes || dashRes.ok === false) {
-    const msg = (dashRes && (dashRes.message || dashRes.error)) || "Erreur de chargement du dashboard.";
+  // AUDIT 2026-06-10 (REAL 2/2) : le ok METIER est dans res.data.ok, pas au
+  // top-level de l'enveloppe apiPost {status, data}. Avant, dashRes.ok===false
+  // n'etait jamais vrai -> une erreur metier (DB inaccessible, 401, 429) etait
+  // rendue comme un succes avec le payload d'erreur comme donnees. Meme pattern
+  // que _triggerStartPlan / pings (res.data || res).
+  const _dashPayload = (dashRes && dashRes.data) || dashRes || {};
+  if (!dashRes || _dashPayload.ok === false) {
+    const msg = (_dashPayload.message || _dashPayload.error) || "Erreur de chargement du dashboard.";
     container.innerHTML = _renderError(msg);
     _bindEvents(container);
     return;
   }
 
-  const dashboardData = dashRes.data || dashRes;
-  const stats = (statsRes && statsRes.ok !== false) ? (statsRes.data || statsRes) : {};
-  const settings = (settingsRes && settingsRes.ok !== false) ? (settingsRes.data || settingsRes) : {};
-  const updateInfo = (updateRes && updateRes.ok !== false) ? (updateRes.data || updateRes) : null;
+  const dashboardData = _dashPayload;
+  const _statsP = (statsRes && statsRes.data) || statsRes || {};
+  const stats = _statsP.ok !== false ? _statsP : {};
+  const _setP = (settingsRes && settingsRes.data) || settingsRes || {};
+  const settings = _setP.ok !== false ? _setP : {};
+  const _updP = (updateRes && updateRes.data) || updateRes || null;
+  const updateInfo = _updP && _updP.ok !== false ? _updP : null;
   _currentSettings = settings;
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings, updateInfo);
