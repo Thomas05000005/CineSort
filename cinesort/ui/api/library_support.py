@@ -482,6 +482,14 @@ _SOURCE_HINT_TO_DRAWER = {
     "dvd": "dvd",
     "hdtv": "other", "cam": "other",
 }
+# AUDIT 2026-06-11 (R4-P5) : le drawer Qualite (qualite-filters-drawer.js) envoie
+# des LIBELLES ('BluRay'/'WEB-DL'/'WEB-Rip'/'DVD'/'HDTV'/'Autre') sous la cle
+# 'sources' (pluriel) ; le drawer Biblio envoie bluray/web/dvd/other sous
+# 'source'. On normalise les libelles vers le vocabulaire backend.
+_DRAWER_SOURCE_ALIAS = {
+    "web-dl": "web", "web-rip": "web", "webdl": "web", "webrip": "web",
+    "hdtv": "other", "autre": "other",
+}
 
 
 def _media_source_label(video_name: str) -> str:
@@ -576,15 +584,33 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     if not _in_list(row.get("grain_nature"), filters.get("grain_nature")):
         return False
     # Source media (bluray/web/dvd/other) derivee du nom video, PAS proposed_source.
-    source_filter = filters.get("source")
+    # AUDIT 2026-06-11 (R4-P5) : accepte aussi la cle 'sources' (pluriel) du
+    # drawer Qualite et normalise ses libelles (WEB-DL/WEB-Rip->web, HDTV/Autre
+    # ->other). Avant, la cle pluriel n'etait jamais lue -> filtre mort.
+    source_filter = filters.get("source") or filters.get("sources")
     if source_filter:
         media_src = row.get("media_source")
         if media_src is None:  # defensif : derive a la volee si absent du payload
             media_src = _media_source_label(row.get("video") or row.get("path") or "")
-        wanted = {str(f).lower() for f in source_filter}
+        wanted = {_DRAWER_SOURCE_ALIAS.get(str(f).lower(), str(f).lower()) for f in source_filter}
         ms = str(media_src or "").lower()
         ok = (ms in wanted) or ("other" in wanted and ms not in {"bluray", "web", "dvd"})
         if not ok:
+            return False
+
+    # Decennies (drawer Qualite, cle 'decades', values '1990' — tolere '1990s').
+    # AUDIT 2026-06-11 (R4-P5) : jamais lu avant -> filtre mort. Un film sans
+    # annee (year=0) est exclu quand le filtre est actif (aligne sur
+    # compute_by_decade qui skip les annees invalides). NB : le filtre 'genres'
+    # du meme drawer reste NON applicable ici — les rows n'embarquent pas les
+    # genres TMDb (manque de donnees, pas de mapping possible) ; period_days est
+    # consomme separement par quality/get_history.
+    decades_filter = filters.get("decades")
+    if decades_filter:
+        year = int(row.get("year") or 0)
+        decade = str((year // 10) * 10) if year > 0 else ""
+        wanted = {str(f).strip().lower().rstrip("s") for f in decades_filter}
+        if decade not in wanted:
             return False
     # Audio langues : normalise ISO639-1 (eng->en) + "multi" = >=2 vraies langues.
     # AUDIT 2026-06-11 (R4-P3) : "multi" compte les langues IDENTIFIABLES
@@ -597,7 +623,12 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         norm_row.discard("")
         wanted = {str(f).lower() for f in audio_filter}
         real_langs = norm_row - _NON_LANG_CODES
-        ok = bool(norm_row & wanted) or ("multi" in wanted and len(real_langs) >= 2)
+        # R4-P5 : 'Autre' (drawer Qualite) = au moins une vraie langue hors fr/en.
+        ok = (
+            bool(norm_row & wanted)
+            or ("multi" in wanted and len(real_langs) >= 2)
+            or (("autre" in wanted or "other" in wanted) and bool(real_langs - {"fr", "en"}))
+        )
         if not ok:
             return False
     # Sous-titres : "none" = AUCUN sous-titre ; sinon normalise ISO639-1.
