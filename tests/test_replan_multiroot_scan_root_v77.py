@@ -88,6 +88,56 @@ class ResolveScanRootTests(unittest.TestCase):
 
         self.assertIsNone(_resolve_scan_root_for_replan(_NoRun(), "runX", self.r1))
 
+    # --- Revue adversaire R4 (P4 v2) ---
+
+    def test_nested_roots_deepest_wins(self) -> None:
+        """Roots IMBRIQUES (config warnee, pas bloquee) : un film a la racine
+        de Films/Films4K doit resoudre Films4K (le plus profond), PAS le
+        premier candidat contenant (roots[0]=Films) qui contaminerait le titre."""
+        films = self.r1 / "Films"
+        films4k = films / "Films4K"
+        films4k.mkdir(parents=True)
+        api = _FakeApi(str(films), {"roots": [str(films), str(films4k)]})
+        got = _resolve_scan_root_for_replan(api, "run1", films4k)
+        self.assertIsNotNone(got)
+        self.assertEqual(Path(got).resolve(), films4k.resolve())
+
+    def test_source_root_priority_candidate_wins(self) -> None:
+        """PlanRow.source_root (autoritatif) prime sur les roots de la DB."""
+        sub = self.r2 / "Movie (2010)"
+        sub.mkdir()
+        api = _FakeApi(str(self.r1), {"roots": [str(self.r1)]})  # DB ignore R2
+        got = _resolve_scan_root_for_replan(
+            api, "run1", sub, priority_candidates=[str(self.r2)]
+        )
+        self.assertIsNotNone(got)
+        self.assertEqual(Path(got).resolve(), self.r2.resolve())
+
+    def test_candidates_normalized_env_var_and_spaces(self) -> None:
+        """config_json persiste les roots BRUTS : variables d'env et espaces
+        de tete doivent etre normalises avant comparaison."""
+        import os
+
+        sub = self.r1 / "Movie (2010)"
+        sub.mkdir()
+        os.environ["CINESORT_TEST_ROOT_P4"] = str(self.r1)
+        try:
+            api = _FakeApi("", {"roots": ["  %CINESORT_TEST_ROOT_P4%  "]})
+            got = _resolve_scan_root_for_replan(api, "run1", sub)
+            self.assertIsNotNone(got, "candidat %VAR% doit etre expandvars-normalise")
+            self.assertEqual(Path(got).resolve(), self.r1.resolve())
+        finally:
+            os.environ.pop("CINESORT_TEST_ROOT_P4", None)
+
+    def test_invalid_priority_candidate_falls_back_to_db(self) -> None:
+        sub = self.r1 / "Movie (2010)"
+        sub.mkdir()
+        api = _FakeApi(str(self.r1), {"roots": [str(self.r1)]})
+        got = _resolve_scan_root_for_replan(
+            api, "run1", sub, priority_candidates=[None, "", str(self.r2)]
+        )
+        self.assertEqual(Path(got).resolve(), self.r1.resolve())
+
 
 class ReplanEffectMultiRootTests(unittest.TestCase):
     """Effet bout-en-bout : le film a la racine du root secondaire garde son stem."""

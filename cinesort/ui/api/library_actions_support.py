@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -336,7 +337,11 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # film d'un root SECONDAIRE faussait folder_name (un film pose a la racine
     # de R2 heritait du nom du dossier R2 au lieu du stem). On choisit donc le
     # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
-    scan_root = _resolve_scan_root_for_replan(api, run_id, folder_path)
+    # P4 v2 : la row porte source_root (le root EXACT du scan, core.py:424) —
+    # candidat autoritaire teste en premier, avant les roots reconstruits de la DB.
+    scan_root = _resolve_scan_root_for_replan(
+        api, run_id, folder_path, priority_candidates=[target.get("source_root")]
+    )
 
     new_row = replan_single_row(
         cfg, folder_path, video_path, tmdb=tmdb, kind=kind, library_root=scan_root
@@ -404,7 +409,13 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     return new_row_json
 
 
-def _resolve_scan_root_for_replan(api: Any, run_id: str, folder_path: Path) -> Optional[Path]:
+def _resolve_scan_root_for_replan(
+    api: Any,
+    run_id: str,
+    folder_path: Path,
+    *,
+    priority_candidates: Optional[List[Any]] = None,
+) -> Optional[Path]:
     """Retourne la racine du scan qui CONTIENT folder_path, ou None.
 
     AUDIT 2026-06-11 (R4-P4) : runs.root ne stocke que roots[0] (compat). Les
@@ -413,7 +424,40 @@ def _resolve_scan_root_for_replan(api: Any, run_id: str, folder_path: Path) -> O
     folder_path lui-meme ou un de ses ancetres : passer un root etranger a
     replan_single_row fausserait _folder_is_root (un film pose a la racine d'un
     root secondaire perdrait son stem). None = compat pre-R3e (cfg.root==folder).
+
+    Revue adversaire R4 (P4 v2) :
+    - `priority_candidates` (ex: PlanRow.source_root, le root AUTORITATIF du
+      scan porte par la row) sont testes en premier, ordre fourni.
+    - Parmi les candidats DB, le PLUS PROFOND gagne : avec des roots imbriques
+      (Films + Films/Films4K, config seulement warnee par validate_roots), le
+      premier-match retournait Films pour un film de Films4K -> folder_name
+      contamine, la classe de bug que ce helper doit eliminer.
+    - Les candidats sont normalises (strip/quotes, expandvars, expanduser)
+      avant resolve : config_json persiste les roots BRUTS pre-normalisation.
     """
+
+    def _norm(raw: Any) -> Optional[Path]:
+        text = str(raw or "").strip().strip('"').strip()
+        if not text:
+            return None
+        try:
+            return Path(os.path.expandvars(text)).expanduser().resolve()
+        except (OSError, ValueError):
+            return None
+
+    try:
+        folder_res = folder_path.resolve()
+    except (OSError, ValueError):
+        folder_res = folder_path
+
+    def _contains(cand: Path) -> bool:
+        return cand == folder_res or cand in folder_res.parents
+
+    for raw in priority_candidates or []:
+        cand_p = _norm(raw)
+        if cand_p is not None and _contains(cand_p):
+            return cand_p
+
     try:
         found = api._find_run_row(run_id)
     except (OSError, AttributeError, KeyError, TypeError, ValueError):
@@ -440,18 +484,14 @@ def _resolve_scan_root_for_replan(api: Any, run_id: str, folder_path: Path) -> O
             if val:
                 candidates.append(val)
 
-    try:
-        folder_res = folder_path.resolve()
-    except (OSError, ValueError):
-        folder_res = folder_path
+    best: Optional[Path] = None
     for cand in candidates:
-        try:
-            cand_p = Path(cand).resolve()
-        except (OSError, ValueError):
+        cand_p = _norm(cand)
+        if cand_p is None or not _contains(cand_p):
             continue
-        if cand_p == folder_res or cand_p in folder_res.parents:
-            return Path(cand)
-    return None
+        if best is None or len(cand_p.parts) > len(best.parts):
+            best = cand_p
+    return best
 
 
 def _build_cfg_for_row(api: Any, settings: Dict[str, Any], *, root: Path):
