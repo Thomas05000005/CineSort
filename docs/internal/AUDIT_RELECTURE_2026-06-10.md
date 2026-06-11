@@ -47,9 +47,22 @@ Non-regression Vague 2 : 120+ passed sur la suite REST/scrubber/probe. Echecs ho
 
 Non-regression Vague 3 : 67 passed (hydration/internal_settings/restart/radarr/plex/email/jellyfin/tmdb-guard).
 
-**Vague suivante (a faire)** : (4) contrats JS vivants (doublons group_key, accueil progression,
-traitement). Note : findings JS valides par `node --check` + lecture croisee des contrats ;
-validation runtime complete = app live (Playwright).
+**Vague 4 — contrats JS vivants (3 fixes REAL 2/2 surs, 2026-06-11)** :
+
+| Finding | Commit | Statut |
+|---|---|---|
+| `doublons.js:97` group_key JS != backend -> decisions Garder A/B perdues | `e347684` | corrige + GATE contrat (equivalence JS<->Python verifiee) |
+| `accueil.js:1323` erreur metier non detectee (res.ok vs res.data.ok) | `b4c6fdb` | corrige (pattern res.data.ok, node --check) |
+| `traitement.js:2653` auto-save unmount annule par son propre abort | `ba10800` | corrige (mode detached sans signal, node --check) |
+
+**Reste de la Vague 4 (NON fait — necessite validation runtime app live)** : findings dont le
+correctif exige soit un ajout de contrat backend (accueil progression/showResume : get_dashboard
+doit exposer active_run_id/progress ; drawer options dry_run/skip_duplicates), soit une decision
+sur du code mort (processing.js 4 etapes, vues status/qij/quality jamais routees). A traiter en
+session avec l'EXE/Playwright pour mesurer le comportement reel avant de toucher.
+
+**Synthese corrections** : 20 commits de fix sur 4 vagues (3 perte de donnees + 6 securite +
+~12 chemins secrets masques + 3 contrats JS), chacun avec GATE et import-linter vert.
 
 ---
 

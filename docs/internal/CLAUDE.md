@@ -148,6 +148,33 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 
 ## Sessions recentes
 
+### 10-11 juin 2026 — Audit relecture integrale + backlog de correction (4 vagues) ✅
+
+Relecture multi-agents de tout le code (~120k lignes, workflow `wf_984bef0d-63a`, ~510 agents,
+panel de double-refutation). **314 findings uniques** (5 CRITICAL, ~140 HIGH), 106 REAL 2/2.
+Rapport complet : [AUDIT_RELECTURE_2026-06-10.md](./AUDIT_RELECTURE_2026-06-10.md).
+
+**20 commits de correction sur branche `loop/correction-2026-06`** (jamais pousses), chacun avec
+GATE et import-linter vert :
+- **Vague 1 — perte de donnees (3)** : TTL quarantaine sur date d'entree (manifest) pas st_mtime
+  (`7089cab`) ; journal write-ahead apply par-row preserve (`9d89200`) ; rollback revert aussi
+  QUARANTINE_* (`e7346ee`).
+- **Vague 2 — securite (6)** : garde CSRF same-site + CORS sans wildcard (`b1dd226`) ; OMDb HTTPS
+  (`5dc70ea`) ; scrubber args non-str + re-sync apres basicConfig (`e20d2c0`) ; whitelist binaire
+  probe dans _resolve_tool_path (`8a387f2`) ; SHA256 archives epinglable par env var (`9ef5457`).
+- **Vague 3 — secrets masques ~12 chemins (4)** : hydratation scan ignore le masque (`f11bf2a`,
+  couvre accueil+watcher) ; helper `_internal_settings` pour 7 rapports Jellyfin/Plex/Radarr/SMTP
+  (`1eb1fb0`) ; rescan TMDb (`74171f0`) ; restart REST token+host+cors (`a0a8701`).
+- **Vague 4 — contrats JS vivants (3)** : doublons group_key aligne backend (`e347684`, evitait la
+  perte des decisions Garder A/B) ; accueil detecte erreurs metier res.data.ok (`b4c6fdb`) ;
+  traitement auto-save unmount detache de l'abort (`ba10800`).
+
+**Reste a faire** (documente dans le rapport) : findings JS necessitant validation runtime (app live
+/ Playwright) — progression accueil, drawer options, processing.js, vues mortes status/qij/quality ;
++ les 37 findings CONTESTES (bug source reel mais chemin mort) ; + angles non couverts par l'audit
+(CI/packaging/locales/tests). 2 echecs de tests PRE-EXISTANTS hors perimetre a traiter
+(test_apply_op_labels, RecordApplyOpTests + 4 legacy-410 dans test_rest_security).
+
 ### 3-4 juin 2026 — Vague R complete + cycle hotfix6/7 (BugHunt R6) 🟡 EN COURS
 
 Cycle adversarial intensif post-Vague Q, 30 tags poses entre le 02 et le 04 juin :
