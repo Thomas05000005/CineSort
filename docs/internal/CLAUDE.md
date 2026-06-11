@@ -148,6 +148,32 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 
 ## Sessions recentes
 
+### 11 juin 2026 (suite) — Verification totale + vague R4 (14 fixes) ✅
+
+**Verification totale** demandee par l'utilisateur : workflow 65 agents (128 findings, 21 challenges,
+20 confirmes en double-refutation, 0 refute) + suite complete (5642 passed, 22 echecs TOUS
+pre-existants — 8 nouveaux suspects prouves pre-existants via worktree temporaire au commit pre-vague).
+Elle a attrape 4 vrais defauts DANS les fixes R1-R3 -> **vague R4, 14 commits** (annexe R4 du handoff) :
+- **P1 `90e21e4`** : perceptual_workers refait a la racine — cle UI = canonique (l'UI POST l'objet
+  settings ENTIER, echo du GET : le fallback alias R3c etait mort, GATE complaisant). Memoire creee :
+  feedback_cinesort_settings_full_payload.
+- **P2 `d40f57c`** : _RELEASE_GROUP_RE tiret COLLE (9 mutilations R1a reparees + 1 pre-existante,
+  differentiel corpus 0 divergence scene).
+- **P3 `b336cc9`+`05cf075`+`1a2f9c6`(+`37e76c8` fix test)** : langues hors _LANG_MAP conservees,
+  tags de piste exclus (forced/sdh/cc/commentary/mul/multi/und/qaa-qtz), build embarques bruts.
+- **P4 `72ab67f`+`638e192`** : replan multi-root — _resolve_scan_root_for_replan (contient le film,
+  plus profond gagne, candidats normalises, PlanRow.source_root prioritaire).
+- **P5-P14** : drawer Qualite (sources/decades/Autre `7ba6f43`, genres morts retires `48cde2e`,
+  period_days=0 `5ebd35e`) ; purge secrets historiques runs.config_json au boot `552bf69` ;
+  4 round-trips settings `a0e4714` (collection_folder_name, lowercase_extensions au GET, split ';',
+  file_extensions->video_exts) ; badge 0=configure `5d5b3c6`.
+
+**Revue adversaire R4** (9 agents + reprise post-quota, union 53+34 findings) : tout juge (inline,
+quota agents tombe 2x — reset 16/06 21h ; relance possible resumeFromRunId wf_7e1cf1c1-092).
+Verifs : suite complete post-R4 5676 passed / 22 echecs = baseline exacte ; 293+52 tests cibles
+verts ; import-linter 3/3 ; node --check x3. Residuels documentes dans l'annexe R4 du handoff
+(settings fantomes, drop sous-titres externes amont, HDTV≡Autre, router query params, artefacts dist/).
+
 ### 11 juin 2026 — Audit de verification + vague de correction R1/R2/R3 (13 fixes) ✅
 
 Verification multi-agents (lecture seule, double-refutation) des 35 fixes Vagues 1-6 + 3 fixes Opus
@@ -363,7 +389,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-11 (Audit de verification + vague de correction R1/R2/R3 : 13 fixes, 0 regression, import-linter 3/3 ; cf annexe Fable 5 dans AUDIT_EVALUATION_HANDOFF_2026-06-11.md).*
+*Last updated : 2026-06-11 (Verification totale 65 agents + vague R4 : 14 fixes dont P1 perceptual_workers racine, P2 tiret colle, P4 multi-root v2 ; 0 regression suite complete ; cf annexes Fable 5 + R4 dans AUDIT_EVALUATION_HANDOFF_2026-06-11.md).*
 
 ---
 

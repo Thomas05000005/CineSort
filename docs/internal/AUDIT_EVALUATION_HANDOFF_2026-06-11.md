@@ -660,3 +660,66 @@ Résultats bruts : `_verif_audit_2026-06-11.json` (non commité). Conclusions :
   futur mécanisme d'`expected_ops` fiable.
 - Échecs PRÉ-EXISTANTS toujours présents (4 `test_rest_security`, 4 `SettingsDispatcherSectionsTests`,
   etc., cf §7) — **non imputables** à cette vague (vérifiés en restaurant `HEAD`).
+
+---
+
+## VAGUE R4 (Fable 5) — Correction des findings de la vérification totale (2026-06-11)
+
+Déclenchée par la vérification totale (workflow 65 agents : 128 findings, 20 confirmés en
+double-réfutation) puis affinée par une **revue adversaire dédiée** (workflow 9 agents + reprise
+post-quota : 53+34 findings, union des 2 passes). **14 commits**, 1 sujet/commit, GATE
+rouge-avant/vert-après pour chaque fix de code.
+
+### Les 4 problèmes majeurs de R1-R3 corrigés à la racine
+
+| # | Commits | Sujet |
+|---|---------|-------|
+| P1 | `90e21e4` | **perceptual_workers refait** : la clé du champ UI devient la CANONIQUE (l'UI POST l'objet settings entier = écho du GET ; le fallback alias R3c était mort, le GATE était complaisant). Nouveau GATE sur le flux UI RÉEL : extrait la clé depuis parametres.js, GET complet → édition → save → 8 persiste (rouge avant : 0). |
+| P2 | `d40f57c` | **scene_parser** : `_RELEASE_GROUP_RE` exige le tiret COLLÉ au groupe (signal structurel scène). Répare les 9 mutilations R1a (`Thor - Ragnarok 4K` → `Thor`) + le cas pré-existant `Title - Sub 1080p`. Différentiel corpus 22 noms : 10 réparés, 0 divergence scène. |
+| P3 | `b336cc9`+`05cf075`+`1a2f9c6` | **filtres langues** : codes hors `_LANG_MAP` conservés bruts (eng+hin = multi ✓, hin ≠ Aucun ✓) ; tags de piste (und/forced/sdh/cc/commentary/mul/multi/qaa-qtz) exclus du comptage ; build des rows conserve les langues embarquées brutes (cause amont). |
+| P4 | `72ab67f`+`638e192` | **replan multi-root** : le root passé à replan doit CONTENIR le film — `_resolve_scan_root_for_replan` (runs.root + config_json.roots, candidats normalisés ~/%VAR%, le PLUS PROFOND gagne pour les roots imbriqués, `PlanRow.source_root` autoritaire en priorité). |
+
+### Les autres fixes de la vague
+
+| # | Commit | Sujet |
+|---|--------|-------|
+| P5 | `7ba6f43` | Drawer Qualité : `sources` (pluriel) + libellés normalisés, nouveau filtre `decades`, audio `Autre`. |
+| P6 | `552bf69` | **Sécurité** : purge au boot des secrets historiques de `runs.config_json` (écrits en clair avant R1b). Idempotent, testé sur base PRÉ-EXISTANTE. |
+| P7 | `48cde2e` | Drawer Qualité : section **Genres retirée** (contrôle mort — les rows n'ont pas les genres TMDb ; badge mensonger). Test ré-ancré. |
+| P8 | `5ebd35e` | `period_days=0` (« Tout ») n'est plus avalé par `|| 30` (4 sites qualite.js). |
+| P9-P12 | `a0e4714` | 4 round-trips settings : `collection_folder_name` (clé canonique), `lowercase_extensions` exposé au GET (toggle mentait), split `;` pour `subtitle_expected_languages` (consommé au scan), `file_extensions` alimente enfin `video_exts` (réglage fantôme). |
+| P13 | `5d5b3c6` | Badge section : 0 = configuré pour un number à min 0. |
+| — | `37e76c8` | Correction d'une assertion fautive du GATE P14 (commit 1a2f9c6 parti avec un test rouge — erreur de séquence pipe/exit-code, tracée honnêtement). |
+
+### Vérifications finales R4
+- **Suite complète** (~5700 tests hors e2e/chromium/EXE) : 5676 passed, **22 échecs = exactement la
+  baseline pré-existante** (les 2 candidats supplémentaires — rate-limit HTTP et perf 100 probes —
+  repassent verts sur machine calme : flaky sous charge des 30 agents).
+- 293 + 52 tests ciblés verts ; import-linter **3/3 KEPT** ; `node --check` sur les 3 JS touchés.
+- Tier colors / DPAPI / dry-run / bypass loopback intacts ; aucun push.
+
+### Résiduels DOCUMENTÉS (assumés ou hors périmètre, par la revue adversaire)
+- **Parsers** : résidu ` - GROUP` (groupe espacé, format P2P exotique absent du corpus) pollue la
+  query TMDb au lieu d'amputer le titre — trade-off assumé du tiret collé ; l'effet composé bloque
+  aussi le strip langue after-year sur ces mêmes noms.
+- **Sous-titres externes** : le drop amont des langues hors `_LANG_MAP` (subtitle_helpers, domain)
+  subsiste — un film dont les SEULS sous-titres externes sont exotiques peut encore matcher « Aucun ».
+- **Settings fantômes pré-existants** (à trancher en vague dédiée) : `subtitle_lang_priority`,
+  `windows_safe`, `retention_days` (≠ history_retention_days), `animations_enabled` — persistés mais
+  sans consommateur backend démontré.
+- **HDTV ≡ Autre** dans le filtre source (granularité backend bluray/web/dvd/other).
+- **Drill-down décennie → `/bibliotheque?filter=decade_X`** : le router ne parse pas les query params
+  (pré-existant, lié au drill-down podiums différé).
+- Collision REST-only `source`+`sources` simultanés (le singulier prime) ; scalaire au lieu de liste
+  itéré caractère par caractère (REST-only).
+- **Artefacts de build périmés** : `dist/CineSort_QA/` et `dist_backup_*` embarquent l'ancien
+  parametres.js — à purger au prochain packaging.
+- Reconciliation : la branche `COMPLETED_BY_BOOT_CLEANUP` reste latente (aucun writer
+  d'`expected_ops` possible avant close) — 100 % des zombies → ROLLED_BACK prudent, assumé.
+
+### Reprise agents (quota)
+La phase Verdict-par-agents de la revue adversaire a été coupée 2× par le quota hebdomadaire
+(reset 16/06 21h Europe/Paris). Le round 1 adversaire est COMPLET (union des 2 passes) et tous les
+findings ont été jugés inline puis corrigés/documentés ci-dessus. Relance possible après reset :
+`Workflow({scriptPath: ".../revue-adversaire-r4-wf_7e1cf1c1-092.js", resumeFromRunId: "wf_7e1cf1c1-092"})`
+pour une contre-validation 100 % agents des verdicts inline.
