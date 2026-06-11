@@ -94,6 +94,11 @@ def _runs_history_payload(
                         ensure_exists=False,
                     ).run_dir
                 ),
+                # AUDIT 2026-06-10 : exposer le `status` (DB) — sans lui le CTA
+                # "Reprendre la validation" (accueil showResume, statut
+                # AWAITING_VALIDATION) et les filtres Statut/Undone de l'historique
+                # ne matchaient jamais. Source : runs.status (list_runs SELECT *).
+                "status": str(run_row.get("status") or "PENDING"),
                 "started_ts": started_ts,
                 "ended_ts": ended_ts,
                 "duration_s": duration_s,
@@ -104,6 +109,28 @@ def _runs_history_payload(
             }
         )
     return history
+
+
+def _active_run_id(api: Any) -> Optional[str]:
+    """run_id du run actuellement en cours (running et pas done), ou None.
+
+    AUDIT 2026-06-10 : get_dashboard ne renvoyait pas `active_run_id` (il
+    n'existait que sur GET /api/health). L'accueil (_extractScanProgress) le
+    lisait dans le payload get_dashboard -> la carte "Scan en cours" ne
+    s'affichait jamais. Meme logique que rest_server._find_active_run_id.
+    """
+    runs = getattr(api, "_runs", None)
+    runs_lock = getattr(api, "_runs_lock", None)
+    if not runs or not runs_lock:
+        return None
+    try:
+        with runs_lock:
+            for run_id, rs in runs.items():
+                if getattr(rs, "running", False) and not getattr(rs, "done", False):
+                    return str(run_id)
+    except (RuntimeError, AttributeError):
+        return None
+    return None
 
 
 def _empty_dashboard_payload(mode: str, runs_history: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -608,7 +635,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         )
 
         if not run_row:
-            return _empty_dashboard_payload(mode, runs_history)
+            return {**_empty_dashboard_payload(mode, runs_history), "active_run_id": _active_run_id(api)}
 
         resolved_run_id = str(run_row.get("run_id") or "")
         run_paths = api._run_paths_for(
@@ -669,6 +696,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 **cached_payload,
                 "runs_history": runs_history,
                 "pending_undo": pending_undo,
+                "active_run_id": _active_run_id(api),
             }
 
         run_state = api._get_run(resolved_run_id)
@@ -701,6 +729,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             **cached_section,
             "runs_history": runs_history,
             "pending_undo": pending_undo,
+            "active_run_id": _active_run_id(api),
         }
     # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter
     # HTTP 500 sur RuntimeError/MemoryError/etc (cas run obsolete + DB locked).
