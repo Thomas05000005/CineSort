@@ -122,6 +122,46 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         mode = self.store.apply.get_atomic_mode(batch_id)
         self.assertEqual(mode["rollback_status"], ROLLBACK_DONE)
 
+    def test_rollback_reverts_quarantine_ops(self) -> None:
+        """GATE AUDIT 2026-06-10 (HIGH) : QUARANTINE_FILE et QUARANTINE_DIR sont
+        journalisees reversible=True et DOIVENT etre revertees (dst _review ->
+        src). Avant le fix elles etaient SKIPPED 'non revert-able', laissant les
+        fichiers en quarantaine tout en retournant ok=True (FS non restaure)."""
+        batch_id = self.store.apply.insert_apply_batch(
+            run_id="r1", dry_run=False, quarantine_unapproved=True,
+        )
+        self.store.apply.upsert_atomic_mode(batch_id, True)
+
+        # QUARANTINE_FILE : un fichier video deplace en _review
+        src_file = self.src_root / "film.mkv"
+        dst_file = self.dst_root / "_review" / "film" / "film.mkv"
+        _create_file(dst_file, size=256)
+        # QUARANTINE_DIR : un dossier complet deplace en _review
+        src_dir = self.src_root / "MonFilm (2020)"
+        dst_dir = self.dst_root / "_review" / "MonFilm (2020)"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        _create_file(dst_dir / "movie.mkv", size=128)
+
+        self.store.apply.append_apply_operation(
+            batch_id=batch_id, op_index=1, op_type="QUARANTINE_FILE",
+            src_path=str(src_file), dst_path=str(dst_file), reversible=True,
+        )
+        self.store.apply.append_apply_operation(
+            batch_id=batch_id, op_index=2, op_type="QUARANTINE_DIR",
+            src_path=str(src_dir), dst_path=str(dst_dir), reversible=True,
+        )
+
+        result = rollback_forward(self.store, batch_id)
+        self.assertTrue(result["ok"], f"got {result}")
+        self.assertEqual(result["rollback_status"], ROLLBACK_DONE)
+        self.assertEqual(result["counts"]["done"], 2, "les 2 QUARANTINE doivent etre revertees")
+        self.assertEqual(result["counts"]["skipped"], 0)
+        # FS reellement restaure : tout est revenu a src, plus rien en _review
+        self.assertTrue(src_file.exists())
+        self.assertFalse(dst_file.exists())
+        self.assertTrue((src_dir / "movie.mkv").exists())
+        self.assertFalse(dst_dir.exists())
+
     def test_rollback_skips_irreversible_ops(self) -> None:
         """Op avec reversible=False : skipped, pas FS touch."""
         batch_id = self.store.apply.insert_apply_batch(

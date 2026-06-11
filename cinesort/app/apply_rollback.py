@@ -110,7 +110,12 @@ def _revert_one_op(
             "reason": f"undo_status={undo_status}",
         }
 
-    if op_type not in ("MOVE_FILE", "MOVE_DIR"):
+    # AUDIT 2026-06-10 (HIGH, REAL 2/2) : QUARANTINE_FILE/QUARANTINE_DIR sont
+    # journalisees avec reversible=True et src_path/dst_path de meme semantique
+    # que les MOVE (origine -> _review/...). Les exclure ici laissait les
+    # fichiers en quarantaine apres un rollback atomique tout en retournant
+    # ok=True (FS non restaure). Le revert dst->src est strictement identique.
+    if op_type not in ("MOVE_FILE", "MOVE_DIR", "QUARANTINE_FILE", "QUARANTINE_DIR"):
         return {
             "id": op_id,
             "op_index": op_index,
