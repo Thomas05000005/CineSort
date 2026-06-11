@@ -36,8 +36,20 @@ Non-regression Vague 2 : 120+ passed sur la suite REST/scrubber/probe. Echecs ho
 4 PRE-EXISTANTS (legacy 410 sur `/api/get_settings`) + 1 fuite d'etat rate-limiter inter-fichiers
 (`test_x_request_id_on_unauthorized_post` passe en isolation).
 
-**Vagues suivantes (a faire)** : (3) secrets masques (~12 chemins, fix centralise) ->
-(4) contrats JS vivants (doublons, accueil, traitement).
+**Vague 3 — secrets masques (4 commits, ~12 chemins, 2026-06-11)** :
+
+| Finding | Commit | Statut |
+|---|---|---|
+| `run_flow_support` hydratation ecrasait la vraie cle par le masque (REAL 2/2) | `f11bf2a` | corrige + 3 GATE — couvre accueil.js scan + watcher |
+| 7 rapports Jellyfin/Plex/Radarr/SMTP lisaient le payload masque | `1eb1fb0` | corrige + 3 GATE (`_internal_settings`) |
+| `library_actions_support:283` rescan TMDb cle masquee | `74171f0` | corrige (mecanisme `_internal_settings`) |
+| `_restart_api_server_impl` token masque + host/cors omis | `a0a8701` | corrige + GATE |
+
+Non-regression Vague 3 : 67 passed (hydration/internal_settings/restart/radarr/plex/email/jellyfin/tmdb-guard).
+
+**Vague suivante (a faire)** : (4) contrats JS vivants (doublons group_key, accueil progression,
+traitement). Note : findings JS valides par `node --check` + lecture croisee des contrats ;
+validation runtime complete = app live (Playwright).
 
 ---
 
