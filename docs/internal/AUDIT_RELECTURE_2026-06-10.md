@@ -7,6 +7,26 @@
 > de completude. Acheve en 4 reprises sur coupures de quota (journal de resume, zero perte).
 > Volume cumule : ~27M tokens, ~9300 tool calls, ~510 agents.
 
+## Suivi des corrections
+
+**Vague 1 — perte de donnees (3/3 corrigees, 2026-06-11)** :
+
+| Finding | Commit | Statut |
+|---|---|---|
+| `quarantine_ttl.py:195` TTL sur st_mtime (CRITICAL) | `7089cab` | corrige + 2 GATE |
+| `apply_core.py:1368/988` journal write-ahead perdu (HIGH) | `9d89200` | corrige + GATE |
+| `apply_rollback.py:113` QUARANTINE_* non revertes (HIGH) | `e7346ee` | corrige + GATE |
+
+Non-regression Vague 1 : 78/78 sur les fichiers touches, 359 passed sur la suite
+apply/quarantine/rollback/journal. 2 echecs PRE-EXISTANTS hors perimetre
+(`test_apply_op_labels`, `RecordApplyOpTests::test_returns_false_on_failure_and_logs`
+— a traiter separement, ils echouaient deja avant ces fixes).
+
+**Vagues suivantes (a faire)** : (2) securite (CORS+loopback, SHA256 archives, scrubber) ->
+(3) secrets masques (~12 chemins, fix centralise) -> (4) contrats JS vivants (doublons, accueil, traitement).
+
+---
+
 ## Chiffres finaux
 
 | Severite | Findings uniques |
