@@ -606,7 +606,10 @@ function _isFieldConfigured(field, settings) {
   const val = settings[field.key];
   if (val === undefined || val === null || val === "") return false;
   if (field.type === "toggle") return Boolean(val);
-  if (field.type === "number") return Number(val) !== 0;
+  // AUDIT 2026-06-11 (R4-P13) : 0 est une valeur CONFIGUREE pour un champ
+  // number dont le min est 0 (ex: perceptual_workers=0 = auto) - l'ancien
+  // `!== 0` degradait le badge de section a "partial" pour une valeur legitime.
+  if (field.type === "number") return field.min === 0 ? Number.isFinite(Number(val)) : Number(val) !== 0;
   return true;
 }
 
