@@ -29,6 +29,31 @@ class TitlePreservationTests(unittest.TestCase):
         self.assertEqual(parse_scene_title("Blade - Trinity (2004)"), "Blade - Trinity")
         self.assertEqual(parse_scene_title("Cloverfield - Paradox"), "Cloverfield - Paradox")
 
+    def test_subtitle_preserved_even_with_single_quality_tag(self) -> None:
+        """GATE R4-P2 (regression R1a/50acdaf) : un nommage personnel
+        'Titre - SousTitre TAG' ne doit PAS perdre son sous-titre quand un tag
+        qualite isole (4K/DV/SDR/XviD/PROPER/HDLight...) declenche
+        had_tech_marker. Signal structurel : un release group scene est COLLE
+        au tiret (' -GROUP'), un sous-titre a un espace des deux cotes."""
+        cases = {
+            "Thor - Ragnarok 4K.mkv": "Thor - Ragnarok",
+            "Thor - Ragnarok (2017) 4K.mkv": "Thor - Ragnarok",
+            "Thor - Ragnarok DV.mkv": "Thor - Ragnarok",
+            "Cloverfield - Paradox SDR.mkv": "Cloverfield - Paradox",
+            "Blade - Trinity FHD.mkv": "Blade - Trinity",
+            "Rocky - Balboa XviD.mkv": "Rocky - Balboa",
+            "John Wick - Parabellum HDLight.mkv": "John Wick - Parabellum",
+            "Batman - Begins PROPER.mkv": "Batman - Begins",
+            "Kill Bill - Vol1 REPACK.mkv": "Kill Bill - Vol1",
+        }
+        for raw, expected in cases.items():
+            self.assertEqual(parse_scene_title(raw), expected, raw)
+
+    def test_subtitle_preserved_with_full_tech_chain(self) -> None:
+        # Cas pre-existant (mutile aussi AVANT R1a) repare par le tiret colle :
+        # le sous-titre espace survit meme a une chaine technique complete.
+        self.assertEqual(parse_scene_title("Title - Sub 1080p x264.mkv"), "Title - Sub")
+
 
 class RealReleaseStillCleanedTests(unittest.TestCase):
     def test_release_group_stripped_when_tech_marker_present(self) -> None:

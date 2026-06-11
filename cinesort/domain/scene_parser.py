@@ -162,7 +162,14 @@ _AFTER_YEAR_NOISE_RE = re.compile(
 # Release group : "-GROUPNAME" en fin de chaine.
 # Requiert un espace AVANT le tiret pour ne pas casser "Spider-Man".
 # 2-25 chars alphanum + _, evite de manger "Toy Story 4" -> "Toy Story" (le 4 n'a pas de tiret).
-_RELEASE_GROUP_RE = re.compile(r"\s-\s*[A-Za-z0-9_]{2,25}\s*$")
+# AUDIT 2026-06-11 (R4-P2) : le tiret doit etre COLLE au groupe (pas de \s* apres).
+# Signal structurel scene : "x264-DEiTY" laisse " -DEiTY" apres le strip noise
+# (tiret colle), alors qu'un sous-titre legitime " - Ragnarok" a un espace des
+# DEUX cotes. L'ancien \s* permettait a "Thor - Ragnarok 4K" (had_tech_marker
+# via 4K) de perdre " - Ragnarok". Trade-off assume : un groupe P2P exotique
+# " - GROUP" (espace apres tiret, rare) n'est plus strippe — preferer un residu
+# dans le titre a un titre ampute.
+_RELEASE_GROUP_RE = re.compile(r"\s-[A-Za-z0-9_]{2,25}\s*$")
 
 # Tags langue trailing sans annee prealable. Couvre les cas type
 # "L'arme Fatale 2 - FR EN mHDgz.mkv" ou les tokens FR/EN/VF/VO/MULTI/VOSTFR
