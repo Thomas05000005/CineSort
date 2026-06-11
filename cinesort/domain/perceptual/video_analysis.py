@@ -186,7 +186,12 @@ def luminance_histogram(pixels: List[int], bit_depth: int = 8) -> List[int]:
     avec min/max/dict access par pixel.
     """
     max_val = 1024 if bit_depth >= 10 else 256
-    if not pixels:
+    # AUDIT 2026-06-10 (CRITICAL) : `pixels` est typé List[int] mais recoit un
+    # np.ndarray depuis le refactor B3 (frame_extraction.parse_raw_frame). Un
+    # `not pixels` / `if pixels:` sur un ndarray multi-elements leve ValueError
+    # ("truth value of an array... is ambiguous") -> crash de toute l'analyse
+    # video perceptuelle (avale en warning). On teste la taille (valide list+ndarray).
+    if pixels is None or np.size(pixels) == 0:
         return [0] * max_val
     # Clip dans [0, max_val-1] puis bincount (vectorise en C)
     arr = np.clip(np.asarray(pixels, dtype=np.int64), 0, max_val - 1)
@@ -214,7 +219,9 @@ def block_variance_stats(
     avant ; np.var en C ~100ms apres).
     """
     w, h, bs = int(width), int(height), int(block_size)
-    if w < bs or h < bs or not pixels:
+    # AUDIT 2026-06-10 (CRITICAL) : voir luminance_histogram — pixels peut etre
+    # un np.ndarray, `not pixels` leverait ValueError. Check par taille.
+    if w < bs or h < bs or pixels is None or np.size(pixels) == 0:
         return {"mean_variance": 0.0, "median_variance": 0.0, "flat_ratio": 1.0, "detail_ratio": 0.0}
 
     # Reshape pixels en (h, w), puis on garde uniquement la zone exactement
@@ -501,7 +508,9 @@ def _aggregate_pixel_metrics(
         y_avg = fd.get("y_avg", 128.0)
         y_avgs.append(y_avg)
         weights.append(dark_weight if y_avg < DARK_SCENE_Y_AVG_THRESHOLD else 1.0)
-        if pixels:
+        # AUDIT 2026-06-10 (CRITICAL) : `if pixels:` sur un np.ndarray leve
+        # ValueError -> _aggregate_pixel_metrics plante des la 1re frame reelle.
+        if pixels is not None and np.size(pixels) > 0:
             hist = luminance_histogram(pixels, bit_depth)
             banding_scores.append(detect_banding(hist)["score"])
             bit_depths_list.append(effective_bit_depth(hist, bit_depth)["mean_bits"])
