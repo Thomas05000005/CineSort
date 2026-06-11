@@ -715,6 +715,21 @@ def undo_selected_rows(
             "message": t("errors.preview_undo_selective"),
         }
 
+    # AUDIT 2026-06-11 (R3d, gap[5]) : enforcement backend du delai 24h sur
+    # l'undo SELECTIF aussi. La garde n'existait que dans undo_last_apply
+    # (L1018) ; undo_selected_rows allait directement de la selection a
+    # _execute_undo_ops, permettant un undo reel apres expiration. La dry_run
+    # au-dessus reste autorisee meme expiree (apercu UI). Miroir exact 410.
+    apply_ts = float(batch.get("started_ts") or 0.0)
+    if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+        return _err_response(
+            "L'annulation n'est plus possible (delai 24h depasse).",
+            category="state",
+            level="info",
+            log_module=__name__,
+            http_status=410,
+        )
+
     # Collect all reversible PENDING ops for the selected row_ids.
     target_row_ids = set(str(r) for r in row_ids)
     all_ops = store.apply.list_apply_operations(batch_id=bid)
