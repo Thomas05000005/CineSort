@@ -21,15 +21,20 @@ def _make_api(
     state_dir: str = "/tmp/state",
     timeout_s: float = 10.0,
 ) -> MagicMock:
-    """Construit un faux objet api compatible avec search_tmdb."""
+    """Construit un faux objet api compatible avec search_tmdb.
+
+    AUDIT 2026-06-10 : search_tmdb lit _internal_settings (cle dé-masquee) et
+    normalize_user_path module-level (api._normalize_user_path n'existait pas).
+    """
     api = MagicMock()
-    api.settings.get_settings.return_value = {
+    _settings = {
         "tmdb_api_key": api_key,
         "state_dir": state_dir,
         "tmdb_timeout_s": timeout_s,
         "tmdb_cache_ttl_days": 30,
     }
-    api._normalize_user_path.return_value = Path(state_dir)
+    api._internal_settings.return_value = _settings
+    api.settings.get_settings.return_value = _settings
     return api
 
 
@@ -233,7 +238,7 @@ class SearchTmdbErrorsTests(unittest.TestCase):
 
     def test_get_settings_keyerror_returns_runtime_error(self) -> None:
         api = MagicMock()
-        api.settings.get_settings.side_effect = KeyError("missing")
+        api._internal_settings.side_effect = KeyError("missing")  # AUDIT 2026-06-10
         res = tmdb_support.search_tmdb(api, "Inception")
         self.assertFalse(res["ok"])
         self.assertIn("missing", res["message"])
