@@ -176,8 +176,22 @@ _TRAILING_LANG_TOKENS_RE = re.compile(
 
 # Residus audio : "DTS-HD MA", "DTS-HD HRA", "5.1", "7.1", "2.0", "Atmos".
 # NOISE_RE catch "dts-hd" mais pas "ma" / "hra" standalone, et pas les channel counts.
+# AUDIT 2026-06-10 (REAL 2/2) : l'ancien pattern `\b(?:ma|hra|[257][\s.]?[01]|
+# 2[\s.]?0|atmos)\b` mutilait des TITRES reels : "21 Jump Street" -> "Jump
+# Street", "50 First Dates" -> "First Dates", "Ma Vie de Courgette" -> "Vie de
+# Courgette", "71 (2014)" -> "2014", "20 000 Leagues" -> "000 Leagues". Causes :
+# (a) `[\s.]?` rendait le separateur de canal OPTIONNEL -> "21"/"50"/"71"/"20"
+# matchaient comme si c'etait du 2.1/5.0/7.1/2.0 ; (b) "ma"/"hra" nus matchaient
+# des mots de titre ("Ma"). On exige desormais un separateur ENTRE le nombre de
+# canaux et le ".1/.0" (un vrai tag audio "5.1" devient "5 1" apres le replace
+# point->espace), et on retire "ma"/"hra" (trop agressifs ; "DTS-HD MA" est
+# deja gere par _NOISE_RE). `[257][\s.][01]` couvre 5.1/7.1/2.1/5.0/7.0/2.0.
+# Les canaux (5.1/7.1/2.0) et "atmos" sont insensibles a la casse ; "MA"/"HRA"
+# (DTS-HD Master Audio / High Resolution Audio) sont matches UNIQUEMENT en
+# majuscules via le flag scope (?-i:...) -> on strippe le tag audio "MA" mais
+# PAS le mot de titre title-case "Ma" ("Ma Vie de Courgette").
 _AUDIO_RESIDUE_RE = re.compile(
-    r"\b(?:ma|hra|[257][\s.]?[01]|2[\s.]?0|atmos)\b",
+    r"\b(?:[257][\s.][01]|atmos|(?-i:MA|HRA))\b",
     re.IGNORECASE,
 )
 
@@ -196,6 +210,19 @@ _GROUP_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9_]{2,25}$")
 # comme "Spider-Man" ou "X-Men").
 _SCENE_MARKER_RE = re.compile(
     r"\b(?:19\d{2}|20\d{2}|1080p|2160p|720p|480p|x264|x265|h\.?264|h\.?265|"
+    r"hevc|avc|av1|bluray|blu[\s.-]?ray|brrip|bdrip|web[\s.-]?dl|web[\s.-]?rip|"
+    r"hdtv|hdrip|dvdrip|remux|truehd|dts|atmos|aac|ac3|10bit|hdr|uhd)\b",
+    re.IGNORECASE,
+)
+
+# AUDIT 2026-06-10 (REAL 2/2) : marqueur TECHNIQUE seul (sans l'annee). Utilise
+# par parse_scene_title pour ne stripper un "-GROUP" final QUE si le nom est une
+# vraie release scene (resolution/codec/source presents). Sans ce garde,
+# "Thor - Ragnarok (2017)" devenait "Thor", "Blade - Trinity" -> "Blade",
+# "Cloverfield - Paradox" -> "Cloverfield" : le sous-titre apres " - " etait pris
+# pour un release group. L'annee est EXCLUE car un titre propre peut en contenir.
+_TECH_MARKER_RE = re.compile(
+    r"\b(?:1080p|2160p|720p|480p|x264|x265|h\.?264|h\.?265|"
     r"hevc|avc|av1|bluray|blu[\s.-]?ray|brrip|bdrip|web[\s.-]?dl|web[\s.-]?rip|"
     r"hdtv|hdrip|dvdrip|remux|truehd|dts|atmos|aac|ac3|10bit|hdr|uhd)\b",
     re.IGNORECASE,
@@ -348,6 +375,12 @@ def parse_scene_title(filename: str) -> str:
 
     name = name.replace(".", " ").replace("_", " ")
 
+    # AUDIT 2026-06-10 (REAL 2/2) : on ne strippe un "-GROUP" final QUE si le nom
+    # est une vraie release scene (marqueur TECHNIQUE present). Calcule AVANT le
+    # strip noise (qui retire ces marqueurs). Sinon "Thor - Ragnarok (2017)" ->
+    # "Thor". L'annee seule ne compte pas (un titre propre peut en avoir).
+    had_tech_marker = bool(_TECH_MARKER_RE.search(name))
+
     # 2. Position-aware strip si annee parenthesee : strip aussi le suffixe
     # "(year) LANG" → garde uniquement le titre avant la parenthese.
     # Sinon "Le Capitaine Fracasse (1961) FRENCH" -> "Le Capitaine Fracasse FRENCH".
@@ -377,8 +410,9 @@ def parse_scene_title(filename: str) -> str:
     _orphan_sep_re = re.compile(r"\s+[-_.]+\s*$")
     for _ in range(4):
         prev = name
-        # Release group `-GROUP$`
-        name = _RELEASE_GROUP_RE.sub(" ", name)
+        # Release group `-GROUP$` — seulement si vraie release (marqueur technique).
+        if had_tech_marker:
+            name = _RELEASE_GROUP_RE.sub(" ", name)
         # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
         name = _orphan_sep_re.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
