@@ -382,3 +382,148 @@ vérifiée), **[14]/[15] JS** (pas de test runtime), **[11]/[8]** (GATE absent /
 Verdict attendu d'un évaluateur juste : corrections Python solides et bien testées ; corrections JS
 plausibles mais à valider en runtime ; périmètre volontairement borné aux REAL 2/2 sûrs, le reste
 explicitement remis à une session avec l'EXE.
+
+---
+
+## ANNEXE OPUS (2e modèle) — validation runtime + 3 fixes (2026-06-11)
+
+> Délégué par Fable 5 sur les points demandant plus de capacité ou une validation runtime.
+> Modèle : Opus 4.8. Branche `loop/correction-2026-06`. **Aucun push.** Même protocole
+> (1 sujet/commit, GATE qui échoue avant / passe après, import-linter 3/3 vert).
+>
+> Commits créés (3) :
+> - `a400a4e` — fix(scan): fast-path dossier (YYYY) descend les releases imbriquées
+> - `cddba9c` — fix(watchlist): un remake (année différente) n'est plus marqué "owned"
+> - `7b94c73` — fix(db): pragma_history bornée par rétention après chaque insert
+
+### Mission 1 — CSRF same-origin : **HYPOTHÈSE VALIDÉE EN RUNTIME (pas de fix nécessaire)**
+
+**Verdict : l'hypothèse "dashboard desktop = same-origin" TIENT, et le garde est même plus sûr
+qu'estimé.** Validé en lançant réellement l'app (`python app.py` avec `CINESORT_E2E=1` → CDP port
+ouvert, app.py:719-721) et en inspectant les requêtes via Playwright/CDP (le harness existant
+`tests/e2e_desktop/conftest.py` confirme ce mode de lancement). pywebview 6.2.1 + WebView2
+(edgechromium), Python 3.12, Playwright 1.60.
+
+**Preuves capturées en runtime (pas par raisonnement) :**
+1. **URL réelle de la page principale** : `http://127.0.0.1:8642/dashboard/?native=1#/accueil`.
+   → servie en **HTTP same-origin sur 127.0.0.1**, PAS `file://`, PAS de custom scheme. (Cohérent
+   avec app.py:828/892 : `main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken=...&native=1"`.
+   Le `file://` n'est qu'un *fallback* si le serveur REST ne démarre pas, app.py:876 — et dans ce
+   cas il n'y a aucun serveur REST à attaquer, donc hors sujet pour le garde CSRF.)
+2. **`window.location.origin` = `http://127.0.0.1:8642`**.
+3. **POINT DÉCISIF — l'Origin réellement envoyé par WebView2 sur un POST same-origin** : j'ai
+   déclenché depuis le contexte de la page un `fetch(location.origin + '/api/runtime/get_app_version',
+   {method:'POST', ...})`. La requête capturée côté listener réseau porte **`Origin = <ABSENT>`**
+   (idem pour le GET `/api/health`). **WebView2 n'envoie AUCUN header Origin sur les requêtes
+   same-origin** (GET comme POST).
+
+**Conséquence sur le garde `_is_forbidden_cross_site`** (rest_server.py) : il fait
+`origin = headers.get("Origin"); if not origin: return False`. Comme WebView2 n'envoie pas d'Origin
+en same-origin, le garde retourne **toujours `False`** pour le dashboard desktop → **il ne peut
+structurellement jamais bloquer le desktop**. Le fix `b1dd226` est donc **sûr en runtime**.
+
+**Défense en profondeur (vérifiée par reproduction de `_allowed_origin` sur les origins réels)** :
+même si une future version de WebView2 envoyait un Origin, `_allowed_origin("http://127.0.0.1:8642")`
+le renvoie (host ∈ {127.0.0.1, localhost, ::1}) → autorisé. LAN same-origin
+`http://192.168.1.50:8642` autorisé via le match `Host`. Site externe `http://evil.example.com` →
+`None` → 403. `null` (cas `file://`) → 403 (mais inatteignable pour un desktop fonctionnel, cf. ci-dessus).
+
+**Garde-fous tests** : `test_rest_security.py -k "cross or origin or cors"` = **7 passed** (les GATE
+CSRF). Sur la suite complète : 14 passed + **4 failed PRÉ-EXISTANTS** (legacy `/api/get_settings`
+→ 410 Gone, déjà documentés §7 — NON imputables au fix CSRF ni à mon travail).
+
+**Honnêteté / limites** : l'EXE `dist/CineSort.exe` est daté du 8 juin (antérieur au fix `b1dd226`
+du 11 juin) ; je n'ai donc PAS observé le garde lui-même s'exécuter dans le binaire de prod. Mais
+ce que je devais valider — **l'Origin réel envoyé par WebView2** — est un comportement du moteur
+WebView2 indépendant du fix, et je l'ai constaté sur l'app live (source actuelle). Le garde est
+purement déterministe à partir de cet Origin (logique reproduite et testée). Aucun trou trouvé,
+**aucun scheme/null à ajouter à `_allowed_origin`**. (Scripts de probe runtime créés puis supprimés,
+non commités.)
+
+### Mission 2 — fast-path dossier `(YYYY)` : **FIXÉ** (`a400a4e`)
+
+**Bug confirmé par reproduction** (`discover_candidate_folders` sur layouts réels en tmpdir) : un
+sous-dossier matchant `(YYYY)` était ajouté à `candidates` mais **jamais descendu** (`_walk` non
+appelé sur lui). `iter_videos` (phase 2) étant non-récursif, un film imbriqué
+(`Avatar (2009)/Avatar.2009.1080p-GRP/film.mkv`) donnait **0 row** (film absent du plan). Reproduit :
+`plan_library` → `len(rows)==0` sur le layout imbriqué.
+
+**Fix** (`cinesort/domain/scan_helpers.py`) : décision en **1 scandir** (`_yyyy_folder_shape`) sur
+chaque dossier `(YYYY)` :
+- vidéo directe non-bonus présente → **candidat seul, PAS de descente** (cas plat majoritaire ;
+  évite tout doublon ET évite de planifier les featurettes des sous-dossiers comme films) ;
+- pas de vidéo directe MAIS sous-dossiers → **descente** via `_walk(..., in_year_descent=True)` qui
+  retrouve la release imbriquée et **filtre les feuilles 100% bonus** (`Extras/`, `Featurettes/`,
+  `bonus.mkv`) pour ne pas les planifier ;
+- ni l'un ni l'autre → candidat (comportement historique, `iter_videos` tranche).
+Hors descente `(YYYY)`, le comportement leaf historique est **strictement préservé** (vérifié contre
+`git show HEAD:` de l'ancien fichier).
+
+**GATE** : `tests/test_scan_nested_yyyy_v77.py` (8 tests) couvrant les 3 invariants demandés :
+(1) film direct = **1 candidat, aucun doublon** ; (2) film imbriqué **retrouvé** ; (3)
+featurettes/extras imbriqués **jamais planifiés** ; + 2 tests bout-en-bout `plan_library` (1 row
+pour le film, bonus exclu). **Sur le code d'origine, 5/8 échouent** (`len(rows)==0` = film absent) ;
+avec le fix, 8/8 passent. **140 tests scan/plan** sans régression, import-linter 3/3.
+
+**Ce qui reste incertain (honnêteté)** : le tri bonus repose sur `_file_looks_bonus` (stems exacts
+`bonus/extras/featurette/...` + pattern `sample/trailer/teaser`). Un dossier release nommé
+exactement « extras » mais contenant le vrai film (cas tordu) serait écarté — improbable mais
+théoriquement possible. Le coût : 1 scandir supplémentaire UNIQUEMENT pour les `(YYYY)` SANS vidéo
+directe (le cas plat majoritaire garde son fast-path zéro-scandir-extra). Validé en tmpdir local, PAS
+sur une vraie bibliothèque NAS de l'utilisateur (pas d'accès).
+
+### Mission 3 — 2 findings REAL 2/2 backend (`cddba9c`, `7b94c73`)
+
+**(a) `watchlist.py:121` — remakes faux positifs — FIXÉ (`cddba9c`).** Bug reproduit :
+`compare_watchlist([{title:Dune, year:2021}], [Dune(1984)])` → `owned_count=1` (FAUX). Le fallback
+« titre seul » du pass 1 testait `norm in local_title_only` (tous les titres, années comprises). Fix :
+indexer séparément `local_title_only_no_year` (proposed_year==0) et restreindre le fallback à ceux-là.
+Préservés : match exact titre|année, branche watchlist-sans-année, fallback légitime (watchlist datée /
+local non daté). GATE : `tests/test_watchlist_remake_v77.py` (6 tests, **sans** le skip-guard
+`web/index.html` qui désactive `test_watchlist.py` entier) ; sur le code d'origine **2/6 échouent**
+(remake marqué owned), avec le fix 6/6. Le pass 2 fuzzy filtrait déjà par année — un test garde-fou
+le confirme. **Très sûr** (logique pure, déterministe).
+
+**(b) `pragma_profile.py:219` — croissance non bornée de `pragma_history` — FIXÉ (`7b94c73`).**
+`_record_pragma_history` insère 1 ligne à CHAQUE ouverture de connexion (1-3 par méthode repository),
+aucune purge n'existait (grep confirmé). Fix : purge bornée DANS la même transaction implicite que
+l'INSERT (1 seul commit, sémantique INSERT+COMMIT-avant-BEGIN-du-MigrationManager préservée), gardant
+les **500** lignes les plus récentes par `id` (PK AUTOINCREMENT monotone) via un DELETE range indexé
+`id <= max_id - cap`. Tolérant (échec de purge → log debug + commit quand même l'INSERT). GATE :
+`tests/test_pragma_history_retention_v77.py` (4 tests) ; sur le code d'origine, **table non bornée
+(637 lignes après 637 inserts) → 2/4 échouent** ; avec le fix, exactement 500, les plus récentes.
+25 tests pragma/migration-028 + 74 tests db/pragma sans régression, import-linter 3/3.
+
+**Ce qui reste incertain** : le plafond 500 est un choix (pas de besoin métier d'historique long sur
+une table d'audit) ; il pourrait être rendu configurable plus tard. Le fix réduit aussi la *fréquence*
+d'écriture moyenne mais n'élimine pas l'INSERT-par-connexion lui-même (chaque LECTURE reste une petite
+écriture) — la contention WAL est *bornée* mais pas supprimée ; supprimer l'INSERT-par-connexion
+(ex. throttle temporel, ou record_history=False sur les connexions courte-vie de lecture) serait un
+sujet distinct, plus invasif, laissé de côté.
+
+**`sqlite_store.py:613` (rotation backups) : NON traité — délibérément.** Le rapport le classe
+**CONTESTÉ 1/2** : le scénario central (perte d'un backup `manual`) n'est pas atteignable car
+`backup_now(trigger="manual")` n'a aucun appelant production (seul `tests/test_db_backup.py` l'utilise ;
+aucun endpoint REST / bouton Settings). Per le mandat (« findings REAL 2/2 »), je l'ai écarté plutôt
+que de forcer un fix sur un chemin mort.
+
+### Auto-évaluation honnête (Opus)
+
+**Ce dont je suis sûr :**
+- Mission 1 : l'Origin réel `<ABSENT>` sur POST same-origin est une **observation runtime directe**
+  (Playwright/CDP sur l'app live), pas une déduction. Le garde est sûr. C'est le point le plus solide.
+- Missions 2 et 3 : chaque fix a un GATE **prouvé rouge sur le code d'origine** (par `git show HEAD:`
+  réel, restauré ensuite) et vert après — pas de mock complaisant, les bugs sont reproduits puis fixés.
+- Aucune régression sur les suites ciblées ; import-linter 3/3 après chaque commit ; 1 sujet/commit ;
+  aucun push ; aucun secret touché ; couleurs tier non touchées ; dry-run/bypass loopback intacts.
+
+**Ce qui reste incertain / faible :**
+- Je n'ai PAS observé le garde CSRF `b1dd226` *s'exécuter* dans l'EXE de prod (EXE antérieur au fix).
+  J'ai validé le *prérequis* (l'Origin WebView2), pas le binaire final ligne par ligne.
+- Les fixes scan sont validés en **tmpdir local**, pas sur une vraie bibliothèque NAS/SMB de
+  l'utilisateur (latence, casse de chemins, jonctions Windows non testées).
+- Le tri bonus (Mission 2) et le plafond 500 (Mission 3) sont des **choix de conception** raisonnables
+  mais discutables ; un évaluateur peut légitimement vouloir un plafond configurable ou un tri bonus
+  plus permissif.
+- Échecs PRÉ-EXISTANTS toujours présents (4 dans `test_rest_security`, cf §7) — **non imputables** à
+  cette annexe.
