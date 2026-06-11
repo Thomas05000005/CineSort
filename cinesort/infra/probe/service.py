@@ -188,6 +188,38 @@ class ProbeService:
         # (probable WinError 2 -> path en cache invalide entre 2 boots).
         return raw_mediainfo is None and raw_ffprobe is None
 
+    def _is_tool_definitely_unavailable(
+        self,
+        *,
+        backend: str,
+        mediainfo_tool: ToolStatus,
+        ffprobe_tool: ToolStatus,
+    ) -> bool:
+        """AUDIT 2026-06-11 (R3e, gap[4]) : variante STRICTE pour le circuit breaker.
+
+        Ne classe 'tool unavailable' QUE les cas non ambigus ou le binaire est
+        reellement absent (detection available=False). Le cas auto + binaires
+        available mais 2 runs None (L189 de `_is_tool_unavailable_failure`) est
+        EXCLU ici : une source reseau injoignable y tombe (timeout/IO alors que
+        ffprobe/mediainfo se lancent) et DOIT alimenter le breaker. Sinon le
+        compteur n'incremente jamais, la source ne passe jamais DEGRADED, et
+        chaque fichier du NAS en panne paie le timeout adaptatif complet
+        (~41h de hang que le module dit prevenir).
+
+        Cas WinError 2 reel (path obsolete) : il echoue aussi sur les fichiers
+        LOCAUX, ou record_failure est un no-op (extract_network_source -> None) ;
+        et le cache reste protege par `_is_tool_unavailable_failure` (inchange).
+        Alimenter le breaker ici est donc sans risque.
+        """
+        if backend == "none":
+            return False
+        if backend == "mediainfo":
+            return not mediainfo_tool.available
+        if backend == "ffprobe":
+            return not ffprobe_tool.available
+        # auto : seulement si AUCUN binaire n'est lancable (pas de probe possible).
+        return not mediainfo_tool.available and not ffprobe_tool.available
+
     def _maybe_purge_obsolete_tool_paths(
         self,
         *,
@@ -539,7 +571,18 @@ class ProbeService:
         # absent du PATH) : c'est une cause locale, pas un probleme de la source.
         # Idem si backend == "none" (probe desactive).
         # No-op sur paths locaux (extract_network_source retourne None).
-        if backend != "none" and not tool_unavailable:
+        # AUDIT 2026-06-11 (R3e, gap[4]) : on utilise la variante STRICTE
+        # `_is_tool_definitely_unavailable` (PAS le `tool_unavailable` du cache).
+        # Une source reseau injoignable en auto rend les 2 runs None par
+        # timeout/IO -> l'ancien `tool_unavailable` (L189) la classait a tort
+        # "tool indisponible" et SAUTAIT ce feed, donc le breaker ne degradait
+        # jamais et le NAS en panne re-timeoutait sur chaque fichier (~41h).
+        breaker_tool_unavailable = self._is_tool_definitely_unavailable(
+            backend=backend,
+            mediainfo_tool=mediainfo_tool,
+            ffprobe_tool=ffprobe_tool,
+        )
+        if backend != "none" and not breaker_tool_unavailable:
             probe_succeeded = raw_mediainfo is not None or raw_ffprobe is not None
             if probe_succeeded:
                 self._source_breaker.record_success(media_path)
