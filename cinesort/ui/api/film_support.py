@@ -269,7 +269,10 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         fid = identity_key_from_dict(row)
         h_res = film_history_support.get_film_history(api, fid)
         if h_res and h_res.get("ok"):
-            history = h_res.get("history") or []
+            # AUDIT 2026-06-10 (REAL 2/2) : get_film_history retourne la cle
+            # "events" (domain/film_history.py:232), pas "history" -> la timeline
+            # du Modal Film etait systematiquement vide.
+            history = h_res.get("events") or []
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("history fetch error: %s", exc)
 
