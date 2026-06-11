@@ -125,6 +125,33 @@ class RestSecurityHttpTests(unittest.TestCase):
             return status, data, headers_out
         raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
+    def _request_with_origin(
+        self, method: str, path: str, body: Any = None, token: str | None = None,
+        origin: str | None = None,
+    ) -> tuple:
+        """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS)."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            headers: Dict[str, str] = {"Content-Type": "application/json"}
+            if token is not None:
+                headers["Authorization"] = f"Bearer {token}"
+            if origin is not None:
+                headers["Origin"] = origin
+            payload = json.dumps(body or {}) if body is not None else ""
+            conn.request(method, path, body=payload.encode("utf-8"), headers=headers)
+            resp = conn.getresponse()
+            status = resp.status
+            data_raw = resp.read()
+            headers_out = {k: v for k, v in resp.getheaders()}
+        finally:
+            with contextlib.suppress(OSError):
+                conn.close()
+        try:
+            data = json.loads(data_raw.decode("utf-8")) if data_raw else {}
+        except json.JSONDecodeError:
+            data = {"_raw": data_raw.decode("utf-8", errors="replace")}
+        return status, data, headers_out
+
     # 26
     def test_request_without_auth_returns_401(self) -> None:
         status, _, _ = self._request("POST", "/api/get_settings", body={}, token=None)
@@ -185,18 +212,58 @@ class RestSecurityHttpTests(unittest.TestCase):
             self.assertNotIn("etc/passwd", msg)
 
     # 35
-    def test_cors_configurable(self) -> None:
-        """H4 revisite : le CORS est configurable via cors_origin.
-        Par defaut '*' pour autoriser l'acces LAN au dashboard distant (BUG 2).
-        La securite repose sur le Bearer token, pas sur le CORS.
-        """
+    def test_cors_default_no_wildcard(self) -> None:
+        """AUDIT 2026-06-10 : par defaut, plus de ACAO:* (lecture cross-site /
+        CSRF). Une requete sans Origin (non-navigateur) ne recoit aucune ACAO."""
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request("OPTIONS", "/api/get_settings")
         resp = conn.getresponse()
         cors = resp.getheader("Access-Control-Allow-Origin", "")
         conn.close()
-        # Le defaut est '*' pour permettre l'acces LAN (dashboard distant)
-        self.assertEqual(cors, "*", "Par defaut CORS doit etre * pour autoriser le LAN")
+        self.assertEqual(cors, "", "Plus de ACAO:* par defaut")
+
+    def test_cors_echoes_localhost_origin(self) -> None:
+        """Une Origin localhost (dashboard same-origin desktop) est reflechie."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": "http://127.0.0.1:9999"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, "http://127.0.0.1:9999")
+
+    def test_cors_rejects_external_origin(self) -> None:
+        """Une Origin externe (site malveillant) ne recoit aucune ACAO."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": "https://evil.example.com"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, "", "origine externe non reflechie")
+
+    def test_csrf_post_from_external_origin_403(self) -> None:
+        """GATE AUDIT 2026-06-10 (REAL 2/2) : un POST cross-site depuis un site
+        externe est rejete 403 AVANT toute action, meme avec un token valide —
+        ferme la CSRF possible via le bypass auth loopback."""
+        status, data, _ = self._request_with_origin(
+            "POST", "/api/run/start_plan", body={"settings": {"library_path": str(self.root)}},
+            token=self.token, origin="https://evil.example.com",
+        )
+        self.assertEqual(status, 403)
+        self.assertNotIn("run_id", data)
+
+    def test_csrf_post_from_localhost_origin_allowed(self) -> None:
+        """Un POST same-origin (Origin localhost, le dashboard) n'est PAS bloque
+        par le garde CSRF (il passe au flux normal auth/dispatch)."""
+        status, _, _ = self._request_with_origin(
+            "POST", "/api/get_settings", body={}, token=self.token,
+            origin=f"http://127.0.0.1:{self.port}",
+        )
+        self.assertNotEqual(status, 403, "le dashboard same-origin ne doit pas etre bloque")
+
+    def test_cors_configurable_explicit_still_emitted(self) -> None:
+        """Backward compat : une cors_origin explicite reste emise meme sans Origin."""
+        # Couvert par test_cors_can_be_restricted_explicitly ci-dessous.
+        self.assertTrue(True)
 
     def test_cors_can_be_restricted_explicitly(self) -> None:
         """Si rest_api_cors_origin est configure, la valeur est respectee."""

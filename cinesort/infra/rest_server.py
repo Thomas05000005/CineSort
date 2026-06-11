@@ -21,6 +21,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlsplit
 
 from cinesort.infra.log_context import (
     clear_request_id,
@@ -398,22 +399,68 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug("REST %s", format % args)
 
-    # --- CORS ---------------------------------------------------------------
+    # --- CORS / CSRF --------------------------------------------------------
+
+    def _allowed_origin(self, origin: Optional[str]) -> Optional[str]:
+        """Retourne l'Origin a refleter dans ACAO si elle est autorisee, sinon None.
+
+        Autorise : localhost (127.0.0.1 / localhost / ::1, tout port et scheme),
+        l'origine PROPRE du serveur (meme Host -> dashboard LAN auto-servi), ou
+        la `cors_origin` explicitement configuree (non '*'). Toute autre origine
+        (un site web externe) est refusee : ferme la lecture cross-site et, via
+        `_is_forbidden_cross_site`, la CSRF possible par le bypass auth loopback.
+        """
+        o = (origin or "").strip()
+        if not o or o.lower() == "null":
+            return None
+        try:
+            host = (urlsplit(o).hostname or "").lower()
+        except ValueError:
+            return None
+        if host in {"127.0.0.1", "localhost", "::1"}:
+            return o
+        # Same-origin : Origin == scheme://<Host> (cas du dashboard servi en LAN
+        # depuis 0.0.0.0 ou l'utilisateur ouvre http://<ip-lan>:8642).
+        own_host = (self.headers.get("Host") or "").strip().lower()
+        if own_host and o.split("://", 1)[-1].lower() == own_host:
+            return o
+        cfg = (self.cors_origin or "").strip()
+        if cfg and cfg != "*" and o == cfg:
+            return o
+        return None
+
+    def _is_forbidden_cross_site(self) -> bool:
+        """Garde CSRF : True si la requete vient d'un navigateur sur une origine
+        non autorisee. Un navigateur envoie TOUJOURS `Origin` sur une requete
+        cross-origin (et sur les POST same-origin) ; un client non-navigateur
+        (curl, cron, code natif) n'en envoie pas. Sans ce garde, n'importe quel
+        site visite par l'utilisateur peut POSTer sur l'API locale et le bypass
+        auth loopback l'autoriserait (AUDIT 2026-06-10, REAL 2/2)."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return False
+        return self._allowed_origin(origin) is None
 
     def _send_cors_headers(self) -> None:
-        # Cf issue #69 : Vary: Origin obligatoire quand on echo une origin
-        # specifique (cache HTTP correcte cote browser/proxy). Pour le default
-        # "*" on n'a pas besoin de Vary mais le mettre quand meme ne nuit pas
-        # — il signale juste que la reponse depend de l'Origin (info honnete).
-        self.send_header("Access-Control-Allow-Origin", self.cors_origin)
-        if self.cors_origin != "*":
+        # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
+        # On reflete uniquement une origine autorisee (localhost / same-origin /
+        # cors_origin configuree). Cf issue #69 : Vary: Origin obligatoire quand
+        # on echo une origine specifique (cache HTTP correcte browser/proxy).
+        allowed = self._allowed_origin(self.headers.get("Origin"))
+        if allowed is not None:
+            self.send_header("Access-Control-Allow-Origin", allowed)
             self.send_header("Vary", "Origin")
+        elif self.cors_origin and self.cors_origin != "*":
+            # Origine LAN explicitement configuree : comportement existant conserve.
+            self.send_header("Access-Control-Allow-Origin", self.cors_origin)
+            self.send_header("Vary", "Origin")
+        # Sinon : aucune ACAO emise. Les requetes same-origin (sans Origin) n'en
+        # ont pas besoin ; les requetes cross-site ne peuvent pas lire la reponse.
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Max-Age", "86400")
         # NB : pas de "Access-Control-Allow-Credentials: true" — l'auth Bearer
-        # passe par header Authorization, pas par cookie. Le combo "*" +
-        # credentials est interdit par la spec CORS, on est conforme.
+        # passe par header Authorization, pas par cookie.
 
     def do_OPTIONS(self) -> None:
         # V3-04 polish v7.7.0 : positionner aussi un request_id pour les
@@ -972,6 +1019,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             # M9 : ne pas refleter le path dans la reponse
             self._respond_json(404, {"ok": False, "message": "Endpoint inconnu"})
+            return
+
+        # Garde CSRF : rejette les POST cross-site venant d'un navigateur AVANT
+        # toute action. Indispensable car le bypass auth loopback autoriserait
+        # sinon une page malveillante a piloter l'API locale (start_plan/apply).
+        if self._is_forbidden_cross_site():
+            logger.warning("REST 403 cross-site POST from origin=%r", self.headers.get("Origin"))
+            self._respond_json(403, {"ok": False, "message": "Origine non autorisee"})
             return
 
         # Rate limiting : bloquer avant meme de verifier le token
