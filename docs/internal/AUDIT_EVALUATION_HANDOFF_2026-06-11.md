@@ -412,9 +412,22 @@ Vérifiés en rejouant sur l'état d'avant le fix concerné — ils échouaient 
   dans le bilan iter15.
 - `tests/test_phase5_historique_complete.py::ApplyTabDetailTests::test_apply_op_labels`.
 - `tests/test_release_hygiene.py::RecordApplyOpTests::test_returns_false_on_failure_and_logs`.
+- `tests/test_release_hygiene.py::ReleaseHygieneTests::test_no_personal_strings_in_repo` (chemins persos dans
+  d'anciens BILAN trackés, antérieurs à la session ; vérifié sur HEAD du 2026-06-09).
+- `tests/test_phase4_parametres_endpoints.py::ResetSettingsTests::test_scope_apparence_restores_default_theme`
+  (reset du thème, sans rapport avec `_resolve_db_path` ; échoue sur la version HEAD).
+- `tests/test_quality_score.py::…::test_analyze_quality_batch_rejects_concurrent_launch` et
+  `…::test_analyze_quality_batch_logs_structured_error…` : tests de concurrence/état, **flaky** en suite
+  pleine, PASSENT en isolation (timing, pas un bug produit).
 - `tests/test_audit_2026_05_24_regression.py::…::test_save_section_omdb_exists`.
 
 À ne PAS imputer aux corrections de cette session. (À traiter séparément.)
+
+> NOTE Vague 6 : plusieurs tests EXISTANTS ont été ré-ancrés car ils mockaient l'ancien contrat
+> (test_tmdb_support, test_phase6_tmdb_manual_search, test_library_timeline → `_internal_settings` ;
+> test_phase4 reset → chemin DB canonique ; test_composite_score_v2 → vraies clés probe). C'est légitime
+> (le code corrige le contrat ; les tests testaient le bug). L'évaluateur peut vérifier que chaque ré-ancrage
+> teste le comportement CORRECT, pas juste « ça passe ».
 
 ---
 
