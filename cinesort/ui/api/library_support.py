@@ -429,6 +429,10 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "subtitle_languages": subtitle_languages,
             "subtitle_missing_langs": subtitle_missing_langs,
             "proposed_source": proposed_source,
+            # AUDIT 2026-06-11 (R3) : source MEDIA (bluray/web/dvd/other) derivee du
+            # nom video, pour le filtre Source du drawer (distincte de
+            # proposed_source = source d'identification).
+            "media_source": _media_source_label(r.get("video") or r.get("source_path") or ""),
             "confidence": confidence,
             # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-2) : metrics["size_bytes"]
             # n'existe pas. La taille estimee est dans detected.file_size_bytes
@@ -459,6 +463,51 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
 # Filtrage
 # ---------------------------------------------------------------------------
 
+# AUDIT 2026-06-11 (R3) : les filtres du drawer avance (source/codec/resolution/
+# langues/sous-titres) ne matchaient JAMAIS car les valeurs du drawer differaient
+# du vocabulaire backend. On normalise au moment du match.
+
+# Codec : backend _normalize_codec produit h264/hevc/av1/unknown ; drawer envoie
+# h264/h265/av1/other.
+_DRAWER_CODEC_ALIAS = {"h265": "hevc", "h264": "h264", "av1": "av1"}
+_KNOWN_CODECS = {"h264", "hevc", "av1"}
+# Resolution : backend _classify_resolution produit 4k/1080p/720p/sd/unknown ;
+# drawer envoie 480p/720p/1080p/4k/other.
+_DRAWER_RES_ALIAS = {"480p": "sd", "720p": "720p", "1080p": "1080p", "4k": "4k"}
+_KNOWN_RES = {"4k", "1080p", "720p", "sd"}
+# Source media : source_hint (release_name_parser) -> vocabulaire drawer.
+_SOURCE_HINT_TO_DRAWER = {
+    "bluray": "bluray", "remux": "bluray",
+    "webdl": "web", "webrip": "web",
+    "dvd": "dvd",
+    "hdtv": "other", "cam": "other",
+}
+
+
+def _media_source_label(video_name: str) -> str:
+    """Derive le label source media (bluray/web/dvd/other) depuis le nom du
+    fichier video, pour le filtre Source du drawer (AUDIT 2026-06-11 R3 : avant,
+    le filtre comparait a proposed_source = source d'IDENTIFICATION nfo/name/tmdb,
+    jamais a la source media)."""
+    name = str(video_name or "").strip()
+    if not name:
+        return ""
+    try:
+        from cinesort.domain.release_name_parser import parse_release_name  # noqa: PLC0415
+        hint = str(parse_release_name(name).source_hint or "").strip().lower()
+    except (ImportError, OSError, TypeError, ValueError):
+        return ""
+    return _SOURCE_HINT_TO_DRAWER.get(hint, "other" if hint else "")
+
+
+def _to_iso639_1(lang: str) -> str:
+    """Normalise un code langue ISO639-2/3 (eng/fra/fre) en ISO639-1 (en/fr)."""
+    try:
+        from cinesort.domain.subtitle_helpers import _normalize_iso639  # noqa: PLC0415
+        return str(_normalize_iso639(str(lang or "")) or "").strip().lower()
+    except (ImportError, OSError, TypeError, ValueError):
+        return str(lang or "").strip().lower()
+
 
 def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """Applique tous les filtres actifs a une row. AND entre categories."""
@@ -488,23 +537,57 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     tier_filter = filters.get("tier_v2") or filters.get("display_tier")
     if not _in_list(row.get("display_tier") or row.get("tier_v2"), tier_filter):
         return False
-    if not _in_list(row.get("codec"), filters.get("codec")):
-        return False
-    if not _in_list(row.get("resolution"), filters.get("resolution")):
-        return False
+    # Codec : drawer h265 -> backend hevc ; "other" = hors {h264,hevc,av1}.
+    codec_filter = filters.get("codec")
+    if codec_filter:
+        rc = str(row.get("codec") or "").strip().lower()
+        wanted = {_DRAWER_CODEC_ALIAS.get(str(f).lower(), str(f).lower()) for f in codec_filter}
+        ok = (rc in wanted) or ("other" in wanted and rc not in _KNOWN_CODECS)
+        if not ok:
+            return False
+    # Resolution : drawer 480p -> backend sd ; "other" = hors {4k,1080p,720p,sd}.
+    res_filter = filters.get("resolution")
+    if res_filter:
+        rr = str(row.get("resolution") or "").strip().lower()
+        wanted = {_DRAWER_RES_ALIAS.get(str(f).lower(), str(f).lower()) for f in res_filter}
+        ok = (rr in wanted) or ("other" in wanted and rr not in _KNOWN_RES)
+        if not ok:
+            return False
     if not _in_list(row.get("hdr"), filters.get("hdr")):
         return False
     if not _in_list(row.get("grain_era_v2"), filters.get("grain_era_v2")):
         return False
     if not _in_list(row.get("grain_nature"), filters.get("grain_nature")):
         return False
-    # Phase 5 spec 07 : source / audio_langs / subtitle_langs (drawer avance)
-    if not _in_list(row.get("proposed_source"), filters.get("source")):
-        return False
-    if not _any_in_list(row.get("audio_languages"), filters.get("audio_languages")):
-        return False
-    if not _any_in_list(row.get("subtitle_languages"), filters.get("subtitle_languages")):
-        return False
+    # Source media (bluray/web/dvd/other) derivee du nom video, PAS proposed_source.
+    source_filter = filters.get("source")
+    if source_filter:
+        media_src = row.get("media_source")
+        if media_src is None:  # defensif : derive a la volee si absent du payload
+            media_src = _media_source_label(row.get("video") or row.get("path") or "")
+        wanted = {str(f).lower() for f in source_filter}
+        ms = str(media_src or "").lower()
+        ok = (ms in wanted) or ("other" in wanted and ms not in {"bluray", "web", "dvd"})
+        if not ok:
+            return False
+    # Audio langues : normalise ISO639-1 (eng->en) + "multi" = >=2 langues.
+    audio_filter = filters.get("audio_languages")
+    if audio_filter:
+        norm_row = {_to_iso639_1(l) for l in (row.get("audio_languages") or [])}
+        norm_row.discard("")
+        wanted = {str(f).lower() for f in audio_filter}
+        ok = bool(norm_row & wanted) or ("multi" in wanted and len(norm_row) >= 2)
+        if not ok:
+            return False
+    # Sous-titres : "none" = AUCUN sous-titre ; sinon normalise ISO639-1.
+    sub_filter = filters.get("subtitle_languages")
+    if sub_filter:
+        norm_row = {_to_iso639_1(l) for l in (row.get("subtitle_languages") or [])}
+        norm_row.discard("")
+        wanted = {str(f).lower() for f in sub_filter}
+        ok = bool(norm_row & wanted) or ("none" in wanted and not norm_row)
+        if not ok:
+            return False
 
     # Warnings : OR interne (au moins un warning du filtre present dans la row)
     wflags = filters.get("warnings")
