@@ -98,7 +98,14 @@ function _groupKey(group) {
   for (const key of ["group_key", "id", "signature"]) {
     if (group[key]) return String(group[key]);
   }
-  return String(group.key || group.title || "") + "::" + String(group.year || "");
+  // AUDIT 2026-06-10 (REAL 2/2) : ce fallback DOIT etre identique au backend
+  // _group_key_for (run_flow_support.py) — title.lower()|year, "|" strippe.
+  // Avant : "Title::Year" (casse d'origine, separateur "::") ne matchait jamais
+  // le backend -> mark_duplicate_winner persistait losers=[] et aucun fichier
+  // perdant n'etait deplace a l'apply. Toutes les decisions Garder A/B perdues.
+  const title = String(group.title || "").trim().toLowerCase();
+  const year = group.year || group.proposed_year || "";
+  return `${title}|${year}`.replace(/^\|+|\|+$/g, "");
 }
 
 function _firstRowId(group) {
