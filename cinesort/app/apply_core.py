@@ -13,7 +13,7 @@ from cinesort.app.cleanup import (
     _move_residual_top_level_dirs,
     preview_cleanup_residual_folders,
 )
-from cinesort.app.move_journal import atomic_move
+from cinesort.app.move_journal import RecordOpWithJournal, atomic_move
 from cinesort.domain.naming import (
     build_naming_context,
     check_path_length_killswitch,
@@ -985,7 +985,7 @@ def move_duplicate_losers_to_user_decided(
             _rid_str = str(row.row_id or "")
             _record_op_ref = record_op
 
-            def row_record_op(
+            def _inject_row_id(
                 payload: Dict[str, Any],
                 _rid_str: str = _rid_str,
                 _record_op_ref: Callable[[Dict[str, Any]], None] = _record_op_ref,
@@ -993,6 +993,15 @@ def move_duplicate_losers_to_user_decided(
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _rid_str
                 _record_op_ref(payload)
+
+            # AUDIT 2026-06-10 (HIGH, REAL 2/2) : conserver journal_store/batch_id
+            # de RecordOpWithJournal (sinon atomic_move -> shutil.move sans
+            # journal write-ahead). Cf le meme fix dans la boucle apply par-row.
+            row_record_op = RecordOpWithJournal(
+                _inject_row_id,
+                store=getattr(_record_op_ref, "journal_store", None),
+                batch_id=getattr(_record_op_ref, "journal_batch_id", None),
+            )
 
         # Cas "collection" : on a un video_name dans un dossier partagé →
         # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
@@ -1365,15 +1374,27 @@ def apply_rows(
             _current_row_id = str(row.row_id or "")
             _record_op_ref = record_op
 
-            def row_record_op(
+            def _inject_row_id(
                 payload: Dict[str, Any],
                 _current_row_id: str = _current_row_id,
                 _record_op_ref: Callable[[Dict[str, Any]], None] = _record_op_ref,
             ) -> None:
-                """Wrapper qui injecte `row_id` dans le payload pour la traçabilité Undo v5."""
+                """Injecte `row_id` dans le payload pour la traçabilité Undo v5."""
                 if isinstance(payload, dict) and not payload.get("row_id"):
                     payload["row_id"] = _current_row_id
                 _record_op_ref(payload)
+
+            # AUDIT 2026-06-10 (HIGH, REAL 2/2) : une fonction nue perdait les
+            # attributs journal_store/journal_batch_id portes par
+            # RecordOpWithJournal -> atomic_move retombait sur shutil.move SANS
+            # journal write-ahead (protection CR-1 contre crash mi-move
+            # silencieusement desactivee). On re-enrobe pour conserver ces
+            # attributs tout en injectant row_id.
+            row_record_op = RecordOpWithJournal(
+                _inject_row_id,
+                store=getattr(_record_op_ref, "journal_store", None),
+                batch_id=getattr(_record_op_ref, "journal_batch_id", None),
+            )
 
         try:
             if ok:
