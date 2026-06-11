@@ -73,6 +73,7 @@ def _insert_batch(
     started_ts: float,
     status: str = "PENDING",
     dry_run: int = 0,
+    summary_json: str = "{}",
 ) -> None:
     conn.execute(
         """
@@ -80,9 +81,9 @@ def _insert_batch(
           batch_id, run_id, started_ts, ended_ts, dry_run,
           quarantine_unapproved, status, summary_json, app_version
         )
-        VALUES(?, ?, ?, NULL, ?, 0, ?, '{}', 'test')
+        VALUES(?, ?, ?, NULL, ?, 0, ?, ?, 'test')
         """,
-        (batch_id, run_id, started_ts, dry_run, status),
+        (batch_id, run_id, started_ts, dry_run, status, summary_json),
     )
     conn.commit()
 
@@ -164,13 +165,19 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
         # Toujours PENDING : pas touche
         self.assertEqual(_get_batch_status(self.conn, "b-young"), "PENDING")
 
-    # ---- Cas 3 : 1 PENDING vieux complet -> COMPLETED ----
+    # ---- Cas 3 : 1 PENDING vieux complet (PROUVE via expected_ops) -> COMPLETED ----
+    # AUDIT 2026-06-11 (R3e, gap[1]) : 'completed' exige desormais une preuve de
+    # completude (expected_ops dans le summary ET total >= expected_ops).
 
     def test_old_pending_complete_marked_completed(self) -> None:
         _insert_batch(
-            self.conn, batch_id="b-old-ok", started_ts=self.old_ts, status="PENDING"
+            self.conn,
+            batch_id="b-old-ok",
+            started_ts=self.old_ts,
+            status="PENDING",
+            summary_json='{"expected_ops": 2}',  # preuve : 2 ops attendues
         )
-        # 2 ops sans erreur -> verdict 'completed'
+        # 2 ops sans erreur ET 2 attendues -> verdict 'completed'
         _insert_op(self.conn, batch_id="b-old-ok", op_index=0)
         _insert_op(self.conn, batch_id="b-old-ok", op_index=1)
 
@@ -184,6 +191,55 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
             _get_batch_status(self.conn, "b-old-ok"), STATUS_COMPLETED_BY_BOOT
         )
         self.assertEqual(report["batches"][0]["verdict"], "completed")
+
+    def test_old_pending_incomplete_ops_marked_rolled_back(self) -> None:
+        """gap[1] coeur : moins d'ops enregistrees qu'attendu (crash mid-apply)
+        -> ROLLED_BACK, PAS 'completed'. Avant le fix, total>0/failed=0 suffisait
+        a tort a marquer 'completed' alors que des moves n'ont jamais eu lieu."""
+        _insert_batch(
+            self.conn,
+            batch_id="b-old-partial",
+            started_ts=self.old_ts,
+            status="PENDING",
+            summary_json='{"expected_ops": 5}',  # 5 attendues...
+        )
+        # ...mais seulement 2 enregistrees (kill mid-apply), aucune en erreur.
+        _insert_op(self.conn, batch_id="b-old-partial", op_index=0)
+        _insert_op(self.conn, batch_id="b-old-partial", op_index=1)
+
+        report = reconcile_pending_batches(
+            self.store, max_age_hours=1.0, now_ts=self.now
+        )
+        self.assertEqual(report["pending_found"], 1)
+        self.assertEqual(report["completed"], 0)
+        self.assertEqual(report["rolled_back"], 1)
+        self.assertEqual(
+            _get_batch_status(self.conn, "b-old-partial"), STATUS_ROLLED_BACK_BY_BOOT
+        )
+
+    def test_old_pending_without_expected_ops_marked_rolled_back(self) -> None:
+        """Sans expected_ops dans le summary (cas reel : insert_apply_batch
+        persiste summary={}), la completude n'est PAS prouvable -> defaut
+        prudent ROLLED_BACK (contrat docstring L31-33)."""
+        _insert_batch(
+            self.conn,
+            batch_id="b-old-noexp",
+            started_ts=self.old_ts,
+            status="PENDING",
+            summary_json="{}",  # aucune preuve
+        )
+        _insert_op(self.conn, batch_id="b-old-noexp", op_index=0)
+        _insert_op(self.conn, batch_id="b-old-noexp", op_index=1)
+
+        report = reconcile_pending_batches(
+            self.store, max_age_hours=1.0, now_ts=self.now
+        )
+        self.assertEqual(report["pending_found"], 1)
+        self.assertEqual(report["completed"], 0)
+        self.assertEqual(report["rolled_back"], 1)
+        self.assertEqual(
+            _get_batch_status(self.conn, "b-old-noexp"), STATUS_ROLLED_BACK_BY_BOOT
+        )
 
     # ---- Cas 4 : 1 PENDING vieux incomplet -> ROLLED_BACK ----
 
@@ -271,7 +327,11 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
             self.conn, batch_id="b-young", started_ts=self.fresh_ts, status="PENDING"
         )
         _insert_batch(
-            self.conn, batch_id="b-old-ok", started_ts=self.old_ts, status="PENDING"
+            self.conn,
+            batch_id="b-old-ok",
+            started_ts=self.old_ts,
+            status="PENDING",
+            summary_json='{"expected_ops": 1}',  # preuve de completude (R3e gap[1])
         )
         _insert_op(self.conn, batch_id="b-old-ok", op_index=0)
         _insert_batch(

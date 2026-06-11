@@ -9,10 +9,10 @@ Solution (meme pattern que `move_reconciliation.py` pour apply_pending_moves
 + migration 019) : au boot CineSort, scanner les batches PENDING dont
 `started_ts` est anterieur a un seuil (defaut 1h), et les marquer :
 
-| Etat des operations associees    | Verdict      | Status final              |
-|----------------------------------|--------------|---------------------------|
-| toutes applied=True OR skipped=True | finalisable | COMPLETED_BY_BOOT_CLEANUP |
-| au moins une operation inachevee | inconsistant | ROLLED_BACK_BY_BOOT_CLEANUP |
+| Etat des operations associees                 | Verdict      | Status final              |
+|-----------------------------------------------|--------------|---------------------------|
+| total >= expected_ops ET aucune en erreur     | finalisable  | COMPLETED_BY_BOOT_CLEANUP |
+| incomplet / en erreur / completude non prouvee| inconsistant | ROLLED_BACK_BY_BOOT_CLEANUP |
 
 Note : ici "applied" / "skipped" s'inferent des colonnes existantes :
 - `undo_status` reste a 'PENDING' tant que l'op n'a pas ete undo
@@ -28,9 +28,14 @@ on adopte une heuristique conservatrice :
   inserees ET aucune n'a `error_message` non-vide ;
 - sinon ROLLED_BACK.
 
-Le comptage des operations vs sommaire batch (summary_json.expected_ops)
-est tente, mais en l'absence d'info on tombe sur "marker ROLLED_BACK" par
-defaut, plus prudent.
+AUDIT 2026-06-11 (R3e, gap[1]) : la completude est desormais PROUVEE par
+comparaison du compte d'ops enregistrees au `summary_json.expected_ops`.
+record_apply_op insere chaque op APRES un move reussi (error_message=NULL),
+donc un kill mid-apply laisse un sous-ensemble d'ops toutes a NULL,
+indistinguable d'un apply complet par le seul compte. En l'absence
+d'expected_ops fiable, defaut "marker ROLLED_BACK", plus prudent. Cette
+classification ne touche jamais le FS et n'affecte pas l'undo (seul status
+'DONE' est reversible) : elle ne fait que choisir un libelle d'etat honnete.
 
 Idempotent : si pas de PENDING-zombi, retourne report vide.
 Re-run au prochain boot OK (les batches deja flagges COMPLETED_BY_BOOT_CLEANUP
@@ -39,6 +44,7 @@ ou ROLLED_BACK_BY_BOOT_CLEANUP ne sont plus 'PENDING' donc ignores).
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -89,18 +95,45 @@ def _list_pending_batches(store: Any, *, older_than_ts: float) -> List[Dict[str,
     return rows
 
 
-def _classify_batch(store: Any, batch_id: str) -> str:
+def _read_expected_ops(summary_json: str) -> Optional[int]:
+    """Extrait `expected_ops` (compte d'ops attendu) du summary_json du batch.
+
+    Retourne un int strictement positif si present et valide, sinon None.
+    Un `bool` (sous-classe d'int) est rejete pour eviter True->1 silencieux.
+    """
+    try:
+        data = json.loads(summary_json) if summary_json else {}
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = data.get("expected_ops")
+    if isinstance(val, bool) or not isinstance(val, int):
+        return None
+    return val if val > 0 else None
+
+
+def _classify_batch(store: Any, batch_id: str, summary_json: str = "") -> str:
     """Decide si un batch PENDING-zombi est completable ou doit etre rollback.
 
     Retourne 'completed' ou 'rolled_back'.
 
-    Heuristique conservatrice :
-    - Si aucune operation associee : ROLLED_BACK (rien n'a ete fait,
-      ou alors les operations n'ont jamais ete inserees -> incoherent).
-    - Si toutes les operations ont error_message NULL/vide ET
-      undo_status != 'FAILED' : COMPLETED.
-    - Si au moins une operation a un error_message non-vide OU
-      undo_status='FAILED' : ROLLED_BACK (preuve d'echec partiel).
+    AUDIT 2026-06-11 (R3e, gap[1]) : honorer le contrat documente (docstring
+    module L27-33). Le compte total d'ops ne suffit PAS a prouver la
+    completude — record_apply_op (apply_support) insere chaque op APRES un move
+    reussi avec error_message=NULL, donc un kill mid-apply laisse un
+    sous-ensemble d'ops toutes a NULL, indistinguable d'un apply complet par le
+    seul compte. On exige desormais une PREUVE : `expected_ops` dans le summary
+    du batch ET total >= expected_ops. Sans cette preuve, defaut ROLLED_BACK
+    (plus prudent). Note : la classification ne touche jamais le FS et n'affecte
+    pas l'undo (seul status='DONE' est reversible, cf apply.py
+    get_last_reversible_apply_batch) — ROLLED_BACK ne fait que marquer
+    "inconsistant, revue manuelle" au lieu d'un "completed" faussement rassurant.
+
+    - Aucune operation associee : ROLLED_BACK (rien n'a ete fait / incoherent).
+    - error_message non-vide OU undo_status='FAILED' : ROLLED_BACK (echec partiel).
+    - expected_ops absent/invalide OU total < expected_ops : ROLLED_BACK (non prouve).
+    - total >= expected_ops > 0 ET aucun echec : COMPLETED.
     """
     with store._managed_conn() as conn:  # type: ignore[attr-defined]
         try:
@@ -130,6 +163,11 @@ def _classify_batch(store: Any, batch_id: str) -> str:
         # Aucune operation enregistree -> batch sans contenu, on rollback.
         return "rolled_back"
     if failed > 0 or undo_failed > 0:
+        return "rolled_back"
+
+    # Preuve de completude requise (sinon ROLLED_BACK prudent).
+    expected = _read_expected_ops(summary_json)
+    if expected is None or total < expected:
         return "rolled_back"
     return "completed"
 
@@ -237,7 +275,7 @@ def reconcile_pending_batches(
         bid = batch["batch_id"]
         rid = batch["run_id"]
         try:
-            verdict = _classify_batch(store, bid)
+            verdict = _classify_batch(store, bid, summary_json=batch.get("summary_json") or "")
         except (sqlite3.Error, OSError, AttributeError):
             _logger.exception("reconcile_pending_batches: classify failed for %s", bid)
             verdict = "rolled_back"
