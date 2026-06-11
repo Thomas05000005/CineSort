@@ -594,3 +594,69 @@ que de forcer un fix sur un chemin mort.
   plus permissif.
 - Échecs PRÉ-EXISTANTS toujours présents (4 dans `test_rest_security`, cf §7) — **non imputables** à
   cette annexe.
+
+---
+
+## ANNEXE FABLE 5 (3e modèle) — Audit de vérification + vague de correction R1/R2/R3 (2026-06-11)
+
+### Mandat
+Relire le présent dossier, vérifier que les 35 fixes (Vagues 1-6) + les 3 fixes Opus sont **réellement
+résolus et non régressifs**, lancer un **audit de vérification multi-agents** (lecture seule) pour
+trouver ce qui restait, puis **corriger** ce qui était PARTIEL ou non-fait. Contrainte : modèle
+Fable 5, rien d'illégal/offensif, aucune extraction de raisonnement résumé, aucun push.
+
+### Audit de vérification (lecture seule)
+Workflow multi-agents (VerifyFixes / Gaps / NewBugs / Critic, schémas FLAT, double-réfutation).
+Résultats bruts : `_verif_audit_2026-06-11.json` (non commité). Conclusions :
+- Les **3 fixes Opus** (`a400a4e`, `cddba9c`, `7b94c73`) + le garde CSRF runtime sont **RÉSOLU** —
+  Opus a bien compris.
+- **2 régressions introduites** par les Vagues 1-6 (confirmées en restaurant `HEAD`) → R1.
+- **3 fixes PARTIEL** (GATE complaisant/absent : Jellyfin timeline, film events, quality scope) → R2.
+- **Plusieurs gaps PAS-CORRIGÉS** réels et atteignables en runtime → R3. (Plusieurs autres findings
+  re-classés **DÉJÀ-CORRIGÉ** ou **NON-ATTEIGNABLE** après vérification empirique — cf JSON.)
+
+### Vague R1/R2/R3 — 13 commits, 1 sujet/commit, GATE rouge-avant/vert-après prouvé pour chacun
+
+| # | Commit | Sujet | GATE |
+|---|--------|-------|------|
+| R1a | `50acdaf` | scene_parser : garde release-group basée sur `_NOISE_RE` complet (régression : `_TECH_MARKER_RE` trop étroit laissait `-GROUP`) | `test_scene_parser_title_mutilation_v77` |
+| R1b | `63517d7` | apply : secrets NON persistés en clair dans `runs.config_json` (`_scrub_secrets_for_persist`) — régression sécurité | `test_config_secrets_scrub_v77` |
+| R2.3 | `dbaa07c` | release_name_parser : `.ts` ne force plus `source_hint=cam` (text_no_ext avant boucle source ET cam) | `test_release_name_cam_ts_v77` |
+| R2 | `760f404` | vrais GATE pour les 3 fixes PARTIEL (jellyfin date map, quality scope validated, film events) | `test_r2_partial_hardening_v77` + `test_jellyfin_date_map_v77` |
+| R3a | `c7c0627` | quality : `perceptual_auto_on_quality` lit le dict settings PLAT (`.get("settings")` → `{}` cassait l'auto-run) | `test_perceptual_auto_on_quality_iter8` (ré-ancré) |
+| R3b | `d282bf3` | library : 5 filtres du drawer avancé matchent enfin (codec h265↔hevc, résolution 480p↔sd, source dérivée, langues ISO, sous-titres "none") | `test_library_drawer_filters_v77` |
+| R3c | `191b916` | settings : `perceptual_workers_count` (UI) persiste enfin (était écrasé à 0 par `_save_section_perceptual`) | `test_perceptual_workers_persist_v77` |
+| R3d/5 | `5a7d975` | undo : garde 24h (410) sur `undo_selected_rows` aussi (existait que dans `undo_last_apply`) | `test_undo_24h_deadline_selective_v77` |
+| R3d/6 | `f4bc0fe` | undo : les chemins undo réels acquièrent `_apply_slot_guard` (409 si occupé) — course apply/undo | `test_undo_apply_slot_guard_v77` |
+| R3e/1 | `90b7961` | reconciliation : COMPLETED exige une preuve de complétude (`expected_ops`), sinon ROLLED_BACK prudent (batch demi-appliqué ne passe plus "completed") | `test_apply_batches_reconciliation_v77` (ré-ancré + 2 cas) |
+| R3e/2 | `90e0464` | scan : le row cache v2 compare le `kind` (hit stale single↔collection éliminé) | `test_row_cache_kind_guard_v77` |
+| R3e/3 | `d4a4ded` | replan : `folder_name` idempotent via `library_root` explicite (cfg.root==folder forçait le stem fichier) | `test_replan_idempotent_folder_name_v77` |
+| R3e/4 | `bc653b5` | probe : circuit breaker alimenté en backend auto (`_is_tool_definitely_unavailable` strict ; NAS down ≠ tool absent → évite le hang ~41h) | `test_probe_breaker_auto_wiring_v77` |
+
+### Vérifications finales
+- **Régression** : 168 tests (modules touchés + tous les GATE) **passed**, 0 régression introduite.
+- **import-linter** : **3 contrats KEPT** (domain/infra/app) après la vague.
+- Couleurs tier non touchées ; DPAPI intact ; dry-run/bypass loopback intacts ; aucun push ; aucun
+  secret commité ; modèle Fable 5.
+
+### Auto-évaluation honnête (Fable 5)
+**Solide :**
+- Chaque fix a un GATE **prouvé rouge** sur `git show HEAD:` réel (restauré ensuite) puis vert — pas
+  de mock complaisant. Les 2 régressions R1 et les gaps R3 sont reproduits empiriquement avant fix.
+- Les tests qui **encodaient** un bug ont été ré-ancrés sur le chemin réel (ITER8 dict plat,
+  reconciliation `expected_ops`) — discriminants conservés.
+- Choix de conception **documentés et défendus** : reconciliation conservatrice (le label boot
+  n'affecte ni le FS ni l'undo, seul `status='DONE'` est réversible) ; breaker strict découplé du
+  `tool_unavailable` du cache (pas de régression anti-pollution).
+
+**Incertain / faible :**
+- Le wiring du breaker (R3e/4) est prouvé via **breaker mocké** (record_failure appelé) + un fichier
+  local ; la dégradation end-to-end sur un **vrai NAS/SMB injoignable** n'est pas testée (latence,
+  WinError réseau réels).
+- Les fixes replan/cache (R3e/2-3) sont validés en **tmpdir**, pas sur une vraie bibliothèque.
+- `expected_ops` (R3e/1) n'est **pas encore écrit** par le chemin apply (le compte exact n'est pas
+  connu à la création du batch) : en production, les zombies tombent donc sur le défaut prudent
+  ROLLED_BACK. C'est le comportement documenté, mais la branche "completed" reste latente jusqu'à un
+  futur mécanisme d'`expected_ops` fiable.
+- Échecs PRÉ-EXISTANTS toujours présents (4 `test_rest_security`, 4 `SettingsDispatcherSectionsTests`,
+  etc., cf §7) — **non imputables** à cette vague (vérifiés en restaurant `HEAD`).
