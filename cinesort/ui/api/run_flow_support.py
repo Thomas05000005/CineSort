@@ -709,6 +709,26 @@ def _hydrate_settings_from_store(
     return merged
 
 
+def _scrub_secrets_for_persist(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Copie des settings avec les secrets MASQUES, pour persistance.
+
+    AUDIT 2026-06-11 (R1b) : depuis le fix d'hydratation (_hydrate_settings_from_store
+    garde les vraies cles dechiffrees DPAPI), le dict settings contient les secrets
+    EN CLAIR. Ce dict etait passe tel quel a start_job(config=...) qui le persiste
+    dans runs.config_json (json.dumps, infra/db/repositories/run.py) -> fuite des
+    secrets en clair dans la base SQLite a chaque scan (viole l'invariant DPAPI).
+    Le scan lui-meme lit les vraies cles via le closure job_fn (PAS via config),
+    donc masquer la copie de persistance n'affecte pas l'identification.
+    """
+    if not isinstance(settings, dict):
+        return {}
+    out = dict(settings)
+    for field in _SECRET_FIELDS:
+        if str(out.get(field) or "").strip():
+            out[field] = _SECRET_MASK
+    return out
+
+
 def _start_plan_impl(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) -> Dict[str, Any]:
     """Implementation reelle de start_plan, sans wrap global (Vague G)."""
     if not isinstance(settings, dict):
@@ -748,7 +768,9 @@ def _start_plan_impl(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[
                 job_fn=job_fn,
                 root=str(ctx["root"]),
                 state_dir=str(state_dir),
-                config=dict(settings or {}),
+                # AUDIT 2026-06-11 (R1b) : secrets MASQUES dans la copie persistee
+                # en config_json (le scan utilise les vraies cles via job_fn).
+                config=_scrub_secrets_for_persist(settings or {}),
                 run_id_hint=run_id,
                 debug_log=(lambda message: dlog(f"jobrunner: {message}")) if debug_enabled else None,
             )
