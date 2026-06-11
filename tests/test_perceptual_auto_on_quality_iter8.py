@@ -129,15 +129,16 @@ class PerceptualAutoOnQualityIter8Tests(unittest.TestCase):
         """Wrappe api.settings.get_settings pour injecter perceptual_*
         sans persister settings.json.
 
-        _recompute_worker fait `api.settings.get_settings().get("settings")`
-        donc on retourne {"settings": {...}}.
+        AUDIT 2026-06-11 (R3) : get_settings() retourne un dict PLAT et
+        _recompute_worker lit desormais settings.get(...) directement (le
+        .get("settings") qui rendait settings={} a ete supprime). On injecte donc
+        les overrides au TOP-level. Avant, l'injection nestee {"settings": {...}}
+        encodait le bug (le test passait en exercant le chemin casse).
         """
 
         def _patched():
             base = original() or {}
-            merged_settings = dict(base.get("settings") or {})
-            merged_settings.update(overrides)
-            base["settings"] = merged_settings
+            base.update(overrides)
             return base
 
         return _patched

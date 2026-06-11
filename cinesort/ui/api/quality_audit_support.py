@@ -350,7 +350,11 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
         # si l'utilisateur a active l'auto sans avoir active le moteur, pour honorer
         # le contrat ii.b (echec d'approvisionnement bruyant).
         try:
-            settings = api.settings.get_settings().get("settings") or {}
+            # AUDIT 2026-06-11 (R3) : get_settings() retourne un dict PLAT (pas de
+            # cle "settings", cf call sites L35/L208). Le .get("settings") rendait
+            # settings={} toujours -> perceptual_enabled lu False -> l'analyse
+            # perceptuelle auto post-recompute (fix ITER8) ne se lancait JAMAIS.
+            settings = api.settings.get_settings() or {}
             auto_perc_q = to_bool(settings.get("perceptual_auto_on_quality"), True)
             if auto_perc_q and row_ids:
                 perc_enabled = to_bool(settings.get("perceptual_enabled"), False)
