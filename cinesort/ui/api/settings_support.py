@@ -260,11 +260,16 @@ def _normalize_jellyfin_url(url: str) -> str:
 
 
 def _normalize_lang_list(raw: Any) -> List[str]:
-    """Normalise une liste de codes langue depuis le payload settings."""
+    """Normalise une liste de codes langue depuis le payload settings.
+
+    AUDIT 2026-06-11 (R4-P11) : le hint UI dit "Separees par ;" mais le split
+    n'acceptait que la virgule -> "fr;en" persistait ['fr;en'] (token poubelle,
+    warnings subtitle_missing faux). On accepte ';' ET ','.
+    """
     if isinstance(raw, list):
         return [str(l).strip().lower() for l in raw if str(l).strip()]
     if isinstance(raw, str) and raw.strip():
-        return [l.strip().lower() for l in raw.split(",") if l.strip()]
+        return [l.strip().lower() for l in re.split(r"[;,]", raw) if l.strip()]
     return ["fr"]
 
 
@@ -857,6 +862,10 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-02 (R5-STRESS-5) parallelisme batch inter-films
     ("perceptual_parallelism_enabled", True),
     ("perceptual_workers", 0),
+    # AUDIT 2026-06-11 (R4-P10) : lowercase_extensions est CONSOMME par
+    # build_cfg_from_settings (to_bool defaut True) mais etait absent du GET ->
+    # le toggle UI affichait OFF en permanence alors que l'effectif etait ON.
+    ("lowercase_extensions", True),
     ("perceptual_audio_fingerprint_enabled", True),
     ("perceptual_scene_detection_enabled", True),
     ("perceptual_audio_spectral_enabled", True),
@@ -1646,10 +1655,20 @@ def _save_section_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
             out["excluded_patterns"] = [p.strip() for p in raw.split(",") if p.strip()]
     if "file_extensions" in payload:
         raw = payload.get("file_extensions")
+        # AUDIT 2026-06-11 (R4-P12) : split ';' ET ',' (le hint UI dit ';') —
+        # ".mkv;.xyz" persistait ['mkv;.xyz'] (token poubelle). Et la cle
+        # file_extensions n'avait AUCUN consommateur : le moteur lit video_exts
+        # (build_cfg_from_settings, union avec VIDEO_EXTS_ALL -> additif). On
+        # ecrit donc AUSSI video_exts (format '.ext') pour que le champ UI
+        # "Extensions video acceptees" ait enfin un effet sur le scan.
+        exts: List[str] = []
         if isinstance(raw, list):
-            out["file_extensions"] = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]
+            exts = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]
         elif isinstance(raw, str):
-            out["file_extensions"] = [e.strip().lower().lstrip(".") for e in raw.split(",") if e.strip()]
+            exts = [e.strip().lower().lstrip(".") for e in re.split(r"[;,]", raw) if e.strip()]
+        if isinstance(raw, (list, str)):
+            out["file_extensions"] = exts
+            out["video_exts"] = [f".{e}" for e in exts]
     return out
 
 

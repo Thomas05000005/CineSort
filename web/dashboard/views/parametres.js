@@ -139,7 +139,11 @@ export const PARAMETRES_GROUPS = [
     sections: [
       { id: "organization", label: "Organisation", fields: [
         { key: "collection_folder_enabled", label: "Regrouper les sagas dans _Collection/", type: "toggle" },
-        { key: "collection_folder", label: "Nom du dossier collections", type: "text", placeholder: "_Collection",
+        // AUDIT 2026-06-11 (R4-P9) : clé CANONIQUE collection_folder_name (= celle
+        // du GET et du backend). L'alias collection_folder n'était jamais renvoyé
+        // par le GET -> le champ retombait sur le placeholder au rechargement
+        // alors que la vraie valeur était persistée (même pattern que R4-P1).
+        { key: "collection_folder_name", label: "Nom du dossier collections", type: "text", placeholder: "_Collection",
           hint: "Nom du sous-dossier où regrouper les films d'une même saga.", advanced: true },
         { key: "enable_tv_detection", label: "Détection séries TV", type: "toggle" },
       ]},
