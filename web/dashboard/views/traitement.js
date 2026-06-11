@@ -2541,14 +2541,19 @@ function _bindEvents(container) {
   _eventsBound = true;
 }
 
-async function _handleSaveValidation() {
+async function _handleSaveValidation({ detached = false } = {}) {
   if (!_runInfo?.runId) return;
   const decisions = _buildDecisions();
   try {
+    // AUDIT 2026-06-10 (REAL 2/2) : en mode detache (auto-save sur unmount), on
+    // n'utilise PAS _signal() — sinon l'_abortController.abort() de unmount
+    // annule la requete et les decisions sont perdues. On saute aussi le
+    // render/toast post-save (le container est en cours de detachement).
     const res = await apiPost("run/save_validation", {
       run_id: _runInfo.runId,
       decisions,
-    }, { signal: _signal() });
+    }, detached ? {} : { signal: _signal() });
+    if (detached) return;
     if (res?.data?.ok !== false) {
       showToast({ type: "success", text: "Décisions sauvegardées." });
       await _loadRunInfo();
@@ -2569,7 +2574,7 @@ async function _handleSaveValidation() {
       showToast({ type: "error", text: "Échec de la sauvegarde." });
     }
   } catch {
-    showToast({ type: "error", text: "Erreur lors de la sauvegarde." });
+    if (!detached) showToast({ type: "error", text: "Erreur lors de la sauvegarde." });
   }
 }
 
@@ -2651,7 +2656,8 @@ export function unmountTraitement() {
   // si on quitte Validation avec decisions non enregistrees. Sans ca, fermer
   // la vue ou changer d'onglet perdait silencieusement les modifs JS.
   if (_currentStep === "validation" && _hasUnsavedValidationDecisions()) {
-    _handleSaveValidation();
+    // Mode detache : sans signal -> survit a l'abort ci-dessous (AUDIT 2026-06-10).
+    _handleSaveValidation({ detached: true });
   }
   _stopPolling();
   _stopUndoCountdown();
