@@ -58,6 +58,27 @@ class DrawerFilterTests(unittest.TestCase):
         self.assertTrue(_row_matches(self._row(audio_languages=["eng", "fra"]), {"audio_languages": ["multi"]}))
         self.assertFalse(_row_matches(self._row(audio_languages=["eng"]), {"audio_languages": ["multi"]}))
 
+    # --- AUDIT 2026-06-11 (R4-P3) : langues hors _LANG_MAP comptees, non-langues exclues ---
+    def test_audio_multi_with_unmapped_language(self) -> None:
+        """Un film eng+hin (hindi hors _LANG_MAP) EST multi-langues. Avant,
+        hin -> '' -> discard -> 1 seule langue comptee -> 'multi' ratait."""
+        self.assertTrue(_row_matches(self._row(audio_languages=["eng", "hin"]), {"audio_languages": ["multi"]}))
+        self.assertTrue(_row_matches(self._row(audio_languages=["hin", "tam"]), {"audio_languages": ["multi"]}))
+
+    def test_audio_und_is_not_a_second_language(self) -> None:
+        """'und' (indetermine, tres frequent ffprobe) n'est pas une vraie 2e langue."""
+        self.assertFalse(_row_matches(self._row(audio_languages=["eng", "und"]), {"audio_languages": ["multi"]}))
+
+    def test_subtitle_none_excludes_unmapped_language_subs(self) -> None:
+        """Un film avec des sous-titres hindi A des sous-titres : il ne doit pas
+        matcher 'Aucun'. Avant, hin -> '' -> discard -> set vide -> matchait."""
+        self.assertFalse(_row_matches(self._row(subtitle_languages=["hin"]), {"subtitle_languages": ["none"]}))
+        self.assertFalse(_row_matches(self._row(subtitle_languages=["und"]), {"subtitle_languages": ["none"]}))
+
+    def test_audio_unmapped_does_not_match_fr(self) -> None:
+        # Non-regression : un code brut conserve ne matche pas un filtre fr/en.
+        self.assertFalse(_row_matches(self._row(audio_languages=["hin"]), {"audio_languages": ["fr"]}))
+
     # --- Sous-titres : "none" = aucun sous-titre ---
     def test_subtitle_none_selects_films_without_subs(self) -> None:
         self.assertTrue(_row_matches(self._row(subtitle_languages=[]), {"subtitle_languages": ["none"]}))

@@ -500,13 +500,29 @@ def _media_source_label(video_name: str) -> str:
     return _SOURCE_HINT_TO_DRAWER.get(hint, "other" if hint else "")
 
 
+# Codes ISO639 qui ne designent PAS une langue identifiable : exclus du comptage
+# "multi" (sinon eng+und compterait 2 langues) mais CONSERVES comme presence de
+# piste (un film avec une piste 'und' a bien de l'audio/des sous-titres).
+_NON_LANG_CODES = frozenset({"und", "unknown", "zxx", "mis"})
+
+
 def _to_iso639_1(lang: str) -> str:
-    """Normalise un code langue ISO639-2/3 (eng/fra/fre) en ISO639-1 (en/fr)."""
+    """Normalise un code langue ISO639-2/3 (eng/fra/fre) en ISO639-1 (en/fr).
+
+    AUDIT 2026-06-11 (R4-P3) : un code HORS _LANG_MAP (~25 langues : hin, tam,
+    ukr...) retombait sur "" via _normalize_iso639 puis etait discard() par les
+    filtres -> un film ['eng','hin'] ne matchait pas "multi" et un film ['hin']
+    matchait "none". On conserve desormais le code brut (lowercased) quand la
+    normalisation ne le connait pas : la piste reste comptee.
+    """
+    raw = str(lang or "").strip().lower()
+    if not raw:
+        return ""
     try:
         from cinesort.domain.subtitle_helpers import _normalize_iso639  # noqa: PLC0415
-        return str(_normalize_iso639(str(lang or "")) or "").strip().lower()
+        return str(_normalize_iso639(raw) or "").strip().lower() or raw
     except (ImportError, OSError, TypeError, ValueError):
-        return str(lang or "").strip().lower()
+        return raw
 
 
 def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
@@ -570,13 +586,18 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         ok = (ms in wanted) or ("other" in wanted and ms not in {"bluray", "web", "dvd"})
         if not ok:
             return False
-    # Audio langues : normalise ISO639-1 (eng->en) + "multi" = >=2 langues.
+    # Audio langues : normalise ISO639-1 (eng->en) + "multi" = >=2 vraies langues.
+    # AUDIT 2026-06-11 (R4-P3) : "multi" compte les langues IDENTIFIABLES
+    # distinctes (les codes non mappes type hin/tam sont conserves bruts par
+    # _to_iso639_1, donc comptes) en excluant _NON_LANG_CODES (eng+und n'est
+    # pas un film multi-langues).
     audio_filter = filters.get("audio_languages")
     if audio_filter:
         norm_row = {_to_iso639_1(l) for l in (row.get("audio_languages") or [])}
         norm_row.discard("")
         wanted = {str(f).lower() for f in audio_filter}
-        ok = bool(norm_row & wanted) or ("multi" in wanted and len(norm_row) >= 2)
+        real_langs = norm_row - _NON_LANG_CODES
+        ok = bool(norm_row & wanted) or ("multi" in wanted and len(real_langs) >= 2)
         if not ok:
             return False
     # Sous-titres : "none" = AUCUN sous-titre ; sinon normalise ISO639-1.
