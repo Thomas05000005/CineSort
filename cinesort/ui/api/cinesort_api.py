@@ -1017,7 +1017,10 @@ class CineSortApi:
             old_server.stop()
             self._rest_server = None
 
-        settings = self._get_settings_impl()
+        # AUDIT 2026-06-10 : _internal_settings (token en clair) — _get_settings_impl
+        # masquait rest_api_token, le serveur redemarrait avec Bearer "••••••••"
+        # (constante publique) et tout client legitime recevait 401.
+        settings = self._internal_settings()
         if not settings.get("rest_api_enabled"):
             return _err_response(
                 "API REST desactivee dans les reglages.", category="runtime", level="warning", log_module=__name__
@@ -1027,14 +1030,20 @@ class CineSortApi:
             return _err_response("Aucun token configure.", category="state", level="info", log_module=__name__)
 
         port = int(settings.get("rest_api_port") or 8642)
+        # AUDIT 2026-06-10 : repliquer host + cors_origin du boot (app.py:351-360).
+        # Sans host, le serveur rebind silencieusement sur 127.0.0.1 -> perte de
+        # l'exposition LAN/dashboard distant ; sans cors_origin, retour a "*".
+        host = "0.0.0.0" if settings.get("rest_api_enabled") else "127.0.0.1"
         # NB : module-style pour permettre patch("cinesort.infra.rest_server.RestApiServer").
         server = _rest_server_mod.RestApiServer(
             self,
             port=port,
             token=token,
+            cors_origin=str(settings.get("rest_api_cors_origin") or ""),
             https_enabled=bool(settings.get("rest_api_https_enabled")),
             cert_path=str(settings.get("rest_api_cert_path") or ""),
             key_path=str(settings.get("rest_api_key_path") or ""),
+            host=host,
         )
         server.start()
         self._rest_server = server
