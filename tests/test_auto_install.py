@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from cinesort.infra.probe.auto_install import (
+    _resolve_expected_sha256,
     IntegrityError,
     _assert_https,
     _find_in_zip,
@@ -206,6 +207,28 @@ class TestSha256Verification(unittest.TestCase):
         finally:
             if os.path.exists(path):
                 os.unlink(path)
+
+    def test_resolve_expected_sha256_priority(self):
+        """GATE AUDIT 2026-06-10 : permet d'epingler le SHA256 via variable d'env
+        pour forcer le fail-closed sans modifier le code. Ordre : override kwarg
+        > env var > constante module."""
+        env = "CINESORT_TEST_SHA256_XYZ"
+        # 1. override kwarg gagne sur tout
+        with patch.dict(os.environ, {env: "from_env"}):
+            self.assertEqual(
+                _resolve_expected_sha256(env, "from_override", "from_const"), "from_override"
+            )
+        # 2. sans override, la variable d'env gagne sur la constante
+        with patch.dict(os.environ, {env: "from_env"}):
+            self.assertEqual(_resolve_expected_sha256(env, None, "from_const"), "from_env")
+        # 3. sans override ni env : constante module (None par defaut = unverified)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(env, None)
+            self.assertEqual(_resolve_expected_sha256(env, None, "from_const"), "from_const")
+            self.assertIsNone(_resolve_expected_sha256(env, None, None))
+        # 4. env vide (espaces) ignore -> constante
+        with patch.dict(os.environ, {env: "   "}):
+            self.assertEqual(_resolve_expected_sha256(env, None, "from_const"), "from_const")
 
     def test_verify_archive_mismatch_fails_closed(self):
         """SHA256 mismatch : IntegrityError + suppression du fichier suspect (fail-closed)."""

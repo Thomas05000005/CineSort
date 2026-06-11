@@ -53,6 +53,28 @@ MEDIAINFO_URL = "https://mediaarea.net/download/binary/mediainfo/24.11/MediaInfo
 EXPECTED_SHA256_FFMPEG: Optional[str] = None
 EXPECTED_SHA256_MEDIAINFO: Optional[str] = None
 
+# AUDIT 2026-06-10 : les constantes ci-dessus sont None (FFmpeg gyan.dev est une
+# rolling release dont le hash ne peut etre fige sans casser les futurs installs).
+# Pour permettre a un deploiement sensible a la securite de FORCER la
+# verification fail-closed sans modifier le code, on accepte un hash epingle via
+# variable d'environnement. Ordre de resolution : override kwarg > env var >
+# constante module. Si tout est None, le comportement documente (warning
+# "integrity UNVERIFIED") est conserve.
+_ENV_SHA256_FFMPEG = "CINESORT_FFMPEG_SHA256"
+_ENV_SHA256_MEDIAINFO = "CINESORT_MEDIAINFO_SHA256"
+
+
+def _resolve_expected_sha256(
+    env_var: str, override: Optional[str], constant: Optional[str]
+) -> Optional[str]:
+    """Resout le SHA256 attendu : override kwarg > variable d'env > constante."""
+    if override is not None:
+        return override
+    env_val = (os.environ.get(env_var) or "").strip()
+    if env_val:
+        return env_val
+    return constant
+
 # Timeout socket pour urlretrieve : sans cela, un serveur muet (hosts en panne,
 # firewall corporate qui drop) fait hang l'install indefiniment.
 # 120s couvre des downloads de ~120 MB sur une connexion lente (1 Mbps).
@@ -188,7 +210,7 @@ def install_ffprobe(
         # IntegrityError remonte et abandonne l'install (fail-closed).
         _verify_archive(
             zip_path,
-            expected_sha256 if expected_sha256 is not None else EXPECTED_SHA256_FFMPEG,
+            _resolve_expected_sha256(_ENV_SHA256_FFMPEG, expected_sha256, EXPECTED_SHA256_FFMPEG),
             label="ffmpeg.zip",
         )
 
@@ -243,7 +265,7 @@ def install_mediainfo(
         # Fix VN-A.4 : verification SHA256 avant extraction (fail-closed).
         _verify_archive(
             zip_path,
-            expected_sha256 if expected_sha256 is not None else EXPECTED_SHA256_MEDIAINFO,
+            _resolve_expected_sha256(_ENV_SHA256_MEDIAINFO, expected_sha256, EXPECTED_SHA256_MEDIAINFO),
             label="mediainfo.zip",
         )
 
