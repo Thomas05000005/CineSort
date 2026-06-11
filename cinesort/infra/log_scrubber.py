@@ -18,7 +18,7 @@ import logging.handlers
 import re
 import traceback
 from pathlib import Path
-from typing import Iterable, List, Optional, Pattern
+from typing import Any, Iterable, List, Optional, Pattern
 
 from cinesort.infra.log_context import attach_filter_to_handler
 
@@ -100,6 +100,20 @@ class SecretsScrubFilter(logging.Filter):
     (requests, urllib3, etc.).
     """
 
+    @staticmethod
+    def _scrub_arg(value: Any) -> Any:
+        """Scrub un arg de log. str -> scrub direct. Objet non-str -> on scrub
+        son str() et on ne remplace que si un secret a ete retire (preserve les
+        ints/floats pour %d/%f et les objets sans secret pour %r)."""
+        if isinstance(value, str):
+            return scrub_secrets(value)
+        try:
+            raw = str(value)
+        except Exception:  # noqa: BLE001 - un __str__ qui leve ne doit pas casser le log
+            return value
+        scrubbed = scrub_secrets(raw)
+        return scrubbed if scrubbed != raw else value
+
     def filter(self, record: logging.LogRecord) -> bool:
         # Scrub le message format string lui-meme.
         try:
@@ -109,13 +123,20 @@ class SecretsScrubFilter(logging.Filter):
             pass
 
         # Scrub les args (substitues dans le message a getMessage()).
+        # AUDIT 2026-06-10 : l'idiome ubiquitaire logger.x("... : %s", exc) passe
+        # un objet NON-str (ex requests.HTTPError dont __str__ contient
+        # "...for url: https://www.omdbapi.com/?apikey=SECRET"). Avant ce fix
+        # seuls les args de type str etaient scrubbes -> fuite en clair. On
+        # scrubbe desormais aussi le str() des args non-str, mais on ne REMPLACE
+        # l'objet par sa chaine que si le scrubbing a reellement retire un secret
+        # (sinon on garde l'objet original pour ne pas casser %d/%f/%r).
         try:
             if record.args:
                 if isinstance(record.args, dict):
-                    record.args = {k: scrub_secrets(v) if isinstance(v, str) else v for k, v in record.args.items()}
+                    record.args = {k: self._scrub_arg(v) for k, v in record.args.items()}
                 elif isinstance(record.args, tuple):
-                    record.args = tuple(scrub_secrets(v) if isinstance(v, str) else v for v in record.args)
-        except (AttributeError, TypeError):
+                    record.args = tuple(self._scrub_arg(v) for v in record.args)
+        except (AttributeError, TypeError, ValueError):
             pass
 
         # Scrub la traceback. Le formatter du handler appelle formatException()
@@ -141,11 +162,18 @@ def install_global_scrubber(loggers: Iterable[logging.Logger] = ()) -> None:
     une liste de loggers nommes). Idempotent : peut etre appele plusieurs fois
     sans dupliquer le filter.
 
-    A appeler une seule fois au boot, dans app.py ou cinesort_api.py.
+    A appeler au boot, dans app.py ou cinesort_api.py. Peut etre rappele apres
+    `logging.basicConfig()` ou apres l'ajout de handlers : seuls les seuls
+    points de filtre manquants sont ajoutes (idempotent, pas de doublon).
+
+    AUDIT 2026-06-10 : un filtre pose sur un LOGGER ne s'applique PAS aux
+    records propagees depuis un logger enfant (seuls les filtres de HANDLER
+    s'appliquent). Comme app.py appelait install AVANT basicConfig(), le
+    StreamHandler console cree ensuite n'avait aucun scrub. On ne court-circuite
+    donc plus l'install : chaque appel RE-SYNCHRONISE le filtre sur le root,
+    tous ses handlers courants et les loggers nommes.
     """
     global _INSTALLED
-    if _INSTALLED:
-        return
     flt = SecretsScrubFilter()
     root = logging.getLogger()
     if not any(isinstance(f, SecretsScrubFilter) for f in root.filters):

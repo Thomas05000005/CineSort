@@ -417,6 +417,10 @@ def main_api() -> None:
     # `log_level` du settings.json est applique plus loin une fois l'API creee.
     boot_level = resolve_log_level(None)
     _logging_api.basicConfig(level=boot_level, format="%(message)s")
+    # AUDIT 2026-06-10 : re-synchroniser le scrubber APRES basicConfig pour
+    # couvrir le StreamHandler console qu'il vient de creer (un filtre de logger
+    # ne s'applique pas aux records propagees vers ce handler).
+    install_global_scrubber()
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
@@ -650,6 +654,9 @@ def main() -> None:
 
     boot_level = resolve_log_level(None)
     _logging_main.basicConfig(level=boot_level, format="%(message)s")
+    # AUDIT 2026-06-10 : re-synchroniser le scrubber APRES basicConfig (couvre le
+    # StreamHandler console cree par basicConfig).
+    install_global_scrubber()
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
