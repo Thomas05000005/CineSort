@@ -390,7 +390,7 @@ function _renderDecadesSection(stats) {
  */
 function _renderEvolutionSection() {
   const hist = _state.history;
-  const period = (hist && hist.period_days) || _state.filters.period_days || 30;
+  const period = _normalizePeriodDays(hist && hist.period_days != null ? hist.period_days : _state.filters.period_days);
   const points = Array.isArray(hist && hist.points) ? hist.points : [];
   const validPoints = points.filter((p) => p && p.avg_score != null);
 
@@ -772,9 +772,18 @@ async function _loadByDecade(signal, filters) {
   }
 }
 
+// AUDIT 2026-06-11 (R4-P8) : `x || 30` avalait period_days=0 ('Tout', supporté
+// backend 0=all par quality/get_history) -> la période 'Tout' renvoyait
+// toujours 30 jours. 0 est une valeur VALIDE ; seuls null/undefined/NaN/<0
+// retombent sur 30.
+function _normalizePeriodDays(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+}
+
 async function _loadHistory(signal, periodDays) {
   try {
-    const res = await apiPost("quality/get_history", { period_days: Number(periodDays) || 30 }, { signal });
+    const res = await apiPost("quality/get_history", { period_days: _normalizePeriodDays(periodDays) }, { signal });
     const data = _resolveData(res);
     if (data && data.ok !== false) {
       _state.history = data;
@@ -928,7 +937,7 @@ function _openFiltersDrawer(container) {
       try {
         await Promise.all([
           _loadByDecade(signal, newFilters),
-          _loadHistory(signal, newFilters.period_days || 30),
+          _loadHistory(signal, _normalizePeriodDays(newFilters.period_days)),
           _loadRejectFilms(signal),
           _loadSagas(signal),
         ]);
@@ -1069,7 +1078,7 @@ export async function initQualite(container) {
       _loadRejectFilms(signal),
       _loadSagas(signal),
       _loadByDecade(signal, _state.filters),
-      _loadHistory(signal, _state.filters.period_days || 30),
+      _loadHistory(signal, _normalizePeriodDays(_state.filters.period_days)),
     ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;
