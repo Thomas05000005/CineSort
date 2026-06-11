@@ -21,7 +21,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from cinesort.app.quarantine_ttl import list_review_bucket_files
+import json
+
+from cinesort.app.quarantine_ttl import _TTL_MANIFEST_NAME, list_review_bucket_files
 
 
 def _make_cfg(root: Path) -> SimpleNamespace:
@@ -33,11 +35,28 @@ def _set_mtime(p: Path, days_ago: float) -> None:
     os.utime(p, (ts, ts))
 
 
-def _write_file(p: Path, content: bytes = b"x" * 100, days_ago: float = 0.0) -> Path:
+def _seed_arrival(root: Path, rel: str, days_ago: float) -> None:
+    """Inscrit la date d'ENTREE en quarantaine dans le manifest (AUDIT 2026-06-10 :
+    age_days et tri reposent desormais sur l'arrivee, plus sur le mtime)."""
+    manifest_path = root / "_review" / _TTL_MANIFEST_NAME
+    data = {}
+    if manifest_path.is_file():
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data[rel] = time.time() - (days_ago * 86400.0)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_file(
+    p: Path, content: bytes = b"x" * 100, days_ago: float = 0.0, *, root: Path = None
+) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(content)
     if days_ago > 0:
         _set_mtime(p, days_ago)
+        if root is not None:
+            rel = p.relative_to(root / "_review").as_posix()
+            _seed_arrival(root, rel, days_ago)
     return p
 
 
@@ -79,12 +98,13 @@ class ListReviewBucketFilesTests(unittest.TestCase):
         self.assertEqual(res["by_subdir"]["_leftovers"]["count"], 1)
         self.assertEqual(res["by_subdir"]["_leftovers"]["size"], 50)
 
-    def test_files_sorted_by_mtime_desc(self) -> None:
-        _write_file(self.root / "_review" / "_conflicts" / "old.bin", days_ago=10)
-        _write_file(self.root / "_review" / "_conflicts" / "mid.bin", days_ago=5)
-        _write_file(self.root / "_review" / "_conflicts" / "new.bin", days_ago=1)
+    def test_files_sorted_by_arrival_desc(self) -> None:
+        # Tri par date d'ENTREE en quarantaine DESC (recent en haut).
+        _write_file(self.root / "_review" / "_conflicts" / "old.bin", days_ago=10, root=self.root)
+        _write_file(self.root / "_review" / "_conflicts" / "mid.bin", days_ago=5, root=self.root)
+        _write_file(self.root / "_review" / "_conflicts" / "new.bin", days_ago=1, root=self.root)
         res = list_review_bucket_files(self.cfg)
-        # mtime decroissant : new (1j) > mid (5j) > old (10j)
+        # arrivee decroissante : new (1j) > mid (5j) > old (10j)
         self.assertEqual(res["files"][0]["rel"], "_conflicts/new.bin")
         self.assertEqual(res["files"][1]["rel"], "_conflicts/mid.bin")
         self.assertEqual(res["files"][2]["rel"], "_conflicts/old.bin")
@@ -97,13 +117,25 @@ class ListReviewBucketFilesTests(unittest.TestCase):
         self.assertEqual(len(res["files"]), 3)  # tronque
 
     def test_age_days_computed(self) -> None:
-        _write_file(self.root / "_review" / "_conflicts" / "x.bin", days_ago=15.0)
+        # age_days = temps EN QUARANTAINE (depuis l'arrivee), pas l'age du fichier.
+        _write_file(self.root / "_review" / "_conflicts" / "x.bin", days_ago=15.0, root=self.root)
         res = list_review_bucket_files(self.cfg)
         self.assertEqual(len(res["files"]), 1)
         age = res["files"][0]["age_days"]
         # Marge de tolerance (le test s'execute donc fenetre entre lecture et stat)
         self.assertGreater(age, 14.5)
         self.assertLess(age, 16.0)
+
+    def test_age_days_uses_arrival_not_mtime(self) -> None:
+        # GATE AUDIT 2026-06-10 : un fichier au mtime tres ancien mais arrive a
+        # l'instant affiche age_days ~ 0 (et non l'age du fichier).
+        f = self.root / "_review" / "_conflicts" / "vieux.mkv"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x" * 100)
+        _set_mtime(f, 400)  # mtime 400j, AUCUN seed d'arrivee
+        res = list_review_bucket_files(self.cfg)
+        self.assertEqual(len(res["files"]), 1)
+        self.assertLess(res["files"][0]["age_days"], 1.0)
 
     def test_subdir_top_quarantine_for_top_level_file(self) -> None:
         # Un fichier directement sous `_review/` (rare mais possible).

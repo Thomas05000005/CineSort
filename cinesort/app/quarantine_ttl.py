@@ -34,11 +34,12 @@ Architecture (verrouillee import-linter) :
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
@@ -62,6 +63,17 @@ TTL_SUBDIRS = (
 # Defaut TTL (jours). Aligne avec UI : settings.quarantaine_ttl_days = 30.
 DEFAULT_TTL_DAYS = 30
 
+# AUDIT 2026-06-10 (CRITICAL, REAL 2/2) : le TTL se basait sur st_mtime, or
+# apply deplace les fichiers via atomic_move/shutil.move qui PRESERVE le mtime
+# d'origine. Un film encode/telecharge il y a des mois etait donc purge des le
+# 1er cycle apres sa mise en quarantaine (perte de donnees). On date desormais
+# l'ENTREE en quarantaine via un manifest "premiere observation" : tant qu'un
+# fichier n'a pas ete vu par list/purge, son TTL ne court pas ; a la 1re
+# observation on enregistre `now`, et le TTL court a partir de la. A la
+# migration, tous les fichiers presents repartent a `now` (jamais purges
+# retroactivement).
+_TTL_MANIFEST_NAME = ".cinesort_ttl_manifest.json"
+
 # Cron : 24h en secondes (idem retention_cleanup), externalise pour tests.
 _INTERVAL_S = 24.0 * 3600.0
 _INITIAL_DELAY_S = 60.0
@@ -72,15 +84,78 @@ def review_root(cfg: "Config") -> Path:
     return Path(cfg.root) / REVIEW_FOLDER_NAME
 
 
+def _ttl_manifest_path(root: Path) -> Path:
+    """Chemin du manifest d'arrivee (premiere observation) du bucket."""
+    return root / _TTL_MANIFEST_NAME
+
+
+def _load_ttl_manifest(root: Path) -> Dict[str, float]:
+    """Charge le manifest {rel_posix: first_seen_ts}. Tolerant : {} si absent/corrompu."""
+    path = _ttl_manifest_path(root)
+    try:
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _log.warning("ttl manifest: lecture %s echec : %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for rel, ts in data.items():
+        try:
+            out[str(rel)] = float(ts)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _save_ttl_manifest(root: Path, manifest: Dict[str, float]) -> None:
+    """Ecrit le manifest (best-effort, ne leve jamais)."""
+    path = _ttl_manifest_path(root)
+    try:
+        path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        _log.warning("ttl manifest: ecriture %s echec : %s", path, exc)
+
+
+def _sync_arrival_manifest(root: Path, *, persist: bool, now: Optional[float] = None) -> Dict[str, float]:
+    """Synchronise le manifest avec le contenu reel du bucket.
+
+    - Tout fichier present mais absent du manifest recoit `first_seen = now`
+      (1re observation -> son TTL commence ici, pas a son mtime).
+    - Les entrees pointant vers des fichiers disparus sont retirees.
+    - `persist=False` (dry_run / lecture) : calcule en memoire sans ecrire.
+
+    Retourne le mapping {rel_posix: first_seen_ts} a jour.
+    """
+    ts_now = time.time() if now is None else now
+    manifest = _load_ttl_manifest(root)
+    present: Dict[str, float] = {}
+    for fp in _iter_review_files(root):
+        try:
+            rel = fp.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        present[rel] = manifest.get(rel, ts_now)
+    changed = present.keys() != manifest.keys()
+    if persist and changed:
+        _save_ttl_manifest(root, present)
+    return present
+
+
 def _iter_review_files(root: Path) -> List[Path]:
-    """Liste tous les fichiers (recursifs) sous `root`. Tolerant aux erreurs FS."""
+    """Liste tous les fichiers (recursifs) sous `root`. Tolerant aux erreurs FS.
+
+    Exclut le manifest TTL interne (ce n'est pas du contenu quarantaine).
+    """
     out: List[Path] = []
     if not root.exists() or not root.is_dir():
         return out
     try:
         for item in root.rglob("*"):
             try:
-                if item.is_file():
+                if item.is_file() and item.name != _TTL_MANIFEST_NAME:
                     out.append(item)
             except (OSError, PermissionError):
                 continue
@@ -128,6 +203,11 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
     files = _iter_review_files(root)
     payload["files_count"] = len(files)
 
+    # Ancre la date d'entree en quarantaine de chaque fichier (1re observation).
+    # Le viewer est un point d'entree naturel : on persiste pour que le TTL
+    # parte de l'ouverture de l'ecran et pas du 1er cron.
+    arrivals = _sync_arrival_manifest(root, persist=True, now=now)
+
     by_subdir: Dict[str, Dict[str, int]] = {}
     entries: List[Dict[str, Any]] = []
     total_size = 0
@@ -143,6 +223,9 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
             rel = fp.relative_to(root).as_posix()
         except ValueError:
             rel = fp.name
+        # age_days = temps passe EN QUARANTAINE (depuis l'arrivee), pas l'age
+        # du fichier (mtime, preserve par move) — voir AUDIT 2026-06-10.
+        arrival = arrivals.get(rel, mtime)
         # Le premier composant identifie le sous-dossier (ou "_top_quarantine"
         # si le fichier est directement sous _review/).
         parts = rel.split("/", 1)
@@ -156,15 +239,17 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
                 "rel": rel,
                 "size": size,
                 "mtime": mtime,
-                "age_days": max(0.0, (now - mtime) / 86400.0),
+                "arrival_ts": arrival,
+                "age_days": max(0.0, (now - arrival) / 86400.0),
                 "subdir": subdir,
             }
         )
     payload["total_size_bytes"] = total_size
     payload["by_subdir"] = by_subdir
 
-    # Tri par mtime DESC (plus recent en haut), tronque a `limit`.
-    entries.sort(key=lambda d: d["mtime"], reverse=True)
+    # Tri par arrivee DESC (entre le plus recemment en quarantaine en haut),
+    # tronque a `limit`.
+    entries.sort(key=lambda d: d["arrival_ts"], reverse=True)
     payload["files"] = entries[: max(0, int(limit))]
     return payload
 
@@ -175,8 +260,18 @@ def _purge_target_roots(cfg: "Config") -> List[Path]:
     return [root / sub for sub in TTL_SUBDIRS]
 
 
-def _purge_dir_recursive(target: Path, *, cutoff_ts: float, dry_run: bool) -> Dict[str, int]:
-    """Supprime recursivement les fichiers > cutoff_ts sous `target`.
+def _purge_dir_recursive(
+    target: Path,
+    *,
+    cutoff_ts: float,
+    dry_run: bool,
+    arrival_of: Optional[Callable[[Path], float]] = None,
+) -> Dict[str, int]:
+    """Supprime recursivement les fichiers entres avant cutoff_ts sous `target`.
+
+    `arrival_of(item)` donne la date d'entree en quarantaine du fichier (manifest
+    de 1re observation). Si None, fallback sur st_mtime (utilise par purge_all,
+    dont le cutoff futur supprime tout de toute facon).
 
     Retourne {"deleted": N, "bytes_freed": N, "errors": N, "considered": N}.
     Les dossiers vides post-purge sont supprimes (sauf `target` lui-meme).
@@ -192,7 +287,8 @@ def _purge_dir_recursive(target: Path, *, cutoff_ts: float, dry_run: bool) -> Di
                 continue
             stats["considered"] += 1
             st = item.stat()
-            if st.st_mtime > cutoff_ts:
+            entered_ts = arrival_of(item) if arrival_of is not None else st.st_mtime
+            if entered_ts > cutoff_ts:
                 continue
             size = int(st.st_size)
             if dry_run:
@@ -269,12 +365,26 @@ def purge_review_bucket(
         payload["no_bucket"] = True
         return payload
 
-    cutoff_ts = time.time() - (days * 86400.0)
+    now = time.time()
+    cutoff_ts = now - (days * 86400.0)
+
+    # Date d'entree en quarantaine de chaque fichier (manifest 1re observation).
+    # En dry_run on ne persiste pas, mais le calcul est identique au reel.
+    arrivals = _sync_arrival_manifest(root, persist=not dry_run, now=now)
+
+    def _arrival_of(item: Path) -> float:
+        try:
+            rel = item.relative_to(root).as_posix()
+        except ValueError:
+            return now
+        return arrivals.get(rel, now)
 
     # 1) Sous-dossiers cible (TTL_SUBDIRS)
     for sub in TTL_SUBDIRS:
         target = root / sub
-        sub_stats = _purge_dir_recursive(target, cutoff_ts=cutoff_ts, dry_run=dry_run)
+        sub_stats = _purge_dir_recursive(
+            target, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
+        )
         payload["by_subdir"][sub] = sub_stats
         payload["deleted"] += sub_stats["deleted"]
         payload["bytes_freed"] += sub_stats["bytes_freed"]
@@ -289,7 +399,9 @@ def purge_review_bucket(
     try:
         for child in root.iterdir():
             if child.is_dir() and child.name not in excluded:
-                sub_stats = _purge_dir_recursive(child, cutoff_ts=cutoff_ts, dry_run=dry_run)
+                sub_stats = _purge_dir_recursive(
+                    child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
+                )
                 top_stats["deleted"] += sub_stats["deleted"]
                 top_stats["bytes_freed"] += sub_stats["bytes_freed"]
                 top_stats["errors"] += sub_stats["errors"]
@@ -298,13 +410,12 @@ def purge_review_bucket(
                 if not dry_run:
                     with contextlib.suppress(OSError):
                         child.rmdir()
-            elif child.is_file():
+            elif child.is_file() and child.name != _TTL_MANIFEST_NAME:
                 # Fichiers libres au top-level (rare mais possible)
                 try:
                     top_stats["considered"] += 1
-                    st = child.stat()
-                    if st.st_mtime <= cutoff_ts:
-                        size = int(st.st_size)
+                    if _arrival_of(child) <= cutoff_ts:
+                        size = int(child.stat().st_size)
                         if dry_run:
                             top_stats["deleted"] += 1
                             top_stats["bytes_freed"] += size
@@ -325,6 +436,12 @@ def purge_review_bucket(
     payload["bytes_freed"] += top_stats["bytes_freed"]
     payload["errors"] += top_stats["errors"]
     payload["considered"] += top_stats["considered"]
+
+    # Nettoie le manifest des fichiers supprimes : sans cela, une row reutilisant
+    # plus tard le meme chemin relatif heriterait de l'ancienne date d'arrivee et
+    # serait purgee immediatement (re-introduction du bug). No-op en dry_run.
+    if not dry_run:
+        _sync_arrival_manifest(root, persist=True, now=now)
 
     _log.info(
         "purge_review_bucket: deleted=%d bytes_freed=%d ttl=%dj dry_run=%s",
@@ -412,6 +529,10 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
     payload["bytes_freed"] += top_stats["bytes_freed"]
     payload["errors"] += top_stats["errors"]
     payload["considered"] += top_stats["considered"]
+
+    # Resynchronise le manifest sur ce qui reste (les fichiers purges sont retires).
+    if not dry_run:
+        _sync_arrival_manifest(root, persist=True)
 
     _log.info(
         "purge_review_bucket_all: deleted=%d bytes_freed=%d dry_run=%s",

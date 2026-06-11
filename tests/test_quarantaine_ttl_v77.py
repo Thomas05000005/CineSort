@@ -22,10 +22,13 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import json
+
 from cinesort.app.quarantine_ttl import (
     DEFAULT_TTL_DAYS,
     REVIEW_FOLDER_NAME,
     TTL_SUBDIRS,
+    _TTL_MANIFEST_NAME,
     list_review_bucket_files,
     purge_review_bucket,
     purge_review_bucket_all,
@@ -46,11 +49,38 @@ def _set_mtime(p: Path, days_ago: float) -> None:
     os.utime(p, (ts, ts))
 
 
-def _write_file(p: Path, content: bytes = b"x", days_ago: float = 0.0) -> Path:
+def _seed_arrival(root: Path, rel: str, days_ago: float) -> None:
+    """Inscrit dans le manifest une date d'ENTREE en quarantaine `days_ago` jours
+    dans le passe (simule un fichier mis en quarantaine il y a `days_ago` jours).
+
+    AUDIT 2026-06-10 : le TTL se base sur l'arrivee en quarantaine (manifest),
+    plus sur le mtime du fichier — les tests doivent donc semer l'arrivee.
+    """
+    manifest_path = root / "_review" / _TTL_MANIFEST_NAME
+    data = {}
+    if manifest_path.is_file():
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data[rel] = time.time() - (days_ago * 86400.0)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_file(
+    p: Path, content: bytes = b"x", days_ago: float = 0.0, *, root: Path = None
+) -> Path:
+    """Ecrit un fichier de quarantaine.
+
+    `days_ago` simule l'anciennete d'ENTREE en quarantaine : on fixe le mtime ET
+    on seme le manifest d'arrivee a la meme date (les deux pour rester robuste,
+    mais c'est le manifest qui pilote le TTL desormais).
+    """
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(content)
     if days_ago > 0:
         _set_mtime(p, days_ago)
+        if root is not None:
+            rel = p.relative_to(root / "_review").as_posix()
+            _seed_arrival(root, rel, days_ago)
     return p
 
 
@@ -94,8 +124,12 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_purge_old_files_in_conflicts(self) -> None:
         # 1 vieux fichier (40j) + 1 recent (1j) avec TTL 30j
-        old = _write_file(self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40)
-        recent = _write_file(self.root / "_review" / "_conflicts" / "recent.mkv", days_ago=1)
+        old = _write_file(
+            self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root
+        )
+        recent = _write_file(
+            self.root / "_review" / "_conflicts" / "recent.mkv", days_ago=1, root=self.root
+        )
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertEqual(res["deleted"], 1)
@@ -103,11 +137,43 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
         self.assertFalse(old.exists())
         self.assertTrue(recent.exists())
 
+    def test_old_mtime_recent_arrival_not_purged(self) -> None:
+        # GATE AUDIT 2026-06-10 (CRITICAL) : un fichier dont le mtime est tres
+        # ancien (film encode il y a 999 jours) mais qui vient d'ENTRER en
+        # quarantaine (manifest = maintenant) ne doit PAS etre purge. C'est le
+        # scenario exact de la perte de donnees corrigee.
+        f = self.root / "_review" / "_conflicts" / "vieux_film.mkv"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x")
+        _set_mtime(f, 999)  # mtime tres ancien, MAIS pas de seed manifest
+        res = purge_review_bucket(self.cfg, ttl_days=30)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["deleted"], 0, "arrivee = now -> conserve malgre mtime ancien")
+        self.assertTrue(f.exists())
+        # 2e cycle apres avoir vieilli l'arrivee de 40j : maintenant purge.
+        _seed_arrival(self.root, "_conflicts/vieux_film.mkv", 40)
+        res2 = purge_review_bucket(self.cfg, ttl_days=30)
+        self.assertEqual(res2["deleted"], 1)
+        self.assertFalse(f.exists())
+
+    def test_arrival_manifest_excluded_from_inventory(self) -> None:
+        # Le manifest interne ne doit jamais etre compte ni purge comme contenu.
+        _write_file(
+            self.root / "_review" / "_conflicts" / "a.bin", days_ago=40, root=self.root
+        )
+        inv = list_review_bucket_files(self.cfg)
+        rels = {e["rel"] for e in inv["files"]}
+        self.assertNotIn(_TTL_MANIFEST_NAME, rels)
+        # Le manifest existe bien sur disque mais hors inventaire.
+        self.assertTrue((self.root / "_review" / _TTL_MANIFEST_NAME).is_file())
+
     def test_purge_all_ttl_subdirs(self) -> None:
         # 1 vieux fichier par sous-dossier TTL
         old_files = []
         for sub in TTL_SUBDIRS:
-            f = _write_file(self.root / "_review" / sub / "x.bin", days_ago=60)
+            f = _write_file(
+                self.root / "_review" / sub / "x.bin", days_ago=60, root=self.root
+            )
             old_files.append(f)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertEqual(res["deleted"], len(TTL_SUBDIRS))
@@ -119,9 +185,12 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
         preserved = _write_file(
             self.root / "_review" / "_duplicates_user_decided" / "decision.mkv",
             days_ago=999,
+            root=self.root,
         )
         # Un fichier conflits ancien pour confirmer que le TTL marche par ailleurs
-        purged = _write_file(self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40)
+        purged = _write_file(
+            self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root
+        )
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertFalse(purged.exists())
@@ -129,8 +198,12 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_top_level_quarantine_row_purged(self) -> None:
         # Row top-level : `_review/<folder>/...` (cas quarantine_unapproved=True)
-        old = _write_file(self.root / "_review" / "MyFilm (2020)" / "movie.mkv", days_ago=40)
-        recent = _write_file(self.root / "_review" / "MyFilm (2020)" / "subs.srt", days_ago=1)
+        old = _write_file(
+            self.root / "_review" / "MyFilm (2020)" / "movie.mkv", days_ago=40, root=self.root
+        )
+        recent = _write_file(
+            self.root / "_review" / "MyFilm (2020)" / "subs.srt", days_ago=1, root=self.root
+        )
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertFalse(old.exists())
@@ -140,7 +213,9 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_empty_dirs_removed_after_purge(self) -> None:
         # Fichier ancien dans sous-dossier profond : on purge le fichier + le sous-dossier vide.
-        f = _write_file(self.root / "_review" / "_leftovers" / "deep" / "x.bin", days_ago=99)
+        f = _write_file(
+            self.root / "_review" / "_leftovers" / "deep" / "x.bin", days_ago=99, root=self.root
+        )
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertEqual(res["deleted"], 1)
         self.assertFalse(f.exists())
@@ -150,9 +225,9 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
         self.assertTrue((self.root / "_review" / "_leftovers").exists())
 
     def test_by_subdir_counters(self) -> None:
-        _write_file(self.root / "_review" / "_conflicts" / "a.bin", days_ago=40)
-        _write_file(self.root / "_review" / "_conflicts" / "b.bin", days_ago=40)
-        _write_file(self.root / "_review" / "_leftovers" / "c.bin", days_ago=40)
+        _write_file(self.root / "_review" / "_conflicts" / "a.bin", days_ago=40, root=self.root)
+        _write_file(self.root / "_review" / "_conflicts" / "b.bin", days_ago=40, root=self.root)
+        _write_file(self.root / "_review" / "_leftovers" / "c.bin", days_ago=40, root=self.root)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertEqual(res["by_subdir"]["_conflicts"]["deleted"], 2)
         self.assertEqual(res["by_subdir"]["_leftovers"]["deleted"], 1)
