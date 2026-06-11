@@ -40,7 +40,10 @@ from cinesort.infra._http_utils import make_session_with_retry
 logger = logging.getLogger(__name__)
 
 
-OMDB_API_BASE = "http://www.omdbapi.com/"
+# AUDIT 2026-06-10 : HTTPS obligatoire — en HTTP clair la cle API (param apikey)
+# et les reponses transitaient en clair (fuite de cle vers tout observateur
+# reseau + reponses falsifiables par un on-path, ensuite mises en cache 7j).
+OMDB_API_BASE = "https://www.omdbapi.com/"
 
 # TTL court : OMDb met a jour les ratings IMDb regulierement. 7 jours est un
 # bon compromis (eviter de marteler l'API tout en captant les corrections
