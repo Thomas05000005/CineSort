@@ -1538,7 +1538,15 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # `perceptual_workers` clampe a [0, 16] (0 = auto). `perceptual_parallelism_enabled`
         # est un bool (defaut True) qui agit comme kill-switch global du pool batch.
         "perceptual_parallelism_enabled": to_bool(payload.get("perceptual_parallelism_enabled"), True),
-        "perceptual_workers": max(0, min(16, _coerce_workers_int(payload.get("perceptual_workers")))),
+        # AUDIT 2026-06-11 (R3) : l'UI (parametres.js) n'envoie QUE l'alias
+        # perceptual_workers_count, pas perceptual_workers. Avant, cette section
+        # (executee APRES _save_section_advanced) ecrivait inconditionnellement
+        # perceptual_workers depuis payload.get("perceptual_workers")=None ->
+        # fallback 0 (auto) -> la valeur saisie etait toujours ecrasee. On lit
+        # l'alias en fallback. Clamp canonique [0..16] (0=auto).
+        "perceptual_workers": max(0, min(16, _coerce_workers_int(
+            payload.get("perceptual_workers", payload.get("perceptual_workers_count"))
+        ))),
         "perceptual_audio_fingerprint_enabled": to_bool(payload.get("perceptual_audio_fingerprint_enabled"), True),
         "perceptual_scene_detection_enabled": to_bool(payload.get("perceptual_scene_detection_enabled"), True),
         "perceptual_audio_spectral_enabled": to_bool(payload.get("perceptual_audio_spectral_enabled"), True),
@@ -1668,12 +1676,9 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
             out["update_github_repo"] = repo
     if "worker_count" in payload:
         out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
-    if "perceptual_workers_count" in payload:
-        # Fix audit 2026-05-24 : mismatch nom UI (perceptual_workers_count) vs
-        # backend (perceptual_workers). On normalise vers le nom backend.
-        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers_count"), 4)))
-    if "perceptual_workers" in payload:
-        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers"), 4)))
+    # AUDIT 2026-06-11 (R3) : perceptual_workers(_count) est gere par
+    # _save_section_perceptual (clamp canonique [0..16], lit l'alias UI). On ne le
+    # traite plus ici (l'ancien clamp [1..32] etait incoherent ET ecrase ensuite).
     if "desktop_notifications_enabled" in payload:
         out["desktop_notifications_enabled"] = to_bool(payload.get("desktop_notifications_enabled"), False)
     if "animations_enabled" in payload:
