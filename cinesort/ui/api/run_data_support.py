@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import cinesort.domain.core as core
 from cinesort.domain.conversions import to_int
@@ -110,6 +110,25 @@ def _parse_subtitle_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _parse_tv_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """AUDIT 2026-06-10 (REAL 2/2) : restaure les champs TV (absents avant ->
+    remis a None). Sans eux, apres redemarrage de l'app (RunState plus en
+    memoire), apply rechargeait les rows via plan.jsonl puis apply_tv_episode
+    renommait avec season=0/episode=0 -> fichiers TV 'S00E00 - .ext' (violation
+    invariant renommage + perte d'info)."""
+    def _opt_int(key: str) -> Optional[int]:
+        v = data.get(key)
+        return int(v) if v not in (None, "") else None
+
+    return {
+        "tv_series_name": _optional_str(data, "tv_series_name"),
+        "tv_season": _opt_int("tv_season"),
+        "tv_episode": _opt_int("tv_episode"),
+        "tv_episode_title": _optional_str(data, "tv_episode_title"),
+        "tv_tmdb_series_id": _opt_int("tv_tmdb_series_id"),
+    }
+
+
 def row_from_json(data: Dict[str, Any]) -> core.PlanRow:
     return core.PlanRow(
         candidates=_parse_candidates(data),
@@ -117,6 +136,7 @@ def row_from_json(data: Dict[str, Any]) -> core.PlanRow:
         **_parse_basic_fields(data),
         **_parse_optional_fields(data),
         **_parse_subtitle_fields(data),
+        **_parse_tv_fields(data),
     )
 
 

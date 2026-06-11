@@ -108,6 +108,24 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
             tmdb_collection_name=str(data.get("tmdb_collection_name") or "") or None,
             edition=str(data.get("edition") or "") or None,
             nfo_runtime=int(data["nfo_runtime"]) if data.get("nfo_runtime") not in (None, "", 0) else None,
+            # AUDIT 2026-06-10 (REAL 2/2) : restaurer les 10 champs TV/sous-titres
+            # serialises par plan_row_to_jsonable (asdict). Sans eux, tout hit du
+            # cache incremental ramenait tv_season/tv_episode=None ->
+            # apply_tv_episode renommait l'episode en S00E00 (perte d'info +
+            # violation invariant renommage), et les badges sous-titres
+            # disparaissaient en UI.
+            tv_series_name=str(data.get("tv_series_name") or "") or None,
+            tv_season=int(data["tv_season"]) if data.get("tv_season") not in (None, "") else None,
+            tv_episode=int(data["tv_episode"]) if data.get("tv_episode") not in (None, "") else None,
+            tv_episode_title=str(data.get("tv_episode_title") or "") or None,
+            tv_tmdb_series_id=int(data["tv_tmdb_series_id"])
+            if data.get("tv_tmdb_series_id") not in (None, "", 0)
+            else None,
+            subtitle_count=int(data.get("subtitle_count") or 0),
+            subtitle_languages=[str(x) for x in (data.get("subtitle_languages") or [])],
+            subtitle_formats=[str(x) for x in (data.get("subtitle_formats") or [])],
+            subtitle_missing_langs=[str(x) for x in (data.get("subtitle_missing_langs") or [])],
+            subtitle_orphans=int(data.get("subtitle_orphans") or 0),
         )
     except (KeyError, TypeError, ValueError):
         return None
