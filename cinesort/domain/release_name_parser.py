@@ -187,8 +187,14 @@ def parse_release_name(name: str) -> ReleaseNameInfo:
     # garde le premier token degrade trouve. Si un CAM est detecte, on force
     # aussi source_hint="cam" : un fichier CAM EST une captation degradee, peu
     # importe le mensonge "REMUX/BluRay" colle dans le nom.
+    # AUDIT 2026-06-10 (REAL 2/2) : retirer l'extension de fichier finale avant
+    # la detection CAM. Le caller passe le nom AVEC extension (str(row.video)) et
+    # `\bTS\b` matchait l'extension `.ts` (MPEG-TS legitime) -> is_cam=True, tier
+    # cape Bronze + facteur -30 "Captation degradee (TS)" sur tout .ts sain. Un
+    # vrai token TS/TC de release est en milieu de nom, jamais l'extension finale.
+    text_cam = re.sub(r"\.[A-Za-z0-9]{1,4}$", "", text)
     for pattern, cam_tok in _PATTERNS_CAM:
-        if re.search(pattern, text, re.IGNORECASE):
+        if re.search(pattern, text_cam, re.IGNORECASE):
             info.is_cam = True
             info.cam_token = cam_tok
             info.source_hint = "cam"
