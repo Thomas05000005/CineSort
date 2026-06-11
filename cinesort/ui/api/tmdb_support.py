@@ -7,6 +7,11 @@ import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
+# AUDIT 2026-06-10 (CRITICAL) : `api._normalize_user_path` n'existe pas (c'est un
+# nom module-level dans cinesort_api, pas une methode d'instance) -> AttributeError
+# non rattrapee -> HTTP 500 sur get_tmdb_posters / search_tmdb des qu'une cle TMDb
+# est configuree. On utilise la vraie fonction module-level.
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +40,7 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         if not ids:
             return {"ok": True, "posters": {}}
 
-        settings = api.settings.get_settings()
+        settings = api._internal_settings()  # AUDIT: secrets en clair (tmdb_api_key) sinon 401
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             # Audit 2026-06-08 : sans indicateur explicite, le frontend ne peut
@@ -48,7 +53,7 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
             # consommateurs.
             return {"ok": True, "posters": {}, "reason": "tmdb_not_configured"}
 
-        state_dir = api._normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         # V5-03 polish v7.7.0 : propager le TTL configurable.
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
@@ -130,7 +135,7 @@ def search_tmdb(
             year_int = None
 
     try:
-        settings = api.settings.get_settings()
+        settings = api._internal_settings()  # AUDIT: secrets en clair (tmdb_api_key) sinon 401
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             return _err_response(
@@ -140,7 +145,7 @@ def search_tmdb(
                 log_module=__name__,
             )
 
-        state_dir = api._normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
         except (TypeError, ValueError):
