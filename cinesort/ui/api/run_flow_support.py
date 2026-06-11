@@ -28,7 +28,12 @@ from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
-from cinesort.ui.api.settings_support import normalize_user_path, read_settings
+from cinesort.ui.api.settings_support import (
+    _SECRET_FIELDS,
+    _SECRET_MASK,
+    normalize_user_path,
+    read_settings,
+)
 
 # Seuil duplique dans plan_support._ROOT_BULK_WARNING_THRESHOLD.
 _ROOT_BULK_THRESHOLD = 20
@@ -692,7 +697,14 @@ def _hydrate_settings_from_store(
         return settings
     merged: Dict[str, Any] = dict(persisted)
     # Requete override on-disk : on ecrase persisted par les cles du caller.
+    # AUDIT 2026-06-10 (REAL 2/2) : SAUF un secret egal au masque "••••••••".
+    # Les callers UI (accueil.js _triggerStartPlan, watcher) renvoient le payload
+    # settings/get_settings dont les secrets sont MASQUES. Sans cette exclusion,
+    # le masque ecrasait la vraie cle dechiffree on-disk -> tout scan tournait
+    # avec tmdb_api_key/omdb_api_key="••••••••" (identification cassee, 401).
     for key, value in settings.items():
+        if key in _SECRET_FIELDS and str(value or "").strip() == _SECRET_MASK:
+            continue  # garde la vraie valeur persistee
         merged[key] = value
     return merged
 
