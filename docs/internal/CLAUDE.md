@@ -148,6 +148,32 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 
 ## Sessions recentes
 
+### 11 juin 2026 — Audit de verification + vague de correction R1/R2/R3 (13 fixes) ✅
+
+Verification multi-agents (lecture seule, double-refutation) des 35 fixes Vagues 1-6 + 3 fixes Opus
+(`AUDIT_EVALUATION_HANDOFF_2026-06-11.md`). Conclusions : les 3 fixes Opus sont RESOLU ; **2
+regressions** introduites par les Vagues 1-6 ; **3 fixes PARTIEL** (GATE complaisant/absent) ;
+plusieurs **gaps PAS-CORRIGES** reels. Resultats bruts dans `_verif_audit_2026-06-11.json`.
+
+**13 commits R1/R2/R3** sur `loop/correction-2026-06` (jamais pousses), 1 sujet/commit, GATE
+rouge-avant/vert-apres prouve par `git show HEAD:` reel pour chacun :
+- **R1 (2 regressions)** : scene_parser garde release-group sur `_NOISE_RE` complet (`50acdaf`) ;
+  secrets NON persistes en clair dans `runs.config_json` via `_scrub_secrets_for_persist` (`63517d7`).
+- **R2 (.ts + 3 PARTIEL durcis)** : `.ts` ne force plus `source_hint=cam` (`dbaa07c`) ; vrais GATE
+  jellyfin date map / quality scope / film events (`760f404`).
+- **R3 (gaps reels)** : perceptual_auto_on_quality lit le dict plat (`c7c0627`) ; 5 filtres drawer
+  avance (codec/resolution/source/langues/sous-titres) (`d282bf3`) ; perceptual_workers_count UI
+  persiste (`191b916`) ; garde 24h sur undo_selected_rows (`5a7d975`) ; slot-guard sur chemins undo
+  reels (`f4bc0fe`) ; reconciliation exige `expected_ops` avant COMPLETED (`90b7961`) ; row cache v2
+  compare le `kind` (`90e0464`) ; replan folder_name idempotent via `library_root` (`d4a4ded`) ;
+  circuit breaker probe alimente en backend auto, evite le hang ~41h NAS down (`bc653b5`).
+
+**Verifs finales** : 168 tests (modules touches + tous les GATE) passed, 0 regression ; import-linter
+**3 contrats KEPT** ; couleurs tier/DPAPI/dry-run/bypass loopback intacts ; aucun push. Modele Fable 5.
+8 fichiers test v77 neufs cette vague (apply_batches_reconciliation, row_cache_kind_guard,
+replan_idempotent_folder_name, probe_breaker_auto_wiring, perceptual_workers_persist, undo_24h,
+undo_apply_slot_guard, config_secrets_scrub).
+
 ### 10-11 juin 2026 — Audit relecture integrale + backlog de correction (4 vagues) ✅
 
 Relecture multi-agents de tout le code (~120k lignes, workflow `wf_984bef0d-63a`, ~510 agents,
@@ -337,7 +363,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-04 (Vague R complete + hotfix7 en cours, migrations 27->31, facades 5->6 avec runtime, memoires user rappelees, API REST /api/<facade>/<methode>).*
+*Last updated : 2026-06-11 (Audit de verification + vague de correction R1/R2/R3 : 13 fixes, 0 regression, import-linter 3/3 ; cf annexe Fable 5 dans AUDIT_EVALUATION_HANDOFF_2026-06-11.md).*
 
 ---
 
