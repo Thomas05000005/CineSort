@@ -79,6 +79,24 @@ class DrawerFilterTests(unittest.TestCase):
         # Non-regression : un code brut conserve ne matche pas un filtre fr/en.
         self.assertFalse(_row_matches(self._row(audio_languages=["hin"]), {"audio_languages": ["fr"]}))
 
+    # --- Revue adversaire R4 (P3 v2) : tags speciaux != langues ---
+    def test_special_tags_are_not_second_languages(self) -> None:
+        """forced/sdh/cc/commentary/mul/qaa-qtz (tags de piste, pas des langues)
+        ne doivent compter ni pour 'multi' ni pour 'Autre'."""
+        for tag in ("forced", "sdh", "cc", "commentary", "mul", "qaa", "qtz"):
+            self.assertFalse(
+                _row_matches(self._row(audio_languages=["eng", tag]), {"audio_languages": ["multi"]}),
+                f"eng+{tag} n'est pas un film multi-langues",
+            )
+        self.assertFalse(
+            _row_matches(self._row(audio_languages=["fra", "commentary"]), {"audio_languages": ["Autre"]}),
+            "fra+commentary n'a pas de vraie langue hors fr/en",
+        )
+
+    def test_special_tag_track_is_still_a_subtitle(self) -> None:
+        # Une piste 'forced' EST un sous-titre : ne matche pas 'Aucun'.
+        self.assertFalse(_row_matches(self._row(subtitle_languages=["forced"]), {"subtitle_languages": ["none"]}))
+
     # --- Sous-titres : "none" = aucun sous-titre ---
     def test_subtitle_none_selects_films_without_subs(self) -> None:
         self.assertTrue(_row_matches(self._row(subtitle_languages=[]), {"subtitle_languages": ["none"]}))

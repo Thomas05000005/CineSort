@@ -508,10 +508,24 @@ def _media_source_label(video_name: str) -> str:
     return _SOURCE_HINT_TO_DRAWER.get(hint, "other" if hint else "")
 
 
-# Codes ISO639 qui ne designent PAS une langue identifiable : exclus du comptage
-# "multi" (sinon eng+und compterait 2 langues) mais CONSERVES comme presence de
-# piste (un film avec une piste 'und' a bien de l'audio/des sous-titres).
-_NON_LANG_CODES = frozenset({"und", "unknown", "zxx", "mis"})
+# Codes ISO639 / tags de piste qui ne designent PAS une langue identifiable :
+# exclus du comptage "multi"/"autre" (sinon eng+und ou eng+forced compteraient
+# 2 langues) mais CONSERVES comme presence de piste (un film avec une piste
+# 'und' ou 'forced' a bien de l'audio/des sous-titres -> ne matche pas "Aucun").
+# Revue adversaire R4 (P3 v2) : ajoute mul + tags speciaux forced/sdh/cc/
+# commentary (que _LANG_MAP mappe a '' et que le fallback brut reintroduisait
+# comme fausses langues) + la plage ISO 639-2 usage local qaa..qtz (convention
+# pistes commentaire), via _is_non_language_code (520 codes, pas de frozenset).
+_NON_LANG_CODES = frozenset(
+    {"und", "unknown", "zxx", "mis", "mul", "forced", "sdh", "cc", "commentary"}
+)
+
+
+def _is_non_language_code(code: str) -> bool:
+    if code in _NON_LANG_CODES:
+        return True
+    # Plage ISO 639-2 reservee usage local : qaa..qtz.
+    return len(code) == 3 and code.startswith("q") and "a" <= code[1] <= "t"
 
 
 def _to_iso639_1(lang: str) -> str:
@@ -622,7 +636,7 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         norm_row = {_to_iso639_1(l) for l in (row.get("audio_languages") or [])}
         norm_row.discard("")
         wanted = {str(f).lower() for f in audio_filter}
-        real_langs = norm_row - _NON_LANG_CODES
+        real_langs = {l for l in norm_row if not _is_non_language_code(l)}
         # R4-P5 : 'Autre' (drawer Qualite) = au moins une vraie langue hors fr/en.
         ok = (
             bool(norm_row & wanted)
