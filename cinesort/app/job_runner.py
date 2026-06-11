@@ -147,11 +147,20 @@ class JobRunner:
             or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
         )
         if accepts_should_pause:
+            # AUDIT 2026-06-10 (REAL 2/2) : valider la LIAISON des arguments avant
+            # d'appeler, au lieu d'un except TypeError autour de l'appel. La
+            # signature confirme deja que should_pause est accepte ; un TypeError
+            # leve PENDANT l'execution vient donc du CORPS du job (donnees
+            # invalides), pas de la signature. L'ancien except rejouait alors le
+            # job ENTIER -> double effets de bord (deplacements, journal, notifs).
+            # sig.bind() teste la liaison sans executer : seul un vrai mismatch
+            # de signature retombe sur le fallback legacy ; un TypeError du corps
+            # se propage normalement (pas de re-run).
             try:
-                return job_fn(should_cancel, should_pause=should_pause)
+                sig.bind(should_cancel, should_pause=should_pause)
             except TypeError:
-                # Defensif : signature inattendue, fallback legacy.
                 return job_fn(should_cancel)
+            return job_fn(should_cancel, should_pause=should_pause)
         return job_fn(should_cancel)
 
     def _should_pause_factory(self, run_id: str) -> Callable[[], bool]:

@@ -134,6 +134,33 @@ class JobFnSignatureInjectionTests(unittest.TestCase):
         self._wait_terminal(run_id)
         self.assertTrue(called["value"])
 
+    def test_body_typeerror_does_not_rerun_job(self) -> None:
+        """GATE AUDIT 2026-06-10 (REAL 2/2) : un TypeError leve dans le CORPS d'un
+        job qui accepte should_pause ne doit PAS rejouer le job entier (l'ancien
+        except TypeError rejouait -> double effets de bord). Le TypeError du corps
+        se propage et le job n'est execute qu'UNE fois."""
+        calls = {"n": 0}
+
+        def body_typeerror_job(should_cancel, should_pause=None):
+            calls["n"] += 1
+            raise TypeError("erreur du corps (donnees invalides), pas de signature")
+
+        with self.assertRaises(TypeError):
+            self.runner._invoke_job_fn(body_typeerror_job, lambda: False, lambda: False)
+        self.assertEqual(calls["n"], 1, "le job ne doit etre execute qu'une seule fois")
+
+    def test_should_pause_still_injected_after_fix(self) -> None:
+        """Non-regression : should_pause toujours injecte (appel direct)."""
+        seen = {"sp": None}
+
+        def aware(should_cancel, should_pause=None):
+            seen["sp"] = should_pause
+            return {"ok": True}
+
+        sp = lambda: True
+        self.runner._invoke_job_fn(aware, lambda: False, sp)
+        self.assertIs(seen["sp"], sp)
+
     def test_job_fn_accepting_should_pause_receives_it(self) -> None:
         received = {"sp": None}
 
