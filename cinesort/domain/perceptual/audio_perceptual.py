@@ -386,8 +386,15 @@ def analyze_audio_perceptual(
         result.audio_tier = "degrade"
         return result
 
-    idx = int(best.get("index", 0))
-    result.track_index = idx
+    # AUDIT 2026-06-10 (REAL 2/2) : best["index"] est l'index ABSOLU du conteneur
+    # (video=0, audio=1...), mais il est utilise comme index audio-RELATIF dans
+    # `-map 0:a:{idx}`. Pour un film standard a 1 piste audio (index absolu 1),
+    # `-map 0:a:1` ne matche aucun flux -> loudnorm/astats/clipping/fingerprint
+    # echouent TOUS silencieusement. On calcule l'index audio-relatif = rang de
+    # la piste parmi les pistes audio (par index absolu croissant).
+    abs_idx = int(best.get("index", 0))
+    result.track_index = abs_idx
+    idx = sum(1 for t in audio_tracks if int((t or {}).get("index", abs_idx)) < abs_idx)
     result.track_codec = str(best.get("codec") or "")
     result.track_channels = int(best.get("channels") or 0)
     result.track_language = str(best.get("language") or "")
