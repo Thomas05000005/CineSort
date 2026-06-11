@@ -151,6 +151,11 @@ class RunSimulationIntegrationTests(unittest.TestCase):
         store.quality.list_quality_reports.return_value = reports
         store.run.get_latest_run.return_value = {"run_id": "RUN123"}
         store.run.list_runs.return_value = [{"run_id": "RUN123"}]
+        # Pattern reel : le simulateur recupere le store via _get_or_create_infra(state_dir).
+        runner = MagicMock()
+        api._get_or_create_infra.return_value = (store, runner)
+        api._state_dir = "/tmp/test-state-dir"
+        # Retro-compat : conserver api._store pour les assertions de tests existants.
         api._store = store
         api._active_quality_profile_payload.return_value = {
             "profile_json": active_profile

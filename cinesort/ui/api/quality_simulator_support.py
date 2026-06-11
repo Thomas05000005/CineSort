@@ -198,8 +198,12 @@ def _get_active_profile(api: Any) -> Dict[str, Any]:
 
 def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str, Any]]:
     """Retourne une liste de quality_reports (chaque dict contient metrics.subscores)."""
-    store = getattr(api, "_store", None)
-    if store is None:
+    # CineSortApi n'expose pas d'attribut `_store` direct (cf cinesort_api.py:1017-1023).
+    # Le store s'obtient via `_get_or_create_infra(state_dir)`. L'ancien code
+    # `getattr(api, "_store", None)` retournait toujours None en prod -> simulateur mort.
+    try:
+        store, _runner = api._get_or_create_infra(api._state_dir)
+    except (AttributeError, OSError, TypeError):
         return []
 
     if scope == "library":
@@ -227,9 +231,10 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
     try:
-        latest = api._store.run.get_latest_run()
+        store, _runner = api._get_or_create_infra(api._state_dir)
+        latest = store.run.get_latest_run()
         return latest.get("run_id") if isinstance(latest, dict) else None
-    except (AttributeError, KeyError):
+    except (AttributeError, KeyError, OSError, TypeError):
         return None
 
 
