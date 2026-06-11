@@ -132,8 +132,9 @@ function _renderHeader(stats) {
   const _healthRaw = totalScored > 0 ? (_healthy / totalScored) * 100 : 0;
   const healthPct = Number.isFinite(_healthRaw) ? Math.round(_healthRaw) : 0;
 
+  // AUDIT 2026-06-11 (R4-P7) : genres retire du compte — le controle a ete
+  // retire du drawer (les rows n'ont pas les genres TMDb, filtre sans effet).
   const activeFilterCount = (_state.filters.decades.length
-    + _state.filters.genres.length
     + _state.filters.sources.length
     + _state.filters.audio_languages.length);
 
