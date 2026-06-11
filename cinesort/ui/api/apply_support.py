@@ -751,75 +751,89 @@ def undo_selected_rows(
             "message": t("errors.no_reversible_op_pending"),
         }
 
-    log_fn = api._file_logger(run_paths)
-    log_fn("INFO", f"=== UNDO SELECTIVE start batch={bid} row_ids={row_ids} ===")
+    # AUDIT 2026-06-11 (R3d, gap[6]) : l'undo selectif mute FS+DB du meme run
+    # que l'apply ; il DOIT acquerir le slot apply pour ne pas courir avec un
+    # apply concurrent (avant, seuls apply_changes/build_apply_preview le
+    # prenaient). Slot occupe -> 409.
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
 
-    cfg = api._cfg_from_run_row(_row)
-    empty_bucket = cfg.root / cfg.empty_folders_folder_name
-    residual_bucket = cfg.root / cfg.cleanup_residual_folders_folder_name
+        log_fn = api._file_logger(run_paths)
+        log_fn("INFO", f"=== UNDO SELECTIVE start batch={bid} row_ids={row_ids} ===")
 
-    undo_counts = _execute_undo_ops(
-        api,
-        selected_ops,
-        store,
-        log_fn,
-        run_paths,
-        empty_bucket=empty_bucket,
-        residual_bucket=residual_bucket,
-        atomic=bool(atomic),
-    )
+        cfg = api._cfg_from_run_row(_row)
+        empty_bucket = cfg.root / cfg.empty_folders_folder_name
+        residual_bucket = cfg.root / cfg.cleanup_residual_folders_folder_name
 
-    # Si l'undo a été abandonné atomiquement (hash mismatch), remonter le rapport.
-    if undo_counts.get("aborted_atomic"):
-        log_fn("WARN", f"UNDO SELECTIVE atomique refuse batch={bid}: hash mismatch")
+        undo_counts = _execute_undo_ops(
+            api,
+            selected_ops,
+            store,
+            log_fn,
+            run_paths,
+            empty_bucket=empty_bucket,
+            residual_bucket=residual_bucket,
+            atomic=bool(atomic),
+        )
+
+        # Si l'undo a été abandonné atomiquement (hash mismatch), remonter le rapport.
+        if undo_counts.get("aborted_atomic"):
+            log_fn("WARN", f"UNDO SELECTIVE atomique refuse batch={bid}: hash mismatch")
+            return {
+                "ok": False,
+                "batch_id": bid,
+                "dry_run": False,
+                "status": "ABORTED_HASH_MISMATCH",
+                "message": t("errors.undo_atomic_refused"),
+                "preverify": undo_counts.get("preverify"),
+            }
+
+        # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
+        remaining = store.apply.list_apply_operations(batch_id=bid)
+        all_resolved = all(
+            str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
+        )
+        if all_resolved:
+            batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
+        else:
+            batch_status = "UNDONE_PARTIAL"
+        store.apply.mark_apply_batch_undo_status(
+            batch_id=bid,
+            status=batch_status,
+            summary={
+                "undo_selective": True,
+                "row_ids": list(target_row_ids),
+                **undo_counts,
+            },
+        )
+
+        log_fn(
+            "INFO",
+            f"=== UNDO SELECTIVE done batch={bid} done={undo_counts['done']} failed={undo_counts['failed']} status={batch_status} ===",
+        )
+
         return {
-            "ok": False,
+            "ok": True,
             "batch_id": bid,
             "dry_run": False,
-            "status": "ABORTED_HASH_MISMATCH",
-            "message": t("errors.undo_atomic_refused"),
-            "preverify": undo_counts.get("preverify"),
-        }
-
-    # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
-    remaining = store.apply.list_apply_operations(batch_id=bid)
-    all_resolved = all(
-        str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
-    )
-    if all_resolved:
-        batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
-    else:
-        batch_status = "UNDONE_PARTIAL"
-    store.apply.mark_apply_batch_undo_status(
-        batch_id=bid,
-        status=batch_status,
-        summary={
-            "undo_selective": True,
+            "status": batch_status,
+            "counts": {
+                "done": undo_counts["done"],
+                "skipped": undo_counts["skipped"],
+                "failed": undo_counts["failed"],
+            },
             "row_ids": list(target_row_ids),
-            **undo_counts,
-        },
-    )
-
-    log_fn(
-        "INFO",
-        f"=== UNDO SELECTIVE done batch={bid} done={undo_counts['done']} failed={undo_counts['failed']} status={batch_status} ===",
-    )
-
-    return {
-        "ok": True,
-        "batch_id": bid,
-        "dry_run": False,
-        "status": batch_status,
-        "counts": {
-            "done": undo_counts["done"],
-            "skipped": undo_counts["skipped"],
-            "failed": undo_counts["failed"],
-        },
-        "row_ids": list(target_row_ids),
-        "message": t("errors.undo_selective_done")
-        if undo_counts["failed"] == 0
-        else t("errors.undo_selective_done_with_anomalies"),
-    }
+            "message": t("errors.undo_selective_done")
+            if undo_counts["failed"] == 0
+            else t("errors.undo_selective_done_with_anomalies"),
+        }
 
 
 @requires_valid_run_id
@@ -1070,9 +1084,22 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
             "message": t("errors.no_reversible_op_to_undo"),
         }
 
-    return _execute_and_finalize_undo(
-        api, run_id, uctx, reversible_ops, store, run_paths=run_paths, atomic=bool(atomic)
-    )
+    # AUDIT 2026-06-11 (R3d, gap[6]) : l'undo reel mute FS+DB du meme run que
+    # l'apply ; il DOIT acquerir le slot apply pour ne pas courir avec un
+    # apply concurrent (avant, seuls apply_changes/build_apply_preview le
+    # prenaient). Slot occupe -> 409, comme apply.
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
+        return _execute_and_finalize_undo(
+            api, run_id, uctx, reversible_ops, store, run_paths=run_paths, atomic=bool(atomic)
+        )
 
 
 @requires_valid_run_id
