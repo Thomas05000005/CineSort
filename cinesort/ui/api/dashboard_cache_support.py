@@ -14,7 +14,7 @@ def dashboard_cache_path(run_paths: state.RunPaths) -> Path:
 def path_cache_signature(path: Path) -> Dict[str, Any]:
     try:
         stat_result = path.stat()
-    except (ImportError, OSError, PermissionError):
+    except OSError:
         return {"exists": False, "size": 0, "mtime_ns": 0}
     return {"exists": True, "size": int(stat_result.st_size), "mtime_ns": int(stat_result.st_mtime_ns)}
 
