@@ -276,11 +276,17 @@ class BulkActionsWiringTests(unittest.TestCase):
         self.assertIn("library/export_films", self.js)
 
     def test_endpoint_perceptual_batch(self) -> None:
-        # On utilise analyze_perceptual_batch (le bulk-friendly endpoint) ou
-        # queue_perceptual_analyses si paires fournies.
-        self.assertTrue(
-            "quality/analyze_perceptual_batch" in self.js or "quality/queue_perceptual_analyses" in self.js,
-            "L'action 'Analyser perceptuel' doit appeler l'un des 2 endpoints quality",
+        # AUDIT 2026-06-13 (R5-D) : l'action 'Analyser perceptuel' utilise
+        # desormais la variante ASYNC quality/queue_perceptual_batch (job_id +
+        # progression done/total via get_perceptual_job_status), au lieu de
+        # l'ancien appel BLOQUANT analyze_perceptual_batch.
+        self.assertIn(
+            "quality/queue_perceptual_batch", self.js,
+            "L'action 'Analyser perceptuel' doit appeler quality/queue_perceptual_batch (async).",
+        )
+        self.assertIn(
+            "quality/get_perceptual_job_status", self.js,
+            "Le bulk perceptuel doit poller le statut du job (progression).",
         )
 
     def test_danger_confirm_modal_for_deletion(self) -> None:

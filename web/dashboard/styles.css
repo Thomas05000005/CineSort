@@ -1192,6 +1192,38 @@ body.is-background .skeleton { animation-play-state: paused; }
   font-variant-numeric: tabular-nums;
 }
 
+/* AUDIT 2026-06-13 (R5-D) : barre de progression de l'analyse perceptuelle
+   batch dans la toolbar bulk de la Bibliotheque. Meme animation --progress
+   (0..1) que la barre des doublons / du scan, pour coherence visuelle. */
+.bibliotheque-perc-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1, 4px);
+  flex-basis: 100%;
+  margin-top: var(--sp-2, 8px);
+}
+.bibliotheque-perc-progress-bar {
+  width: 100%;
+  height: 10px;
+  background: var(--surface-2, var(--bg-raised));
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+  border: 1px solid var(--border-1, var(--border-strong));
+}
+.bibliotheque-perc-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.4s ease-out;
+}
+.bibliotheque-perc-progress-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============================================================
    TOASTS GLOBAUX (D5) — copie du desktop avec memes tokens.
    ============================================================ */

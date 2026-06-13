@@ -318,15 +318,31 @@ function _renderNonTierChips() {
 function _renderBulkToolbar() {
   const n = _state.selected.size;
   if (n === 0) return "";
+  // AUDIT 2026-06-13 (R5-D) : barre de progression de l'analyse perceptuelle
+  // batch (job async). Affichee tant que _state.perceptualJob est actif ; mise
+  // a jour en place par _pollPerceptualJob (pas de full re-render par tick).
+  const pj = _state.perceptualJob;
+  const percHtml = pj ? `
+    <div class="bibliotheque-perc-progress" role="status" aria-live="polite">
+      <div class="bibliotheque-perc-progress-bar">
+        <div class="bibliotheque-perc-progress-fill" data-perc-progress-fill
+             style="--progress: ${pj.total > 0 ? (pj.done / pj.total) : 0}"></div>
+      </div>
+      <span class="bibliotheque-perc-progress-label" data-perc-progress-label>
+        Analyse perceptuelle : ${pj.done}/${pj.total}…
+      </span>
+    </div>` : "";
+  const disabled = pj ? "disabled" : "";
   return `
     <div class="bibliotheque-bulk-toolbar" role="region" aria-label="Actions groupées">
       <span class="bibliotheque-bulk-count">✓ ${n} film${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}</span>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual">▶ Analyser perceptuel</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan">↻ Re-scanner</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual" ${disabled}>▶ Analyser perceptuel</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan" ${disabled}>↻ Re-scanner</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Recharger les posters TMDb">🖼 Posters TMDb</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="export">📤 Exporter…</button>
       <button type="button" class="v5-btn v5-btn--danger" data-bibliotheque-bulk="delete">🗑 Marquer pour suppression</button>
       <button type="button" class="v5-btn v5-btn--ghost" data-bibliotheque-bulk="clear">Annuler sélection</button>
+      ${percHtml}
     </div>
   `;
 }
@@ -1488,24 +1504,92 @@ async function _bulkRefreshPosters(rowIds) {
   }
 }
 
+// AUDIT 2026-06-13 (R5-D) : analyse perceptuelle batch ASYNC avec progression.
+// Avant : appel BLOQUANT quality/analyze_perceptual_batch -> requete suspendue
+// plusieurs minutes sans feedback, toast "lancee" trompeur (l'await avait deja
+// attendu la fin), grille jamais rafraichie. Desormais : queue_perceptual_batch
+// -> job_id -> barre de progression done/total -> refresh grille + recap honnete.
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function _pollPerceptualJob(jobId, maxAttempts = 1800, delayMs = 1000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (!_state) return null;  // unmount -> stop poll
+    try {
+      const res = await apiPost("quality/get_perceptual_job_status", { job_id: jobId });
+      if (!_state) return null;
+      const d = (res && res.data) || res || {};
+      if (d.ok === false) return null;
+      // Mise a jour EN PLACE de la barre (pas de full _render par tick).
+      if (_state.perceptualJob) {
+        _state.perceptualJob.done = Number(d.done || 0);
+        _state.perceptualJob.total = Number(d.total || _state.perceptualJob.total || 0);
+        _state.perceptualJob.status = String(d.status || "running");
+        const total = _state.perceptualJob.total || 0;
+        const done = _state.perceptualJob.done || 0;
+        const fill = document.querySelector("[data-perc-progress-fill]");
+        const label = document.querySelector("[data-perc-progress-label]");
+        if (fill) fill.style.setProperty("--progress", total > 0 ? (done / total) : 0);
+        if (label) label.textContent = `Analyse perceptuelle : ${done}/${total}…`;
+      }
+      const st = String(d.status || "").toLowerCase();
+      if (st === "done" || st === "error" || st === "cancelled") return d;
+    } catch (_e) {
+      // Erreur reseau transitoire : on retente au prochain tick.
+    }
+    await _sleep(delayMs);
+  }
+  return null;
+}
+
 async function _bulkPerceptual(rowIds) {
   if (!_runId) {
     showToast({ type: "warn", text: "Aucun run actif." });
     return;
   }
+  _state.perceptualJob = { total: rowIds.length, done: 0, status: "running", jobId: null };
+  _render();
   try {
-    const res = await apiPost("quality/analyze_perceptual_batch", {
+    const res = await apiPost("quality/queue_perceptual_batch", {
       run_id: _runId,
       row_ids: rowIds,
     });
-    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    if (!_state) return;
     const _payload = (res && res.data) || res || {};
-    if (_payload.ok !== false) {
-      showToast({ type: "success", text: `Analyse perceptuelle lancée sur ${rowIds.length} films.` });
-    } else {
+    if (_payload.ok === false || !_payload.job_id) {
+      _state.perceptualJob = null;
+      _render();
       showToast({ type: "error", text: _payload.message || _payload.error || "Erreur perceptuelle." });
+      return;
+    }
+    _state.perceptualJob = { total: _payload.total || rowIds.length, done: 0, status: "running", jobId: _payload.job_id };
+    _render();
+    showToast({ type: "info", text: `Analyse perceptuelle de ${_payload.total || rowIds.length} films démarrée…`, duration: 2000 });
+
+    const final = await _pollPerceptualJob(_payload.job_id);
+    if (!_state) return;
+    _state.perceptualJob = null;
+
+    if (!final) {
+      _render();
+      showToast({ type: "warn", text: "Analyse perceptuelle interrompue (statut indisponible)." });
+      return;
+    }
+    const okCount = Number(final.success_count != null ? final.success_count : (final.results || []).length);
+    const errCount = Number(final.error_count != null ? final.error_count : (final.errors || []).length);
+    const total = Number(final.total || rowIds.length);
+    // Refresh de la grille pour exposer les nouveaux scores perceptuels.
+    await _fetchLibrary();
+    if (!_state) return;
+    if (final.status === "error" && okCount === 0) {
+      showToast({ type: "error", text: `Analyse perceptuelle échouée (${errCount} erreur${errCount > 1 ? "s" : ""}).` });
+    } else {
+      const errPart = errCount > 0 ? `, ${errCount} erreur${errCount > 1 ? "s" : ""}` : "";
+      showToast({ type: "success", text: `Analyse perceptuelle terminée : ${okCount}/${total} analysé${okCount > 1 ? "s" : ""}${errPart}.` });
     }
   } catch (err) {
+    if (_state) { _state.perceptualJob = null; _render(); }
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
   }
 }
