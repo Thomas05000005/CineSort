@@ -723,3 +723,47 @@ La phase Verdict-par-agents de la revue adversaire a été coupée 2× par le qu
 findings ont été jugés inline puis corrigés/documentés ci-dessus. Relance possible après reset :
 `Workflow({scriptPath: ".../revue-adversaire-r4-wf_7e1cf1c1-092.js", resumeFromRunId: "wf_7e1cf1c1-092"})`
 pour une contre-validation 100 % agents des verdicts inline.
+
+---
+
+## VAGUE R5 (Opus 4.8) — UX perceptuel + identification NFO + doublons (2026-06-13)
+
+Declenchee par l'analyse de 5 captures de l'app reelle + le constat utilisateur
+« on ne voit pas la progression de l'analyse perceptuelle ni la comparaison ».
+Verifications faites sur les VRAIES donnees (plan.jsonl du run 20260612_234833,
+settings.json). **8 commits**, 1 sujet/commit, GATE + node --check + verif data.
+
+### Constat racine (verifie empiriquement)
+- **TMDb n'a jamais tourne** sur ce run : `tmdb_enabled=False`, aucune cle,
+  **0 tmdb_id / 0 jaquette** sur 1027 films. Identification = NFO (908) + nom
+  (115) + unknown (4). Le candidat « 90% ✓Choisi » de l'inspecteur est un
+  candidat NFO, pas TMDb.
+
+### Commits
+| # | Commit | Sujet |
+|---|--------|-------|
+| R5-A | `20cb06f` | `_row_unidentified` n'exige plus `tmdb_id>0` : un film NFO/nom (confiance+annee) EST identifie. **1027 -> 27** non-identifies. (Repare test_unidentified_counted pre-existant rouge.) |
+| R5-B | `389982c` | Cartes biblio : `row.identified` (backend) -> clap propre au lieu du CTA « Identifier » (1000 cartes corrigees). |
+| R5-C | `6251c93` | Backend `queue_perceptual_batch` async + `progress_cb(done,total)` sur `analyze_perceptual_batch` (callers existants inchanges). Pollable via `get_perceptual_job_status`. |
+| R5-D | `a89c8d6` | Biblio bulk perceptuel : queue+poll+**barre de progression**+refresh grille+**recap honnete** (fini le toast « lancee » menteur + requete bloquante). |
+| R5-E | `9df1bf9` | **Entree « Doublons » dans le menu** (la vue comparateur existait mais n'etait atteignable que via Traitement etape 4) + badge compteur (65, verifie). |
+| R5-F | `bc32e19` | **Pont biblio -> comparateur** : selection de 2+ versions du meme film -> bouton « Comparer les versions ». |
+| R5-G | (verifie) | « Voir les doublons » (alerte film) : DEJA fonctionnel (alert-labels.js:145 + open_duplicates -> #/doublons). |
+| R5-I | `6a6ec57` | Messages honnetes : alerte root_level_source (« Film a la racine » au lieu de « renomme a la main »), stat « Identifie via » (proposed_source au lieu de « — »), « Confiance d'identification ». |
+
+### R5-H — TMDb : GAP VERIFIE, decision requise (NON implemente)
+L'utilisateur veut reactiver TMDb pour avoir des jaquettes. **Mais le code
+court-circuite TMDb quand le NFO a matche** : `_build_tmdb_fallback_candidates`
+(plan_support_dedup.py:18) `need = (not nfo_cands) or year_delta_reject or
+(not name_year)`. Pour un film NFO-matche, `nfo_cands` est non vide -> TMDb
+n'est JAMAIS interroge. Les augment NFO->TMDb (`_augment_candidates_from_nfo_*`)
+ne tournent QUE si le NFO contient un tmdbid/imdbid.
+=> **Reactiver TMDb seul ne donnera PAS de jaquettes aux 908 films NFO.**
+Fix possible (a valider avec l'utilisateur + sa cle, touche le pipeline scan) :
+ajouter une passe d'enrichissement « identifie -> chercher tmdb_id+poster par
+titre+annee » sans changer l'identification NFO. A trancher avant implementation.
+
+### Verification finale R5
+447 passed / 1 echec (`test_countdown_3s_if_over_50` = PRE-EXISTANT baseline §7,
+non imputable). node --check OK sur tous les JS touches. import-linter non
+re-verifie (aucun nouvel import cross-couche introduit).
