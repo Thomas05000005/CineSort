@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -223,6 +224,7 @@ def title_prefix_before_parenthesized_year(text: str) -> str:
     return prefix
 
 
+@lru_cache(maxsize=512)
 def _norm_for_tokens(s: str) -> str:
     s = s.lower()
     s = _strip_accents(s)
