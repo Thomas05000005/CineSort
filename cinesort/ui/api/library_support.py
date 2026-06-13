@@ -1136,25 +1136,37 @@ def _row_subs_missing_fr(row: Dict[str, Any]) -> bool:
 
 
 def _row_unidentified(row: Dict[str, Any]) -> bool:
-    """True si la row n'a pas ete identifiee par TMDb (cf domain/librarian.py).
+    """True si le film n'a PAS pu etre identifie (titre+annee fiables).
 
-    Critere robuste : absence de tmdb_id resolu (None/0) OU confidence sous le
-    seuil low (60). Les anciens critères (proposed_source=='unknown' / conf==0)
-    sont conserves comme fallback pour rester compatibles avec d'anciens runs
-    qui n'auraient pas persiste tmdb_id sur les rows.
+    AUDIT 2026-06-13 (R5-A) : l'ancienne version exigeait `tmdb_id > 0` EN
+    PREMIER (`if tmdb_id_int <= 0: return True`). Or l'identification ne passe
+    pas forcement par TMDb : un film resolu par fichier NFO ou par parsing du
+    nom n'a AUCUN tmdb_id mais EST parfaitement identifie (titre + annee +
+    confiance). Sur une biblio reelle 100% NFO (TMDb desactive), ce bug
+    classait les 1027 films "non identifies" et affichait "Identifier" partout.
+    Le tmdb_id ne sert qu'aux jaquettes / au match Jellyfin, PAS a decider de
+    l'identification.
+
+    Critere corrige :
+    - tmdb_id resolu (> 0) => identifie (raccourci suffisant).
+    - sinon : identifie si proposed_source est fiable (nfo / name / tmdb /
+      imdb ...), confiance >= seuil low (60) ET une annee est resolue.
+    - non identifie si source unknown/vide, confiance < 60, ou annee absente.
     """
     tmdb_id = row.get("tmdb_id")
     try:
-        tmdb_id_int = int(tmdb_id) if tmdb_id is not None else 0
+        if tmdb_id is not None and int(tmdb_id) > 0:
+            return False  # tmdb_id resolu : identifie (raccourci).
     except (TypeError, ValueError):
-        tmdb_id_int = 0
-    if tmdb_id_int <= 0:
-        return True
-    conf = int(row.get("confidence") or 0)
-    if conf < 60:
-        return True
+        pass
     src = str(row.get("proposed_source") or "").strip().lower()
-    if src in ("unknown", ""):
+    if src in ("", "unknown"):
+        return True
+    if int(row.get("confidence") or 0) < 60:
+        return True
+    # La row Library expose `year`, la PlanRow `proposed_year` : on tolere les 2.
+    year = int(row.get("proposed_year") or row.get("year") or 0)
+    if year <= 0:
         return True
     return False
 
