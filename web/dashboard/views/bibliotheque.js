@@ -315,6 +315,21 @@ function _renderNonTierChips() {
   `;
 }
 
+// AUDIT 2026-06-13 (R5-F) : la selection contient-elle >=2 versions du meme
+// film (meme titre+annee normalises) ? -> propose le pont vers le comparateur.
+function _selectionHasDuplicatePair() {
+  if (!_state || _state.selected.size < 2) return false;
+  const counts = new Map();
+  for (const id of _state.selected) {
+    const r = _state.rows.find((x) => String(x.row_id) === String(id));
+    if (!r) continue;
+    const key = `${String(r.title || "").trim().toLowerCase()}|${r.year || 0}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (counts.get(key) >= 2) return true;
+  }
+  return false;
+}
+
 function _renderBulkToolbar() {
   const n = _state.selected.size;
   if (n === 0) return "";
@@ -333,9 +348,16 @@ function _renderBulkToolbar() {
       </span>
     </div>` : "";
   const disabled = pj ? "disabled" : "";
+  // AUDIT 2026-06-13 (R5-F) : pont vers le comparateur quand la selection
+  // contient au moins 2 versions du MEME film (meme titre+annee). Repond au cas
+  // d'usage "je selectionne 1080p + 4k du meme film et je veux les comparer".
+  const compareBtn = _selectionHasDuplicatePair()
+    ? `<button type="button" class="v5-btn v5-btn--primary" data-bibliotheque-bulk="compare" title="Comparer les versions du même film (frames, audio, qualité)">⊟ Comparer les versions</button>`
+    : "";
   return `
     <div class="bibliotheque-bulk-toolbar" role="region" aria-label="Actions groupées">
       <span class="bibliotheque-bulk-count">✓ ${n} film${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}</span>
+      ${compareBtn}
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual" ${disabled}>▶ Analyser perceptuel</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan" ${disabled}>↻ Re-scanner</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Recharger les posters TMDb">🖼 Posters TMDb</button>
@@ -1415,6 +1437,14 @@ function _handleBulkAction(action) {
     // delete passe par une modale + confirmation ; le release est fait dans
     // _confirmBulkDelete via onConfirm/onCancel (cf signature).
     _confirmBulkDelete(ids, release);
+    return;
+  }
+  if (action === "compare") {
+    // AUDIT 2026-06-13 (R5-F) : ouvre la vue Doublons (comparateur A/B,
+    // frames/audio, winner). La vue charge tous les groupes ; l'utilisateur
+    // retrouve son film. Navigation par hash (coherent avec film-detail).
+    release();
+    window.location.hash = "#/doublons";
     return;
   }
   if (action === "perceptual") {
