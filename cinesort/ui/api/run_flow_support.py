@@ -578,6 +578,42 @@ def _build_plan_job_fn(
 
             _save_plan_artifacts(rs, rows, stats, root, state_dir, dlog)
 
+            # AUDIT 2026-06-13 (R5-H1) : enrichissement TMDb post-scan. Les films
+            # identifies par NFO/nom n'ont pas de tmdb_id (la recherche TMDb est
+            # court-circuitee au scan quand un NFO matche, plan_support_dedup.py:18)
+            # -> aucune jaquette. Si l'utilisateur a active TMDb, on resout en
+            # ARRIERE-PLAN le tmdb_id (+ jaquette) par titre+annee pour ces films,
+            # sans toucher a l'identification. Gate sur tmdb_enabled ; daemon =
+            # ne bloque pas la fin du scan ; les jaquettes apparaissent au
+            # prochain chargement biblio. Reutilise la fonction testee R5-H2
+            # (skip les rows ayant deja un tmdb_id).
+            try:
+                if to_bool(settings.get("tmdb_enabled"), False) and rows:
+                    enrich_ids = [
+                        str(getattr(r, "row_id", "") or "")
+                        for r in rows
+                        if str(getattr(r, "row_id", "") or "").strip()
+                    ]
+                    if enrich_ids:
+                        import threading as _threading
+
+                        from cinesort.ui.api import tmdb_support as _tmdb_support
+
+                        def _bg_tmdb_enrich() -> None:
+                            try:
+                                res = _tmdb_support.enrich_tmdb_ids_by_title(api, run_id, enrich_ids)
+                                resolved = res.get("resolved") if isinstance(res, dict) else "?"
+                                dlog(f"job_fn post-scan tmdb enrich resolved={resolved}")
+                            except Exception as _exc:  # noqa: BLE001 - daemon best-effort
+                                dlog(f"job_fn post-scan tmdb enrich warning: {_exc}")
+
+                        _threading.Thread(
+                            target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True
+                        ).start()
+                        dlog(f"job_fn post-scan tmdb enrich launched ({len(enrich_ids)} films)")
+            except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+                dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")
+
             # Capturer le snapshot sante bibliotheque dans les stats
             try:
                 lib_result = generate_suggestions(rows, [], settings)
