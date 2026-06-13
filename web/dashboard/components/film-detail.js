@@ -166,8 +166,13 @@ function _renderHero(data) {
     ? Math.round(Number(topCand.confidence))
     : (row.confidence != null ? Math.round(Number(row.confidence)) : null);
 
-  // Source (NFO / Probe / etc.)
-  const source = row.match_source || row.identification_source || "—";
+  // Source d'identification (NFO / nom / TMDb...).
+  // AUDIT 2026-06-13 (R5-I) : les rows exposent `proposed_source` (nfo/name/
+  // tmdb), pas match_source/identification_source -> la stat affichait toujours
+  // "—" alors que les films sont identifies (ex. par NFO). On lit la bonne cle.
+  const _srcMap = { nfo: "NFO", name: "Nom de fichier", tmdb: "TMDb", imdb: "IMDb", unknown: "—" };
+  const _rawSrc = String(row.match_source || row.identification_source || row.proposed_source || "").trim().toLowerCase();
+  const source = _srcMap[_rawSrc] || (_rawSrc ? _rawSrc.toUpperCase() : "—");
 
   // Poster
   const posterUrl = data.poster_url || topCand.poster_url || null;
@@ -230,8 +235,8 @@ function _renderHero(data) {
         ${metaLine ? `<div class="film-detail-meta-line">${metaLine}</div>` : ""}
         <div class="film-detail-meta-stats">
           ${score != null ? `<div class="film-detail-score" data-film-action="open-analysis" title="Voir détail Score V2">${scoreCircle}</div>` : ""}
-          ${confidence != null ? `<div class="film-detail-stat"><span class="film-detail-stat-label">Confiance match</span><span class="film-detail-stat-value">${confidence}%</span></div>` : ""}
-          <div class="film-detail-stat"><span class="film-detail-stat-label">Source</span><span class="film-detail-stat-value">${escapeHtml(source)}</span></div>
+          ${confidence != null ? `<div class="film-detail-stat" title="Confiance globale que ce film est correctement identifié (titre + année)"><span class="film-detail-stat-label">Confiance d'identification</span><span class="film-detail-stat-value">${confidence}%</span></div>` : ""}
+          <div class="film-detail-stat" title="Méthode d'identification du film"><span class="film-detail-stat-label">Identifié via</span><span class="film-detail-stat-value">${escapeHtml(source)}</span></div>
         </div>
         ${sourcePath ? `<div class="film-detail-path">📁 <span class="film-detail-path-text" title="${escapeHtml(sourcePath)}">${escapeHtml(sourcePath)}</span></div>` : ""}
         ${videoBlock}

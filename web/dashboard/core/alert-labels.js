@@ -68,8 +68,13 @@ const FLAG_MAP = {
   // --- Source / Filesystem ---
   root_level_source: {
     icon: "📁",
-    label: "Source non identifiée",
-    description: "Le dossier source n'est pas dans un format scene standard — fichier probablement renommé à la main.",
+    // AUDIT 2026-06-13 (R5-I) : ce flag signale UNIQUEMENT un film pose
+    // directement a la racine (plan_support_core.py:707), pas un probleme
+    // d'identification ni un fichier "renomme a la main" (un BluRay scene a la
+    // racine declenchait a tort ce message trompeur). On dit la verite :
+    // le film sera range dans un sous-dossier "Titre (Annee)" a l'application.
+    label: "Film à la racine",
+    description: "Ce film est posé directement à la racine de la bibliothèque (hors sous-dossier dédié). Il sera rangé dans un dossier « Titre (Année) » lors de l'application.",
     severity: "info",
     action: { kind: "ignore", label: "Ignorer" },
   },
