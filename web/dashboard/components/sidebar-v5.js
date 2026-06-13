@@ -28,6 +28,12 @@ export const NAV_ITEMS = [
     svg: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>' },
   { id: "quality",      labelKey: "sidebar.nav.quality",     shortcut: "Alt+4", badgeKey: "quality",
     svg: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>' },
+  // AUDIT 2026-06-13 (R5-E) : entree dediee Doublons (la vue /doublons existait
+  // mais n'etait atteignable que via Traitement -> Etape 4, donc invisible).
+  // Pas de raccourci Alt+N (le handler clavier ne gere que 1..7, deja pris) ;
+  // badge "duplicates" alimente par run/get_sidebar_counters.
+  { id: "doublons",     labelKey: "sidebar.nav.doublons",                       badgeKey: "duplicates",
+    svg: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' },
   { id: "history",      labelKey: "sidebar.nav.history",     shortcut: "Alt+5",
     svg: '<polyline points="3 12 3 4 21 4 21 20 3 20 3 12"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="20"/>' },
   { id: "_separator" },
@@ -66,16 +72,21 @@ function _buildItemHtml(item, active) {
   const badge = item.badgeKey
     ? `<span class="v5-sidebar-badge" data-badge-key="${escapeHtml(item.badgeKey)}" role="status" aria-live="polite" aria-label="${escapeHtml(t("sidebar.counter_aria", { label }))}"></span>`
     : '';
+  // AUDIT 2026-06-13 (R5-E) : shortcut optionnel (ex. Doublons n'a pas de
+  // Alt+N libre). Sans raccourci, titre = label seul et chip raccourci omis.
+  const titleText = item.shortcut
+    ? t("sidebar.title_with_shortcut", { label, shortcut: item.shortcut })
+    : label;
   return `
     <button type="button" class="v5-sidebar-item ${active ? "is-active" : ""}"
             data-route="${escapeHtml(item.id)}"
-            data-shortcut="${escapeHtml(item.shortcut)}"
+            data-shortcut="${escapeHtml(item.shortcut || "")}"
             ${ariaCurrent}
             tabindex="${active ? "0" : "-1"}"
-            title="${escapeHtml(t("sidebar.title_with_shortcut", { label, shortcut: item.shortcut }))}">
+            title="${escapeHtml(titleText)}">
       <span class="v5-sidebar-icon">${_svgIcon(item.svg)}</span>
       <span class="v5-sidebar-label">${escapeHtml(label)}</span>
-      <span class="v5-sidebar-shortcut">${escapeHtml(item.shortcut)}</span>
+      ${item.shortcut ? `<span class="v5-sidebar-shortcut">${escapeHtml(item.shortcut)}</span>` : ""}
       ${badge}
     </button>
   `;

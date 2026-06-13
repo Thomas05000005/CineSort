@@ -351,6 +351,7 @@ const SIDEBAR_ROUTE_ALIAS = {
   home: "/accueil",
   processing: "/traitement",
   library: "/bibliotheque",
+  doublons: "/doublons",  // AUDIT 2026-06-13 (R5-E) : entree menu Doublons.
   quality: "/qualite",
   history: "/historique",
   settings: "/parametres",
@@ -370,6 +371,7 @@ const _ROUTE_TO_SIDEBAR_ID = {
   accueil: "home", home: "home", status: "home",
   traitement: "processing", processing: "processing",
   bibliotheque: "library", library: "library",
+  doublons: "doublons",  // AUDIT 2026-06-13 (R5-E) : highlight l'entree Doublons.
   qualite: "quality", quality: "quality",
   historique: "history", logs: "history",
   parametres: "settings", settings: "settings",

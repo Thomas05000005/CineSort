@@ -1733,7 +1733,7 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
     Retourne {validation, application, quality} pour le run le plus recent.
     Un compteur a 0 signifie "rien a faire", le badge correspondant restera invisible.
     """
-    empty = {"validation": 0, "application": 0, "quality": 0}
+    empty = {"validation": 0, "application": 0, "quality": 0, "duplicates": 0}
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
@@ -1772,10 +1772,34 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         application = 0 if last_batch else len(approved_ids)
         quality = sum(1 for r in rows if getattr(r, "warning_flags", None))
 
+        # AUDIT 2026-06-13 (R5-E) : badge "Doublons" = films dans un groupe de
+        # doublons (meme titre+annee >= 2 occurrences). Meme semantique que le
+        # chip biblio "Dans doublons" (library_support._count_duplicates_and_sagas).
+        dup_keys: Counter = Counter()
+        for r in rows:
+            title = str(getattr(r, "proposed_title", "") or "").strip().lower()
+            if not title:
+                continue
+            year = int(getattr(r, "proposed_year", 0) or 0)
+            dup_keys[(title, year)] += 1
+        duplicates = sum(
+            1
+            for r in rows
+            if str(getattr(r, "proposed_title", "") or "").strip()
+            and dup_keys[
+                (
+                    str(getattr(r, "proposed_title", "") or "").strip().lower(),
+                    int(getattr(r, "proposed_year", 0) or 0),
+                )
+            ]
+            >= 2
+        )
+
         return {
             "validation": int(validation),
             "application": int(application),
             "quality": int(quality),
+            "duplicates": int(duplicates),
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.debug("get_sidebar_counters fallback (err=%s)", exc)

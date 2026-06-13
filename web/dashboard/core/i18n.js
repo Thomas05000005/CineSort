@@ -35,6 +35,7 @@ const _FALLBACK_FR = Object.freeze({
   "sidebar.nav.home": "Accueil",
   "sidebar.nav.processing": "Traitement",
   "sidebar.nav.library": "Bibliothèque",
+  "sidebar.nav.doublons": "Doublons",
   "sidebar.nav.quality": "Qualité",
   "sidebar.nav.history": "Historique",
   "sidebar.nav.qij": "QIJ",
