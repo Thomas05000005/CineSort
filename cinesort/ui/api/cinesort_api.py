@@ -1999,6 +1999,16 @@ class CineSortApi:
         """
         return perceptual_support.queue_perceptual_analyses(self, pairs, options)
 
+    def _queue_perceptual_batch_impl(
+        self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """R5-C : analyse perceptuelle batch SINGLE-film en background (biblio).
+
+        Variante async de analyze_perceptual_batch : retourne un job_id pollable
+        via _get_perceptual_job_status_impl (meme registre que les paires).
+        """
+        return perceptual_support.queue_perceptual_batch(self, run_id, row_ids, options)
+
     def _get_perceptual_job_status_impl(self, job_id: str) -> Dict[str, Any]:
         """Phase 4 doublons : statut d'un batch perceptuel queue."""
         return perceptual_support.get_perceptual_job_status(self, job_id)

@@ -217,6 +217,16 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._queue_perceptual_analyses_impl(pairs, options)
 
+    def queue_perceptual_batch(
+        self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """R5-C : analyse perceptuelle batch SINGLE-film (biblio) en background.
+
+        Returns:
+            {ok, job_id, total}. Polling via get_perceptual_job_status(job_id).
+        """
+        return self._api._queue_perceptual_batch_impl(run_id, row_ids, options)
+
     def get_perceptual_job_status(self, job_id: str) -> Dict[str, Any]:
         """Phase 4 doublons : statut d'un job perceptuel batch."""
         return self._api._get_perceptual_job_status_impl(job_id)

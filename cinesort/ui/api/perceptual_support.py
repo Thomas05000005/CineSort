@@ -7,7 +7,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
 from cinesort.domain.i18n_messages import t
@@ -525,6 +525,7 @@ def analyze_perceptual_batch(
     run_id: str,
     row_ids: Any,
     options: Optional[Dict[str, Any]] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, Any]:
     """Analyse perceptuelle batch sur plusieurs films.
 
@@ -563,8 +564,25 @@ def analyze_perceptual_batch(
     else:
         max_workers = resolve_batch_workers(configured_workers)
 
+    # AUDIT 2026-06-13 (R5-C) : progress_cb(done, total) appele apres CHAQUE film
+    # (thread-safe) pour alimenter une barre de progression cote UI sans perdre
+    # le parallelisme. None (defaut) = comportement historique inchange.
+    _total = len(ids)
+    _done_lock = threading.Lock()
+    _done = [0]
+
     def _worker(rid: str) -> Dict[str, Any]:
-        return get_perceptual_report(api, run_id, rid, options)
+        try:
+            return get_perceptual_report(api, run_id, rid, options)
+        finally:
+            if progress_cb is not None:
+                with _done_lock:
+                    _done[0] += 1
+                    current = _done[0]
+                try:
+                    progress_cb(current, _total)
+                except Exception:  # noqa: BLE001 - un cb defaillant ne casse pas le batch
+                    logger.debug("analyze_perceptual_batch: progress_cb a leve, ignore", exc_info=True)
 
     raw_results = run_batch_parallel(
         ids,
@@ -1092,6 +1110,104 @@ def queue_perceptual_analyses(
     thread.start()
 
     return {"ok": True, "job_id": job_id, "total": len(normalized)}
+
+
+def _run_perceptual_batch_job(
+    api: Any,
+    job_id: str,
+    run_id: str,
+    row_ids: List[str],
+    options: Optional[Dict[str, Any]],
+) -> None:
+    """Worker thread daemon : analyse perceptuelle batch SINGLE-film (pas paires).
+
+    Reutilise analyze_perceptual_batch (parallelisme + tally) en lui passant un
+    progress_cb qui met a jour le snapshot du job (done/total) apres chaque film.
+    Garde-fou large pour finaliser le job meme en cas de plantage (cf
+    _run_perceptual_job pour la meme logique sur les paires).
+    """
+    try:
+        def _cb(done: int, _total: int) -> None:
+            _record_job_snapshot(job_id, done=done)
+
+        res = analyze_perceptual_batch(api, run_id, row_ids, options, progress_cb=_cb)
+        ok = bool(res.get("ok"))
+        results = list(res.get("results") or [])
+        errors = list(res.get("errors") or [])
+        _record_job_snapshot(
+            job_id,
+            status="done" if ok else "error",
+            done=int(res.get("total") or len(row_ids)),
+            ts_end=time.time(),
+            results=results,
+            errors=errors,
+            success_count=int(res.get("success_count") or len(results)),
+            error_count=int(res.get("error_count") or len(errors)),
+        )
+    except Exception as exc:  # noqa: BLE001 - garde-fou worker thread
+        logger.exception("perceptual batch job %s a echoue: %s", job_id, exc)
+        try:
+            _record_job_snapshot(
+                job_id,
+                status="error",
+                ts_end=time.time(),
+                errors=[{"ok": False, "message": f"job worker failure: {exc}"}],
+            )
+        except Exception:  # noqa: BLE001 - dernier rempart
+            logger.exception("perceptual batch job %s : snapshot d'erreur impossible", job_id)
+    finally:
+        try:
+            _trim_perceptual_jobs()
+        except Exception:  # noqa: BLE001
+            logger.exception("perceptual batch job %s : _trim a echoue", job_id)
+
+
+def queue_perceptual_batch(
+    api: Any,
+    run_id: str,
+    row_ids: Any,
+    options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Queue une analyse perceptuelle batch SINGLE-film en background.
+
+    AUDIT 2026-06-13 (R5-C/D) : variante async de analyze_perceptual_batch pour
+    la bibliotheque. Avant, le bouton "Analyser perceptuel" appelait le endpoint
+    bloquant -> requete suspendue plusieurs minutes sans progression ni refresh,
+    toast "lancee" trompeur. On expose desormais un job_id pollable via
+    get_perceptual_job_status (meme registre que les paires de doublons), avec
+    progression done/total.
+
+    Returns: {ok, job_id, total} ou err.
+    """
+    ids = [str(r) for r in (row_ids or []) if str(r).strip()]
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not ids:
+        return _err_response("Aucun row_id valide.", category="validation", level="info", log_module=__name__)
+
+    job_id = f"perceptual_batch_{int(time.time() * 1000)}_{id(ids) & 0xFFFF:04x}"
+    snapshot: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": "running",
+        "total": len(ids),
+        "done": 0,
+        "results": [],
+        "errors": [],
+        "ts_start": time.time(),
+        "ts_end": None,
+    }
+    with _PERCEPTUAL_JOBS_LOCK:
+        _PERCEPTUAL_JOBS[job_id] = snapshot
+
+    thread = threading.Thread(
+        target=_run_perceptual_batch_job,
+        args=(api, job_id, str(run_id), ids, options),
+        name=f"perc-batch-{job_id}",
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "job_id": job_id, "total": len(ids)}
 
 
 def get_perceptual_job_status(api: Any, job_id: str) -> Dict[str, Any]:  # noqa: ARG001
