@@ -461,6 +461,11 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             row["grain_era_v2"] = gi.get("film_era_v2")
             row["grain_nature"] = gi.get("nature")
 
+        # AUDIT 2026-06-13 (R5-B) : exposer l'etat d'identification (source unique
+        # = _row_unidentified) pour que la carte UI n'affiche "Identifier" QUE sur
+        # les vrais non-identifies, pas sur les films NFO/nom sans tmdb_id.
+        row["identified"] = not _row_unidentified(row)
+
         out.append(row)
 
     return out

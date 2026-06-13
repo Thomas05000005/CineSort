@@ -418,10 +418,16 @@ function _renderFilmCard(row) {
   // Fallback sur `poster_url` direct pour backward compat (acquis 242cf339).
   const proxiedPoster = posterProxyUrl(row.tmdb_id, "w185");
   const posterSrc = proxiedPoster || row.poster_url || "";
+  // AUDIT 2026-06-13 (R5-B) : "Identifier" ne doit s'afficher QUE sur les vrais
+  // non-identifies. Un film identifie par NFO/nom (sans tmdb_id ni jaquette) a
+  // un clap propre, pas un CTA "Identifier" intempestif. `row.identified` est
+  // calcule cote backend (source unique = _row_unidentified). Fallback sur
+  // tmdb_id si le champ est absent (payload ancien).
+  const isIdentified = (row.identified === true) || (row.identified == null && !!row.tmdb_id);
   if (posterSrc) {
     poster = `<img class="bibliotheque-card-poster-img" src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="lazy">`;
-  } else if (row.tmdb_id) {
-    poster = `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true">🎬</div>`;
+  } else if (isIdentified) {
+    poster = `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true" title="${escapeHtml(title)} — identifié (pas de jaquette)">🎬</div>`;
   } else {
     poster = `<div class="bibliotheque-card-poster-placeholder bibliotheque-card-poster-placeholder--unidentified"
                    data-bibliotheque-unidentified="${escapeHtml(rowId)}"
