@@ -767,3 +767,15 @@ titre+annee » sans changer l'identification NFO. A trancher avant implementatio
 447 passed / 1 echec (`test_countdown_3s_if_over_50` = PRE-EXISTANT baseline §7,
 non imputable). node --check OK sur tous les JS touches. import-linter non
 re-verifie (aucun nouvel import cross-couche introduit).
+
+### R5-H — IMPLEMENTE (2026-06-13, choix utilisateur « passe + bouton »)
+Gap confirme : `_build_tmdb_fallback_candidates` skippe TMDb quand un NFO matche.
+Deux fixes livres, chacun avec GATE (TMDb mocke) :
+- **R5-H2 `41715bc`** (bouton, sans re-scan) : `enrich_tmdb_ids_by_title(run_id,
+  row_ids)` resout le tmdb_id par titre+annee et le PERSISTE dans le plan SANS
+  toucher a l'identification ; le poster suit (builder Library par tmdb_id). Le
+  bouton biblio « Recuperer jaquettes » gere les films avec ET sans tmdb_id.
+- **R5-H1 `d2c607d`** (automatique) : hook post-scan (gate `tmdb_enabled`, thread
+  daemon, best-effort) qui lance la meme fonction sur tous les row_ids du run.
+**Pre-requis utilisateur** : saisir la cle TMDb dans Parametres > Integrations
+(actuellement tmdb_enabled=False, aucune cle). Validation LIVE a faire avec la cle.
