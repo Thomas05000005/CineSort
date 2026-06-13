@@ -153,6 +153,16 @@ let _applyOptions = {
   quarantine: false,
   apply_atomic: false,
 };
+// AUDIT 2026-06-13 (R5-P2) : aperçu + résumé de l'Étape 5 alimentés par le VRAI
+// plan backend (run/build_apply_preview), au lieu d'estimations client-side
+// mensongères. Avant : `renames = approved.length`, `moves = 0`, et l'aperçu
+// affichait "Dossier renommé : <racine> -> <titre>" pour les films posés à la
+// racine alors que l'apply CRÉE un sous-dossier et y DÉPLACE le fichier (cf
+// summary.txt du run + plan_support_core.py:674). _applyPreviewSig invalide le
+// cache quand les décisions changent (approve/reject).
+let _applyPreview = null;
+let _applyPreviewLoading = false;
+let _applyPreviewSig = "";
 // Fix audit 2026-05-24 : AbortController scope module pour annuler tous les
 // apiPost en vol au unmount (navigation, fermeture vue). Sans ça les fetch
 // continuent et appellent _renderInPlace/_loadXxx après remise à null du
@@ -1360,36 +1370,117 @@ function _formatPreviewEntry(entry) {
   return `<div class="apply-preview-entry">${src || dst || "&mdash;"}</div>`;
 }
 
+// AUDIT 2026-06-13 (R5-P2) : signature légère des décisions pour invalider
+// l'aperçu backend quand l'utilisateur approuve/rejette des films.
+function _applyDecisionsSignature() {
+  let approved = 0;
+  for (const st of _decisionsState.values()) {
+    if (st && st.ok) approved += 1;
+  }
+  return `${_runInfo?.runId || ""}|${_decisionsState.size}|${approved}`;
+}
+
+// Charge le VRAI plan d'apply (build_apply_preview) une fois par signature de
+// décisions. Idempotent : ne refetch pas tant que la signature est inchangée
+// (évite toute boucle de re-render). En échec, on retombe sur l'estimation
+// client clairement étiquetée.
+async function _ensureApplyPreview() {
+  if (!_runInfo?.runId) return;
+  // Ne pas solliciter build_apply_preview pendant un apply réel : il acquiert
+  // le même slot (409) et la vue montre déjà la progression live.
+  if (_applyStatus?.running) return;
+  const sig = _applyDecisionsSignature();
+  if (_applyPreviewLoading || _applyPreviewSig === sig) return;
+  _applyPreviewLoading = true;
+  _applyPreviewSig = sig;
+  try {
+    const res = await apiPost(
+      "run/build_apply_preview",
+      { run_id: _runInfo.runId, decisions: _buildDecisions() },
+      { signal: _signal() },
+    );
+    const data = res?.data || res;
+    _applyPreview = (data && data.ok !== false) ? data : null;
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      _applyPreviewLoading = false;
+      _applyPreviewSig = "";  // permet un refetch après annulation
+      return;
+    }
+    _applyPreview = null;
+  } finally {
+    _applyPreviewLoading = false;
+    if (_currentStep === "apply") _renderInPlace();
+  }
+}
+
+// Aplatit les ops effectives (hors no-op) des films du plan backend, limité à N.
+function _applyPreviewOps(limit) {
+  const out = [];
+  const films = (_applyPreview && Array.isArray(_applyPreview.films)) ? _applyPreview.films : [];
+  for (const film of films) {
+    if (film.change_type === "noop") continue;
+    for (const op of (film.ops || [])) {
+      if (op.action_summary === "noop_equivalent_fs") continue;
+      out.push(op);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
 function _renderApplyStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   // VN-C.1 (batch 2) : seuil "auto-approve" = CONF_HIGH (85) via thresholds unifies.
   const _autoThr = getConfidenceThresholdsSync().high;
   const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= _autoThr);
-  const renames = approved.length;
-  const moves = (_runInfo?.duplicatesGroups || 0) * 2;
-  const deletions = 0; // placeholder pour reject deletions
 
-  // Fix audit 2026-05-25 (v1.5.3) Vague F : afficher dossier_avant -> dossier_apres
-  // et indiquer explicitement que le nom du fichier video est conserve par
-  // apply_core (contrainte projet : "JAMAIS modifier le titre des films").
-  const preview = approved.slice(0, 3).map((r) => {
-    const videoName = String(r.video || "");
-    const folderOld = String(r.folder || r.path || "");
-    const proposedTitle = String(r.proposed_title || "");
-    const proposedYear = String(r.proposed_year || "");
-    const folderNew = proposedTitle ? `${proposedTitle}${proposedYear ? " (" + proposedYear + ")" : ""}` : folderOld;
-    return `
+  // AUDIT 2026-06-13 (R5-P2) : déclenche le chargement du vrai plan backend.
+  _ensureApplyPreview();
+  const totals = _applyPreview?.totals || null;
+  // Compteurs : vrais totaux backend si dispo, sinon estimation client étiquetée.
+  // apply ne SUPPRIME jamais (un reject -> quarantaine), donc suppressions=0.
+  const renames = totals ? Number(totals.renames || 0) : approved.length;
+  const moves = totals ? Number(totals.moves || 0) : ((_runInfo?.duplicatesGroups || 0) * 2);
+  const deletions = 0;
+  const quarantined = totals ? Number(totals.quarantined || 0) : 0;
+  const previewIsEstimate = !totals;
+
+  // AUDIT 2026-06-13 (R5-P2) : aperçu issu du VRAI plan backend (build_apply_preview)
+  // via _formatPreviewEntry, qui connaît le type d'op exact (création de
+  // sous-dossier + déplacement pour les films à la racine, vs renommage de
+  // dossier). Fallback estimation client clairement étiquetée si le plan n'a pas
+  // (encore) pu être calculé.
+  let preview;
+  if (totals) {
+    const ops = _applyPreviewOps(3);
+    preview = ops.length
+      ? ops.map((op) => `<li>${_formatPreviewEntry(op)}</li>`).join("")
+      : `<li><div class="apply-preview-entry v5u-text-muted">Aucune opération sur disque (films déjà conformes).</div></li>`;
+  } else if (_applyPreviewLoading) {
+    preview = `<li><div class="apply-preview-entry v5u-text-muted">Calcul du plan réel…</div></li>`;
+  } else {
+    // Estimation client (plan backend indisponible). On NE présente PAS un
+    // renommage de dossier comme certain : libellé prudent.
+    preview = approved.slice(0, 3).map((r) => {
+      const videoName = String(r.video || "");
+      const folderOld = String(r.folder || r.path || "");
+      const proposedTitle = String(r.proposed_title || "");
+      const proposedYear = String(r.proposed_year || "");
+      const folderNew = proposedTitle ? `${proposedTitle}${proposedYear ? " (" + proposedYear + ")" : ""}` : folderOld;
+      return `
     <li>
       <div class="apply-preview-entry">
-        <span>Dossier renomme :</span>
+        <span>Destination prévue :</span>
         <code class="traitement-apply-before">${escapeHtml(folderOld)}</code>
         <span class="traitement-apply-arrow">-></span>
         <code class="traitement-apply-after">${escapeHtml(folderNew)}</code>
-        ${videoName ? `<div class="apply-preview-note">Fichier conserve : <code>${escapeHtml(videoName)}</code></div>` : ""}
+        ${videoName ? `<div class="apply-preview-note">Fichier conservé : <code>${escapeHtml(videoName)}</code> (estimation — lancez le dry-run pour le détail exact)</div>` : ""}
       </div>
     </li>
   `;
-  }).join("");
+    }).join("");
+  }
 
   // Fix APPLY-2 (2026-05-30) : barre de progression live pendant un apply
   // en cours. Reutilise les classes CSS .traitement-scan-progress-* deja
@@ -1424,12 +1515,14 @@ function _renderApplyStep() {
       ` : ""}
 
       <div class="traitement-apply-summary">
-        <h3>Résumé des opérations</h3>
+        <h3>Résumé des opérations${previewIsEstimate ? ` <span class="v5u-text-muted">(estimation)</span>` : ""}</h3>
         <ul>
-          <li><strong>${escapeHtml(String(renames))}</strong> renommage${renames > 1 ? "s" : ""}</li>
-          <li><strong>${escapeHtml(String(moves))}</strong> déplacement${moves > 1 ? "s" : ""}</li>
+          <li><strong>${escapeHtml(String(renames))}</strong> renommage${renames > 1 ? "s" : ""} de dossier</li>
+          <li><strong>${escapeHtml(String(moves))}</strong> déplacement${moves > 1 ? "s" : ""} de fichier</li>
+          ${quarantined > 0 ? `<li><strong>${escapeHtml(String(quarantined))}</strong> mise${quarantined > 1 ? "s" : ""} en quarantaine</li>` : ""}
           <li><strong>${escapeHtml(String(deletions))}</strong> suppression${deletions > 1 ? "s" : ""}</li>
         </ul>
+        ${previewIsEstimate ? `<p class="apply-preview-note v5u-text-muted">Comptes estimés tant que le plan exact n'est pas calculé. Lancez le dry-run pour le détail réel (les films à la racine sont rangés dans un sous-dossier «Titre (Année)/», ce qui compte comme un déplacement).</p>` : ""}
       </div>
 
       ${preview ? `
@@ -2687,6 +2780,11 @@ export function unmountTraitement() {
   _runStatus = null;
   _activeContainer = null;
   _validationPlan = null;
+  // AUDIT 2026-06-13 (R5-P2) : reset du cache d'aperçu apply au unmount pour ne
+  // pas réafficher le plan d'un run précédent.
+  _applyPreview = null;
+  _applyPreviewLoading = false;
+  _applyPreviewSig = "";
   // VN-C.2 : reset du state JS des decisions au unmount. Aucune persistence
   // hors session run (par design — la spec interdit localStorage long-terme,
   // les decisions vivent uniquement le temps de la session de validation).
