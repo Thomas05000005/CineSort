@@ -360,7 +360,7 @@ function _renderBulkToolbar() {
       ${compareBtn}
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual" ${disabled}>▶ Analyser perceptuel</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan" ${disabled}>↻ Re-scanner</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Recharger les posters TMDb">🖼 Posters TMDb</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Récupérer les jaquettes TMDb (résout aussi les films NFO par titre + année)">🖼 Récupérer jaquettes</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="export">📤 Exporter…</button>
       <button type="button" class="v5-btn v5-btn--danger" data-bibliotheque-bulk="delete">🗑 Marquer pour suppression</button>
       <button type="button" class="v5-btn v5-btn--ghost" data-bibliotheque-bulk="clear">Annuler sélection</button>
@@ -1476,58 +1476,65 @@ function _handleBulkAction(action) {
  * Pas d'UI gallery a ce stade (cf consigne issue #350 : un bouton simple suffit).
  */
 async function _bulkRefreshPosters(rowIds) {
-  // Mapping rowId -> tmdb_id et inverse pour le patch d'apres reponse.
-  const tmdbByRow = new Map();
+  // AUDIT 2026-06-13 (R5-H2) : recupere les jaquettes pour 2 cas :
+  //  - films AVEC tmdb_id -> integrations/get_tmdb_posters (par id) ;
+  //  - films identifies SANS tmdb_id (NFO/nom) -> integrations/
+  //    enrich_tmdb_ids_by_title (recherche titre+annee, PERSISTE le tmdb_id).
+  // Avant, le bouton ignorait les films NFO ("Aucun film identifie TMDb").
+  const withId = new Map();    // rid -> tmdb_id
+  const withoutId = [];        // rids identifies mais sans tmdb_id
   rowIds.forEach((rid) => {
     const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-    if (r && r.tmdb_id) {
-      const tid = parseInt(r.tmdb_id, 10);
-      if (Number.isFinite(tid) && tid > 0) tmdbByRow.set(String(rid), tid);
-    }
+    if (!r) return;
+    const tid = parseInt(r.tmdb_id, 10);
+    if (Number.isFinite(tid) && tid > 0) withId.set(String(rid), tid);
+    else if (r.identified !== false) withoutId.push(String(rid));
   });
-  if (tmdbByRow.size === 0) {
-    showToast({ type: "warn", text: "Aucun film identifié TMDb dans la sélection." });
+  if (withId.size === 0 && withoutId.length === 0) {
+    showToast({ type: "warn", text: "Aucun film identifié dans la sélection." });
     return;
   }
-  const tmdbIds = Array.from(new Set(Array.from(tmdbByRow.values())));
-  // Backend cap : 20 IDs max par appel (cf tmdb_support.get_tmdb_posters).
-  // On previent l'utilisateur si la selection depasse pour eviter l'illusion
-  // que tout a ete traite alors que seuls les 20 premiers le sont.
-  if (tmdbIds.length > 20) {
-    showToast({
-      type: "warn",
-      text: `Seuls les 20 premiers films identifiés sur ${tmdbIds.length} seront rechargés (limite TMDb).`,
-      duration: 6000,
-    });
-  }
+  let patched = 0;
   try {
-    const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
-    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
-    // (unmount entre temps -> NPE sur _state.rows).
-    if (!_state) return;
-    const data = res && res.data ? res.data : res;
-    if (!data || data.ok === false) {
-      throw new Error((data && (data.message || data.error)) || "Erreur TMDb posters.");
-    }
-    // La reponse est typiquement {ok, posters: {<tmdb_id>: <url>}} (cf
-    // _get_tmdb_posters_impl dans cinesort/ui/api/tmdb_support.py). Tolere
-    // aussi `data.urls` au cas ou la shape change.
-    const map = data.posters || data.urls || {};
-    let patched = 0;
-    tmdbByRow.forEach((tid, rid) => {
-      const url = map[String(tid)] || map[tid];
-      if (!url) return;
-      const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-      if (r) {
-        r.poster_url = String(url);
-        patched += 1;
+    // 1) Films NFO/nom sans tmdb_id : resoudre par titre+annee (persiste).
+    if (withoutId.length > 0) {
+      if (!_runId) {
+        showToast({ type: "warn", text: "Aucun run actif pour résoudre les films NFO." });
+      } else {
+        const res = await apiPost("integrations/enrich_tmdb_ids_by_title", { run_id: _runId, row_ids: withoutId });
+        if (!_state) return;
+        const d = (res && res.data) || res || {};
+        if (d.ok === false) {
+          showToast({ type: "error", text: d.message || d.error || "Erreur TMDb (clé configurée ?)." });
+        } else {
+          const map = d.posters || {};
+          Object.keys(map).forEach((rid) => {
+            const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+            if (r) { r.poster_url = String(map[rid]); patched += 1; }
+          });
+        }
       }
-    });
+    }
+    // 2) Films deja identifies TMDb : recharger les posters par id.
+    if (withId.size > 0) {
+      const tmdbIds = Array.from(new Set(Array.from(withId.values())));
+      const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
+      if (!_state) return;
+      const d = (res && res.data) || res || {};
+      const map = (d && (d.posters || d.urls)) || {};
+      withId.forEach((tid, rid) => {
+        const url = map[String(tid)] || map[tid];
+        if (!url) return;
+        const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+        if (r) { r.poster_url = String(url); patched += 1; }
+      });
+    }
+    if (!_state) return;
     if (patched > 0) {
       _render();
-      showToast({ type: "success", text: `${patched} poster${patched > 1 ? "s" : ""} TMDb rechargé${patched > 1 ? "s" : ""}.` });
+      showToast({ type: "success", text: `${patched} jaquette${patched > 1 ? "s" : ""} récupérée${patched > 1 ? "s" : ""}.` });
     } else {
-      showToast({ type: "warn", text: "Aucun poster reçu (TMDb a peut-être un cache vide pour ces IDs)." });
+      showToast({ type: "warn", text: "Aucune jaquette trouvée (vérifiez la clé TMDb dans Paramètres)." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });

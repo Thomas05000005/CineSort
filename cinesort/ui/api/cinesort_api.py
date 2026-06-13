@@ -2277,6 +2277,11 @@ class CineSortApi:
         """Retourne les URLs de posters TMDb pour les IDs demandes (cache local)."""
         return tmdb_support.get_tmdb_posters(self, tmdb_ids, size)
 
+    def _enrich_tmdb_ids_by_title_impl(self, run_id: str, row_ids: Any) -> Dict[str, Any]:
+        """R5-H2 : resout + persiste le tmdb_id de films identifies NFO/nom (sans
+        tmdb_id) par recherche titre+annee, pour recuperer leurs jaquettes."""
+        return tmdb_support.enrich_tmdb_ids_by_title(self, run_id, row_ids)
+
     def _search_tmdb_impl(self, query: str, year: Optional[int] = None) -> Dict[str, Any]:
         """Spec 06 3.4 : recherche manuelle TMDb depuis le Modal Film.
 

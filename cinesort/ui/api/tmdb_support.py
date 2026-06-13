@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -83,6 +84,140 @@ _SEARCH_POSTER_SIZE = "w185"
 # Hard cap defensif : on n'envoie jamais > N resultats au front pour eviter
 # d'inonder le DOM si TMDb retourne 20 hits sur une requete generique.
 _SEARCH_MAX_RESULTS = 10
+
+
+def _build_tmdb_client(api: Any):
+    """Construit un TmdbClient depuis les settings (secrets EN CLAIR via
+    _internal_settings, sinon cle masquee -> 401). Retourne (tmdb, None) ou
+    (None, err_response) si la cle manque.
+    """
+    settings = api._internal_settings()
+    api_key = str(settings.get("tmdb_api_key") or "").strip()
+    if not api_key:
+        return None, _err_response(
+            "Cle TMDb non configuree (Parametres > Integrations).",
+            category="config", level="info", log_module=__name__,
+        )
+    state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+    try:
+        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+    except (TypeError, ValueError):
+        cache_ttl_days = 30
+    tmdb = TmdbClient(
+        api_key=api_key,
+        cache_path=state_dir / "tmdb_cache.json",
+        timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+        cache_ttl_days=cache_ttl_days,
+    )
+    return tmdb, None
+
+
+def _poster_url_from_path(poster_path: Any, size: str = "w185") -> Optional[str]:
+    path = str(poster_path or "").strip()
+    if not path:
+        return None
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"https://image.tmdb.org/t/p/{size}{path}"
+
+
+def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, Any]:
+    """R5-H2 : resout le tmdb_id (+ jaquette) de films deja identifies (NFO/nom)
+    SANS tmdb_id, par recherche TMDb titre+annee, et le PERSISTE dans le plan.
+
+    N'altere PAS l'identification (proposed_title/year/source inchanges) : on ne
+    fait qu'attacher le tmdb_id. Le poster suit automatiquement car le builder
+    Library recupere les jaquettes par tmdb_id (get_tmdb_posters). Repond au cas
+    biblio 100% NFO ou reactiver TMDb seul ne suffit pas (la recherche TMDb est
+    court-circuitee au scan quand un NFO a matche).
+
+    Returns: {ok, resolved, total, posters: {row_id: url}} ou err.
+    """
+    ids = {str(r) for r in (row_ids or []) if str(r).strip()}
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not ids:
+        return _err_response("Aucun row_id valide.", category="validation", level="info", log_module=__name__)
+
+    tmdb, err = _build_tmdb_client(api)
+    if err:
+        return err
+
+    try:
+        settings = api._internal_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+    plan_jsonl = getattr(run_paths, "plan_jsonl", None)
+    if plan_jsonl is None or not plan_jsonl.exists():
+        return _err_response("Plan introuvable pour ce run.", category="resource", level="info", log_module=__name__)
+
+    all_rows: List[Dict[str, Any]] = []
+    with open(plan_jsonl, encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                all_rows.append(data)
+
+    posters: Dict[str, str] = {}
+    resolved = 0
+    changed = False
+    for row in all_rows:
+        rid = str(row.get("row_id") or "")
+        if rid not in ids:
+            continue
+        existing = row.get("tmdb_id")
+        try:
+            if existing is not None and int(existing) > 0:
+                continue  # deja un tmdb_id : rien a resoudre.
+        except (TypeError, ValueError):
+            pass
+        title = str(row.get("proposed_title") or row.get("nfo_title") or "").strip()
+        if not title:
+            continue
+        year = int(row.get("proposed_year") or 0) or None
+        try:
+            results = tmdb.search_movie(title, year=year)
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("enrich_tmdb: search '%s' (%s) a echoue: %s", title, year, exc)
+            continue
+        if not results:
+            continue
+        best = results[0]
+        try:
+            tid = int(best.id)
+        except (TypeError, ValueError):
+            continue
+        if tid <= 0:
+            continue
+        row["tmdb_id"] = tid
+        changed = True
+        resolved += 1
+        url = _poster_url_from_path(getattr(best, "poster_path", None))
+        if url:
+            posters[rid] = url
+
+    if changed:
+        tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fp:
+            for r in all_rows:
+                fp.write(json.dumps(r, ensure_ascii=False) + "\n")
+        tmp_path.replace(plan_jsonl)
+
+    try:
+        tmdb.flush()
+    except (OSError, AttributeError):
+        pass
+
+    return {"ok": True, "resolved": int(resolved), "total": len(ids), "posters": posters}
 
 
 def search_tmdb(
