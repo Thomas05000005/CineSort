@@ -217,9 +217,12 @@ class PerceptualRepository(_BaseRepository):
         with self._managed_conn() as conn:
             cur = conn.execute(
                 """
+                -- AUDIT 2026-06-14 (R7-15) : COUNT(DISTINCT row_id) au lieu de
+                -- COUNT(*) : re-scanner la meme biblio (nouveau run_id, memes
+                -- row_id) creait plusieurs reports par film -> compteurs gonfles.
                 SELECT date(ts, 'unixepoch', 'localtime') as d,
                        AVG(global_score_v2) as avg_score,
-                       COUNT(*) as n
+                       COUNT(DISTINCT row_id) as n
                 FROM perceptual_reports
                 WHERE global_score_v2 IS NOT NULL
                   AND ts >= ? AND ts <= ?
@@ -251,7 +254,9 @@ class PerceptualRepository(_BaseRepository):
         with self._managed_conn() as conn:
             cur = conn.execute(
                 """
-                SELECT COUNT(*) FROM perceptual_reports
+                -- AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter
+                -- N fois un film re-scanne (insight "N films <tier> ce mois").
+                SELECT COUNT(DISTINCT row_id) FROM perceptual_reports
                 WHERE global_tier_v2 = ? AND ts >= ?
                 """,
                 (str(tier).lower(), float(since_ts)),
