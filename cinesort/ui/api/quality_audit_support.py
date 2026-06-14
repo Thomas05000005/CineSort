@@ -328,7 +328,13 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
         # Reuse_existing=False pour forcer le re-calcul depuis le profil actuel.
         for rid in row_ids:
             try:
-                api.quality.get_quality_report(run_id, rid, {"reuse_existing": False})
+                res = api.quality.get_quality_report(run_id, rid, {"reuse_existing": False})
+                # AUDIT 2026-06-14 (R7-11) : get_quality_report renvoie {ok:False}
+                # sans lever (probe ffprobe absent, media deplace) -> avant,
+                # errors restait 0 et le toast vert annoncait "N/N re-calcules"
+                # meme quand tout echouait. On compte les echecs metier.
+                if isinstance(res, dict) and res.get("ok") is False:
+                    errors += 1
             # except Exception large : on continue en cas d'erreur sur un film
             except (OSError, KeyError, TypeError, ValueError) as exc:
                 logger.debug("recompute_worker error row_id=%s: %s", rid, exc)

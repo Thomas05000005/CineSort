@@ -1032,7 +1032,16 @@ function _pollRecompute(jobId, total) {
     clearInterval(_state.recomputePollTimer);
     _state.recomputePollTimer = null;
     if (status === "done") {
-      showToast({ type: "success", text: `✓ Scores re-calculés (${progress}/${totalJob})`, duration: 4500 });
+      // AUDIT 2026-06-14 (R7-11) : tenir compte des echecs metier (data.errors)
+      // -> ne plus afficher un toast vert "N/N" quand des films ont echoue.
+      const errs = Number(data.errors || 0);
+      if (errs >= totalJob && totalJob > 0) {
+        showToast({ type: "error", text: `Re-calcul : ${errs}/${totalJob} en échec (vérifiez ffprobe/médias).`, duration: 6000 });
+      } else if (errs > 0) {
+        showToast({ type: "warn", text: `Scores re-calculés : ${totalJob - errs}/${totalJob} OK, ${errs} échec(s).`, duration: 6000 });
+      } else {
+        showToast({ type: "success", text: `✓ Scores re-calculés (${progress}/${totalJob})`, duration: 4500 });
+      }
     } else if (status === "failed") {
       showToast({ type: "error", text: `Re-calcul échoué : ${data.error || "erreur inconnue"}` });
     } else if (status === "cancelled") {
