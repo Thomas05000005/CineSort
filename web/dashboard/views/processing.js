@@ -766,7 +766,11 @@ async function _runApply() {
     const res = await apiPost("run/apply", { run_id: _state.currentRunId, dry_run: dry, quarantine });
     if (res.ok) {
       const msg = dry ? "Dry-run termine." : "Apply termine.";
-      const done = res.data?.done || 0;
+      // AUDIT 2026-06-14 (R7-14) : run/apply renvoie {result: ApplyResult.__dict__},
+      // pas de cle `done`. Le recap affichait donc toujours "0 operation". On
+      // somme les vraies operations (renommages + deplacements + collections).
+      const r = res.data?.result || {};
+      const done = (Number(r.renames) || 0) + (Number(r.moves) || 0) + (Number(r.collection_moves) || 0);
       if (resultBox) resultBox.innerHTML = `
         <div class="v5-processing-apply-success">
           <strong>${_esc(msg)}</strong>
