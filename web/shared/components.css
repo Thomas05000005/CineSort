@@ -412,6 +412,10 @@
 
 .v5-input {
   background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R6-E) : sans color-scheme, le popup natif d'un <select>
+     (filtre Doublons) est rendu en blanc par l'OS (Windows) -> illisible sur
+     fond sombre. dark force l'OS a peindre la liste deroulante en sombre. */
+  color-scheme: dark;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   padding: 0 var(--sp-3);
@@ -7315,7 +7319,10 @@ body.v5-notif-lock {
   bottom: 0;
   width: 420px;
   max-width: 90vw;
-  background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R6-E) : --surface-1 = 3,5% d'opacite -> panneau quasi
+     transparent (page visible derriere). On bascule sur --bg-raised (opaque,
+     defini dans les 5 themes) pour un vrai fond de tiroir. */
+  background: var(--bg-raised);
   border-left: 1px solid var(--border-1);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
   display: flex;

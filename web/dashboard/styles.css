@@ -621,6 +621,13 @@ body.is-background .login-wrap { animation-play-state: paused; }
 .modal-card {
   width: 100%; max-width: 560px; max-height: 85vh;
   display: flex; flex-direction: column;
+  /* AUDIT 2026-06-14 (R6-E) : la classe .card ne definit aucun background
+     (commentaire "defini dans themes.css" obsolete -> regle absente), donc la
+     fenetre showModal (ex: confirmation de decision) etait transparente. On
+     pose un fond opaque + bordure + ombre comme pour .danger-modal. */
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   animation: modalSlideUp var(--dur-slow) var(--ease-out);
 }
 @keyframes modalSlideUp { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
