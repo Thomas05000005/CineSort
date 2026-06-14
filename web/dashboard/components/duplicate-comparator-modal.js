@@ -371,10 +371,15 @@ async function _loadFramesTab() {
   const pairKey = pair ? pair.key : "default";
   // Cache par paire (cas 3+ fichiers).
   if (!_state.framesLoadedByPair) _state.framesLoadedByPair = {};
-  if (_state.framesLoadedByPair[pairKey]) return;
-  _state.framesLoadedByPair[pairKey] = true;
+  if (!_state.framesLoadingByPair) _state.framesLoadingByPair = {};
+  if (_state.framesLoadedByPair[pairKey]) return; // deja charge avec succes
+  if (_state.framesLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="frames"]');
+  // AUDIT 2026-06-14 (R6-D) : si le DOM n'est pas pret, on NE marque RIEN (ni
+  // loaded ni loading) pour permettre un nouvel essai — sinon le flag restait
+  // bloque a true et l'onglet ne se chargeait jamais (placeholder fige).
   if (!tabContent) return;
+  _state.framesLoadingByPair[pairKey] = true;
   const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_frames", {
@@ -385,15 +390,16 @@ async function _loadFramesTab() {
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.framesLoadedByPair[pairKey] = false;
       const msg = data.message || data.error || "Échec extraction frames";
       _replaceTabContent("frames", _renderFramesError(msg));
-      return;
+      return; // pas de cache -> reessayable
     }
+    _state.framesLoadedByPair[pairKey] = true; // succes uniquement -> cache
     _replaceTabContent("frames", _renderFramesPayload(data));
   } catch (err) {
-    _state.framesLoadedByPair[pairKey] = false;
     _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)));
+  } finally {
+    _state.framesLoadingByPair[pairKey] = false;
   }
 }
 
@@ -448,10 +454,14 @@ async function _loadAudioTab() {
   const pair = _currentPair();
   const pairKey = pair ? pair.key : "default";
   if (!_state.audioLoadedByPair) _state.audioLoadedByPair = {};
-  if (_state.audioLoadedByPair[pairKey]) return;
-  _state.audioLoadedByPair[pairKey] = true;
+  if (!_state.audioLoadingByPair) _state.audioLoadingByPair = {};
+  if (_state.audioLoadedByPair[pairKey]) return; // deja charge avec succes
+  if (_state.audioLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="audio"]');
+  // AUDIT 2026-06-14 (R6-D) : DOM pas pret -> on ne marque rien (reessayable),
+  // sinon le placeholder "Extraction audio en cours" restait fige a vie.
   if (!tabContent) return;
+  _state.audioLoadingByPair[pairKey] = true;
   const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_audio", {
@@ -462,14 +472,15 @@ async function _loadAudioTab() {
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.audioLoadedByPair[pairKey] = false;
       _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"));
-      return;
+      return; // pas de cache -> reessayable
     }
+    _state.audioLoadedByPair[pairKey] = true; // succes uniquement -> cache
     _replaceTabContent("audio", _renderAudioPayload(data));
   } catch (err) {
-    _state.audioLoadedByPair[pairKey] = false;
     _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)));
+  } finally {
+    _state.audioLoadingByPair[pairKey] = false;
   }
 }
 
@@ -777,6 +788,9 @@ export function openDuplicateComparatorModal(opts) {
     activeTab: "apercu",
     framesLoadedByPair: {},
     audioLoadedByPair: {},
+    // R6-D : gardes anti-concurrence (chargement en vol) distinctes du cache succes.
+    framesLoadingByPair: {},
+    audioLoadingByPair: {},
     decisionInFlight: false,
   };
   _ensureOverlay();
