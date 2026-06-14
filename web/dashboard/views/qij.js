@@ -109,9 +109,14 @@ function _qualityRender() {
   const root = _qState.containerRef;
   if (!root) return;
   const stats = _qState.globalStats || {};
+  // AUDIT 2026-06-14 (R7-1) : get_global_stats niche les KPI sous summary.*
+  // (total_films/avg_score/premium_pct/trend). Avant, le front les lisait a la
+  // racine -> KPI toujours 0 et fleche toujours '→'. summary.trend est DEJA un
+  // glyphe (↑/↓/→), pas 'up'/'down'.
+  const s = stats.summary || {};
   const dist = stats.v2_tier_distribution;
   const trend = stats.trend_30days;
-  const totalFilms = Number(stats.total_films || 0);
+  const totalFilms = Number(s.total_films || 0);
   const hasData = _hasDataInDistribution(dist) || _hasDataInTrend(trend) || totalFilms > 0;
 
   if (!hasData) {
@@ -123,11 +128,11 @@ function _qualityRender() {
     return;
   }
 
-  // KPIs (port v4)
-  const avgScore = stats.avg_score || 0;
-  const premiumPct = stats.premium_pct || 0;
-  const trendArrow = stats.trend === "up" ? "↑" : stats.trend === "down" ? "↓" : "→";
-  const trendColor = stats.trend === "up" ? "var(--success)" : stats.trend === "down" ? "var(--danger)" : "var(--text-muted)";
+  // KPIs (port v4) — R7-1 : lus sous summary.* ; trend est deja un glyphe.
+  const avgScore = s.avg_score || 0;
+  const premiumPct = s.premium_pct || 0;
+  const trendArrow = s.trend || "→";
+  const trendColor = trendArrow === "↑" ? "var(--success)" : trendArrow === "↓" ? "var(--danger)" : "var(--text-muted)";
   const anomalies = stats.top_anomalies || [];
   const tech = stats.technical_distribution || {};
 
@@ -164,7 +169,7 @@ function _qualityRender() {
 
       <!-- V7-port : KPI 4 cards -->
       <div class="v5-kpi-grid qij-kpi-grid">
-        <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_films"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Number(stats.total_films || 0)}</span></div></article>
+        <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_films"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${totalFilms}</span></div></article>
         <article class="v5-kpi-card v5-kpi-card--tier-gold"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_avg_score"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Math.round(avgScore)}</span><span class="v5-kpi-suffix">/100</span></div></article>
         <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_platinum"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value">${Math.round(premiumPct)}</span><span class="v5-kpi-suffix">%</span></div></article>
         <article class="v5-kpi-card"><header class="v5-kpi-header"><span class="v5-kpi-label">${_esc(t("qij.quality.kpi_trend"))}</span></header><div class="v5-kpi-body"><span class="v5-kpi-value qij-trend-value" style="--trend-color:${trendColor}">${trendArrow}</span></div></article>
