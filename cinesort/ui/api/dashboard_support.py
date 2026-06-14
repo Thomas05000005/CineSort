@@ -133,6 +133,30 @@ def _active_run_id(api: Any) -> Optional[str]:
     return None
 
 
+def _active_run_info(api: Any) -> Optional[Dict[str, Any]]:
+    """AUDIT 2026-06-14 (R7-7) : bloc de progression du scan en cours, lu par
+    accueil.js _extractScanProgress (total_rows/current_index/phase/status).
+    get_dashboard n'exposait qu'active_run_id -> barre figee a "0/0" sans ETA.
+    None si aucun scan actif."""
+    try:
+        rid = _active_run_id(api)
+        if not rid:
+            return None
+        rs = api._get_run(rid)
+        if rs is None:
+            return None
+        running = bool(getattr(rs, "running", False))
+        return {
+            "run_id": str(rid),
+            "status": "running" if running else "idle",
+            "phase": "running" if running else "idle",
+            "total_rows": int(getattr(rs, "total", 0) or 0),
+            "current_index": int(getattr(rs, "idx", 0) or 0),
+        }
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
 def _empty_dashboard_payload(mode: str, runs_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "ok": True,
@@ -724,6 +748,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 "runs_history": runs_history,
                 "pending_undo": pending_undo,
                 "active_run_id": _active_run_id(api),
+                "run_info": _active_run_info(api),
             }
 
         run_state = api._get_run(resolved_run_id)
@@ -757,6 +782,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             "runs_history": runs_history,
             "pending_undo": pending_undo,
             "active_run_id": _active_run_id(api),
+            "run_info": _active_run_info(api),
         }
     # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter
     # HTTP 500 sur RuntimeError/MemoryError/etc (cas run obsolete + DB locked).
