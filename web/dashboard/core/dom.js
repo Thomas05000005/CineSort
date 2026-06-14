@@ -57,13 +57,20 @@ export function safeUrl(u) {
  * @param {string} size - taille demandee ("w92"|"w185"|"w342"|"w500")
  * @returns {string} URL relative `/api/poster?...` ou "" si invalide
  */
-export function posterProxyUrl(tmdbId, size) {
+export function posterProxyUrl(tmdbId, size, bust) {
   const allowed = new Set(["w92", "w185", "w342", "w500"]);
   if (!allowed.has(String(size))) return "";
   const idNum = Number(tmdbId);
   if (!Number.isInteger(idNum) || idNum <= 0 || idNum > 9999999999) return "";
   // Pas besoin d'escape : les valeurs sont sanitize en amont (whitelist + entier).
-  return `/api/poster?id=${idNum}&size=${size}`;
+  let url = `/api/poster?id=${idNum}&size=${size}`;
+  // AUDIT 2026-06-14 (R7-8) : `bust` (timestamp) apres un "Recuperer jaquettes"
+  // -> force=1 fait re-telecharger l'image cote proxy (cache disque immuable
+  // 30j sinon) et v=<bust> force le navigateur a re-requeter. Absent au rendu
+  // normal (URL stable -> cache HTTP efficace).
+  const b = Number(bust);
+  if (Number.isFinite(b) && b > 0) url += `&force=1&v=${b}`;
+  return url;
 }
 
 /**

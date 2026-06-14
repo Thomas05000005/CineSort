@@ -687,6 +687,17 @@ def serve_poster(
         _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
         return
 
+    # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
+    # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
+    # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
+    # reservi tel quel -> le refresh n'avait aucun effet visuel.
+    if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
+        try:
+            for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
+                _f.unlink()
+        except (OSError, ValueError):
+            pass
+
     # 3. Orchestrer cache hit / fetch.
     cache_file, content_type, error_code = get_or_fetch(
         tmdb_client, cache_root, tmdb_id, size

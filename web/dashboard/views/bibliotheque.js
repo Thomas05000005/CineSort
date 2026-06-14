@@ -458,7 +458,9 @@ function _renderFilmCard(row) {
   // Iter12 ETAPE 2 : prioriser le proxy `/api/poster?id=...&size=w185` quand
   // `tmdb_id` est disponible (CSP resserree en section 4 sans casser l'affichage).
   // Fallback sur `poster_url` direct pour backward compat (acquis 242cf339).
-  const proxiedPoster = posterProxyUrl(row.tmdb_id, "w185");
+  // R7-8 : row._posterBust (pose par "Recuperer jaquettes") force le proxy a
+  // re-telecharger + le navigateur a re-requeter ; absent au rendu normal.
+  const proxiedPoster = posterProxyUrl(row.tmdb_id, "w185", row._posterBust);
   const posterSrc = proxiedPoster || row.poster_url || "";
   // AUDIT 2026-06-13 (R5-B) : "Identifier" ne doit s'afficher QUE sur les vrais
   // non-identifies. Un film identifie par NFO/nom (sans tmdb_id ni jaquette) a
@@ -1575,6 +1577,7 @@ async function _bulkRefreshPosters(rowIds) {
             if (!r) return;
             if (idMap[rid] != null) { r.tmdb_id = idMap[rid]; r.identified = true; }
             if (map[rid]) r.poster_url = String(map[rid]);
+            r._posterBust = Date.now(); // R7-8 : force le rechargement visuel
             patched += 1;
           });
         }
@@ -1594,7 +1597,7 @@ async function _bulkRefreshPosters(rowIds) {
         const url = map[String(tid)] || map[tid];
         if (!url) return;
         const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-        if (r) { r.poster_url = String(url); patched += 1; }
+        if (r) { r.poster_url = String(url); r._posterBust = Date.now(); patched += 1; }
       });
     }
     if (!_state) return;
