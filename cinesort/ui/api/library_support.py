@@ -192,6 +192,13 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         return []
     plan_rows = plan_result.get("rows") or []
 
+    # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides) sur
+    # chaque row -> la biblio reflete le match choisi (tmdb_id/titre/annee) et ne
+    # revient plus au match auto au reload. No-op si aucun override.
+    from cinesort.ui.api.film_support import overlay_tmdb_override
+    for _r in plan_rows:
+        overlay_tmdb_override(store, run_id, _r)
+
     # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
     # batch via integrations.get_tmdb_posters(). Avant : `r.get("poster_url")`
     # retournait toujours None car PlanRow n'a PAS de champ poster_url plat (le

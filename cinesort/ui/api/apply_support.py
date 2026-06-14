@@ -1365,6 +1365,28 @@ def _execute_apply(
     except (OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Lecture duplicate_decisions impossible: {exc}")
 
+    # AUDIT 2026-06-14 (R7-3) : appliquer les overrides TMDb manuels (choix d'un
+    # autre candidat via set_film_tmdb_candidate, table film_tmdb_overrides) sur
+    # les PlanRows AVANT le calcul des destinations. Sans ca, l'apply renommait
+    # avec le match auto et le choix utilisateur etait silencieusement perdu.
+    # No-op si aucun override (comportement inchange pour le cas courant).
+    try:
+        for _r in rows:
+            _rid_row = str(getattr(_r, "row_id", "") or "")
+            if not _rid_row:
+                continue
+            _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
+            if not _ov:
+                continue
+            if int(_ov.get("tmdb_id") or 0) > 0:
+                _r.tmdb_id = int(_ov["tmdb_id"])
+            if _ov.get("proposed_title"):
+                _r.proposed_title = str(_ov["proposed_title"])
+            if int(_ov.get("proposed_year") or 0) > 0:
+                _r.proposed_year = int(_ov["proposed_year"])
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
+
     # Multi-root : grouper les rows par source_root et appeler apply_rows par root
     rows_by_root: Dict[str, List[Any]] = {}
     for row in rows:

@@ -183,6 +183,43 @@ def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]
     return 0
 
 
+def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]) -> bool:
+    """AUDIT 2026-06-14 (R7-3) : applique l'override TMDb manuel sur une row dict.
+
+    Le choix manuel d'un candidat (set_film_tmdb_candidate) est persiste dans la
+    table film_tmdb_overrides mais AUCUN consommateur de prod ne la lisait :
+    biblio, fiche film et apply retombaient sur le match auto -> au reload le
+    choix disparaissait et l'apply renommait avec l'ancien match. Ce helper
+    overlay tmdb_id/chosen_tmdb_id/proposed_title/proposed_year/confidence depuis
+    l'override. Sans override -> no-op (comportement inchange). Reversible : la
+    table reste la source, on n'ecrit pas le plan (clear_tmdb_override suffit).
+    """
+    if not isinstance(row, dict) or store is None:
+        return False
+    rid = str(run_id or "")
+    row_id = str(row.get("row_id") or "")
+    if not rid or not row_id:
+        return False
+    try:
+        ov = store.film_modal.get_tmdb_override(run_id=rid, row_id=row_id)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    if not ov:
+        return False
+    tid = int(ov.get("tmdb_id") or 0)
+    if tid > 0:
+        row["tmdb_id"] = tid
+        row["chosen_tmdb_id"] = tid
+    if ov.get("proposed_title"):
+        row["proposed_title"] = str(ov["proposed_title"])
+    if int(ov.get("proposed_year") or 0) > 0:
+        row["proposed_year"] = int(ov["proposed_year"])
+    conf = int(ov.get("new_confidence") or 0)
+    if conf > 0:
+        row["confidence"] = conf
+    return True
+
+
 def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
     """Retourne la totalite des informations d'un film pour la page standalone.
 
@@ -240,6 +277,11 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
+
+        # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides)
+        # AVANT la resolution du chosen tmdb_id / poster, sinon la fiche film
+        # re-affiche le match auto et ignore le choix utilisateur.
+        overlay_tmdb_override(store, resolved_rid, row)
 
         # Perceptual
         try:
