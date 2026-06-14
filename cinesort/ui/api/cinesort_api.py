@@ -928,6 +928,26 @@ class CineSortApi:
         url = _network_utils_mod.build_dashboard_url(ip, port, is_https)
         return {"ok": True, "ip": ip, "port": port, "https": is_https, "dashboard_url": url}
 
+    def _reveal_rest_token_impl(self) -> Dict[str, Any]:
+        """AUDIT 2026-06-14 (R7-10) : revele le Bearer REST en CLAIR pour les
+        boutons "Afficher/Copier la cle" (Statut Acces distant + Parametres).
+
+        Le GET settings masque rest_api_token (-> '********'), donc afficher/
+        copier exposait les puces -> 401 sur l'appareil distant. Cet endpoint
+        retourne la vraie valeur, mais UNIQUEMENT en local (is_remote_request
+        False) : un client distant ne peut jamais exfiltrer le token via l'API.
+        """
+        if is_remote_request():
+            return _err_response(
+                "Action disponible en local uniquement.",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
+        settings = self._internal_settings()
+        token = str(settings.get("rest_api_token") or "")
+        return {"ok": True, "rest_api_token": token}
+
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
         import io

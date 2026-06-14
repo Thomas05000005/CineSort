@@ -978,17 +978,36 @@ async function _renderRemoteAccessBlock(settings) {
   const copyUrlBtn = document.getElementById("statusCopyUrl");
   const tokenEl = document.getElementById("statusRemoteToken");
   const msgEl = document.getElementById("statusRemoteMsg");
+  // AUDIT 2026-06-14 (R7-10) : le token du payload settings est MASQUE
+  // ('********'). Afficher/copier exposait donc les puces -> 401 sur l'appareil
+  // distant. On recupere le vrai Bearer via l'endpoint local reveal_rest_token
+  // (refuse aux requetes distantes cote backend), avec cache local.
+  let _realToken = null;
+  const _getRealToken = async () => {
+    if (_realToken != null) return _realToken;
+    try {
+      const r = await apiPost("settings/reveal_rest_token");
+      const d = (r && r.data) || r || {};
+      if (d.ok && d.rest_api_token) { _realToken = String(d.rest_api_token); return _realToken; }
+    } catch { /* noop */ }
+    return null;
+  };
   if (showBtn && tokenEl) {
-    showBtn.addEventListener("click", () => {
+    showBtn.addEventListener("click", async () => {
       const shown = tokenEl.dataset.shown === "1";
       tokenEl.dataset.shown = shown ? "0" : "1";
-      tokenEl.textContent = shown ? tokenMasked : (tokenEl.dataset.full || "");
+      if (shown) { tokenEl.textContent = tokenMasked; return; }
+      const real = await _getRealToken();
+      tokenEl.textContent = real || tokenMasked;
+      if (!real && msgEl) msgEl.textContent = "Clé révélable en local uniquement.";
     });
   }
   if (copyBtn && tokenEl) {
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(tokenEl.dataset.full || "");
+        const real = await _getRealToken();
+        if (!real) { if (msgEl) msgEl.textContent = "Clé copiable en local uniquement."; return; }
+        await navigator.clipboard.writeText(real);
         if (msgEl) { msgEl.textContent = "✓ Clé d'accès copiée"; setTimeout(() => msgEl.textContent = "", 2500); }
       } catch {
         if (msgEl) msgEl.textContent = "Copie impossible (utilise 👁 et copie manuellement).";

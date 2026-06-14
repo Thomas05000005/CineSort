@@ -120,6 +120,12 @@ class SettingsFacade(_BaseFacade):
         """
         return self._api._get_dashboard_qr_impl()
 
+    def reveal_rest_token(self) -> Dict[str, Any]:
+        """R7-10 : revele le Bearer REST en clair (LOCALHOST uniquement) pour les
+        boutons Afficher/Copier. Cf CineSortApi._reveal_rest_token_impl.
+        """
+        return self._api._reveal_rest_token_impl()
+
     # ---------- Naming presets & template preview (sprint C1 — refactor #84 suite) ----------
 
     def get_naming_presets(self) -> Dict[str, Any]:
