@@ -254,6 +254,24 @@ def _build_dashboard_section(
     # moyenne : —". On la calcule ici et on l'expose dans kpis.
     confidences = [int(getattr(r, "confidence", 0) or 0) for r in rows]
     confidence_avg = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
+    # AUDIT 2026-06-14 (R6-I) : Etape 2 "Verification" affichait toujours "0 cas"
+    # car le backend n'exposait ni review_queue_count ni conflicts_count. On les
+    # calcule depuis les rows : "cas a verifier" = film avec une alerte OU une
+    # confiance faible ; "conflits" = film avec un flag d'incoherence de source.
+    _CONFLICT_FLAGS = frozenset({
+        "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
+        "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
+        "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
+    })
+    review_queue_count = 0
+    conflicts_count = 0
+    for _r in rows:
+        _flags = set(getattr(_r, "warning_flags", []) or [])
+        _label = str(getattr(_r, "confidence_label", "") or "").lower()
+        if _flags or _label == "low":
+            review_queue_count += 1
+        if _flags & _CONFLICT_FLAGS:
+            conflicts_count += 1
     premium_count = sum(1 for score in scores if score >= 85)
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
     stats_obj = _parse_stats_json(run_row.get("stats_json"))
@@ -500,6 +518,8 @@ def _build_dashboard_section(
         "kpis": {
             "score_avg": score_avg,
             "confidence_avg": confidence_avg,  # R6-I : confiance moyenne d'identification
+            "review_queue_count": int(review_queue_count),  # R6-I : Etape 2 "cas a verifier"
+            "conflicts_count": int(conflicts_count),  # R6-I : Etape 2 "conflits"
             "score_premium_pct": score_premium_pct,
             "total_movies": total_movies,
             "scored_movies": scored_movies,
