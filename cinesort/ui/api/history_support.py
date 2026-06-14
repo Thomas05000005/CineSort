@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -303,6 +304,46 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: apply_operations err run_id=%s err=%s", run_id, exc)
 
+    # AUDIT 2026-06-14 (R7-6) : detail des films + doublons pour l'Inspecteur
+    # Historique (onglets Films / Doublons). Avant, ces cles n'etaient pas
+    # renvoyees -> "(detail non disponible)" systematique + recherche par titre
+    # qui ne matchait jamais.
+    films: List[Dict[str, Any]] = []
+    try:
+        plan_res = api.run.get_plan(run_id) if hasattr(api, "run") else None
+        plan_rows = (plan_res or {}).get("rows") or [] if isinstance(plan_res, dict) else []
+        row_by_id = {str(r.get("row_id")): r for r in plan_rows if isinstance(r, dict)}
+        for rep in quality_reports:
+            rid = str(rep.get("row_id") or "")
+            pr = row_by_id.get(rid, {})
+            year = int(pr.get("proposed_year") or 0) or None
+            films.append(
+                {
+                    "film_id": rid,
+                    "title": str(pr.get("proposed_title") or pr.get("nfo_title") or "").strip() or f"Film {rid}",
+                    "year": year,
+                    "tier": str(rep.get("tier") or "").strip().lower(),
+                    "score": rep.get("score"),
+                }
+            )
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: films detail err run_id=%s err=%s", run_id, exc)
+
+    duplicates_decided: List[Dict[str, Any]] = []
+    try:
+        for dec in (store.apply.list_duplicate_decisions(run_id=run_id) if store else []) or []:
+            gk = str(dec.get("group_key") or "")
+            m = re.search(r"^(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)", gk)
+            duplicates_decided.append(
+                {
+                    "title": (m.group("title").strip() if m else gk) or "(Sans titre)",
+                    "year": int(m.group("year")) if m else None,
+                    "winner": str(dec.get("winner_row_id") or ""),
+                }
+            )
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: duplicates detail err run_id=%s err=%s", run_id, exc)
+
     return {
         "ok": True,
         "run": {
@@ -321,6 +362,10 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
             "score_avg": score_avg,
             "films_by_tier": films_by_tier,
             "apply_operations": apply_operations,
+            # R7-6 : detail pour les onglets Films / Doublons de l'Inspecteur.
+            "films": films,
+            "duplicates_decided": duplicates_decided,
+            "duplicates_skipped": [],
         },
     }
 
