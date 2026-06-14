@@ -232,7 +232,7 @@ function _renderRejectSection(stats) {
       <button type="button" class="qualite-reject-card" data-qualite-reject-card="${escapeHtml(rowId)}" data-qualite-reject-index="${idx}" aria-label="${escapeHtml(title)} (${year || "?"})">
         <div class="qualite-reject-poster">
           ${poster
-            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
             : `<div class="qualite-reject-poster-empty" aria-hidden="true">🎬</div>`}
           ${qualityUnavailable
             ? `<span class="qualite-reject-score qualite-reject-unavailable" title="Probe indisponible : qualite non mesuree">Indispo</span>`

@@ -339,7 +339,7 @@ function _renderGroupCard(group) {
       <header class="doublons-card-header">
         <div class="doublons-card-poster" aria-hidden="true">
           ${posterUrl
-            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
             : `<div class="doublons-card-poster-placeholder">🎬</div>`}
         </div>
         <div class="doublons-card-title-block">
@@ -593,7 +593,7 @@ function _renderRightPanel() {
       title: "📌 Groupe sélectionné",
       html: `
         ${posterUrl
-          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" /></div>`
+          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" /></div>`
           : `<div class="doublons-inspector-poster doublons-inspector-poster--empty">🎬</div>`}
         <h4 class="doublons-inspector-title">${escapeHtml(title)}${escapeHtml(year)}</h4>
         ${runtime ? `<p class="doublons-inspector-meta">${escapeHtml(String(runtime))} min</p>` : ""}

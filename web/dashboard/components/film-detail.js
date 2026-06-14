@@ -330,7 +330,7 @@ function _renderCandidate(candidate, isChosen) {
   const rawPoster = candidate.poster_url || (candidate.poster_path ? `https://image.tmdb.org/t/p/w92${candidate.poster_path.startsWith("/") ? "" : "/"}${candidate.poster_path}` : null);
   const poster = _resizePosterUrl(rawPoster, "w185") || rawPoster;
   const posterHtml = poster
-    ? `<img class="film-detail-candidate-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(tit)}" loading="lazy">`
+    ? `<img class="film-detail-candidate-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(tit)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'">`
     : `<div class="film-detail-candidate-poster film-detail-candidate-poster--placeholder" aria-hidden="true">🎬</div>`;
 
   const metaParts = [];
@@ -1005,7 +1005,7 @@ function _renderTmdbSearchResults(results) {
           : "";
         const posterUrl = r.poster_url ? escapeHtml(String(r.poster_url)) : "";
         const posterBlock = posterUrl
-          ? `<img class="tmdb-manual-search-poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" width="92" height="138">`
+          ? `<img class="tmdb-manual-search-poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" width="92" height="138" onerror="this.onerror=null;this.style.display='none'">`
           : `<div class="tmdb-manual-search-poster tmdb-manual-search-poster--empty" aria-hidden="true">🎞</div>`;
         return `
           <li class="tmdb-manual-search-item" data-tmdb-id="${tid}">
