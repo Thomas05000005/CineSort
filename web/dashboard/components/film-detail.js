@@ -896,6 +896,15 @@ async function _refreshPosterUnit(tmdbId, btn) {
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Echec refresh poster.");
     }
+    // AUDIT 2026-06-14 (R7-17) : get_tmdb_posters renvoie ok:true +
+    // reason:"tmdb_not_configured" (pas ok:false) quand la cle manque. Sans ce
+    // test, on tombait sur le throw generique "Reessayer ?" (incite a reessayer
+    // en vain). Message precis + sortie propre.
+    if (data.reason === "tmdb_not_configured") {
+      if (img) img.style.opacity = "1";
+      showToast({ type: "warn", text: "Clé TMDb non configurée (Paramètres ▸ TMDb)." });
+      return;
+    }
     // La facade peut retourner soit { posters: { "<id>": "<url>" } }, soit
     // { results: [ { tmdb_id, poster_url } ] }. On gere les 2 shapes.
     let newUrl = null;
