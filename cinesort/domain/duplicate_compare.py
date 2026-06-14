@@ -263,9 +263,9 @@ def compare_by_criteria(
     results.append(
         CriterionResult(
             name="file_size",
-            label="Taille",
-            value_a=str(size_a),
-            value_b=str(size_b),
+            label="Taille (estimée)",
+            value_a=_human_size(size_a),
+            value_b=_human_size(size_b),
             winner="tie",
             points_delta=0,
         )
@@ -436,6 +436,21 @@ def _best_audio(probe: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             best = t
             best_rank = r
     return best
+
+
+def _human_size(n: int) -> str:
+    """AUDIT 2026-06-14 (R6-D) : taille lisible pour la table criteres du
+    comparateur (avant : octets bruts type "1610612736")."""
+    n = int(n or 0)
+    if n <= 0:
+        return "?"
+    units = ["o", "Ko", "Mo", "Go", "To"]
+    size = float(n)
+    idx = 0
+    while size >= 1024 and idx < len(units) - 1:
+        size /= 1024
+        idx += 1
+    return f"{int(size)} {units[idx]}" if idx == 0 else f"{size:.1f} {units[idx]}"
 
 
 def _file_size(probe: Optional[Dict[str, Any]]) -> int:

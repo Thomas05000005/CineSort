@@ -1425,7 +1425,10 @@ def _filename_from_row(r: Any) -> str:
     vid = str(r.get("video") or "")
     if vid:
         return vid
-    folder = str(r.get("folder") or "")
+    # AUDIT 2026-06-14 (R6-D) : les items de groupe (find_duplicate_targets)
+    # exposent `source_folder`, pas `folder` -> on retombait sur "?" pour le nom
+    # de fichier du comparateur. On accepte les deux cles.
+    folder = str(r.get("folder") or r.get("source_folder") or "")
     if folder:
         return folder.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     return "?"

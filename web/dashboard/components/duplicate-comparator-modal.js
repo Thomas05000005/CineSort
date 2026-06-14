@@ -343,7 +343,7 @@ function _renderFramesPayload(payload) {
   }
   return `
     <div class="duplicate-modal-tab-content" data-tab="frames">
-      <p class="duplicate-modal-hint">${frames.length} paire${frames.length > 1 ? "s" : ""} de frames extraites. Les frames sont en luminance (Y plane).</p>
+      <p class="duplicate-modal-hint">${frames.length} paire${frames.length > 1 ? "s" : ""} d'images extraites aux mêmes instants. Images comparées en niveaux de gris (luminance) : <strong>Δ moyen</strong> = écart de luminosité moyen pixel à pixel (0 = identiques, 255 = totalement différentes ; &lt; 10 ≈ même image).</p>
       <div class="duplicate-frames-grid">
         ${frames.map((f, i) => `
           <div class="duplicate-frames-row">
