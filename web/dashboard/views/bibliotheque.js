@@ -147,6 +147,9 @@ function _initState() {
     counters: {}, // 11 compteurs library/get_library_counters_by_chip
     tierFilter: localStorage.getItem(LS_TIER) || "all",
     activeChips: new Set(), // non-tier chips actifs
+    // R7-13 : warnings d'une playlist appliquee (ex preset "DNR partiel") ->
+    // emis dans _buildFilters (le backend filtre par filters.warnings).
+    playlistWarnings: [],
     search: "",
     sort: localStorage.getItem(LS_SORT) || "title",
     viewMode: localStorage.getItem(LS_VIEW) || "grid",
@@ -736,6 +739,10 @@ function _buildFilters({ includeAdvanced = true } = {}) {
   if (_state.activeChips.size > 0) {
     filters.chips = Array.from(_state.activeChips);
   }
+  // R7-13 : warnings issus d'une playlist appliquee (le backend filtre dessus).
+  if (Array.isArray(_state.playlistWarnings) && _state.playlistWarnings.length > 0) {
+    filters.warnings = _state.playlistWarnings.slice();
+  }
   if (includeAdvanced && _state.advancedActive) {
     const adv = _state.advanced || {};
     if (adv.year_min && adv.year_min > 1900) filters.year_min = adv.year_min;
@@ -1157,6 +1164,7 @@ function _bindEvents(container) {
       _state.tierFilter = "all";
       _state.search = "";
       _state.activeChips.clear();
+      _state.playlistWarnings = []; // R7-13 : reset du filtre warnings de playlist
       _state.advancedActive = false;
       _state.advanced = { ...ADVANCED_DRAWER_DEFAULTS };
       localStorage.setItem(LS_TIER, "all");
@@ -1872,14 +1880,11 @@ function _applyPlaylist(playlistId) {
   }
   // warnings / chips -> activeChips
   _state.activeChips.clear();
-  if (Array.isArray(filters.warnings)) {
-    filters.warnings.forEach((_w) => {
-      // Fix audit 2026-05-24 : mapping `dnr_partial` -> `recently_modified`
-      // etait faux semantiquement (dnr_partial = warning DNR partiel, sans
-      // rapport avec une modif recente). Aucun mapping exact n'existe a ce
-      // jour ; on ne fait plus rien tant qu'on n'a pas de correspondance sure.
-    });
-  }
+  // R7-13 : la playlist transporte un filtre `warnings` (ex preset "DNR partiel"
+  // = {warnings:["dnr_partial"]}). Avant, la boucle etait vide -> le filtre etait
+  // perdu (toast succes sans filtrage). On le stocke pour _buildFilters (le
+  // backend filtre par filters.warnings, library_support.py:678).
+  _state.playlistWarnings = Array.isArray(filters.warnings) ? filters.warnings.map((w) => String(w)) : [];
   if (Array.isArray(filters.chips)) {
     filters.chips.forEach((k) => _state.activeChips.add(String(k)));
   }
