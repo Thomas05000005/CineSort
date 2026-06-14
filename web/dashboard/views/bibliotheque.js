@@ -32,6 +32,7 @@ import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { renderFilmDetail } from "../components/film-detail.js";
+import { openDuplicateComparatorModal } from "../components/duplicate-comparator-modal.js";
 import { showToast } from "../components/toast.js";
 import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 import {
@@ -1440,11 +1441,38 @@ function _handleBulkAction(action) {
     return;
   }
   if (action === "compare") {
-    // AUDIT 2026-06-13 (R5-F) : ouvre la vue Doublons (comparateur A/B,
-    // frames/audio, winner). La vue charge tous les groupes ; l'utilisateur
-    // retrouve son film. Navigation par hash (coherent avec film-detail).
+    // AUDIT 2026-06-14 (R6-B) : ouvre DIRECTEMENT le comparateur sur les films
+    // selectionnes (mode lecture seule), au lieu de naviguer vers #/doublons ou
+    // l'utilisateur devait re-trouver son film (l'ancien R5-F supposait a tort
+    // que la biblio etait un groupe de doublons). Le modal gere 2 films (A/B)
+    // ou 3+ (barre de paires). readOnly:true : la biblio n'a pas de group_key
+    // et ne propose pas de decision winner (cf vue Doublons pour decider).
+    if (!_runId) {
+      showToast({ type: "warn", text: "Aucun run actif pour comparer." });
+      release();
+      return;
+    }
+    const selectedRows = _state.rows.filter((r) => _state.selected.has(String(r.row_id)));
+    if (selectedRows.length < 2) {
+      showToast({ type: "warn", text: "Sélectionnez au moins 2 films à comparer." });
+      release();
+      return;
+    }
+    const cmpRows = selectedRows.map((r) => ({
+      row_id: String(r.row_id),
+      label: r.title || String(r.row_id),
+      file_name: r.title || "",
+    }));
+    openDuplicateComparatorModal({
+      runId: _runId,
+      rows: cmpRows,
+      rowA: cmpRows[0].row_id,
+      rowB: cmpRows[1].row_id,
+      title: selectedRows[0].title || "",
+      year: selectedRows[0].year || "",
+      readOnly: true,
+    });
     release();
-    window.location.hash = "#/doublons";
     return;
   }
   if (action === "perceptual") {
