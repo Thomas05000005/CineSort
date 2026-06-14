@@ -73,12 +73,19 @@ function _normalizeTierDist(rawDist) {
 }
 
 function _resolveTierDist(stats) {
-  if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
-    const v2 = _normalizeTierDist(stats.v2_tier_distribution.counts);
-    const v2sum = _TIER_ORDER.reduce((s, t) => s + (v2[t] || 0), 0);
-    if (v2sum > 0) return v2;
+  // AUDIT 2026-06-14 (R6-F) : la V1 (quality_reports) couvre TOUS les films
+  // classes du dernier run ; la V2 (perceptuel) est PARTIELLE (analyse opt-in,
+  // souvent quelques films seulement) et donc non representative de la
+  // bibliotheque. On prend la V1 comme distribution complete, V2 seulement en
+  // repli si la V1 est absente. Evite le faux "100% Bronze / X films classes".
+  if (stats && stats.tier_distribution) {
+    const v1 = _normalizeTierDist(stats.tier_distribution);
+    const v1sum = _TIER_ORDER.reduce((s, t) => s + (v1[t] || 0), 0);
+    if (v1sum > 0) return v1;
   }
-  if (stats && stats.tier_distribution) return _normalizeTierDist(stats.tier_distribution);
+  if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
+    return _normalizeTierDist(stats.v2_tier_distribution.counts);
+  }
   return {};
 }
 

@@ -1567,7 +1567,12 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
         # 3. Global tier distribution
-        tier_data = store.quality.get_global_tier_distribution(limit_runs=lim)
+        # AUDIT 2026-06-14 (R6-F) : distribution "etat courant" = DERNIER run
+        # SEULEMENT (limit_runs=1). Avant, l'agregation sur `lim` runs (20)
+        # cumulait les films de plusieurs scans -> "films classes" gonfle et
+        # tiers fausses sur la page Qualite (ex: 1249 quasi tout Bronze) alors
+        # que la Biblio (V1 dernier run) montre la vraie repartition.
+        tier_data = store.quality.get_global_tier_distribution(limit_runs=1)
 
         # 4. Top anomaly codes
         top_anomalies = store.anomaly.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
@@ -1644,7 +1649,10 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         librarian_data = _compute_librarian_suggestions(api, store, run_ids[0] if run_ids else "", settings)
 
         # 12. v7.6.0 Vague 2 — Home overview-first payloads
-        v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids)
+        # AUDIT 2026-06-14 (R6-F) : V2 perceptuel du DERNIER run uniquement
+        # (run_ids[:1]). Avant, le cumul sur 20 runs donnait ~1265 lignes quasi
+        # toutes "bronze" (perceptuel partiel/ancien) -> faux "Sante 0% / tout Bronze".
+        v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids[:1])
         trend_30days = _compute_trend_30days(store)
         insights = _compute_active_insights(api, store, run_ids, settings)
 
