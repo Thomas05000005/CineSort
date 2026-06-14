@@ -148,6 +148,49 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 
 ## Sessions recentes
 
+### 14 juin 2026 — Vagues R6 + R7 + audit patterns (44 fixes) ✅
+
+Session Opus 4.8 sur `loop/correction-2026-06` (jamais pousse), declenchee par
+analyse de captures de l'app reelle puis "on corrige tout" / "fais tout le reste".
+
+**Vague R6 (13 commits, c8c123c..76b0043)** : R6-G fausse alerte TMDb (lit
+`_has_tmdb_api_key`) ; R6-F page Qualite = distribution dernier run (965 films,
+fini "tout Bronze" qui lisait le perceptuel cross-run) ; R6-E fonds opaques
+(`.modal-card`/`.card` sans background, drawer biblio `--surface-1`, dropdown
+`color-scheme:dark`) ; R6-A doublons groupes par IDENTITE titre+annee toutes
+racines + badge scope + exclusion tv_episode (avant : groupes QUE si collision
+de destination -> cross-racine rates) ; R6-D comparateur (onglets Frames/Audio
+debloques : flag `LoadedByPair` pose avant querySelector -> fix flag apres succes
++ garde `LoadingByPair` ; nom "?" car `_filename_from_row` lisait `folder` au lieu
+de `source_folder` ; taille octets bruts) ; R6-C/B cache doublons inter-navigation
+(`_groupsCache` par runId) ; R6-I (year_missing mappe, confidence_avg, Etape 2
+review_queue/conflicts) ; Comparer biblio en readOnly ; R6-H jaquettes (enrich
+renvoie `ids:{row_id:tmdb_id}` + client patche r.tmdb_id ; onerror sur posters).
+
+**Audit "patterns R6" (workflow 56 agents, verif adversariale)** : 33 bugs
+confirmes -> 18 synthetises (4 HIGH / 9 MED / 5 LOW). Rapport :
+[AUDIT_PATTERNS_R6_2026-06-14.md](./AUDIT_PATTERNS_R6_2026-06-14.md). Familles
+recurrentes : front lit une cle que le back niche/ne fournit pas ; agregation
+cross-run ; CSS transparent ; secret masque lu comme valeur ; feedback trompeur ;
+**write-only jamais consomme** ; rendu/onerror posters.
+
+**Vague R7 (18 commits, 33e735d..d9ab69d)** : 1 sujet=1 commit, GATE
+fail-before/pass-after chacun. HIGH : R7-1 KPI QIJ sous `summary.*` ; R7-2
+film-detail lit `probe.detected.*` ; R7-3 override TMDb manuel effectif (overlay
+biblio+fiche+apply, table reste source) ; R7-4 "Marquer pour suppression"
+consomme par l'apply (bucket `_user_marked_for_deletion/`, miroir isole des
+losers). MED : R7-5 summary KPI dernier run ; R7-6 Inspecteur Historique
+(films+doublons) ; R7-7 progression scan (`run_info` dans get_dashboard) ; R7-8
+refresh poster force le proxy (cache disque + cache-bust) ; R7-9 CSS drawers/
+selects (complement R6-E) ; R7-10 reveal token REST (localhost-only) ; R7-11
+recompute compte les `{ok:False}` ; R7-12 unmark/clear override cables
+(impl+facade+endpoints+UI). LOW : R7-13 playlist warnings ; R7-14 recap Apply
+(result.renames+moves) ; R7-15 trend perceptuel COUNT(DISTINCT row_id) ; R7-16
+onerror vignettes ; R7-17 message cle TMDb absente fiche film.
+
+**Verifs** : 166 GATEs+regression verts, import-linter 3/3, py_compile/node OK,
+EXE rebuild. ~35 fichiers test v77 neufs cette session.
+
 ### 11 juin 2026 (suite) — Verification totale + vague R4 (14 fixes) ✅
 
 **Verification totale** demandee par l'utilisateur : workflow 65 agents (128 findings, 21 challenges,
@@ -389,7 +432,7 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-11 (Verification totale 65 agents + vague R4 : 14 fixes dont P1 perceptual_workers racine, P2 tiret colle, P4 multi-root v2 ; 0 regression suite complete ; cf annexes Fable 5 + R4 dans AUDIT_EVALUATION_HANDOFF_2026-06-11.md).*
+*Last updated : 2026-06-14 (Vagues R6 + R7 + audit patterns : 44 fixes, 0 regression, 166 GATEs verts, import-linter 3/3, EXE rebuild ; cf AUDIT_PATTERNS_R6_2026-06-14.md).*
 
 ---
 
