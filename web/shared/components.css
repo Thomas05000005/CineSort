@@ -7442,6 +7442,12 @@ body.v5-notif-lock {
 .doublons-card-year { color: var(--text-2); font-weight: var(--fw-regular); font-size: var(--fs-md); }
 .doublons-card-meta { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); flex-wrap: wrap; }
 .doublons-card-alerts { color: var(--warning, #d97706); font-weight: var(--fw-semibold); }
+/* AUDIT 2026-06-14 (R6-A) : badge de portee du doublon (liste unique par
+   identite, le badge precise ou se trouvent les copies). */
+.doublons-card-scope { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); border: 1px solid var(--border-1); }
+.doublons-card-scope.is-cross { color: var(--accent, #8b5cf6); border-color: color-mix(in srgb, var(--accent, #8b5cf6) 45%, transparent); }
+.doublons-card-scope.is-same-root { color: var(--text-2); }
+.doublons-card-scope.is-same-folder { color: var(--text-3, var(--text-2)); }
 .doublons-card-versions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .doublons-version { background: var(--surface-2); border-radius: var(--radius-md); padding: var(--sp-3); border: 1px solid var(--border-1); }
 .doublons-version.is-winner { border-color: var(--success, #16a34a); background: rgba(22, 163, 74, 0.04); }

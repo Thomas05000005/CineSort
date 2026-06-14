@@ -315,6 +315,13 @@ function _renderGroupCard(group) {
   // Fix audit 2026-05-24 : disable uniquement les boutons du groupe en vol.
   const inflight = _state.decisionInFlightByGroup.has(groupKey) ? "disabled" : "";
 
+  // R6-A : badge de portee (liste unique par identite). Indique ou sont les copies.
+  const scopeInfo = {
+    cross_root: { label: "↔ Racines différentes", cls: "is-cross" },
+    same_root: { label: "Même racine", cls: "is-same-root" },
+    same_folder: { label: "Même dossier", cls: "is-same-folder" },
+  }[String(group.scope || "")] || null;
+
   return `
     <article class="doublons-card${isSelected ? " is-selected" : ""}${decided ? " is-decided" : ""}"
              data-doublons-group="${escapeHtml(groupKey)}" tabindex="0">
@@ -330,6 +337,7 @@ function _renderGroupCard(group) {
             <span>${totalFiles} fichier${totalFiles > 1 ? "s" : ""}</span>
             <span>·</span>
             <span>${escapeHtml(_fmtSize(totalSize))}</span>
+            ${scopeInfo ? `<span class="doublons-card-scope ${scopeInfo.cls}">${escapeHtml(scopeInfo.label)}</span>` : ""}
             ${alertCounts.total > 0 ? `<span class="doublons-card-alerts">⚠ ${alertCounts.total} alerte${alertCounts.total > 1 ? "s" : ""}</span>` : ""}
           </div>
           ${decided ? `

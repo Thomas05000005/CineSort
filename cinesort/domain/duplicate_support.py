@@ -272,6 +272,14 @@ def find_duplicate_targets(
         if not bool(dec.get("ok", False)):
             continue
 
+        # AUDIT 2026-06-14 (R6-A) : un episode TV n'est PAS un doublon de film.
+        # Plusieurs episodes d'une serie partagent le meme titre+annee mais sont
+        # des fichiers distincts -> l'ancienne branche "collection" les groupait
+        # a tort (ex: dossier "A Knight ..." = 6 tv_episode). Choix utilisateur
+        # "1 liste par identite" : on exclut les episodes de la detection.
+        if getattr(row, "kind", "") == "tv_episode":
+            continue
+
         title = str(dec.get("title") or row.proposed_title).strip() or row.proposed_title
         try:
             year = int(dec.get("year") or row.proposed_year)
@@ -298,6 +306,8 @@ def find_duplicate_targets(
                 "year": str(year),
                 "target": str(target),
                 "source_folder": str(row.folder),
+                # R6-A : racine d'origine (multi-root) pour etiqueter la portee.
+                "source_root": str(getattr(row, "source_root", None) or ""),
             }
         )
 
@@ -367,8 +377,34 @@ def find_duplicate_targets(
             if conflict or ((not matched_target) and existing_norm not in target_norms):
                 existing_elsewhere.append(existing_path)
 
-        if (not has_plan_dupe) and (not existing_elsewhere):
+        # AUDIT 2026-06-14 (R6-A) : "1 liste par identite". On emet un groupe des
+        # qu'au moins 2 films partagent la meme identite (titre+annee), MEME si
+        # leurs dossiers de destination different (doublons cross-racine que
+        # l'ancienne condition has_plan_dupe ratait -> "65 detectes / 5
+        # affiches"). La collision de destination reste un signal interne
+        # (plan_conflict) pour la securite d'apply.
+        identity_dupe = len(items) >= 2
+        if (not identity_dupe) and (not existing_elsewhere):
             continue
+
+        # Portee du doublon (badge informatif, la liste reste unique) :
+        #  - cross_root : copies dans des racines differentes (source_root) ;
+        #  - same_root  : meme racine mais dossiers parents differents ;
+        #  - same_folder: meme dossier parent.
+        roots = {str(it.get("source_root") or "").strip() for it in items}
+        roots.discard("")
+        parents = set()
+        for it in items:
+            try:
+                parents.add(norm_win_path(Path(it["source_folder"]).parent))
+            except (ValueError, TypeError, OSError):
+                pass
+        if len(roots) > 1:
+            scope = "cross_root"
+        elif len(parents) > 1:
+            scope = "same_root"
+        else:
+            scope = "same_folder"
 
         groups.append(
             {
@@ -377,6 +413,7 @@ def find_duplicate_targets(
                 "rows": items,
                 "existing_paths": existing_elsewhere[:8],
                 "plan_conflict": bool(has_plan_dupe),
+                "scope": scope,
             }
         )
         if len(groups) >= max_groups:
