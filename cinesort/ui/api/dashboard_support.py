@@ -1605,17 +1605,18 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         top_anomalies = store.anomaly.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
 
         # 5. Aggregated summary
-        total_films = sum(r.get("total_rows", 0) for r in runs_summary)
-        all_scored = sum(qc.get("scored_movies", 0) for qc in quality_counts.values())
-        all_premium = sum(qc.get("premium_count", 0) for qc in quality_counts.values())
-        weighted_scores = [
-            (qc["score_avg"], qc["scored_movies"]) for qc in quality_counts.values() if qc.get("scored_movies", 0) > 0
-        ]
-        if weighted_scores:
-            total_weight = sum(w for _, w in weighted_scores)
-            avg_score = sum(s * w for s, w in weighted_scores) / total_weight if total_weight else 0.0
-        else:
-            avg_score = 0.0
+        # AUDIT 2026-06-14 (R7-5) : complement de R6-F. total_films/avg_score/
+        # premium_pct etaient cumules sur `lim` runs (defaut 20) alors que chaque
+        # run est un snapshot complet independant -> un film present dans N scans
+        # etait compte N fois (KPI gonfles). On scope au DERNIER run, comme la
+        # distribution par tier (limit_runs=1) et la Bibliotheque.
+        latest_rid = run_ids[0] if run_ids else None
+        latest_summary = next((r for r in runs_summary if r.get("run_id") == latest_rid), None)
+        total_films = int(latest_summary.get("total_rows", 0)) if latest_summary else 0
+        latest_qc = quality_counts.get(latest_rid, {}) if latest_rid else {}
+        all_scored = int(latest_qc.get("scored_movies", 0) or 0)
+        all_premium = int(latest_qc.get("premium_count", 0) or 0)
+        avg_score = float(latest_qc.get("score_avg", 0.0) or 0.0)
         premium_pct = (all_premium / all_scored * 100) if all_scored else 0.0
 
         # 6. Trend (↑↓→)
