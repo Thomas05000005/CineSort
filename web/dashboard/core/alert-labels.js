@@ -188,6 +188,23 @@ const FLAG_MAP = {
     severity: "critical",
     action: { kind: "open_film", label: "Voir détail" },
   },
+  // AUDIT 2026-06-14 (R6-I) : flag emis par la detection de doublons quand
+  // l'annee est introuvable -> n'etait pas mappe ("Alerte sans description.").
+  year_missing: {
+    icon: "📅",
+    label: "Année introuvable",
+    description: "Aucune année exploitable (ni NFO ni nom de dossier). Le regroupement de doublons se base alors sur le titre seul : vérifier l'année avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
+};
+
+// AUDIT 2026-06-14 (R6-I) : map de langues pour les flags subtitle_missing_<lang>
+// dynamiques (de/es/it/...) non listes explicitement ci-dessus.
+const _LANG_NAMES = {
+  fr: "français", en: "anglais", de: "allemand", es: "espagnol",
+  it: "italien", pt: "portugais", nl: "néerlandais", ja: "japonais",
+  ko: "coréen", zh: "chinois", ru: "russe", ar: "arabe",
 };
 
 const DEFAULT = {
@@ -205,7 +222,27 @@ const DEFAULT = {
 export function labelForFlag(code) {
   const c = String(code || "").trim();
   if (!c) return null;
-  const entry = FLAG_MAP[c] || DEFAULT;
+  let entry = FLAG_MAP[c];
+  // AUDIT 2026-06-14 (R6-I) : flags subtitle_missing_<lang> dynamiques.
+  if (!entry && c.startsWith("subtitle_missing_")) {
+    const lang = c.slice("subtitle_missing_".length);
+    const langName = _LANG_NAMES[lang] || lang.toUpperCase();
+    entry = {
+      icon: "💬",
+      label: `Sous-titres ${lang.toUpperCase()} manquants`,
+      description: `Aucun sous-titre ${langName} détecté pour ce film.`,
+      severity: "warning",
+      action: { kind: "config_subs", label: "Configurer recherche subs" },
+    };
+  }
+  // AUDIT 2026-06-14 (R6-I) : flag inconnu -> on affiche le code en clair plutot
+  // que le generique "Alerte sans description." (sans valeur pour l'utilisateur).
+  if (!entry) {
+    entry = {
+      ...DEFAULT,
+      description: `Alerte « ${c} » (non documentée). Signalez-la si elle est fréquente.`,
+    };
+  }
   return {
     code: c,
     icon: entry.icon,
