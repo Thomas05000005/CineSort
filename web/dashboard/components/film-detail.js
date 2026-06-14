@@ -433,17 +433,26 @@ function _renderTabsBar() {
 
 function _renderOverviewTab(data) {
   const probe = data.probe || {};
-  const video = probe.video || {};
-  const audioTracks = Array.isArray(probe.audio) ? probe.audio : [];
-  const subs = Array.isArray(probe.subtitles) ? probe.subtitles : [];
+  // AUDIT 2026-06-14 (R7-2) : get_film_full renvoie le `metrics` brut -> les
+  // caracteristiques techniques vivent SOUS probe.detected.* (plat), pas dans
+  // probe.video/probe.audio/probe.subtitles. Avant, l'apercu affichait tout
+  // vide ("Pistes audio: 0", Resolution/Codec/Bitrate absents). Le nombre de
+  // sous-titres n'est pas dans metrics : on le lit sur la PlanRow (data.row).
+  const det = probe.detected || {};
+  const row = data.row || {};
+  const resolution = det.resolution || (det.width && det.height ? `${det.width}×${det.height}` : "");
+  const durMin = det.duration_s ? Math.round(Number(det.duration_s) / 60) : 0;
+  const audioCount = Number(det.audio_tracks_count || 0);
+  const subCount = Number(row.subtitle_count || 0);
   return `
     <div class="film-detail-overview">
       <dl class="film-detail-data-list">
-        ${video.width && video.height ? `<dt>Résolution</dt><dd>${escapeHtml(video.width)}×${escapeHtml(video.height)}</dd>` : ""}
-        ${video.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(video.codec).toUpperCase())}</dd>` : ""}
-        ${video.bitrate_kbps ? `<dt>Bitrate</dt><dd>${escapeHtml(String(video.bitrate_kbps))} kbps</dd>` : ""}
-        <dt>Pistes audio</dt><dd>${audioTracks.length}</dd>
-        <dt>Sous-titres</dt><dd>${subs.length}</dd>
+        ${resolution ? `<dt>Résolution</dt><dd>${escapeHtml(resolution)}</dd>` : ""}
+        ${det.video_codec ? `<dt>Codec</dt><dd>${escapeHtml(String(det.video_codec).toUpperCase())}</dd>` : ""}
+        ${det.bitrate_kbps ? `<dt>Bitrate</dt><dd>${escapeHtml(String(det.bitrate_kbps))} kbps</dd>` : ""}
+        ${durMin > 0 ? `<dt>Durée</dt><dd>${durMin} min</dd>` : ""}
+        <dt>Pistes audio</dt><dd>${audioCount}</dd>
+        <dt>Sous-titres</dt><dd>${subCount}</dd>
       </dl>
     </div>
   `;
