@@ -248,6 +248,12 @@ def _build_dashboard_section(
     scores = [int(item.get("score") or 0) for item in reports]
     scored_movies = len(scores)
     score_avg = round(sum(scores) / scored_movies, 1) if scored_movies else 0.0
+    # AUDIT 2026-06-14 (R6-I) : confiance moyenne (identification) = moyenne des
+    # PlanRow.confidence (0..100). Avant, l'accueil lisait latestRun.
+    # avg_confidence_pct qui n'existe pas dans runs_history -> "Confiance
+    # moyenne : —". On la calcule ici et on l'expose dans kpis.
+    confidences = [int(getattr(r, "confidence", 0) or 0) for r in rows]
+    confidence_avg = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
     premium_count = sum(1 for score in scores if score >= 85)
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
     stats_obj = _parse_stats_json(run_row.get("stats_json"))
@@ -493,6 +499,7 @@ def _build_dashboard_section(
     return {
         "kpis": {
             "score_avg": score_avg,
+            "confidence_avg": confidence_avg,  # R6-I : confiance moyenne d'identification
             "score_premium_pct": score_premium_pct,
             "total_movies": total_movies,
             "scored_movies": scored_movies,

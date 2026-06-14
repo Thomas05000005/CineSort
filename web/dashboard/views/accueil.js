@@ -129,7 +129,9 @@ function _renderLastRunCard(latestRun, kpis) {
   const date = formatRelativeTime(startedDate);
   const total = latestRun.total_rows != null ? Number(latestRun.total_rows) : null;
   const avgScore = kpis && kpis.score_avg != null ? Number(kpis.score_avg) : (latestRun.avg_score_v2 != null ? Number(latestRun.avg_score_v2) : null);
-  const avgConfidence = latestRun.avg_confidence_pct;
+  // R6-I : la confiance moyenne vient de kpis.confidence_avg (runs_history n'a
+  // pas avg_confidence_pct -> affichait toujours "—").
+  const avgConfidence = kpis && kpis.confidence_avg != null ? Number(kpis.confidence_avg) : latestRun.avg_confidence_pct;
   const scoreTxt = avgScore != null && avgScore > 0 ? `${Math.round(avgScore)}/100` : "— (pas calculé)";
   const confTxt = avgConfidence != null ? `${Math.round(avgConfidence)}%` : "—";
   const totalTxt = total != null ? `${total} films analysés` : "— films";
