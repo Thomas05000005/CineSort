@@ -1390,6 +1390,9 @@ class ApplyResult:
     skipped: int = 0
     errors: int = 0
     merges_count: int = 0
+    # AUDIT 2026-06-14 (R7-4) : compteur des films marques pour suppression
+    # deplaces vers _review/_user_marked_for_deletion/ a l'apply.
+    marked_for_deletion_moved_count: int = 0
     duplicates_identical_moved_count: int = 0
     # Backward-compatible alias kept for older consumers.
     duplicates_identical_deleted_count: int = 0
@@ -1427,6 +1430,8 @@ class ApplyExecutionContext:
     leftovers_root: Path
     # Phase 6 doublons (spec 01-doublons.md §3.7) : bucket des losers post-decision UI.
     duplicates_user_decided_root: Optional[Path] = None
+    # AUDIT 2026-06-14 (R7-4) : bucket des films marques pour suppression par l'utilisateur.
+    marked_for_deletion_root: Optional[Path] = None
     touched_top_level_dirs: Set[Path] = field(default_factory=set)
     folder_map: Dict[str, str] = field(default_factory=dict)
     dedup_seen_ops: Set[Tuple[str, str, str]] = field(default_factory=set)

@@ -71,6 +71,16 @@ def _write_deletion_marks(path: Path, data: Dict[str, Any]) -> None:
     state.atomic_write_json(path, data)
 
 
+def list_deletion_marks_row_ids(api: Any, run_id: str) -> List[str]:
+    """AUDIT 2026-06-14 (R7-4) : row_ids marques pour suppression via le mecanisme
+    bulk (deletion_marks.json). Consomme par l'apply (apply_support) pour router
+    ces films vers _review/_user_marked_for_deletion/. [] si rien/erreur."""
+    path = _deletion_marks_path(api, run_id)
+    if path is None:
+        return []
+    return [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
+
+
 def _persist_marks(api: Any, run_id: str, new_row_ids: List[str]) -> int:
     """Persiste les marqueurs. Retourne le nombre de rows nouvellement marques."""
     path = _deletion_marks_path(api, run_id)

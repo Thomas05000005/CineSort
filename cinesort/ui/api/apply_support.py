@@ -1387,6 +1387,27 @@ def _execute_apply(
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
+    # AUDIT 2026-06-14 (R7-4) : collecter les films marques pour suppression
+    # depuis les DEUX mecanismes historiques (modal -> table DB ; bulk ->
+    # deletion_marks.json), unifies, pour les router vers
+    # _review/_user_marked_for_deletion/ a l'apply. Avant, le marquage etait
+    # write-only (aucun consommateur) -> promesse UI jamais tenue.
+    marked_for_deletion: Set[str] = set()
+    try:
+        for _m in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
+            _mid = str(_m.get("row_id") or "").strip()
+            if _mid:
+                marked_for_deletion.add(_mid)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Lecture marked_for_deletion (DB) impossible: {exc}")
+    try:
+        from cinesort.ui.api.library_actions_support import list_deletion_marks_row_ids
+        for _mid in list_deletion_marks_row_ids(api, run_id):
+            if _mid:
+                marked_for_deletion.add(str(_mid))
+    except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Lecture deletion_marks.json impossible: {exc}")
+
     # Multi-root : grouper les rows par source_root et appeler apply_rows par root
     rows_by_root: Dict[str, List[Any]] = {}
     for row in rows:
@@ -1469,6 +1490,7 @@ def _execute_apply(
             decision_presence=decision_presence,
             record_op=record_op_for_apply,
             duplicate_loser_row_ids=duplicate_losers if duplicate_losers else None,
+            marked_for_deletion_row_ids=marked_for_deletion if marked_for_deletion else None,
             progress_cb=progress_cb,
             audit_logger=auditor,
         )

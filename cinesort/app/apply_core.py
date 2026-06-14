@@ -95,6 +95,8 @@ def build_apply_context(
     duplicates_identical_root = merge_review_root / "_duplicates_identical"
     # Phase 6 doublons (spec 01-doublons.md §3.7) : losers post-decision UI.
     duplicates_user_decided_root = merge_review_root / "_duplicates_user_decided"
+    # AUDIT 2026-06-14 (R7-4) : bucket des films marques pour suppression.
+    marked_for_deletion_root = merge_review_root / "_user_marked_for_deletion"
     leftovers_root = merge_review_root / "_leftovers"
 
     if quarantine_unapproved and (not dry_run):
@@ -116,6 +118,7 @@ def build_apply_context(
         conflicts_sidecars_root=conflicts_sidecars_root,
         duplicates_identical_root=duplicates_identical_root,
         duplicates_user_decided_root=duplicates_user_decided_root,
+        marked_for_deletion_root=marked_for_deletion_root,
         leftovers_root=leftovers_root,
     )
 
@@ -1074,6 +1077,137 @@ def move_duplicate_losers_to_user_decided(
         res.duplicates_identical_moved_count += 1
 
 
+def move_marked_for_deletion_to_bucket(
+    cfg: "Config",
+    rows: list["PlanRow"],
+    marked_row_ids: Set[str],
+    *,
+    marked_for_deletion_root: Path,
+    dry_run: bool,
+    log: Callable[[str, str], None],
+    res: "ApplyResult",
+    record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> None:
+    """AUDIT 2026-06-14 (R7-4) : deplace les films marques pour suppression par
+    l'utilisateur vers `<root>/_review/_user_marked_for_deletion/`.
+
+    Miroir isole de move_duplicate_losers_to_user_decided (zero impact sur le
+    chemin doublons). Appele AVANT la boucle apply principale ; les rows marquees
+    sont ensuite exclues. Deplacements via atomic_move + record_apply_op ->
+    reversibles par l'undo. No-op si set vide. Securite torrents : on DEPLACE
+    (jamais de suppression definitive), l'utilisateur videra le bucket lui-meme.
+    """
+    if not marked_row_ids:
+        return
+    if not dry_run:
+        marked_for_deletion_root.mkdir(parents=True, exist_ok=True)
+
+    by_row: Dict[str, "PlanRow"] = {}
+    for r in rows:
+        _rid = getattr(r, "row_id", None)
+        _rid_str = str(_rid) if _rid not in (None, "") else ""
+        if _rid_str:
+            by_row[_rid_str] = r
+
+    seen: Set[str] = set()
+    for rid in marked_row_ids:
+        if rid in seen:
+            continue
+        seen.add(rid)
+        row = by_row.get(str(rid))
+        if row is None:
+            log("WARN", f"MARKED_FOR_DELETION row_id introuvable, skip: {rid}")
+            continue
+
+        folder = Path(row.folder)
+        video_name = str(row.video or "").strip()
+        row_record_op = record_op
+        if record_op is not None:
+            _rid_str = str(row.row_id or "")
+            _record_op_ref = record_op
+
+            def _inject_row_id(
+                payload: Dict[str, Any],
+                _rid_str: str = _rid_str,
+                _record_op_ref: Callable[[Dict[str, Any]], None] = _record_op_ref,
+            ) -> None:
+                if isinstance(payload, dict) and not payload.get("row_id"):
+                    payload["row_id"] = _rid_str
+                _record_op_ref(payload)
+
+            row_record_op = RecordOpWithJournal(
+                _inject_row_id,
+                store=getattr(_record_op_ref, "journal_store", None),
+                batch_id=getattr(_record_op_ref, "journal_batch_id", None),
+            )
+
+        bucket_label = "MARKED_FOR_DELETION moved to _review/_user_marked_for_deletion"
+
+        # Cas collection : deplacer SEULEMENT la video marquee + ses sidecars.
+        if row.kind == "collection" and video_name:
+            video = folder / video_name
+            if not video.exists():
+                try:
+                    matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
+                    video = matches[0] if matches else video
+                except (OSError, PermissionError):
+                    pass
+            if not video.exists():
+                log("WARN", f"MARKED_FOR_DELETION video manquante pour row {rid}, skip: {video}")
+                continue
+            sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+            for sidecar in sidecars:
+                if not sidecar.exists():
+                    continue
+                move_to_review_bucket(
+                    sidecar,
+                    src_anchor=folder,
+                    bucket_root=marked_for_deletion_root,
+                    bucket_name=bucket_label,
+                    include_anchor_name=True,
+                    use_dup_suffix=False,
+                    rel_override=None,
+                    dry_run=dry_run,
+                    log=log,
+                    res=res,
+                    record_op=row_record_op,
+                )
+                res.marked_for_deletion_moved_count += 1
+            move_to_review_bucket(
+                video,
+                src_anchor=folder,
+                bucket_root=marked_for_deletion_root,
+                bucket_name=bucket_label,
+                include_anchor_name=True,
+                use_dup_suffix=False,
+                rel_override=None,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=row_record_op,
+            )
+            res.marked_for_deletion_moved_count += 1
+            continue
+
+        # Cas single : deplacer le dossier entier.
+        if not folder.exists():
+            log("WARN", f"MARKED_FOR_DELETION dossier manquant pour row {rid}, skip: {folder}")
+            continue
+        target = unique_path_dup(marked_for_deletion_root / core_mod.windows_safe(folder.name))
+        log("INFO", f"{bucket_label}: {folder} -> {target}")
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+            record_apply_op(
+                row_record_op,
+                op_type="MOVE_DIR",
+                src_path=folder,
+                dst_path=target,
+                reversible=True,
+            )
+        res.marked_for_deletion_moved_count += 1
+
+
 def move_collection_folder(
     cfg: "Config",
     folder: Path,
@@ -1129,6 +1263,7 @@ def apply_rows(
     decision_presence: Optional[Set[str]] = None,
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
     duplicate_loser_row_ids: Optional[Set[str]] = None,
+    marked_for_deletion_row_ids: Optional[Set[str]] = None,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     should_pause: Optional[Callable[[], bool]] = None,
@@ -1177,6 +1312,22 @@ def apply_rows(
         )
         # Retirer les losers des rows à apply normalement.
         rows = [r for r in rows if str(getattr(r, "row_id", "")) not in losers_set]
+
+    # AUDIT 2026-06-14 (R7-4) : films marques pour suppression -> bucket dedie
+    # AVANT la boucle apply, puis exclus (meme schema que les losers).
+    marked_set: Set[str] = {str(r) for r in (marked_for_deletion_row_ids or set()) if r}
+    if marked_set and ctx.marked_for_deletion_root is not None:
+        move_marked_for_deletion_to_bucket(
+            cfg,
+            rows,
+            marked_set,
+            marked_for_deletion_root=ctx.marked_for_deletion_root,
+            dry_run=dry_run,
+            log=log,
+            res=res,
+            record_op=record_op,
+        )
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in marked_set]
 
     migrate_legacy_collection_root(
         cfg,
