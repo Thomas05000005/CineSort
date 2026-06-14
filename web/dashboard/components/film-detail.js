@@ -195,8 +195,11 @@ function _renderHero(data) {
   // sur `posterUrl` direct preserve backward compat (acquis 242cf339).
   const proxiedPosterUrl = posterProxyUrl(tmdbIdForRefresh, "w342");
   const posterSrc = proxiedPosterUrl || posterUrl || "";
+  // AUDIT 2026-06-14 (R6-H) : onerror -> placeholder. Le proxy /api/poster peut
+  // renvoyer un corps JSON (404 sans poster / 503 cle absente) au lieu d'une
+  // image ; sans ce filet, l'<img> affiche une icone cassee.
   const posterInner = posterSrc
-    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager">`
+    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'film-detail-poster film-detail-poster--placeholder',textContent:'🎬'}))">`
     : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
   const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 

@@ -1391,6 +1391,26 @@ function _bindEvents(container) {
     }
   }, opts);
 
+  // AUDIT 2026-06-14 (R6-H) : filet de securite jaquettes. Le proxy /api/poster
+  // renvoie un corps JSON (404 "poster indisponible" / 503 "cle TMDb absente"),
+  // PAS une image -> sans onerror, le navigateur affiche une icone d'image
+  // cassee. Les events 'error' des <img> ne bouillonnent pas -> on ecoute en
+  // phase CAPTURE et on remplace l'<img> en echec par le placeholder 🎬.
+  const _captureOpts = { capture: true };
+  if (_eventsController) _captureOpts.signal = _eventsController.signal;
+  container.addEventListener("error", (ev) => {
+    const img = ev.target;
+    if (!img || img.tagName !== "IMG") return;
+    if (!img.classList || !img.classList.contains("bibliotheque-card-poster-img")) return;
+    if (img.dataset && img.dataset.posterFallbackDone === "1") return; // idempotent
+    const ph = document.createElement("div");
+    ph.className = "bibliotheque-card-poster-placeholder";
+    ph.setAttribute("aria-hidden", "true");
+    ph.title = img.alt ? `${img.alt} — jaquette indisponible` : "Jaquette indisponible";
+    ph.textContent = "🎬";
+    if (img.parentNode) img.parentNode.replaceChild(ph, img);
+  }, _captureOpts);
+
 }
 
 /**
