@@ -795,9 +795,15 @@ function _resolveLatestRun(payload) {
 // silencieuse pour un onboarding decouverte.
 function _renderSetupBanner(settings) {
   const s = settings || {};
+  // AUDIT 2026-06-14 (R6-G) : le GET masque les secrets -> `tmdb_api_key` revient
+  // vide ("••••" ou ""), donc tester sa valeur donnait une FAUSSE alerte
+  // "TMDb n'est pas configuré" alors que la clé est bien là (cf pastille ☑TMDb
+  // verte + Paramètres "Configuré"). On lit le flag canonique `_has_tmdb_api_key`
+  // (présence réelle de la clé), avec repli sur la valeur si elle n'est pas masquée.
   const tmdbKey = typeof s.tmdb_api_key === "string" ? s.tmdb_api_key.trim() : "";
+  const hasTmdbKey = s._has_tmdb_api_key === true || tmdbKey !== "";
   const tmdbEnabled = s.tmdb_enabled !== false; // par defaut on suppose enabled
-  const tmdbMissing = !tmdbKey || tmdbEnabled === false;
+  const tmdbMissing = !tmdbEnabled || !hasTmdbKey;
 
   const secondaryMissing = [];
   if (!s.jellyfin_enabled && !(typeof s.jellyfin_api_key === "string" && s.jellyfin_api_key.trim())) {
