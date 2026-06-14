@@ -1543,6 +1543,7 @@ async function _bulkRefreshPosters(rowIds) {
     return;
   }
   let patched = 0;
+  let notConfigured = false; // R6-H : clé TMDb absente détectée (message précis)
   try {
     // 1) Films NFO/nom sans tmdb_id : resoudre par titre+annee (persiste).
     if (withoutId.length > 0) {
@@ -1556,9 +1557,17 @@ async function _bulkRefreshPosters(rowIds) {
           showToast({ type: "error", text: d.message || d.error || "Erreur TMDb (clé configurée ?)." });
         } else {
           const map = d.posters || {};
-          Object.keys(map).forEach((rid) => {
+          const idMap = d.ids || {}; // R6-H : tmdb_id resolus par row_id
+          // R6-H : patcher r.tmdb_id en memoire -> le rendu passe par le proxy
+          // /api/poster?id=<tmdb_id> et affiche la jaquette fraiche (avant,
+          // seul r.poster_url etait patche, ignore par le rendu si tmdb_id vide).
+          const touched = new Set([...Object.keys(idMap), ...Object.keys(map)]);
+          touched.forEach((rid) => {
             const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-            if (r) { r.poster_url = String(map[rid]); patched += 1; }
+            if (!r) return;
+            if (idMap[rid] != null) { r.tmdb_id = idMap[rid]; r.identified = true; }
+            if (map[rid]) r.poster_url = String(map[rid]);
+            patched += 1;
           });
         }
       }
@@ -1569,6 +1578,9 @@ async function _bulkRefreshPosters(rowIds) {
       const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
       if (!_state) return;
       const d = (res && res.data) || res || {};
+      // R6-H : get_tmdb_posters renvoie ok:true + reason:"tmdb_not_configured"
+      // (pas ok:false) quand la cle manque -> on capte pour un message precis.
+      if (d && d.reason === "tmdb_not_configured") notConfigured = true;
       const map = (d && (d.posters || d.urls)) || {};
       withId.forEach((tid, rid) => {
         const url = map[String(tid)] || map[tid];
@@ -1581,6 +1593,8 @@ async function _bulkRefreshPosters(rowIds) {
     if (patched > 0) {
       _render();
       showToast({ type: "success", text: `${patched} jaquette${patched > 1 ? "s" : ""} récupérée${patched > 1 ? "s" : ""}.` });
+    } else if (notConfigured) {
+      showToast({ type: "warn", text: "Clé TMDb non configurée (Paramètres ▸ TMDb)." });
     } else {
       showToast({ type: "warn", text: "Aucune jaquette trouvée (vérifiez la clé TMDb dans Paramètres)." });
     }

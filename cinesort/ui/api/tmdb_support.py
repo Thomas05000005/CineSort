@@ -168,6 +168,10 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
                 all_rows.append(data)
 
     posters: Dict[str, str] = {}
+    # AUDIT 2026-06-14 (R6-H) : on renvoie aussi le tmdb_id resolu par row_id.
+    # Sans ca, le client ne mettait pas a jour r.tmdb_id en memoire -> le rendu
+    # (proxy /api/poster?id=tmdb_id) ne pouvait pas afficher la jaquette fraiche.
+    resolved_ids: Dict[str, int] = {}
     resolved = 0
     changed = False
     for row in all_rows:
@@ -201,6 +205,7 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
         row["tmdb_id"] = tid
         changed = True
         resolved += 1
+        resolved_ids[rid] = tid
         url = _poster_url_from_path(getattr(best, "poster_path", None))
         if url:
             posters[rid] = url
@@ -217,7 +222,7 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
     except (OSError, AttributeError):
         pass
 
-    return {"ok": True, "resolved": int(resolved), "total": len(ids), "posters": posters}
+    return {"ok": True, "resolved": int(resolved), "total": len(ids), "posters": posters, "ids": resolved_ids}
 
 
 def search_tmdb(
