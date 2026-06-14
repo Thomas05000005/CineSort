@@ -384,6 +384,8 @@ a:hover { text-decoration: underline; }
 /* --- Inputs ------------------------------------------------ */
 .input {
   width: 100%; padding: var(--sp-2) var(--sp-3);
+  /* AUDIT 2026-06-14 (R7-9) : popup natif des <select>.input en sombre (Windows). */
+  color-scheme: dark;
   background: var(--bg-raised); border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm); color: var(--text-primary);
   font: inherit; font-size: var(--fs-sm);
