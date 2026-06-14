@@ -1703,6 +1703,41 @@ def rescan_row(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
     }
 
 
+def _browse_all_if_none_approved(rows: Any, safe: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """AUDIT 2026-06-13 (R5-J) : la vue Doublons est un NAVIGATEUR de doublons.
+
+    find_duplicate_targets ne groupe QUE les films approuves (`dec.ok`), car
+    c'est concu comme une securite "collision de destination avant apply". Mais
+    la vue Doublons (et son entree menu R5-E) appelle check_duplicates avec
+    decisions={} HORS du workflow d'apply -> aucun film approuve -> 0 groupe
+    affiche, alors que le badge/chip annoncent des doublons (meme titre+annee).
+
+    Correctif : quand AUCUN film n'est approuve, on traite tous les films comme
+    candidats pour que la vue montre les groupes (2+ films -> meme dossier
+    destination). Si au moins un film est approuve (workflow apply en cours), on
+    respecte les decisions. La securite pre-apply (apply_support.py:1235) reste
+    INCHANGEE : elle appelle find_duplicate_targets directement avec les vraies
+    decisions, jamais via check_duplicates.
+    """
+    try:
+        any_ok = any(bool((safe.get(getattr(r, "row_id", "")) or {}).get("ok")) for r in rows)
+    except (AttributeError, TypeError):
+        return safe
+    if any_ok:
+        return safe
+    browse = dict(safe)
+    for r in rows:
+        rid = getattr(r, "row_id", "")
+        if not rid:
+            continue
+        browse[rid] = {
+            "ok": True,
+            "title": getattr(r, "proposed_title", "") or "",
+            "year": getattr(r, "proposed_year", 0) or 0,
+        }
+    return browse
+
+
 @requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
@@ -1727,6 +1762,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             disk_decisions = api._load_decisions_from_validation(rs.paths)
             merged = api._merge_decisions(incoming, disk_decisions)
             safe = api._normalize_decisions_for_rows(rows, merged)
+            safe = _browse_all_if_none_approved(rows, safe)  # R5-J : vue = navigateur
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             data["size_savings_total"] = _compute_size_savings_total(data)
@@ -1755,6 +1791,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         disk_decisions = api._load_decisions_from_validation(run_paths)
         merged = api._merge_decisions(incoming, disk_decisions)
         safe = api._normalize_decisions_for_rows(rows, merged)
+        safe = _browse_all_if_none_approved(rows, safe)  # R5-J : vue = navigateur
         cfg = api._cfg_from_run_row(row)
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
