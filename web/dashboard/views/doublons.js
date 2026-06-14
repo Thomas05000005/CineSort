@@ -37,6 +37,14 @@ let _filmCache = new Map();   // row_id -> {poster_url, overview, candidates}
 let _keyboardHandler = null;
 const _SELECTED_KEY_STORAGE = "cinesort.doublons.selectedGroupKey";
 
+// AUDIT 2026-06-14 (R6-C) : cache des groupes de doublons PERSISTANT entre les
+// navigations (survit a unmountDoublons). check_duplicates parcourt ~1000 films
+// + scanne le disque -> plusieurs secondes. Avant, re-entrer dans la vue
+// relancait ce scan a chaque fois. Le cache est cle par runId ; "Actualiser"
+// force un nouveau scan. Reference partagee avec _state.groups -> les decisions
+// (winner_decided) prises en place restent reflechies dans le cache.
+let _groupsCache = null;   // { runId, groups, sizeSavingsTotal } | null
+
 // Fix audit 2026-05-24 : getNavSignal était importé puis assigné dans une
 // variable locale `signal` jamais utilisée (void signal). On centralise un
 // getter de signal pour le passer en 3e arg de tous les apiPost.
@@ -62,6 +70,8 @@ function _initState() {
     // Désormais : Set des groupKeys en vol -> seuls les boutons du groupe
     // concerné se désactivent, l'utilisateur peut décider en parallèle.
     decisionInFlightByGroup: new Set(),
+    // R6-C : true quand les groupes affiches viennent du cache (pas re-scannes).
+    fromCache: false,
     // Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le
     // bulk perceptual (miroir du pattern scan etape 1 Analyse). Null hors batch,
     // sinon {jobId, done, total, status, startedTs} mis a jour a chaque tick
@@ -243,7 +253,8 @@ function _renderHeader() {
         </p>
       </div>
       <div class="doublons-toolbar" role="toolbar" aria-label="Actions Doublons">
-        <button type="button" class="v5-btn v5-btn--secondary" data-doublons-action="refresh">↻ Actualiser</button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-doublons-action="refresh"
+                title="${_state.fromCache ? "Résultats en cache (re-scan non relancé). Cliquez pour re-scanner." : "Re-scanner les doublons"}">↻ Actualiser${_state.fromCache ? ' <span class="doublons-cache-badge" title="Résultats en cache">⚡</span>' : ""}</button>
         <select class="v5-input doublons-filter" data-doublons-filter aria-label="Filtrer">
           <option value="all"${_state.filter === "all" ? " selected" : ""}>Tous (${n})</option>
           <option value="conflict"${_state.filter === "conflict" ? " selected" : ""}>Conflits seulement</option>
@@ -728,7 +739,9 @@ async function _decideFromCard(groupKey, side, winnerRowId) {
     // Round-trip _loadGroups() pour resynchroniser depuis la source de vérité.
     _state.decisionInFlightByGroup.delete(groupKey);
     _handleDecision(groupKey, side, winnerRowId, data);
-    await _loadGroups();
+    // R6-C : resync reel depuis le backend (totaux recalcules) -> force le
+    // re-scan et rafraichit le cache, plutot que de relire le cache stale.
+    await _loadGroups(true);
   } catch (err) {
     if (!_state) return;
     showToast({ type: "error", text: err && err.message ? err.message : String(err) });
@@ -842,7 +855,8 @@ async function _autoDecideAll() {
       if (!_state) return;
       _state.bulkInFlight = false;
       // Resync depuis le backend pour les totaux (size_savings, decidedCount).
-      await _loadGroups();
+      // R6-C : force le re-scan (bypass cache) + rafraichit le cache.
+      await _loadGroups(true);
       if (!_state) return;
       if (ko === 0) {
         showToast({ type: "success", text: `✓ ${ok} groupe${ok > 1 ? "s" : ""} auto-décidé${ok > 1 ? "s" : ""}.` });
@@ -1056,7 +1070,32 @@ function _onKeydown(ev) {
 
 /* --- Data --- */
 
-async function _loadGroups() {
+// R6-C : applique un jeu de groupes (frais ou issu du cache) a l'etat + rend.
+// Factorise pour partager la meme logique post-chargement entre le chemin reseau
+// (check_duplicates) et le chemin cache (restitution instantanee).
+function _applyGroupsData(groups, sizeSavingsTotal) {
+  if (!_state) return;
+  _state.groups = Array.isArray(groups) ? groups : [];
+  _state.sizeSavingsTotal = Number(sizeSavingsTotal) || 0;
+  _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
+  _state.pendingCount = _state.groups.length - _state.decidedCount;
+  _state.loading = false;
+  // Selection : restaurer si encore valide, sinon premier groupe non décidé.
+  if (_state.selectedGroupKey && !_findGroupByKey(_state.selectedGroupKey)) {
+    _state.selectedGroupKey = null;
+  }
+  if (!_state.selectedGroupKey && _state.groups.length > 0) {
+    const firstUndec = _state.groups.find((g) => !g.winner_decided) || _state.groups[0];
+    _state.selectedGroupKey = _groupKey(firstUndec);
+    _writeStoredSelection(_state.selectedGroupKey);
+  }
+  _render();
+  _renderRightPanel();
+  // Hydrater posters en background.
+  void _hydrateGroupsWithPosters();
+}
+
+async function _loadGroups(force = false) {
   // Fix audit 2026-05-25 (v1.5.4) Vague I : garde contre _state null. Le module
   // remet _state = null dans unmountDoublons(). Quand on navigue rapidement
   // entre Apply (qui appelle initDoublons) et une autre vue, un _loadGroups()
@@ -1092,6 +1131,14 @@ async function _loadGroups() {
     return;
   }
 
+  // R6-C : cache hit -> restitution instantanee sans relancer le scan disque.
+  if (!force && _groupsCache && _groupsCache.runId === runId) {
+    _state.fromCache = true;
+    _applyGroupsData(_groupsCache.groups, _groupsCache.sizeSavingsTotal);
+    return;
+  }
+  _state.fromCache = false;
+
   try {
     const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} }, { signal: _signal() });
     // Fix audit 2026-05-25 (v1.5.4) Vague I : await termine -> revérifier _state.
@@ -1104,31 +1151,18 @@ async function _loadGroups() {
       _renderRightPanel();
       return;
     }
-    _state.groups = Array.isArray(data.groups) ? data.groups : [];
-    // Utilise size_savings_total enrichi backend si dispo, sinon agrège
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    // Utilise size_savings_total enrichi backend si dispo, sinon agrège.
+    let sizeSavingsTotal;
     if (typeof data.size_savings_total === "number") {
-      _state.sizeSavingsTotal = data.size_savings_total;
+      sizeSavingsTotal = data.size_savings_total;
     } else {
-      _state.sizeSavingsTotal = _state.groups.reduce((sum, g) => {
-        return sum + (Number(g.comparison && g.comparison.size_savings) || 0);
-      }, 0);
+      sizeSavingsTotal = groups.reduce((sum, g) => sum + (Number(g.comparison && g.comparison.size_savings) || 0), 0);
     }
-    _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
-    _state.pendingCount = _state.groups.length - _state.decidedCount;
-    _state.loading = false;
-    // Selection : restaurer si encore valide, sinon premier groupe non décidé
-    if (_state.selectedGroupKey && !_findGroupByKey(_state.selectedGroupKey)) {
-      _state.selectedGroupKey = null;
-    }
-    if (!_state.selectedGroupKey && _state.groups.length > 0) {
-      const firstUndec = _state.groups.find((g) => !g.winner_decided) || _state.groups[0];
-      _state.selectedGroupKey = _groupKey(firstUndec);
-      _writeStoredSelection(_state.selectedGroupKey);
-    }
-    _render();
-    _renderRightPanel();
-    // Hydrater posters en background
-    void _hydrateGroupsWithPosters();
+    // R6-C : memoriser pour les prochaines navigations (reference partagee avec
+    // _state.groups -> les decisions en place restent reflechies au retour).
+    _groupsCache = { runId, groups, sizeSavingsTotal };
+    _applyGroupsData(groups, sizeSavingsTotal);
   } catch (err) {
     // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
     if (!_state) return;
@@ -1157,7 +1191,8 @@ function _bindEvents() {
   _container.querySelectorAll("[data-doublons-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const action = btn.dataset.doublonsAction;
-      if (action === "refresh") _loadGroups();
+      // R6-C : "Actualiser" force un nouveau scan (bypass cache).
+      if (action === "refresh") _loadGroups(true);
       else if (action === "bulk-perceptual") void _bulkPerceptual();
       // Fix audit 2026-05-24 (v1.5.2) : nouveaux handlers auto-décide + go-apply.
       else if (action === "auto-decide-all") void _autoDecideAll();
