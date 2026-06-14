@@ -1506,6 +1506,41 @@ def set_film_tmdb_candidate(
     }
 
 
+def clear_tmdb_override(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """AUDIT 2026-06-14 (R7-12) : annule l'override TMDb manuel (revient au match
+    auto). Reversibilite promise par set_film_tmdb_candidate, jusqu'ici sans
+    appelant de prod (methode repo orpheline)."""
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.clear_tmdb_override(run_id=rid, row_id=str(row_id))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(f"clear_tmdb_override echoue : {exc}", category="runtime", level="error", log_module=__name__)
+    removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
+    return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
+
+
+def unmark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """AUDIT 2026-06-14 (R7-12) : annule le marquage pour suppression d'un film
+    (avant : impossible -> il partait au bucket au prochain apply sans recours)."""
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.unmark_for_deletion(run_id=rid, row_id=str(row_id))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(f"unmark_for_deletion echoue : {exc}", category="runtime", level="error", log_module=__name__)
+    removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
+    return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
+
+
 def mark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
     """Spec 06 §3.7 : marque un film pour le bucket `_user_marked_for_deletion/`.
 

@@ -2158,6 +2158,14 @@ class CineSortApi:
         """
         return library_support.mark_for_deletion(self, run_id, row_id)
 
+    def _clear_tmdb_override_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule l'override TMDb manuel (revient au match auto)."""
+        return library_support.clear_tmdb_override(self, run_id, row_id)
+
+    def _unmark_for_deletion_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule le marquage pour suppression d'un film."""
+        return library_support.unmark_for_deletion(self, run_id, row_id)
+
     def _mark_alert_ignored_impl(self, row_id: str, alert_code: str) -> Dict[str, Any]:
         """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
 

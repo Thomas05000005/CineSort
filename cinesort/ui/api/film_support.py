@@ -273,6 +273,8 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     probe_dict = None
     perceptual_dict = None
     store: Any = None
+    _has_override = False  # R7-12
+    _is_marked = False  # R7-12
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
@@ -282,6 +284,14 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         # AVANT la resolution du chosen tmdb_id / poster, sinon la fiche film
         # re-affiche le match auto et ignore le choix utilisateur.
         overlay_tmdb_override(store, resolved_rid, row)
+
+        # R7-12 : flags d'etat pour exposer les actions d'annulation dans l'UI
+        # (revenir au match auto / annuler le marquage pour suppression).
+        try:
+            _has_override = store.film_modal.get_tmdb_override(run_id=resolved_rid, row_id=str(row_id)) is not None
+            _is_marked = bool(store.film_modal.is_marked_for_deletion(run_id=resolved_rid, row_id=str(row_id)))
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
 
         # Perceptual
         try:
@@ -407,4 +417,7 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         "runtime": runtime,
         "director": director,
         "overview": overview,
+        # R7-12 : etat des corrections manuelles -> actions d'annulation UI.
+        "has_tmdb_override": _has_override,
+        "is_marked_for_deletion": _is_marked,
     }

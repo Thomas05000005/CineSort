@@ -625,14 +625,24 @@ function _renderTabPanel() {
  * Actions principales
  * =========================================================== */
 
-function _renderActions() {
+function _renderActions(data) {
+  const d = data || {};
+  // AUDIT 2026-06-14 (R7-12) : actions d'annulation des corrections manuelles,
+  // affichees seulement si l'etat le justifie (flags get_film_full).
+  const overrideBtn = d.has_tmdb_override
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="clear-override" title="Annuler le choix manuel et revenir au match TMDb automatique">↩ Revenir au match auto</button>`
+    : "";
+  const deleteBtn = d.is_marked_for_deletion
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="unmark-delete">↩ Annuler le marquage suppression</button>`
+    : `<button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>`;
   return `
     <footer class="film-detail-actions">
       <button type="button" class="v5-btn v5-btn--primary" data-film-action="validate">✓ Valider</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="analyze-perceptual">▶ Analyser perceptuel</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="rescan">↻ Re-scanner</button>
-      <button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>
+      ${overrideBtn}
+      ${deleteBtn}
     </footer>
   `;
 }
@@ -657,7 +667,7 @@ function _renderAll() {
       ${_renderAlerts(data)}
       ${_renderCandidates(data)}
       ${_renderTabsBar()}
-      ${_renderActions()}
+      ${_renderActions(data)}
     </article>
   `;
   _bindEvents();
@@ -755,6 +765,28 @@ async function _handleAction(action, btn) {
 
     case "mark-delete":
       _markForDeletionWithConfirm(row, runId, rowId);
+      break;
+
+    case "unmark-delete":
+      // R7-12 : annule le marquage pour suppression.
+      try {
+        const r = await apiPost("library/unmark_for_deletion", { run_id: runId, row_id: rowId });
+        const d = (r && r.data) || r || {};
+        if (d.ok === false) { showToast({ type: "error", text: d.message || "Annulation impossible." }); break; }
+        showToast({ type: "success", text: "Marquage suppression annulé." });
+        _reload();
+      } catch (e) { showToast({ type: "error", text: String(e && e.message ? e.message : e) }); }
+      break;
+
+    case "clear-override":
+      // R7-12 : revient au match TMDb automatique.
+      try {
+        const r = await apiPost("library/clear_tmdb_override", { run_id: runId, row_id: rowId });
+        const d = (r && r.data) || r || {};
+        if (d.ok === false) { showToast({ type: "error", text: d.message || "Annulation impossible." }); break; }
+        showToast({ type: "success", text: "Choix manuel annulé (retour au match auto)." });
+        _reload();
+      } catch (e) { showToast({ type: "error", text: String(e && e.message ? e.message : e) }); }
       break;
 
     case "search-tmdb":

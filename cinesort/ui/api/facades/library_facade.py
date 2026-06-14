@@ -119,6 +119,14 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._search_tmdb_impl(query=query, year=year)
 
+    def clear_tmdb_override(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule l'override TMDb manuel. Cf _clear_tmdb_override_impl."""
+        return self._api._clear_tmdb_override_impl(run_id, row_id)
+
+    def unmark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule le marquage pour suppression. Cf _unmark_for_deletion_impl."""
+        return self._api._unmark_for_deletion_impl(run_id, row_id)
+
     def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
         """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
 
