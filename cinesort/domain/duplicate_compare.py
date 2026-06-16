@@ -107,7 +107,9 @@ def compare_duplicates(
     # Critere optionnel : score perceptuel (poids 10)
     if perceptual_score_a is not None and perceptual_score_b is not None:
         pa, pb = int(perceptual_score_a), int(perceptual_score_b)
-        delta = max(-10, min(10, (pa - pb) // 5))  # normalise sur ±10
+        # int() truncate vers 0 (symetrique), contrairement a `//` qui floor
+        # vers -inf et biaisait en faveur de B sur petites differences.
+        delta = max(-10, min(10, int((pa - pb) / 5)))  # normalise sur ±10
         w = "a" if delta > 0 else "b" if delta < 0 else "tie"
         criteria.append(
             CriterionResult(
