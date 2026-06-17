@@ -61,23 +61,33 @@ def run():
     st2, tmp2 = _store()
     bid2 = st2.apply.insert_apply_batch(run_id="r2", dry_run=False, quarantine_unapproved=False)
     st2.apply.upsert_atomic_mode(bid2, True)
+    # Etat reel d'un apply atomique crashe : batch clos FAILED AVANT le revert.
+    st2.apply.close_apply_batch(batch_id=bid2, status="FAILED", summary={"crash": True})
     src2, dst2 = _mk_moved(tmp2, "film.mkv")
     st2.apply.append_apply_operation(batch_id=bid2, op_index=1, op_type="MOVE_FILE",
                                      src_path=str(src2), dst_path=str(dst2), reversible=True)
-    # Simuler le kill : on marque IN_PROGRESS et on N'execute PAS le revert.
+    # Simuler le kill PENDANT le revert : on marque IN_PROGRESS et on N'execute PAS le revert.
     st2.apply.mark_rollback_status(bid2, "IN_PROGRESS")
     mode_before = st2.apply.get_atomic_mode(bid2)["rollback_status"]
+    def _batch_status(st, bid):
+        with st._managed_conn() as c:
+            row = c.execute("SELECT status FROM apply_batches WHERE batch_id=?", (bid,)).fetchone()
+            return row[0] if row else None
+    status_before = _batch_status(st2, bid2)  # FAILED
     fs_before = dst2.exists() and not src2.exists()  # toujours a moitie : fichier en dst
     report = reconcile_inprogress_rollbacks(st2)
     mode_after = st2.apply.get_atomic_mode(bid2)["rollback_status"]
+    status_after = _batch_status(st2, bid2)  # R8-088 : doit refleter ROLLED_BACK_BY_ATOMIC
     fs_after = src2.exists() and not dst2.exists()  # revert termine
     s013 = (mode_before == "IN_PROGRESS" and fs_before and report.get("resumed") == 1
             and mode_after == "ROLLED_BACK_BY_ATOMIC" and fs_after)
+    s088 = (status_before == "FAILED" and status_after == "ROLLED_BACK_BY_ATOMIC")
     results["S013_reprise_inprogress_orphelin"] = s013
-    print("\n=== S-013 (RB2 : reprise d'un rollback IN_PROGRESS orphelin au boot) ===")
-    print(f"  AVANT : rollback_status={mode_before}, FS a moitie (dst)={fs_before}")
+    results["S088_boot_reflete_status_batch"] = s088
+    print("\n=== S-013/088 (RB2 : reprise IN_PROGRESS orphelin + status batch reflete au boot) ===")
+    print(f"  AVANT : rollback_status={mode_before}, apply_batches.status={status_before}, FS a moitie (dst)={fs_before}")
     print(f"  reconcile_inprogress_rollbacks report : {report}")
-    print(f"  APRES : rollback_status={mode_after}, FS reverti={fs_after}")
+    print(f"  APRES : rollback_status={mode_after}, apply_batches.status={status_after} (R8-088, AVANT figé FAILED), FS reverti={fs_after}")
     shutil.rmtree(tmp2, ignore_errors=True)
 
     # ---- S-015 : transition FAILED -> ROLLED_BACK_BY_ATOMIC autorisee ----

@@ -413,3 +413,25 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - Prod : `apply_rollback.py` (R8-012), `apply_batches_reconciliation.py` (R8-013), `apply.py` whitelist + `apply_support.py`
   (R8-015, R8-011) ; test `test_apply_atomic_rollback_integration_v77.py` (RB1 mis à jour).
 - `r8_f2c_rollback_undo_diff.py`/`.out.txt` (S-012/013/015/011), `suite_f2c.txt`.
+
+### Filet F2-c (round adversarial rollback/undo/reconcile/statuts) — `wf_b1e98c63-e7b`
+> 3 finders (resume/undo_status · transitions de statut · undo casse-seule) + panel 3 sceptiques + 2 leurres.
+> **RELIABLE=true**, **leurres 0/2**. **Cumulé campagne : 0/42.** **14 candidats → 2 SURVIVANTS (3/3)**, tous deux
+> résidus DE CE QUE JE VENAIS D'ÉCRIRE (R8-013/R8-011) → corrigés en salve.
+- **R8-088 (high)** : `reconcile_inprogress_rollbacks` (R8-013) relançait `rollback_forward` mais N'appelait PAS
+  `close_apply_batch` → un apply crashé repris au boot atteignait `rollback_status=ROLLED_BACK_BY_ATOMIC` mais
+  `apply_batches.status` **restait figé FAILED** (le miroir R8-015 n'était qu'inline). **Fix** : miroir de la re-cloture
+  dans le chemin boot. **Diff S-088** : `status FAILED → ROLLED_BACK_BY_ATOMIC` au boot. **Commit** : `32dedb7`.
+- **R8-089 (med)** : le `journaled_move` autour du rename casse-seule en 2 temps (`current→.__tmp_ren→target`) ne
+  peut pas encadrer l'état intermédiaire → hard-kill entre les 2 renames → reconcile **fausse alarme « FICHIER PERDU »**.
+  **Fix** : retrait du wrapper (le rename a son propre rollback ; cohérent avec le site apply non journalisé).
+  **Diff S-011** reste vert sans le wrapper. **Commit** : `32dedb7`.
+- **Réfuté sécurité-critique (0/3)** : « re-run de rollback_forward NON idempotent → double-revert/perte » → FAUX
+  (gardes FS `dst_missing`/`src_already_exists` + `undo_status='DONE'` → SKIPPED, idempotent vérifié). 11 autres réfutés.
+- **Non-régression R8-088/089** : ciblé reconcile/rollback **43 passed** + undo **58 passed** ; surgical/additif (la suite
+  F2-c a validé le code environnant).
+
+### ═══ VERDICT F2-c (2026-06-18) ═══
+- **4 findings corrigés** (R8-013 `1eb7916`, R8-012 `de28c50`, R8-015+R8-011 `bab8070`) + **2 résidus filet corrigés**
+  (R8-088/R8-089). **R8-014 différé** (PARTIAL non réversible — chantier multi-site). Différentiels S-012/013/015/011/088
+  tous verts. **Non-régression** : suite complète 264 nœuds, 0 nouvel échec. Checkpoint `f493abdc` intact, **pas de push**.
