@@ -352,6 +352,60 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 
 ---
 
+## ═══ FAMILLE F2 — SOUS-SALVE F2-d (MIGRATIONS / SELF-HEAL / SQLITE) ═══
+
+> Couche PERSISTANCE. Cartographie préalable (workflow `wf_73fcafa1-f69`) : **insight de cohérence** — il y a
+> UN seul self-heal ; R8-022/023 élargissent le set de tables requises → font feu le bootstrap plus souvent →
+> **R8-019 (la mine paused_at) doit être fixé AVANT**. Différentiels store-fixture jetables. **Les 5 captures
+> saines (migrations lossless v27→v31, settings round-trip, TTL/rollback quarantaine, bornes) restent INTACTES.**
+
+### Cluster self-heal (commit `c29a48e`) — R8-019/020/021/022 (un seul self-heal cohérent)
+- **R8-019 F-MIG-PAUSEDAT (HIGH, perte données)** : le bootstrap self-heal rejoue 025 (`DROP TABLE runs` +
+  `INSERT ... SELECT ..., NULL`) sur une DB qui a déjà `paused_at` → écrasait tous les `paused_at` à NULL. Fix
+  **migration-level self-heal-safe** : `ALTER TABLE runs ADD COLUMN paused_at REAL` (1ᵉʳ passage l'ajoute NULL = idem ;
+  replay → « duplicate column » idempotent-skip) + `SELECT paused_at` (au lieu de NULL) → valeur **PRÉSERVÉE**.
+  **Diff S-019** : `1234567.89` préservé au self-heal.
+- **R8-021 F-MIG-IDEMPOTENT** : `_is_idempotent_error` ne couvrait qu'`OperationalError` → un `IntegrityError`
+  (re-INSERT idempotent au rebuild) bloquait tout le boot. Fix : except élargi `(OperationalError, IntegrityError)`
+  + allowlist **étroite** (unique/pk ; NOT NULL/CHECK toujours re-levés). **Diff S-021**.
+- **R8-020 F-MIG-SCHEMAVER** : le bootstrap posait `user_version` sans rien insérer dans `schema_migrations` →
+  historique désync. Fix : backfill `INSERT OR IGNORE` par migration ≤ version après le bootstrap. **Diff S-020** (31 rows).
+- **R8-022 F-V6-SCHEMA-IRC** : `incremental_row_cache` (mig 008) absente du filet self-heal. Fix : ajout à
+  `REQUIRED_SCHEMA_TABLES` + `SCHEMA_GROUPS['incremental']`. **Diff S-022** (droppée → recréée par le self-heal).
+- **R8-023 F-V8-SCHEMA-REGISTRY ⏸️ DIFFÉRÉ** : la cartographie a révélé que `vec_films_hash` n'est pas juste absente
+  du registre — son **fichier `032-vector-search-tables.sql` est en TIRETS**, donc **jamais découvert** par
+  `_MIGRATION_FILE_RE` (digit+underscore) → la table n'existe **jamais**. L'ajouter aux tables requises **sans
+  renommer 032 ferait BOUCLER le boot** (RuntimeError « schéma incomplet »). Or `similar_films` est **OFF** et
+  `SqliteVecAdapter` un **scaffold** (`NotImplementedError`) → activer le vector-search (renommer 032) = **décision
+  produit**. Capture saine `c3_migrations` confirme « 032 tirets IGNORÉE = latent ». **Différé jusqu'à activation produit.**
+
+### Crons / taxonomie / sérialisation
+- **R8-024 F-V3-E2 (HIGH)** (`e21a004`) : 3 sites attrapaient `(AttributeError,OSError,RuntimeError,TypeError,ValueError)`
+  mais PAS `sqlite3.OperationalError` (= DatabaseError, ≠ OSError) → un verrou DB transitoire **tuait le thread cron**
+  (retention/quarantaine définitivement mortes) ou **avortait le lot de probe**. Fix : `+sqlite3.Error` aux 3 tuples
+  (+AttributeError au probe). **Diff** : `c3e_cron` rejoué → « SWALLOW (cron survit)/robuste » (AVANT « cron meurt »).
+- **R8-025 F-DB-01 (HIGH)** (`afb504c`) : `runtime_support` passait `busy_timeout_ms=8000` → 8000≠5000 déclenchait le
+  re-override back-compat qui **écrasait le busy_timeout du profil NAS** (30000/60000) → SQLITE_BUSY prématuré. Fix :
+  laisser le défaut (5000) → back-compat ne se déclenche pas → le **profil fait foi** (la logique `connect_sqlite`
+  reste pour les callers explicites, ex. test 3000). **Diff S-025** : NAS=30000 préservé avec 5000 vs 8000 (le bug).
+- **R8-026 F-V3-E1** (`39d80aa`) : `atomic_write_json` faisait `os.replace` sans retry → PermissionError Windows
+  (lecteur concurrent) → write perdu. Fix : retry borné 5× (backoff 50ms), atomicité préservée. **Diff S-026**.
+- **R8-029 F-QTN-MANIFEST** (`8628e42`) : `_save_ttl_manifest` `write_text` direct (non atomique) → corruption
+  possible. Fix : tmp+os.replace. (Pattern R8-026.)
+- **R8-027 F-META-01 + R8-090 (jumeau)** (`43088fc`) : les DEUX désérialiseurs PlanRow perdaient un champ DIFFÉRENT
+  (asdict sérialise les deux) — `row_from_json` perdait `nfo_runtime` (R8-027), `plan_row_from_jsonable` perdait
+  `source_root` (R8-090, **découvert par la cartographie**). Fix symétrique : chacun parse les deux. **Diff** :
+  round-trip préserve nfo_runtime ET source_root (lost=[]) ; `meta_roundtrip` baseline lève maintenant « obtenu [] » = corrigé.
+
+### Non-régression F2-d
+- Migrations lossless v27→v31 **INTACTE** (`c3_migrations` ASCENDANT OK). 5 captures saines toutes intactes.
+  Ciblé migration/schema 215 passed. Suite complète (`suite_f2d.txt`) : **108 failed / 5812 passed / 170 errors** —
+  diff vs baseline : **0 disparu, 1 « nouveau » = R8-086 flaky** (`test_perceptual_parallel`, timing, causalement
+  indépendant de la persistance) → **ensemble déterministe 264, 0 nouvel échec réel.** ✅
+- Artefacts : `r8_f2d_selfheal_diff`, `r8_f2d_persistence_diff`, `r8_f2d_roundtrip_diff` (+ `.out.txt`), `suite_f2d.txt`.
+
+---
+
 ## ═══ FAMILLE F2 — SOUS-SALVE F2-c (ROLLBACK / STATUTS + UNDO-CASE) ═══
 
 > Cohérence d'ÉTAT (statuts rollback/undo qui mentent/se figent), pas d'intégrité fichier. Différentiels
