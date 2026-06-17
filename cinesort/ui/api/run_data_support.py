@@ -97,6 +97,12 @@ def _parse_optional_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         "tmdb_collection_name": _optional_str(data, "tmdb_collection_name"),
         "edition": _optional_str(data, "edition"),
         "source_root": _optional_str(data, "source_root"),
+        # R8-027 (F2-d, F-META-01) : row_from_json (reload apply post-redemarrage) ne
+        # reparsait PAS nfo_runtime alors que l'autre deserialiseur (plan_support_core:110)
+        # le parse -> apres restart, la detection "duree -> autre film" + la desambiguisation
+        # +/-10 min etaient degradees (nfo_runtime=None). On le restaure (meme idiome que
+        # tmdb_collection_id : to_int defaut 0 -> None, comportement absent/invalide preserve).
+        "nfo_runtime": to_int(data.get("nfo_runtime"), 0) or None,
     }
 
 

@@ -107,6 +107,12 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
             else None,
             tmdb_collection_name=str(data.get("tmdb_collection_name") or "") or None,
             edition=str(data.get("edition") or "") or None,
+            # R8-090 (F2-d, couture jumelle de R8-027) : ce deserialiseur (cache incremental)
+            # parse nfo_runtime mais OUBLIAIT source_root, alors que row_from_json (run_data_support)
+            # parse source_root mais oubliait nfo_runtime -> chaque deserialiseur perdait un champ
+            # DIFFERENT serialise par plan_row_to_jsonable (asdict). Sur cache HIT, source_root etait
+            # perdu (multi-root). On restaure source_root ici (symetrie avec le fix R8-027).
+            source_root=str(data.get("source_root") or "") or None,
             nfo_runtime=int(data["nfo_runtime"]) if data.get("nfo_runtime") not in (None, "", 0) else None,
             # AUDIT 2026-06-10 (REAL 2/2) : restaurer les 10 champs TV/sous-titres
             # serialises par plan_row_to_jsonable (asdict). Sans eux, tout hit du
