@@ -128,7 +128,7 @@ demi-application **PERMANENTE / irrécupérable**. Baseline figée : `../baselin
 ---
 
 ## R8-002 — F-QTN-GOV — Gouvernance TTL quarantaine : préservation des originaux non revus
-**Famille** : F1. **Commit** : `<hash R8-002>` (loop/correction-2026-06). Capture baseline **instrumentée**
+**Famille** : F1. **Commit** : `e4c8723` (loop/correction-2026-06). Capture baseline **instrumentée**
 cette vague (placeholder `cap_qtn_governance` résolu).
 
 ### Instrumentation d'abord (cause racine vérifiée vs registre)
@@ -167,3 +167,28 @@ précisément le risque de perte ; la préservation supprime le risque. Croissan
 ### Artefacts
 - `../baseline_r8/captures/cap_qtn_governance.py` (instrument) + `.out.txt` (snapshot **cassé** baseline).
 - `r8_002_qtn_governance_diff.out.txt` (post-fix, `data_lost=false`), `suite_r8_002.txt`.
+
+---
+
+## F1 — FILET INTÉGRITÉ (round adversarial sur la surface corrigée) — `wf_9d8b47a3-ba0`
+> 3 finders (apply_collection_item rollback · ledger dedup · clean_old_runs préservation) + panel
+> **3 sceptiques à asymétrie** par candidat + 2 leurres de calibration.
+
+- **RELIABLE=true** (3/3 finders vivants, panel 3/3 votes partout). **Leurres : 0/2 fuités** (panel calibré).
+  **Cumulé campagne : 0/30.**
+- **10 candidats levés → 0 SURVIVANT** (seuil ≥2/3 « réel »). Tous **réfutés** par re-dérivation sur le code réel :
+  - « ops MOVE_FILE forward restent reversible=True après rollback » → réfuté : l'undo est **idempotent +
+    existence-guarded** (`apply_rollback`/`_execute_undo_ops` SKIP si dst absent / src présent) → pas de double-revert.
+  - « pending-move orphelin du move vidéo échoué re-tenté au boot » → réfuté : `reconcile_pending_moves` **classe
+    + log + DELETE seulement, ne re-move JAMAIS** ; verdict `rolled_back` = exactement l'état disque post-rollback.
+  - « compteurs quarantaine non revertés → row à la fois errored + partiellement-actionné » → réfuté comme
+    **cosmétique d'observabilité**, PAS une perte (fichiers quarantinés correctement laissés en place). *(Note F6
+    possible plus tard, non-intégrité.)*
+  - « `_preserved_review` croît sans borne » → réfuté : **tradeoff assumé** (préserver > supprimer un original non
+    revu) ; croissance bornée par la revue utilisateur. *(Housekeeping F6 éventuel : UI « purger préservés ».)*
+  - « cross-filesystem partial move » (1/3, le plus proche) → réfuté : `_review` et `_preserved_review` sont sous
+    le **même volume** (`runs/`) → `shutil.move` = rename atomique, pas copy2+delete → cas non atteignable.
+  - + name-collision TOCTOU, rglob perf, `_commit_dedup` sur statut non-moved → tous réfutés (guards existants / non-intégrité).
+- **Verdict filet** : les fixes R8-001/R8-002 **n'ouvrent AUCUN nouveau gap d'intégrité** (panel-confirmé, calibré).
+  Aucun nouveau finding R8-086+ à enregistrer côté intégrité. 2 notes non-intégrité (compteur cosmétique,
+  housekeeping `_preserved_review`) consignées ci-dessus pour F6 éventuel — **pas des cibles F1/F2**.
