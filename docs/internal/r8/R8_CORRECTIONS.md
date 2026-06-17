@@ -365,9 +365,16 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
   **migration-level self-heal-safe** : `ALTER TABLE runs ADD COLUMN paused_at REAL` (1ᵉʳ passage l'ajoute NULL = idem ;
   replay → « duplicate column » idempotent-skip) + `SELECT paused_at` (au lieu de NULL) → valeur **PRÉSERVÉE**.
   **Diff S-019** : `1234567.89` préservé au self-heal.
-- **R8-021 F-MIG-IDEMPOTENT** : `_is_idempotent_error` ne couvrait qu'`OperationalError` → un `IntegrityError`
-  (re-INSERT idempotent au rebuild) bloquait tout le boot. Fix : except élargi `(OperationalError, IntegrityError)`
-  + allowlist **étroite** (unique/pk ; NOT NULL/CHECK toujours re-levés). **Diff S-021**.
+- **R8-021 F-MIG-IDEMPOTENT — initialement « fixé » dans `c29a48e`, puis RETRACTÉ dans `cd663d2`** : le fix initial
+  (except élargi `(OperationalError, IntegrityError)` + allowlist unique/pk) **introduisait une PERTE DE DONNÉES**,
+  attrapée par le filet F2-d (survivor 3/3). Les migrations de RECONSTRUCTION (021/025 : `INSERT INTO X_new SELECT ...
+  FROM X` ; `DROP X` ; `RENAME`) rejouées par le self-heal sur une **source corrompue** (PK dupliquée) lèvent une PK
+  `IntegrityError` ; la « skipper » via `ROLLBACK TO SAVEPOINT` laisse `X_new` **VIDE**, puis `DROP+RENAME` **wipe
+  silencieusement** la table (même classe que la mine 025/NULL de R8-019 !). **Décision : bloquer le boot sur
+  `IntegrityError` est le comportement SÛR (recuperable via backup) vs wipe irrécupérable** → retour à `OperationalError`
+  seul (`_is_idempotent_error(exc: OperationalError)`, fragments `duplicate column`/`already exists`). **Diff
+  `r8_f2d_filet_survivors_diff` §1** : source corrompue 3 lignes → AVANT (swallow) wipe à **0** ; COURANT (raise) préserve
+  **3** + re-lève. **Diff S-021 inversé** (UNIQUE/PK/NOTNULL → NON idempotent, re-levés). Cf section « Filet F2-d ».
 - **R8-020 F-MIG-SCHEMAVER** : le bootstrap posait `user_version` sans rien insérer dans `schema_migrations` →
   historique désync. Fix : backfill `INSERT OR IGNORE` par migration ≤ version après le bootstrap. **Diff S-020** (31 rows).
 - **R8-022 F-V6-SCHEMA-IRC** : `incremental_row_cache` (mig 008) absente du filet self-heal. Fix : ajout à
@@ -397,12 +404,43 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
   `source_root` (R8-090, **découvert par la cartographie**). Fix symétrique : chacun parse les deux. **Diff** :
   round-trip préserve nfo_runtime ET source_root (lost=[]) ; `meta_roundtrip` baseline lève maintenant « obtenu [] » = corrigé.
 
+### Filet F2-d (round adversarial migrations/self-heal/crons/sérialisation) — `w2g8eihie`
+- **RELIABLE=true** ; 3 finders, **12 candidats** ; panel 3 sceptiques asymétriques + **2 leurres de calibration
+  → decoys_leaked=0** (cumul filets F1→F2-d : **0/44**). **2 survivants 3/3**, tous deux résidus du code écrit en F2-d :
+- **(1) R8-021 — RÉSIDU DATA-LOSS, le fix R8-021 lui-même** : voir entrée R8-021 ci-dessus. **RETRACTÉ `cd663d2`**
+  (le filet a attrapé une régression de perte de données que J'AVAIS introduite dans `c29a48e`). HIGH.
+- **(2) R8-091 — F-CAND-COLLECTION** (`a64789b`) : `candidate_from_json` (`run_data_support.py:37`) construisait
+  `core.Candidate` SANS `tmdb_collection_id`/`tmdb_collection_name` (`core.py:387-388`) — couture **jumelle** de
+  R8-027/R8-090 un cran plus profond (Candidate vs PlanRow). Le jumeau `plan_row_from_jsonable` (`plan_support_core.py:82-86`)
+  les parse déjà → au reload post-restart, chaque candidat voyait son id+nom de collection TMDb **nullé silencieusement**.
+  Fix : parse des deux champs en miroir. **Diff `r8_f2d_filet_survivors_diff` §2** : collection préservée (lost=[]).
+- **10 candidats réfutés** (dont : « même résidu sur l'`apply()` par-migration » 0/3 — le forward-apply ne rejoue chaque
+  migration qu'une fois ; back-compat busy_timeout pour tout ≠5000 0/3 ; `_save_ttl_manifest` tmp-name 0/3 ; retry 750ms
+  suffisant 0/3 ; `nfo_runtime=0` faux gap 0/3 ; parité PlanRow sans autre drop 0/3).
+
 ### Non-régression F2-d
-- Migrations lossless v27→v31 **INTACTE** (`c3_migrations` ASCENDANT OK). 5 captures saines toutes intactes.
-  Ciblé migration/schema 215 passed. Suite complète (`suite_f2d.txt`) : **108 failed / 5812 passed / 170 errors** —
-  diff vs baseline : **0 disparu, 1 « nouveau » = R8-086 flaky** (`test_perceptual_parallel`, timing, causalement
-  indépendant de la persistance) → **ensemble déterministe 264, 0 nouvel échec réel.** ✅
-- Artefacts : `r8_f2d_selfheal_diff`, `r8_f2d_persistence_diff`, `r8_f2d_roundtrip_diff` (+ `.out.txt`), `suite_f2d.txt`.
+- Migrations lossless v27→v31 **INTACTE** post-retract R8-021 (`c3_migrations` : ASCENDANT OK, self-healing IDEMPOTENT,
+  T6 upgrade v27→v31 lossless, `tables_perdues={}`). **Le retract ne touche QUE le chemin source-corrompue** ; les DB
+  saines ne lèvent jamais d'`IntegrityError` au rebuild → 0 impact. 5 captures saines toutes intactes.
+- Ciblé migration/collection/sérialisation : **90 passed / 2 skipped** ; les **2 seuls échecs**
+  (`test_phase4_bibliotheque_endpoints` Export/Counters) **prouvés PRÉ-EXISTANTS** (reproduits à l'identique sur HEAD sans
+  mes modifs uncommitted ; mock `get_tmdb_override` ère R7-3, chemin ne touche aucun code F2-d). Self-heal `r8_f2d_selfheal_diff`
+  **VERDICT CORRIGÉ** (S-019/020/021-inversé/022). Suite complète (`suite_f2d.txt`) : **108 failed / 5812 passed / 170 errors** —
+  diff vs baseline : **0 disparu, 1 « nouveau » = R8-086 flaky** (`test_perceptual_parallel`, timing, indép. de la persistance)
+  → **ensemble déterministe 264, 0 nouvel échec réel.** ✅
+- Artefacts : `r8_f2d_selfheal_diff`, `r8_f2d_persistence_diff`, `r8_f2d_roundtrip_diff`, **`r8_f2d_filet_survivors_diff`**
+  (+ `.out.txt`), `suite_f2d.txt`.
+
+### ═══ VERDICT F2-d (2026-06-18) ═══
+- **9 findings traités** : R8-019 ✅, R8-020 ✅, R8-021 **RETRACTÉ** (fix initial = data-loss, le filet l'a prouvé),
+  R8-022 ✅, R8-024 ✅, R8-025 ✅, R8-026 ✅, R8-027 ✅, R8-029 ✅. **+ R8-090** (jumeau, cartographie) ✅ **+ R8-091**
+  (jumeau profond, filet) ✅. **1 DIFFÉRÉ** : R8-023 (`vec_films_hash` / 032-tirets scaffold OFF → décision produit).
+- **Self-heal COHÉRENT** : un seul pipeline. R8-019 ordonné AVANT R8-022/023 (élargir le set de tables requises fait
+  feu le bootstrap plus souvent). Le filet a confirmé la cohérence ET attrapé une mine que le « durcissement » R8-021
+  avait elle-même créée → retract. **Aucune rustine concurrente.**
+- **Commits F2-d** : `c29a48e` (cluster self-heal R8-019/020/022, R8-021 retracté après), `e21a004` (R8-024),
+  `afb504c` (R8-025), `39d80aa` (R8-026), `8628e42` (R8-029), `43088fc` (R8-027+R8-090), `cd663d2` (R8-021 RETRACT),
+  `a64789b` (R8-091), `217f55d` (journal).
 
 ---
 
@@ -489,3 +527,86 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - **4 findings corrigés** (R8-013 `1eb7916`, R8-012 `de28c50`, R8-015+R8-011 `bab8070`) + **2 résidus filet corrigés**
   (R8-088/R8-089). **R8-014 différé** (PARTIAL non réversible — chantier multi-site). Différentiels S-012/013/015/011/088
   tous verts. **Non-régression** : suite complète 264 nœuds, 0 nouvel échec. Checkpoint `f493abdc` intact, **pas de push**.
+
+---
+
+## ═══════════ RÉCAP F2 COMPLÈTE — INTÉGRITÉ / INVARIANTS (a/b/c/d) — 2026-06-18 ═══════════
+
+> **28 findings corrigés** sur les 4 sous-salves + **4 chantiers différés** (raisons explicites ci-dessous)
+> + **1 fix RETRACTÉ** (R8-021, le filet a prouvé que mon « durcissement » causait une perte de données).
+> Méthode constante : différentiel comportemental **cassé→correct sur fixtures jetables**, **un commit par finding**,
+> **filet adversarial** (3 finders + panel 3 sceptiques asymétriques + 2 leurres) après CHAQUE sous-salve, résidus
+> in-périmètre corrigés en salve. **Calibration filets : decoys_leaked = 0/44 cumulés (F1→F2-d).**
+
+### F2-a — PARITÉ TV (seam #1) — commit `da09ff9`
+- **Corrigés (9)** : portage garde-par-garde du chemin film (réf. saine post-F1) vers `apply_tv_episode` — sidecars
+  réalignés SxxExx (R8-003), `src_sha1`/`src_size` sur les ops (R8-004), MAX_PATH sur vidéo+sidecars (R8-005),
+  collision-policy + comparaison contenu (R8-006), `record_op` en dry_run (R8-007), `mkdir` compté/journalisé (R8-008),
+  édition UI titre/année (R8-010), sidecar-conflict avalé (R8-073), compteur `res.moves` faux en dry_run (R8-074).
+  Routés par `move_file_with_collision_policy` + atomicité intra-row (parité COLL-ATOMIC). **Diff** : `r8_f2a_tv_parity_diff` S1-S5.
+- **Différés (2)** : **R8-009** gate 9 leftovers (sémantique TV-aware requise — 1 dossier TV = N épisodes, nettoyage
+  aveugle supprimerait d'autres épisodes), **R8-075** gate 10 anime (numérotation absolue Saison 00 = décision produit).
+- **Filet `wf_2fbab5c8-0ad`** : RELIABLE=true, leurres 0/2, **0 survivant** (grille V7 re-confrontée : inventaire 9 portés
+  + 2 différés vérifié complet). Note : F-V6-UNDO-CASE listé « différé » en F2-a a été **corrigé en F2-c** (R8-011).
+- **Captures instrumentées** : `cap_tv_parity` + `v5_tv_apply_repro` (baseline cassé), `r8_f2a_tv_parity_diff`.
+
+### F2-b — DEDUP / LOSER — commit `2fd4f63` (+ `0cd24a1` filet)
+- **Corrigés (3)** : **R8-017** atomicité per-loser/per-marked (les 2 helpers hors try/except → un fichier verrouillé
+  avortait TOUT le batch ; fix : try/except par rid + `_revert_moves` factorisé + continue) ; **R8-018** invariant
+  `moved==deleted` + chemin de récupération réel (compteur dédié `duplicates_user_decided_moved_count`) ;
+  **R8-087** (filet) chemin de récupération `marked_for_deletion` silencieux (sibling de R8-018, aggravé par mon ajout loser).
+- **Différés (0)**.
+- **Filet `wf_1b2f6be3-74a`** : RELIABLE=true, leurres 0/2, **1 survivant → R8-087 corrigé en salve**. Concern
+  sécurité-critique « `shutil.Error` avorte le batch » **réfuté + vérifié live** (shutil.Error EST un OSError).
+- **Captures instrumentées** : `r8_f2b_loser_atomic_diff` (S1/S2), `r8_f2b_loser_counter_diff` (S1/S2).
+
+### F2-c — ROLLBACK / STATUTS + UNDO-CASE — commits `1eb7916`/`de28c50`/`bab8070` (+ `32dedb7` filet)
+- **Corrigés (6)** : **R8-013** `rollback_status` figé IN_PROGRESS si kill pendant revert ; **R8-012** `undo_status`
+  op-level jamais marqué après revert ; **R8-015** apply-status FAILED ne reflète pas le rollback ; **R8-011** undo
+  casse-seule Windows classé CONFLIT (le `str()` case-sensitive — `Path` est insensible à la casse sur Windows) ;
+  **R8-088** (filet) `reconcile_inprogress_rollbacks` ne re-cloturait pas le batch au boot ; **R8-089** (filet)
+  `journaled_move` autour du rename casse-seule 2-temps → fausse alarme « FICHIER PERDU ».
+- **Différés (1)** : **R8-014** apply-status DONE malgré errors (PARTIAL n'est pas un statut réversible ;
+  `get_last_reversible_apply_batch` filtre `status='DONE'` → fermer en PARTIAL casserait l'undo = pire régression).
+- **Filet `wf_b1e98c63-e7b`** : RELIABLE=true, leurres 0/2, **2 survivants → R8-088/R8-089 corrigés en salve**. Concern
+  « re-run rollback_forward non idempotent » **réfuté** (gardes FS + `undo_status='DONE'`).
+- **Captures instrumentées** : `r8_f2c_rollback_undo_diff` (S-011/012/013/015/088).
+
+### F2-d — MIGRATIONS / SELF-HEAL / SQLITE — commits `c29a48e`/`e21a004`/`afb504c`/`39d80aa`/`8628e42`/`43088fc` (+ `cd663d2`/`a64789b`)
+- **Corrigés (10)** : **R8-019** mine paused_at (self-heal rejoue 025 → écrasait paused_at à NULL ; fix migration-level
+  ALTER+SELECT, ordonné AVANT le reste) ; **R8-020** backfill `schema_migrations` post-bootstrap ; **R8-022**
+  `incremental_row_cache` au filet self-heal ; **R8-024** crons tués par `sqlite3.OperationalError` non attrapé ;
+  **R8-025** back-compat busy_timeout écrasant le profil NAS ; **R8-026** `atomic_write_json` sans retry (PermissionError
+  Windows) ; **R8-027** + **R8-090** (cartographie) round-trip PlanRow (chaque désérialiseur perdait un champ différent) ;
+  **R8-029** `_save_ttl_manifest` non atomique ; **R8-091** (filet) `candidate_from_json` perdait les collections TMDb.
+- **RETRACTÉ (1)** : **R8-021** — le « durcissement » (swallow IntegrityError UNIQUE/PK) **introduisait une perte de
+  données** (skip d'un `INSERT...SELECT` de rebuild sur source corrompue → table vidée par `DROP+RENAME`). Le filet
+  F2-d l'a attrapé (3/3). Retour à `OperationalError` seul = comportement SÛR (boot bloqué recuperable vs wipe). `cd663d2`.
+- **Différés (1)** : **R8-023** `vec_films_hash` (mig 032 en tirets = scaffold jamais découvert, `similar_films` OFF,
+  `SqliteVecAdapter` = `NotImplementedError`) → activer le vector-search = décision produit.
+- **Filet `w2g8eihie`** : RELIABLE=true, leurres 0/2, **2 survivants → R8-021 (retract) + R8-091 corrigés en salve**.
+- **Captures instrumentées** : `r8_f2d_selfheal_diff` (S-019/020/021-inversé/022), `r8_f2d_persistence_diff`,
+  `r8_f2d_roundtrip_diff`, `r8_f2d_filet_survivors_diff` (§1 wipe, §2 collection). Capture saine `c3_migrations` (lossless v27→v31) intacte.
+
+### CHANTIERS F2 DIFFÉRÉS — à reprendre (4 + 1 test flaky)
+| ID | Sujet | Raison du report | Cible |
+|---|---|---|---|
+| **R8-009** | gate 9 TV-leftovers (nettoyage source après apply TV) | nettoyage aveugle d'un dossier TV (N épisodes) supprimerait d'autres épisodes → sémantique **TV-aware** requise (nettoyer si plus de média après TOUS les épisodes) | F5 (logique métier TV) |
+| **R8-075** | gate 10 anime (numérotation absolue → Saison 00) | placement anime (Saison 00 vs 01 vs plat) = **décision produit/convention** | F5 (décision produit) |
+| **R8-014** | apply-status DONE malgré `errors>0` | PARTIAL non réversible ; `get_last_reversible_apply_batch` filtre `DONE` → fermer en PARTIAL **casserait l'undo** (régression pire). Observabilité réelle existe ailleurs (`auditor.end` DONE/PARTIAL). Chantier multi-site | F-statuts (refonte statut apply) |
+| **R8-023** | `vec_films_hash` (mig 032 vector-search) | fichier 032 en **tirets** = jamais découvert ; table inexistante ; `similar_films` OFF + adaptateur `NotImplementedError` → renommer 032 = **activer une feature produit** | produit (vector-search) |
+| **R8-086** | `test_perceptual_parallel` flaky (timing) | non-déterministe (3/9 PASS isolé), causalement indép. de la persistance ; **enregistré, non corrigé** | F6 (durcissement tests) |
+
+### Bilan chiffré F2
+- **28 findings corrigés** : F2-a 9 · F2-b 3 · F2-c 6 · F2-d 10. Dont **5 découverts par filet/cartographie et corrigés
+  en salve** : R8-087 (F2-b), R8-088/R8-089 (F2-c), R8-090 (cartographie F2-d), R8-091 (filet F2-d).
+- **1 fix RETRACTÉ** (R8-021) : preuve de la valeur du filet adversarial — il a attrapé une **régression de perte de
+  données que la salve elle-même avait introduite**.
+- **4 chantiers différés** (R8-009, R8-075, R8-014, R8-023) + 1 test flaky enregistré (R8-086).
+- **Non-régression globale** : ensemble déterministe **264 nœuds, 0 nouvel échec réel** à travers les 4 sous-salves
+  (seul « nouveau » récurrent = R8-086 flaky). **5 captures saines intactes** : migrations lossless v27→v31,
+  round-trip settings, TTL/rollback quarantaine, bornes/tier.
+- **Cohérence** : rollback **factorisé** (`_revert_moves`, une seule variante partagée per-row/COLL-ATOMIC/TV/loser) ;
+  self-heal **unique et cohérent** (R8-019 ordonné avant l'élargissement du set de tables requises).
+- **17 commits F2** (hors journal) : `da09ff9` · `2fd4f63` `0cd24a1` · `1eb7916` `de28c50` `bab8070` `32dedb7` ·
+  `c29a48e` `e21a004` `afb504c` `39d80aa` `8628e42` `43088fc` `cd663d2` `a64789b`. Checkpoint `f493abdc` **intact**, **rien poussé**.
