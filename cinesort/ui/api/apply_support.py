@@ -440,6 +440,52 @@ def _execute_undo_ops(
                 continue
 
             if target_path.exists():
+                # R8-011 (F2-c) : sur FS INSENSIBLE A LA CASSE (Windows/SMB),
+                # target_path.exists() est VRAI quand current_path et target_path
+                # designent le MEME fichier physique en ne differant QUE par la casse
+                # (undo d'un rename casse-seule : "film" -> "Film"). Ce n'est PAS un
+                # conflit -> on fait le rename casse-seule au lieu de classer CONFLIT/
+                # FAILED. Sur FS SENSIBLE A LA CASSE (Linux), "Film" != "film" sont des
+                # fichiers distincts -> samefile()=False -> on retombe sur le vrai
+                # chemin conflit (comportement correct preserve sur les deux plateformes).
+                _case_only_same = False
+                # NB : on compare les STR (sensible a la casse) — l'egalite Path est
+                # insensible a la casse sur Windows (PureWindowsPath) et masquerait la
+                # difference de casse. samefile() confirme ensuite le meme fichier physique.
+                if str(current_path) != str(target_path):
+                    try:
+                        _case_only_same = current_path.samefile(target_path)
+                    except OSError:
+                        _case_only_same = False
+                if _case_only_same:
+                    try:
+                        from cinesort.app.apply_core import _case_only_rename_with_rollback
+
+                        with journaled_move(
+                            store, src=current_path, dst=target_path, op_type="UNDO_RESTORE"
+                        ):
+                            _case_only_rename_with_rollback(current_path, target_path)
+                        done += 1
+                        store.apply.mark_apply_operation_undo_status(
+                            op_id=op_id, undo_status="DONE", error_message=None
+                        )
+                        log_fn(
+                            "INFO",
+                            f"UNDO casse-seule {idx}/{len(reversible_ops)}: {current_path} -> {target_path}",
+                        )
+                    except (OSError, PermissionError, FileExistsError) as case_exc:
+                        failed += 1
+                        store.apply.mark_apply_operation_undo_status(
+                            op_id=op_id,
+                            undo_status="FAILED",
+                            error_message=f"Undo casse-seule echoue: {case_exc}",
+                        )
+                        log_fn(
+                            "ERROR",
+                            f"UNDO casse-seule echec {idx}/{len(reversible_ops)}: {current_path} -> {target_path}: {case_exc}",
+                        )
+                    continue
+
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
                 conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
@@ -2264,6 +2310,38 @@ def _apply_changes_body(
                     "ERROR",
                     f"Rollback atomique a leve une exception batch={apply_batch_id}: {rb_exc}",
                 )
+
+            # R8-015 (F2-c) : refleter le resultat du rollback dans apply_batches.status.
+            # Le batch a ete clos FAILED ci-dessus AVANT le revert ; si le revert a
+            # COMPLETEMENT restaure le FS, le statut doit passer a ROLLED_BACK_BY_ATOMIC
+            # (sinon apply_batches.status reste FAILED et ne dit pas si le FS est restaure).
+            # Un revert partiel/echoue reste FAILED (l'etat est ambigu, garde la trace
+            # rollback_status=ROLLBACK_PARTIAL/FAILED dans apply_batch_modes). Tolerant.
+            if (
+                atomic_rollback_summary is not None
+                and bool(atomic_rollback_summary.get("ok"))
+                and str(atomic_rollback_summary.get("rollback_status") or "") == "ROLLED_BACK_BY_ATOMIC"
+                and apply_batch_id is not None
+            ):
+                try:
+                    store.apply.close_apply_batch(
+                        batch_id=str(apply_batch_id),
+                        status="ROLLED_BACK_BY_ATOMIC",
+                        summary={
+                            "run_id": run_id,
+                            "dry_run": False,
+                            "error": str(exc),
+                            "ops_count": int(op_index),
+                            "rollback_status": "ROLLED_BACK_BY_ATOMIC",
+                            "rollback_counts": atomic_rollback_summary.get("counts"),
+                        },
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    log_fn(
+                        "WARN",
+                        f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "
+                        f"batch={apply_batch_id}: {st_exc}",
+                    )
 
         api.log_api_exception(
             "apply",

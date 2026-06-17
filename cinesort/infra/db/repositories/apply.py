@@ -69,6 +69,15 @@ _ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
         "UNDONE_DONE",
         "UNDONE_PARTIAL",
     }),
+    # R8-015 (F2-c) : un apply qui a echoue est clos FAILED, PUIS rollback_forward
+    # restaure le FS. Si le revert reussit completement, le statut du batch doit
+    # refleter cet etat reel -> ROLLED_BACK_BY_ATOMIC (sinon il reste fige a FAILED,
+    # impossible de savoir depuis apply_batches.status si le FS est restaure). On
+    # n'autorise QUE cette transition depuis FAILED (pas de retour vers DONE/PENDING
+    # = pas de reintroduction dans get_last_reversible_apply_batch).
+    "FAILED": frozenset({
+        "ROLLED_BACK_BY_ATOMIC",
+    }),
 }
 
 
