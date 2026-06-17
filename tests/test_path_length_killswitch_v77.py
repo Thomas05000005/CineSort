@@ -302,6 +302,9 @@ class ApplyTvEpisodeKillSwitchTests(unittest.TestCase):
             dry_run=True,
             log=log,
             res=res,
+            conflicts_root=self.root / "_review" / "_conflicts",
+            conflicts_sidecars_root=self.root / "_review" / "_conflicts_sidecars",
+            duplicates_identical_root=self.root / "_review" / "_duplicates_identical",
         )
 
         self.assertEqual(
@@ -336,6 +339,9 @@ class ApplyTvEpisodeKillSwitchTests(unittest.TestCase):
             dry_run=True,
             log=log,
             res=res,
+            conflicts_root=self.root / "_review" / "_conflicts",
+            conflicts_sidecars_root=self.root / "_review" / "_conflicts_sidecars",
+            duplicates_identical_root=self.root / "_review" / "_duplicates_identical",
         )
 
         self.assertEqual(

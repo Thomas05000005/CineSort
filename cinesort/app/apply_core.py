@@ -1572,7 +1572,13 @@ def apply_rows(
                         dry_run,
                         log,
                         res,
+                        conflicts_root=ctx.conflicts_root,
+                        conflicts_sidecars_root=ctx.conflicts_sidecars_root,
+                        duplicates_identical_root=ctx.duplicates_identical_root,
+                        hash_cache=ctx.hash_cache,
                         record_op=row_record_op,
+                        new_title=new_title,
+                        new_year=new_year,
                     )
                 elif row.kind == "single":
                     apply_single(
@@ -2233,9 +2239,24 @@ def apply_tv_episode(
     log: Callable[[str, str], None],
     res: "ApplyResult",
     *,
+    conflicts_root: Path,
+    conflicts_sidecars_root: Path,
+    duplicates_identical_root: Path,
+    hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
+    new_title: Optional[str] = None,
+    new_year: Optional[int] = None,
 ) -> None:
-    """Rename/move a TV episode into Série (année)/Saison NN/S01E01 - Titre.ext structure."""
+    """Rename/move a TV episode into Série (année)/Saison NN/S01E01 - Titre.ext structure.
+
+    R8-F2-a : mis à PARITÉ avec le chemin film (apply_single/apply_collection_item).
+    Les moves vidéo + sidecars passent par `move_file_with_collision_policy` (sha1/size,
+    politique de collision + comparaison contenu, ops journalisées même en dry_run,
+    mkdir compté) ; les sidecars sont réalignés sur le stem cible (SxxExx - Titre) ;
+    le kill-switch MAX_PATH vérifie aussi les sidecars internes ; l'item est atomique
+    intra-row (rollback des fichiers déjà déplacés si une étape échoue).
+    (`new_title`/`new_year` : édition UI titre/année — câblés F2-a gate 7.)
+    """
     video = folder / row.video
     if not video.exists():
         try:
@@ -2248,7 +2269,13 @@ def apply_tv_episode(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
 
-    year = int(row.proposed_year or 0)
+    # GATE 7 (TV-UIEDIT) : honorer l'édition UI titre/année de la décision (parité
+    # apply_single, qui reçoit new_title/new_year de `dec`). Sans ça, une correction
+    # de série/année saisie en validation sur un épisode TV était silencieusement
+    # ignorée (l'apply nommait depuis row.proposed_*). new_title pilote l'identifiant
+    # de la série (le dossier) ; new_year l'année. Fallback sur row.* si non fourni.
+    _eff_series = (new_title or "").strip() or str(row.tv_series_name or row.proposed_title or "")
+    year = int(new_year) if (new_year is not None and int(new_year or 0) > 0) else int(row.proposed_year or 0)
     season = int(row.tv_season or 0)
     episode = int(row.tv_episode or 0)
     ep_title = str(row.tv_episode_title or "").strip()
@@ -2256,9 +2283,9 @@ def apply_tv_episode(
     # Build target path: root / Série (année) / Saison NN / S01E01 - Titre.ext
     # ITER7 etape 3 : approvisionnement cfg.separator (cf. site apply_single).
     _naming_ctx = build_naming_context(
-        title=str(row.proposed_title or ""),
+        title=_eff_series,
         year=year,
-        tv_series_name=str(row.tv_series_name or row.proposed_title or ""),
+        tv_series_name=_eff_series,
         tv_season=season,
         tv_episode=episode,
         tv_episode_title=ep_title,
@@ -2276,10 +2303,35 @@ def apply_tv_episode(
     target_file = target_dir / target_filename
     core_mod.ensure_inside_root(cfg, target_file)
 
-    # VQ-3 : kill-switch MAX_PATH Windows. target_file inclut Serie/Saison/SxxExx
-    # ce qui peut facilement depasser 260 chars sur des series Anime longues
-    # avec sous-titres episode lengthy.
-    _path_err = check_path_length_killswitch(str(target_file))
+    # GATE 1 (TV1) : réaligner les sidecars sur le STEM cible (SxxExx - Titre) plutôt
+    # que de conserver leur nom source (sinon orphelins pour Jellyfin/Kodi/Plex).
+    # Les sidecars episode-specifiques partagent le stem video -> on remplace ce stem
+    # par le stem cible en preservant la chaine de suffixes (.fr.forced.srt).
+    # Les sidecars generiques (poster.jpg, ne commencant pas par le stem video) gardent
+    # leur nom (ne PAS les realigner sur l'episode).
+    target_stem = target_file.stem
+    sidecar_targets: list[Tuple[Path, Path]] = []
+    try:
+        for sc in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
+            if not sc.exists():
+                continue
+            if sc.name.startswith(video.stem):
+                suffix_chain = sc.name[len(video.stem):]
+                dst_sc = target_dir / f"{target_stem}{suffix_chain}"
+            else:
+                dst_sc = target_dir / sc.name
+            sidecar_targets.append((sc, dst_sc))
+    except (PermissionError, OSError) as exc:
+        log("WARN", f"TV sidecar scan failed for {folder}: {exc}")
+
+    # GATE 3 (TV-MAXPATH) : kill-switch MAX_PATH sur la vidéo ET chaque sidecar réaligné
+    # (le sidecar le plus long peut dépasser 260 même si target_file passe).
+    _candidate_paths = [str(target_file)] + [str(d) for (_, d) in sidecar_targets]
+    _path_err: Optional[str] = None
+    for _cp in _candidate_paths:
+        _path_err = check_path_length_killswitch(_cp)
+        if _path_err is not None:
+            break
     if _path_err is not None:
         log("WARN", _path_err)
         try:
@@ -2289,41 +2341,79 @@ def apply_tv_episode(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
         return
 
-    if target_file.exists():
-        log("INFO", f"TV episode already in place: {target_file}")
-        core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
-        return
-
+    # GATE 4 (TV3/SIDECOLL) : plus de skip NOOP naïf sur target_file.exists() — la
+    # comparaison de contenu + la politique de collision/quarantaine sont déléguées à
+    # move_file_with_collision_policy (un 2e épisode différent visant la même cible
+    # n'est plus laissé silencieusement en source).
     log("INFO", f"TV MOVE: {video} -> {target_file}")
-    if not dry_run:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        atomic_move(record_op, src=video, dst=target_file, op_type="MOVE_FILE")
-        record_apply_op(
-            record_op,
-            op_type="MOVE_FILE",
-            src_path=video,
-            dst_path=target_file,
-            reversible=True,
+
+    # GATE 8 (parité COLL-ATOMIC post-F1) : atomicité intra-row. On suit les moves
+    # réellement effectués et on les ANNULE si une étape échoue, puis on re-lève pour
+    # que la boucle per-row enregistre l'erreur (FICHIER VERROUILLE) et poursuive.
+    moved_for_rollback: list[Tuple[Path, Path]] = []
+
+    def _rollback_partial_tv() -> None:
+        for dst_done, src_orig in reversed(moved_for_rollback):
+            try:
+                if dst_done.exists() and not src_orig.exists():
+                    atomic_move(record_op, src=dst_done, dst=src_orig, op_type="ROLLBACK_TV_MOVE")
+                    record_apply_op(
+                        record_op,
+                        op_type="ROLLBACK_TV_MOVE",
+                        src_path=dst_done,
+                        dst_path=src_orig,
+                        reversible=False,
+                    )
+                    res.moves = max(0, res.moves - 1)
+                    log("WARN", f"ROLLBACK TV (atomicite intra-row): {dst_done} -> {src_orig}")
+            except (OSError, PermissionError) as rb_exc:
+                log("ERROR", f"ROLLBACK TV ECHEC {dst_done} -> {src_orig}: {rb_exc}")
+
+    def _move_status(src_path: Path, dst_path: Path) -> str:
+        # GATES 2/4/5/6 portées d'un coup : sha1/size sur l'op, politique de collision +
+        # comparaison contenu, op journalisée même en dry_run, mkdir compté.
+        return move_file_with_collision_policy(
+            cfg,
+            src_path,
+            dst_path,
+            src_anchor=folder,
+            dry_run=dry_run,
+            log=log,
+            res=res,
+            conflicts_root=conflicts_root,
+            conflicts_sidecars_root=conflicts_sidecars_root,
+            duplicates_identical_root=duplicates_identical_root,
+            hash_cache=hash_cache,
+            record_op=record_op,
         )
 
-        # Move sidecars (.srt, .nfo, etc.) that match the video stem.
-        try:
-            for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-                if sidecar.exists():
-                    dst_side = target_dir / sidecar.name
-                    if not dst_side.exists():
-                        atomic_move(record_op, src=sidecar, dst=dst_side, op_type="MOVE_FILE")
-                        record_apply_op(
-                            record_op,
-                            op_type="MOVE_FILE",
-                            src_path=sidecar,
-                            dst_path=dst_side,
-                            reversible=True,
-                        )
-        except (PermissionError, OSError):
-            pass
+    try:
+        # Vidéo (asset principal) d'abord.
+        status = _move_status(video, target_file)
+        if status == "moved" and not dry_run:
+            moved_for_rollback.append((target_file, video))
+        elif status == "duplicate_identical":
+            core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
+        elif status in {"conflict", "sidecar_conflict"}:
+            core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
 
-    res.moves += 1
+        # Sidecars réalignés (GATE 1) — collision/échec gérés par la politique
+        # (GATE 4 + H3-02 : plus de `except: pass` qui avalait les échecs).
+        for sc, dst_sc in sidecar_targets:
+            s_status = _move_status(sc, dst_sc)
+            if s_status == "moved" and not dry_run:
+                moved_for_rollback.append((dst_sc, sc))
+            elif s_status in {"conflict", "sidecar_conflict", "duplicate_identical"}:
+                core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
+    except (OSError, PermissionError) as exc:
+        log("ERROR", f"apply_tv_episode: echec move, rollback intra-row ({folder.name}): {exc}")
+        _rollback_partial_tv()
+        raise
+
+    # GATE 5/TV-DRYRUN counter : res.moves est désormais incrémenté par
+    # move_file_with_collision_policy par move réel (vidéo + chaque sidecar), y compris
+    # en dry_run pour la preview — on retire l'ancien `res.moves += 1` inconditionnel
+    # qui comptait l'épisode même quand rien n'était déplacé.
 
 
 def quarantine_row(

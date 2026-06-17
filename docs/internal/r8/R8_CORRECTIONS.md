@@ -192,3 +192,57 @@ précisément le risque de perte ; la préservation supprime le risque. Croissan
 - **Verdict filet** : les fixes R8-001/R8-002 **n'ouvrent AUCUN nouveau gap d'intégrité** (panel-confirmé, calibré).
   Aucun nouveau finding R8-086+ à enregistrer côté intégrité. 2 notes non-intégrité (compteur cosmétique,
   housekeeping `_preserved_review`) consignées ci-dessus pour F6 éventuel — **pas des cibles F1/F2**.
+
+---
+
+## ═══ FAMILLE F2 — INTÉGRITÉ / INVARIANTS — SOUS-SALVE F2-a (PARITÉ TV, seam #1) ═══
+
+> Stratégie : **portage garde-par-garde** des gardes du chemin film (référence **corrigée post-F1**) vers
+> `apply_tv_episode`, confronté à la **grille de parité V7**. Le cœur : router les moves vidéo + sidecars par
+> `move_file_with_collision_policy` (porte sha1/size + collision/contenu + ops dry-run + mkdir compté d'un coup),
+> + réalignement sidecars + atomicité (parité COLL-ATOMIC post-F1) + édition UI. **Commit** : `<hash F2-a>`.
+
+### Grille V7 → statut R8 (fermeture du seam #1)
+| # | Garde (chemin film = réf) | Finding | Portée ? | Comment |
+|---|---|---|---|---|
+| 1 | Sidecars réalignés sur le nom cible (SxxExx) | F-V4B-TV1 | ✅ | stem cible + chaîne de suffixes ; génériques (poster) gardent leur nom |
+| 2 | `src_sha1`/`src_size` sur les ops (anti-undo-dangereux) | F-V4B-TV2 | ✅ | via `move_file_with_collision_policy` |
+| 3 | MAX_PATH sur `_longest_inner` (vidéo **et** sidecars) | F-V6-TV-MAXPATH | ✅ | boucle sur target_file + chaque sidecar réaligné |
+| 4 | Politique de collision + comparaison contenu | F-V5-TV3 / F-V6-TV-SIDECOLL | ✅ | NOOP naïf `exists()` retiré → `move_file_with_collision_policy` (quarantaine, plus de drop silencieux) |
+| 5 | `record_op` émis **en dry_run** (preview) | F-V6-TV-DRYRUN | ✅ | via la policy (ops + compteur en dry_run) |
+| 6 | `mkdir_counted` (compté + journalisé) | F-V6-TV-MKDIR | ✅ | via la policy (`target_dir.mkdir` brut retiré) |
+| 7 | Édition UI titre/année honorée | F-V6-TV-UIEDIT | ✅ | `new_title`/`new_year` plombés + utilisés dans le naming |
+| 8 | Atomicité intra-row (parité COLL-ATOMIC post-F1) | (parité R8-001) | ✅ | rollback des moves effectués si échec + re-raise per-row |
+| — | Sidecar conflict avalé sans WARN | F-H3-02 | ✅ | `except: pass` retiré → géré par la policy / rollback |
+| — | Compteur `res.moves` faux en dry_run/NOOP | (TV-DRYRUN) | ✅ | `res.moves += 1` inconditionnel retiré (compté par move réel) |
+| 9 | Leftovers + nettoyage dossier source | F-V7-TV-LEFTOVERS | ⏸️ **DIFFÉRÉ** | un dossier TV = **plusieurs épisodes** (≠ dossier film = 1 film) ; porter « move leftovers + rmdir source » à l'aveugle **risquerait de supprimer d'autres épisodes**. Nécessite une sémantique TV-aware (nettoyer seulement si le dossier ne contient plus de média après TOUS les épisodes). **Pas un port aveugle — résiduel.** |
+| 10 | Anime numérotation absolue (`season=None`→Saison 00) | F-V6-TV-ANIME | ⏸️ **DIFFÉRÉ** | placement des animes en numérotation absolue (Saison 00 vs Saison 01 vs plat) = **décision produit/convention**, hors « port d'une garde film » (le film n'a pas de saisons). Résiduel. |
+| 12 | Undo casse-seule restauré (côté **undo**) | F-V6-UNDO-CASE | ⏸️ **DIFFÉRÉ** | bug du **chemin undo** (`apply_support.py:442`), pas de `apply_tv_episode` ; affecte film ET TV. Fix distinct (commit dédié F2). |
+
+### Différentiel baseline prouvé (`r8_f2a_tv_parity_diff.py` / `.out.txt`, fixtures jetables)
+Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1 orphelins, TV2 sans sha1) +
+`cap_tv_parity.out.txt` (gates 3-8). Différentiel cassé→correct, **7 scénarios** :
+| Scénario | Garde | AVANT | APRÈS |
+|---|---|---|---|
+| S1 | 1/2/6 | sidecars nom source (orphelins), ops sans sha1, mkdir brut | sidecars `S01E01 - Pilot.{srt,nfo}` (0 orphelin), op vidéo `src_sha1` présent, **MKDIR journalisé** |
+| S2 | 4 | 2e épisode différent **laissé en source** (silencieux) | source **quarantinée** (`conflicts_quarantined_count=1`), pas laissée |
+| S3 | 8 | item à moitié appliqué si sidecar échoue | vidéo **rollback** (revenue source, **2 ops ROLLBACK**), état cohérent |
+| S4 | 5 | aucune op en dry_run | **3 ops MOVE_FILE** journalisées, **0 move physique** |
+| S5 | 7 | édition titre/année **ignorée** (dossier `Wrong Series (2019)`) | dossier **`Corrected Series (2021)`** utilisé |
+
+### Non-régression
+- `tests/test_path_length_killswitch_v77.py` : **12 passed** (2 appels mis à la nouvelle signature). Sweep apply/TV
+  ciblé : 386 passed, échecs **tous pré-existants** (chromium/e2e, 0 nouveau vs baseline).
+- Suite complète (`suite_f2a.txt`) : 108 failed / 5812 passed / 170 errors. Diff vs baseline (`f2a_failures.txt`
+  vs `prefix_failures.txt`) : **0 disparu**, **1 « nouveau » = `test_perceptual_parallel.py::…test_video_and_audio_tasks_run_via_pool`**.
+  → **FLAKY, PAS une régression** : (a) causalement indépendant — le test n'importe que `perceptual.parallelism`/
+  `perceptual_support`/`cinesort_api`, jamais `apply_core.apply_tv_episode` ni `state.clean_old_runs` (mes seuls
+  sites) ; (b) **non-déterministe** — 3/9 PASS en isolation (assertion de parallélisme via `time.sleep(0.1)`,
+  sensible à l'ordonnancement) ; une vraie régression serait déterministe + aurait un chemin causal. Absent des 3
+  runs baseline précédents (chance). → **enregistré R8-086** (test flaky, F6/durcissement-tests), NON corrigé en F2-a.
+  **Ensemble des nœuds déterministes inchangé : 264, 0 nouvel échec réel.** ✅
+
+### Artefacts / sites
+- Prod : `apply_core.py` `apply_tv_episode` (signature += conflicts/sidecars/dup roots, hash_cache, new_title/new_year ;
+  corps réécrit) + caller L1568 (plombage ctx) ; test `test_path_length_killswitch_v77.py` (signature).
+- `r8_f2a_tv_parity_diff.py` + `.out.txt` (S1-S5), `suite_f2a.txt`.

@@ -218,6 +218,7 @@ avant le move réussi**) ; faire gouverner les buckets `run_dir/_review` par la 
 | R8-080 | **F-H7-02** | 🟡 low | `jellyfin_sync.py:217-248` | après apply d'un film vu, un 503 transitoire sur `PlayedItems` laisse le flag « vu » non restauré et non re-tenté dans ce run (`client.mark_played` échoue → `result.errors++`, pas de re-queue). WARN émis, récupérable par re-sync. | `captures/cap_residual.out.txt` ✅ figé |
 | R8-081 | **F-TEST-01** | 🟠 medium | `tests/test_auto_install.py:37` | `assertTrue(d.exists() or True)` toujours vrai → `test_creates_dir` passe quoi qu'il arrive (**test menteur** qui masquerait une régression R8). **À corriger AVANT de s'appuyer sur ce test en R8.** | `captures/cap_residual.out.txt` ✅ figé (table de vérité `x or True`) |
 | R8-082 | **F-0.5-02** | 🟠 medium | `docs/internal/observe/` | bloat git : **771 Mo / 1608 fichiers** trackés non ignorés → clones/CI lourds + surface de fuite future. (PAS une fuite de secret actuelle — réfutée en live, voir non-régression.) | `git ls-files`/`du -sh` (mesuré, F-0.5-02 rapport) |
+| R8-086 | **F-TEST-FLAKY-PERC** | 🟡 low | `tests/test_perceptual_parallel.py` (`test_video_and_audio_tasks_run_via_pool`) | test **flaky** (assertion de parallélisme via `time.sleep(0.1)`, sensible à l'ordonnancement) : ~3/9 PASS en isolation. Faux signal de régression (masque/bruite la non-régression R8). Découvert en F2-a. **NON corrigé** (F6/durcissement-tests). | run x6 = 2 PASS / 4 FAIL (cf R8_CORRECTIONS F2-a) |
 
 ---
 
