@@ -2109,19 +2109,96 @@ def apply_collection_item(
     if not sub_dir.exists():
         mkdir_counted(sub_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
 
-    for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-        dst = sub_dir / sidecar.name
+    # R8-001 (F1, PERTE DE DONNEES) : atomicite intra-row.
+    # Un item de collection deplace ses sidecars PUIS sa video. Si une etape echoue
+    # (ex. .mkv verrouille -> PermissionError dans atomic_move), l'ancien code laissait
+    # les sidecars deja deplaces + la video en source = item A MOITIE applique, sans
+    # rollback ; et le ledger dedup, marque AVANT le move, faisait skipper l'item au
+    # retry => demi-application PERMANENTE (irrecuperable). Cf baseline COLL-ATOMIC.
+    # Fix : (A) on suit les moves reellement effectues et on les ANNULE si une etape
+    # echoue (etat tout-ou-rien) ; (B) on ne marque le ledger dedup QU'APRES le succes
+    # complet de chaque move (sinon le retry skipperait un item partiel).
+    moved_for_rollback: list[Tuple[Path, Path]] = []  # (dst effectif, src d'origine)
+    dedup_added_this_item: list[Tuple[str, str, str]] = []
+
+    def _commit_dedup(key: Optional[Tuple[str, str, str]]) -> None:
+        if key is not None and dedup_seen_ops is not None:
+            dedup_seen_ops.add(key)
+            dedup_added_this_item.append(key)
+
+    def _rollback_partial_item() -> None:
+        # Restaure un etat COHERENT : remet en source (ordre inverse) chaque fichier
+        # reellement deplace par cet item. Best-effort : un echec de revert est logge
+        # mais n'interrompt pas les autres reverts.
+        for dst_done, src_orig in reversed(moved_for_rollback):
+            try:
+                if dst_done.exists() and not src_orig.exists():
+                    atomic_move(
+                        record_op,
+                        src=dst_done,
+                        dst=src_orig,
+                        op_type="ROLLBACK_COLLECTION_MOVE",
+                    )
+                    record_apply_op(
+                        record_op,
+                        op_type="ROLLBACK_COLLECTION_MOVE",
+                        src_path=dst_done,
+                        dst_path=src_orig,
+                        reversible=False,
+                    )
+                    res.moves = max(0, res.moves - 1)
+                    log("WARN", f"ROLLBACK collection (atomicite intra-row): {dst_done} -> {src_orig}")
+            except (OSError, PermissionError) as rb_exc:
+                log("ERROR", f"ROLLBACK collection ECHEC {dst_done} -> {src_orig}: {rb_exc}")
+        # (B) un retry doit re-traiter l'item : retirer du ledger les cles ajoutees ici.
         if dedup_seen_ops is not None:
-            op_key = (str(core_mod._norm_win_path(sidecar)), str(core_mod._norm_win_path(dst)), "collection_sidecar")
-            if op_key in dedup_seen_ops:
-                log("INFO", f"SKIP_DEDUP collection_sidecar: {sidecar} -> {dst}")
+            for k in dedup_added_this_item:
+                dedup_seen_ops.discard(k)
+
+    try:
+        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
+            dst = sub_dir / sidecar.name
+            op_key: Optional[Tuple[str, str, str]] = None
+            if dedup_seen_ops is not None:
+                op_key = (str(core_mod._norm_win_path(sidecar)), str(core_mod._norm_win_path(dst)), "collection_sidecar")
+                if op_key in dedup_seen_ops:
+                    log("INFO", f"SKIP_DEDUP collection_sidecar: {sidecar} -> {dst}")
+                    core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
+                    continue
+            status = move_file_with_collision_policy(
+                cfg,
+                sidecar,
+                dst,
+                src_anchor=folder,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                conflicts_root=conflicts_root,
+                conflicts_sidecars_root=conflicts_sidecars_root,
+                duplicates_identical_root=duplicates_identical_root,
+                hash_cache=hash_cache,
+                record_op=record_op,
+            )
+            _commit_dedup(op_key)  # (B) ledger marque seulement apres move reussi
+            if status == "moved" and not dry_run:
+                moved_for_rollback.append((dst, sidecar))
+            if status == "duplicate_identical":
+                core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
+            elif status in {"conflict", "sidecar_conflict"}:
+                core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
+
+        dst_video = sub_dir / _video_name_with_ext_case(cfg, video)
+        vid_key: Optional[Tuple[str, str, str]] = None
+        if dedup_seen_ops is not None:
+            vid_key = (str(core_mod._norm_win_path(video)), str(core_mod._norm_win_path(dst_video)), "collection_video")
+            if vid_key in dedup_seen_ops:
+                log("INFO", f"SKIP_DEDUP collection_video: {video} -> {dst_video}")
                 core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
-                continue
-            dedup_seen_ops.add(op_key)
+                return
         status = move_file_with_collision_policy(
             cfg,
-            sidecar,
-            dst,
+            video,
+            dst_video,
             src_anchor=folder,
             dry_run=dry_run,
             log=log,
@@ -2132,37 +2209,20 @@ def apply_collection_item(
             hash_cache=hash_cache,
             record_op=record_op,
         )
+        _commit_dedup(vid_key)  # (B) ledger marque seulement apres move video reussi
+        if status == "moved" and not dry_run:
+            moved_for_rollback.append((dst_video, video))
         if status == "duplicate_identical":
             core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         elif status in {"conflict", "sidecar_conflict"}:
             core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
-
-    dst_video = sub_dir / _video_name_with_ext_case(cfg, video)
-    if dedup_seen_ops is not None:
-        op_key = (str(core_mod._norm_win_path(video)), str(core_mod._norm_win_path(dst_video)), "collection_video")
-        if op_key in dedup_seen_ops:
-            log("INFO", f"SKIP_DEDUP collection_video: {video} -> {dst_video}")
-            core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
-            return
-        dedup_seen_ops.add(op_key)
-    status = move_file_with_collision_policy(
-        cfg,
-        video,
-        dst_video,
-        src_anchor=folder,
-        dry_run=dry_run,
-        log=log,
-        res=res,
-        conflicts_root=conflicts_root,
-        conflicts_sidecars_root=conflicts_sidecars_root,
-        duplicates_identical_root=duplicates_identical_root,
-        hash_cache=hash_cache,
-        record_op=record_op,
-    )
-    if status == "duplicate_identical":
-        core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
-    elif status in {"conflict", "sidecar_conflict"}:
-        core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
+    except (OSError, PermissionError) as exc:
+        # Echec mid-item : restaurer l'etat coherent (rollback), liberer le ledger,
+        # puis RE-LEVER pour que la boucle per-row (apply_core.py:~1650) enregistre
+        # l'erreur "FICHIER VERROUILLE" et poursuive le batch (resilience per-row).
+        log("ERROR", f"apply_collection_item: echec move, rollback intra-row ({folder.name}): {exc}")
+        _rollback_partial_item()
+        raise
 
 
 def apply_tv_episode(

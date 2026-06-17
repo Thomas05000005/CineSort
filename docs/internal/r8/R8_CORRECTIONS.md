@@ -83,3 +83,44 @@ Grep ciblé sur `tests/` (`or True`, `or 1`, `assert True`, `assertTrue(True)`, 
 ### Artefacts rejouables
 - `r8_081_falsifiability.py` + `r8_081_falsifiability.out.txt` (preuve vert/rouge/vert sans edit prod).
 - `suite_baseline_prefix.txt` (baseline pré-fix), `prefix_failures.txt` (264 nœuds pré-existants), `suite_postfix.txt`.
+
+---
+
+## ═══ FAMILLE F1 — PERTE DE DONNÉES NON RÉCUPÉRABLE ═══
+
+## R8-001 — F-V8-COLL-ATOMIC — Atomicité intra-row collection + ledger dedup non empoisonné
+**Famille** : F1. **Commit** : `<hash R8-001>` (loop/correction-2026-06). Fix A+B **indissociable** (1 commit).
+
+### Cause racine (baseline)
+`apply_collection_item` (`cinesort/app/apply_core.py`) déplace les sidecars PUIS la vidéo, et marque le ledger
+`dedup_seen_ops` **AVANT** chaque move. Si le move vidéo échoue (`.mkv` verrouillé → `PermissionError` dans
+`atomic_move`), les sidecars sont déjà partis, la vidéo reste en source = **item à moitié appliqué, sans
+rollback** ; et la clé dedup de la vidéo, ajoutée avant le move, fait **skipper l'item au retry** →
+demi-application **PERMANENTE / irrécupérable**. Baseline figée : `../baseline_r8/captures/v9_coll_atomic_repro.out.txt`
+(`half_applied=true, dedup_poisoned=true, no_rollback=true`).
+
+### Fix (avant→après, `apply_core.py:2109-2165` → bloc atomique)
+- **(A) Atomicité** : la séquence sidecars+vidéo est encadrée par un `try/except (OSError, PermissionError)`.
+  On suit les moves réellement effectués (`moved_for_rollback`) ; sur échec, `_rollback_partial_item()` **remet
+  en source** (ordre inverse) chaque fichier déplacé (`atomic_move` + op `ROLLBACK_COLLECTION_MOVE` journalisée),
+  puis **re-lève** → la boucle per-row (`apply_core.py:~1650`) enregistre l'erreur « FICHIER VERROUILLÉ » et
+  poursuit le batch (résilience per-row déjà en place). État final = **tout-ou-rien**.
+- **(B) Ledger** : `dedup_seen_ops.add(op_key)` déplacé **APRÈS** le `move_file_with_collision_policy` réussi
+  (`_commit_dedup`). Sur échec, `_rollback_partial_item` fait `discard` des clés ajoutées pour cet item → un
+  **retry RE-TRAITE** l'item au lieu de le skipper.
+
+### Différentiel baseline prouvé (artefact rejouable `r8_001_coll_atomic_diff.py` / `.out.txt`)
+| Observation | AVANT (baseline) | APRÈS (fix) |
+|---|---|---|
+| (A) état après échec move vidéo | `half_applied=true` (sidecars orphelins, vidéo en source) | **cohérent** : vidéo en source, sidecars **restaurés en source**, **2 ops ROLLBACK** émises |
+| (B) ledger dedup vidéo | `dedup_poisoned=true` (marquée « vue » → retry skippe) | **non poisonné** → **retry RE-TRAITE et COMPLÈTE l'item** (vidéo+sidecars dans le sous-dossier, source vidée) |
+| repro baseline `v9_coll_atomic_repro.py` re-joué | `half_applied=true, dedup_poisoned=true` | `half_applied=false, dedup_poisoned=false, rollback_ops=2` → **VERDICT « non reproduit »** |
+
+### Non-régression
+- `tests/test_apply_atomicity.py` : **23 passed**.
+- Suite complète (`suite_r8_001.txt`) : **107 failed / 5813 passed / 170 errors** — **IDENTIQUE** au pré-fix ;
+  diff `r8_001_failures.txt` vs `prefix_failures.txt` (`comm`) : **264 nœuds, 0 nouveau, 0 disparu**. ✅ 0 régression.
+
+### Artefacts
+- `r8_001_coll_atomic_diff.py` + `.out.txt` (différentiel A+B, fixture jetable, prouve retry-re-traite).
+- `suite_r8_001.txt` (suite post-fix), `r8_001_failures.txt` (264 nœuds = pré-existants).
