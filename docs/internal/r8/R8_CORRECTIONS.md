@@ -200,7 +200,7 @@ précisément le risque de perte ; la préservation supprime le risque. Croissan
 > Stratégie : **portage garde-par-garde** des gardes du chemin film (référence **corrigée post-F1**) vers
 > `apply_tv_episode`, confronté à la **grille de parité V7**. Le cœur : router les moves vidéo + sidecars par
 > `move_file_with_collision_policy` (porte sha1/size + collision/contenu + ops dry-run + mkdir compté d'un coup),
-> + réalignement sidecars + atomicité (parité COLL-ATOMIC post-F1) + édition UI. **Commit** : `<hash F2-a>`.
+> + réalignement sidecars + atomicité (parité COLL-ATOMIC post-F1) + édition UI. **Commit** : `da09ff9`.
 
 ### Grille V7 → statut R8 (fermeture du seam #1)
 | # | Garde (chemin film = réf) | Finding | Portée ? | Comment |
@@ -246,3 +246,26 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - Prod : `apply_core.py` `apply_tv_episode` (signature += conflicts/sidecars/dup roots, hash_cache, new_title/new_year ;
   corps réécrit) + caller L1568 (plombage ctx) ; test `test_path_length_killswitch_v77.py` (signature).
 - `r8_f2a_tv_parity_diff.py` + `.out.txt` (S1-S5), `suite_f2a.txt`.
+
+### Filet F2-a (round adversarial sur le TV porté + pipeline amont) — `wf_2fbab5c8-0ad`
+> 3 finders (move-block porté · pipeline TV amont · **re-confrontation grille V7**) + panel 3 sceptiques
+> asymétrie + 2 leurres. **RELIABLE=true** (3/3 finders), **leurres 0/2**. **Cumulé campagne : 0/34.**
+- **8 candidats → 0 SURVIVANT** (seuil ≥2/3). Finder 3 (grille V7) n'a remonté **aucun** gardé « réputé porté mais
+  absent » → l'inventaire **8 portés + 3 différés est vérifié complet**.
+- 3 candidats à 1/3 (dissident unique, réfutés) : (a) « vidéo quarantinée → sidecars orphelins » → réfuté : la
+  vidéo n'est quarantinée que si `target_file` **existe déjà** (épisode réel) → les sidecars réalignés s'attachent
+  à cet épisode réel, pas à un fantôme ; (b) « fichiers multi-épisodes S01E01E02 collapsés » → **amont/parsing**,
+  hors grille apply, non introduit par le port (réfuté 2/3, non promu) ; (c) « TV devrait utiliser `dedup_seen_ops` »
+  → réfuté : épisodes uniques par row (pas de double-move batch comme collection) + collision gérée par la policy.
+- « Orphan season dir au rollback » → réfuté 0/3 : **parité film pré-existante** (apply_single/collection laissent
+  aussi un dir vide au rollback ; l'op MKDIR est réversible au niveau undo-batch). Cohérent avec le filet F1.
+- **Verdict filet** : le port n'introduit **aucun nouveau gap**, et **aucune garde portable du seam #1 n'a été
+  oubliée**. Aucun nouveau finding (hors R8-086 flaky déjà enregistré).
+
+### ═══ VERDICT F2-a (2026-06-17) ═══
+- **Seam #1 (parité TV)** : **FERMÉ EN CORRECTION pour les gardes PORTABLES** — 8 gardes portées + prouvées
+  (gates 1-8 + UIEDIT), filet 0 survivant, grille V7 re-confrontée. **3 résiduelles DIFFÉRÉES** (non portables à
+  l'aveugle) : gate 9 leftovers (sémantique TV-aware requise), gate 10 anime (décision produit), F-V6-UNDO-CASE
+  (chemin undo, film+TV, commit dédié). → seam **NON intégralement fermé** ; reste = 3 gardes non-portables-en-l'état.
+- **Différentiels** : S1-S5 tous cassé→correct. **Non-régression** : 264 nœuds déterministes, 0 nouvel échec
+  (1 flaky R8-086). **Commit** : `da09ff9`. Checkpoint `f493abdc` intact, pas de push.
