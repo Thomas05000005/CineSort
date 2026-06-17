@@ -34,7 +34,9 @@ class TestGetToolsDir(unittest.TestCase):
 
     def test_creates_dir(self):
         d = get_tools_dir()
-        self.assertTrue(d.exists() or True)  # peut ne pas exister en CI
+        # get_tools_dir() fait tools_dir.mkdir(exist_ok=True) puis retourne :
+        # le dossier DOIT exister apres l'appel (cf auto_install.py:169).
+        self.assertTrue(d.exists(), "get_tools_dir() doit creer le dossier tools/")
 
 
 class TestFindInZip(unittest.TestCase):
