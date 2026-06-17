@@ -394,7 +394,16 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_rollback_does_not_change_undo_status(self) -> None:
+    def test_rollback_marks_undo_status_done(self) -> None:
+        # R8-012 (F2-c) : apres un revert atomique REUSSI, l'undo_status OP-LEVEL doit
+        # refleter que l'op est annulee ('DONE'). Avant, rollback_forward ne touchait
+        # PAS undo_status (restait 'PENDING') -> l'historique (history_support.py:300)
+        # et les compteurs undone_ops/pending_ops (apply.py:391) affichaient un batch
+        # deja reverti comme "pending_ops=total, undone_ops=0" = jamais annule. Le
+        # rollback_status reste SEPARE et coherent dans apply_batch_modes (les deux
+        # co-existent : op-level DONE + rollback_status DONE). Aucune interaction avec
+        # l'undo manuel : un batch rollback-atomique n'est pas status='DONE' donc jamais
+        # propose a l'undo (cf test_get_last_reversible_apply_batch_not_impacted).
         batch_id = self.store.apply.insert_apply_batch(
             run_id="r1", dry_run=False, quarantine_unapproved=False,
         )
@@ -413,10 +422,10 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
         rollback_forward(self.store, batch_id)
 
         ops = self.store.apply.list_apply_operations(batch_id=batch_id)
-        # undo_status n'a PAS ete touche par rollback_forward (reste 'PENDING')
-        self.assertEqual(ops[0]["undo_status"], "PENDING")
+        # R8-012 : undo_status reflete desormais le revert ('DONE')
+        self.assertEqual(ops[0]["undo_status"], "DONE")
 
-        # rollback_status SEPARE dans apply_batch_modes
+        # rollback_status SEPARE dans apply_batch_modes (coherent)
         mode = self.store.apply.get_atomic_mode(batch_id)
         self.assertEqual(mode["rollback_status"], ROLLBACK_DONE)
 

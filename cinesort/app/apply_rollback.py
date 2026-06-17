@@ -435,6 +435,34 @@ def rollback_forward(
         elif result["status"] == "FAILED":
             failed += 1
 
+        # R8-012 (F2-c) : marquer le statut undo OP-LEVEL apres le revert. Avant,
+        # rollback_forward revertait le FS mais ne touchait jamais
+        # apply_operations.undo_status -> un batch atomiquement reverti apparaissait
+        # "pending_ops=total, undone_ops=0" (entierement annulable) alors que le FS
+        # etait deja revenu a src. Marquer ici rend l'etat op-level coherent ET
+        # rollback_forward idempotent/reprenable (un re-run skippe les undo_status=DONE,
+        # cf R8-013). On NE retrograde PAS une op deja terminale (skip "undo_status=...").
+        _new_undo: Optional[str] = None
+        if result["status"] == "DONE":
+            _new_undo = "DONE"
+        elif result["status"] == "FAILED":
+            _new_undo = "FAILED"
+        elif result["status"] == "SKIPPED" and not str(result.get("reason") or "").startswith("undo_status="):
+            _new_undo = "SKIPPED"
+        if _new_undo is not None and result.get("id"):
+            try:
+                store.apply.mark_apply_operation_undo_status(
+                    op_id=int(result["id"]),
+                    undo_status=_new_undo,
+                    error_message=(str(result.get("reason") or "") if _new_undo == "FAILED" else None),
+                )
+            except (sqlite3.Error, AttributeError, OSError) as _mark_exc:
+                _audit_log(
+                    audit_fn,
+                    "WARN",
+                    f"rollback_forward: mark undo_status={_new_undo} impossible op_id={result.get('id')}: {_mark_exc}",
+                )
+
     # Final status logique
     if failed == 0:
         final_status = ROLLBACK_DONE
