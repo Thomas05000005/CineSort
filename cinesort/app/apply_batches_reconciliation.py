@@ -95,6 +95,32 @@ def _list_pending_batches(store: Any, *, older_than_ts: float) -> List[Dict[str,
     return rows
 
 
+def _list_inprogress_rollbacks(store: Any) -> List[str]:
+    """R8-013 (F2-c) : liste les batch_id dont `apply_batch_modes.rollback_status`
+    est figé à 'IN_PROGRESS'.
+
+    Si l'app est tuée pendant `rollback_forward` (entre le mark IN_PROGRESS et le
+    statut final), ce statut reste IN_PROGRESS à vie ; or `reconcile_pending_batches`
+    ne scanne que `apply_batches.status='PENDING'` (le batch en rollback est FAILED) →
+    l'état figé n'était jamais récupéré. Au BOOT, tout rollback IN_PROGRESS est par
+    définition orphelin (le process qui le menait est mort) → on les reprend.
+    """
+    ids: List[str] = []
+    with store._managed_conn() as conn:  # type: ignore[attr-defined]
+        try:
+            cur = conn.execute(
+                "SELECT batch_id FROM apply_batch_modes WHERE rollback_status = 'IN_PROGRESS'"
+            )
+            for r in cur.fetchall():
+                bid = str(r[0] or "").strip()
+                if bid:
+                    ids.append(bid)
+        except sqlite3.OperationalError:
+            # DB pre-atomic : la table n'existe pas encore. Pas une erreur.
+            return []
+    return ids
+
+
 def _read_expected_ops(summary_json: str) -> Optional[int]:
     """Extrait `expected_ops` (compte d'ops attendu) du summary_json du batch.
 
@@ -321,15 +347,65 @@ def reconcile_pending_batches(
     return report
 
 
+def reconcile_inprogress_rollbacks(store: Any) -> Dict[str, Any]:
+    """R8-013 (F2-c) : reprend les rollbacks figés `rollback_status='IN_PROGRESS'`.
+
+    Pour chaque batch orphelin, on RE-LANCE `rollback_forward` : il est idempotent
+    (les ops déjà revertées ont undo_status='DONE' (R8-012) ou sont protégées par les
+    gardes FS dst_missing/src_already_exists → skip), donc il termine proprement le
+    revert et écrit le statut final, libérant l'état figé. Tolère store None / table
+    absente / toute erreur (le boot continue).
+    """
+    report: Dict[str, Any] = {"inprogress_found": 0, "resumed": 0, "resume_failed": 0, "batches": []}
+    if store is None:
+        return report
+    try:
+        ids = _list_inprogress_rollbacks(store)
+    except (sqlite3.Error, OSError, AttributeError):
+        _logger.exception("reconcile_inprogress_rollbacks: list failed")
+        return report
+    if not ids:
+        return report
+    report["inprogress_found"] = len(ids)
+    _logger.warning(
+        "reconcile_inprogress_rollbacks: %d rollback(s) figé(s) IN_PROGRESS détecté(s) au boot (orphelins)",
+        len(ids),
+    )
+    # Import local : évite tout cycle au module-load (apply_rollback importe apply_core).
+    from cinesort.app.apply_rollback import rollback_forward
+
+    for bid in ids:
+        try:
+            res = rollback_forward(store, bid)
+            ok = bool(res.get("ok"))
+            report["resumed" if ok else "resume_failed"] += 1
+            report["batches"].append({"batch_id": bid, "ok": ok, "rollback_status": res.get("rollback_status")})
+            _logger.info(
+                "reconcile_inprogress_rollbacks: batch %s repris -> %s",
+                bid,
+                res.get("rollback_status"),
+            )
+        except Exception:  # boundary : un échec ne doit pas tuer le boot
+            _logger.exception("reconcile_inprogress_rollbacks: resume failed for %s", bid)
+            report["resume_failed"] += 1
+    return report
+
+
 def reconcile_batches_at_boot(
     store: Any,
     *,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
 ) -> Dict[str, Any]:
-    """Wrapper boot : appelle reconcile_pending_batches + logue le rapport.
+    """Wrapper boot : reprend les rollbacks IN_PROGRESS orphelins (R8-013) PUIS
+    cleanup les PENDING-zombi + logue le rapport.
 
     Tolere toutes les erreurs (n'empeche jamais le boot de continuer).
     """
+    inprogress_report: Dict[str, Any] = {"inprogress_found": 0, "resumed": 0, "resume_failed": 0, "batches": []}
+    try:
+        inprogress_report = reconcile_inprogress_rollbacks(store)
+    except Exception:
+        _logger.exception("reconcile_batches_at_boot: inprogress reconcile error (boot continues)")
     try:
         report = reconcile_pending_batches(store, max_age_hours=max_age_hours)
     except Exception:
@@ -339,7 +415,11 @@ def reconcile_batches_at_boot(
             "completed": 0,
             "rolled_back": 0,
             "batches": [],
+            "rollbacks_resumed": int(inprogress_report.get("resumed", 0)),
+            "rollbacks_inprogress_found": int(inprogress_report.get("inprogress_found", 0)),
         }
+    report["rollbacks_resumed"] = int(inprogress_report.get("resumed", 0))
+    report["rollbacks_inprogress_found"] = int(inprogress_report.get("inprogress_found", 0))
 
     if report["pending_found"] > 0:
         _logger.info(
