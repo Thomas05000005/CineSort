@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -550,7 +551,9 @@ def _run_purge_once(api: Any, ttl_days: int) -> None:
         # le cron tourne en thread daemon, il n'importe pas la cfg directement
         # — c'est `api` qui sait construire le cfg courant via les settings.
         result = api.run.purge_quarantine_bucket(ttl_days)
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+    # R8-024 (F2-d) : +sqlite3.Error -> un verrou DB transitoire ne tue plus le thread
+    # cron de purge TTL (qui restait mort definitivement = croissance non bornee).
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
         _log.warning("purge_quarantine cron: appel echoue ttl=%dj err=%s", ttl_days, exc)
         return
     if not isinstance(result, dict) or not result.get("ok"):

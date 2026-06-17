@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -720,7 +721,11 @@ class ProbeService:
                         "sources": {"backend": backend, "tools": {}},
                         "error": f"timeout: {exc}",
                     }
-                except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+                    # R8-024 (F2-d) : +AttributeError +sqlite3.Error. Une OperationalError
+                    # (ecriture cache probe sur verrou DB) sortait de la boucle as_completed
+                    # -> tout le LOT de probe restant etait abandonne (films scores au nom seul).
+                    # Desormais : entree ok:False par fichier (comme la branche TimeoutExpired).
                     logger.warning("Probe parallel failed path=%s err=%s", mp, exc)
                     results[str(mp)] = {
                         "ok": False,
