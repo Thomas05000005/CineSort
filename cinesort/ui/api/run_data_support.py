@@ -34,6 +34,19 @@ def candidate_from_json(data: Dict[str, Any]) -> core.Candidate:
         year = int(data["year"]) if data.get("year") is not None else None
     except (OSError, KeyError, TypeError, ValueError):
         year = None
+    # R8-091 (filet F2-d) : champs collection TMDb perdus au reload (asymetrie de
+    # round-trip, meme classe que R8-027/R8-090). Le jumeau plan_row_from_jsonable
+    # (plan_support_core.py:82-86) les parse deja ; ici ils etaient absents ->
+    # tout candidat voyait son id+nom de collection nulles au rechargement.
+    collection_id: int | None
+    try:
+        collection_id = (
+            int(data["tmdb_collection_id"])
+            if data.get("tmdb_collection_id") not in (None, "", 0)
+            else None
+        )
+    except (OSError, KeyError, TypeError, ValueError):
+        collection_id = None
     return core.Candidate(
         title=str(data.get("title") or ""),
         year=year,
@@ -42,6 +55,8 @@ def candidate_from_json(data: Dict[str, Any]) -> core.Candidate:
         poster_url=str(data.get("poster_url")) if data.get("poster_url") else None,
         score=float(data.get("score") or 0.0),
         note=str(data.get("note") or ""),
+        tmdb_collection_id=collection_id,
+        tmdb_collection_name=str(data.get("tmdb_collection_name") or "") or None,
     )
 
 
