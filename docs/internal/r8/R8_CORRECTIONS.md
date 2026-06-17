@@ -277,7 +277,7 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 > R8-017 (atomicité) + R8-018 (compteur/récupération) **indissociables dans le bloc per-rid du helper loser**
 > (la correction du compteur édite les lignes que la résilience per-rid réécrit) → **1 commit F2-b** justifié.
 > **Commit** : `<hash F2-b>`. Cohérence : même logique d'isolation que la boucle per-row (L1650) + COLL-ATOMIC (F1)
-> + TV gate 8 (F2-a) — rollback **factorisé** dans `_revert_moves` (pas une 3ᵉ variante).
+> + TV gate 8 (F2-a) — rollback **factorisé** dans `_revert_moves` (pas une 3ᵉ variante). **Commit** : `2fd4f63`.
 
 ### R8-017 — LOSER-ATOMIC (helpers loser/marked hors try/except → batch avorté + partiel)
 - **Cause racine** : `move_duplicate_losers_to_user_decided` (L1303) + `move_marked_for_deletion_to_bucket` (L1320)
@@ -316,3 +316,27 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - Prod : `apply_core.py` (`_revert_moves` neuf + per-rid try/except des 2 helpers + compteur loser dédié) ;
   `core.py` (`duplicates_user_decided_moved_count`) ; `apply_support.py` (synthèse + chemin récup).
 - `r8_f2b_loser_atomic_diff.py`/`.out.txt`, `r8_f2b_loser_counter_diff.py`/`.out.txt`, `suite_f2b.txt`.
+
+### Filet F2-b (round adversarial couche dedup/loser/marked) — `wf_1b2f6be3-74a`
+> 3 finders (atomicité loser/marked · comptabilité/invariants · chemins de récupération + undo) + panel
+> 3 sceptiques asymétrie + 2 leurres. **RELIABLE=true**, **leurres 0/2**. **Cumulé campagne : 0/38.**
+- **11 candidats → 2 SURVIVANTS** (même finding, 2 angles) = **R8-087** : `marked_for_deletion_moved_count`
+  (R7-4) n'avait NI ligne de synthèse NI chemin de récupération `_user_marked_for_deletion` dans le rapport
+  d'apply (sibling de R8-018 ; **mon ajout du chemin loser a aggravé l'asymétrie**). Bucket silencieux.
+- **Refuté notable (0/3, sécurité-critique vérifié par moi)** : « `shutil.Error` échappe au `except` et avorte
+  le batch » → **FAUX** : `shutil.Error` **EST** un `OSError` (MRO `Error→OSError→Exception`,
+  `issubclass==True`, vérifié en live) → le `except (OSError, PermissionError)` l'attrape → R8-017 **suffisant**.
+- Autres refutés (0/3) : windows_safe/unique_path TypeError (non levé/atteint), comptage collection sain,
+  pas d'autre site cassant moved==deleted, pas de consommateur sommant le nouveau compteur, rollback ne fuit
+  pas `_rid_count`, op-types ROLLBACK_* inoffensifs au reconcile. → **R8-017/R8-018 sans gap résiduel**.
+
+### R8-087 — F-MARKED-RECOV-SILENT (chemin de récupération marked silencieux) — CORRIGÉ EN F2-b (filet)
+- **Cause** : `marked_for_deletion_moved_count` populé (R7-4) mais **absent** de `apply_support.py` (0 occurrence)
+  → ni synthèse ni « À RETENIR » vers `_user_marked_for_deletion` (alors que `_duplicates_identical` et,
+  depuis R8-018, `_duplicates_user_decided` le sont). L'utilisateur ne savait pas où récupérer ses films marqués.
+- **Fix** (`apply_support.py`) : ligne de synthèse « Films marqués pour suppression déplacés » + action_line
+  `if marked_for_deletion_moved_count>0 → _user_marked_for_deletion`. **Additif UI** (compteur existant, 0 logique).
+- **Différentiel** : `marked_for_deletion_moved_count`/`_user_marked_for_deletion` passe de **0 → 4** occurrences
+  dans `apply_support.py` (synthèse + récup). **Non-régression** : tests de synthèse `test_backend_flow` +
+  `test_marked_for_deletion_apply_v77` = **5 passed** ; additif pur (la suite F2-b a validé le code environnant).
+- **Commit** : `<hash R8-087>`.
