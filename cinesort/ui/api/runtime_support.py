@@ -302,7 +302,15 @@ def get_or_create_infra(
 
         store = SQLiteStore(
             resolved_db_path,
-            busy_timeout_ms=8000,
+            # R8-025 (F2-d) : NE PAS forcer busy_timeout_ms=8000 ici. 8000 != defaut 5000
+            # declenchait le re-override back-compat de connect_sqlite, qui ECRASAIT le
+            # busy_timeout du profil NAS (30000/60000 sur SMB) -> SQLITE_BUSY premature,
+            # y compris pendant les ALTER/CREATE INDEX de migration. On laisse le DEFAUT
+            # (5000 == _DEFAULT_BUSY_TIMEOUT_MS) -> le back-compat ne se declenche pas ->
+            # le PROFIL (apply_pragmas : NAS 30000/60000, local 5000) fait foi.
+            # (Le re-override explicite reste dispo pour les callers/tests qui passent une
+            #  valeur != 5000 deliberement, ex. test_db_robustness busy_timeout_ms=3000.)
+            busy_timeout_ms=5000,
             debug_logger=_sqlite_debug,
             pragma_profile_name=pragma_profile_kwarg,
         )
