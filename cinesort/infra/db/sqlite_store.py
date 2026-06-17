@@ -84,6 +84,11 @@ REQUIRED_SCHEMA_TABLES = (
     "apply_pending_moves",
     "incremental_file_hashes",
     "incremental_scan_cache",
+    # R8-022 (F2-d) : incremental_row_cache (migration 008, scan incremental v2) etait
+    # absente du filet self-heal -> si droppee/manquante, ni _ensure_required_schema ni
+    # _with_schema_group('incremental') ne la recreaient -> Operationalable 'no such table'
+    # au scan. 008 est IF NOT EXISTS + deja dans le bootstrap : on n'ajoute que la detection.
+    "incremental_row_cache",
     "perceptual_reports",
     "duplicate_decisions",
     # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables 023 (Modal Film)
@@ -107,7 +112,7 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "apply_journal": ("apply_batches", "apply_operations"),
     # CR-1 audit QA 20260429 : journal write-ahead pour atomicite shutil.move.
     "apply_pending": ("apply_pending_moves",),
-    "incremental": ("incremental_file_hashes", "incremental_scan_cache"),
+    "incremental": ("incremental_file_hashes", "incremental_scan_cache", "incremental_row_cache"),
     "perceptual": ("perceptual_reports",),
     # P4.1 : table calibration feedback utilisateur (migration 014).
     "user_feedback": ("user_quality_feedback",),
@@ -289,7 +294,9 @@ class _StoreBase:
                         try:
                             conn.execute(stmt)
                             conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                        except sqlite3.OperationalError as stmt_exc:
+                        except (sqlite3.OperationalError, sqlite3.IntegrityError) as stmt_exc:
+                            # R8-021 (F2-d) : aussi IntegrityError (re-INSERT idempotent au
+                            # replay bootstrap) -> _is_idempotent_error tranche skip/raise.
                             # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
                             # tolere les erreurs idempotentes (duplicate column,
                             # already exists) pour rester self-healing sur DB
@@ -314,6 +321,18 @@ class _StoreBase:
                     # Best effort : restaurer le PRAGMA quoi qu'il arrive.
                     with suppress(sqlite3.Error):
                         conn.execute("PRAGMA foreign_keys = ON")
+        # R8-020 (F2-d) : backfiller schema_migrations apres un self-heal bootstrap.
+        # Le bootstrap pose user_version mais n'insere RIEN dans schema_migrations ->
+        # historique desync (diagnostic d'incident 023 impossible). On enregistre chaque
+        # migration <= version (INSERT OR IGNORE, idempotent) maintenant que la table
+        # schema_migrations existe (creee par la migration 012 dans le script bootstrap).
+        try:
+            with self._managed_conn() as conn:
+                for mig_version, mig_path in self.migrations.list_migrations():
+                    if int(mig_version) <= int(version):
+                        MigrationManager._record_migration(conn, int(mig_version), mig_path.name)
+        except sqlite3.Error as backfill_exc:
+            self._debug(f"_bootstrap_schema_latest: schema_migrations backfill ignore: {backfill_exc}")
         return int(version)
 
     def _prepare_db_directory(self) -> None:

@@ -17,10 +17,19 @@ _MIGRATION_FILE_RE = re.compile(r"^(?P<version>\d+)_.*\.sql$")
 _IDEMPOTENT_ERROR_FRAGMENTS = (
     "duplicate column name",
     "already exists",
+    # R8-021 (F2-d) : fragments IntegrityError d'un re-INSERT idempotent (rejouer une
+    # migration qui re-insere une ligne deja presente). Allowlist VOLONTAIREMENT etroite
+    # (UNIQUE/PK "already"-style uniquement) : une IntegrityError NOT NULL / FK / CHECK
+    # n'est PAS ici -> elle est re-levee (signal de donnee corrompue).
+    "unique constraint failed",
+    "primary key",
 )
 
 
-def _is_idempotent_error(exc: sqlite3.OperationalError) -> bool:
+def _is_idempotent_error(exc: sqlite3.DatabaseError) -> bool:
+    # R8-021 : accepte OperationalError ("duplicate column"/"already exists") ET
+    # IntegrityError ("unique constraint failed"/"primary key") -> un IntegrityError
+    # d'un rebuild idempotent (021/023/025 rejoues) ne bloque plus tout le boot.
     msg = str(exc).lower()
     return any(fragment in msg for fragment in _IDEMPOTENT_ERROR_FRAGMENTS)
 
@@ -251,7 +260,9 @@ class MigrationManager:
                             try:
                                 conn.execute(stmt)
                                 conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                            except sqlite3.OperationalError as stmt_exc:
+                            except (sqlite3.OperationalError, sqlite3.IntegrityError) as stmt_exc:
+                                # R8-021 (F2-d) : on attrape aussi IntegrityError (re-INSERT
+                                # idempotent au replay) ; _is_idempotent_error tranche skip/raise.
                                 # H-1 audit 20260428 : ALTER TABLE ADD COLUMN n'est pas
                                 # IF NOT EXISTS-able avant SQLite 3.35. Si la colonne existe
                                 # deja (DB clonee, restauree, ou migration partiellement
