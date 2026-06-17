@@ -85,7 +85,22 @@ def atomic_write_json(p: Path, obj) -> None:
     tmp = p.with_name(tmp_name)
     try:
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, p)
+        # R8-026 (F2-d) : retry court sur os.replace. Sur Windows, os.replace leve
+        # PermissionError (WinError 5/32) quand un lecteur concurrent (poller UI, 2e onglet)
+        # tient le fichier destination ouvert -> le write etait PERDU (l'ancienne valeur restait).
+        # Boucle bornee (5x, backoff ~50ms) ; l'atomicite n'est PAS affectee (os.replace reste
+        # atomique, jamais de JSON corrompu). On re-leve apres epuisement des tentatives.
+        _replace_exc: Optional[PermissionError] = None
+        for _attempt in range(5):
+            try:
+                os.replace(tmp, p)
+                _replace_exc = None
+                break
+            except PermissionError as exc:
+                _replace_exc = exc
+                time.sleep(0.05 * (_attempt + 1))
+        if _replace_exc is not None:
+            raise _replace_exc
     finally:
         # Best-effort cleanup : tmp.exists() / tmp.unlink() ne peuvent lever
         # qu'OSError (PermissionError, FileNotFoundError en derivent). Les
