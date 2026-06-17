@@ -385,6 +385,24 @@ def reconcile_inprogress_rollbacks(store: Any) -> Dict[str, Any]:
                 bid,
                 res.get("rollback_status"),
             )
+            # R8-088 (filet F2-c) : `rollback_forward` n'ecrit QUE apply_batch_modes.rollback_status.
+            # Le crash d'apply avait clos apply_batches.status='FAILED' AVANT le revert ; sans ce
+            # miroir, un revert termine au boot laisserait status fige a FAILED (la re-cloture
+            # ROLLED_BACK_BY_ATOMIC n'existait qu'inline dans apply_support, hors chemin boot).
+            # On reflete donc l'etat reel dans apply_batches.status (parite avec R8-015).
+            if ok and str(res.get("rollback_status") or "") == "ROLLED_BACK_BY_ATOMIC":
+                try:
+                    store.apply.close_apply_batch(
+                        batch_id=bid,
+                        status="ROLLED_BACK_BY_ATOMIC",
+                        summary={"resumed_at_boot": True, "rollback_status": "ROLLED_BACK_BY_ATOMIC"},
+                    )
+                except Exception as close_exc:  # transition deja terminale / batch absent : tolere
+                    _logger.warning(
+                        "reconcile_inprogress_rollbacks: apply_batches.status non mis a jour pour %s: %s",
+                        bid,
+                        close_exc,
+                    )
         except Exception:  # boundary : un échec ne doit pas tuer le boot
             _logger.exception("reconcile_inprogress_rollbacks: resume failed for %s", bid)
             report["resume_failed"] += 1

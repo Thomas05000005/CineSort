@@ -461,10 +461,15 @@ def _execute_undo_ops(
                     try:
                         from cinesort.app.apply_core import _case_only_rename_with_rollback
 
-                        with journaled_move(
-                            store, src=current_path, dst=target_path, op_type="UNDO_RESTORE"
-                        ):
-                            _case_only_rename_with_rollback(current_path, target_path)
+                        # R8-089 (filet F2-c) : PAS de journaled_move ici. Le rename
+                        # casse-seule se fait en 2 temps (current -> .__tmp_ren -> target).
+                        # journaled_move ne peut PAS encadrer l'etat intermediaire .__tmp_ren
+                        # (ni src ni dst journalises) -> un hard-kill entre les 2 renames
+                        # ferait une FAUSSE alarme "FICHIER PERDU" au reconcile (src+dst
+                        # absents). _case_only_rename_with_rollback a son propre rollback
+                        # (tmp -> current) sur echec ; on reste coherent avec le site apply
+                        # (apply_core.py _case_only_rename_with_rollback, non journalise lui aussi).
+                        _case_only_rename_with_rollback(current_path, target_path)
                         done += 1
                         store.apply.mark_apply_operation_undo_status(
                             op_id=op_id, undo_status="DONE", error_message=None
