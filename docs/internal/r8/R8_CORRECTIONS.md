@@ -10,7 +10,7 @@
 
 ## R8-081 — F-TEST-01 — Réparer l'instrument : assertion tautologique → vérification réelle
 **Famille** : F6 (qualité de test / instrument) — corrigé **EN PREMIER** (avant F1) : tant qu'un test ment,
-valider un fix sur un « vert » ne prouve rien. **Commit** : `<hash à compléter>` (loop/correction-2026-06).
+valider un fix sur un « vert » ne prouve rien. **Commit** : `885402c` (loop/correction-2026-06).
 
 ### 1. Localisation + intention réelle
 - **Fichier** : `tests/test_auto_install.py:35-37`, méthode `TestGetToolsDir.test_creates_dir`.

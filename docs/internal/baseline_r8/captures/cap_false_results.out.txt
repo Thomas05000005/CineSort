@@ -1,0 +1,110 @@
+BASELINE R8 — cap_false_results : resultats silencieusement faux (read-only)
+
+==============================================================================
+F-H4-01  quality_score._normalize_audio_bitrate_kbps (seuil bps > 10000 STRICT)
+==============================================================================
+  source : cinesort/domain/quality_score.py:538 (seuil 'n > 10000.0' l.563)
+  in=   8000 bps -> normalize=   8000 kbps | per_channel(6ch)=1333.3333333333333 -> bonus=+4 'Debit audio eleve'  <-- 8000 bps (=8 kbps, AAC mono pourri) lu comme 8000 kbps
+  in=  10000 bps -> normalize=  10000 kbps | per_channel(6ch)=1666.6666666666667 -> bonus=+4 'Debit audio eleve'  <-- 10000 bps NON divise (seuil strict) -> 10000 kbps
+  in=  10001 bps -> normalize=     10 kbps | per_channel(6ch)=1.6666666666666667 -> bonus=-3 'Debit audio faible'  <-- juste au-dessus du seuil -> divise -> 10 kbps (cliff)
+  in=  48000 bps -> normalize=     48 kbps | per_channel(6ch)=8.0 -> bonus=-3 'Debit audio faible'
+  in= 192000 bps -> normalize=    192 kbps | per_channel(6ch)=32.0 -> bonus=-3 'Debit audio faible'
+  in= 640000 bps -> normalize=    640 kbps | per_channel(6ch)=106.66666666666667 -> bonus=-3 'Debit audio faible'
+
+  8000 bps note comme 8000 kbps (bonus +4) : True
+  cliff 10000->10000 kbps mais 10001->10 kbps : True
+
+==============================================================================
+F-H5-01  clean_title_guess : residu 'DD5 1' (DD5.1 casse par le replace '.')
+==============================================================================
+  NOTE drift symbole : 'scene_parser.clean_title_guess' inexistant.
+  Vraie fonction = title_helpers.clean_title_guess (l.254) -> delegue
+  scene_parser.parse_scene_title (l.327). Mecanisme : replace '.'->' '
+  (l.378) transforme 'DD5.1' en 'DD5 1' AVANT _NOISE_RE (l.398) dont le
+  motif 'dd5\.?1' n'admet pas d'espace ; _AUDIO_RESIDUE_RE exige \b
+  avant le chiffre, absent dans 'DD5' -> residu conserve.
+
+  [F-H5-01 sujet]
+    in     = 'Joker.2019.DD5.1.1080p.BluRay.x264-GROUP.mkv'
+    cleaned= 'Joker 2019 DD5 1'   (parse_scene_title='Joker 2019 DD5 1')
+  [controle propre]
+    in     = 'Inception.2010.1080p.BluRay.x264'
+    cleaned= 'Inception 2010'   (parse_scene_title='Inception 2010')
+
+  Joker conserve un residu 'DD5'/'DD5 1' : True  (cleaned='Joker 2019 DD5 1')
+  Controle Inception propre ('Inception 2010') : True
+
+==============================================================================
+F-CONF-01  _save_section_probe persiste calc.exe ; _binary_name_allowed le refuse
+==============================================================================
+  source persist  : cinesort/ui/api/settings_support.py:1366 (_save_section_probe)
+  source resolver : cinesort/infra/probe/tooling.py:30 (_binary_name_allowed)
+  EXPECTED_BINARY_NAMES['ffprobe'] = ['ffprobe', 'ffprobe.exe']
+
+  payload ffprobe_path                     = 'C:/Windows/System32/calc.exe'
+  _save_section_probe -> persiste tel quel : 'C:/Windows/System32/calc.exe'
+  _binary_name_allowed('ffprobe', calc)    = False
+
+  ASYMETRIE (persiste sans valider, mais resolver refuse) : True
+
+==============================================================================
+F-H7-01  tmdb_client.search_movie : 200 {results:[]} empoisonne le cache 7j
+==============================================================================
+  source : cinesort/infra/tmdb_client.py:431 (search_movie), cache l.515
+  cle search => TTL court _SEARCH_CACHE_TTL_S = 7j (l.45)
+
+  appel #1 (TMDb renvoie 200 results:[]) -> 0 resultat(s)
+  cache disque apres #1 : {"search|fr-FR|joker|2019": []}
+  appel #2 (TMDb renverrait Joker) -> 0 resultat(s) (re-fetch ? NON, sert le cache [])
+  appel #3 (cle differente, non empoisonnee) -> 1 resultat(s) (prouve que le stub PEUT rendre un vrai resultat)
+
+  CACHE EMPOISONNE (re-search reste 0 alors qu'un vrai resultat existe) : True
+
+==============================================================================
+F-PERC-01  analyze_loudnorm : argv force '-v quiet' mais lit le JSON dans stderr
+==============================================================================
+  source : cinesort/domain/perceptual/audio_perceptual.py:124 (analyze_loudnorm)
+  argv construit : ffmpeg -i movie.mkv -map 0:a:0 -af loudnorm=print_format=json -f null -v quiet -
+  contient '-v quiet'              : True
+  utilise loudnorm=print_format=json: True
+  lit le resultat dans stderr      : True (l.145-148)
+  resultat sous '-v quiet' (stderr='') -> None
+
+  CONTRADICTION (quiet supprime stderr que le code lit) : True
+
+==============================================================================
+F-PERC-02  run_filter_graph (l.90) : signalstats SANS metadata=mode=print
+==============================================================================
+  source : cinesort/domain/perceptual/video_analysis.py:90 (filtre vf)
+           parser cherche 'YAVG=' (l.52, l.122)
+  -vf construit : select='not(mod(n\,7))',signalstats=stat=tout+vrep,blockdetect,blurdetect
+  contient 'signalstats'        : True
+  contient 'metadata=mode=print': False
+  frames parsees (stderr realiste sans YAVG=) : 0
+
+  RESULTAT VIDE SILENCIEUX (signalstats sans metadata=print) : True
+
+==============================================================================
+F-PERC-03  astats : Crest factor / Dynamic range par-canal, hors bloc Overall
+==============================================================================
+  source : cinesort/domain/perceptual/audio_perceptual.py:234-240 + _extract_overall_block (l.744)
+  bloc Overall extrait :
+      [Parsed_astats_0 @ 0x1] Overall
+      [Parsed_astats_0 @ 0x1] DC offset: 0.000011
+      [Parsed_astats_0 @ 0x1] RMS level dB: -28.4
+      [Parsed_astats_0 @ 0x1] Peak level dB: -1.2
+      [Parsed_astats_0 @ 0x1] Noise floor dB: -68.5
+
+  Sur le bloc Overall (ce que le code lit) :
+    RMS=-28.4  Peak=-1.2  Noise=-68.5  Crest=None  Dynamic=None
+  Dans le texte complet (blocs par-canal) :
+    Crest=17.5  Dynamic=51.2  (presents, mais ignores)
+
+  Crest/Dynamic PERDUS (presents par-canal, None apres Overall) : True
+
+==============================================================================
+RESUME (json)
+==============================================================================
+RESUME: {"verdicts": {"F-H4-01": true, "F-H5-01": true, "F-CONF-01": true, "F-H7-01": true, "F-PERC-01": true, "F-PERC-02": true, "F-PERC-03": true}, "detail": {"F-H4-01": {"out": {"8000": 8000, "10000": 10000, "10001": 10, "48000": 48, "192000": 192, "640000": 640}, "bug_8kbps_scored_as_bonus": true, "threshold_strict_cliff": true}, "F-H5-01": {"joker_cleaned": "Joker 2019 DD5 1", "joker_keeps_dd5_residue": true, "control_inception": "Inception 2010", "control_clean": true}, "F-CONF-01": {"persisted": "C:/Windows/System32/calc.exe", "binary_name_allowed": false, "asymmetry": true}, "F-H7-01": {"first_empty": 0, "second_after_real_available": 0, "control_other_key": 1, "cache_poisoned": true}, "F-PERC-01": {"argv": ["ffmpeg", "-i", "movie.mkv", "-map", "0:a:0", "-af", "loudnorm=print_format=json", "-f", "null", "-v", "quiet", "-"], "has_v_quiet": true, "result_is_none": true, "contradiction": true}, "F-PERC-02": {"vf": "select='not(mod(n\\,7))',signalstats=stat=tout+vrep,blockdetect,blurdetect", "has_signalstats": true, "has_metadata_print": false, "frames_parsed": 0, "silent_empty": true}, "F-PERC-03": {"overall_crest": null, "overall_dynamic": null, "perchannel_crest": "17.5", "perchannel_dynamic": "51.2", "crest_dynamic_lost_in_overall": true}}}
+
+findings confirmes (broken-state observe) : 7/7
