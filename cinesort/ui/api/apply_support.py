@@ -1684,6 +1684,7 @@ def _summarize_apply(
             f"- Fusions realisees : {result.merges_count}\n"
             f"- Duplicats identiques deplaces : {result.duplicates_identical_moved_count}\n"
             f"- Duplicats identiques supprimes logiquement : {result.duplicates_identical_deleted_count}\n"
+            f"- Doublons (decision utilisateur) deplaces : {result.duplicates_user_decided_moved_count}\n"
             f"- Conflits isoles en _review : {result.conflicts_quarantined_count}\n"
             f"- Conflits sidecars gardes des deux cotes : {result.sidecar_conflicts_kept_both_count}\n"
             f"- Conflits sidecars isoles : {result.conflicts_sidecars_quarantined_count}\n"
@@ -1753,6 +1754,10 @@ def _summarize_apply(
             action_lines.append(f"- Conflits sidecars conserves: {review_root / '_conflicts_sidecars'}")
         if result.duplicates_identical_moved_count > 0:
             action_lines.append(f"- Duplicates identiques deplaces: {review_root / '_duplicates_identical'}")
+        if result.duplicates_user_decided_moved_count > 0:
+            # R8-018 : chemin de recuperation REEL des perdants d'une decision utilisateur
+            # (avant, ces fichiers etaient comptes en _duplicates_identical -> chemin mensonger).
+            action_lines.append(f"- Doublons decides (perdants) deplaces: {review_root / '_duplicates_user_decided'}")
         if result.leftovers_moved_count > 0:
             action_lines.append(f"- Leftovers deplaces: {review_root / '_leftovers'}")
         if result.empty_folders_moved_count > 0:

@@ -269,3 +269,50 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
   (chemin undo, film+TV, commit dédié). → seam **NON intégralement fermé** ; reste = 3 gardes non-portables-en-l'état.
 - **Différentiels** : S1-S5 tous cassé→correct. **Non-régression** : 264 nœuds déterministes, 0 nouvel échec
   (1 flaky R8-086). **Commit** : `da09ff9`. Checkpoint `f493abdc` intact, pas de push.
+
+---
+
+## ═══ FAMILLE F2 — SOUS-SALVE F2-b (DEDUP-LOSER) ═══
+
+> R8-017 (atomicité) + R8-018 (compteur/récupération) **indissociables dans le bloc per-rid du helper loser**
+> (la correction du compteur édite les lignes que la résilience per-rid réécrit) → **1 commit F2-b** justifié.
+> **Commit** : `<hash F2-b>`. Cohérence : même logique d'isolation que la boucle per-row (L1650) + COLL-ATOMIC (F1)
+> + TV gate 8 (F2-a) — rollback **factorisé** dans `_revert_moves` (pas une 3ᵉ variante).
+
+### R8-017 — LOSER-ATOMIC (helpers loser/marked hors try/except → batch avorté + partiel)
+- **Cause racine** : `move_duplicate_losers_to_user_decided` (L1303) + `move_marked_for_deletion_to_bucket` (L1320)
+  appelés **avant** la boucle per-row, **hors** son try/except → un fichier verrouillé **avorte TOUT le batch**
+  (winners inclus), partiel laissé = incohérent. Asymétrie : une row normale verrouillée est attrapée per-row (L1650).
+- **Fix** (`apply_core.py`, les DEUX helpers) : chaque `rid` est encadré par `try/except (OSError, PermissionError)`
+  → sur échec : `_revert_moves(...)` rollback les moves déjà faits **de ce loser** (parité COLL-ATOMIC), `res.errors += 1`,
+  message, **`continue`** (PAS de re-raise — on est hors boucle per-row, re-lever avorterait le batch = le bug).
+  Comptage **atomique par rid** (ajouté à `res` qu'après succès complet).
+- **Différentiel** (`r8_f2b_loser_atomic_diff.py` / `.out.txt`, fixtures) : **S1** 2 losers, le 1ᵉʳ verrouillé →
+  AVANT le helper **propage** (batch avorté, loser 2 non traité) ; APRÈS **None** propagé, **loser 2 traité**,
+  `res.errors=1`. **S2** loser collection, vidéo échoue après sidecars → **sidecars rollback** (revenus source),
+  vidéo en source, état cohérent.
+
+### R8-018 — LOSER-COUNTER (invariant moved==deleted cassé + récupération mensongère)
+- **Cause racine** : le helper loser incrémentait `duplicates_identical_moved_count` (compteur des byte-identiques,
+  lockstep avec `_deleted_count` à L690-691) → **invariant `moved==deleted` cassé** (moved>deleted) + l'UI
+  (`apply_support.py:1685/1754`) pointait `_duplicates_identical` alors que les fichiers sont dans
+  `_duplicates_user_decided` = **chemin de récupération mensonger**. (Le helper `marked` avait déjà son compteur dédié = modèle.)
+- **Fix** : (a) **compteur dédié** `ApplyResult.duplicates_user_decided_moved_count` (`core.py`, miroir de
+  `marked_for_deletion_moved_count`) ; le helper loser l'incrémente au lieu de `duplicates_identical_moved_count`
+  → l'invariant `moved==deleted` tient (les byte-identiques ne co-incrémentent qu'à L690-691). (b) `apply_support.py` :
+  ligne de synthèse + **chemin de récupération RÉEL** (`if duplicates_user_decided_moved_count>0 → _duplicates_user_decided`).
+- **Différentiel** (`r8_f2b_loser_counter_diff.py` / `.out.txt`) : **S1** après un loser : `duplicates_identical_moved_count=0`
+  (AVANT=1 à tort), `=deleted=0` → **invariant tient** (AVANT `1 != 0`) ; `duplicates_user_decided_moved_count=1` (dédié).
+  **S2** `apply_support` propose `_duplicates_user_decided` (chemin réel).
+
+### Non-régression
+- Ciblé `test_phase6_doublons_apply` + `test_marked_for_deletion_apply_v77` + `test_merge_duplicates` : **20 passed**
+  (aucun test ne pinnait l'ancien compteur).
+- Suite complète (`suite_f2b.txt`) : **107 failed / 5813 passed / 170 errors** — diff vs baseline
+  (`f2b_failures.txt` vs `prefix_failures.txt`) : **264 nœuds, 0 nouveau, 0 disparu** (R8-086 flaky a même
+  passé ce run). ✅ 0 régression.
+
+### Artefacts / sites
+- Prod : `apply_core.py` (`_revert_moves` neuf + per-rid try/except des 2 helpers + compteur loser dédié) ;
+  `core.py` (`duplicates_user_decided_moved_count`) ; `apply_support.py` (synthèse + chemin récup).
+- `r8_f2b_loser_atomic_diff.py`/`.out.txt`, `r8_f2b_loser_counter_diff.py`/`.out.txt`, `suite_f2b.txt`.

@@ -922,6 +922,33 @@ def merge_dir_safe(
         res.source_dirs_deleted_count += 1
 
 
+def _revert_moves(
+    record_op: Optional[Callable[[Dict[str, Any]], None]],
+    moved_pairs: list[Tuple[Path, Path]],
+    log: Callable[[str, str], None],
+    label: str,
+) -> None:
+    """R8-017 (F2-b) : annule (best-effort, ordre inverse) une liste de moves
+    (dst effectif, src d'origine) déjà effectués pour un item, afin de laisser un
+    état COHÉRENT après un échec mid-item. Même logique que les rollbacks intra-row
+    de COLL-ATOMIC (F1) et TV (F2-a) — factorisée, pas une 3e variante.
+    """
+    for dst_done, src_orig in reversed(moved_pairs):
+        try:
+            if dst_done.exists() and not src_orig.exists():
+                atomic_move(record_op, src=dst_done, dst=src_orig, op_type=f"ROLLBACK_{label}")
+                record_apply_op(
+                    record_op,
+                    op_type=f"ROLLBACK_{label}",
+                    src_path=dst_done,
+                    dst_path=src_orig,
+                    reversible=False,
+                )
+                log("WARN", f"ROLLBACK {label}: {dst_done} -> {src_orig}")
+        except (OSError, PermissionError) as rb_exc:
+            log("ERROR", f"ROLLBACK {label} ECHEC {dst_done} -> {src_orig}: {rb_exc}")
+
+
 def move_duplicate_losers_to_user_decided(
     cfg: "Config",
     rows: list["PlanRow"],
@@ -1006,28 +1033,52 @@ def move_duplicate_losers_to_user_decided(
                 batch_id=getattr(_record_op_ref, "journal_batch_id", None),
             )
 
-        # Cas "collection" : on a un video_name dans un dossier partagé →
-        # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
-        # entier, car d'autres films peuvent y vivre).
-        if row.kind == "collection" and video_name:
-            video = folder / video_name
-            if not video.exists():
-                # tolère case-insensitive : iter le dossier
-                try:
-                    matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
-                    video = matches[0] if matches else video
-                except (OSError, PermissionError):
-                    pass
-            if not video.exists():
-                log("WARN", f"DUPLICATE_LOSER video manquant pour row {rid}, skip: {video}")
-                continue
-            # Déplace la vidéo + sidecars associés
-            sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
-            for sidecar in sidecars:
-                if not sidecar.exists():
+        # R8-017 (F2-b) : ISOLATION per-loser + ROLLBACK. Un loser verrouillé ne doit
+        # PAS avorter tout le batch (asymétrie corrigée avec la boucle per-row L1650) ;
+        # un loser collection à moitié déplacé est rollback (parité COLL-ATOMIC F1).
+        # Comptage ATOMIQUE par loser : on n'ajoute à res qu'après succès complet du rid
+        # (sinon un partiel/échec laissait un compteur faux).
+        _moved_pairs: list[Tuple[Path, Path]] = []
+        _rid_count = 0
+        try:
+            # Cas "collection" : on a un video_name dans un dossier partagé →
+            # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
+            # entier, car d'autres films peuvent y vivre).
+            if row.kind == "collection" and video_name:
+                video = folder / video_name
+                if not video.exists():
+                    # tolère case-insensitive : iter le dossier
+                    try:
+                        matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
+                        video = matches[0] if matches else video
+                    except (OSError, PermissionError):
+                        pass
+                if not video.exists():
+                    log("WARN", f"DUPLICATE_LOSER video manquant pour row {rid}, skip: {video}")
                     continue
-                move_to_review_bucket(
-                    sidecar,
+                # Déplace la vidéo + sidecars associés
+                sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+                for sidecar in sidecars:
+                    if not sidecar.exists():
+                        continue
+                    moved_to = move_to_review_bucket(
+                        sidecar,
+                        src_anchor=folder,
+                        bucket_root=duplicates_user_decided_root,
+                        bucket_name="DUPLICATE_LOSER moved to _review/_duplicates_user_decided",
+                        include_anchor_name=True,
+                        use_dup_suffix=False,
+                        rel_override=None,
+                        dry_run=dry_run,
+                        log=log,
+                        res=res,
+                        record_op=row_record_op,
+                    )
+                    if moved_to is not None and not dry_run:
+                        _moved_pairs.append((Path(moved_to), sidecar))
+                    _rid_count += 1
+                moved_to = move_to_review_bucket(
+                    video,
                     src_anchor=folder,
                     bucket_root=duplicates_user_decided_root,
                     bucket_name="DUPLICATE_LOSER moved to _review/_duplicates_user_decided",
@@ -1039,42 +1090,45 @@ def move_duplicate_losers_to_user_decided(
                     res=res,
                     record_op=row_record_op,
                 )
-                res.duplicates_identical_moved_count += 1
-            move_to_review_bucket(
-                video,
-                src_anchor=folder,
-                bucket_root=duplicates_user_decided_root,
-                bucket_name="DUPLICATE_LOSER moved to _review/_duplicates_user_decided",
-                include_anchor_name=True,
-                use_dup_suffix=False,
-                rel_override=None,
-                dry_run=dry_run,
-                log=log,
-                res=res,
-                record_op=row_record_op,
-            )
-            res.duplicates_identical_moved_count += 1
-            continue
+                if moved_to is not None and not dry_run:
+                    _moved_pairs.append((Path(moved_to), video))
+                _rid_count += 1
+                # R8-018 : compteur DEDIE (≠ duplicates_identical) -> invariant
+                # moved==deleted preserve + chemin de recuperation reel (_duplicates_user_decided).
+                res.duplicates_user_decided_moved_count += _rid_count
+                continue
 
-        # Cas "single" : déplace le dossier entier vers le bucket.
-        if not folder.exists():
-            log("WARN", f"DUPLICATE_LOSER dossier manquant pour row {rid}, skip: {folder}")
+            # Cas "single" : déplace le dossier entier vers le bucket.
+            if not folder.exists():
+                log("WARN", f"DUPLICATE_LOSER dossier manquant pour row {rid}, skip: {folder}")
+                continue
+            target = duplicates_user_decided_root / core_mod.windows_safe(folder.name)
+            # Anti-collision : suffixe __DUP1/2/... si déjà présent.
+            target = unique_path_dup(target)
+            log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
+            if not dry_run:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                record_apply_op(
+                    row_record_op,
+                    op_type="MOVE_DIR",
+                    src_path=folder,
+                    dst_path=target,
+                    reversible=True,
+                )
+                _moved_pairs.append((target, folder))
+            res.duplicates_user_decided_moved_count += 1  # R8-018 : compteur dedie
+        except (OSError, PermissionError) as exc:
+            # Isolation : le batch N'EST PAS avorté ; on rollback le partiel de ce
+            # loser puis on enregistre l'erreur et on continue (parité per-row L1650).
+            log("ERROR", f"DUPLICATE_LOSER echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
+            _revert_moves(row_record_op, _moved_pairs, log, "DUPLICATE_LOSER")
+            res.errors += 1
+            try:
+                res.error_messages.append(f"DUPLICATE_LOSER {getattr(folder, 'name', folder)}: {exc}")
+            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+                pass
             continue
-        target = duplicates_user_decided_root / core_mod.windows_safe(folder.name)
-        # Anti-collision : suffixe __DUP1/2/... si déjà présent.
-        target = unique_path_dup(target)
-        log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
-            record_apply_op(
-                row_record_op,
-                op_type="MOVE_DIR",
-                src_path=folder,
-                dst_path=target,
-                reversible=True,
-            )
-        res.duplicates_identical_moved_count += 1
 
 
 def move_marked_for_deletion_to_bucket(
@@ -1143,24 +1197,46 @@ def move_marked_for_deletion_to_bucket(
 
         bucket_label = "MARKED_FOR_DELETION moved to _review/_user_marked_for_deletion"
 
-        # Cas collection : deplacer SEULEMENT la video marquee + ses sidecars.
-        if row.kind == "collection" and video_name:
-            video = folder / video_name
-            if not video.exists():
-                try:
-                    matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
-                    video = matches[0] if matches else video
-                except (OSError, PermissionError):
-                    pass
-            if not video.exists():
-                log("WARN", f"MARKED_FOR_DELETION video manquante pour row {rid}, skip: {video}")
-                continue
-            sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
-            for sidecar in sidecars:
-                if not sidecar.exists():
+        # R8-017 (F2-b) : même isolation per-item + rollback que les losers (et que la
+        # boucle per-row L1650). Un fichier marqué verrouillé n'avorte PAS le batch ;
+        # un item collection à moitié déplacé est rollback. Comptage atomique par rid.
+        _moved_pairs: list[Tuple[Path, Path]] = []
+        _rid_count = 0
+        try:
+            # Cas collection : deplacer SEULEMENT la video marquee + ses sidecars.
+            if row.kind == "collection" and video_name:
+                video = folder / video_name
+                if not video.exists():
+                    try:
+                        matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
+                        video = matches[0] if matches else video
+                    except (OSError, PermissionError):
+                        pass
+                if not video.exists():
+                    log("WARN", f"MARKED_FOR_DELETION video manquante pour row {rid}, skip: {video}")
                     continue
-                move_to_review_bucket(
-                    sidecar,
+                sidecars = core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+                for sidecar in sidecars:
+                    if not sidecar.exists():
+                        continue
+                    moved_to = move_to_review_bucket(
+                        sidecar,
+                        src_anchor=folder,
+                        bucket_root=marked_for_deletion_root,
+                        bucket_name=bucket_label,
+                        include_anchor_name=True,
+                        use_dup_suffix=False,
+                        rel_override=None,
+                        dry_run=dry_run,
+                        log=log,
+                        res=res,
+                        record_op=row_record_op,
+                    )
+                    if moved_to is not None and not dry_run:
+                        _moved_pairs.append((Path(moved_to), sidecar))
+                    _rid_count += 1
+                moved_to = move_to_review_bucket(
+                    video,
                     src_anchor=folder,
                     bucket_root=marked_for_deletion_root,
                     bucket_name=bucket_label,
@@ -1172,40 +1248,39 @@ def move_marked_for_deletion_to_bucket(
                     res=res,
                     record_op=row_record_op,
                 )
-                res.marked_for_deletion_moved_count += 1
-            move_to_review_bucket(
-                video,
-                src_anchor=folder,
-                bucket_root=marked_for_deletion_root,
-                bucket_name=bucket_label,
-                include_anchor_name=True,
-                use_dup_suffix=False,
-                rel_override=None,
-                dry_run=dry_run,
-                log=log,
-                res=res,
-                record_op=row_record_op,
-            )
-            res.marked_for_deletion_moved_count += 1
-            continue
+                if moved_to is not None and not dry_run:
+                    _moved_pairs.append((Path(moved_to), video))
+                _rid_count += 1
+                res.marked_for_deletion_moved_count += _rid_count
+                continue
 
-        # Cas single : deplacer le dossier entier.
-        if not folder.exists():
-            log("WARN", f"MARKED_FOR_DELETION dossier manquant pour row {rid}, skip: {folder}")
+            # Cas single : deplacer le dossier entier.
+            if not folder.exists():
+                log("WARN", f"MARKED_FOR_DELETION dossier manquant pour row {rid}, skip: {folder}")
+                continue
+            target = unique_path_dup(marked_for_deletion_root / core_mod.windows_safe(folder.name))
+            log("INFO", f"{bucket_label}: {folder} -> {target}")
+            if not dry_run:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                record_apply_op(
+                    row_record_op,
+                    op_type="MOVE_DIR",
+                    src_path=folder,
+                    dst_path=target,
+                    reversible=True,
+                )
+                _moved_pairs.append((target, folder))
+            res.marked_for_deletion_moved_count += 1
+        except (OSError, PermissionError) as exc:
+            log("ERROR", f"MARKED_FOR_DELETION echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
+            _revert_moves(row_record_op, _moved_pairs, log, "MARKED_FOR_DELETION")
+            res.errors += 1
+            try:
+                res.error_messages.append(f"MARKED_FOR_DELETION {getattr(folder, 'name', folder)}: {exc}")
+            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+                pass
             continue
-        target = unique_path_dup(marked_for_deletion_root / core_mod.windows_safe(folder.name))
-        log("INFO", f"{bucket_label}: {folder} -> {target}")
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
-            record_apply_op(
-                row_record_op,
-                op_type="MOVE_DIR",
-                src_path=folder,
-                dst_path=target,
-                reversible=True,
-            )
-        res.marked_for_deletion_moved_count += 1
 
 
 def move_collection_folder(

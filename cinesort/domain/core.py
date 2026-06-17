@@ -1393,6 +1393,12 @@ class ApplyResult:
     # AUDIT 2026-06-14 (R7-4) : compteur des films marques pour suppression
     # deplaces vers _review/_user_marked_for_deletion/ a l'apply.
     marked_for_deletion_moved_count: int = 0
+    # R8-018 (F2-b) : compteur DEDIE des doublons "perdants" d'une decision utilisateur
+    # deplaces vers _review/_duplicates_user_decided/. Avant, ces moves incrementaient
+    # duplicates_identical_moved_count (doublons byte-identiques) -> invariant
+    # moved==deleted casse + chemin de recuperation mensonger (UI pointait
+    # _duplicates_identical alors que les fichiers sont dans _duplicates_user_decided).
+    duplicates_user_decided_moved_count: int = 0
     duplicates_identical_moved_count: int = 0
     # Backward-compatible alias kept for older consumers.
     duplicates_identical_deleted_count: int = 0
