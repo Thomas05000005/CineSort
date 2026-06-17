@@ -1,0 +1,22 @@
+reconcile_inprogress_rollbacks: 1 rollback(s) figé(s) IN_PROGRESS détecté(s) au boot (orphelins)
+=== S-012 (RB1 : undo_status op-level marque apres revert) ===
+  rollback ok / FS reverti : True / True
+  undo_status des ops      : ['DONE'] (AVANT toujours ['PENDING'] ; APRES ['DONE'])
+
+=== S-013 (RB2 : reprise d'un rollback IN_PROGRESS orphelin au boot) ===
+  AVANT : rollback_status=IN_PROGRESS, FS a moitie (dst)=True
+  reconcile_inprogress_rollbacks report : {'inprogress_found': 1, 'resumed': 1, 'resume_failed': 0, 'batches': [{'batch_id': '1781732470021_a6f21971bd294f5f821a3f36f44ea907', 'ok': True, 'rollback_status': 'ROLLED_BACK_BY_ATOMIC'}]}
+  APRES : rollback_status=ROLLED_BACK_BY_ATOMIC, FS reverti=True
+
+=== S-015 (apply-status : FAILED -> ROLLED_BACK_BY_ATOMIC reflete le revert) ===
+  exception sur la transition : None (AVANT = ApplyBatchStateError ; APRES None)
+  statut final du batch       : ROLLED_BACK_BY_ATOMIC (attendu ROLLED_BACK_BY_ATOMIC)
+
+=== S-011 (UNDO-CASE : undo casse-seule au lieu de CONFLIT) ===
+  contexte                 : FS insensible casse (Windows) : undo casse-seule attendu
+  rapport undo (done/failed/conflict) : 1/0/0
+  fichiers lib             : ['Film.mkv']
+  classes en _undo_conflicts (AVANT bug) : [] (attendu [])
+
+VERDICT : CORRIGE (rollback/undo/statuts coherents)
+RESUME: {"S012_undo_status_marque": true, "S013_reprise_inprogress_orphelin": true, "S015_transition_FAILED_to_ROLLED_BACK": true, "S011_undo_casse_seule": true}

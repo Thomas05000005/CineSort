@@ -339,4 +339,77 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - **Différentiel** : `marked_for_deletion_moved_count`/`_user_marked_for_deletion` passe de **0 → 4** occurrences
   dans `apply_support.py` (synthèse + récup). **Non-régression** : tests de synthèse `test_backend_flow` +
   `test_marked_for_deletion_apply_v77` = **5 passed** ; additif pur (la suite F2-b a validé le code environnant).
-- **Commit** : `<hash R8-087>`.
+  Sweep apply/dedup ciblé : 765 passed, 0 nouvel échec. **Commit** : `0cd24a1`.
+
+### ═══ VERDICT F2-b (2026-06-17) ═══
+- **R8-017** (atomicité per-loser/marked) + **R8-018** (invariant `moved==deleted` + chemin récup réel) :
+  différentiels cassé→correct prouvés (S1/S2 chacun) ; **commit `2fd4f63`**.
+- **Filet** `wf_1b2f6be3-74a` : RELIABLE=true, leurres 0/2, **1 écart trouvé (R8-087) ET corrigé en salve**
+  (`0cd24a1`) ; concern sécurité-critique « shutil.Error avorte le batch » **réfuté + vérifié** (shutil.Error EST
+  un OSError → R8-017 suffisant). 0 écart résiduel sur R8-017/R8-018.
+- **Non-régression** : suite complète 264 nœuds, 0 nouvel échec. Cohérence : rollback factorisé `_revert_moves`,
+  même logique que per-row/COLL-ATOMIC/TV (pas une 3ᵉ variante). **Checkpoint `f493abdc` intact, pas de push.**
+
+---
+
+## ═══ FAMILLE F2 — SOUS-SALVE F2-c (ROLLBACK / STATUTS + UNDO-CASE) ═══
+
+> Cohérence d'ÉTAT (statuts rollback/undo qui mentent/se figent), pas d'intégrité fichier. Différentiels
+> comportementaux sur fixtures `SQLiteStore` jetables (`r8_f2c_rollback_undo_diff.py` : S-012/013/015/011, tous verts).
+
+### R8-013 — RB2 (rollback_status figé IN_PROGRESS si kill pendant revert) — `1eb7916`
+- **Cause** : `rollback_forward` marque `IN_PROGRESS` (apply_rollback.py:380) puis le statut final ; un kill entre les
+  deux laisse `rollback_status='IN_PROGRESS'` à vie. `reconcile_pending_batches` ne scanne que `apply_batches.status='PENDING'`
+  (le batch en rollback est FAILED) → état figé jamais récupéré.
+- **Fix** (`apply_batches_reconciliation.py`) : nouveau `reconcile_inprogress_rollbacks` — au boot, liste les batches
+  `rollback_status='IN_PROGRESS'` (`_list_inprogress_rollbacks`) et **RE-LANCE `rollback_forward`** (idempotent : ops déjà
+  revertées protégées par les gardes FS `dst_missing`/`src_already_exists` + `undo_status='DONE'` R8-012). Câblé **avant**
+  le pass PENDING dans `reconcile_batches_at_boot`. **Différentiel S-013** : kill simulé (mark IN_PROGRESS, FS à moitié) →
+  AVANT figé IN_PROGRESS ; APRÈS `resumed=1`, `rollback_status=ROLLED_BACK_BY_ATOMIC`, FS reverti.
+
+### R8-012 — RB1 (undo_status op-level jamais marqué après revert) — `de28c50`
+- **Cause** : `rollback_forward` revertait le FS mais ne touchait jamais `apply_operations.undo_status` → l'historique
+  (`history_support.py:300`) + les compteurs `undone_ops`/`pending_ops` (`apply.py:391`) affichaient un batch reverti
+  comme « pending_ops=total, undone_ops=0 » = jamais annulé.
+- **Fix** (`apply_rollback.py`) : marquer `undo_status` (DONE/FAILED/SKIPPED) après chaque `_revert_one_op`, sans
+  rétrograder une op déjà terminale. Rend l'état op-level cohérent + `rollback_forward` reprenable (R8-013).
+  **Note design** : la séparation `rollback_status` (atomic) ≠ `undo_status` (manuel) reste tenue — marquer DONE après un
+  revert réussi EST sémantiquement correct et **n'interfère pas** avec l'undo manuel (un batch rollback-atomique n'est pas
+  `status='DONE'` → jamais proposé à l'undo). **Test mis à jour** : `test_rollback_does_not_change_undo_status` pinnait le
+  comportement BUGGÉ (PENDING) → renommé `test_rollback_marks_undo_status_done` (assertion 'DONE'). **Différentiel S-012**.
+
+### R8-015 — apply-status (FAILED figé, n'reflète pas le rollback) — `bab8070`
+- **Cause** : l'apply en échec ferme le batch `FAILED` (apply_support.py:2228) **avant** `_atomic_rollback_forward` ; le
+  verdict du revert ne va que dans `apply_batch_modes.rollback_status` → `apply_batches.status` reste FAILED, sans dire si
+  le FS est restauré. Or le whitelist n'a aucune transition depuis FAILED.
+- **Fix** : (a) whitelist `apply.py` : `FAILED → {ROLLED_BACK_BY_ATOMIC}` (seule transition autorisée, pas de retour DONE/
+  PENDING → pas de réintroduction dans `get_last_reversible`). (b) `apply_support.py` : après un revert **complètement
+  réussi** (`ok` + `rollback_status==ROLLED_BACK_BY_ATOMIC`), re-clore le batch en `ROLLED_BACK_BY_ATOMIC` ; un revert
+  partiel/échoué reste FAILED (état ambigu tracé par rollback_status). **Différentiel S-015** : transition AVANT =
+  `ApplyBatchStateError` ; APRÈS = statut `ROLLED_BACK_BY_ATOMIC`.
+
+### R8-011 — F-V6-UNDO-CASE (undo casse-seule Windows classé CONFLIT) — `bab8070`
+- **Cause** : `_execute_undo_ops` (apply_support.py:442) : `if target_path.exists()` → sur FS insensible à la casse
+  (Windows/SMB), restaurer `film`→`Film` voit `Film` « exister » (même fichier physique) → classé CONFLIT/FAILED au lieu de
+  restaurer.
+- **Fix** : avant le chemin conflit, détecter le cas casse-seule via **`str(current) != str(target)`** (comparaison
+  sensible à la casse — l'égalité Path est INSENSIBLE sur Windows et masquerait la diff) **+ `current.samefile(target)`**
+  (même fichier physique). Si oui → rename casse-seule réutilisant `_case_only_rename_with_rollback` (détour tmp Windows-safe).
+  **Correct sur Windows ET Linux** : sur Linux `Film`≠`film` sont distincts → `samefile=False` → vrai conflit préservé.
+  **Différentiel S-011** : `film.mkv` → restauré `Film.mkv` (done=1), AVANT classé `_undo_conflicts` (failed=1).
+
+### R8-014 — apply-status DONE malgré errors — ⏸️ **DIFFÉRÉ**
+- **Raison** : le statut « PARTIAL » n'existe PAS dans le whitelist (`_ALLOWED_BATCH_TRANSITIONS`), et surtout
+  `get_last_reversible_apply_batch` filtre **`status='DONE'`** uniquement → fermer un apply partiel en « PARTIAL » le
+  rendrait **non annulable** = régression PIRE que le nit d'observabilité. Un fix correct = introduire un statut PARTIAL
+  **réversible** (whitelist + get_last_reversible + transitions UNDONE + UI) = chantier multi-site à part. Le journal d'AUDIT
+  enregistre **déjà** DONE/PARTIAL (`auditor.end`, apply_support.py:1522) → l'observabilité réelle existe ailleurs. **Différé, documenté.**
+
+### Non-régression
+- Ciblé rollback/reconcile/robustness : **43 passed** (test RB1 mis à jour). Suite complète (`suite_f2c.txt`) :
+  **107 failed / 5813 passed / 170 errors** — diff vs baseline : **264 nœuds, 0 nouveau, 0 disparu**. ✅ 0 régression.
+
+### Artefacts / sites
+- Prod : `apply_rollback.py` (R8-012), `apply_batches_reconciliation.py` (R8-013), `apply.py` whitelist + `apply_support.py`
+  (R8-015, R8-011) ; test `test_apply_atomic_rollback_integration_v77.py` (RB1 mis à jour).
+- `r8_f2c_rollback_undo_diff.py`/`.out.txt` (S-012/013/015/011), `suite_f2c.txt`.
