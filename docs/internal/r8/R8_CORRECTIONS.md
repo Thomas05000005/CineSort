@@ -89,7 +89,7 @@ Grep ciblé sur `tests/` (`or True`, `or 1`, `assert True`, `assertTrue(True)`, 
 ## ═══ FAMILLE F1 — PERTE DE DONNÉES NON RÉCUPÉRABLE ═══
 
 ## R8-001 — F-V8-COLL-ATOMIC — Atomicité intra-row collection + ledger dedup non empoisonné
-**Famille** : F1. **Commit** : `<hash R8-001>` (loop/correction-2026-06). Fix A+B **indissociable** (1 commit).
+**Famille** : F1. **Commit** : `7b25d50` (loop/correction-2026-06). Fix A+B **indissociable** (1 commit).
 
 ### Cause racine (baseline)
 `apply_collection_item` (`cinesort/app/apply_core.py`) déplace les sidecars PUIS la vidéo, et marque le ledger
@@ -124,3 +124,46 @@ demi-application **PERMANENTE / irrécupérable**. Baseline figée : `../baselin
 ### Artefacts
 - `r8_001_coll_atomic_diff.py` + `.out.txt` (différentiel A+B, fixture jetable, prouve retry-re-traite).
 - `suite_r8_001.txt` (suite post-fix), `r8_001_failures.txt` (264 nœuds = pré-existants).
+
+---
+
+## R8-002 — F-QTN-GOV — Gouvernance TTL quarantaine : préservation des originaux non revus
+**Famille** : F1. **Commit** : `<hash R8-002>` (loop/correction-2026-06). Capture baseline **instrumentée**
+cette vague (placeholder `cap_qtn_governance` résolu).
+
+### Instrumentation d'abord (cause racine vérifiée vs registre)
+La baseline R8-002 n'était pas figée (placeholder). Instrumentée sur fixture jetable :
+`../baseline_r8/captures/cap_qtn_governance.py` (+ `.out.txt`). **Cause racine confirmée et précisée** :
+- L'apply écrit les buckets quarantaine conflict/duplicate/leftover sous **`<run_dir>/_review`**
+  (`apply_support.py:1489` : `run_review_root = run_paths.run_dir / "_review"`).
+- Le TTL quarantaine (`quarantine_ttl.review_root`) ne gouverne QUE `cfg.root/_review`.
+- La rétention-runs **`clean_old_runs(state_dir, keep_last=20)`** (`infra/state.py:105`) fait
+  `shutil.rmtree(run_dir)` sur les vieux runs → **détruit `<run_dir>/_review` entier**, donc les
+  **originaux quarantinés** (vrais fichiers films déplacés sur collision/doublon) **avant revue
+  utilisateur, quel que soit le TTL** (30 j ignoré). = **perte de données non récupérable**.
+- *Écart vs description registre* : le registre disait « TTL ne gouverne pas 4/5 buckets » ; la vraie
+  mécanique destructrice est la **rétention-runs** (`clean_old_runs`), pas la TTL elle-même. Fix adapté à la réalité.
+
+### Fix (garde-fou de gouvernance — `infra/state.py:105`, **pas de purge destructive d'une quarantaine non revue**)
+`clean_old_runs` **PRÉSERVE** désormais tout `<run_dir>/_review` contenant des fichiers : il le **reloce sous
+`runs/_preserved_review/<run_id>/`** (dossier **exclu** de la rétention) AVANT de `rmtree` le reste du run_dir.
+La rétention-runs reste effective (les run_dirs sont nettoyés) mais ne **détruit plus** d'original quarantiné.
+*(Choix : préservation plutôt que déplacer la TTL — supprimer des originaux non revus sur un minuteur est
+précisément le risque de perte ; la préservation supprime le risque. Croissance bornée par revue utilisateur.)*
+
+### Différentiel baseline prouvé
+| Observation (fixture : run vieux avec `_review/_conflicts/<original>.mkv`, `clean_old_runs(keep_last=2)`) | AVANT | APRÈS |
+|---|---|---|
+| `cap_qtn_governance.py` → RESUME | `data_lost=true, preserved_copies=0` (`../baseline_r8/captures/cap_qtn_governance.out.txt`) | **`data_lost=false, preserved_copies=1`** → original sous `runs/_preserved_review/...` (`r8_002_qtn_governance_diff.out.txt`) |
+| run_dir vieux nettoyé (rétention OK) | oui | oui (préservation n'empêche pas le nettoyage du reste) |
+
+### Non-régression
+- Ciblé `-k "state or quarantine or retention or runs"` : 192 passed ; 3 failed + 4 errors **tous pré-existants**
+  (chromium/Playwright, ∈ baseline 264 ; `comm` vs `prefix_failures.txt` = 0 nouveau). Aucun test n'appelle
+  directement `clean_old_runs`.
+- Suite complète (`suite_r8_002.txt`) : **107 failed / 5813 passed / 170 errors** — **IDENTIQUE** au pré-fix ;
+  diff `r8_002_failures.txt` vs `prefix_failures.txt` (`comm`) : **264 nœuds, 0 nouveau, 0 disparu**. ✅ 0 régression.
+
+### Artefacts
+- `../baseline_r8/captures/cap_qtn_governance.py` (instrument) + `.out.txt` (snapshot **cassé** baseline).
+- `r8_002_qtn_governance_diff.out.txt` (post-fix, `data_lost=false`), `suite_r8_002.txt`.
