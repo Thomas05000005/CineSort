@@ -17,19 +17,18 @@ _MIGRATION_FILE_RE = re.compile(r"^(?P<version>\d+)_.*\.sql$")
 _IDEMPOTENT_ERROR_FRAGMENTS = (
     "duplicate column name",
     "already exists",
-    # R8-021 (F2-d) : fragments IntegrityError d'un re-INSERT idempotent (rejouer une
-    # migration qui re-insere une ligne deja presente). Allowlist VOLONTAIREMENT etroite
-    # (UNIQUE/PK "already"-style uniquement) : une IntegrityError NOT NULL / FK / CHECK
-    # n'est PAS ici -> elle est re-levee (signal de donnee corrompue).
-    "unique constraint failed",
-    "primary key",
 )
 
 
-def _is_idempotent_error(exc: sqlite3.DatabaseError) -> bool:
-    # R8-021 : accepte OperationalError ("duplicate column"/"already exists") ET
-    # IntegrityError ("unique constraint failed"/"primary key") -> un IntegrityError
-    # d'un rebuild idempotent (021/023/025 rejoues) ne bloque plus tout le boot.
+def _is_idempotent_error(exc: sqlite3.OperationalError) -> bool:
+    # R8-021 RETRACTE (F2-d, attrape par le filet F2-d 3/3) : on N'attrape PAS
+    # IntegrityError (UNIQUE/PK). Raison : les migrations de RECONSTRUCTION (021/025 :
+    # INSERT INTO X_new SELECT ... FROM X ; DROP TABLE X ; RENAME) rejouees par le
+    # bootstrap sur une source CORROMPUE (PK dupliquees) levent une PK IntegrityError ;
+    # la "skipper" laisserait X_new VIDE puis DROP+RENAME ECRASERAIT silencieusement la
+    # table = PERTE DE DONNEES (meme classe que le bug 025 NULL R8-019). Bloquer le boot
+    # sur IntegrityError est le comportement SUR (recuperable via backup), donc on garde
+    # OperationalError uniquement.
     msg = str(exc).lower()
     return any(fragment in msg for fragment in _IDEMPOTENT_ERROR_FRAGMENTS)
 
@@ -260,9 +259,9 @@ class MigrationManager:
                             try:
                                 conn.execute(stmt)
                                 conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                            except (sqlite3.OperationalError, sqlite3.IntegrityError) as stmt_exc:
-                                # R8-021 (F2-d) : on attrape aussi IntegrityError (re-INSERT
-                                # idempotent au replay) ; _is_idempotent_error tranche skip/raise.
+                            except sqlite3.OperationalError as stmt_exc:
+                                # R8-021 RETRACTE : on N'attrape PAS IntegrityError (swallow
+                                # un UNIQUE/PK sur INSERT...SELECT de rebuild = wipe silencieux).
                                 # H-1 audit 20260428 : ALTER TABLE ADD COLUMN n'est pas
                                 # IF NOT EXISTS-able avant SQLite 3.35. Si la colonne existe
                                 # deja (DB clonee, restauree, ou migration partiellement

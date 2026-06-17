@@ -294,9 +294,11 @@ class _StoreBase:
                         try:
                             conn.execute(stmt)
                             conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                        except (sqlite3.OperationalError, sqlite3.IntegrityError) as stmt_exc:
-                            # R8-021 (F2-d) : aussi IntegrityError (re-INSERT idempotent au
-                            # replay bootstrap) -> _is_idempotent_error tranche skip/raise.
+                        except sqlite3.OperationalError as stmt_exc:
+                            # R8-021 RETRACTE (filet F2-d) : NE PAS attraper IntegrityError ici.
+                            # Sur une source corrompue (PK dupliquee), skipper l'INSERT...SELECT
+                            # de rebuild laisserait X_new VIDE -> DROP+RENAME = wipe silencieux.
+                            # Bloquer le boot (re-lever) est le comportement SUR (recuperable).
                             # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
                             # tolere les erreurs idempotentes (duplicate column,
                             # already exists) pour rester self-healing sur DB

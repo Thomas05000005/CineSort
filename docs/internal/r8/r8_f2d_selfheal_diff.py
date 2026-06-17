@@ -4,8 +4,10 @@ S-019 (paused_at) : un self-heal bootstrap (rejoue 025) sur une DB avec paused_a
                     (AVANT : ecrasee a NULL = perte). LE plus critique.
 S-022 (incremental_row_cache) : la table est dans REQUIRED_SCHEMA_TABLES -> recreee par le self-heal.
 S-020 (schema_migrations) : backfille apres le bootstrap (historique non desync).
-S-021 (IntegrityError idempotent) : _is_idempotent_error accepte unique/pk (re-INSERT au replay) mais
-                    PAS NOT NULL/CHECK -> un rebuild idempotent ne bloque plus le boot.
+S-021 RETRACTE (filet F2-d) : _is_idempotent_error NE swallow PLUS aucun IntegrityError (UNIQUE/PK
+                    inclus) -> sur rebuild a source corrompue, re-leve (boot bloque, recuperable)
+                    plutot que wipe silencieux. Seuls OperationalError duplicate-column/already-exists
+                    restent idempotents. Voir r8_f2d_filet_survivors_diff.py pour le differentiel wipe.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2d_selfheal_diff.py
 """
@@ -78,16 +80,21 @@ def run():
     print("\n=== S-020 (schema_migrations backfille apres bootstrap) ===")
     print(f"  rows schema_migrations apres self-heal : {sm_count} (attendu > 0)")
 
-    # S-021 : taxonomie idempotente (pure fonction)
-    ok_unique = _is_idempotent_error(sqlite3.IntegrityError("UNIQUE constraint failed: t.col"))
-    ok_pk = _is_idempotent_error(sqlite3.IntegrityError("PRIMARY KEY must be unique"))
-    not_notnull = _is_idempotent_error(sqlite3.IntegrityError("NOT NULL constraint failed: t.col"))
-    not_check = _is_idempotent_error(sqlite3.IntegrityError("CHECK constraint failed: t"))
-    s021 = ok_unique and ok_pk and (not not_notnull) and (not not_check)
-    results["S021_integrityerror_idempotent_narrow"] = s021
-    print("\n=== S-021 (IntegrityError idempotent, allowlist etroite) ===")
-    print(f"  UNIQUE/PK -> idempotent (skip)     : {ok_unique}/{ok_pk} (attendu True/True)")
-    print(f"  NOT NULL/CHECK -> NON idempotent   : {not not_notnull}/{not not_check} (attendu re-leve)")
+    # S-021 RETRACTE (filet F2-d) : _is_idempotent_error NE swallow PLUS aucun
+    # IntegrityError (UNIQUE/PK inclus) -> sur un rebuild a source corrompue, l'erreur
+    # est re-levee (boot bloque, recuperable) plutot que de wiper la table. SEULS les
+    # OperationalError "duplicate column"/"already exists" restent idempotents.
+    skip_unique = _is_idempotent_error(sqlite3.OperationalError("UNIQUE constraint failed: t.col"))
+    skip_pk = _is_idempotent_error(sqlite3.OperationalError("PRIMARY KEY must be unique"))
+    skip_notnull = _is_idempotent_error(sqlite3.OperationalError("NOT NULL constraint failed: t.col"))
+    skip_dupcol = _is_idempotent_error(sqlite3.OperationalError("duplicate column name: x"))
+    skip_exists = _is_idempotent_error(sqlite3.OperationalError("table x already exists"))
+    # SUR = aucun IntegrityError-like swallow, seuls duplicate column / already exists.
+    s021 = (not skip_unique) and (not skip_pk) and (not skip_notnull) and skip_dupcol and skip_exists
+    results["S021_integrityerror_NON_swallow_retracte"] = s021
+    print("\n=== S-021 RETRACTE (IntegrityError NON swallow = sur) ===")
+    print(f"  UNIQUE/PK/NOTNULL -> NON idempotent (re-leve) : {not skip_unique}/{not skip_pk}/{not skip_notnull} (attendu True/True/True)")
+    print(f"  duplicate column / already exists -> idempotent : {skip_dupcol}/{skip_exists} (attendu True/True)")
 
     shutil.rmtree(tmp, ignore_errors=True)
     allok = all(results.values())
