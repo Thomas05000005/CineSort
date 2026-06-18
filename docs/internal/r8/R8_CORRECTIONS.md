@@ -710,3 +710,118 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
 - **Commits F3** : `8adeff2` (R8-032) · `d90be70` (R8-033) · `6a80929` (R8-031) · `05a8795` (R8-030) ·
   `885dca2` (R8-093) · `79500b4` (R8-094+095). Checkpoint `f493abdc` **intact**, **rien poussé** (on pousse
   APRÈS F3 close — failles non exposées avant réparation).
+
+---
+
+## ═══ FAMILLE F4 — RÉSULTATS FAUX SILENCIEUX — 2026-06-18 ═══
+
+> **PLAN A retenu** : vrai **ffmpeg/ffprobe 8.1.1** (Gyan build) présent sur le PATH -> instrumentation
+> RÉELLE sur fixtures vidéo synthétiques (jamais le mock pour prouver une mesure). Les fixes perceptuels
+> sont prouvés par **relations métamorphiques** (invariance / monotonie / discrimination) mesurées sur de
+> vraies exécutions. Règle F4 : le vert mocké ne vaut rien — différentiel sur **mesure réelle**.
+
+### GROUPE PERCEPTUEL — la « mesure du vide » (R8-034 / 035 / 036)
+**AVANT (instrumenté, `r8_f4_perceptual_instr.out.txt`)** : 3 fixtures VISIBLEMENT différentes (testsrc2 net,
+mandelbrot, mandelbrot écrasé) produisent des mesures **IDENTIQUES** — frames_parsed=0, loudnorm=None,
+crest/dynrange=None, block/blur=0 -> scores **95/95** fabriqués. Le perceptuel ne mesurait RIEN.
+- **R8-034** (`23df760`) : `analyze_loudnorm` passait `-v quiet` -> stderr vide -> loudness EBU R128 jamais
+  mesurée (None). Fix `-v info`. **Diff réel** : clean IL=-21.76 vs degraded (vol 0.05) **-47.85** (discrimine).
+- **R8-035** (`435006b`) : Crest factor / Dynamic range lus dans le bloc « Overall » d'astats où ils n'existent
+  PAS (uniquement par canal, vérifié ffmpeg 8.1.1 mono+stéréo) -> None -> 2 poids audio figés à 50. Fix :
+  `_min_float` sur le texte complet (pire canal). **Diff** : crest/dynrange réels et discriminants.
+- **R8-036** (`542bdaa`) : filtre `signalstats,blockdetect,blurdetect` SANS `metadata=mode=print` (filtres
+  muets sur stderr) + parser sur des clés inexistantes (`YAVG=`/`block:`) au lieu des vraies `lavfi.*=` +
+  garde `"blockdetect" in line`. -> 0 frame -> block/blur=0 -> _score_*(0)=95. Fix 3 volets : metadata=print,
+  clés `lavfi.signalstats.YAVG=`/`lavfi.block=`/`lavfi.blur=`, regroupement par `frame:N`. Tests FilterParsing
+  réécrits sur le format RÉEL (l'ancien mock `block: 22.5` n'était jamais produit = test qui mentait).
+**APRÈS (instrumenté)** : frames_parsed=**48** ; loudnorm/crest/dynrange réels et **discriminants** ;
+block_mean discrimine (clean 12.33 vs mandelbrot 1.08) + block SCORE discrimine (75 vs 95) ; blur_mean réel et
+**MONOTONE** (4.53 net -> 15.98 flou). Relations métamorphiques (iii discrimination + ii monotonie) tiennent
+APRÈS et échouaient AVANT.
+- **R8-096 (résidu DÉFÉRÉ)** : l'instrumentation R8-036 a EXPOSÉ que les seuils `BLUR_*` (0.01-0.10) ne
+  correspondent PAS à l'échelle réelle de blurdetect (net≈4.5 stable 480p↔1080p, flou≥16) -> le SCORE blur
+  sature à 10. Le `blur_mean` est désormais RÉEL ; la recalibration des seuils exige un **corpus de films réels
+  labellisés** (le grain affecte blurdetect) + la MAJ de ~10 tests composite qui encodent l'ancienne échelle.
+  **Différé** (décision de calibration produit), enregistré R8-096.
+
+### CACHE TMDb (R8-041) — `2a337d4`
+`search_movie` cachait `[]` sur une réponse 200+results=[] ; `_cache_get` (cached is not None, vrai pour [])
+servait [] 7 jours -> film figé « non identifié » après UN hoquet TMDb. Fix : `if results:` avant `_cache_set`.
+**Diff** (`r8_f4_tmdb_cache_diff`) : APRÈS vide non caché -> 2e search re-fetch -> récupère Inception ; AVANT sert [].
+
+### VALEURS FAUSSES (R8-038 bitrate, R8-039 codec, R8-040 parsing)
+- **R8-038** (`258af2a` + test `6c29b11`) : bitrate audio toujours en bps (invariant probe) -> division
+  INCONDITIONNELLE /1000. AVANT : seuil >10000 -> 8000 bps (8 kbps dégradé) lu 8000 kbps -> **+4 bonus au lieu
+  de -3 malus** (inversion de signe). Tests « kbps kept » (192/1509/9000 nus) = domaine PHANTOM (le probe
+  produit 192000), réalignés sur l'invariant bps + cas dégradé 8000->8.
+- **R8-039** (`9df787a`) : `_best_audio_track` triait par (channels, bitrate) codec-AVEUGLE. **Diff fichier RÉEL**
+  (FLAC 6ch rank3 VBR + EAC3 6ch @640k rank2) : AVANT eac3 (faux) ; APRÈS flac = `duplicate_compare._best_audio`
+  (113 divergences éliminées). Fix : clé (codec_rank, channels, bitrate) via `codec_ranks.AUDIO_CODEC_RANK`.
+- **R8-040** (`608ced6`) : `replace('.',' ')` transforme "DD5.1"->"DD5 1" -> `\b[257][\s.][01]` échoue (5 collé à
+  DD) -> résidu pollue la query TMDb. Fix : préfixe `(?:ddp?)?` optionnel. **Diff** : DD5.1/DDP5.1/DD7.1/DD2.0
+  retirés, "21 Jump Street" préservé.
+
+### ÉCHELLE / CONTRAT (R8-042 dup-scale, R8-043 HDR, R8-044 mkv title)
+- **R8-042** (`48a8cf9`) : doublons.js rendait des POINTS head-to-head en "X/100" -> "0/100" pour un bon perdant.
+  Fix : échelle = points d'avantage sur points en jeu (scoreA+scoreB), libellé « Avantage » + « pts ». node --check OK.
+- **R8-043** (`822b93c`) : la modale lit `d.hdr_analysis.hdr_format/is_hdr` mais `VideoPerceptual.to_dict`
+  n'émettait pas la clé -> « sdr » pour tout film. Fix : champ `hdr_type` + clé `hdr_analysis` dans to_dict +
+  report depuis le probe. **Diff** : detect_hdr_type(bt2020,smpte2084)=hdr10 (réel) ; modale AVANT « sdr »,
+  APRÈS « hdr10 »/« sdr » correct. (Fixture HDR synthétique testsrc2 ne tague pas toujours primaries/transfer ;
+  un vrai film HDR porte les tags — détection prouvée dessus.)
+- **R8-044** (`831d867`) : égalité exacte container_title vs proposed -> 88% de faux `mkv_title_mismatch`. Fix :
+  comparaison par tokens normalisés (bruit scene retiré) + inclusion/recouvrement ≥70%. **Diff** (corpus 10) :
+  AVANT 5 faux positifs ; APRÈS 0, 10/10 corrects (vrais conflits flaguent). Test (fichier skippé legacy) corrigé.
+
+### ANNULATION (R8-037) — `8626744`
+Le batch perceptuel post-scan lisait `api._perceptual_cancel_event` jamais assigné -> annulation inerte (deux
+events disjoints). Fix : `JobRunner.get_cancel_event(run_id)` + le job_fn câble l'event du run sur l'api.
+**Diff** (`r8_f4_cancel_diff`) : AVANT _resolve=None ; APRÈS request_cancel (rt.cancel_event.set) propagé au batch.
+
+### Non-régression F4
+- Sweep ciblé de TOUS les modules touchés par F4 (perceptual/audio/video/quality_score/quality_report/scene_parser/
+  duplicate/mkv/tmdb/job_runner/run_flow/codec/bitrate/hdr/doublons/composite) : **1241 passed**, seuls échecs =
+  2 flaky/pré-existants prouvés (`test_analyze_quality_batch` tempfile-PermissionError ; `test_rollup_by_codec` =
+  e2e legacy-410, hors suite non-rég, ne touche pas `_best_audio_track`).
+- Suite complète (`suite_f4_failures.txt`, 19 min) : **37 failed / 5802 passed / 113 errors** (compteurs bruts ≈
+  baseline F3, le delta = bruit `[chromium]`/`e2e`). **PREUVE déterministe** : les **25 nœuds FAILED non-chromium**
+  diffés vs la baseline F3 (24 nœuds, prouvés pré-existants par rejeu pré/post) = **24 IDENTIQUES + 1 delta** =
+  `test_golden_path_plan_validate_apply_undo`. Ce nœud **PASSE en isolation, fichier entier, et contexte proche
+  (3 fichiers)** sur l'arbre F4 -> échec **full-suite-only** (fuite d'état d'un test distant), surfacé par le
+  DÉCALAGE D'ORDONNANCEMENT de mes tests ajoutés (degraded-bitrate, multi-frame, mkv-conflict…) — **PAS** du code
+  F4 (qui n'ajoute aucun état global inter-tests : `api._perceptual_cancel_event` est par-instance + nettoyé en
+  `finally` ; le cache TMDb est par-instance). **FLAKY CONFIRMÉ par re-run** (`suite_f4_rerun.txt`) :
+  golden-path **PASSE** au 2ᵉ run complet (échec au 1ᵉʳ = non-déterministe) et les **24 nœuds non-chromium du
+  re-run sont IDENTIQUES à la baseline F3** (diff vide). Même classe que R8-086.
+  → **0 nouvel échec DÉTERMINISTE introduit par F4** (24 nœuds pré-existants, prouvés). ✅
+
+### Filet F4 (round adversarial couche mesure/analyse) — `w2m3xjy1g`
+- **RELIABLE=true** ; 3 finders (mesure du vide · cache empoisonnable · échelle/unité fausse) + panel 3 sceptiques
+  asymétriques + **2 leurres → decoys_leaked=0** (cumul filets F1→F4 : **0/48**). 7 candidats, **5 survivants**,
+  tous **résidus de MÊME CLASSE** que les fixes F4 → 3 corrigés en salve, 2 différés :
+- **R8-097** (`ba79f28`, cache-0 3/3 HIGH) : `search_tv()` cachait une réponse vide — **JUMEAU EXACT de R8-041**
+  jamais appliqué au TV. Fix `if cache_items:`. **Diff** : vide non caché, re-fetch récupère (id 1399).
+- **R8-098** (`ba79f28`, void-0 3/3 HIGH) : clipping non mesuré (`total_segments=0`, verdict 'unknown') ->
+  `if clip:` truthy -> `s_clip=90` fabriqué (classe R8-034/035). Fix : gate `total_segments > 0` -> neutre 80.
+  **Diff** : score non-mesuré (58) < mesuré-sans-clipping (59).
+- **R8-099** (`ba79f28`, scale-0 2/3 LOW) : `_bitrate_label` seuil bps/kbps (classe R8-038) -> 8000 bps affiché
+  « **8 Mbps** » (1000× faux). Fix `/1000` inconditionnel. **Diff** : « 8 Mbps » -> « 8 kbps », 25 Mbps inchangé.
+- **R8-100 DIFFÉRÉ** (void-1/void-2 3/3 MED) : `_score_temporal(0)=90` et le chemin **V1** de `_score_val_inv`
+  (0->95) fabriquent des scores flatteurs quand le filtre vidéo échoue ENTIÈREMENT (hors R8-036). Reachability
+  LIMITÉE (V2 défaut gate la confiance ; V1 = kill-switch ; score final recalculé par V2). Même classe que R8-096
+  -> **pass de robustesse-scoring dédié** (drapeau « mesuré ? » + tiers unknown). Différé, enregistré R8-100.
+- **2 réfutés** (0/3) : s_clip init=80 (faux gap) ; formatage taille Go/Gio. **2 leurres → 0/3** (score global
+  toujours 0 ; clé API en clair dans le cache) correctement réfutés.
+
+### ═══ VERDICT F4 (2026-06-18) ═══
+- **14 findings corrigés** : 11 du registre (R8-034/035/036/037/038/039/040/041/042/043/044) + **3 résidus filet
+  corrigés en salve** (R8-097 jumeau TV de R8-041, R8-098 clipping vide, R8-099 bitrate label). Différentiel RÉEL
+  prouvé pour chacun (mesure ffmpeg réelle pour le perceptuel ; valeur fausse->correcte sinon). **2 résidus
+  DÉFÉRÉS** : R8-096 (seuils blur vs échelle blurdetect) + R8-100 (score temporel/V1 fabriqué sur filtre échoué) —
+  tous deux « robustesse-scoring » nécessitant un corpus réel + tiers unknown (décision de calibration).
+  PLAN A (ffmpeg 8.1.1). **Honnêteté** : aucune mesure prouvée sur le mock ; les tests qui mentaient (FilterParsing
+  format bidon, bitrate kbps phantom, mkv scene-mismatch) réécrits sur la réalité.
+- **Filet F4** `w2m3xjy1g` : RELIABLE=true, leurres 0/2, 5 survivants (3 corrigés + 2 différés), 0 leurre passé.
+- **Commits F4** : `23df760` `435006b` `542bdaa` (perceptuel) · `2a337d4` (tmdb) · `258af2a` `6c29b11` (bitrate)
+  · `9df787a` (codec) · `608ced6` (parsing) · `48a8cf9` (dup-scale) · `822b93c` (hdr) · `831d867` (mkv title) ·
+  `8626744` (cancel) · `ba79f28` (filet R8-097/098/099). Checkpoint `f493abdc` intact, **rien poussé**.

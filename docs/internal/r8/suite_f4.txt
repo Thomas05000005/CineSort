@@ -1,0 +1,40 @@
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_keyboard_shortcuts
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_one_view_active_at_a_time
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_validation_view_accessible
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_search_box_exists
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_filters_exist
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_save_button_exists
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_validation_screenshot
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_execution_view_accessible
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_dryrun_toggle_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_apply_button_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_undo_button_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_execution_screenshot
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_default_theme_applied
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_change_theme_to_cinema
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_change_theme_to_neon
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_theme_affects_css_variables
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_theme_on_documentelement
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_visual_regression_accueil
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_restore_studio_theme
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-cinema]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_lifecycle_present_tick_enabled[chromium-3]
+ERROR tests/test_runtime_labels_fr.py::test_sidebar_labels_utf8_strict[chromium-Sidebar nav processing-[data-route="processing"] .v5-sidebar-label-Traitement]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-neon]
+36 failed, 5803 passed, 162 skipped, 32 warnings, 113 errors, 230 subtests passed in 1165.00s (0:19:24)

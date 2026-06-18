@@ -1,0 +1,152 @@
+ERROR    cinesort.ui.api.cinesort_api:cinesort_api.py:463 API_EXCEPTION endpoint=analyze_quality_batch run_id=20260618_221117_781 error_type=OSError error=quality batch boom extra={"continue_on_error": true, "reuse_existing": false, "row_ids_count": 1}
+ERROR    cinesort.ui.api.quality_support:_responses.py:80 api err [runtime]: Impossible de terminer l'analyse qualite.
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_page_displayed[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_valid_token[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_invalid_token[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_empty_token[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_button_disabled_during_request[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_persist_checkbox[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_login_screenshot[chromium]
+FAILED tests/e2e_dashboard/test_dash_01_login.py::TestDashLogin::test_no_js_console_errors_on_load[chromium]
+FAILED tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashApiResilience::test_unauthorized_api_returns_401[chromium]
+FAILED tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashApiResilience::test_invalid_endpoint_returns_404[chromium]
+FAILED tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_double_login_does_not_break[chromium]
+FAILED tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_long_token_does_not_crash[chromium]
+FAILED tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_advanced_exists
+FAILED tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_naming_exists
+FAILED tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_omdb_exists
+FAILED tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_sources_exists
+FAILED tests/test_ci_workflows_pyproject_compat_v77.py::CiWorkflowsCompatTests::test_ci_yml_installs_requirements_or_pyproject
+FAILED tests/test_ci_workflows_pyproject_compat_v77.py::CiWorkflowsCompatTests::test_workflows_install_via_known_patterns
+FAILED tests/test_phase3_1b_cta_health_suggestions.py::IntegrationTests::test_render_accueil_passes_3_args
+FAILED tests/test_phase3_1c_env_inspector_states.py::InspectorContentTests::test_shortcuts_section_lists_keys
+FAILED tests/test_phase4_bibliotheque_endpoints.py::GetLibraryCountersByChipTests::test_unidentified_counted
+FAILED tests/test_phase4_bibliotheque_endpoints.py::ExportFilmsTests::test_export_json_inline_films
+FAILED tests/test_phase4_parametres_endpoints.py::ResetSettingsTests::test_scope_apparence_restores_default_theme
+FAILED tests/test_phase5_bibliotheque_complete.py::BulkActionsWiringTests::test_countdown_3s_if_over_50
+FAILED tests/test_phase5_historique_complete.py::ApplyTabDetailTests::test_apply_op_labels
+FAILED tests/test_phase5_traitement_complete.py::ValidationStepTests::test_bulk_approve_shows_toast_5s
+FAILED tests/test_pyinstaller_smoke.py::PyInstallerSmokeTests::test_exe_starts_and_responds_to_health
+FAILED tests/test_quality_score.py::QualityScoreTests::test_analyze_quality_batch_logs_structured_error_and_returns_clean_message
+FAILED tests/test_refactor_84_progress_v77.py::TestRefactor84LazyImportProgress::test_lazy_imports_bounded
+FAILED tests/test_release_hygiene.py::ReleaseHygieneTests::test_no_personal_strings_in_repo
+FAILED tests/test_release_hygiene.py::RecordApplyOpTests::test_returns_false_on_failure_and_logs
+FAILED tests/test_rest_security.py::RestSecurityHttpTests::test_request_empty_token_returns_401
+FAILED tests/test_rest_security.py::RestSecurityHttpTests::test_request_invalid_token_returns_401
+FAILED tests/test_rest_security.py::RestSecurityHttpTests::test_request_without_auth_returns_401
+FAILED tests/test_rest_security.py::RateLimiterHttpIntegrationTests::test_rate_limiter_returns_429_after_5_failures
+FAILED tests/test_unified_ui_contracts.py::UnifiedUiContractTests::test_app_injects_token_for_native_mode
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_all_nav_buttons_present[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_required_tabs_visible[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_navigate_to_each_view[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_library_workflow_steps[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_active_nav_state_changes[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_keyboard_shortcut_navigation[chromium]
+ERROR tests/e2e_dashboard/test_dash_02_navigation.py::TestDashNavigation::test_escape_closes_modal_if_open[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_library_shows_run_label[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_validation_table_has_15_films[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_validation_table_has_correct_columns[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_search_filters_rows_effectively[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_approve_all_and_save[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_duplicates_section_loads[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_apply_section_has_dry_run[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_confidence_filter_reduces_rows[chromium]
+ERROR tests/e2e_dashboard/test_dash_03_full_workflow.py::TestDashFullWorkflow::test_presets_buttons_exist[chromium]
+ERROR tests/e2e_dashboard/test_dash_04_themes.py::TestDashThemes::test_default_theme_applied[chromium]
+ERROR tests/e2e_dashboard/test_dash_04_themes.py::TestDashThemes::test_switch_theme_via_settings[chromium]
+ERROR tests/e2e_dashboard/test_dash_04_themes.py::TestDashThemes::test_css_variables_change_with_theme[chromium]
+ERROR tests/e2e_dashboard/test_dash_04_themes.py::TestDashThemes::test_theme_persist_after_save[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_refresh_button_reloads_data[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_status_shows_kpi_cards[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_status_shows_health_section[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_data_consistency_status_vs_library[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_quality_view_has_content[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_settings_view_loads[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_logs_view_loads[chromium]
+ERROR tests/e2e_dashboard/test_dash_05_sync_realtime.py::TestDashSync::test_no_console_errors_across_all_views[chromium]
+ERROR tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashSettingsIntegration::test_settings_loads_all_sections[chromium]
+ERROR tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashSettingsIntegration::test_settings_save_button_exists[chromium]
+ERROR tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashSettingsIntegration::test_settings_theme_selector_has_4_options[chromium]
+ERROR tests/e2e_dashboard/test_dash_06_api_resilience.py::TestDashSettingsIntegration::test_settings_animation_selector_exists[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_rapid_navigation_no_crash[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_f5_refresh_reloads_view[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_polling_idle_no_js_errors[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_direct_hash_navigation[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_invalid_hash_redirects[chromium]
+ERROR tests/e2e_dashboard/test_dash_07_edge_cases.py::TestDashEdgeCases::test_all_views_have_content[chromium]
+ERROR tests/test_runtime_apply_history_labels.py::test_apply_history_run_labels_are_french[chromium]
+ERROR tests/test_runtime_apply_history_labels.py::test_apply_history_op_counters_are_french[chromium]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-studio]
+ERROR tests/test_runtime_countdown_lifecycle.py::test_countdown_3_2_1_lifecycle_three_instants[chromium]
+ERROR tests/test_runtime_empty_state.py::test_empty_state_bibliotheque_filter_no_match_then_reset[chromium]
+ERROR tests/test_runtime_empty_state.py::test_empty_state_historique_no_filter_match_then_present[chromium]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_lifecycle_present_tick_enabled[chromium-2]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_close_clears_interval_no_leak[chromium]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_zero_no_disabled_no_span[chromium]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_undo_unmount_cleanup_runtime[chromium]
+ERROR tests/test_runtime_famille_b_toast.py::test_toast_lifecycle_info_appears_then_disappears[chromium]
+ERROR tests/test_runtime_famille_b_toast.py::test_toast_lifecycle_success_with_action[chromium]
+ERROR tests/test_runtime_famille_b_toast.py::test_toast_container_has_aria_live_polite[chromium]
+ERROR tests/test_runtime_famille_b_toast.py::test_toast_dedup_window_merges_identical[chromium]
+ERROR tests/test_runtime_famille_b_toast.py::test_toast_clearall_purges_immediately[chromium]
+ERROR tests/test_runtime_labels_fr.py::test_sidebar_labels_utf8_strict[chromium-Sidebar nav home-[data-route="home"] .v5-sidebar-label-Accueil]
+ERROR tests/test_runtime_labels_fr.py::test_traitement_etape1_label_utf8_strict[chromium]
+ERROR tests/test_runtime_labels_fr.py::test_traitement_etape2_label_utf8_strict[chromium]
+ERROR tests/test_runtime_labels_fr.py::test_rest_api_token_masked_bullets_utf8[chromium]
+ERROR tests/test_runtime_skeleton_lifecycle.py::test_skeleton_bibliotheque_lifecycle_present_then_replaced[chromium]
+ERROR tests/test_runtime_skeleton_lifecycle.py::test_skeleton_historique_lifecycle_present_then_replaced[chromium]
+ERROR tests/test_runtime_toast_lifecycle.py::test_toast_save_settings_lifecycle_absent_present_absent[chromium]
+ERROR tests/test_runtime_toast_lifecycle.py::test_toast_error_lifecycle_long_duration_then_absent[chromium]
+ERROR tests/test_runtime_unmount_no_poll.py::test_unmount_traitement_stops_polling_runtime[chromium]
+ERROR tests/test_runtime_unmount_no_poll.py::test_unmount_accueil_stops_dashboard_polling_runtime[chromium]
+ERROR tests/e2e_desktop/test_01_launch.py::TestAppLaunch::test_app_starts - F...
+ERROR tests/e2e_desktop/test_01_launch.py::TestAppLaunch::test_sidebar_visible
+ERROR tests/e2e_desktop/test_01_launch.py::TestAppLaunch::test_accueil_loaded
+ERROR tests/e2e_desktop/test_01_launch.py::TestAppLaunch::test_accueil_screenshot
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_core_views[home]
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_core_views[library]
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_core_views[quality]
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_core_views[logs]
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_core_views[settings]
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_navigate_all_views_screenshot
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_keyboard_shortcuts
+ERROR tests/e2e_desktop/test_02_navigation.py::TestNavigation::test_one_view_active_at_a_time
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_validation_view_accessible
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_search_box_exists
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_filters_exist
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_save_button_exists
+ERROR tests/e2e_desktop/test_04_validation.py::TestValidation::test_validation_screenshot
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_execution_view_accessible
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_dryrun_toggle_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_apply_button_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_undo_button_exists
+ERROR tests/e2e_desktop/test_05_apply.py::TestApply::test_execution_screenshot
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_default_theme_applied
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_change_theme_to_cinema
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_change_theme_to_neon
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_theme_affects_css_variables
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_theme_on_documentelement
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_visual_regression_accueil
+ERROR tests/e2e_desktop/test_06_themes.py::TestThemes::test_restore_studio_theme
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-cinema]
+ERROR tests/test_runtime_famille_b_countdown.py::test_countdown_lifecycle_present_tick_enabled[chromium-3]
+ERROR tests/test_runtime_labels_fr.py::test_sidebar_labels_utf8_strict[chromium-Sidebar nav processing-[data-route="processing"] .v5-sidebar-label-Traitement]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-4.5-Texte primaire sur fond principal-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_tier_colors_invariant_runtime[chromium-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-primary---bg-raised-4.5-Texte primaire sur carte elevee-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-secondary---bg-4.5-Texte secondaire sur fond-neon]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-studio]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-cinema]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-luxe]
+ERROR tests/test_runtime_contrast_wcag.py::test_contrast_runtime_wcag_aa[chromium---text-muted---bg-3.0-Texte muet sur fond (large/UI)-neon]
+37 failed, 5803 passed, 162 skipped, 32 warnings, 113 errors, 229 subtests passed in 1117.78s (0:18:37)
