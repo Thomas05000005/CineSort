@@ -197,8 +197,14 @@ _TRAILING_LANG_TOKENS_RE = re.compile(
 # (DTS-HD Master Audio / High Resolution Audio) sont matches UNIQUEMENT en
 # majuscules via le flag scope (?-i:...) -> on strippe le tag audio "MA" mais
 # PAS le mot de titre title-case "Ma" ("Ma Vie de Courgette").
+# R8-040 (F4) : préfixe DD/DDP optionnel COLLÉ au nombre de canaux. Après
+# `name.replace('.',' ')`, "DD5.1" devient "DD5 1" : le `\b` devant `[257]`
+# échoue (le 5 est précédé d'une lettre, pas de frontière de mot) -> "DD5 1"/
+# "DDP5 1"/"DD7 1" restait et polluait la query TMDb. Le `(?:ddp?)?` optionnel
+# absorbe le préfixe sans toucher le strip release-group (R1/R4) ; le séparateur
+# OBLIGATOIRE `[\s.]` entre canal et `.1` reste (anti "21 Jump Street"/"50"/"71").
 _AUDIO_RESIDUE_RE = re.compile(
-    r"\b(?:[257][\s.][01]|atmos|(?-i:MA|HRA))\b",
+    r"\b(?:(?:ddp?)?[257][\s.][01]|atmos|(?-i:MA|HRA))\b",
     re.IGNORECASE,
 )
 
