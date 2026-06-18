@@ -1036,3 +1036,13 @@ RELIABLE=true (taux faux-positifs panel 0%). Décoys 0/2. 3 corrigés (HDR + 2 r
   commentaire). Scan AST des méthodes test_* sans assertion : 146 brut -> 34 hors e2e/visual -> TOUTES
   légitimes (smoke/no-raise type `_assert_https`, délégué `_node_check`/`_assert_loaded_after_await`, mock,
   import-smoke, skip). **0 nouveau test menteur** apparu depuis l'Étape 0 (les 2 d'origine traités).
+
+### Filet F6-a (workflow wf_3e044bd9, RELIABLE=true)
+3 finders (a11y-contraste / focus-trap / tests-menteurs) + panel 3 sceptiques asymétriques + 2 leurres.
+**RELIABLE=true : 0/2 leurres passés** (« reset modal n'a toujours pas trapFocus » et « omdb-error encore
+#b91c1c 2,9:1 » correctement réfutés 0/3 — les fixes R8-076/078 tiennent). **7 résidus confirmés (3/3)** :
+TOUS des overlays custom aria-modal sans focus-trap (même famille que R8-078) -> **corrigés en salve**
+(R8-078b `901c06c`) : command-palette, demo-wizard, processing (drawer inspecteur), aide (drawer doc),
+library-advanced-drawer, qualite-filters-drawer, film-detail (recherche TMDb manuelle). Le candidat
+a11y-contraste (.parametres-tier-badge--bronze) a été **RÉFUTÉ** (0/3) -> pas de fix.
+Verdict : RELIABLE=true (faux-positifs panel 0%), 7 corrigés (focus-trap), 0 enregistré.
