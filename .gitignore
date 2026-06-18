@@ -92,3 +92,12 @@ ci_log.txt
 # Ne JAMAIS commit. Cf docs/RELEASE.md section "Bundle WebView2".
 webview2_fixed/
 webview2_fixed.cab
+
+# R8 F6-b option (a) : artefacts REGENERABLES sortis du suivi (disque intact,
+# historique passe inchange — la purge historique = chantier separe). Cf
+# docs/internal/r8/F6B_GIT_ANALYSIS.md. NE PAS confondre avec baseline_r8/ et
+# docs/internal/r8/ (preuves R8, restent suivies).
+docs/internal/observe/
+dist_backup_*/
+test_library/
+FAIL_*.png
