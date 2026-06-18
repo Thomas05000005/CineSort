@@ -138,8 +138,12 @@ def analyze_loudnorm(
         "loudnorm=print_format=json",
         "-f",
         "null",
+        # R8-034 (F4) : loudnorm imprime son JSON via av_log au niveau INFO sur
+        # stderr. "-v quiet" supprimait TOUT -> stderr vide -> analyze_loudnorm
+        # renvoyait None -> loudness EBU R128 JAMAIS mesurée. "-v info" (comme
+        # analyze_astats) laisse le bloc JSON atteindre stderr (vérifié ffmpeg 8.1.1).
         "-v",
-        "quiet",
+        "info",
         "-",
     ]
     rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
