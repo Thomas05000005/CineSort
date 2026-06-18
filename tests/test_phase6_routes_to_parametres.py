@@ -33,7 +33,6 @@ _RADARR_JS = _DASH / "views" / "radarr.js"
 _PLEX_JS = _DASH / "views" / "plex.js"
 _JELLYFIN_JS = _DASH / "views" / "jellyfin.js"
 _DEMO_WIZARD_JS = _DASH / "views" / "demo-wizard.js"
-_QIJ_JS = _DASH / "views" / "qij.js"
 _PARAMETRES_JS = _DASH / "views" / "parametres.js"
 
 
@@ -78,13 +77,9 @@ class NoLegacySettingsLinkTests(unittest.TestCase):
             "demo-wizard.js ne doit plus inserer de lien HTML vers #/settings",
         )
 
-    def test_qij_view_has_no_settings_link(self) -> None:
-        content = _read(_QIJ_JS)
-        self.assertNotIn(
-            '"#/settings"',
-            content,
-            "qij.js (bouton Paramètres intégrations) ne doit plus pointer vers /settings",
-        )
+    # R8-046 (F5) : test_qij_view_has_no_settings_link RETIRÉ — views/qij.js supprimé
+    # (vue morte, split QIJ->qualite). qualite.js n'expose pas de lien intégrations ;
+    # l'invariant deep-link /parametres#integrations reste couvert par radarr/plex/jellyfin.
 
 
 class DeepLinkPresenceTests(unittest.TestCase):
@@ -123,12 +118,9 @@ class DeepLinkPresenceTests(unittest.TestCase):
             "demo-wizard.js doit deep-linker la bannière vers /parametres#sources",
         )
 
-    def test_qij_button_links_to_integrations_dynamic(self) -> None:
-        content = _read(_QIJ_JS)
-        # Le bouton Paramètres construit dynamiquement "#/parametres#integrations-<id>"
-        # a partir de data-integ-settings.
-        self.assertIn("#/parametres", content)
-        self.assertIn("integrations-", content)
+    # R8-046 (F5) : test_qij_button_links_to_integrations_dynamic RETIRÉ — views/qij.js
+    # supprimé (vue morte). Le deep-link dynamique /parametres#integrations-<id> reste
+    # couvert par radarr/plex/jellyfin ci-dessus.
 
 
 class ParametresFragmentSupportTests(unittest.TestCase):
