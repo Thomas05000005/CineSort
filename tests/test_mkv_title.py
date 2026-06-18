@@ -54,9 +54,15 @@ class CheckContainerTitleTests(unittest.TestCase):
         self.assertEqual(check_container_title("inception", "Inception"), [])
         self.assertEqual(check_container_title("INCEPTION", "Inception"), [])
 
-    def test_scene_title_mismatch(self) -> None:
-        """Titre scene → warning mkv_title_mismatch."""
+    def test_scene_title_same_film_no_mismatch(self) -> None:
+        """R8-044 (F4) : un nom de release scene DU MÊME film ne doit PAS flaguer
+        (88 % de faux positifs avant). Les tokens de titre 'inception' sont inclus."""
         flags = check_container_title("Inception.2010.1080p.BluRay.x264-SPARKS", "Inception")
+        self.assertEqual(flags, [])
+
+    def test_scene_title_different_film_mismatch(self) -> None:
+        """R8-044 : un nom de release scene d'un AUTRE film flague toujours."""
+        flags = check_container_title("The.Matrix.1999.1080p.BluRay.x264-SPARKS", "Inception")
         self.assertEqual(flags, ["mkv_title_mismatch"])
 
     def test_different_clean_title(self) -> None:
