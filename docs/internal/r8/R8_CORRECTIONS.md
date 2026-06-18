@@ -964,3 +964,35 @@ Suite de F5 PARTIELLE. Les 7 FORK-DESIGN tranchés par Thomas appliqués + retra
   **0 nouvel échec déterministe** vs baseline F3. Seuls échecs = pré-existants (test_apply_op_labels,
   4× SettingsDispatcherSections [refactor lock wrapper pré-R8], test_bulk_approve_shows_toast_5s,
   3× bibliotheque). py_compile + node --check OK partout.
+
+---
+
+## ═══ FILET F5 (workflow wf_b1348d50, RELIABLE=true) — 2026-06-19 ═══
+
+Filet adversarial : 3 finders (dead-links / toggles fantômes / contrats résiduels) + panel 3 sceptiques
+à asymétrie d'info + 2 leurres de calibration. **RELIABLE=true : 0/2 leurres passés** (les 2 claims faux
+— qij.js encore importé, toggle theme fantôme — correctement réfutés 0/3). 6 résidus confirmés.
+
+### Corrigés en salve (résidus triviaux + 1 bug réel de mon propre fix)
+- **R8-056b (HDR, 3/3 votes)** `6843e0c` : MON fix R8-056 oubliait de remonter `hdr_analysis` (sibling de
+  resolution sous video_perceptual) -> `d.hdr_analysis` undefined -> la modale affichait « sdr » FAUX pour
+  TOUS les films (y compris vrais HDR10/DV/HLG), valeur fausse et non « unknown » (faux silencieux F4).
+  Fix : lever hdr_analysis au top-level. Diff : HDR10 « sdr »->« hdr10 ».
+- **R8-101 (windows_safe, 3/3)** `e0a71d1` : toggle fantôme — windows_safe() appliquée INCONDITIONNELLEMENT
+  (aucun gate). Retiré (l'échappement Windows reste toujours actif = sécurité).
+- **R8-102 (entrées de route mortes, 2/3)** `cd2587d` : new_rejects/duplicates_to_resolve dans
+  _INSIGHT_ROUTE_BY_TYPE morts après le re-keying R8-049 (-> quality_reject/duplicates_probable). Retirés.
+
+### Enregistrés (NON tranchés — câbler vs retirer = décision produit, comme R8-063)
+- **cleanup_empty_folders** (3/3) : toggle « Supprimer les dossiers vides après apply » write-only (absent de
+  Config/build_cfg). DISTINCT de move_empty_folders_enabled (« Déplacer », bien câblé). Câbler une SUPPRESSION
+  de dossiers vides vs retirer le fantôme = décision Thomas (intention distincte du move).
+- **excluded_patterns** (3/3) : champ « motifs d'exclusion » write-only — le moteur de scan ne lit JAMAIS
+  excluded_patterns. AUCUN hook d'exclusion n'existe dans app/ ou domain/ : câbler = feature scan neuve.
+  Câbler les exclusions de scan (vraie feature utile) vs retirer le fantôme = décision Thomas.
+- **cleanup_orphans** (3/3) : re-confirme R8-063 déjà SIGNALÉ (destructif, gouvernance quarantaine F1).
+
+### Verdict filet
+RELIABLE=true (taux faux-positifs panel 0%). Décoys 0/2. 3 corrigés (HDR + 2 résidus), 3 enregistrés
+(cleanup_empty_folders, excluded_patterns, cleanup_orphans) pour arbitrage — tous des phantom-features
+« câbler vs retirer » alignés sur le pattern R8-063/F-PROM-02.
