@@ -97,8 +97,8 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "subtitles", label: "Sous-titres", fields: [
         { key: "subtitle_detection_enabled", label: "Détection sous-titres externes", type: "toggle" },
-        { key: "subtitle_lang_priority", label: "Priorité des langues", type: "text", placeholder: "fr;en;original",
-          hint: "Séparées par ; (la première trouvée est la principale)." },
+        // R8-065-lang (F5) : champ "subtitle_lang_priority" RETIRÉ — fantôme write-only jamais
+        // lu (la clé consommée par le pipeline sous-titres est subtitle_expected_languages).
         { key: "subtitle_expected_languages", label: "Langues attendues", type: "text", placeholder: "fr;en", hint: "Séparées par ;", advanced: true },
       ]},
       { id: "scoring", label: "Scoring qualité", fields: [

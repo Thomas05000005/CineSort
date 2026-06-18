@@ -1708,12 +1708,8 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["cleanup_orphans"] = to_bool(payload.get("cleanup_orphans"), False)
     if "cleanup_empty_folders" in payload:
         out["cleanup_empty_folders"] = to_bool(payload.get("cleanup_empty_folders"), False)
-    if "subtitle_lang_priority" in payload:
-        raw = payload.get("subtitle_lang_priority")
-        if isinstance(raw, list):
-            out["subtitle_lang_priority"] = [str(c).strip().lower()[:3] for c in raw if str(c).strip()]
-        elif isinstance(raw, str):
-            out["subtitle_lang_priority"] = [c.strip().lower()[:3] for c in raw.split(",") if c.strip()]
+    # R8-065-lang (F5) : "subtitle_lang_priority" RETIRÉ — fantôme write-only jamais lu par
+    # le pipeline sous-titres (la clé consommée est subtitle_expected_languages).
     return out
 
 
