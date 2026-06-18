@@ -1447,7 +1447,7 @@ def _filename_from_row(r: Any) -> str:
     return "?"
 
 
-def _quality_info_for_row(store: Any, run_id: str, r: Any) -> Dict[str, Any]:
+def _quality_info_for_row(store: Any, run_id: str, r: Any, probe: Any = None) -> Dict[str, Any]:
     rid = str((r.get("row_id") if isinstance(r, dict) else "") or "")
     qr: Optional[Dict[str, Any]] = None
     if store and rid:
@@ -1455,9 +1455,27 @@ def _quality_info_for_row(store: Any, run_id: str, r: Any) -> Dict[str, Any]:
             qr = store.quality.get_quality_report(run_id=run_id, row_id=rid)
         except (OSError, KeyError, TypeError, ValueError):
             qr = None
+    info: Dict[str, Any] = {"score": 0, "tier": ""}
     if qr and isinstance(qr, dict):
-        return {"score": int(qr.get("score") or 0), "tier": str(qr.get("tier") or "")}
-    return {"score": 0, "tier": ""}
+        info = {"score": int(qr.get("score") or 0), "tier": str(qr.get("tier") or "")}
+    # R8-059 (F5) : codec / résolution / audio depuis le probe — doublons.js
+    # (cartes A/B, L375-388) lit qualityA.codec/.resolution/.audio_codec, jamais
+    # fournis AVANT (seuls score+tier renvoyés) -> lignes Codec/Résolution/Audio
+    # jamais affichées.
+    if isinstance(probe, dict):
+        video = probe.get("video") or {}
+        codec = str(video.get("codec") or "")
+        if codec:
+            info["codec"] = codec
+        w, h = video.get("width"), video.get("height")
+        if w and h:
+            info["resolution"] = f"{int(w)}x{int(h)}"
+        tracks = probe.get("audio_tracks") or []
+        if tracks and isinstance(tracks[0], dict):
+            ac = str(tracks[0].get("codec") or "")
+            if ac:
+                info["audio_codec"] = ac
+    return info
 
 
 def _verdict_for(winner: str, side: str) -> str:
@@ -1474,6 +1492,8 @@ def _build_comparison_payload(
     row_b: Dict[str, Any],
     store: Any,
     run_id: str,
+    probe_a: Any = None,
+    probe_b: Any = None,
 ) -> Dict[str, Any]:
     winner = result.winner
     return {
@@ -1487,8 +1507,8 @@ def _build_comparison_payload(
         "size_savings": result.size_savings,
         "file_a_name": _filename_from_row(row_a),
         "file_b_name": _filename_from_row(row_b),
-        "quality_a": _quality_info_for_row(store, run_id, row_a),
-        "quality_b": _quality_info_for_row(store, run_id, row_b),
+        "quality_a": _quality_info_for_row(store, run_id, row_a, probe_a),
+        "quality_b": _quality_info_for_row(store, run_id, row_b, probe_b),
         "verdict_a": _verdict_for(winner, "a"),
         "verdict_b": _verdict_for(winner, "b"),
         "criteria": [
@@ -1516,7 +1536,9 @@ def _enrich_one_group(group: Dict[str, Any], run_id: str, store: Any) -> None:
         result = compare_duplicates(probes[0], probes[1])
     except (OSError, KeyError, TypeError, ValueError):
         return
-    group["comparison"] = _build_comparison_payload(result, rows[0], rows[1], store, run_id)
+    group["comparison"] = _build_comparison_payload(
+        result, rows[0], rows[1], store, run_id, probes[0], probes[1]  # R8-059 : probes -> codec/résolution/audio
+    )
 
 
 def _enrich_groups_with_quality_comparison(
@@ -1527,6 +1549,40 @@ def _enrich_groups_with_quality_comparison(
     """Enrichit les groupes de doublons avec une comparaison qualite si les probes sont disponibles."""
     for group in data.get("groups") or []:
         _enrich_one_group(group, run_id, store)
+
+
+def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: Any) -> None:
+    """R8-057 (F5) : joint les décisions doublons PERSISTÉES (table duplicate_decisions)
+    au payload check_duplicates -> `winner_decided`/`winner_side`/`winner_row_id`.
+
+    AVANT : check_duplicates ne relisait JAMAIS la décision -> au refresh le badge
+    « Décidé » disparaissait (decidedCount=0), bien que la décision soit persistée
+    et honorée à l'apply. On indexe les décisions par `group_key` (même clé que
+    mark_duplicate_winner via `_group_key_for`) et on annote chaque groupe.
+    """
+    apply_repo = getattr(store, "apply", None) if store else None
+    lister = getattr(apply_repo, "list_duplicate_decisions", None)
+    if not callable(lister):
+        return
+    try:
+        decisions = lister(run_id=run_id)
+    except (OSError, KeyError, TypeError, ValueError):
+        return
+    by_key = {str(d.get("group_key") or ""): d for d in (decisions or []) if d.get("group_key")}
+    if not by_key:
+        return
+    for group in data.get("groups") or []:
+        dec = by_key.get(_group_key_for(group))
+        if not dec:
+            continue
+        winner_row_id = str(dec.get("winner_row_id") or "")
+        group["winner_decided"] = True
+        group["winner_row_id"] = winner_row_id
+        rows = group.get("rows") or []
+        for idx, item in enumerate(rows[:2]):
+            if str((item or {}).get("row_id") or "") == winner_row_id and winner_row_id:
+                group["winner_side"] = "a" if idx == 0 else "b"
+                break
 
 
 def _compute_size_savings_total(data: Dict[str, Any]) -> int:
@@ -1781,6 +1837,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             safe = _browse_all_if_none_approved(rows, safe)  # R5-J : vue = navigateur
             data = _find_dups(rs.cfg, rows, safe)
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
+            _annotate_groups_with_decisions(data, run_id, rs.store)  # R8-057
             data["size_savings_total"] = _compute_size_savings_total(data)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -1811,6 +1868,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         cfg = api._cfg_from_run_row(row)
         data = _find_dups(cfg, rows, safe)
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
+        _annotate_groups_with_decisions(data, run_id, found_store)  # R8-057
         data["size_savings_total"] = _compute_size_savings_total(data)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
