@@ -13,6 +13,7 @@ from dataclasses import asdict as _asdict
 from dataclasses import is_dataclass as _is_dc
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.confidence_thresholds import confidence_label_fr
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.conversions import to_float as _to_float
@@ -637,12 +638,26 @@ def _has_vf(langs: List[str]) -> bool:
     return any(lang in {"fr", "fra", "fre", "french", "vf", "vff", "vfi"} for lang in langs)
 
 
+def _audio_codec_rank(track: Dict[str, Any]) -> int:
+    """R8-039 (F4) : rang codec audio (source de vérité `codec_ranks`, lookup exact),
+    aligné sur `duplicate_compare._audio_codec_rank_value`."""
+    codec = str(track.get("codec") or "").strip().lower()
+    return _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+
+
 def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not audio_tracks:
         return {}
+    # R8-039 (F4) : trier par RANG CODEC d'abord (lossless > lossy), puis canaux,
+    # puis bitrate. AVANT : `max(channels, bitrate)` codec-AVEUGLE -> sur un film
+    # TrueHD/Atmos + piste lossy compatible (même nb de canaux, bitrate « brut »
+    # parfois supérieur), choisissait la LOSSY -> étiquette codec fausse (eac3/dts
+    # affiché au lieu de truehd). Divergeait de `duplicate_compare._best_audio`
+    # (113 films, h6_best_audio_divergence). Désormais alignés.
     return max(
         audio_tracks,
         key=lambda t: (
+            _audio_codec_rank(t),
             _to_int(t.get("channels"), 0),
             _to_int(t.get("bitrate"), 0),
         ),
