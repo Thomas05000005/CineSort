@@ -227,7 +227,11 @@ import { initTraitement, unmountTraitement } from "./views/traitement.js"; // /t
 import { initBibliotheque, unmountBibliotheque } from "./views/bibliotheque.js"; // /bibliotheque
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
-import { initFilmDetail } from "./views/film-detail.js"; // /film/:id (pas de page v4)
+// D1 (R8 seam #3) : la vue standalone views/film-detail.js (jumeau buggé R8-053/054/055)
+// est SUPPRIMÉE. La route /film/:id est servie par le COMPOSANT (mode B = page standalone,
+// conçu pour /film/:id) — flux d'id identique (route id -> row_id -> library/get_film_full),
+// donc 0 lien mort et 0 changement d'appelant (home-widgets/qualite/historique).
+import { renderFilmDetail } from "./components/film-detail.js";
 
 // === Helpers UI legacy preserves ===
 import { initKeyboard } from "./core/keyboard.js";
@@ -272,7 +276,9 @@ function _legacyRedirect(legacyName, canonicalRoute) {
 registerRoute("/film/:id", {
   view: "view-film-detail",
   guard: requireAuth,
-  init: (el, opts) => initFilmDetail(el, { filmId: opts && opts.params ? opts.params.id : undefined }),
+  // D1 : rendu par le composant (mode B), plus la vue standalone supprimée.
+  init: (el, opts) =>
+    renderFilmDetail({ mode: "B", rowId: opts && opts.params ? opts.params.id : undefined, container: el }),
 });
 // /processing reste fonctionnelle : utilisee en INTERNE par traitement.js et
 // qij.js comme etape stepper du workflow (scan -> review -> apply). Mount
