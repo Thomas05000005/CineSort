@@ -288,6 +288,11 @@ def _execute_perceptual_analysis(
             width=width,
             height=height,
         )
+        # R8-043 (F4) : reporter le type HDR détecté par le probe (métadonnée
+        # couleur bt2020/smpte2084/hlg...) sur le modèle perceptuel -> exposé en
+        # hdr_analysis dans to_dict -> la modale affiche le vrai format (plus « sdr »
+        # systématique). hdr_type vide/absent -> reste "sdr".
+        video_local.hdr_type = str(video_info.get("hdr_type") or "sdr")
         tmdb_meta = _load_tmdb_metadata(api, row)
         # §15 v7.5.0 : utilise analyze_grain_v2 si Grain Intelligence active
         if p_settings.get("grain_intelligence_enabled"):
