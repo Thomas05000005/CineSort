@@ -274,8 +274,9 @@ export const PARAMETRES_GROUPS = [
         { key: "animation_level", label: "Niveau d'animation", type: "select", options: [
           {v:"subtle",l:"Subtil"},{v:"moderate",l:"Modéré"},{v:"intense",l:"Intense"},
         ], livePreview: "animation" },
-        { key: "animations_enabled", label: "Activer les animations", type: "toggle",
-          hint: "Décocher pour une interface 100% statique (utile sur PC bas de gamme).", advanced: true },
+        // R8-067 (F5) : toggle "animations_enabled" RETIRÉ — fantôme cosmétique jamais
+        // consommé (aucun JS ne lit s.animations_enabled). L'intensité d'animation est
+        // pilotée par animation_level (sélecteur au-dessus : subtil/modéré/intense).
       ]},
       { id: "effects", label: "Effets visuels", fields: [
         { key: "effect_speed", label: "Vitesse animations (%)", type: "range", min: 0, max: 100, default: 50, advanced: true, livePreview: "effect_speed" },

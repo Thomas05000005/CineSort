@@ -1702,8 +1702,8 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     # traite plus ici (l'ancien clamp [1..32] etait incoherent ET ecrase ensuite).
     if "desktop_notifications_enabled" in payload:
         out["desktop_notifications_enabled"] = to_bool(payload.get("desktop_notifications_enabled"), False)
-    if "animations_enabled" in payload:
-        out["animations_enabled"] = to_bool(payload.get("animations_enabled"), True)
+    # R8-067 (F5) : "animations_enabled" RETIRÉ — fantôme cosmétique jamais consommé
+    # (intensité pilotée par animation_level).
     if "cleanup_orphans" in payload:
         out["cleanup_orphans"] = to_bool(payload.get("cleanup_orphans"), False)
     if "cleanup_empty_folders" in payload:
