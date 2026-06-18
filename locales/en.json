@@ -560,6 +560,7 @@
       "processing": "Processing",
       "library": "Library",
       "quality": "Quality",
+      "doublons": "Duplicates",
       "history": "History",
       "qij": "QIJ",
       "settings": "Settings",
