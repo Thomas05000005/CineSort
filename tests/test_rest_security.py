@@ -236,13 +236,25 @@ class RestSecurityHttpTests(unittest.TestCase):
         self.assertEqual(cors, "", "Plus de ACAO:* par defaut")
 
     def test_cors_echoes_localhost_origin(self) -> None:
-        """Une Origin localhost (dashboard same-origin desktop) est reflechie."""
+        """Une Origin localhost sur le PORT D'ECOUTE (dashboard same-origin desktop)
+        est reflechie. R8-031 (F3) : seul le port effectif du serveur est autorise."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": f"http://127.0.0.1:{self.port}"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, f"http://127.0.0.1:{self.port}")
+
+    def test_cors_rejects_localhost_other_port(self) -> None:
+        """R8-031 (F3) : une Origin loopback sur un AUTRE port (2e app locale
+        hostile, http://127.0.0.1:9999) n'est PLUS reflechie — fermait la CSRF
+        que le bypass auth loopback permettait depuis une autre app locale."""
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request("OPTIONS", "/api/get_settings", headers={"Origin": "http://127.0.0.1:9999"})
         resp = conn.getresponse()
         cors = resp.getheader("Access-Control-Allow-Origin", "")
         conn.close()
-        self.assertEqual(cors, "http://127.0.0.1:9999")
+        self.assertEqual(cors, "", "origine loopback sur autre port non reflechie (R8-031)")
 
     def test_cors_rejects_external_origin(self) -> None:
         """Une Origin externe (site malveillant) ne recoit aucune ACAO."""

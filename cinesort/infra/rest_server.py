@@ -404,7 +404,8 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     def _allowed_origin(self, origin: Optional[str]) -> Optional[str]:
         """Retourne l'Origin a refleter dans ACAO si elle est autorisee, sinon None.
 
-        Autorise : localhost (127.0.0.1 / localhost / ::1, tout port et scheme),
+        Autorise : localhost (127.0.0.1 / localhost / ::1) UNIQUEMENT sur le port
+        d'ecoute du serveur (R8-031, F3 ; scheme libre, port contraint),
         l'origine PROPRE du serveur (meme Host -> dashboard LAN auto-servi), ou
         la `cors_origin` explicitement configuree (non '*'). Toute autre origine
         (un site web externe) est refusee : ferme la lecture cross-site et, via
@@ -414,11 +415,28 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         if not o or o.lower() == "null":
             return None
         try:
-            host = (urlsplit(o).hostname or "").lower()
+            parts = urlsplit(o)
+            host = (parts.hostname or "").lower()
         except ValueError:
             return None
         if host in {"127.0.0.1", "localhost", "::1"}:
-            return o
+            # R8-031 (F3) : n'autoriser le loopback QUE sur le port d'ecoute
+            # effectif du serveur. Sans ce controle, une 2e app locale hostile
+            # (ex. http://localhost:9999) etait traitee comme origine autorisee
+            # -> sa requete passait la garde CSRF via le bypass auth loopback.
+            # Le scheme reste libre (http/https loopback), seul le PORT doit
+            # matcher. own_port indeterminable (tests sans socket) -> on autorise
+            # (ne casse pas l'usage local quand on ne peut pas introspecter).
+            try:
+                origin_port = parts.port
+            except ValueError:
+                return None
+            if origin_port is None:
+                origin_port = 443 if (parts.scheme or "").lower() == "https" else 80
+            own_port = self._own_port()
+            if own_port is None or origin_port == own_port:
+                return o
+            return None
         # Same-origin : Origin == scheme://<Host> (cas du dashboard servi en LAN
         # depuis 0.0.0.0 ou l'utilisateur ouvre http://<ip-lan>:8642).
         own_host = (self.headers.get("Host") or "").strip().lower()
@@ -427,6 +445,31 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         cfg = (self.cors_origin or "").strip()
         if cfg and cfg != "*" and o == cfg:
             return o
+        return None
+
+    def _own_port(self) -> Optional[int]:
+        """Port d'ecoute effectif du serveur (R8-031, F3).
+
+        Prefere `server.server_address[1]` (non spoofable). Fallback : le port du
+        header `Host` (cas navigateur : le browser y met l'autorite cible, donc le
+        vrai port). None si indeterminable (handler de test sans socket ni Host).
+        """
+        srv = getattr(self, "server", None)
+        addr = getattr(srv, "server_address", None) if srv is not None else None
+        if addr and len(addr) >= 2:
+            try:
+                return int(addr[1])
+            except (TypeError, ValueError):
+                pass
+        try:
+            host_hdr = (self.headers.get("Host") or "").strip()
+        except AttributeError:
+            return None
+        if ":" in host_hdr:
+            try:
+                return int(host_hdr.rsplit(":", 1)[1])
+            except ValueError:
+                return None
         return None
 
     def _is_forbidden_cross_site(self) -> bool:
