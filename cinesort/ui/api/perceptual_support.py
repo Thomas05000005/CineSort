@@ -130,6 +130,13 @@ def _flatten_perceptual_for_modal(report: Dict[str, Any]) -> Dict[str, Any]:
             report["width"] = res.get("width")
         if report.get("height") is None:
             report["height"] = res.get("height")
+    # R8-056b (filet F5) : remonter hdr_analysis (sibling de resolution sous
+    # video_perceptual). OUBLIÉ par le flatten initial -> d.hdr_analysis undefined ->
+    # la modale retombait sur « sdr » pour TOUS les films (y compris vrais HDR10/DV/HLG),
+    # valeur FAUSSE et non « unknown » : résultat faux silencieux (famille F4).
+    hdr = vid.get("hdr_analysis")
+    if isinstance(hdr, dict) and not report.get("hdr_analysis"):
+        report["hdr_analysis"] = hdr
     if report.get("global_tier_v2") and not report.get("display_tier"):
         report["display_tier"] = report["global_tier_v2"]
     payload = report.get("global_score_v2_payload")
