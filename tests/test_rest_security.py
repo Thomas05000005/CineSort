@@ -285,10 +285,11 @@ class RestSecurityHttpTests(unittest.TestCase):
         )
         self.assertNotEqual(status, 403, "le dashboard same-origin ne doit pas etre bloque")
 
-    def test_cors_configurable_explicit_still_emitted(self) -> None:
-        """Backward compat : une cors_origin explicite reste emise meme sans Origin."""
-        # Couvert par test_cors_can_be_restricted_explicitly ci-dessous.
-        self.assertTrue(True)
+    # R8-087/F6-a : test_cors_configurable_explicit_still_emitted RETIRÉ — c'était un no-op
+    # menteur (assertTrue(True), 0 assertion réelle). Son intention (« cors_origin explicite
+    # émise même sans Origin ») est DÉJÀ couverte par test_cors_can_be_restricted_explicitly
+    # ci-dessous, qui envoie un OPTIONS SANS header Origin et asserte que la valeur configurée
+    # est bien émise dans Access-Control-Allow-Origin. Redondant -> retiré.
 
     def test_cors_can_be_restricted_explicitly(self) -> None:
         """Si rest_api_cors_origin est configure, la valeur est respectee."""
