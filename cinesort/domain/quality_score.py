@@ -558,11 +558,14 @@ def _normalize_audio_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
     n = _to_float(raw_bitrate, -1.0)
     if n <= 0:
         return None
-    # > 10000 : forcement bps (10 Mbps audio n'existe pas pour un seul flux,
-    # plafond pratique TrueHD/DTS-HD MA ~6-9 Mbps lossless).
-    if n > 10000.0:
-        return int(round(n / 1000.0))
-    return int(round(n))
+    # R8-038 (F4) : le bitrate stocké est TOUJOURS en bits/s. La couche probe
+    # normalise tout via `conversions.to_optional_bitrate` (ffprobe `bit_rate` =
+    # bps ; mediainfo `BitRate` = bps ; toute unité Kb/s/Mb/s convertie en bps).
+    # L'ancien seuil « > 10000 -> /1000, sinon tel quel » lisait un flux ~8 kbps
+    # (8000 bps, mono dégradé) comme 8000 kbps -> per_channel énorme -> bonus
+    # « débit audio élevé » au lieu du malus (inversion de signe). On divise
+    # INCONDITIONNELLEMENT par 1000 (bps -> kbps), conforme à l'invariant probe.
+    return int(round(n / 1000.0))
 
 
 # Backward-compat alias (callers externes potentiels). Pointe vers la variante
