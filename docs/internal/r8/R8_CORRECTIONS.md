@@ -610,3 +610,103 @@ Baseline cassé figé : `../baseline_r8/captures/v5_tv_apply_repro.out.txt` (TV1
   self-heal **unique et cohérent** (R8-019 ordonné avant l'élargissement du set de tables requises).
 - **17 commits F2** (hors journal) : `da09ff9` · `2fd4f63` `0cd24a1` · `1eb7916` `de28c50` `bab8070` `32dedb7` ·
   `c29a48e` `e21a004` `afb504c` `39d80aa` `8628e42` `43088fc` `cd663d2` `a64789b`. Checkpoint `f493abdc` **intact**, **rien poussé**.
+
+---
+
+## ═══ FAMILLE F3 — SÉCURITÉ (surfaces d'attaque) — 2026-06-18 ═══
+
+> Règle d'acceptation ADAPTÉE : **DOUBLE différentiel** par finding — (1) l'attaque qui réussissait AVANT
+> échoue APRÈS (vecteur fermé) ; (2) l'usage loopback LÉGITIME continue de marcher. **INVARIANT : le bypass
+> loopback légitime (client 127.0.0.1 + bind 127.0.0.1) n'est jamais cassé — on ferme la porte aux attaquants,
+> pas à l'utilisateur local.** Repros d'attaque via requêtes forgées sur instance/fixtures de test.
+
+### Ordre par gravité : BINAIRE ARBITRAIRE → GET NON GARDÉS → PORT/ORIGINE
+
+### R8-032 — BINAIRE ARBITRAIRE (ffprobe exec, asymétrie save/exec) — `8adeff2`
+- **Vecteur** : `settings.json` place `ffprobe_path` sur un binaire arbitraire (`calc.exe`/`malware.exe`) ;
+  le flux perceptuel l'exécutait en `argv[0]` SANS `_binary_name_allowed` (la garde whitelist que
+  `get_tools_status` applique déjà). Asymétrie save/exec.
+- **Fix coherent (UNE garde, source unique)** : `safe_tool_path()` neuf dans `infra/probe/tooling.py`
+  (= `_resolve_tool_path(..., shutil.which)`) → applique le MÊME whitelist de noms. Les **5 sites** perceptuels
+  (`perceptual_support.py` L140/296/333/642/818) passent par `safe_tool_path(..., "ffprobe")`.
+- **Double diff** (`r8_f3_binaire_arbitraire_diff.py` §R8-032) : `ffprobe_path=malware.exe` → AVANT renvoie le
+  malware (exécuté), APRÈS fallback PATH ffprobe (refusé) ; `ffprobe.exe` légitime → préservé.
+
+### R8-033 — BINAIRE ARBITRAIRE (sibling ffmpeg) — `d90be70`
+- **Vecteur** : `resolve_ffmpeg_path` dérivait le `ffmpeg.exe` VOISIN du dossier de `ffprobe_path` sans contrôle
+  (4 sites) → un `ffprobe_path` arbitraire faisait exécuter un ffmpeg voisin malveillant.
+- **Fix (auto-défense, domain-pur)** : ne dériver le sibling QUE si le basename de `ffprobe_path` ∈
+  `_ALLOWED_FFPROBE_NAMES` (whitelist locale, `domain/` ne peut pas importer `infra`) ; sinon fallback
+  `shutil.which("ffmpeg")`.
+- **Double diff** (§R8-033) : sibling de `evil/malware.exe` → AVANT dérive `evil/ffmpeg.exe` (exécuté), APRÈS
+  fallback PATH ffmpeg ; sibling d'un vrai `tools/ffprobe.exe` → `tools/ffmpeg.exe` préservé.
+
+### R8-030 — GET NON GARDÉS (`/api/poster?force=1` CSRF) — `05a8795`
+- **Vecteur** : `force=1` PURGE le cache disque + re-télécharge depuis TMDb (effet de bord). Un
+  `<img src=…&force=1>` CROSS-SITE (hébergé par un site tiers, **sans Origin** → `_is_forbidden_cross_site`
+  ne l'attrape pas) déclenchait ce purge/re-DL en CSRF, même en bind 127.0.0.1.
+- **Fix coherent** : `_is_cross_site_get()` = Origin présent+interdit **OU** `Sec-Fetch-Site: cross-site`
+  (le signal que les navigateurs envoient sur les `<img>` no-cors). `force` NEUTRALISÉ si cross-site ; la
+  LECTURE du poster (cache) reste ouverte (`<img>` legitimes same-origin/natif).
+- **Double diff** (`r8_f3_rest_csrf_diff.py` §R8-030, serveur REST réel) : `<img>` cross-site `force=1` → AVANT
+  purge+re-DL, APRÈS `force` ignoré ; same-origin + client natif → `force` conservé.
+
+### R8-031 — PORT/ORIGINE (loopback tout-port accepté) — `6a80929`
+- **Vecteur** : `_allowed_origin` acceptait n'importe quel PORT loopback → une 2ᵉ app locale hostile sur
+  `http://localhost:9999` voyait son Origin reflétée et passait la garde CSRF via le bypass auth loopback.
+  (Le port de **bind** du serveur, lui, est correctement honoré — `rest_api_port` → constructeur ; pas de
+  faille « bind en dur » : vérifié.)
+- **Fix** : `_own_port()` (`server_address[1]`, fallback header `Host`) ; la branche loopback de
+  `_allowed_origin` n'autorise QUE le port d'écoute effectif (scheme libre). `own_port` indéterminable → on
+  autorise (ne casse pas l'usage local sans socket introspectable).
+- **Double diff** (§R8-031) : POST Origin `localhost:<autre_port>` → AVANT autorisé, APRÈS **403** ; Origin
+  `127.0.0.1:<port_serveur>` → **200** (légitime). Test `test_cors_echoes_localhost_origin` mis à jour (il
+  épinglait le bug : echo de `:9999`) + `test_cors_rejects_localhost_other_port` ajouté.
+
+### Filet F3 (round adversarial sécurité — surface réseau + exécution) — `wp33755cv`
+- **RELIABLE=true** ; 3 finders sécurité (gardes GET/POST · exec binaire · origine/bind) + panel 3 sceptiques
+  asymétriques + **2 leurres de calibration → decoys_leaked=0** (cumul filets F1→F3 : **0/46**). 9 candidats,
+  **3 survivants 3/3**, tous **résidus des fixes F3** → corrigés en salve :
+- **R8-093 (exec-0)** (`885dca2`) : `tools_manager.detect_probe_tools` exécute le `ffprobe_path`/`mediainfo_path`
+  explicite (`_probe_version_line`) SANS `_binary_name_allowed` — **2ᵉ chemin d'exec** que R8-032 (limité à
+  `tooling._resolve_tool_path`) n'avait pas couvert. Atteignable via REST `get_probe_tools_status`/`recheck`.
+  Fix : le candidat `('explicit', path)` n'est ajouté que si `_binary_name_allowed`. **Double diff**
+  (`r8_f3_tools_manager_exec_diff.py`) : malware → AVANT candidat d'exec, APRÈS filtré (fallback managed).
+- **R8-094 (origin-0) + R8-095 (guards-0)** (`79500b4`, UNE garde cohérente) : `force` restait honoré pour un
+  client **LAN non-navigateur** (curl en bind 0.0.0.0) — R8-030 ne couvrait que le navigateur cross-site
+  (R8-094) ; et même SANS `force`, un GET poster cross-site sur **cache MISS** déclenchait un fetch TMDb +
+  écriture disque (amplification/quota — R8-095). Fix : `_poster_trusted_caller()` (navigateur same-origin OU
+  client loopback) gate TOUS les effets de bord poster → untrusted : `force` neutralisé ET
+  `serve_poster(allow_fetch=False)` = **cache seul** (ni fetch, ni purge, ni écriture). LECTURE cache préservée.
+  **Double diff** (`r8_f3_poster_trusted_diff.py`) : LAN curl → untrusted ; LAN dashboard same-origin → trusted ;
+  untrusted+MISS → 404 sans fetch ; untrusted+HIT → 200 servi ; trusted+MISS → fetch tenté.
+- **6 candidats réfutés** (0/3 ou 1/3) : `/api/spec` non-auth (lecture inoffensive) ; `/api/health` non-auth ;
+  save_settings sans validation (settings.json = déjà local) ; perceptual av1/hdr (couvert par R8-032) ;
+  scheme dans la branche loopback ; `_own_port` via Host spoofable. **2 leurres → 0/3** (bypass loopback faux
+  positif, SSRF poster total) correctement réfutés.
+
+### Non-régression F3
+- **INVARIANT bypass loopback préservé** : `r8_f3_rest_csrf_diff.py` non-rég — `GET /api/health` 200,
+  `POST` local sans Origin **200** (le bypass auth loopback fonctionne, CSRF ne bloque pas le local légitime).
+- Ciblé sécurité/poster/tooling : `test_rest_security` CORS/CSRF **6 passed** (test bug mis à jour + 1 ajouté) ;
+  poster/proxy **14 passed** ; tooling/tools_manager **31 passed** ; binaire diff **4/4** ; CSRF diff **7/7** ;
+  poster-trusted diff **4/4**. Les **4 échecs `legacy-410`** de `test_rest_security` (POST `/api/get_settings`
+  → 410 Gone) sont **PRÉ-EXISTANTS** (documentés CLAUDE.md ; reproduits à l'identique sur HEAD).
+- Suite complète (`suite_f3.txt`, 19 min) : **36 failed / 5801 passed / 113 errors** (les compteurs bruts diffèrent
+  de la baseline F2-d 108/5812/170 **uniquement** à cause des tests `[chromium]`/`e2e_desktop` dont le statut
+  failed↔error varie selon l'état navigateur/display au run — bruit d'environnement, pas du code F3).
+  **PREUVE déterministe rigoureuse** : les **24 nœuds FAILED non-chromium** rejoués en isolation sur l'arbre F3
+  **ET** sur l'arbre PRÉ-F3 (`git checkout 72431b4 -- <7 fichiers F3>`) donnent un set **IDENTIQUE**
+  (`diff` vide : 23 déterministes pré-existants — ci_workflows, pyinstaller, release_hygiene, refactor_84,
+  audit_regression, phase3/4/5 UI, `rest_security` legacy-410 ×4, `bibliotheque` ×2 — + 1 flaky `test_quality_score`
+  qui passe en isolation). Les 31 errors non-chromium sont tous `e2e_desktop/*` (display requis, pré-existants).
+  → **0 nouvel échec déterministe introduit par F3.** ✅ INVARIANT bypass loopback préservé.
+
+### ═══ VERDICT F3 (2026-06-18) ═══
+- **4 surfaces d'attaque fermées** (binaire arbitraire ×2 R8-032/033, GET force CSRF R8-030, port/origine R8-031)
+  **+ 3 résidus filet** (R8-093 2ᵉ exec, R8-094 force-LAN, R8-095 fetch-amplification) = **7 findings corrigés**.
+  Double différentiel (attaque fermée + loopback légitime intact) prouvé pour chacun. **Garde cohérente** :
+  `safe_tool_path` (exec) + `_poster_trusted_caller` (effets de bord poster) — pas N variantes.
+- **Commits F3** : `8adeff2` (R8-032) · `d90be70` (R8-033) · `6a80929` (R8-031) · `05a8795` (R8-030) ·
+  `885dca2` (R8-093) · `79500b4` (R8-094+095). Checkpoint `f493abdc` **intact**, **rien poussé** (on pousse
+  APRÈS F3 close — failles non exposées avant réparation).
