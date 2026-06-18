@@ -30,7 +30,7 @@ import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
 // natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
-import { dangerConfirmModal, showModal } from "../components/modal.js";
+import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1944,10 +1944,18 @@ function _openResetModal() {
   document.body.appendChild(overlay);
   overlay._previouslyFocused = document.activeElement;
 
+  // R8-078 (F6-a) : piège de focus Tab/Shift+Tab — même helper partagé que les modales
+  // standard (modal.js). Le handler est posé sur l'overlay -> nettoyé automatiquement par
+  // overlay.remove() dans close(). AVANT : aucun trap -> le focus s'échappait vers le fond.
+  trapFocus(overlay);
+
   const input = overlay.querySelector("[data-parametres-reset-input]");
   const confirmBtn = overlay.querySelector("[data-parametres-reset-confirm]");
   const cancelBtn = overlay.querySelector("[data-parametres-reset-cancel]");
   const countdownEl = overlay.querySelector("[data-parametres-reset-countdown]");
+  // R8-078 (F6-a) : focus initial dans la modale (comme les modales standard) -> le trap
+  // démarre avec le focus à l'intérieur.
+  if (input) { try { input.focus(); } catch (_e) { /* noop */ } }
   const warningEl = overlay.querySelector("[data-parametres-reset-warning]");
 
   let countdownTimer = null;

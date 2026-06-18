@@ -1,0 +1,11 @@
+R8-078 — Piège de focus de la modale reset (_openResetModal), Playwright Tab/Shift+Tab réels.
+Fixture : docs/internal/r8/fixtures/focus_trap.html (importe le vrai trapFocus de modal.js).
+
+AVANT (overlay SANS trapFocus, = modalNoTrap) :
+  focus = notrap_confirm (dernier) -> Tab -> activeElement = ""  (le focus S'ÉCHAPPE de la modale)
+APRÈS (overlay AVEC trapFocus partagé, = modalTrap) :
+  focus = trap_confirm (dernier)  -> Tab       -> trap_input (premier)   [piégé, wrap avant]
+  focus = trap_input (premier)    -> Shift+Tab -> trap_confirm (dernier) [piégé, wrap arrière]
+
+Fix appliqué à parametres.js _openResetModal : import trapFocus + trapFocus(overlay) après
+appendChild + focus initial sur l'input. Handler posé sur l'overlay -> nettoyé par overlay.remove().
