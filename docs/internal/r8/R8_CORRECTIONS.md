@@ -996,3 +996,43 @@ Filet adversarial : 3 finders (dead-links / toggles fantômes / contrats résidu
 RELIABLE=true (taux faux-positifs panel 0%). Décoys 0/2. 3 corrigés (HDR + 2 résidus), 3 enregistrés
 (cleanup_empty_folders, excluded_patterns, cleanup_orphans) pour arbitrage — tous des phantom-features
 « câbler vs retirer » alignés sur le pattern R8-063/F-PROM-02.
+
+---
+
+## ═══ FAMILLE F6-a — COSMÉTIQUE / a11y / i18n / HYGIÈNE TESTS — 2026-06-19 ═══
+
+### a11y (différentiels mesurés Playwright)
+- **R8-076 (contraste OMDb)** `f2ffdb9` : `.omdb-status--error` #b91c1c -> 2,79-2,91:1 sur les 5 thèmes
+  (tous sombres) = sous WCAG AA 4.5:1. Fix : couleur -> #f87171 -> **6,51-6,80:1** (mesuré getComputedStyle +
+  compositing alpha, fixture docs/internal/r8/fixtures/omdb_contrast.html). Fond/bordure inchangés, aucun
+  thème conforme cassé. SIGNALÉ (siblings hors périmètre) : --warning (3,94) et --info (3,83) aussi sous AA.
+- **R8-078 (focus-trap modale reset)** `a8437bf` : `_openResetModal` (overlay custom) sans trapFocus -> le
+  focus s'échappait. Fix : import + `trapFocus(overlay)` (MÊME helper modal.js, pas une variante) + focus
+  initial sur l'input. Diff (fixture focus_trap.html, Tab/Shift+Tab réels) : AVANT Tab depuis le dernier ->
+  focus="" (échappe) ; APRÈS Tab dernier->premier + Shift+Tab premier->dernier (piégé).
+
+### i18n
+- **Résiduelle : CLEAN.** Scan exhaustif des 147 clés t() littérales du frontend vs fr.json+en.json :
+  0 clé manquante réelle (les 2 « manquantes » détectées — `...` et `missing.key` — sont des EXEMPLES dans
+  la docstring de core/i18n.js, pas des appels). La seule vraie clé absente (sidebar.nav.doublons) a été
+  ajoutée en F5. Rien à corriger.
+
+### Observabilité quarantaine (F2-d) — VÉRIFIÉ NON-ISSUE
+- Tracé exhaustivement : `conflicts_quarantined_count` est PER-APPLY-RESULT (éphémère), l'undo ne le révise
+  pas (correct : le résumé d'apply est un instantané historique de CET apply), il N'EST PAS persisté dans
+  l'historique (history_support ne l'affiche pas), et le résumé liste chaque compteur indépendamment (pas de
+  total sommé qui double-compterait — les compteurs sont par-OPÉRATION, pas par-row). La réfutation F2-d
+  tient : **aucune incohérence d'affichage concrète**. Honnêteté > faux vert -> pas de fix fabriqué.
+
+### Hygiène de la suite de tests
+- **R8-086 (flaky)** `3a5f449` : test_perceptual_parallel prouvait le parallélisme par timing (time.sleep +
+  elapsed<0.35s, ~3/9 PASS). Fix : threading.Barrier(2) -> déterministe (libérée QUE si video+audio
+  atteignent .wait() simultanément ; serial -> timeout -> échec franc). **10/10 PASS consécutifs.**
+- **R8-087/hygiène (test no-op)** `9f73eab` : test_cors_configurable_explicit_still_emitted = assertTrue(True),
+  0 assertion (ne peut échouer). Son intention est DÉJÀ couverte par test_cors_can_be_restricted_explicitly
+  (OPTIONS sans Origin -> asserte la valeur CORS configurée). Retiré comme redondant. NB ID : dans le registre,
+  R8-087 = F-MARKED-RECOV-SILENT (déjà corrigé F2-b) ; ce no-op était un item d'hygiène distinct non numéroté.
+- **Balayage final** : `assertTrue(True)`/`or True`/`and False` = 0 occurrence réelle restante (seul match = un
+  commentaire). Scan AST des méthodes test_* sans assertion : 146 brut -> 34 hors e2e/visual -> TOUTES
+  légitimes (smoke/no-raise type `_assert_https`, délégué `_node_check`/`_assert_loaded_after_await`, mock,
+  import-smoke, skip). **0 nouveau test menteur** apparu depuis l'Étape 0 (les 2 d'origine traités).
