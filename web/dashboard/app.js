@@ -898,7 +898,8 @@ async function _loadDashTheme() {
       const s = res.data;
       document.body.dataset.theme = s.theme || "luxe";
       document.body.dataset.animation = s.animation_level || "moderate";
-      document.documentElement.dataset.effects = s.effects_mode || "restraint";
+      // R8-072 (F5) : data-effects RETIRÉ — aucun CSS ne consommait dataset.effects
+      // (effects_mode = fantôme cosmétique sans effet visuel ni contrôle UI).
       const root = document.documentElement;
       // Fix audit 2026-05-26 (v1.5.6) Vague L (theme-1) :
       // Avant : v||50 traitait 0 comme "valeur absente" et le remplacait par 50.

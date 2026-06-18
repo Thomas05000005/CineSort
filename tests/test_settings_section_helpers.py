@@ -304,7 +304,8 @@ class SaveSectionAppearanceTests(unittest.TestCase):
         self.assertEqual(result["effect_speed"], 50)
         self.assertEqual(result["glow_intensity"], 30)
         self.assertEqual(result["light_intensity"], 20)
-        self.assertEqual(result["effects_mode"], "restraint")
+        # R8-072 (F5) : effects_mode RETIRÉ (fantôme cosmétique, 0 CSS consommateur).
+        self.assertNotIn("effects_mode", result)
         self.assertEqual(result["debug_enabled"], False)
 
     def test_debug_enabled_uses_default_when_absent(self) -> None:

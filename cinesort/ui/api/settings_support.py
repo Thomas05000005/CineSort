@@ -1723,7 +1723,8 @@ def _save_section_appearance(payload: Dict[str, Any], *, debug_enabled: bool) ->
         "effect_speed": max(1, min(100, _coerce_appearance_int(payload, "effect_speed", 50))),
         "glow_intensity": max(0, min(100, _coerce_appearance_int(payload, "glow_intensity", 30))),
         "light_intensity": max(0, min(100, _coerce_appearance_int(payload, "light_intensity", 20))),
-        "effects_mode": _normalize_enum(payload.get("effects_mode"), ("restraint", "balanced", "intense"), "restraint"),
+        # R8-072 (F5) : "effects_mode" RETIRÉ — fantôme cosmétique sans contrôle UI ; app.js
+        # posait data-effects mais AUCUN CSS ne le consomme (0 effet visuel).
         "debug_enabled": to_bool(payload.get("debug_enabled"), debug_enabled),
         "log_level": normalize_log_level_setting(payload.get("log_level")),
         # V6-01 Polish Total v7.7.0 (R4-I18N-4) : locale persistee. Validation
