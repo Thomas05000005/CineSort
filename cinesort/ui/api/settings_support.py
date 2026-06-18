@@ -1626,8 +1626,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     la mecanique du preset selecteur ; ce helper gere les champs templates + regles.
     """
     out: Dict[str, Any] = {}
-    if "naming_template" in payload:
-        out["naming_template"] = str(payload.get("naming_template") or "").strip()
+    # R8-071 (F5) : "naming_template" (général) RETIRÉ — fantôme jamais lu par le pipeline
+    # de nommage (canoniques = naming_movie_template / naming_tv_template).
     if "naming_movie_template" in payload:
         out["naming_movie_template"] = str(payload.get("naming_movie_template") or "").strip()
     if "naming_tv_template" in payload:

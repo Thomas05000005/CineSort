@@ -117,8 +117,8 @@ export const PARAMETRES_GROUPS = [
         { key: "naming_preset", label: "Preset", type: "select", options: [
           {v:"default",l:"Défaut"},{v:"plex",l:"Plex"},{v:"jellyfin",l:"Jellyfin"},{v:"quality",l:"Qualité"},{v:"custom",l:"Custom"},
         ]},
-        { key: "naming_template", label: "Template général", type: "text", placeholder: "{title} ({year})",
-          hint: "Variables disponibles : {title} {year} {resolution} {codec} {audio} {source}.", advanced: true },
+        // R8-071 (F5) : champ "naming_template" (général) RETIRÉ — fantôme jamais lu par
+        // le pipeline de nommage (canoniques = naming_movie_template / naming_tv_template).
         { key: "naming_movie_template", label: "Template film", type: "text", placeholder: "{title} ({year})" },
         { key: "naming_tv_template", label: "Template série", type: "text", placeholder: "{series} ({year})" },
       ]},
