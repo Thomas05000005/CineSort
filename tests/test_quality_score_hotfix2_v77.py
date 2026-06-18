@@ -265,41 +265,44 @@ class NormalizeBitrateVideoTests(unittest.TestCase):
 
 
 class NormalizeBitrateAudioTests(unittest.TestCase):
-    """`_normalize_audio_bitrate_kbps` : seuil bps = 10 000 (= 10 Mbps audio)."""
+    """`_normalize_audio_bitrate_kbps` : R8-038 (F4) — le bitrate audio est TOUJOURS
+    en bits/s (invariant probe : ffprobe/mediainfo via to_optional_bitrate). Donc
+    division INCONDITIONNELLE /1000 (bps -> kbps). L'ancien seuil > 10000 « en dessous
+    = déjà kbps » testait un domaine d'entrée PHANTOM (le probe ne produit jamais un
+    192 nu pour 192 kbps : il produit 192000) et masquait le bug R8-038 (8 kbps
+    dégradé = 8000 bps lu comme 8000 kbps -> inversion de signe du score)."""
 
     def test_none_zero_negative_returns_none(self) -> None:
         self.assertIsNone(_normalize_audio_bitrate_kbps(None))
         self.assertIsNone(_normalize_audio_bitrate_kbps(0))
         self.assertIsNone(_normalize_audio_bitrate_kbps(-1))
 
-    def test_aac_192_kbps_kept_as_kbps(self) -> None:
-        # 192 kbps stereo AAC -> reste 192 (en dessous du seuil 10 000).
-        self.assertEqual(_normalize_audio_bitrate_kbps(192), 192)
-
-    def test_dts_1509_kbps_kept_as_kbps(self) -> None:
-        # DTS lossy ~1509 kbps -> reste 1509.
-        self.assertEqual(_normalize_audio_bitrate_kbps(1509), 1509)
-
-    def test_truehd_max_9000_kbps_kept_as_kbps(self) -> None:
-        # Plafond TrueHD ~9000 kbps -> reste tel quel.
-        self.assertEqual(_normalize_audio_bitrate_kbps(9000), 9000)
-
-    def test_threshold_10000_split_bps_to_kbps(self) -> None:
-        # 10001 doit etre traite comme bps -> /1000.
-        self.assertEqual(_normalize_audio_bitrate_kbps(10001), 10)
-        # AAC 192 kbps en bps = 192 000 -> 192 kbps.
+    def test_aac_192kbps_bps_to_kbps(self) -> None:
+        # 192 kbps stereo AAC -> ffprobe bit_rate=192000 bps -> 192 kbps.
         self.assertEqual(_normalize_audio_bitrate_kbps(192000), 192)
-        # DTS 1509 kbps en bps = 1 509 000 -> 1509 kbps.
+
+    def test_dts_1509kbps_bps_to_kbps(self) -> None:
+        # DTS lossy ~1509 kbps -> 1509000 bps -> 1509 kbps.
         self.assertEqual(_normalize_audio_bitrate_kbps(1509000), 1509)
-        # TrueHD ~6 000 000 bps = 6 Mbps -> 6000 kbps.
+
+    def test_truehd_9000kbps_bps_to_kbps(self) -> None:
+        # Plafond TrueHD ~9000 kbps -> 9000000 bps -> 9000 kbps.
+        self.assertEqual(_normalize_audio_bitrate_kbps(9000000), 9000)
+
+    def test_degraded_low_bps_divided(self) -> None:
+        # R8-038 : flux dégradé ~8 kbps = 8000 bps -> 8 kbps (AVANT : 8000 « kbps »
+        # -> per_channel énorme -> bonus +4 au lieu du malus -3). 6000 bps -> 6 kbps.
+        self.assertEqual(_normalize_audio_bitrate_kbps(8000), 8)
+        self.assertEqual(_normalize_audio_bitrate_kbps(6000), 6)
+
+    def test_bps_to_kbps_division(self) -> None:
+        self.assertEqual(_normalize_audio_bitrate_kbps(10001), 10)
+        self.assertEqual(_normalize_audio_bitrate_kbps(192000), 192)
         self.assertEqual(_normalize_audio_bitrate_kbps(6000000), 6000)
 
     def test_separation_from_video_path(self) -> None:
-        """Verifie que le path audio/video sont bien separes (memo C5 patch).
-
-        140 000 (4K REMUX en kbps) DOIT rester 140 000 pour video, mais doit
-        etre divise par 1000 pour audio (= 140 kbps audio bps interprete).
-        """
+        """Le path audio/video reste séparé (memo C5 patch) : 140 000 reste 140 000
+        pour la vidéo (seuil bps vidéo = 500 000), mais /1000 pour l'audio."""
         self.assertEqual(_normalize_video_bitrate_kbps(140000), 140000)
         self.assertEqual(_normalize_audio_bitrate_kbps(140000), 140)
 
