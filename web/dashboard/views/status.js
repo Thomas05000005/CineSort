@@ -448,7 +448,7 @@ function _renderShell(vm, container) {
     <div class="status-quick-actions">
       <button class="btn btn-primary" data-nav-route="/processing">▶ Lancer un nouveau scan</button>
       <button class="btn" data-nav-route="/processing">⎘ Verifier les doublons</button>
-      <button class="btn" data-nav-route="/qij">▼ Voir la qualite</button>
+      <button class="btn" data-nav-route="/qualite">▼ Voir la qualite</button>
       <button class="btn" data-nav-route="/settings">⚙ Parametres</button>
     </div>
   </div>`;
