@@ -512,12 +512,19 @@ class TmdbClient:
                 )
             )
 
-        self._cache_set(cache_key, [r.__dict__ for r in results])
-        # best-effort save
-        try:
-            self._save_cache_atomic()
-        except (OSError, PermissionError) as exc:
-            self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
+        # R8-041 (F4) : NE PAS cacher une réponse VIDE (200 + results=[]) comme un
+        # résultat positif valide. `_cache_get` fait `if cached is not None`, vrai
+        # pour [] -> il servait [] pendant 7 jours (TTL search) => film figé
+        # « non identifié » à travers les re-scans après UN simple hoquet TMDb,
+        # même quand TMDb répond ensuite correctement. Une liste vide n'est pas
+        # mise en cache -> le prochain appel re-interroge TMDb (récupération).
+        if results:
+            self._cache_set(cache_key, [r.__dict__ for r in results])
+            # best-effort save
+            try:
+                self._save_cache_atomic()
+            except (OSError, PermissionError) as exc:
+                self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
         return results
 
     def _get_movie_detail_cached(self, movie_id: int) -> Optional[Dict[str, Any]]:
