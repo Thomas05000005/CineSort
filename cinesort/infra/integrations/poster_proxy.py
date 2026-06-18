@@ -643,6 +643,7 @@ def serve_poster(
     state_dir: Path,
     cache_root: Path,
     query: Dict[str, str],
+    allow_fetch: bool = True,
 ) -> None:
     """Orchestre la reponse HTTP complete pour `GET /api/poster?id=...&size=...`.
 
@@ -679,35 +680,48 @@ def serve_poster(
     # `tmdb_id` et `size` sont non-None ici (mypy hint).
     assert tmdb_id is not None and size is not None
 
-    # 2. Resoudre le TmdbClient (lazy depuis settings.json).
-    tmdb_client = _build_or_get_tmdb_client(state_dir)
-    if tmdb_client is None:
-        # Pas de cle API configuree -> on retourne 503 (proxy non operationnel)
-        # plutot que 502 (qui suggererait une erreur TMDb).
-        _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
-        return
+    if not allow_fetch:
+        # R8-095 (filet F3) : appelant NON fiable (cross-site / client LAN
+        # non-navigateur) -> CACHE SEUL. Aucune requete TMDb sortante, aucun
+        # purge, aucune ecriture disque (anti-amplification : un <img>/curl tiers
+        # ne peut pas bruler le quota de la cle API ni declencher d'I/O). La
+        # LECTURE d'un poster deja en cache reste servie (img legitime non casse).
+        hit = resolve_cache_file(cache_root, size, tmdb_id)
+        if hit is None:
+            _respond_error_json(handler, 404, "resource", "Poster not available")
+            return
+        cache_file, _ext = hit
+        content_type = content_type_from_ext(_ext)
+    else:
+        # 2. Resoudre le TmdbClient (lazy depuis settings.json).
+        tmdb_client = _build_or_get_tmdb_client(state_dir)
+        if tmdb_client is None:
+            # Pas de cle API configuree -> on retourne 503 (proxy non operationnel)
+            # plutot que 502 (qui suggererait une erreur TMDb).
+            _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
+            return
 
-    # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
-    # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
-    # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
-    # reservi tel quel -> le refresh n'avait aucun effet visuel.
-    if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
-        try:
-            for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
-                _f.unlink()
-        except (OSError, ValueError):
-            pass
+        # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
+        # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
+        # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
+        # reservi tel quel -> le refresh n'avait aucun effet visuel.
+        if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
+            try:
+                for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
+                    _f.unlink()
+            except (OSError, ValueError):
+                pass
 
-    # 3. Orchestrer cache hit / fetch.
-    cache_file, content_type, error_code = get_or_fetch(
-        tmdb_client, cache_root, tmdb_id, size
-    )
-    if error_code is not None:
-        status, category, message = _HTTP_ERROR_MAP.get(
-            error_code, (502, "runtime", "Upstream error")
+        # 3. Orchestrer cache hit / fetch.
+        cache_file, content_type, error_code = get_or_fetch(
+            tmdb_client, cache_root, tmdb_id, size
         )
-        _respond_error_json(handler, status, category, message)
-        return
+        if error_code is not None:
+            status, category, message = _HTTP_ERROR_MAP.get(
+                error_code, (502, "runtime", "Upstream error")
+            )
+            _respond_error_json(handler, status, category, message)
+            return
 
     assert cache_file is not None and content_type is not None
 

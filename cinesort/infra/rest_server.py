@@ -500,6 +500,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
         return sec_fetch_site == "cross-site"
 
+    def _poster_trusted_caller(self) -> bool:
+        """Appelant autorise a declencher les EFFETS DE BORD du proxy poster
+        (purge `force` + fetch TMDb/ecriture cache) (R8-094/R8-095, filet F3).
+
+        TRUSTED si : requete navigateur same-origin/same-site (dashboard local ou
+        LAN auto-servi), OU client loopback natif (desktop pywebview/curl local).
+        NON trusted : navigateur cross-site (amplification CSRF, cf
+        `_is_cross_site_get`) ET client LAN non-navigateur (curl distant en bind
+        0.0.0.0, sans Origin ni Sec-Fetch -> ne doit pas bruler le quota TMDb).
+        Les appelants non fiables n'obtiennent QUE la lecture du cache.
+        """
+        if self._is_cross_site_get():
+            return False
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if sec_fetch_site in {"same-origin", "same-site"}:
+            return True
+        return self._client_ip() in _LOCAL_CLIENT_IPS
+
     def _send_cors_headers(self) -> None:
         # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
         # On reflete uniquement une origine autorisee (localhost / same-origin /
@@ -1003,17 +1021,22 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             for key, values in parsed.items():
                 if values:
                     flat_query[key] = values[0]
-            # R8-030 (F3) : `force=1` PURGE le cache disque + re-telecharge depuis
-            # TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE (hebergé
-            # par un site tiers) declenchait ce purge/re-DL en CSRF, meme en bind
-            # 127.0.0.1. On NEUTRALISE `force` pour toute requete cross-site ; la
-            # LECTURE du poster (cache) reste ouverte pour que les <img> legitimes
-            # (meme origine, dashboard local/LAN) continuent de fonctionner.
-            if "force" in flat_query and self._is_cross_site_get():
+            # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
+            # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
+            # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
+            # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
+            # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
+            # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
+            poster_trusted = self._poster_trusted_caller()
+            if "force" in flat_query and not poster_trusted:
                 flat_query.pop("force", None)
-                logger.info("REST GET /api/poster: parametre 'force' ignore (requete cross-site)")
+                logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
             try:
-                poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query)
+                # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
+                # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
+                poster_proxy.serve_poster(
+                    self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted
+                )
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
                 logger.debug(
                     "REST GET /api/poster client disconnect (%s, %.0fms)",

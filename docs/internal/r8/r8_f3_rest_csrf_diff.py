@@ -77,8 +77,9 @@ def run():
     # Capture du `force` recu par serve_poster (sans toucher a TMDb).
     captured: dict = {}
 
-    def _fake_serve_poster(handler, state_dir, cache_root, query):
+    def _fake_serve_poster(handler, state_dir, cache_root, query, allow_fetch=True):
         captured["query"] = dict(query)
+        captured["allow_fetch"] = allow_fetch
         handler.send_response(204)
         with contextlib.suppress(Exception):
             handler._send_cors_headers()
