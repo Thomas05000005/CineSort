@@ -1089,7 +1089,8 @@ def _save_section_tmdb(payload: Dict[str, Any]) -> Dict[str, Any]:
     ttl_days = max(1, min(365, ttl_days))
     return {
         "tmdb_enabled": to_bool(payload.get("tmdb_enabled"), True),
-        "tmdb_timeout_s": to_float(payload.get("tmdb_timeout_s"), 10.0),
+        # Audit 2026-06-18 : clamp [1.0, 60.0] aligne sur jellyfin/plex/radarr (cf #602).
+        "tmdb_timeout_s": max(1.0, min(60.0, to_float(payload.get("tmdb_timeout_s"), 10.0))),
         "tmdb_cache_ttl_days": ttl_days,
     }
 
