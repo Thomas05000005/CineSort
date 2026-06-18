@@ -7633,7 +7633,10 @@ body.v5-notif-lock {
 }
 .omdb-status--error {
   background: rgba(185, 28, 28, 0.12);
-  color: #b91c1c;
+  /* R8-076 (F6-a) : #b91c1c (rouge sombre) donnait 2,79-2,91:1 sur les 5 thèmes (tous
+     sombres) -> sous WCAG AA 4.5:1. #f87171 (rouge clair) atteint 6,5:1 (mesuré Playwright
+     getComputedStyle + compositing alpha). Le fond/bordure teintés restent inchangés. */
+  color: #f87171;
   border-color: rgba(185, 28, 28, 0.30);
 }
 .omdb-status--info {
