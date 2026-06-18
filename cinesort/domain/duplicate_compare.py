@@ -416,7 +416,11 @@ def _channels_label(ch: Optional[int]) -> str:
 def _bitrate_label(br: Optional[int]) -> str:
     if not br or br <= 0:
         return "?"
-    kbps = br // 1000 if br > 10000 else br
+    # R8-099 (filet F4) : le bitrate est TOUJOURS en bits/s (invariant probe,
+    # cf to_optional_bitrate). Division INCONDITIONNELLE /1000 (même anti-pattern
+    # bps/kbps que R8-038 pour l'audio) ; l'ancien seuil > 10000 affichait un flux
+    # < 10000 bps comme « <N> kbps » au lieu de quelques kbps.
+    kbps = br // 1000
     if kbps >= 1000:
         return f"{kbps // 1000} Mbps"
     return f"{kbps} kbps"

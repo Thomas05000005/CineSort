@@ -982,9 +982,14 @@ class TmdbClient:
                 }
             )
 
-        # _cache_set et _save_cache_atomic gerent leur propre lock
-        self._cache_set(cache_key, cache_items)
-        self._save_cache_atomic(force=False)
+        # R8-097 (filet F4) : JUMEAU de R8-041 côté TV. Ne PAS cacher une réponse
+        # VIDE (200 + results=[]) comme valide -> `cached is not None and isinstance
+        # (cached, list)` est vrai pour [] -> série figée « non identifiée » 7 jours
+        # après UN hoquet TMDb. Une liste vide n'est pas mise en cache.
+        if cache_items:
+            # _cache_set et _save_cache_atomic gerent leur propre lock
+            self._cache_set(cache_key, cache_items)
+            self._save_cache_atomic(force=False)
         return out
 
     def get_tv_episode_title(

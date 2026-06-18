@@ -684,7 +684,12 @@ def _compute_audio_score(
             else:
                 s_crest = 20
 
-    if clip:
+    # R8-098 (filet F4) : ne scorer le clipping QUE si la mesure a réellement eu
+    # lieu (total_segments > 0). Sinon (stderr vide / ffmpeg muet -> verdict
+    # 'unknown', total_segments=0) `clip` reste un dict truthy avec pct=0.0 ->
+    # s_clip=90 fabriqué (« parfait ») au lieu du neutre 80. Même classe que
+    # R8-034/035 : une mesure ratée mappait vers la valeur la plus flatteuse.
+    if clip and int(clip.get("total_segments", 0) or 0) > 0:
         pct = clip.get("clipping_pct", 0.0)
         if pct < CLIPPING_ACCEPTABLE_PCT:
             s_clip = 90
