@@ -1302,7 +1302,14 @@ def _compute_librarian_suggestions(
         )
         rows = api._load_rows_from_plan_jsonl(run_paths)
         reports = store.quality.list_quality_reports(run_id=latest_run_id)
-        return generate_suggestions(rows, reports, settings)
+        result = generate_suggestions(rows, reports, settings)
+        # R8-049 (F5) : compte des films basse-confiance d'identification, source de
+        # l'insight métier `films_low_confidence` (le librarian n'émet pas ce type).
+        if isinstance(result, dict):
+            result["low_confidence_count"] = sum(
+                1 for r in rows if 0 < int(getattr(r, "confidence", 0) or 0) < 50
+            )
+        return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         logger.debug("librarian suggestions error: %s", exc)
         return empty
@@ -1487,14 +1494,24 @@ def _compute_active_insights(
     store: Any,
     run_ids: List[str],
     settings: Dict[str, Any],
+    librarian_data: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """v7.6.0 Vague 2 : insights proactifs affiches sur la Home.
 
     Retourne une liste triee par severity desc + count desc :
       [{type, severity, count, label, filter_hint, icon}]
-    Max 5 insights.
+    Max 8 insights.
+
+    R8-049/051/052 (F5) : émet le VOCABULAIRE MÉTIER attendu par le front
+    (_INSIGHT_ROUTE_BY_TYPE dans accueil.js : quality_reject, duplicates_probable,
+    films_not_identified, subs_missing_fr, sagas_incomplete, films_low_confidence,
+    health_low). AVANT, ce producteur n'émettait que des types « physiques »
+    (new_rejects, duplicates_to_resolve…) qu'AUCUNE route/notification ne reconnaissait
+    -> panneaux morts, clics non routés, miroir Centre de notifications vide.
+    Les types métier sont dérivés du bibliothécaire (generate_suggestions) déjà calculé.
     """
     insights: List[Dict[str, Any]] = []
+    librarian_data = librarian_data if isinstance(librarian_data, dict) else {}
 
     # 1. Run actif en cours
     try:
@@ -1523,7 +1540,9 @@ def _compute_active_insights(
             if reject_count > 0:
                 insights.append(
                     {
-                        "type": "new_rejects",
+                        # R8-049 (F5) : type métier `quality_reject` (routé /qualite par le front),
+                        # avant `new_rejects` que _INSIGHT_ROUTE_BY_TYPE ne connaissait pas.
+                        "type": "quality_reject",
                         "severity": "warning",
                         "count": reject_count,
                         "label": f"{reject_count} film{'s' if reject_count > 1 else ''} classe{'s' if reject_count > 1 else ''} Reject dans le dernier scan",
@@ -1534,25 +1553,65 @@ def _compute_active_insights(
         except (AttributeError, OSError):
             pass
 
-    # 3. Doublons a trancher (sur le dernier run)
-    if run_ids:
-        try:
-            anomaly_counts = store.anomaly.get_anomaly_counts_for_runs([run_ids[0]])
-            dup_count = int(anomaly_counts.get(run_ids[0], 0) or 0)
-            # Filtre approximatif : compte total d'anomalies, ajustable si besoin
-            if dup_count > 3:
-                insights.append(
-                    {
-                        "type": "duplicates_to_resolve",
-                        "severity": "warning",
-                        "count": dup_count,
-                        "label": f"{dup_count} anomalies a traiter",
-                        "filter_hint": {"warning": "anomaly"},
-                        "icon": "alert-circle",
-                    }
-                )
-        except (AttributeError, OSError):
-            pass
+    # 3. Insights MÉTIER dérivés du bibliothécaire (R8-049/051/052 F5) : on traduit les
+    #    suggestions generate_suggestions vers les types attendus par _INSIGHT_ROUTE_BY_TYPE
+    #    (accueil.js). Avant, le seul insight « doublons » comptait des ANOMALIES (label
+    #    trompeur « X anomalies à traiter ») et portait un type mort `duplicates_to_resolve`.
+    _LIBRARIAN_TO_INSIGHT = {
+        # librarian id -> (type métier, severity, icon, filter_hint)
+        "duplicates": ("duplicates_probable", "warning", "copy", {"filter": "duplicates"}),
+        "unidentified": ("films_not_identified", "warning", "help-circle", {"filter": "not_identified"}),
+        "missing_subtitles": ("subs_missing_fr", "info", "message-square", {"filter": "subs_missing_fr"}),
+        "collections_info": ("sagas_incomplete", "info", "layers", {"filter": "sagas_incomplete"}),
+    }
+    for sug in librarian_data.get("suggestions") or []:
+        if not isinstance(sug, dict):
+            continue
+        mapping = _LIBRARIAN_TO_INSIGHT.get(str(sug.get("id") or ""))
+        if not mapping:
+            continue
+        count = int(sug.get("count") or 0)
+        if count <= 0:
+            continue
+        itype, severity, icon, filter_hint = mapping
+        insights.append(
+            {
+                "type": itype,
+                "severity": severity,
+                "count": count,
+                "label": str(sug.get("message") or itype),
+                "filter_hint": filter_hint,
+                "icon": icon,
+            }
+        )
+
+    # 3b. Films basse confiance d'identification (films_low_confidence).
+    low_conf = int(librarian_data.get("low_confidence_count") or 0)
+    if low_conf > 0:
+        insights.append(
+            {
+                "type": "films_low_confidence",
+                "severity": "info",
+                "count": low_conf,
+                "label": f"{low_conf} film{'s' if low_conf > 1 else ''} a verifier (identification incertaine)",
+                "filter_hint": {"filter": "low_confidence"},
+                "icon": "help-circle",
+            }
+        )
+
+    # 3c. Sante bibliotheque faible (health_low).
+    health = int(librarian_data.get("health_score") or 100)
+    if health < 60:
+        insights.append(
+            {
+                "type": "health_low",
+                "severity": "warning" if health < 40 else "info",
+                "count": health,
+                "label": f"Sante bibliotheque : {health}/100",
+                "filter_hint": None,
+                "icon": "activity",
+            }
+        )
 
     # 4. DNR partiel (nouveau insight §15)
     try:
@@ -1593,8 +1652,9 @@ def _compute_active_insights(
     severity_order = {"warning": 0, "info": 1, "success": 2}
     insights.sort(key=lambda it: (severity_order.get(it["severity"], 9), -int(it.get("count") or 0)))
 
-    # Limite a 5 insights
-    return insights[:5]
+    # R8-049 (F5) : limite portée à 8 (les 7 types métier + statut run_in_progress
+    # peuvent coexister ; avant [:5] tronquait silencieusement les insights métier).
+    return insights[:8]
 
 
 def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
@@ -1720,7 +1780,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # toutes "bronze" (perceptuel partiel/ancien) -> faux "Sante 0% / tout Bronze".
         v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids[:1])
         trend_30days = _compute_trend_30days(store)
-        insights = _compute_active_insights(api, store, run_ids, settings)
+        insights = _compute_active_insights(api, store, run_ids, settings, librarian_data)
 
         # 13. Spec 10 Qualite — by_decade distribution top-level (best-effort).
         # Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
