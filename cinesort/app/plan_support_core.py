@@ -185,6 +185,16 @@ def stats_snapshot_for_cache(stats: "Stats") -> Dict[str, Any]:
         "incremental_cache_hits": int(stats.incremental_cache_hits or 0),
         "incremental_cache_misses": int(stats.incremental_cache_misses or 0),
         "incremental_cache_rows_reused": int(stats.incremental_cache_rows_reused or 0),
+        # R8-060 (F5) : champs OMIS avant -> sur cache HIT incrémental, la
+        # contribution des dossiers cachés était PERDUE au round-trip (Diagnostic
+        # scan sous-compte + warning « films à la racine » supprimé à tort).
+        # stats_delta_for_cache / stats_apply_cached_delta les gèrent génériquement.
+        "tv_episodes_seen": int(stats.tv_episodes_seen or 0),
+        "root_level_films_seen": int(stats.root_level_films_seen or 0),
+        "films_rejected_ext": int(stats.films_rejected_ext or 0),
+        "films_rejected_size": int(stats.films_rejected_size or 0),
+        "films_rejected_name": int(stats.films_rejected_name or 0),
+        "folders_rejected_scandir_error": int(stats.folders_rejected_scandir_error or 0),
     }
 
 

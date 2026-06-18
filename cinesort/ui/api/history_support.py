@@ -309,10 +309,28 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # renvoyees -> "(detail non disponible)" systematique + recherche par titre
     # qui ne matchait jamais.
     films: List[Dict[str, Any]] = []
+    # R8-061/062 (F5) : plan rows + décisions doublons chargés UNE fois, partagés
+    # par les deux onglets (Films -> statut ; Doublons -> label gagnant).
+    row_by_id: Dict[str, Dict[str, Any]] = {}
     try:
         plan_res = api.run.get_plan(run_id) if hasattr(api, "run") else None
         plan_rows = (plan_res or {}).get("rows") or [] if isinstance(plan_res, dict) else []
         row_by_id = {str(r.get("row_id")): r for r in plan_rows if isinstance(r, dict)}
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: plan rows err run_id=%s err=%s", run_id, exc)
+    dup_decisions: List[Dict[str, Any]] = []
+    dup_row_ids: set = set()
+    try:
+        dup_decisions = (store.apply.list_duplicate_decisions(run_id=run_id) if store else []) or []
+        for _d in dup_decisions:
+            wr = str(_d.get("winner_row_id") or "")
+            if wr:
+                dup_row_ids.add(wr)
+            for _lr in (_d.get("loser_row_ids") or []):
+                dup_row_ids.add(str(_lr))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: dup decisions err run_id=%s err=%s", run_id, exc)
+    try:
         for rep in quality_reports:
             rid = str(rep.get("row_id") or "")
             pr = row_by_id.get(rid, {})
@@ -324,6 +342,10 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
                     "year": year,
                     "tier": str(rep.get("tier") or "").strip().lower(),
                     "score": rep.get("score"),
+                    # R8-062 (F5) : statut lu par historique.js _filmStatusLabel
+                    # (decision tri-état + is_duplicate). Avant : undefined -> toujours « Approuvé ».
+                    "decision": str(pr.get("decision") or "").strip().lower(),
+                    "is_duplicate": rid in dup_row_ids,
                 }
             )
     except (OSError, AttributeError, TypeError, ValueError) as exc:
@@ -331,14 +353,25 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
 
     duplicates_decided: List[Dict[str, Any]] = []
     try:
-        for dec in (store.apply.list_duplicate_decisions(run_id=run_id) if store else []) or []:
+        for dec in dup_decisions:
             gk = str(dec.get("group_key") or "")
             m = re.search(r"^(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)", gk)
+            winner_row_id = str(dec.get("winner_row_id") or "")
+            winner_row = row_by_id.get(winner_row_id, {})
+            # R8-061 (F5) : label gagnant lisible (front lit g.winner_label, sinon « — »).
+            # NB : size_savings n'est PAS persisté dans duplicate_decisions -> non rendu
+            # ici (résidu documenté ; nécessiterait de le stocker à la décision).
+            winner_label = (
+                str(winner_row.get("proposed_title") or winner_row.get("nfo_title") or "").strip()
+                or winner_row_id
+                or "—"
+            )
             duplicates_decided.append(
                 {
                     "title": (m.group("title").strip() if m else gk) or "(Sans titre)",
                     "year": int(m.group("year")) if m else None,
-                    "winner": str(dec.get("winner_row_id") or ""),
+                    "winner": winner_row_id,
+                    "winner_label": winner_label,
                 }
             )
     except (OSError, AttributeError, TypeError, ValueError) as exc:
