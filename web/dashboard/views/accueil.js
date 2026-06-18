@@ -505,16 +505,15 @@ function _renderHealth(stats) {
 }
 
 const _INSIGHT_ROUTE_BY_TYPE = {
-  // R8-051 (F5) : types RÉELLEMENT émis par _compute_active_insights (5). Avant, la
-  // map ne contenait que le vocabulaire "métier" (8 types ci-dessous) JAMAIS produit
-  // -> 0/5 match -> tout clic insight retombait sur /bibliotheque.
+  // R8-051 + R8-049 (F5) : types RÉELLEMENT émis par _compute_active_insights : statut
+  // (run_in_progress), célébration (new_platinum_month, dnr_partial) + les 8 types MÉTIER
+  // ci-dessous (quality_reject/duplicates_probable/…). Filet F5 : entrées mortes
+  // new_rejects/duplicates_to_resolve retirées (renommées en quality_reject/duplicates_probable).
   run_in_progress: "/accueil",
-  new_rejects: "/qualite",
-  duplicates_to_resolve: "/bibliotheque?filter=duplicates",
   dnr_partial: "/qualite",
   new_platinum_month: "/qualite",
-  // Vocabulaire "métier" conservé : routes vers de vrais filtres bibliothèque,
-  // utilisées SI le producteur est enrichi pour les émettre (FORK-DESIGN signalé).
+  // Vocabulaire "métier" (8 types) émis par le producteur enrichi (R8-049) -> routes vers
+  // de vrais filtres bibliothèque.
   duplicates_probable: "/bibliotheque?filter=duplicates",
   films_not_identified: "/bibliotheque?filter=not_identified",
   films_low_confidence: "/bibliotheque?filter=low_confidence",
