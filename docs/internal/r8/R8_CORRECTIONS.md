@@ -825,3 +825,74 @@ events disjoints). Fix : `JobRunner.get_cancel_event(run_id)` + le job_fn câble
 - **Commits F4** : `23df760` `435006b` `542bdaa` (perceptuel) · `2a337d4` (tmdb) · `258af2a` `6c29b11` (bitrate)
   · `9df787a` (codec) · `608ced6` (parsing) · `48a8cf9` (dup-scale) · `822b93c` (hdr) · `831d867` (mkv title) ·
   `8626744` (cancel) · `ba79f28` (filet R8-097/098/099). Checkpoint `f493abdc` intact, **rien poussé**.
+
+---
+
+## ═══ FAMILLE F5 — FEATURES MORTES / CONTRATS / SEAMS — 2026-06-18 ═══
+
+### DÉCISIONS PRODUIT (Thomas) appliquées
+- **D1 — jumeau film-detail (seam #3)** : la vue standalone `views/film-detail.js` (buggée R8-053/054/055)
+  est **SUPPRIMÉE** (`git rm`). La route `/film/:id` est repointée vers le **composant** `components/
+  film-detail.js` **mode B** (page standalone, conçu pour /film/:id) — flux d'id identique (route id → row_id →
+  `library/get_film_full`), 0 lien mort, 0 changement d'appelant. **FORK-DESIGN UX signalé** : route conservée
+  +repointée vs supprimée+recâblage des 3 appelants (home-widgets/qualite/historique) en drawer mode C
+  (changement page→drawer) — à arbitrer. Commit `fe659d8`.
+- **D2 — anime (R8-075, gate 10)** : **STATU QUO conservé** (Saison 00). Aucune modification du placement anime.
+- **D3 — vector-search (R8-023, migration 032)** : **LAISSÉE ÉTEINTE**. Migration 032 non renommée/activée.
+  Feature dormante, à construire post-R8, hors périmètre R8.
+
+### SEAMS / CONTRATS CORRIGÉS (différentiels prouvés)
+- **R8-057 + R8-059 (seam #4 doublons backend)** `9989ec3` : R8-057 — `check_duplicates` ne relisait jamais la
+  décision persistée → badge « Décidé » disparaît au refresh. Fix : `_annotate_groups_with_decisions`
+  (winner_decided/winner_side, indexé par group_key, 2 branches). R8-059 — `_quality_info_for_row` ne renvoyait
+  que {score,tier} ; fix : codec/résolution/audio depuis le probe. **Diff** `r8_f5_doublons_diff`.
+- **R8-060/061/062 (cache + historique)** `7e32924` : R8-060 — `stats_snapshot_for_cache` omettait 6 compteurs
+  → perte au round-trip cache HIT. Fix : ajout des 6 champs (delta/apply génériques). **Diff** AVANT 6/6 perdus
+  → APRÈS préservés. R8-061 winner_label, R8-062 decision+is_duplicate ajoutés aux builders historique. NB :
+  `size_savings` (R8-061) non persisté dans duplicate_decisions → résidu documenté.
+- **R8-049/050/051/052 + R8-066 (insights seam #2 + KPI)** `2905a1f` : R8-049 `emit_from_insights` lisait `code`
+  jamais émis → 0 notification ; fix `type`. R8-050 qualite subs → id réel `missing_subtitles`. R8-051
+  `_INSIGHT_ROUTE_BY_TYPE` re-keyé sur les 5 types réels. R8-052 `_librarianIdToRoute` 4 cas ajoutés. R8-066
+  `duplicates_groups` ajouté aux kpis live. **Diff** R8-049 0/2→2/2, R8-051 5/5 default→routés.
+- **R8-048 (commentaire index.html)** `cf...` : /processing → initTraitement (commentaire trompeur corrigé).
+
+### FORK-DESIGN SIGNALÉS (arbitrage Thomas requis — NON tranchés)
+1. **R8-045 (ENRICH-DEAD)** : vue Enrichissement IA (Ollama) = scaffold délibéré, feature flag `ai_enrichment`
+   OFF, contrat d'endpoints documenté mais `enrichment_facade` n'expose pas `get_status`/`apply_bulk`. CÂBLER
+   (roadmap IA réelle) vs RETIRER (mort-née). Par défaut : RETIRER.
+2. **Insights double vocabulaire** : front a 8 types « métier » (duplicates_probable/films_not_identified/…)
+   que `_compute_active_insights` n'émet PAS (5 types physiques). ENRICHIR le producteur (8 types = vraies
+   features, routes vers filtres bibliothèque réels) vs accepter le set minimal. Front aligné sur les 5 réels.
+3. **R8-063 (cleanup_orphans/empty_folders)** : ambigus vs `cleanup_residual_folders_enabled`/
+   `move_empty_folders_enabled` déjà câblés. Features séparées (CÂBLER) vs doublons (RETIRER) ?
+4. **R8-070 (retention_days)** : `prune_disk_cache`/`prune_probe_cache` existent mais jamais planifiés ;
+   `history_retention_days` pilote déjà le cron. Câbler un cron cache-prune (CÂBLER) vs redondant (RETIRER) ?
+5. **R8-067 (animations_enabled)** : kill-switch a11y/perf « UI 100% statique » (CÂBLER `html[data-animations=off]`)
+   vs vestige remplacé par `animation_level` (RETIRER) ?
+6. **R8-072 (effects_mode)** : consommé par app.js (`dataset.effects`) SANS contrôle UI — exposer un select
+   (ALIGNER) vs dev-only ?
+7. **R8-056 (perceptual display-path)** : le contrat de la modale (`d.codec/d.width/d.grain_analysis/d.breakdown/
+   d.display_tier` top-level) n'a JAMAIS été servi par aucun endpoint (même `to_dict` imbrique sous
+   `video_perceptual`/`grain_analysis`). Fix = sérialiseur unique `_flatten_perceptual_for_modal` partagé par
+   get_perceptual_details + get_perceptual_report (forme aplatie cohérente F4) + dériver `breakdown` depuis
+   `global_score_v2_payload.categories`. **Forme canonique + dérivation breakdown = décision produit.**
+
+### RESTE À FAIRE (clair, décisions recon arrêtées — F5 PARTIELLE)
+- **R8-046/047 (vues mortes)** : supprimer qij.js/quality.js/quality-simulator.js/custom-rules-editor.js +
+  dossier views/library/ (vestiges purs du split QIJ→qualite & library→bibliotheque, ~1100+ l. mort,
+  non routés) ; nettoyer bootstrap-bisect.js + status.js bouton /qij→/qualite. RETIRER (pas de fork-design).
+- **R8-058 (DUP-UNITS)** : adopter le helper central `core/format.js` (fmtBytes/formatBytes) dans les 3
+  formateurs locaux `_fmtSize` (doublons.js:100, duplicate-comparator-modal.js:57, lib-duplicates.js).
+- **R8-064 (auto_approve_enabled)** : CÂBLER — surfacer `get_auto_approved_summary` dans l'UI Traitement.
+- **Toggles RETIRER** : R8-065-lang (subtitle_lang_priority fantôme, vraie clé subtitle_expected_languages),
+  R8-068 (global_workers/worker_count inerte), R8-069 (desktop_notifications_enabled doublon de
+  notifications_enabled), R8-071 (naming_template non lu, canonique = naming_movie/tv_template).
+- **R8-065-sep (ALIGNER)** : injecter `{sep}` dans les templates des presets par défaut.
+- **i18n** : clé `sidebar.nav.doublons` manquante (locales) — à localiser + ajouter (peut aller en F6).
+
+### Non-régression F5 (partiel)
+- Modules touchés (run_flow/doublons/history/notifications/dashboard/plan_support/insights) : **408 passed**
+  (sweep `--ignore=tests/e2e*`), seul échec = `test_apply_op_labels` **PRÉ-EXISTANT** (baseline F3). D1 :
+  node --check OK, 0 référence résiduelle, 0 lien mort. **0 nouvel échec déterministe.**
+- ⚠️ **Note opérationnelle** : 2 process `app.py --api` (PID 324+20268, port 8642, depuis 15/06) arrêtés à la
+  demande de Thomas (bloquaient ses lancements). Règle adoptée : ports éphémères + exclure tests/e2e des sweeps.
