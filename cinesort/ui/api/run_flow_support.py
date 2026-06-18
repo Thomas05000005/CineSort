@@ -367,6 +367,7 @@ def _build_plan_job_fn(
     roots: List[Path] = ctx.get("roots") or [root]
     state_dir = ctx["state_dir"]
     debug_enabled = ctx["debug_enabled"]
+    runner = ctx.get("runner")  # R8-037 : pour câbler le cancel_event au batch perceptuel
 
     def dlog(msg: str) -> None:
         api._debug_log(state_dir=state_dir, run_id=run_id, enabled=debug_enabled, message=msg)
@@ -561,9 +562,21 @@ def _build_plan_job_fn(
                             dlog(
                                 f"job_fn launching auto perceptual batch ({len(row_ids)} films)"
                             )
-                            perc_result = perceptual_support.analyze_perceptual_batch(
-                                api, run_id, row_ids, options=None
-                            )
+                            # R8-037 (F4) : câbler le cancel_event du run sur l'api
+                            # AVANT le batch -> _resolve_cancel_event(api) le lit ->
+                            # request_cancel (qui pose rt.cancel_event) arrête bien
+                            # l'analyse perceptuelle (avant : event jamais assigné =
+                            # checks d'annulation inertes). Nettoyé en finally.
+                            _perc_cancel = runner.get_cancel_event(run_id) if runner else None
+                            if _perc_cancel is not None:
+                                api._perceptual_cancel_event = _perc_cancel
+                            try:
+                                perc_result = perceptual_support.analyze_perceptual_batch(
+                                    api, run_id, row_ids, options=None
+                                )
+                            finally:
+                                if _perc_cancel is not None:
+                                    api._perceptual_cancel_event = None
                             if isinstance(perc_result, dict) and perc_result.get("ok"):
                                 dlog(
                                     "job_fn auto perceptual started success_count="

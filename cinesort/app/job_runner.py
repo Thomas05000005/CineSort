@@ -120,6 +120,15 @@ class JobRunner:
 
         return _should_cancel
 
+    def get_cancel_event(self, run_id: str) -> Optional[threading.Event]:
+        """R8-037 (F4) : expose le `cancel_event` d'un run pour câbler l'annulation
+        coopérative des sous-tâches (ex. batch perceptuel post-scan) sur le MÊME
+        event que `request_cancel` met (`rt.cancel_event`). Sans ça, le batch lisait
+        `api._perceptual_cancel_event` jamais assigné -> checks d'annulation inertes."""
+        with self._lock:
+            rt = self._runs.get(run_id)
+            return rt.cancel_event if rt else None
+
     def _invoke_job_fn(
         self,
         job_fn: JobFn,
