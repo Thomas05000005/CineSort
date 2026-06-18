@@ -505,6 +505,16 @@ function _renderHealth(stats) {
 }
 
 const _INSIGHT_ROUTE_BY_TYPE = {
+  // R8-051 (F5) : types RÉELLEMENT émis par _compute_active_insights (5). Avant, la
+  // map ne contenait que le vocabulaire "métier" (8 types ci-dessous) JAMAIS produit
+  // -> 0/5 match -> tout clic insight retombait sur /bibliotheque.
+  run_in_progress: "/accueil",
+  new_rejects: "/qualite",
+  duplicates_to_resolve: "/bibliotheque?filter=duplicates",
+  dnr_partial: "/qualite",
+  new_platinum_month: "/qualite",
+  // Vocabulaire "métier" conservé : routes vers de vrais filtres bibliothèque,
+  // utilisées SI le producteur est enrichi pour les émettre (FORK-DESIGN signalé).
   duplicates_probable: "/bibliotheque?filter=duplicates",
   films_not_identified: "/bibliotheque?filter=not_identified",
   films_low_confidence: "/bibliotheque?filter=low_confidence",
@@ -540,10 +550,16 @@ function _librarianIdToRoute(id) {
       return "/bibliotheque?filter=duplicates";
     case "subs_missing":
     case "subs_missing_fr":
+    case "missing_subtitles": // R8-052 (F5) : id réel émis par librarian.py
       return "/bibliotheque?filter=subs_missing_fr";
     case "not_identified":
     case "films_not_identified":
+    case "unidentified": // R8-052 : id réel librarian
       return "/bibliotheque?filter=not_identified";
+    case "low_resolution": // R8-052 : id réel librarian
+      return "/qualite";
+    case "collections_info": // R8-052 : id réel librarian
+      return "/bibliotheque?filter=sagas_incomplete";
     case "codec_obsolete":
       return "/bibliotheque?filter=codec_obsolete";
     case "low_confidence":

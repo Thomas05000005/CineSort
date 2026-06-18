@@ -538,6 +538,17 @@ def _build_dashboard_section(
     ]
     audio_top = [{"label": label, "count": int(count)} for label, count in audio_counter.most_common(6)]
 
+    # R8-066 (F5) : nombre de groupes de doublons DÉCIDÉS (même source que l'onglet
+    # Historique : list_duplicate_decisions). AVANT : `duplicates_groups` absent des
+    # kpis live -> stat « Groupes de doublons » toujours 0 + fallback d'estimation
+    # des moves faussé (traitement.js:245/641/1444). NB : décidés (cohérent avec
+    # l'historique), pas l'ensemble détecté (la détection n'est pas dans ce chemin).
+    duplicates_groups = 0
+    try:
+        duplicates_groups = len(store.apply.list_duplicate_decisions(run_id=run_id) or [])
+    except (AttributeError, OSError, KeyError, TypeError, ValueError):
+        duplicates_groups = 0
+
     return {
         "kpis": {
             "score_avg": score_avg,
@@ -556,6 +567,7 @@ def _build_dashboard_section(
             "rejected_count": int(rejected_count),
             "accepted_count": int(accepted_count),
             "deferred_count": int(deferred_count),
+            "duplicates_groups": int(duplicates_groups),  # R8-066 (F5)
         },
         "distributions": {
             "score_bins": bins_payload,

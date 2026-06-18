@@ -333,7 +333,12 @@ function _renderSubsSection(stats) {
   const subsInsight = insights.find((i) => String(i.type || i.code || "").includes("subs_missing"));
   const count = subsInsight && subsInsight.count != null ? Number(subsInsight.count) : null;
   const lsugs = stats && stats.librarian && stats.librarian.suggestions;
-  const subsLs = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || "").includes("subs_missing")) : null;
+  // R8-050 (F5) : la source réelle est librarian.suggestions id="missing_subtitles"
+  // (le producteur d'insights n'émet PAS subs_missing). AVANT : .includes("subs_missing")
+  // ne matchait jamais l'id "missing_subtitles" -> section « Subs FR manquants » toujours « — ».
+  const subsLs = Array.isArray(lsugs)
+    ? lsugs.find((s) => { const id = String(s.id || ""); return id.includes("subtitle") || id.includes("subs_missing"); })
+    : null;
   const finalCount = count != null ? count : (subsLs && subsLs.count != null ? Number(subsLs.count) : null);
   return `
     <section class="qualite-section qualite-subs" aria-labelledby="qualite-subs-title">
