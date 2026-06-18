@@ -41,6 +41,21 @@ def _binary_name_allowed(tool_name: str, path: str) -> bool:
     return name in {n.lower() for n in expected}
 
 
+def safe_tool_path(explicit_value: str, tool_name: str) -> str:
+    """Resout le chemin d'un binaire de probe AVANT exec, en appliquant la MEME
+    garde whitelist que `get_tools_status` (R8-032, filet F3).
+
+    Source de verite unique : `_resolve_tool_path` + `_binary_name_allowed`. Un
+    chemin explicite n'est retourne que si (a) il existe sur disque ET (b) son
+    nom de fichier est dans `EXPECTED_BINARY_NAMES` ; sinon fallback PATH
+    (`shutil.which`). Ferme l'asymetrie save/exec : le flux perceptuel executait
+    `settings['ffprobe_path']` en argv[0] sans cette garde -> un .exe arbitraire
+    (calc.exe, malware.exe...) configure etait execute. L'auto-install legitime
+    (nom `ffprobe.exe`) et la config manuelle d'un vrai ffprobe restent valides.
+    """
+    return _resolve_tool_path(explicit_value, tool_name, shutil.which)
+
+
 def _runner_platform_kwargs() -> Dict[str, object]:
     """
     Windows-only subprocess kwargs to avoid console flicker when probing media tools.

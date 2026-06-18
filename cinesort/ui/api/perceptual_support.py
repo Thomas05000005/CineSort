@@ -47,6 +47,7 @@ from cinesort.domain.perceptual.upscale_detection import (
 from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
 from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
+from cinesort.infra.probe.tooling import safe_tool_path
 from cinesort.infra.subprocess_safety import tracked_run
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
@@ -137,7 +138,8 @@ def _validate_and_load_context(
     if not settings.get("perceptual_enabled"):
         return _err_response(t("errors.perceptual_disabled"), category="state", level="info", log_module=__name__)
 
-    ffprobe_path = str(settings.get("ffprobe_path") or "")
+    # R8-032 (F3) : valider le binaire AVANT exec (meme garde que get_tools_status).
+    ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")
     ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
     if not ffmpeg_path:
         # H-7 audit QA 20260429 : message explicite + suggestion d'action
@@ -293,7 +295,7 @@ def _execute_perceptual_analysis(
             codec = str(video_info.get("codec") or "").lower()
             av1_info = None
             if codec in ("av1", "av01"):
-                ffprobe_path_local = str(settings.get("ffprobe_path") or "") or "ffprobe"
+                ffprobe_path_local = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
                 av1_info = extract_av1_film_grain_params(ffprobe_path_local, str(media_path))
             grain_local = analyze_grain_v2(
                 frames_local,
@@ -330,7 +332,7 @@ def _execute_perceptual_analysis(
         if p_settings["hdr10_plus_detection_enabled"]:
             hdr_type = str(video_info.get("hdr_type") or "")
             if hdr_type == "hdr10":
-                ffprobe_path_local = str(settings.get("ffprobe_path") or "") or "ffprobe"
+                ffprobe_path_local = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
                 video_local.has_hdr10_plus_detected = detect_hdr10_plus_multi_frame(
                     ffprobe_path_local,
                     str(media_path),
@@ -639,7 +641,7 @@ def compare_perceptual(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             # H-7 audit QA 20260429 : message explicite avec marqueur
@@ -815,7 +817,7 @@ def get_perceptual_compare_frames(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             return _err_response(
@@ -1291,7 +1293,7 @@ def get_perceptual_compare_audio(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             return _err_response(
