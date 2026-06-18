@@ -240,8 +240,13 @@ def analyze_astats(
     rms = _search_float(_RE_RMS, overall_text)
     peak = _search_float(_RE_PEAK, overall_text)
     noise = _search_float(_RE_NOISE, overall_text)
-    crest = _search_float(_RE_CREST, overall_text)
-    dynrange = _search_float(_RE_DYNRANGE, overall_text)
+    # R8-035 (F4) : Crest factor / Dynamic range ne figurent PAS dans le bloc
+    # Overall d'astats (vérifié ffmpeg 8.1.1 mono ET stéréo) — uniquement sous
+    # "Channel: N". Les lire sur le texte COMPLET (tous les canaux) et garder le
+    # pire (min). AVANT : _search_float sur overall_text -> toujours None ->
+    # crest/dynrange figés -> 2 des 6 poids audio bloqués à 50 (valeur "parfaite").
+    crest = _min_float(_RE_CREST, stderr)
+    dynrange = _min_float(_RE_DYNRANGE, stderr)
 
     # Verdicts
     noise_verdict = _verdict_noise(noise)
@@ -739,6 +744,19 @@ def _search_float(pattern: re.Pattern, text: str) -> Optional[float]:
     if not m:
         return None
     return _safe_float(m.group(1))
+
+
+def _min_float(pattern: re.Pattern, text: str) -> Optional[float]:
+    """R8-035 (F4) : agrège TOUTES les occurrences (une par canal) et renvoie le
+    minimum (= canal le plus compressé / plus faible dynamique = pire cas).
+    Utilisé pour Crest factor / Dynamic range qui n'existent QUE par canal dans
+    astats (absents du bloc Overall)."""
+    vals = []
+    for raw in pattern.findall(text):
+        v = _safe_float(raw)
+        if v is not None:
+            vals.append(v)
+    return min(vals) if vals else None
 
 
 # MEGA-HOTFIX bug (1) : helper d'extraction du bloc "Overall" d'astats.
