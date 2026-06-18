@@ -296,6 +296,14 @@ function _renderGroupCard(group) {
   const qualityB = comparison.quality_b || {};
   const scoreA = Math.round(Number(comparison.total_score_a) || 0);
   const scoreB = Math.round(Number(comparison.total_score_b) || 0);
+  // R8-042 (F4) : total_score_a/b sont des POINTS head-to-head (somme des
+  // points_delta>0 pour A, <0 pour B) — PAS un score 0..100. Les rendre en
+  // "X/100" affichait un faux "30/100" / "0/100" (perdant ~toujours 0) même
+  // pour 2 bons fichiers. L'échelle correcte = points d'AVANTAGE sur le total
+  // des points en jeu (scoreA+scoreB = somme des |points_delta|).
+  const totalPts = scoreA + scoreB;
+  const advA = `${scoreA}/${totalPts || 1} pts`;
+  const advB = `${scoreB}/${totalPts || 1} pts`;
 
   // Alertes agregees
   const allFlags = [];
@@ -362,7 +370,7 @@ function _renderGroupCard(group) {
           <div class="doublons-version-label">A ${winner === "a" ? `<span class="doublons-version-badge">✓ Recommandé</span>` : ""}</div>
           <div class="doublons-version-name">${escapeHtml(fileA)}</div>
           <dl class="doublons-version-dl">
-            <dt>Score</dt><dd>${scoreA}/100</dd>
+            <dt>Avantage</dt><dd>${advA}</dd>
             <dt>Taille</dt><dd>${escapeHtml(_fmtSize(comparison.file_a_size))}</dd>
             ${qualityA.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(qualityA.codec).toUpperCase())}</dd>` : ""}
             ${qualityA.resolution ? `<dt>Résolution</dt><dd>${escapeHtml(qualityA.resolution)}</dd>` : ""}
@@ -373,7 +381,7 @@ function _renderGroupCard(group) {
           <div class="doublons-version-label">B ${winner === "b" ? `<span class="doublons-version-badge">✓ Recommandé</span>` : ""}</div>
           <div class="doublons-version-name">${escapeHtml(fileB)}</div>
           <dl class="doublons-version-dl">
-            <dt>Score</dt><dd>${scoreB}/100</dd>
+            <dt>Avantage</dt><dd>${advB}</dd>
             <dt>Taille</dt><dd>${escapeHtml(_fmtSize(comparison.file_b_size))}</dd>
             ${qualityB.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(qualityB.codec).toUpperCase())}</dd>` : ""}
             ${qualityB.resolution ? `<dt>Résolution</dt><dd>${escapeHtml(qualityB.resolution)}</dd>` : ""}
