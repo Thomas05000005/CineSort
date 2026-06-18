@@ -9,7 +9,7 @@ import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer alert()/confirm()
 // natifs par dangerConfirmModal (destructif) ou showToast (informatif).
-import { dangerConfirmModal } from "../components/modal.js";
+import { dangerConfirmModal, trapFocus } from "../components/modal.js"; // R8-078b : trapFocus partagé
 import { showToast } from "../components/toast.js";
 
 const OVERLAY_ID = "demoWizardOverlay";
@@ -55,6 +55,7 @@ function _renderWizardOverlay() {
     </div>
   `;
   document.body.appendChild(overlay);
+  trapFocus(overlay); // R8-078b (filet F6-a) : Tab/Shift+Tab piégés (aria-modal)
 
   const btnStart = overlay.querySelector("#btnStartDemo");
   const btnSkip = overlay.querySelector("#btnSkipDemo");

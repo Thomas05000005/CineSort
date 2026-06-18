@@ -37,7 +37,7 @@
 import { escapeHtml, posterProxyUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
-import { dangerConfirmModal, showModal, closeModal } from "./modal.js";
+import { dangerConfirmModal, showModal, closeModal, trapFocus } from "./modal.js"; // R8-078b : trapFocus partagé
 import { showToast } from "./toast.js";
 import { openPerceptualModal } from "./perceptual-modal.js";
 import * as rightPanel from "./right-panel.js";
@@ -1140,6 +1140,7 @@ function _openTmdbManualSearchModal(_rowId, _runId) {
   `;
   document.body.appendChild(overlay);
   overlay._previouslyFocused = document.activeElement;
+  trapFocus(overlay); // R8-078b (filet F6-a) : Tab/Shift+Tab piégés dans la recherche TMDb manuelle (aria-modal)
 
   overlay._escHandler = (ev) => {
     if (ev.key === "Escape") {

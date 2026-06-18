@@ -17,6 +17,7 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 const DRAWER_ID = "qualiteFiltersDrawer";
 
@@ -136,6 +137,7 @@ export function openQualiteFiltersDrawer(opts) {
   container.className = "qualite-drawer-overlay";
   container.innerHTML = _buildHtml(state);
   document.body.appendChild(container);
+  trapFocus(container); // R8-078b : Tab/Shift+Tab piégés dans le drawer filtres qualité (aria-modal)
 
   const previouslyFocused = document.activeElement;
   container._previouslyFocused = previouslyFocused;

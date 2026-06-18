@@ -27,6 +27,7 @@ import { apiPost, escapeHtml } from "./_v5_helpers.js";
 // (start_scan, cancel_run, pollStatus). Sans toast, l'utilisateur reste
 // bloque sans aucune indication que le serveur ne repond pas.
 import { showToast } from "../components/toast.js";
+import { trapFocus } from "../components/modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 
 const STEPS = [
@@ -205,6 +206,7 @@ function _renderInspectorMobileDrawer() {
   `;
   document.body.appendChild(overlay);
   document.body.appendChild(drawer);
+  trapFocus(drawer); // R8-078b : Tab/Shift+Tab piégés dans le drawer inspecteur (aria-modal)
 
   document.getElementById("v5BtnCloseInspector")?.addEventListener("click", _closeInspectorDrawer);
   overlay.addEventListener("click", _closeInspectorDrawer);

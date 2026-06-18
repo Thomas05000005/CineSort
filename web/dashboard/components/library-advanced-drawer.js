@@ -21,6 +21,7 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 const DRAWER_ID = "libraryAdvancedDrawer";
 
@@ -281,6 +282,7 @@ export function openLibraryAdvancedDrawer(opts) {
   host.className = "bibliotheque-drawer-host";
   host.innerHTML = _buildHtml(initial);
   document.body.appendChild(host);
+  trapFocus(host); // R8-078b : Tab/Shift+Tab piégés dans le drawer avancé (aria-modal)
   // Trigger transition next frame
   requestAnimationFrame(() => host.classList.add("is-open"));
 

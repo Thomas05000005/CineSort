@@ -5,6 +5,7 @@
  */
 
 import { navigateTo } from "../core/router.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 let _overlay = null;
 let _input = null;
@@ -100,6 +101,7 @@ function _ensureOverlay() {
       <div class="cmd-palette__hint">↑↓ naviguer · Entrée exécuter · Échap fermer</div>
     </div>`;
   document.body.appendChild(_overlay);
+  trapFocus(_overlay); // R8-078b : Tab/Shift+Tab piégés dans la palette (aria-modal)
   _input = _overlay.querySelector(".cmd-palette__input");
   _list = _overlay.querySelector(".cmd-palette__list");
   _input.addEventListener("input", _refilter);
