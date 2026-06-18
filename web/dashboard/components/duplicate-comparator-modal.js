@@ -36,6 +36,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+import { formatBytes } from "../core/format.js"; // R8-058 (F5) : helper taille central
 import { showToast } from "./toast.js";
 // Fix audit 2026-05-24 a11y : focus trap pour eviter que Tab/Shift+Tab sorte
 // du modal vers le DOM dessous. trapFocus est exporte par modal.js.
@@ -55,15 +56,12 @@ let _focusTrapTarget = null;
 /* --- Helpers --- */
 
 function _fmtSize(bytes) {
-  // Fix incoherence labels : on garde la base 1024 (Mio/Gio) pour rester
-  // coherent avec l'affichage natif Windows Explorer mais on corrige le label
-  // (avant : "Mo"/"Go" decimal SI alors qu'on divisait par 1024^N).
-  // TODO centraliser ce helper dans core/format.js (doublons.js et film-detail.js
-  // ont la meme implementation).
+  // R8-058 (F5) : TODO résolu — délègue au helper central core/format.js (base 1024,
+  // unités localisées o/Ko/Mo/Go/To). Unifie doublons.js + ce comparateur (formatage
+  // identique partout ; avant : "Mio/Gio" ici, "Mo/Go" là, "Mo/Go" décimal ailleurs).
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mio`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Gio`;
+  return formatBytes(b);
 }
 
 function _fmtPercent(num) {

@@ -18,6 +18,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+import { formatBytes } from "../core/format.js"; // R8-058 (F5) : helper taille central
 import { getNavSignal } from "../core/nav-abort.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 import { openPerceptualModal } from "../components/perceptual-modal.js";
@@ -98,10 +99,11 @@ function _writeStoredSelection(key) {
 /* --- Formatters --- */
 
 function _fmtSize(bytes) {
+  // R8-058 (F5) : délègue au helper central core/format.js (base 1024, unités localisées
+  // o/Ko/Mo/Go/To) au lieu de 3 implémentations divergentes (doublons/comparateur/lib).
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+  return formatBytes(b);
 }
 
 function _groupKey(group) {
