@@ -71,6 +71,75 @@ def _ffmpeg_platform_kwargs() -> Dict[str, Any]:
     return kwargs
 
 
+# ---------------------------------------------------------------------------
+# R8-056 (F5) — Forme canonique perceptuelle servie à la modale
+# ---------------------------------------------------------------------------
+# La modale (perceptual-modal.js) consomme TOP-LEVEL : d.grain_analysis.verdict_label,
+# d.width, d.height, d.display_tier, d.breakdown[]. Or le rapport DB les imbrique
+# (metrics.grain_analysis, metrics.video_perceptual.resolution, global_score_v2_payload)
+# -> grain « — », dimensions 0, breakdown vide. Ce sérialiseur APLATIT le rapport vers
+# le contrat de la modale (jamais servi auparavant). breakdown est DÉRIVÉ des
+# category_scores du payload V2 (cohérent avec les vraies métriques réparées en F4).
+
+_CATEGORY_LABEL_FR = {"video": "Vidéo", "audio": "Audio", "coherence": "Cohérence"}
+
+
+def _tier_to_status(tier: str) -> str:
+    """Mappe un tier V2 -> classe de statut CSS de la modale (good/warning/reject/info)."""
+    t = str(tier or "").strip().lower()
+    if t in ("platinum", "gold"):
+        return "good"
+    if t in ("silver", "bronze"):
+        return "warning"
+    if t == "reject":
+        return "reject"
+    return "info"
+
+
+def _category_to_breakdown_row(cat: Dict[str, Any]) -> Dict[str, Any]:
+    """Traduit un category_score (video/audio/coherence) en ligne de breakdown modale."""
+    value = float(cat.get("value") or 0.0)
+    weight = float(cat.get("weight") or 0.0)
+    name = str(cat.get("name") or "")
+    return {
+        "component": _CATEGORY_LABEL_FR.get(name, name or "?"),
+        "weight": round(weight, 2),
+        "value_label": f"{value:.0f}/100",
+        "status": _tier_to_status(str(cat.get("tier") or "")),
+        "points": round(value * weight, 1),  # contribution pondérée au score global
+    }
+
+
+def _flatten_perceptual_for_modal(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Enrichit le rapport DB avec la forme canonique top-level attendue par la modale.
+
+    Mutation idempotente : ne réécrit pas un champ déjà présent. codec N'EST PAS dérivable
+    (le rapport perceptuel ne stocke pas le codec vidéo — résidu documenté, la modale
+    retombe sur « — »).
+    """
+    if not isinstance(report, dict):
+        return report
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    grain = metrics.get("grain_analysis")
+    if isinstance(grain, dict) and not report.get("grain_analysis"):
+        report["grain_analysis"] = grain
+    vid = metrics.get("video_perceptual") if isinstance(metrics.get("video_perceptual"), dict) else {}
+    res = vid.get("resolution") if isinstance(vid.get("resolution"), dict) else {}
+    if res:
+        if report.get("width") is None:
+            report["width"] = res.get("width")
+        if report.get("height") is None:
+            report["height"] = res.get("height")
+    if report.get("global_tier_v2") and not report.get("display_tier"):
+        report["display_tier"] = report["global_tier_v2"]
+    payload = report.get("global_score_v2_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    cats = payload.get("category_scores")
+    if isinstance(cats, list) and cats and not report.get("breakdown"):
+        report["breakdown"] = [_category_to_breakdown_row(c) for c in cats if isinstance(c, dict)]
+    return report
+
+
 def get_perceptual_report(
     api: Any,
     run_id: str,
@@ -120,8 +189,10 @@ def get_perceptual_details(
                 "message": "Aucune analyse perceptuelle persistee pour ce film. Lancez l'analyse depuis l'inspecteur.",
                 "missing": True,
             }
-        # Le DB mixin renvoie deja un dict complet. On le wrap juste avec ok=True.
-        return {"ok": True, "details": report}
+        # R8-056 (F5) : aplatit vers la forme canonique que la modale consomme
+        # (grain_analysis / width / height / display_tier / breakdown top-level).
+        # Avant, ces champs n'existaient qu'imbriqués -> modale à moitié vide.
+        return {"ok": True, "details": _flatten_perceptual_for_modal(report)}
     except (KeyError, ValueError, OSError) as exc:
         logger.warning("get_perceptual_details error run=%s row=%s: %s", run_id, row_id, exc)
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
