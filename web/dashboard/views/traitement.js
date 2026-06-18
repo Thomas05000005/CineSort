@@ -93,6 +93,10 @@ function _gradedCountdownSeconds(count) {
 let _currentStep = "analyse";
 let _runInfo = null;
 let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
+// R8-064 (F5) : résumé d'auto-approbation (run/get_auto_approved_summary), surfacé une
+// fois le plan prêt. _autoApproveForRun = runId pour lequel le résumé a déjà été obtenu.
+let _autoApprove = null; // { autoApproved, manualReview, threshold }
+let _autoApproveForRun = null;
 let _loading = false;
 let _targetRunId = null; // Phase 5 spec §2 : fragment #run-XXX = run cible à afficher.
 let _pollTimer = null;
@@ -261,6 +265,27 @@ async function _loadRunInfo() {
           }
         : null,
     };
+    // R8-064 (F5) : surface le résumé d'auto-approbation (combien de films la confiance
+    // élevée + 0 warning critique rendrait auto-approuvables). Endpoint run/get_auto_approved_summary
+    // jamais consommé avant. Fetch une fois le plan prêt (retry tant que « plan pas prêt »),
+    // puis figé pour ce run. enabled:true => on montre le POTENTIEL d'auto-approbation.
+    if (_runInfo.runId && _autoApproveForRun !== _runInfo.runId) {
+      try {
+        const ar = await apiPost("run/get_auto_approved_summary",
+          { run_id: _runInfo.runId, enabled: true }, { signal: _signal() });
+        const ad = (ar && ar.data) || ar || {};
+        if (ad.ok !== false) {
+          _autoApprove = {
+            autoApproved: Number(ad.auto_approved || 0),
+            manualReview: Number(ad.manual_review || 0),
+            threshold: Number(ad.threshold || 85),
+          };
+          _autoApproveForRun = _runInfo.runId; // figé seulement en cas de succès
+        }
+      } catch (_e) {
+        /* plan pas encore prêt ou abort -> nouvel essai au prochain poll */
+      }
+    }
     _ok = true;
   } catch (err) {
     _runInfo = null;
@@ -618,6 +643,7 @@ function _renderStepStats(stepId) {
         <div class="traitement-stats">
           ${_renderStat("Cas à vérifier", _runInfo.reviewQueue)}
           ${_renderStat("Conflits", _runInfo.conflicts)}
+          ${_autoApprove ? _renderStat(`Auto-approuvables (confiance ≥ ${_autoApprove.threshold})`, _autoApprove.autoApproved) : ""}
         </div>
       `;
     case "validation": {
