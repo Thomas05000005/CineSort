@@ -1695,8 +1695,8 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
         if not repo or re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
             out["update_github_repo"] = repo
-    if "worker_count" in payload:
-        out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
+    # R8-068 (F5) : "worker_count" RETIRÉ — toggle inerte, aucune opération ne le lit
+    # (parallélisme réel piloté par perceptual_workers_count + le mode de scan).
     # AUDIT 2026-06-11 (R3) : perceptual_workers(_count) est gere par
     # _save_section_perceptual (clamp canonique [0..16], lit l'alias UI). On ne le
     # traite plus ici (l'ancien clamp [1..32] etait incoherent ET ecrase ensuite).

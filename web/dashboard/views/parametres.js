@@ -312,8 +312,8 @@ export const PARAMETRES_GROUPS = [
         { key: "perceptual_parallelism_mode", label: "Mode parallélisme", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"max",l:"Max"},{v:"safe",l:"Sécurisé"},{v:"serial",l:"Séquentiel"},
         ]},
-        { key: "worker_count", label: "Nombre de workers globaux", type: "number", min: 1, max: 32, default: 4,
-          hint: "Limite globale pour les opérations parallèles (scan, perceptual, apply).", advanced: true },
+        // R8-068 (F5) : toggle "worker_count" RETIRÉ — inerte, aucune opération ne le lit
+        // (le parallélisme réel est piloté par le mode au-dessus + perceptual_workers_count).
       ]},
       { id: "logs", label: "Logs", fields: [
         { key: "log_level", label: "Niveau de verbosité", type: "select", options: [
