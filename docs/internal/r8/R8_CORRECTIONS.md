@@ -896,3 +896,71 @@ events disjoints). Fix : `JobRunner.get_cancel_event(run_id)` + le job_fn câble
   node --check OK, 0 référence résiduelle, 0 lien mort. **0 nouvel échec déterministe.**
 - ⚠️ **Note opérationnelle** : 2 process `app.py --api` (PID 324+20268, port 8642, depuis 15/06) arrêtés à la
   demande de Thomas (bloquaient ses lancements). Règle adoptée : ports éphémères + exclure tests/e2e des sweeps.
+
+---
+
+## ═══ FAMILLE F5 — FIN (câblage FORK-DESIGN tranchés + retraits) — 2026-06-19 ═══
+
+Suite de F5 PARTIELLE. Les 7 FORK-DESIGN tranchés par Thomas appliqués + retraits + unif + i18n.
+
+### CÂBLER (effet mesurable ON≠OFF / différentiel prouvé)
+- **R8-049/051/052 (insights 8 types métier)** `b995d9f` : `_compute_active_insights` dérive 7/8 types
+  MÉTIER du bibliothécaire (quality_reject, duplicates_probable, films_not_identified, subs_missing_fr,
+  sagas_incomplete, films_low_confidence, health_low) au lieu de 5 types « physiques » qu'aucune route/
+  notif ne reconnaissait. Cap [:5]→[:8]. **Diff** : 1/8→7/8 types métier émis. RÉSIDU : omdb_disagreements
+  dormant (aucune comparaison OMDb↔TMDb calculée). Seam #2 fermé côté producteur.
+- **R8-056 (forme perceptuelle canonique)** `bcaeb49` : `_flatten_perceptual_for_modal` sert le contrat que
+  la modale consomme (grain_analysis/width/height/display_tier/breakdown top-level), JAMAIS servi avant
+  (rapport DB imbriqué). breakdown DÉRIVÉ des category_scores V2. **Diff** : grain « — »→rempli, width 0→3840,
+  breakdown 0→3 lignes. RÉSIDU : codec « — » (non stocké dans le rapport perceptuel).
+- **R8-069 (toast desktop)** `5424f15` : NotifyService.enabled lit desktop_notifications_enabled (toggle UI
+  « notifications desktop ») au lieu de notifications_enabled (qui était le mauvais gate). **Diff** : desktop
+  ON→toast, OFF→pas de toast. Miroir centre inconditionnel préservé. RÉSIDU : notifications_enabled vestigial.
+- **R8-064 (résumé auto-approbation)** `dc774a0` : la vue Traitement consomme run/get_auto_approved_summary
+  (jamais appelé avant) → stat « Auto-approuvables (confiance ≥ N) ». **Diff câblage** : 0→3 références.
+
+### RETIRER (disparition propre, 0 lien mort — grep anti-lien-mort effectué)
+- **R8-046/047 (vues mortes)** `7d3a6e5`+`c1b0d51`+`2b0e977` : suppression du cluster fermé qij/quality/
+  quality-simulator/custom-rules-editor (s'importaient entre eux, 0 import vivant) + dossier views/library/
+  (vestige split library→bibliotheque) = **~5009 lignes mortes**. Nettoyage bootstrap-bisect + status.js
+  (/qij→/qualite) + 2 tests routage qij obsolètes + liste scan i18n. Les tests v5 référençant ces vues
+  skippent déjà (garde legacy).
+- **R8-045 (vue IA morte)** `193c8f3` : views/enrichment.js (176 l., scaffold Ollama jamais routé) supprimée.
+  Backend scaffold (enrichment_facade/ollama_client) DORMANT post-R8 (statut vector-search D3).
+- **Toggles fantômes** : R8-071 naming_template `5fb722f` (canoniques = naming_movie/tv_template), R8-068
+  worker_count `7626f60` (inerte), R8-067 animations_enabled `b68bc26` (jamais lu, → animation_level),
+  R8-065-lang subtitle_lang_priority `fdcd11e` (write-only, → subtitle_expected_languages), R8-072 effects_mode
+  `5fef4a0` (0 CSS consomme data-effects). Chacun : champ parametres.js + persistance settings_support retirés,
+  0 consommateur, 60 settings tests verts.
+
+### UNIFIER + i18n
+- **R8-058** `b1a6e0f` : doublons.js + duplicate-comparator-modal.js délèguent à formatBytes (core/format.js).
+  **Diff** : AVANT divergent 3/4 tailles (Mo/Go ≠ Mio/Gio) → APRÈS identique. (3e formateur lib-duplicates.js
+  supprimé en R8-047.)
+- **i18n** `c4e57c9` : clé sidebar.nav.doublons ajoutée (fr=Doublons, en=Duplicates) — sidebar-v5.js la lisait,
+  t() retombait sur la clé brute.
+
+### D1 — queue de régressions de tests réparée
+- `82c9e22` : la suppression de la vue film-detail (D1, session 1) cassait 3 fichiers de tests qui la lisaient
+  (FileNotFoundError). Retargetés sur le composant (test_audit_2026_05_24 + test_phase3_2_alert_labels, classes
+  film-detail-alert*) ou skip-guard (test_film_detail_v5_ported, exports ES spécifiques à la vue). 0 régression.
+
+### SIGNALÉ (rejoint le chantier données/quarantaine F1 ou sécurité torrent — NON tranché, arbitrage Thomas)
+1. **R8-063 (cleanup_orphans)** : le toggle n'a AUCUNE fonction de nettoyage à câbler (write-only). Construire
+   la suppression d'orphelins = feature DESTRUCTIVE neuve qui doit être gouvernée par le garde-fou quarantaine
+   F1 (ne pas supprimer un orphelin non revu). **Rejoint le chantier TTL/quarantaine → SIGNALÉ** plutôt que
+   bâcler une suppression de fichiers non gouvernée.
+2. **R8-070 (retention_days cache)** : prune_disk_cache/prune_probe_cache existent mais ne sont JAMAIS planifiés ;
+   history_retention_days pilote déjà le cron run-history. Câbler un cron de purge de cache = décision de
+   cycle de vie des données (cohérence F1). **Rejoint le chantier conservation → SIGNALÉ.**
+3. **R8-065-sep (séparateur dans presets)** : injecter {sep} dans les templates de presets par défaut ferait
+   APPLIQUER le séparateur où il était ignoré → **MASS-RENAME potentiel (rupture de seeding torrent)** pour tout
+   utilisateur ayant réglé un séparateur ≠ espace, sur surface large (naming.py L42/L127-145, settings_support
+   L847/L1052). Touche l'invariant le plus protégé (nom de fichier/torrent). **SIGNALÉ** : la décision
+   d'accepter le mass-rename-au-prochain-apply (prévisualisé mais réel) revient à Thomas.
+
+### Non-régression F5-fin
+- Sweeps ciblés (insights/perceptual/notify/traitement/i18n/settings/dead-code, `--ignore=tests/e2e*`) :
+  **0 nouvel échec déterministe** vs baseline F3. Seuls échecs = pré-existants (test_apply_op_labels,
+  4× SettingsDispatcherSections [refactor lock wrapper pré-R8], test_bulk_approve_shows_toast_5s,
+  3× bibliotheque). py_compile + node --check OK partout.

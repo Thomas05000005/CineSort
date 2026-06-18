@@ -141,9 +141,9 @@ avant le move réussi**) ; faire gouverner les buckets `run_dir/_review` par la 
 #### Cluster 5.A — Vues mortes (code complet inatteignable)
 | N° | ID | sév | fichier:ligne | symptôme | capture |
 |---|---|---|---|---|---|
-| R8-045 | **F-V8-ENRICH-DEAD** (V3 [33-35]) | 🔴 high | vue Enrichissement IA (aucune route app.js) | vue complète jamais accessible + ses 3 appels façade échoueraient (`enrichment_facade` n'expose pas `get_status`/`apply_bulk`). | `captures/cap_phantom_config` |
-| R8-046 | **F-DEAD-01** | 🟠 medium | `quality-simulator.js:155` · `custom-rules-editor.js:457` | « Simulateur de preset » + « Éditeur de règles custom » inatteignables : seuls hosts `qij.js`/`quality.js` morts (app.js redirige `/qij`→`/accueil`, `/quality`→`/qualite`) ; ~1100 l. de code mort. | `captures/cap_phantom_config` (Playwright redirect + grep) |
-| R8-047 | **F-LIBWF-DEAD** (V3 [36]) | 🟠 medium | `initLibraryWorkflow` | page « Bibliothèque workflow 5 sections » inatteignable (`/library`→`/bibliotheque`, jamais montée). | `captures/cap_phantom_config` |
+| R8-045 | **F-V8-ENRICH-DEAD** (V3 [33-35]) | 🔴 high | vue Enrichissement IA (aucune route app.js) | vue complète jamais accessible + ses 3 appels façade échoueraient (`enrichment_facade` n'expose pas `get_status`/`apply_bulk`). **CORRIGÉ F5** (`193c8f3`). | `captures/cap_phantom_config` |
+| R8-046 | **F-DEAD-01** | 🟠 medium | `quality-simulator.js:155` · `custom-rules-editor.js:457` | « Simulateur de preset » + « Éditeur de règles custom » inatteignables : seuls hosts `qij.js`/`quality.js` morts (app.js redirige `/qij`→`/accueil`, `/quality`→`/qualite`) ; ~1100 l. de code mort. **CORRIGÉ F5** (`7d3a6e5`). | `captures/cap_phantom_config` (Playwright redirect + grep) |
+| R8-047 | **F-LIBWF-DEAD** (V3 [36]) | 🟠 medium | `initLibraryWorkflow` | page « Bibliothèque workflow 5 sections » inatteignable (`/library`→`/bibliotheque`, jamais montée). **CORRIGÉ F5** (`c1b0d51`). | `captures/cap_phantom_config` |
 | R8-048 | **F-INDEX-CMT** (V3 [37]) | 🟡 low | `index.html:92` | commentaire de maintenance trompeur (routage inexistant). **CORRIGÉ F5** (`1c6f986`). | `captures/cap_phantom_config` |
 
 #### Cluster 5.B — SEAM #2 : insights/suggestions front↔back désaccordés (vocabulaire)
@@ -164,13 +164,13 @@ avant le move réussi**) ; faire gouverner les buckets `run_dir/_review` par la 
 #### Cluster 5.D — SEAM perceptual display-path
 | N° | ID | sév | fichier:ligne | symptôme | capture |
 |---|---|---|---|---|---|
-| R8-056 | **F-V8-PERCEPT-DISPLAY** | 🟠 medium | `perceptual-modal.js:265` ← `repositories/perceptual.py:357` | la modale charge par DÉFAUT `get_perceptual_details` (report DB nu : métriques sous `d.metrics`, champs probe absents) mais lit `d.codec`/`d.width`/`d.grain_analysis`/`d.breakdown` top-level → **Detail technique / breakdown / bitrate-vs-réso VIDES sur film en cache**. | `captures/cap_contracts_static` |
+| R8-056 | **F-V8-PERCEPT-DISPLAY** | 🟠 medium | `perceptual-modal.js:265` ← `repositories/perceptual.py:357` | la modale charge par DÉFAUT `get_perceptual_details` (report DB nu : métriques sous `d.metrics`, champs probe absents) mais lit `d.codec`/`d.width`/`d.grain_analysis`/`d.breakdown` top-level → **Detail technique / breakdown / bitrate-vs-réso VIDES sur film en cache**. **CORRIGÉ F5** (`bcaeb49`). | `captures/cap_contracts_static` |
 
 #### Cluster 5.E — SEAM #4 : rendu doublons (3 renderers dérivés)
 | N° | ID | sév | fichier:ligne | symptôme | capture |
 |---|---|---|---|---|---|
 | R8-057 | **F-V9-DUP-DECISION** | 🔴 high | `doublons.js:194` ↔ `run_flow_support.py:1744` | après « Garder A/B », le badge « Décidé » disparaît au refresh : `check_duplicates` ne joint jamais les décisions (`winner_decided`/`winner_side` = 0 hit back) → `decidedCount=0`. Décision persistée+honorée à l'apply mais **invisible en UI**. **CORRIGÉ F5** (`9989ec3`). | `captures/cap_contracts_static` |
-| R8-058 | **F-V9-DUP-UNITS** | 🟠 medium | `doublons.js:100` ↔ `duplicate-comparator-modal.js:57` ↔ `lib-duplicates.js:215` | **3 formateurs de taille divergents** pour 1 donnée : « 1.5 Go » (décimal sur math binaire) / « 1.50 Gio » / `fmtBytes` locale-aware. En locale EN, l'économie reste FR dans Doublons. Helper centralisé EXISTE, 2/3 ne l'adoptent pas. | `captures/cap_contracts_static` |
+| R8-058 | **F-V9-DUP-UNITS** | 🟠 medium | `doublons.js:100` ↔ `duplicate-comparator-modal.js:57` ↔ `lib-duplicates.js:215` | **3 formateurs de taille divergents** pour 1 donnée : « 1.5 Go » (décimal sur math binaire) / « 1.50 Gio » / `fmtBytes` locale-aware. En locale EN, l'économie reste FR dans Doublons. Helper centralisé EXISTE, 2/3 ne l'adoptent pas. **CORRIGÉ F5** (`b1a6e0f`). | `captures/cap_contracts_static` |
 | R8-059 | **F-V4B-DUP1** | 🟠 medium | `doublons.js:367` ← `run_flow_support.py:1446` | lignes Codec/Résolution/Audio des cartes A/B **jamais affichées** : `_quality_info_for_row` ne renvoie que `{score,tier}`. **CORRIGÉ F5** (`9989ec3`). | `captures/cap_contracts_static` |
 
 #### Cluster 5.F — Sérialiseur cache + contrats historique
@@ -183,16 +183,16 @@ avant le move réussi**) ; faire gouverner les buckets `run_dir/_review` par la 
 #### Cluster 5.G — Config fantôme (toggles write-only, 0 consommateur)
 | N° | ID | sév | fichier:ligne | symptôme | capture |
 |---|---|---|---|---|---|
-| R8-063 | **F-PROM-02** | 🟠 medium | `parametres.js:151-152` | `cleanup_orphans` + `cleanup_empty_folders` echo-persistés seulement, absents de `Config`/`build_cfg_from_settings`, 0 consommateur → cocher « nettoyer orphelins / supprimer dossiers vides » **ne supprime rien**. | `captures/cap_phantom_config` |
-| R8-064 | **F-PROM-01** | 🟠 medium | `parametres.js:105` | `auto_approve_enabled` inerte : `get_auto_approved_summary` 0 appelant UI ; le bouton « Approuver les sûrs » utilise `_state.autoThreshold` seul. | `captures/cap_phantom_config` |
-| R8-065 | **F-PROM-03** | 🟡 low | `parametres.js:128` | sélecteur « Séparateur » inerte en preset défaut (`{sep}` absent des templates) ; `subtitle_lang_priority` fantôme (vraie clé `subtitle_expected_languages`). | `captures/cap_phantom_config` |
+| R8-063 | **F-PROM-02** | 🟠 medium | `parametres.js:151-152` | `cleanup_orphans` + `cleanup_empty_folders` echo-persistés seulement, absents de `Config`/`build_cfg_from_settings`, 0 consommateur → cocher « nettoyer orphelins / supprimer dossiers vides » **ne supprime rien**. **SIGNALÉ (rejoint chantier quarantaine F1 — destructif, pas de fn à câbler)**. | `captures/cap_phantom_config` |
+| R8-064 | **F-PROM-01** | 🟠 medium | `parametres.js:105` | `auto_approve_enabled` inerte : `get_auto_approved_summary` 0 appelant UI ; le bouton « Approuver les sûrs » utilise `_state.autoThreshold` seul. **CORRIGÉ F5** (`dc774a0`). | `captures/cap_phantom_config` |
+| R8-065 | **F-PROM-03** | 🟡 low | `parametres.js:128` | sélecteur « Séparateur » inerte en preset défaut (`{sep}` absent des templates) ; `subtitle_lang_priority` fantôme (vraie clé `subtitle_expected_languages`). **SIGNALÉ partiel (sep : risque mass-rename torrent ; lang RETIRÉ fdcd11e)**. | `captures/cap_phantom_config` |
 | R8-066 | **F-KPI-DUPGROUPS** (V4A [21]) | 🟠 medium | `traitement.js:245` ← `dashboard_support.py:542` | `k.duplicates_groups` absent des kpis live (12 clés) → stat « Groupes de doublons » toujours 0 + fallback estim. moves faussé. **CORRIGÉ F5** (`2905a1f`). | `captures/cap_phantom_config` |
-| R8-067 | **F-CFG-ANIM** (V4A [27]) | 🟠 medium | `parametres.js:277` | `animations_enabled` persisté, **0 consommateur DOM/CSS** (coupées seulement par `@media prefers-reduced-motion`) → hint « interface 100 % statique » mensonger. | `captures/cap_phantom_config` |
-| R8-068 | **F-CFG-WORKERS** (V3 [28]) | 🟠 medium | `parametres.js` (`global_workers`) | champ « Nombre de workers globaux » inerte (0 consommateur). | `captures/cap_phantom_config` |
-| R8-069 | **F-CFG-NOTIF** (V4A [29]) | 🟠 medium | `parametres.js:215` | `desktop_notifications_enabled` persisté, 0 consommateur (les notifs sont pilotées par `notifications_enabled`). | `captures/cap_phantom_config` |
-| R8-070 | **F-CFG-RETENTION** (V3 [30]) | 🟠 medium | `parametres.js` (`retention_days`) | « Rétention scores et analyses (jours) » ne purge rien : seul consommateur `prune_disk_cache` jamais appelé en prod ; les crons lisent `history_retention_days`. | `captures/cap_phantom_config` |
-| R8-071 | **F-CFG-NAMETPL** (V3 [31]) | 🟡 low | `parametres.js` (`naming_template`) | « Template général » persisté mais non lu (moteur lit `naming_movie_template`/`naming_tv_template`). | `captures/cap_phantom_config` |
-| R8-072 | **F-CFG-EFFECTS** (V3 [32]) | 🟡 low | `parametres.js` (`effects_mode`) | gap inverse : `effects_mode` appliqué par app.js sans contrôle dans parametres.js. | `captures/cap_phantom_config` |
+| R8-067 | **F-CFG-ANIM** (V4A [27]) | 🟠 medium | `parametres.js:277` | `animations_enabled` persisté, **0 consommateur DOM/CSS** (coupées seulement par `@media prefers-reduced-motion`) → hint « interface 100 % statique » mensonger. **CORRIGÉ F5** (`b68bc26`). | `captures/cap_phantom_config` |
+| R8-068 | **F-CFG-WORKERS** (V3 [28]) | 🟠 medium | `parametres.js` (`global_workers`) | champ « Nombre de workers globaux » inerte (0 consommateur). **CORRIGÉ F5** (`7626f60`). | `captures/cap_phantom_config` |
+| R8-069 | **F-CFG-NOTIF** (V4A [29]) | 🟠 medium | `parametres.js:215` | `desktop_notifications_enabled` persisté, 0 consommateur (les notifs sont pilotées par `notifications_enabled`). **CORRIGÉ F5** (`5424f15`). | `captures/cap_phantom_config` |
+| R8-070 | **F-CFG-RETENTION** (V3 [30]) | 🟠 medium | `parametres.js` (`retention_days`) | « Rétention scores et analyses (jours) » ne purge rien : seul consommateur `prune_disk_cache` jamais appelé en prod ; les crons lisent `history_retention_days`. **SIGNALÉ (rejoint chantier conservation F1 — cron purge cache)**. | `captures/cap_phantom_config` |
+| R8-071 | **F-CFG-NAMETPL** (V3 [31]) | 🟡 low | `parametres.js` (`naming_template`) | « Template général » persisté mais non lu (moteur lit `naming_movie_template`/`naming_tv_template`). **CORRIGÉ F5** (`5fb722f`). | `captures/cap_phantom_config` |
+| R8-072 | **F-CFG-EFFECTS** (V3 [32]) | 🟡 low | `parametres.js` (`effects_mode`) | gap inverse : `effects_mode` appliqué par app.js sans contrôle dans parametres.js. **CORRIGÉ F5** (`5fef4a0`). | `captures/cap_phantom_config` |
 
 #### Cluster 5.H — TV-apply : préview/édition (contrat utilisateur)
 | N° | ID | sév | fichier:ligne | symptôme | capture |
