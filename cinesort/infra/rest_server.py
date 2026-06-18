@@ -484,6 +484,22 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             return False
         return self._allowed_origin(origin) is None
 
+    def _is_cross_site_get(self) -> bool:
+        """Garde CSRF pour les GET a effet de bord (R8-030, F3).
+
+        Les <img>/<script>/<link> cross-site n'envoient PAS d'`Origin` (requete
+        no-cors), donc `_is_forbidden_cross_site` (base sur Origin) ne les attrape
+        pas. Mais les navigateurs modernes envoient `Sec-Fetch-Site: cross-site`
+        sur CES requetes. On combine les deux signaux : une requete est cross-site
+        si son Origin est present+interdit OU si `Sec-Fetch-Site == cross-site`.
+        Un client non-navigateur (curl, pywebview natif) n'envoie ni l'un ni
+        l'autre -> traite comme NON cross-site (usage local legitime preserve).
+        """
+        if self._is_forbidden_cross_site():
+            return True
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        return sec_fetch_site == "cross-site"
+
     def _send_cors_headers(self) -> None:
         # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
         # On reflete uniquement une origine autorisee (localhost / same-origin /
@@ -987,6 +1003,15 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             for key, values in parsed.items():
                 if values:
                     flat_query[key] = values[0]
+            # R8-030 (F3) : `force=1` PURGE le cache disque + re-telecharge depuis
+            # TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE (hebergé
+            # par un site tiers) declenchait ce purge/re-DL en CSRF, meme en bind
+            # 127.0.0.1. On NEUTRALISE `force` pour toute requete cross-site ; la
+            # LECTURE du poster (cache) reste ouverte pour que les <img> legitimes
+            # (meme origine, dashboard local/LAN) continuent de fonctionner.
+            if "force" in flat_query and self._is_cross_site_get():
+                flat_query.pop("force", None)
+                logger.info("REST GET /api/poster: parametre 'force' ignore (requete cross-site)")
             try:
                 poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query)
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
