@@ -1632,8 +1632,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["naming_movie_template"] = str(payload.get("naming_movie_template") or "").strip()
     if "naming_tv_template" in payload:
         out["naming_tv_template"] = str(payload.get("naming_tv_template") or "").strip()
-    if "windows_safe" in payload:
-        out["windows_safe"] = to_bool(payload.get("windows_safe"), True)
+    # R8-101 (filet F5) : "windows_safe" RETIRÉ — fantôme. windows_safe() est appliquée
+    # inconditionnellement (aucun gate settings) -> échappement Windows toujours actif.
     if "lowercase_extensions" in payload:
         out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
     if "separator" in payload:

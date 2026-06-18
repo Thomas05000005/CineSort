@@ -123,7 +123,10 @@ export const PARAMETRES_GROUPS = [
         { key: "naming_tv_template", label: "Template série", type: "text", placeholder: "{series} ({year})" },
       ]},
       { id: "rules", label: "Règles", fields: [
-        { key: "windows_safe", label: "Noms sûrs Windows (échappe < > : \" / \\ | ? *)", type: "toggle" },
+        // R8-101 (filet F5) : toggle "windows_safe" RETIRÉ — fantôme. La fonction
+        // windows_safe() est appliquée INCONDITIONNELLEMENT (apply_core/duplicate_support,
+        // aucun gate settings) -> l'échappement Windows est toujours actif (sécurité), le
+        // toggle laissait croire qu'on pouvait le désactiver.
         { key: "lowercase_extensions", label: "Extensions en minuscule (.mkv vs .MKV)", type: "toggle" },
         { key: "separator", label: "Séparateur entre éléments", type: "select", options: [
           {v:" ",l:"Espace (Inception 2010)"},
