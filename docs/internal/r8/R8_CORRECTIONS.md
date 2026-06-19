@@ -1046,3 +1046,37 @@ TOUS des overlays custom aria-modal sans focus-trap (même famille que R8-078) -
 library-advanced-drawer, qualite-filters-drawer, film-detail (recherche TMDb manuelle). Le candidat
 a11y-contraste (.parametres-tier-badge--bronze) a été **RÉFUTÉ** (0/3) -> pas de fix.
 Verdict : RELIABLE=true (faux-positifs panel 0%), 7 corrigés (focus-trap), 0 enregistré.
+
+---
+
+## ═══ F6-b PHASE 2 — option (a) + vérif sécurité + PUSH PUBLIC — 2026-06-19 ═══
+
+### Étape 1 — option (a) : untrack + gitignore (réversible, disque intact) — `f8cf3dd`
+`git rm -r --cached` de **1913 artefacts régénérables** (sans suppression disque) + ajout au .gitignore :
+docs/internal/observe (1608), dist_backup_AVANT_REBUILD (252), test_library (27), FAIL_*.png (26).
+Disque INTACT (vérifié). Historique passé inchangé (les blobs y restent — purge = chantier b séparé).
+Artefacts de RÉFÉRENCE R8 (baseline_r8/ 29, docs/internal/r8/ 74) **gardés suivis**. check-ignore confirme
+observe/test_library/dist_backup ignorés ; FAIL_*.png plus suivis.
+
+### Étape 2 — vérif sécurité finale (gate avant push) : VERT, 0 secret réel
+Re-scan sur l'EXACT origin/main..HEAD (426 commits) : **settings.json réel = 0** (jamais tracké), token réel
+= 0, PEM = 0, network.json avec token = 0 (capturent {url,status,method,resource_type} seulement). Seuls
+« tokens » littéraux = **fixture de test** `good-token-test-…` (auto-définie+auto-utilisée dans
+scripts/_check_iter14_rate_limit_429.py pour tester le rate-limiter) + faux positifs (identifiants longs,
+messages d'erreur). settings.json.example = placeholder (`^[A-Z_]+$`). 19 .err trackés = bruit dev sans secret.
+Plus gros blobs du push = bloat historique CONNU (dist_backup 53,7 Mo + test_library), pas de nouveau gros blob.
+**Verdict : push sûr côté secrets.**
+
+### Étape 3 — PUSH PUBLIC (push normal, PAS de --force) : RÉUSSI
+`git push origin loop/correction-2026-06` -> **`* [new branch]`** créée sur github.com/Thomas05000005/CineSort
+au hash **f8cf3dd**, EXIT=0. Warning GitHub informatif (CineSort.exe 53,75 Mo > 50 Mo recommandé, non bloquant).
+**main du distant NON touchée** (toujours sur son tip), **f493abdc INTACT**, aucun SHA réécrit. 426 commits
+(audit + R6/R7 + R8 F2→F6) publiés comme sauvegarde distante + état publié des corrections.
+
+⚠️ Observation : le `main` distant est à `0882c5047…`, en AVANCE sur la ref locale dernier-fetch (`f502570`,
+2026-05-25) — le public a avancé depuis. Le push n'y a pas touché. La réconciliation loop→main (décision
+Thomas séparée) devra se faire contre le main distant ACTUEL, pas la ref périmée.
+
+### Reste post-R8 (non fait, voulu)
+- Purge historique (option b, filter-repo/force-push) pour alléger les 325 Mo = **chantier séparé**, irréversible.
+- Merge loop→main / release/tag = **décision Thomas séparée** (non faite cette phase).
