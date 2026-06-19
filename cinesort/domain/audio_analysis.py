@@ -125,11 +125,12 @@ def _classify_codec(codec: str, title: str) -> Tuple[int, str]:
     if "truehd" in codec and "atmos" in combined:
         return 6, "Atmos"
 
-    # DTS-HD MA specifique (avant le match DTS generique)
+    # DTS-HD MA specifique (avant le match DTS generique).
+    # On collapse les variantes "dts-hd ma" et "dts-hd hra" sur le meme rang 4
+    # car en pratique les rips taggent presque exclusivement MA et la difference
+    # de rang ne pesait rien dans le scoring (cf audit 2026-06-19).
     if "dts-hd" in codec or "dtshd" in codec:
-        if "ma" in codec:
-            return 4, "DTS-HD MA"
-        return 4, "DTS-HD MA"  # dts-hd = presque toujours MA
+        return 4, "DTS-HD MA"
 
     for pattern, rank, label in _CODEC_RANK:
         if pattern == "atmos":
