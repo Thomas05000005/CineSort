@@ -5,7 +5,6 @@ HTTP direct avec X-Api-Key, pas de dependance externe.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any, Dict, List
@@ -87,7 +86,7 @@ class RadarrClient:
         try:
             resp = self._session.post(
                 url,
-                data=json.dumps(payload) if payload else None,
+                json=payload if payload is not None else None,
                 timeout=self.timeout_s,
                 **kwargs,
             )
