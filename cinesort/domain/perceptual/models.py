@@ -67,6 +67,13 @@ class VideoPerceptual:
     # §5 v7.5.0 — HDR10+ multi-frame detection (Pass 2, perceptual opt-in)
     has_hdr10_plus_detected: bool = False
 
+    # R8-043 (F4) : type HDR de base, dérivé de la métadonnée couleur du probe
+    # (bt2020 + smpte2084 -> hdr10 ; hlg ; dolby_vision ; sdr sinon). Exposé en
+    # `hdr_analysis` dans to_dict — la modale lit `d.hdr_analysis.hdr_format` /
+    # `.is_hdr`. AVANT : absent de to_dict -> d.hdr_analysis undefined -> « sdr »
+    # affiché pour TOUT film, même HDR.
+    hdr_type: str = "sdr"
+
     # §7 v7.5.0 — Fake 4K detection via FFT 2D + combinaison avec §13 SSIM
     fft_hf_ratio_median: Optional[float] = None
     fake_4k_verdict_fft: str = "unknown"
@@ -133,6 +140,11 @@ class VideoPerceptual:
                 "ssim_y": round(self.ssim_self_ref, 4),
                 "verdict": self.upscale_verdict,
                 "confidence": round(self.upscale_confidence, 2),
+            },
+            # R8-043 (F4) : objet consommé par perceptual-modal.js (hdr_format/is_hdr).
+            "hdr_analysis": {
+                "hdr_format": self.hdr_type,
+                "is_hdr": self.hdr_type != "sdr",
             },
             "hdr10_plus": {
                 "detected_multi_frame": self.has_hdr10_plus_detected,

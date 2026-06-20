@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import cinesort.ui.api.cinesort_api as backend
-from cinesort.infra.rest_server import RestApiServer, generate_openapi_spec, _get_api_methods
+from cinesort.infra.rest_server import RestApiServer, _get_api_methods, generate_openapi_spec
 from tests._helpers import find_free_port as _find_free_port
 
 # Migration B (PR #257) : legacy frontend supprime.

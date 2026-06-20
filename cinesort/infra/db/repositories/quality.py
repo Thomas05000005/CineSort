@@ -330,21 +330,41 @@ class QualityRepository(_BaseRepository):
         """Aggregate tier distribution across the last N runs."""
         self._ensure_quality_tables()
         lim = max(1, int(limit_runs))
+        # Fix audit 2026-05-30 (v1.5.8) tier_v2 fallback dashboard :
+        # Memes pattern que library_support._build_library_rows:373-377 :
+        # privilegier perceptual.global_tier_v2 si dispo, sinon retomber sur
+        # quality_reports.tier (V1, calcule en post-scan auto). Sans ce fallback,
+        # le dashboard affiche 0 Platinum quand le run n'a pas eu d'analyse
+        # perceptuelle, alors meme que quality_reports contient des tiers V1
+        # valides. On utilise LEFT JOIN + COALESCE pour la cle d'agregation.
+        # Note: on garde tout en lowercase pour eviter les doublons "Gold"/"gold".
         with self._managed_conn() as conn:
+            # _ensure tables perceptual_reports peut ne pas exister sur vieilles bases,
+            # on tente d'assurer leur creation via le store si dispo.
+            try:
+                self._ensure_tables("perceptual_reports")  # type: ignore[attr-defined]
+            except Exception:
+                pass
             cur = conn.execute(
                 """
-                SELECT tier, COUNT(*) AS cnt
-                FROM quality_reports
-                WHERE run_id IN (
+                SELECT COALESCE(LOWER(p.global_tier_v2), LOWER(q.tier)) AS tier_key,
+                       COUNT(*) AS cnt
+                FROM quality_reports q
+                LEFT JOIN perceptual_reports p
+                    ON p.run_id = q.run_id AND p.row_id = q.row_id
+                WHERE q.run_id IN (
                     SELECT run_id FROM runs ORDER BY COALESCE(started_ts, created_ts) DESC LIMIT ?
                 )
-                GROUP BY tier
+                GROUP BY tier_key
                 """,
                 (lim,),
             )
             dist: Dict[str, int] = {}
             for row in cur.fetchall():
-                dist[str(row["tier"])] = int(row["cnt"] or 0)
+                key = row["tier_key"]
+                if key is None:
+                    key = "unknown"
+                dist[str(key)] = int(row["cnt"] or 0)
 
             total_cur = conn.execute(
                 """

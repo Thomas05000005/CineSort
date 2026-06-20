@@ -5,6 +5,9 @@ import { apiPost } from "../core/api.js";
 import { kpiGridHtml } from "../components/kpi-card.js";
 import { skeletonKpiGridHtml, skeletonLinesHtml } from "../components/skeleton.js";
 import { t } from "../core/i18n.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer alert() natif
+// par showToast pour notification de test de connexion (non destructif).
+import { showToast } from "../components/toast.js";
 
 export function initRadarr() { _load(); }
 
@@ -51,7 +54,10 @@ async function _load() {
 
     $("btnRadarrTest")?.addEventListener("click", async () => {
       const r = await apiPost("integrations/test_radarr_connection", { url: s.radarr_url, api_key: s.radarr_api_key });
-      alert(r.data?.ok ? t("radarr.test_ok", { name: r.data.server_name }) : (r.data?.error || t("radarr.test_fail")));
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+      const ok = !!r.data?.ok;
+      const text = ok ? t("radarr.test_ok", { name: r.data.server_name }) : (r.data?.error || t("radarr.test_fail"));
+      showToast({ type: ok ? "success" : "error", text });
     });
 
     $("btnRadarrStatus")?.addEventListener("click", async () => {

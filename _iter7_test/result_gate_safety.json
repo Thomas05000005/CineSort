@@ -1,0 +1,42 @@
+{
+  "started_at": "2026-06-09 13:17:58",
+  "gate1_dry_run_side_effect_free": {
+    "gate": "dry_run_side_effect_free",
+    "run_id": "20260609_131759_880",
+    "plan_rows_count": 20,
+    "decisions_count": 20,
+    "manifest_before_count": 47,
+    "manifest_after_count": 47,
+    "hash_before": "a075f946e36b30ca00411bd72dd823471fe6746cb7a98144450b72578c6a1b8c",
+    "hash_after": "a075f946e36b30ca00411bd72dd823471fe6746cb7a98144450b72578c6a1b8c",
+    "identical": true,
+    "dry_result_ok": true,
+    "diffs": [],
+    "verdict": "PASS"
+  },
+  "gate2_smoke_apply_undo": {
+    "gate": "smoke_apply_reel_undo_atomic",
+    "run_id": "20260609_131808_219",
+    "plan_rows_count": 20,
+    "decisions_count": 20,
+    "hash_before": "a075f946e36b30ca00411bd72dd823471fe6746cb7a98144450b72578c6a1b8c",
+    "hash_after_apply": "4ea557f09da2c05a3b101351571874898f59b622417f5e9dbe6443481e40453e",
+    "hash_after_undo": "e70d540bef5c4956f099b0b78bfb48fa37a5e6e8746e5f238243548b766b4ad7",
+    "apply_ok": true,
+    "apply_changed_fs": true,
+    "undo_ok": true,
+    "undo_restores_fs": false,
+    "diffs": {
+      "added": [
+        "RootB\\Movies\\Tears of Steel (2012)\\Tears of Steel (2012)",
+        "RootB\\Movies\\The Matrix (1999)\\The Matrix (1999)",
+        "RootB\\Shows\\Breaking Bad\\Season 01\\Breaking Bad S01E01",
+        "RootB\\Shows\\Breaking Bad\\Season 01\\Breaking Bad S01x02",
+        "RootB\\Shows\\_Collection"
+      ],
+      "removed": [],
+      "changed": []
+    },
+    "verdict": "FAIL"
+  }
+}

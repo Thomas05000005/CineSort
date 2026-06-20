@@ -10,6 +10,7 @@ Couvre :
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -17,15 +18,16 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any, Dict
+
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import (
-    RestApiServer,
-    _RateLimiter,
-    _find_active_run_id,
     _RATE_LIMIT_MAX_FAILURES,
+    RestApiServer,
+    _CineSortHandler,
+    _find_active_run_id,
+    _RateLimiter,
 )
 from tests._helpers import find_free_port as _find_free_port
-
 
 # ---------------------------------------------------------------------------
 # Tests unitaires _RateLimiter (sans serveur HTTP)
@@ -211,11 +213,14 @@ class DashboardStaticFileTests(unittest.TestCase):
         self.assertIn("text/html", headers.get("content-type", ""))
         self.assertIn(b"CineSort", body)
 
-    def test_dashboard_without_slash_serves_index(self) -> None:
-        """GET /dashboard retourne index.html (fallback)."""
+    def test_dashboard_without_slash_redirects_to_slash(self) -> None:
+        """GET /dashboard renvoie 301 vers /dashboard/ pour fixer la resolution
+        des chemins relatifs (./styles.css -> /dashboard/styles.css au lieu
+        de /styles.css). Sans cette redirection, la page de login s'affichait
+        en HTML brut sans CSS (bug confirme screenshot 2026-06-05)."""
         status, body, headers = self._get("/dashboard")
-        self.assertEqual(status, 200)
-        self.assertIn(b"CineSort", body)
+        self.assertEqual(status, 301)
+        self.assertEqual(headers.get("location"), "/dashboard/")
 
     def test_dashboard_index_explicit(self) -> None:
         """GET /dashboard/index.html retourne 200."""
@@ -358,15 +363,79 @@ class RateLimitHttpTests(unittest.TestCase):
         return status
 
     def test_rate_limit_blocks_after_5_failures(self) -> None:
-        """Apres 5 echecs 401, la 6e requete retourne 429."""
-        # Envoyer 5 requetes avec mauvais token
-        for i in range(_RATE_LIMIT_MAX_FAILURES):
-            status = self._post("/api/get_settings", token="bad-token")
-            self.assertEqual(status, 401, f"Iteration {i}: expected 401, got {status}")
+        """ITER14 #2 SOLDE (2026-06-10) — re-ancrage sur chemin facade non-loopback.
 
-        # La 6e devrait etre 429
-        status = self._post("/api/get_settings", token="bad-token")
-        self.assertEqual(status, 429)
+        Historique :
+          - FIX DEFINITIF 2026-06-07 : 127.0.0.1 exempte du rate-limit (saturation
+            par 401 silents _safeBearer + BOM U+FEFF). Bypass conserve.
+          - ITER14 RATE_LIMIT_429_FACADE : la voie publique testee passe par le
+            chemin facade /api/<facade>/<method>. Le test legacy /api/get_settings
+            tombe sur la garde 410 Gone (P0 #233) avant meme d'atteindre l'auth,
+            ce qui rendait le scenario rate-limit invisible.
+
+        Strategie de re-ancrage (alignee sur scripts/_check_iter14_rate_limit_429.py) :
+          1. Monkey-patch `_CineSortHandler._client_ip` pour simuler une IP LAN
+             (10.0.0.42) : le rate-limit redevient actif (loopback toujours exempte
+             par design, memoire user BYPASS LOOPBACK CONSERVE).
+          2. Pre-saturer le compteur _RateLimiter via record_failure (5 echecs).
+          3. POST sur le VRAI chemin facade `/api/settings/get_settings` avec un
+             bon token : on doit recevoir 429 + Retry-After (28e85c3 fix #2).
+          4. Verifier que le 5e POST loopback reel (sans patch) repond 401 et NON
+             429 -> le bypass loopback reste intact.
+        """
+        # 1. Simuler IP LAN distante via monkey-patch.
+        original_client_ip = _CineSortHandler._client_ip
+
+        def fake_client_ip(self: Any) -> str:
+            return "10.0.0.42"
+
+        _CineSortHandler._client_ip = fake_client_ip  # type: ignore[assignment]
+        try:
+            # 2. Pre-saturer le compteur (5 echecs sur 10.0.0.42).
+            for _ in range(_RATE_LIMIT_MAX_FAILURES):
+                self.server._rate_limiter.record_failure("10.0.0.42")
+            self.assertTrue(
+                self.server._rate_limiter.is_blocked("10.0.0.42"),
+                "le rate-limiter aurait du bloquer 10.0.0.42 apres 5 echecs",
+            )
+
+            # 3. POST facade avec bon token : 429 + Retry-After.
+            conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request(
+                "POST",
+                "/api/settings/get_settings",
+                body=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.token}",
+                },
+            )
+            resp = conn.getresponse()
+            status_429 = resp.status
+            retry_after = resp.getheader("Retry-After")
+            xreq = resp.getheader("X-Request-ID") or resp.getheader("x-request-id")
+            resp.read()
+            conn.close()
+            self.assertEqual(
+                status_429,
+                429,
+                f"facade path doit renvoyer 429 quand 10.0.0.42 est sature, got {status_429}",
+            )
+            self.assertEqual(
+                retry_after, "60", f"Retry-After=60 attendu (RFC 7231), got {retry_after!r}"
+            )
+            self.assertIsNotNone(xreq, "X-Request-ID doit etre present sur 429")
+        finally:
+            _CineSortHandler._client_ip = original_client_ip  # type: ignore[assignment]
+
+        # 4. Loopback NON patche : bypass actif, jamais 429.
+        # Le compteur 10.0.0.42 reste sature mais 127.0.0.1 doit toujours passer.
+        status_loop = self._post("/api/get_settings", token="bad-token")
+        self.assertEqual(
+            status_loop,
+            410,
+            f"loopback exempte du rate-limit, voie legacy 410 attendue, got {status_loop}",
+        )
 
     def test_rate_limit_does_not_block_valid_requests_before_threshold(self) -> None:
         """Un bon token passe si on n'a pas atteint le seuil (nouveau serveur necessaire)."""

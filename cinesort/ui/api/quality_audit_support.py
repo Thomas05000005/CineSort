@@ -17,6 +17,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.conversions import to_bool
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -81,6 +82,22 @@ def get_films_by_tier(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[
             "total": N
         }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'audit Qualite.
+    try:
+        return _get_films_by_tier_impl(api, tier, limit)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_films_by_tier failed for tier=%s limit=%s", tier, limit)
+        return {
+            "ok": False,
+            "error": "films_by_tier_failed",
+            "message": str(exc),
+            "user_message": "Impossible de recuperer la liste des films par tier.",
+        }
+
+
+def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[str, Any]:
+    """Implementation reelle de get_films_by_tier, sans wrap global (Vague G)."""
     tier_norm = str(tier or "").strip().lower()
     if tier_norm not in _VALID_TIERS:
         return _err_response(
@@ -125,6 +142,12 @@ def get_films_by_tier(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[
 
     films_out: List[Dict[str, Any]] = []
     for r in filtered[:lim]:
+        # Iter13 etape 4 (2026-06-10) : propager probe_quality / quality_unavailable
+        # depuis library_support pour que l'UI Qualite distingue un score reel
+        # mesure d'un score base sur le nom seul (probe FAILED apres retry+breaker).
+        # Sans cette propagation, get_films_by_tier renvoyait un score numerique
+        # nu - l'UI affichait un score Silver-cap comme si c'etait une mesure
+        # fiable (degradation silencieuse, contraire a l'acquis iter4).
         films_out.append(
             {
                 "row_id": str(r.get("row_id") or ""),
@@ -134,6 +157,8 @@ def get_films_by_tier(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) -> Dict[
                 "tier": str(r.get("tier_v2") or "unknown").lower(),
                 "poster_url": r.get("poster_url"),
                 "warnings": list(r.get("warnings") or []),
+                "probe_quality": str(r.get("probe_quality") or "UNKNOWN").upper(),
+                "quality_unavailable": bool(r.get("quality_unavailable")),
             }
         )
 
@@ -303,7 +328,13 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
         # Reuse_existing=False pour forcer le re-calcul depuis le profil actuel.
         for rid in row_ids:
             try:
-                api.quality.get_quality_report(run_id, rid, {"reuse_existing": False})
+                res = api.quality.get_quality_report(run_id, rid, {"reuse_existing": False})
+                # AUDIT 2026-06-14 (R7-11) : get_quality_report renvoie {ok:False}
+                # sans lever (probe ffprobe absent, media deplace) -> avant,
+                # errors restait 0 et le toast vert annoncait "N/N re-calcules"
+                # meme quand tout echouait. On compte les echecs metier.
+                if isinstance(res, dict) and res.get("ok") is False:
+                    errors += 1
             # except Exception large : on continue en cas d'erreur sur un film
             except (OSError, KeyError, TypeError, ValueError) as exc:
                 logger.debug("recompute_worker error row_id=%s: %s", rid, exc)
@@ -311,6 +342,52 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
             processed += 1
             if processed % 10 == 0 or processed == total:
                 _set_job_status(job_id, progress=processed, errors=errors)
+
+        # ITER8 cluster settings — fix `perceptual_auto_on_quality` no-op silencieux.
+        # Toggle UI Parametres > "Analyse perceptuelle apres recompute qualite"
+        # etait sauvegarde par _save_section_perceptual (L1523) et expose par
+        # _build_settings_dict (perceptual_support L1433 alias `auto_on_quality`)
+        # mais ZERO lecture dans le chemin reel (_recompute_worker / run_flow_support
+        # apres recompute_all_scores). Pattern : meme contrat que perceptual_auto_on_scan
+        # fixe en 12b3721 (background, best-effort, log WARN bruyant si echec
+        # d'approvisionnement, silencieux si toggle=OFF). Lance analyze_perceptual_batch
+        # sur les row_ids du run. Pre-requis `perceptual_enabled` (false par defaut)
+        # car le moteur n'est pas operationnel sans la cle activee : WARN explicite
+        # si l'utilisateur a active l'auto sans avoir active le moteur, pour honorer
+        # le contrat ii.b (echec d'approvisionnement bruyant).
+        try:
+            # AUDIT 2026-06-11 (R3) : get_settings() retourne un dict PLAT (pas de
+            # cle "settings", cf call sites L35/L208). Le .get("settings") rendait
+            # settings={} toujours -> perceptual_enabled lu False -> l'analyse
+            # perceptuelle auto post-recompute (fix ITER8) ne se lancait JAMAIS.
+            settings = api.settings.get_settings() or {}
+            auto_perc_q = to_bool(settings.get("perceptual_auto_on_quality"), True)
+            if auto_perc_q and row_ids:
+                perc_enabled = to_bool(settings.get("perceptual_enabled"), False)
+                if not perc_enabled:
+                    logger.warning(
+                        "perceptual_auto_on_quality active mais perceptual_enabled=False "
+                        "-> analyse perceptuelle skip (active aussi le moteur)."
+                    )
+                else:
+                    from cinesort.ui.api import perceptual_support
+
+                    logger.info(
+                        "recompute_worker launching auto perceptual batch (%d films)",
+                        len(row_ids),
+                    )
+                    perc_result = perceptual_support.analyze_perceptual_batch(
+                        api, run_id, row_ids, options=None
+                    )
+                    if isinstance(perc_result, dict) and perc_result.get("ok"):
+                        logger.info(
+                            "recompute_worker auto perceptual started success_count=%s",
+                            perc_result.get("success_count"),
+                        )
+                    else:
+                        logger.debug("recompute_worker auto perceptual skipped: %s", perc_result)
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+            logger.warning("recompute_worker auto perceptual warning: %s", exc)
 
         _set_job_status(
             job_id,
@@ -338,6 +415,25 @@ def recompute_all_scores(api: Any) -> Dict[str, Any]:
     Returns:
         {"ok": True, "job_id": "...", "total": N, "run_id": "..."}
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur ce trigger background. La fonction lance un thread Daemon donc on
+    # protege la phase synchrone (validation + insertion job registry).
+    try:
+        return _recompute_all_scores_impl(api)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("recompute_all_scores failed")
+        return {
+            "ok": False,
+            "error": "recompute_scores_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de recalculer les scores. Reessaie ou redemarre."
+            ),
+        }
+
+
+def _recompute_all_scores_impl(api: Any) -> Dict[str, Any]:
+    """Implementation reelle de recompute_all_scores, sans wrap global (Vague G)."""
     resolved_rid = _resolve_latest_run_id(api)
     if not resolved_rid:
         return _err_response(

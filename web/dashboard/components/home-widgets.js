@@ -2,7 +2,7 @@
  * Parité exacte avec web/components/home-widgets.js desktop.
  */
 
-import { escapeHtml, safeUrl } from "../core/dom.js";
+import { escapeHtml, safeUrl, posterProxyUrl } from "../core/dom.js";
 
 function _svg(pathContent, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${pathContent}</svg>`;
@@ -106,13 +106,18 @@ export function renderPosterCarousel(container, items, opts = {}) {
     const tier = String(it.tier || "unknown").toLowerCase();
     const score = it.score != null ? Math.round(Number(it.score)) : "?";
     const year = it.year ? ` (${escapeHtml(it.year)})` : "";
-    const posterStyle = it.poster_url ? `background-image: url('${safeUrl(it.poster_url)}')` : "";
+    // Iter12 ETAPE 2 : prioriser le proxy `/api/poster?id=...&size=w185`
+    // (carrousel home -> taille moyenne). Fallback `poster_url` direct
+    // pour backward compat (acquis 242cf339).
+    const proxied = posterProxyUrl(it.tmdb_id, "w185");
+    const posterSrc = proxied || (it.poster_url ? safeUrl(it.poster_url) : "");
+    const posterStyle = posterSrc ? `background-image: url('${posterSrc}')` : "";
     return `
       <article class="v5-poster-card stagger-item" role="listitem" style="--order: ${idx}"
                data-poster-film="${escapeHtml(it.row_id || "")}"
                tabindex="0" aria-label="${escapeHtml(it.title || "Film")} ${escapeHtml(year)}, score ${escapeHtml(score)}">
         <div class="v5-poster-image" style="${posterStyle}">
-          ${!it.poster_url ? `<div class="v5-poster-placeholder">${_icon("film", 32)}</div>` : ""}
+          ${!posterSrc ? `<div class="v5-poster-placeholder">${_icon("film", 32)}</div>` : ""}
         </div>
         <div class="v5-poster-meta">
           <div class="v5-poster-title v5u-truncate">${escapeHtml(it.title || "?")}${year}</div>

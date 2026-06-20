@@ -12,8 +12,8 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi

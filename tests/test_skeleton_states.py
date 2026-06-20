@@ -1,7 +1,7 @@
 """V2-08 — verifie que les vues critiques ont un skeleton state."""
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 
 class SkeletonStatesTests(unittest.TestCase):

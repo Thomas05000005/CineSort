@@ -16,10 +16,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cinesort.app.watchlist import (
-    parse_letterboxd_csv,
-    parse_imdb_csv,
-    compare_watchlist,
     _normalize_title,
+    compare_watchlist,
+    parse_imdb_csv,
+    parse_letterboxd_csv,
 )
 
 # Migration B (PR #257) : legacy frontend supprime.

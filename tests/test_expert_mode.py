@@ -13,8 +13,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from cinesort.ui.api.settings_support import _save_section_scan_flags
 from cinesort.ui.api.cinesort_api import CineSortApi
+from cinesort.ui.api.settings_support import _save_section_scan_flags
 
 # Migration B (PR1 #257 + PR2) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard

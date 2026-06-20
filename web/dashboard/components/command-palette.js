@@ -5,6 +5,7 @@
  */
 
 import { navigateTo } from "../core/router.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 let _overlay = null;
 let _input = null;
@@ -12,6 +13,7 @@ let _list = null;
 let _commands = [];
 let _filtered = [];
 let _selectedIdx = 0;
+let _prevFocus = null;
 
 const _MRU_KEY = "cinesort.dashboard.cmdPalette.mru";
 const _MRU_LIMIT = 10;
@@ -94,11 +96,12 @@ function _ensureOverlay() {
   _overlay.setAttribute("aria-label", "Palette de commandes");
   _overlay.innerHTML = `
     <div class="cmd-palette">
-      <input type="text" class="cmd-palette__input" placeholder="Tapez une commande..." autocomplete="off" spellcheck="false" />
-      <ul class="cmd-palette__list" role="listbox"></ul>
+      <input type="text" class="cmd-palette__input" placeholder="Rechercher une commande..." autocomplete="off" spellcheck="false" role="combobox" aria-label="Rechercher une commande" aria-controls="cmd-palette-list" aria-expanded="true" aria-autocomplete="list" />
+      <ul class="cmd-palette__list" id="cmd-palette-list" role="listbox"></ul>
       <div class="cmd-palette__hint">↑↓ naviguer · Entrée exécuter · Échap fermer</div>
     </div>`;
   document.body.appendChild(_overlay);
+  trapFocus(_overlay); // R8-078b : Tab/Shift+Tab piégés dans la palette (aria-modal)
   _input = _overlay.querySelector(".cmd-palette__input");
   _list = _overlay.querySelector(".cmd-palette__list");
   _input.addEventListener("input", _refilter);
@@ -133,7 +136,7 @@ function _render() {
     return;
   }
   _list.innerHTML = _filtered.map((c, i) => `
-    <li class="cmd-palette__item${i === _selectedIdx ? " is-selected" : ""}" data-idx="${i}" role="option">
+    <li class="cmd-palette__item${i === _selectedIdx ? " is-selected" : ""}" id="cmd-palette-opt-${i}" data-idx="${i}" role="option" aria-selected="${i === _selectedIdx ? "true" : "false"}">
       <div class="cmd-palette__title"></div>
       <div class="cmd-palette__hint-line"></div>
     </li>`).join("");
@@ -143,14 +146,27 @@ function _render() {
     li.addEventListener("click", () => _execute(i));
     li.addEventListener("mouseenter", () => { _selectedIdx = i; _updateSelection(); });
   });
+  _updateActiveDescendant();
+}
+
+function _updateActiveDescendant() {
+  if (!_input) return;
+  if (_filtered.length > 0) {
+    _input.setAttribute("aria-activedescendant", `cmd-palette-opt-${_selectedIdx}`);
+  } else {
+    _input.removeAttribute("aria-activedescendant");
+  }
 }
 
 function _updateSelection() {
   _list.querySelectorAll(".cmd-palette__item").forEach((li, i) => {
-    li.classList.toggle("is-selected", i === _selectedIdx);
+    const isSel = i === _selectedIdx;
+    li.classList.toggle("is-selected", isSel);
+    li.setAttribute("aria-selected", isSel ? "true" : "false");
   });
   const sel = _list.children[_selectedIdx];
   if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+  _updateActiveDescendant();
 }
 
 function _onInputKey(e) {
@@ -171,6 +187,7 @@ function _execute(idx) {
 function _open() {
   _commands = _buildCommands();
   _ensureOverlay();
+  try { _prevFocus = document.activeElement; } catch { _prevFocus = null; }
   _overlay.classList.remove("hidden");
   _input.value = "";
   _refilter();
@@ -180,6 +197,16 @@ function _open() {
 function _close() {
   if (!_overlay) return;
   _overlay.classList.add("hidden");
+  const target = _prevFocus;
+  _prevFocus = null;
+  if (target && typeof target.focus === "function" && document.body.contains(target)) {
+    try { target.focus(); } catch { /* noop */ }
+  } else {
+    const trigger = document.querySelector("[data-v5-search-trigger]");
+    if (trigger && typeof trigger.focus === "function") {
+      try { trigger.focus(); } catch { /* noop */ }
+    }
+  }
 }
 
 export function initCommandPalette() {

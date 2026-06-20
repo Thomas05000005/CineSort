@@ -18,6 +18,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+import { formatBytes } from "../core/format.js"; // R8-058 (F5) : helper taille central
 import { getNavSignal } from "../core/nav-abort.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
 import { openPerceptualModal } from "../components/perceptual-modal.js";
@@ -36,6 +37,14 @@ let _container = null;
 let _filmCache = new Map();   // row_id -> {poster_url, overview, candidates}
 let _keyboardHandler = null;
 const _SELECTED_KEY_STORAGE = "cinesort.doublons.selectedGroupKey";
+
+// AUDIT 2026-06-14 (R6-C) : cache des groupes de doublons PERSISTANT entre les
+// navigations (survit a unmountDoublons). check_duplicates parcourt ~1000 films
+// + scanne le disque -> plusieurs secondes. Avant, re-entrer dans la vue
+// relancait ce scan a chaque fois. Le cache est cle par runId ; "Actualiser"
+// force un nouveau scan. Reference partagee avec _state.groups -> les decisions
+// (winner_decided) prises en place restent reflechies dans le cache.
+let _groupsCache = null;   // { runId, groups, sizeSavingsTotal } | null
 
 // Fix audit 2026-05-24 : getNavSignal était importé puis assigné dans une
 // variable locale `signal` jamais utilisée (void signal). On centralise un
@@ -62,6 +71,13 @@ function _initState() {
     // Désormais : Set des groupKeys en vol -> seuls les boutons du groupe
     // concerné se désactivent, l'utilisateur peut décider en parallèle.
     decisionInFlightByGroup: new Set(),
+    // R6-C : true quand les groupes affiches viennent du cache (pas re-scannes).
+    fromCache: false,
+    // Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le
+    // bulk perceptual (miroir du pattern scan etape 1 Analyse). Null hors batch,
+    // sinon {jobId, done, total, status, startedTs} mis a jour a chaque tick
+    // du _pollJobUntilDone toutes les 2s pour rafraichir la barre.
+    bulkJob: null,
   };
 }
 
@@ -83,17 +99,25 @@ function _writeStoredSelection(key) {
 /* --- Formatters --- */
 
 function _fmtSize(bytes) {
+  // R8-058 (F5) : délègue au helper central core/format.js (base 1024, unités localisées
+  // o/Ko/Mo/Go/To) au lieu de 3 implémentations divergentes (doublons/comparateur/lib).
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+  return formatBytes(b);
 }
 
 function _groupKey(group) {
   for (const key of ["group_key", "id", "signature"]) {
     if (group[key]) return String(group[key]);
   }
-  return String(group.key || group.title || "") + "::" + String(group.year || "");
+  // AUDIT 2026-06-10 (REAL 2/2) : ce fallback DOIT etre identique au backend
+  // _group_key_for (run_flow_support.py) — title.lower()|year, "|" strippe.
+  // Avant : "Title::Year" (casse d'origine, separateur "::") ne matchait jamais
+  // le backend -> mark_duplicate_winner persistait losers=[] et aucun fichier
+  // perdant n'etait deplace a l'apply. Toutes les decisions Garder A/B perdues.
+  const title = String(group.title || "").trim().toLowerCase();
+  const year = group.year || group.proposed_year || "";
+  return `${title}|${year}`.replace(/^\|+|\|+$/g, "");
 }
 
 function _firstRowId(group) {
@@ -155,6 +179,9 @@ async function _hydrateGroupsWithPosters() {
   }
   if (tasks.length === 0) return;
   await Promise.allSettled(tasks);
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await pour
+  // eviter NPE dans _render() / _renderRightPanel() si la vue a ete demontee.
+  if (!_state) return;
   // Re-render pour afficher les posters
   _render();
   _renderRightPanel();
@@ -228,7 +255,8 @@ function _renderHeader() {
         </p>
       </div>
       <div class="doublons-toolbar" role="toolbar" aria-label="Actions Doublons">
-        <button type="button" class="v5-btn v5-btn--secondary" data-doublons-action="refresh">↻ Actualiser</button>
+        <button type="button" class="v5-btn v5-btn--secondary" data-doublons-action="refresh"
+                title="${_state.fromCache ? "Résultats en cache (re-scan non relancé). Cliquez pour re-scanner." : "Re-scanner les doublons"}">↻ Actualiser${_state.fromCache ? ' <span class="doublons-cache-badge" title="Résultats en cache">⚡</span>' : ""}</button>
         <select class="v5-input doublons-filter" data-doublons-filter aria-label="Filtrer">
           <option value="all"${_state.filter === "all" ? " selected" : ""}>Tous (${n})</option>
           <option value="conflict"${_state.filter === "conflict" ? " selected" : ""}>Conflits seulement</option>
@@ -270,6 +298,14 @@ function _renderGroupCard(group) {
   const qualityB = comparison.quality_b || {};
   const scoreA = Math.round(Number(comparison.total_score_a) || 0);
   const scoreB = Math.round(Number(comparison.total_score_b) || 0);
+  // R8-042 (F4) : total_score_a/b sont des POINTS head-to-head (somme des
+  // points_delta>0 pour A, <0 pour B) — PAS un score 0..100. Les rendre en
+  // "X/100" affichait un faux "30/100" / "0/100" (perdant ~toujours 0) même
+  // pour 2 bons fichiers. L'échelle correcte = points d'AVANTAGE sur le total
+  // des points en jeu (scoreA+scoreB = somme des |points_delta|).
+  const totalPts = scoreA + scoreB;
+  const advA = `${scoreA}/${totalPts || 1} pts`;
+  const advB = `${scoreB}/${totalPts || 1} pts`;
 
   // Alertes agregees
   const allFlags = [];
@@ -300,13 +336,20 @@ function _renderGroupCard(group) {
   // Fix audit 2026-05-24 : disable uniquement les boutons du groupe en vol.
   const inflight = _state.decisionInFlightByGroup.has(groupKey) ? "disabled" : "";
 
+  // R6-A : badge de portee (liste unique par identite). Indique ou sont les copies.
+  const scopeInfo = {
+    cross_root: { label: "↔ Racines différentes", cls: "is-cross" },
+    same_root: { label: "Même racine", cls: "is-same-root" },
+    same_folder: { label: "Même dossier", cls: "is-same-folder" },
+  }[String(group.scope || "")] || null;
+
   return `
     <article class="doublons-card${isSelected ? " is-selected" : ""}${decided ? " is-decided" : ""}"
              data-doublons-group="${escapeHtml(groupKey)}" tabindex="0">
       <header class="doublons-card-header">
         <div class="doublons-card-poster" aria-hidden="true">
           ${posterUrl
-            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
             : `<div class="doublons-card-poster-placeholder">🎬</div>`}
         </div>
         <div class="doublons-card-title-block">
@@ -315,6 +358,7 @@ function _renderGroupCard(group) {
             <span>${totalFiles} fichier${totalFiles > 1 ? "s" : ""}</span>
             <span>·</span>
             <span>${escapeHtml(_fmtSize(totalSize))}</span>
+            ${scopeInfo ? `<span class="doublons-card-scope ${scopeInfo.cls}">${escapeHtml(scopeInfo.label)}</span>` : ""}
             ${alertCounts.total > 0 ? `<span class="doublons-card-alerts">⚠ ${alertCounts.total} alerte${alertCounts.total > 1 ? "s" : ""}</span>` : ""}
           </div>
           ${decided ? `
@@ -328,7 +372,7 @@ function _renderGroupCard(group) {
           <div class="doublons-version-label">A ${winner === "a" ? `<span class="doublons-version-badge">✓ Recommandé</span>` : ""}</div>
           <div class="doublons-version-name">${escapeHtml(fileA)}</div>
           <dl class="doublons-version-dl">
-            <dt>Score</dt><dd>${scoreA}/100</dd>
+            <dt>Avantage</dt><dd>${advA}</dd>
             <dt>Taille</dt><dd>${escapeHtml(_fmtSize(comparison.file_a_size))}</dd>
             ${qualityA.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(qualityA.codec).toUpperCase())}</dd>` : ""}
             ${qualityA.resolution ? `<dt>Résolution</dt><dd>${escapeHtml(qualityA.resolution)}</dd>` : ""}
@@ -339,7 +383,7 @@ function _renderGroupCard(group) {
           <div class="doublons-version-label">B ${winner === "b" ? `<span class="doublons-version-badge">✓ Recommandé</span>` : ""}</div>
           <div class="doublons-version-name">${escapeHtml(fileB)}</div>
           <dl class="doublons-version-dl">
-            <dt>Score</dt><dd>${scoreB}/100</dd>
+            <dt>Avantage</dt><dd>${advB}</dd>
             <dt>Taille</dt><dd>${escapeHtml(_fmtSize(comparison.file_b_size))}</dd>
             ${qualityB.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(qualityB.codec).toUpperCase())}</dd>` : ""}
             ${qualityB.resolution ? `<dt>Résolution</dt><dd>${escapeHtml(qualityB.resolution)}</dd>` : ""}
@@ -390,18 +434,75 @@ function _renderGroupCard(group) {
   `;
 }
 
+// Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le bulk
+// perceptual (miroir du pattern scan etape 1 Analyse). Retourne '' si pas de
+// _state.bulkJob actif, sinon une barre avec --progress (variable CSS),
+// compteur done/total, pourcentage et ETA derive du startedTs.
+function _renderBulkProgress() {
+  const job = _state && _state.bulkJob;
+  if (!job) return "";
+  const total = Math.max(0, Number(job.total) || 0);
+  const done = Math.max(0, Math.min(total, Number(job.done) || 0));
+  const ratio = total > 0 ? done / total : 0;
+  const pct = Math.round(ratio * 100);
+  // ETA : duree ecoulee / done * (total - done). startedTs est en secondes.
+  let etaText = "—";
+  if (job.startedTs && done > 0 && done < total) {
+    const elapsed = Math.max(0, (Date.now() / 1000) - Number(job.startedTs));
+    const remaining = Math.round((elapsed / done) * (total - done));
+    if (remaining > 0 && isFinite(remaining)) {
+      etaText = `~${remaining}s restant`;
+    }
+  } else if (job.status === "queuing") {
+    etaText = "Démarrage…";
+  } else if (done >= total && total > 0) {
+    etaText = "Finalisation…";
+  }
+  const statusLabel = job.status === "queuing"
+    ? "Mise en file"
+    : job.status === "error"
+      ? "Erreur"
+      : "Analyse perceptuelle";
+  return `
+    <div class="doublons-bulk-progress" role="status" aria-live="polite" aria-label="${escapeHtml(statusLabel)}">
+      <div class="doublons-bulk-progress-bar">
+        <div class="doublons-bulk-progress-fill" style="--progress: ${ratio}"></div>
+      </div>
+      <div class="doublons-bulk-progress-meta">
+        <span>${done}/${total} paires analysées</span>
+        <span>${pct}%</span>
+        <span>${escapeHtml(etaText)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function _renderBody() {
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : loading visible avec skeleton + message
+  // d'attente explicite. Avant : "Chargement des doublons…" sur une ligne -> barre
+  // noire vide -> l'utilisateur ne savait pas si la recherche tournait ou s'il
+  // n'y avait simplement rien. Skeletons + détail durée rassurent.
   if (_state.loading) {
-    return `<div class="doublons-section doublons-loading">Chargement des doublons…</div>`;
+    return `
+      <div class="doublons-section">
+        <div class="doublons-loading-header">🔍 Recherche de doublons en cours…</div>
+        <div class="doublons-loading-detail" style="opacity:0.7;text-align:center;padding:8px 0;">Peut prendre plusieurs minutes sur 5000 films</div>
+        ${[1,2,3,4].map(() => `<div class="v5-skeleton doublons-section-skel" style="height:60px;margin:8px 0;"></div>`).join("")}
+      </div>
+    `;
   }
   if (_state.error) {
     return `<div class="doublons-section doublons-error">${escapeHtml(_state.error)}</div>`;
   }
   const list = _visibleGroups();
   if (list.length === 0) {
-    return _renderEmpty();
+    return `
+      ${_renderBulkProgress()}
+      ${_renderEmpty()}
+    `;
   }
   return `
+    ${_renderBulkProgress()}
     <div class="doublons-list">
       ${list.map(_renderGroupCard).join("")}
     </div>
@@ -502,7 +603,7 @@ function _renderRightPanel() {
       title: "📌 Groupe sélectionné",
       html: `
         ${posterUrl
-          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" /></div>`
+          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" /></div>`
           : `<div class="doublons-inspector-poster doublons-inspector-poster--empty">🎬</div>`}
         <h4 class="doublons-inspector-title">${escapeHtml(title)}${escapeHtml(year)}</h4>
         ${runtime ? `<p class="doublons-inspector-meta">${escapeHtml(String(runtime))} min</p>` : ""}
@@ -648,7 +749,9 @@ async function _decideFromCard(groupKey, side, winnerRowId) {
     // Round-trip _loadGroups() pour resynchroniser depuis la source de vérité.
     _state.decisionInFlightByGroup.delete(groupKey);
     _handleDecision(groupKey, side, winnerRowId, data);
-    await _loadGroups();
+    // R6-C : resync reel depuis le backend (totaux recalcules) -> force le
+    // re-scan et rafraichit le cache, plutot que de relire le cache stale.
+    await _loadGroups(true);
   } catch (err) {
     if (!_state) return;
     showToast({ type: "error", text: err && err.message ? err.message : String(err) });
@@ -762,7 +865,8 @@ async function _autoDecideAll() {
       if (!_state) return;
       _state.bulkInFlight = false;
       // Resync depuis le backend pour les totaux (size_savings, decidedCount).
-      await _loadGroups();
+      // R6-C : force le re-scan (bypass cache) + rafraichit le cache.
+      await _loadGroups(true);
       if (!_state) return;
       if (ko === 0) {
         showToast({ type: "success", text: `✓ ${ok} groupe${ok > 1 ? "s" : ""} auto-décidé${ok > 1 ? "s" : ""}.` });
@@ -783,8 +887,28 @@ async function _autoDecideAll() {
 // workflow Traitement. Utilise navigateTo pour rester dans le router SPA et
 // déclencher l'init du workflow Traitement sur la bonne étape.
 function _goToApply() {
-  // navigateTo préfixe avec "#" -> on passe sans le "#" initial.
-  // Le fragment "#step-apply" est lu par traitement.js _readStep().
+  // Fix audit 2026-05-25 (v1.5.3) Vague G : verifier que les doublons sont decides
+  // avant de naviguer vers Apply. Sans ce garde-fou, l'utilisateur pouvait
+  // perdre ses decisions de doublons en partant prematurement.
+  const pending = _state.groups.filter((g) => !g.winner_decided).length;
+  if (pending > 0) {
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace confirm() natif
+    // par dangerConfirmModal (perte potentielle de decisions doublons = destructif).
+    // Memoire utilisateur : countdown 3s si > 50 elements impactes.
+    dangerConfirmModal({
+      title: `Continuer avec ${pending} groupe${pending > 1 ? "s" : ""} de doublons non décidé${pending > 1 ? "s" : ""} ?`,
+      consequence: "Les fichiers en doublon seront conservés tels quels (aucune décision n'est appliquée). Vous pourrez perdre ces décisions au prochain rescan.",
+      countdownSeconds: pending > 50 ? 3 : 0,
+      confirmLabel: "Continuer vers Apply",
+      cancelLabel: "Annuler",
+      onConfirm: () => {
+        // navigateTo prefixe avec "#" -> on passe sans le "#" initial.
+        // Le fragment "#step-apply" est lu par traitement.js _readStep().
+        navigateTo("/traitement#step-apply");
+      },
+    });
+    return;
+  }
   navigateTo("/traitement#step-apply");
 }
 
@@ -809,32 +933,55 @@ async function _bulkPerceptual() {
     return;
   }
   _state.bulkInFlight = true;
+  // Fix audit 2026-05-30 (DUP-1) : initialiser bulkJob AVANT l'appel API pour
+  // afficher immediatement la barre a 0% (feedback visuel instantane). La barre
+  // remplace le toast "Lancement…" qui est donc raccourci a duration 1500ms.
+  _state.bulkJob = {
+    jobId: null,
+    done: 0,
+    total: pairs.length,
+    status: "queuing",
+    startedTs: Date.now() / 1000,
+  };
   _render();
-  showToast({ type: "info", text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…` });
+  showToast({
+    type: "info",
+    text: `⏳ Lancement de ${pairs.length} analyse${pairs.length > 1 ? "s" : ""} perceptuelle${pairs.length > 1 ? "s" : ""}…`,
+    duration: 1500,
+  });
 
   try {
     const res = await apiPost("quality/queue_perceptual_analyses", { pairs, options: {} }, { signal: _signal() });
+    // Fix audit 2026-05-30 (DUP-1) : garde unmount apres await.
+    if (!_state) return;
     const data = _payload(res);
     if (data.ok === false) {
-      showToast({ type: "error", text: data.message || data.error || "Échec queue analyses" });
-      _state.bulkInFlight = false;
-      _render();
+      showToast({ type: "error", text: data.message || data.error || "Échec queue analyses", duration: 8000 });
       return;
     }
     const jobId = data.job_id;
     if (!jobId) {
-      showToast({ type: "warn", text: "Job ID manquant." });
-      _state.bulkInFlight = false;
-      _render();
+      showToast({ type: "warn", text: "Job ID manquant.", duration: 8000 });
       return;
+    }
+    // Fix audit 2026-05-30 (DUP-1) : on bascule en running des qu'on a un jobId.
+    if (_state.bulkJob) {
+      _state.bulkJob = { ..._state.bulkJob, jobId, status: "running" };
+      _render();
     }
     // Polling job status (max 30 essais, 2s entre chaque = 1 min)
     await _pollJobUntilDone(jobId, 30, 2000);
   } catch (err) {
-    showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+    if (!_state) return;
+    showToast({ type: "error", text: err && err.message ? err.message : String(err), duration: 8000 });
   } finally {
-    _state.bulkInFlight = false;
-    _render();
+    // Fix audit 2026-05-30 (DUP-1) : cleanup idempotent. bulkJob remis a null
+    // pour faire disparaitre la barre dans tous les chemins (success/error/timeout).
+    if (_state) {
+      _state.bulkInFlight = false;
+      _state.bulkJob = null;
+      _render();
+    }
   }
 }
 
@@ -851,27 +998,34 @@ async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
       if (!_state) return;
       const data = _payload(res);
       if (data.ok === false) {
-        showToast({ type: "error", text: data.message || data.error || "Polling job échoué" });
+        showToast({ type: "error", text: data.message || data.error || "Polling job échoué", duration: 8000 });
         return;
       }
       const status = String(data.status || "").toLowerCase();
       const done = Number(data.done || 0);
       const total = Number(data.total || 0);
+      // Fix audit 2026-05-30 (DUP-1) : mise a jour de la barre a chaque tick
+      // (toutes les 2s). Le throttle "i % 5 === 0" sur les toasts intermediaires
+      // est supprime car la barre fournit deja un feedback continu non intrusif.
+      _state.bulkJob = {
+        ...(_state.bulkJob || { startedTs: Date.now() / 1000 }),
+        jobId,
+        done,
+        total,
+        status,
+      };
+      _render();
       if (status === "done" || status === "complete" || status === "completed" || status === "finished") {
         showToast({ type: "success", text: `✓ ${done}/${total} analyses terminées` });
         return;
       }
       if (status === "error" || status === "failed") {
-        showToast({ type: "error", text: "Analyses échouées." });
+        showToast({ type: "error", text: "Analyses échouées.", duration: 8000 });
         return;
-      }
-      // En cours
-      if (i > 0 && i % 5 === 0) {
-        showToast({ type: "info", text: `⏳ ${done}/${total} analyses…` });
       }
     } catch (err) {
       if (!_state) return;
-      showToast({ type: "error", text: err && err.message ? err.message : String(err) });
+      showToast({ type: "error", text: err && err.message ? err.message : String(err), duration: 8000 });
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -879,7 +1033,7 @@ async function _pollJobUntilDone(jobId, maxAttempts, delayMs) {
     if (!_state) return;
   }
   if (!_state) return;
-  showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs." });
+  showToast({ type: "warn", text: "Polling timeout — vérifie l'état dans Logs.", duration: 8000 });
 }
 
 /* --- Navigation clavier --- */
@@ -926,7 +1080,38 @@ function _onKeydown(ev) {
 
 /* --- Data --- */
 
-async function _loadGroups() {
+// R6-C : applique un jeu de groupes (frais ou issu du cache) a l'etat + rend.
+// Factorise pour partager la meme logique post-chargement entre le chemin reseau
+// (check_duplicates) et le chemin cache (restitution instantanee).
+function _applyGroupsData(groups, sizeSavingsTotal) {
+  if (!_state) return;
+  _state.groups = Array.isArray(groups) ? groups : [];
+  _state.sizeSavingsTotal = Number(sizeSavingsTotal) || 0;
+  _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
+  _state.pendingCount = _state.groups.length - _state.decidedCount;
+  _state.loading = false;
+  // Selection : restaurer si encore valide, sinon premier groupe non décidé.
+  if (_state.selectedGroupKey && !_findGroupByKey(_state.selectedGroupKey)) {
+    _state.selectedGroupKey = null;
+  }
+  if (!_state.selectedGroupKey && _state.groups.length > 0) {
+    const firstUndec = _state.groups.find((g) => !g.winner_decided) || _state.groups[0];
+    _state.selectedGroupKey = _groupKey(firstUndec);
+    _writeStoredSelection(_state.selectedGroupKey);
+  }
+  _render();
+  _renderRightPanel();
+  // Hydrater posters en background.
+  void _hydrateGroupsWithPosters();
+}
+
+async function _loadGroups(force = false) {
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garde contre _state null. Le module
+  // remet _state = null dans unmountDoublons(). Quand on navigue rapidement
+  // entre Apply (qui appelle initDoublons) et une autre vue, un _loadGroups()
+  // pending peut tenter d'ecrire _state.error apres demontage :
+  //   "Cannot set properties of null (setting 'error')" -> banniere rouge.
+  if (!_state) return;
   _state.loading = true;
   _state.error = null;
   _render();
@@ -937,11 +1122,16 @@ async function _loadGroups() {
     try {
       // Fix audit 2026-05-24 : `run_id_or` n'existe pas dans la facade (cf traitement.js).
       const dash = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal: _signal() });
+      // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await.
+      if (!_state) return;
       const data = _payload(dash);
       runId = data && data.run_id;
       _state.runId = runId;
     } catch (_e) { /* on continuera meme sans runId */ }
   }
+
+  // Re-garde apres bloc await ci-dessus (catch peut nous laisser passer).
+  if (!_state) return;
 
   if (!runId) {
     _state.error = "Aucun run actif. Lance un scan d'abord.";
@@ -951,8 +1141,18 @@ async function _loadGroups() {
     return;
   }
 
+  // R6-C : cache hit -> restitution instantanee sans relancer le scan disque.
+  if (!force && _groupsCache && _groupsCache.runId === runId) {
+    _state.fromCache = true;
+    _applyGroupsData(_groupsCache.groups, _groupsCache.sizeSavingsTotal);
+    return;
+  }
+  _state.fromCache = false;
+
   try {
     const res = await apiPost("run/check_duplicates", { run_id: runId, decisions: {} }, { signal: _signal() });
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : await termine -> revérifier _state.
+    if (!_state) return;
     const data = _payload(res);
     if (data.ok === false) {
       _state.error = data.message || data.error || "Erreur de chargement.";
@@ -961,32 +1161,21 @@ async function _loadGroups() {
       _renderRightPanel();
       return;
     }
-    _state.groups = Array.isArray(data.groups) ? data.groups : [];
-    // Utilise size_savings_total enrichi backend si dispo, sinon agrège
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    // Utilise size_savings_total enrichi backend si dispo, sinon agrège.
+    let sizeSavingsTotal;
     if (typeof data.size_savings_total === "number") {
-      _state.sizeSavingsTotal = data.size_savings_total;
+      sizeSavingsTotal = data.size_savings_total;
     } else {
-      _state.sizeSavingsTotal = _state.groups.reduce((sum, g) => {
-        return sum + (Number(g.comparison && g.comparison.size_savings) || 0);
-      }, 0);
+      sizeSavingsTotal = groups.reduce((sum, g) => sum + (Number(g.comparison && g.comparison.size_savings) || 0), 0);
     }
-    _state.decidedCount = _state.groups.filter((g) => g.winner_decided).length;
-    _state.pendingCount = _state.groups.length - _state.decidedCount;
-    _state.loading = false;
-    // Selection : restaurer si encore valide, sinon premier groupe non décidé
-    if (_state.selectedGroupKey && !_findGroupByKey(_state.selectedGroupKey)) {
-      _state.selectedGroupKey = null;
-    }
-    if (!_state.selectedGroupKey && _state.groups.length > 0) {
-      const firstUndec = _state.groups.find((g) => !g.winner_decided) || _state.groups[0];
-      _state.selectedGroupKey = _groupKey(firstUndec);
-      _writeStoredSelection(_state.selectedGroupKey);
-    }
-    _render();
-    _renderRightPanel();
-    // Hydrater posters en background
-    void _hydrateGroupsWithPosters();
+    // R6-C : memoriser pour les prochaines navigations (reference partagee avec
+    // _state.groups -> les decisions en place restent reflechies au retour).
+    _groupsCache = { runId, groups, sizeSavingsTotal };
+    _applyGroupsData(groups, sizeSavingsTotal);
   } catch (err) {
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     _state.error = err && err.message ? err.message : String(err);
     _state.loading = false;
     _render();
@@ -1012,7 +1201,8 @@ function _bindEvents() {
   _container.querySelectorAll("[data-doublons-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const action = btn.dataset.doublonsAction;
-      if (action === "refresh") _loadGroups();
+      // R6-C : "Actualiser" force un nouveau scan (bypass cache).
+      if (action === "refresh") _loadGroups(true);
       else if (action === "bulk-perceptual") void _bulkPerceptual();
       // Fix audit 2026-05-24 (v1.5.2) : nouveaux handlers auto-décide + go-apply.
       else if (action === "auto-decide-all") void _autoDecideAll();

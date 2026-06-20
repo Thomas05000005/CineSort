@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +37,17 @@ def run_ffprobe_json(
     ]
     try:
         rc, out, err = runner(cmd, timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        # ITER13 RETRY_BACKOFF : apres epuisement des retries dans
+        # `default_runner`, TimeoutExpired peut surfacer ici. Auparavant cette
+        # exception n'etait PAS dans le tuple except -> elle remontait jusqu'au
+        # REST handler en HTTP 500 + payload incomplet (cf BILAN_ITER13 §2).
+        # Maintenant: degradation VISIBLE (message clair), pas silencieuse.
+        messages.append(
+            f"ffprobe timeout apres {getattr(exc, 'timeout', timeout_s):.0f}s "
+            f"(retries epuises): {exc}"
+        )
+        return None, messages
     except (OSError, TimeoutError, TypeError, ValueError) as exc:
         messages.append(f"ffprobe echec execution: {exc}")
         return None, messages

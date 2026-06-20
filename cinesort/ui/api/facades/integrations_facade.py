@@ -43,6 +43,14 @@ class IntegrationsFacade(_BaseFacade):
         """
         return self._api._get_tmdb_posters_impl(tmdb_ids, size)
 
+    def enrich_tmdb_ids_by_title(self, run_id: str, row_ids: Any) -> Dict[str, Any]:
+        """R5-H2 : resout + persiste le tmdb_id de films identifies sans tmdb_id
+        (NFO/nom) par recherche titre+annee, pour recuperer leurs jaquettes.
+
+        Returns: {ok, resolved, total, posters: {row_id: url}}.
+        """
+        return self._api._enrich_tmdb_ids_by_title_impl(run_id, row_ids)
+
     # ---------- Jellyfin (3) ----------
 
     def test_jellyfin_connection(

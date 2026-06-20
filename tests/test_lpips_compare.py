@@ -17,7 +17,6 @@ from cinesort.domain.perceptual.lpips_compare import (
     reset_session_cache,
 )
 
-
 # ---------------------------------------------------------------------------
 # classify_lpips_verdict
 # ---------------------------------------------------------------------------

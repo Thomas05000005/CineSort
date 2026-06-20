@@ -30,7 +30,6 @@ import unittest
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-
 _STRESS_FILMS = int(os.environ.get("CINESORT_STRESS_COUNT") or "10000")
 _PERF_BUDGET_S = 2.0
 _RAM_BUDGET_MB = 1024

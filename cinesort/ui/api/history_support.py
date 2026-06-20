@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -11,14 +12,33 @@ from typing import Any, Dict, List, Tuple
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
-from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
 
 @requires_valid_run_id
 def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint appele par la vue Traitement (step Apply / validation).
+    try:
+        return _get_plan_impl(api, run_id, normalize_user_path=normalize_user_path)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_plan failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "plan_load_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger le plan du run. Le fichier est peut-etre corrompu."
+            ),
+        }
+
+
+def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
     logger.debug("api: get_plan run_id=%s", run_id)
     rs = api._get_run(run_id)
     if rs:
@@ -102,19 +122,34 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
 
 @requires_valid_run_id
 def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
-    rs = api._get_run(run_id)
-    if not rs:
-        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id)
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : action destructive non-protegee
+    # provoquait HTTP 500 + run zombie. Wrap global pour garantir une reponse.
+    try:
+        rs = api._get_run(run_id)
+        if not rs:
+            return _err_response(
+                "Run introuvable.", category="resource", level="info", log_module=__name__, run_id=run_id
+            )
 
-    accepted = rs.runner.request_cancel(run_id)
-    snap = rs.runner.get_status(run_id)
-    return {
-        "ok": bool(accepted),
-        "run_id": run_id,
-        "status": snap.status.value if snap else None,
-        "cancel_requested": bool(snap.cancel_requested) if snap else bool(accepted),
-        "done": bool(snap.done) if snap else False,
-    }
+        accepted = rs.runner.request_cancel(run_id)
+        snap = rs.runner.get_status(run_id)
+        return {
+            "ok": bool(accepted),
+            "run_id": run_id,
+            "status": snap.status.value if snap else None,
+            "cancel_requested": bool(snap.cancel_requested) if snap else bool(accepted),
+            "done": bool(snap.done) if snap else False,
+        }
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("cancel_run failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "cancel_run_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible d'annuler le run. Il continuera en arriere-plan."
+            ),
+        }
 
 
 def _store_for_run(api: Any, run_id: str) -> Tuple[Dict[str, Any], Any] | None:
@@ -138,6 +173,24 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
     Fallback gracieux : si certaines tables/JSON ne sont pas disponibles, les
     champs concernes valent 0 / [] / None plutot que d'echouer.
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _get_history_stats_impl(api, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_history_stats failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "history_stats_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger les details du run. Verifie l'historique "
+                "ou redemarre l'app."
+            ),
+        }
+
+
+def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
+    """Implementation reelle de get_history_stats, sans wrap global (Vague F)."""
     logger.debug("api: get_history_stats run_id=%s", run_id)
     found = _store_for_run(api, run_id)
     if not found:
@@ -160,7 +213,32 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
         except (ValueError, json.JSONDecodeError) as exc:
             logger.debug("get_history_stats: stats_json invalide run_id=%s err=%s", run_id, exc)
 
-    total_rows = int(row.get("total") or stats_obj.get("planned_rows", 0) or 0)
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : aligner total_rows sur la
+    # source unique de verite = nombre de PlanRow dans plan.jsonl. Le
+    # snapshot DB (run_row.total ou stats.planned_rows) peut etre obsolete.
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Fallback delegue a
+    # compute_total_fallback() pour aligner avec dashboard/run_flow (avant
+    # cet helper, history priorisait row.total puis stats.planned_rows,
+    # dashboard l'inverse, run_flow ne lisait que row.total).
+    from cinesort.ui.api.run_data_support import (
+        compute_total_fallback as _compute_total_fallback,
+    )
+    from cinesort.ui.api.run_data_support import (
+        count_plan_rows as _count_plan_rows,
+    )
+
+    try:
+        _hist_run_paths = api._run_paths_for(
+            normalize_user_path(row.get("state_dir"), api._state_dir),
+            run_id,
+            ensure_exists=False,
+        )
+        total_rows = _count_plan_rows(
+            _hist_run_paths,
+            fallback=_compute_total_fallback(row, stats_obj),
+        )
+    except (AttributeError, OSError, TypeError, ValueError):
+        total_rows = _compute_total_fallback(row, stats_obj)
     applied_rows = int(stats_obj.get("applied_count") or 0)
 
     # Quality reports : count + tier distribution + score moyen.
@@ -226,6 +304,79 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: apply_operations err run_id=%s err=%s", run_id, exc)
 
+    # AUDIT 2026-06-14 (R7-6) : detail des films + doublons pour l'Inspecteur
+    # Historique (onglets Films / Doublons). Avant, ces cles n'etaient pas
+    # renvoyees -> "(detail non disponible)" systematique + recherche par titre
+    # qui ne matchait jamais.
+    films: List[Dict[str, Any]] = []
+    # R8-061/062 (F5) : plan rows + décisions doublons chargés UNE fois, partagés
+    # par les deux onglets (Films -> statut ; Doublons -> label gagnant).
+    row_by_id: Dict[str, Dict[str, Any]] = {}
+    try:
+        plan_res = api.run.get_plan(run_id) if hasattr(api, "run") else None
+        plan_rows = (plan_res or {}).get("rows") or [] if isinstance(plan_res, dict) else []
+        row_by_id = {str(r.get("row_id")): r for r in plan_rows if isinstance(r, dict)}
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: plan rows err run_id=%s err=%s", run_id, exc)
+    dup_decisions: List[Dict[str, Any]] = []
+    dup_row_ids: set = set()
+    try:
+        dup_decisions = (store.apply.list_duplicate_decisions(run_id=run_id) if store else []) or []
+        for _d in dup_decisions:
+            wr = str(_d.get("winner_row_id") or "")
+            if wr:
+                dup_row_ids.add(wr)
+            for _lr in (_d.get("loser_row_ids") or []):
+                dup_row_ids.add(str(_lr))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: dup decisions err run_id=%s err=%s", run_id, exc)
+    try:
+        for rep in quality_reports:
+            rid = str(rep.get("row_id") or "")
+            pr = row_by_id.get(rid, {})
+            year = int(pr.get("proposed_year") or 0) or None
+            films.append(
+                {
+                    "film_id": rid,
+                    "title": str(pr.get("proposed_title") or pr.get("nfo_title") or "").strip() or f"Film {rid}",
+                    "year": year,
+                    "tier": str(rep.get("tier") or "").strip().lower(),
+                    "score": rep.get("score"),
+                    # R8-062 (F5) : statut lu par historique.js _filmStatusLabel
+                    # (decision tri-état + is_duplicate). Avant : undefined -> toujours « Approuvé ».
+                    "decision": str(pr.get("decision") or "").strip().lower(),
+                    "is_duplicate": rid in dup_row_ids,
+                }
+            )
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: films detail err run_id=%s err=%s", run_id, exc)
+
+    duplicates_decided: List[Dict[str, Any]] = []
+    try:
+        for dec in dup_decisions:
+            gk = str(dec.get("group_key") or "")
+            m = re.search(r"^(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)", gk)
+            winner_row_id = str(dec.get("winner_row_id") or "")
+            winner_row = row_by_id.get(winner_row_id, {})
+            # R8-061 (F5) : label gagnant lisible (front lit g.winner_label, sinon « — »).
+            # NB : size_savings n'est PAS persisté dans duplicate_decisions -> non rendu
+            # ici (résidu documenté ; nécessiterait de le stocker à la décision).
+            winner_label = (
+                str(winner_row.get("proposed_title") or winner_row.get("nfo_title") or "").strip()
+                or winner_row_id
+                or "—"
+            )
+            duplicates_decided.append(
+                {
+                    "title": (m.group("title").strip() if m else gk) or "(Sans titre)",
+                    "year": int(m.group("year")) if m else None,
+                    "winner": winner_row_id,
+                    "winner_label": winner_label,
+                }
+            )
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: duplicates detail err run_id=%s err=%s", run_id, exc)
+
     return {
         "ok": True,
         "run": {
@@ -244,6 +395,10 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
             "score_avg": score_avg,
             "films_by_tier": films_by_tier,
             "apply_operations": apply_operations,
+            # R7-6 : detail pour les onglets Films / Doublons de l'Inspecteur.
+            "films": films,
+            "duplicates_decided": duplicates_decided,
+            "duplicates_skipped": [],
         },
     }
 
@@ -355,15 +510,44 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if not candidate.exists():
             return _err_response("Chemin introuvable.", category="resource", level="warning", log_module=__name__)
 
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser les symlinks pour
+        # eviter path traversal. Sans ce check, candidate (non-resolu) servait
+        # a os.startfile() alors que la verification d'autorisation portait
+        # sur resolved_path : un symlink dans une base autorisee permettait
+        # d'ouvrir n'importe quel chemin du systeme.
+        if candidate.is_symlink():
+            logger.warning("open_path refuse : symlink detecte %s", candidate)
+            return _err_response(
+                "Les liens symboliques ne sont pas autorises.",
+                category="permission",
+                level="warning",
+                log_module=__name__,
+            )
+
         settings = api.settings.get_settings()
         root_raw = str(settings.get("root") or "").strip()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        open_target = candidate
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
+        # contient un symlink dans son chemin (ex: parent symlink).
+        if str(resolved_path) != str(candidate.absolute()):
+            logger.warning(
+                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
+                candidate,
+                resolved_path,
+            )
+            return _err_response(
+                "Les liens symboliques ne sont pas autorises.",
+                category="permission",
+                level="warning",
+                log_module=__name__,
+            )
+
+        open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
-            open_target = candidate.parent
+            open_target = resolved_path.parent
             resolved_to_check = resolved_path.parent
         elif not resolved_path.is_dir():
             return _err_response(
@@ -385,6 +569,9 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if not allowed:
             return _err_response("Chemin non autorise.", category="permission", level="warning", log_module=__name__)
 
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : utiliser le chemin resolu
+        # (deja valide ci-dessus) plutot que candidate, pour eviter qu'un
+        # symlink contourne la verification d'autorisation.
         os.startfile(str(open_target))  # type: ignore[attr-defined]
         return {"ok": True}
     except (OSError, TypeError, ValueError) as exc:

@@ -10,17 +10,17 @@ from typing import Any, Dict, List
 import numpy as np
 
 from .constants import (
-    BLOCK_NONE,
-    BLOCK_SLIGHT,
-    BLOCK_MODERATE,
-    BLOCK_SEVERE,
-    BLUR_SHARP,
-    BLUR_NORMAL,
-    BLUR_SOFT,
-    BLUR_VERY_SOFT,
+    BANDING_MODERATE,
     BANDING_NONE,
     BANDING_SLIGHT,
-    BANDING_MODERATE,
+    BLOCK_MODERATE,
+    BLOCK_NONE,
+    BLOCK_SEVERE,
+    BLOCK_SLIGHT,
+    BLUR_NORMAL,
+    BLUR_SHARP,
+    BLUR_SOFT,
+    BLUR_VERY_SOFT,
     BT2020_THRESHOLDS_MULTIPLIER,
     BW_SATURATION_THRESHOLD,
     DARK_SCENE_Y_AVG_THRESHOLD,
@@ -29,14 +29,14 @@ from .constants import (
     EFFECTIVE_BITS_MEDIOCRE,
     TEMPORAL_CONSISTENCY_GOOD,
     TEMPORAL_CONSISTENCY_POOR,
-    TIER_REFERENCE,
     TIER_EXCELLENT,
     TIER_GOOD,
     TIER_MEDIOCRE,
-    VISUAL_WEIGHT_BLOCKINESS,
-    VISUAL_WEIGHT_BLUR,
+    TIER_REFERENCE,
     VISUAL_WEIGHT_BANDING,
     VISUAL_WEIGHT_BIT_DEPTH,
+    VISUAL_WEIGHT_BLOCKINESS,
+    VISUAL_WEIGHT_BLUR,
     VISUAL_WEIGHT_GRAIN_VERDICT,
     VISUAL_WEIGHT_TEMPORAL,
 )
@@ -49,14 +49,19 @@ logger = logging.getLogger(__name__)
 # Regex pour parser la sortie ffmpeg (stderr)
 # ---------------------------------------------------------------------------
 
-_RE_YAVG = re.compile(r"YAVG=(\d+)")
-_RE_YMIN = re.compile(r"YMIN=(\d+)")
-_RE_YMAX = re.compile(r"YMAX=(\d+)")
-_RE_SATAVG = re.compile(r"SATAVG=(\d+)")
-_RE_TOUT = re.compile(r"TOUT=([\d.]+)")
-_RE_VREP = re.compile(r"VREP=([\d.]+)")
-_RE_BLOCK = re.compile(r"block[_:]?\s*([\d.]+)", re.IGNORECASE)
-_RE_BLUR = re.compile(r"blur[_:]?\s*([\d.]+)", re.IGNORECASE)
+# R8-036 (F4) : clés ffmpeg RÉELLES imprimées par `metadata=mode=print` (vérifié
+# ffmpeg 8.1.1). AVANT : `YAVG=`, `block:`, `blur:` ne matchaient AUCUNE ligne car
+# (a) le filtre n'avait pas `metadata=mode=print` (filtres muets sur stderr) et
+# (b) les clés réelles sont `lavfi.signalstats.YAVG=`, `lavfi.block=`, `lavfi.blur=`.
+_RE_FRAME = re.compile(r"\bframe:\d+")
+_RE_YAVG = re.compile(r"lavfi\.signalstats\.YAVG=([\d.]+)")
+_RE_YMIN = re.compile(r"lavfi\.signalstats\.YMIN=([\d.]+)")
+_RE_YMAX = re.compile(r"lavfi\.signalstats\.YMAX=([\d.]+)")
+_RE_SATAVG = re.compile(r"lavfi\.signalstats\.SATAVG=([\d.]+)")
+_RE_TOUT = re.compile(r"lavfi\.signalstats\.TOUT=([\d.eE+-]+)")
+_RE_VREP = re.compile(r"lavfi\.signalstats\.VREP=([\d.eE+-]+)")
+_RE_BLOCK = re.compile(r"lavfi\.block=([\d.eE+-]+)")
+_RE_BLUR = re.compile(r"lavfi\.blur=([\d.eE+-]+)")
 
 # FPS par defaut si non fourni
 _DEFAULT_FPS = 24.0
@@ -87,7 +92,14 @@ def run_filter_graph(
     total_frames = max(1, int(duration_s * max(1.0, float(fps))))
     step = max(1, total_frames // max(1, int(sample_count)))
 
-    vf = f"select='not(mod(n\\,{step}))',signalstats=stat=tout+vrep,blockdetect,blurdetect"
+    # R8-036 (F4) : `,metadata=mode=print` est OBLIGATOIRE — signalstats/blockdetect/
+    # blurdetect POSENT des métadonnées de frame (lavfi.*) mais n'écrivent RIEN sur
+    # stderr sans ce filtre final. AVANT : 0 ligne -> blockiness_mean=blur_mean=0
+    # -> _score_blockiness(0)=95 et _score_blur(0)=95 (perceptuel fabriqué).
+    vf = (
+        f"select='not(mod(n\\,{step}))',"
+        "signalstats=stat=tout+vrep,blockdetect,blurdetect,metadata=mode=print"
+    )
 
     cmd = [
         ffmpeg_path,
@@ -112,50 +124,78 @@ def run_filter_graph(
     return _parse_filter_output(stderr)
 
 
+def _to_int(raw: str, default: int) -> int:
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_float(raw: str, default: float) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _parse_filter_output(stderr: str) -> List[Dict[str, Any]]:
-    """Parse la sortie stderr du filtre graph en metriques par frame."""
+    """Parse la sortie `metadata=mode=print` du filtre graph en métriques par frame.
+
+    R8-036 (F4) : la sortie réelle (vérifiée ffmpeg 8.1.1) émet une ligne
+    `... frame:N ... pts_time:...` par frame, suivie d'une ligne `lavfi.<clé>=<val>`
+    par métrique (`lavfi.signalstats.YAVG=`, `lavfi.block=`, `lavfi.blur=`, ...).
+    On groupe par marqueur `frame:`. AVANT : aucune frame parsée (clés/flag faux +
+    `metadata=print` absent) -> blockiness/blur=0 -> scores 95 fabriqués.
+    """
     results: List[Dict[str, Any]] = []
     current: Dict[str, Any] = {}
+    in_frame = False
+
+    def _flush() -> None:
+        if in_frame:
+            results.append(_finalize_frame(current))
 
     for line in stderr.splitlines():
-        # signalstats contient toutes les metriques video d'une frame
-        m_yavg = _RE_YAVG.search(line)
-        if m_yavg:
-            # Nouvelle frame signalstats : sauver la precedente si complete
-            if current.get("_has_signal"):
-                results.append(_finalize_frame(current))
-                current = {}
-            current["y_avg"] = int(m_yavg.group(1))
-            current["_has_signal"] = True
-            m = _RE_YMIN.search(line)
-            current["y_min"] = int(m.group(1)) if m else 0
-            m = _RE_YMAX.search(line)
-            current["y_max"] = int(m.group(1)) if m else 255
-            m = _RE_SATAVG.search(line)
-            current["sat_avg"] = int(m.group(1)) if m else 0
-            m = _RE_TOUT.search(line)
-            current["tout"] = float(m.group(1)) if m else 0.0
-            m = _RE_VREP.search(line)
-            current["vrep"] = float(m.group(1)) if m else 0.0
+        if _RE_FRAME.search(line):
+            _flush()
+            current = {}
+            in_frame = True
             continue
-
-        # blockdetect
-        if "block" in line.lower() and "blockdetect" in line.lower():
-            m = _RE_BLOCK.search(line)
-            if m:
-                current["blockiness"] = float(m.group(1))
+        if not in_frame:
             continue
+        m = _RE_YAVG.search(line)
+        if m:
+            current["y_avg"] = _to_int(m.group(1), 0)
+            continue
+        m = _RE_YMIN.search(line)
+        if m:
+            current["y_min"] = _to_int(m.group(1), 0)
+            continue
+        m = _RE_YMAX.search(line)
+        if m:
+            current["y_max"] = _to_int(m.group(1), 255)
+            continue
+        m = _RE_SATAVG.search(line)
+        if m:
+            current["sat_avg"] = _to_int(m.group(1), 0)
+            continue
+        m = _RE_TOUT.search(line)
+        if m:
+            current["tout"] = _to_float(m.group(1), 0.0)
+            continue
+        m = _RE_VREP.search(line)
+        if m:
+            current["vrep"] = _to_float(m.group(1), 0.0)
+            continue
+        m = _RE_BLOCK.search(line)
+        if m:
+            current["blockiness"] = _to_float(m.group(1), 0.0)
+            continue
+        m = _RE_BLUR.search(line)
+        if m:
+            current["blur"] = _to_float(m.group(1), 0.0)
 
-        # blurdetect
-        if "blur" in line.lower() and "blurdetect" in line.lower():
-            m = _RE_BLUR.search(line)
-            if m:
-                current["blur"] = float(m.group(1))
-
-    # Derniere frame
-    if current.get("_has_signal"):
-        results.append(_finalize_frame(current))
-
+    _flush()
     return results
 
 
@@ -186,7 +226,12 @@ def luminance_histogram(pixels: List[int], bit_depth: int = 8) -> List[int]:
     avec min/max/dict access par pixel.
     """
     max_val = 1024 if bit_depth >= 10 else 256
-    if not pixels:
+    # AUDIT 2026-06-10 (CRITICAL) : `pixels` est typé List[int] mais recoit un
+    # np.ndarray depuis le refactor B3 (frame_extraction.parse_raw_frame). Un
+    # `not pixels` / `if pixels:` sur un ndarray multi-elements leve ValueError
+    # ("truth value of an array... is ambiguous") -> crash de toute l'analyse
+    # video perceptuelle (avale en warning). On teste la taille (valide list+ndarray).
+    if pixels is None or np.size(pixels) == 0:
         return [0] * max_val
     # Clip dans [0, max_val-1] puis bincount (vectorise en C)
     arr = np.clip(np.asarray(pixels, dtype=np.int64), 0, max_val - 1)
@@ -214,7 +259,9 @@ def block_variance_stats(
     avant ; np.var en C ~100ms apres).
     """
     w, h, bs = int(width), int(height), int(block_size)
-    if w < bs or h < bs or not pixels:
+    # AUDIT 2026-06-10 (CRITICAL) : voir luminance_histogram — pixels peut etre
+    # un np.ndarray, `not pixels` leverait ValueError. Check par taille.
+    if w < bs or h < bs or pixels is None or np.size(pixels) == 0:
         return {"mean_variance": 0.0, "median_variance": 0.0, "flat_ratio": 1.0, "detail_ratio": 0.0}
 
     # Reshape pixels en (h, w), puis on garde uniquement la zone exactement
@@ -501,7 +548,9 @@ def _aggregate_pixel_metrics(
         y_avg = fd.get("y_avg", 128.0)
         y_avgs.append(y_avg)
         weights.append(dark_weight if y_avg < DARK_SCENE_Y_AVG_THRESHOLD else 1.0)
-        if pixels:
+        # AUDIT 2026-06-10 (CRITICAL) : `if pixels:` sur un np.ndarray leve
+        # ValueError -> _aggregate_pixel_metrics plante des la 1re frame reelle.
+        if pixels is not None and np.size(pixels) > 0:
             hist = luminance_histogram(pixels, bit_depth)
             banding_scores.append(detect_banding(hist)["score"])
             bit_depths_list.append(effective_bit_depth(hist, bit_depth)["mean_bits"])

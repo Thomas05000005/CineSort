@@ -198,6 +198,55 @@ class AtomicMoveTests(unittest.TestCase):
         wrapped = RecordOpWithJournal(None, store=self.store)
         self.assertIsNone(wrapped({"op_type": "TEST"}))
 
+    def test_per_row_wrapper_preserves_journal_write_ahead(self) -> None:
+        """GATE AUDIT 2026-06-10 (HIGH) : le wrapper par-row d'apply_core doit
+        conserver journal_store/batch_id (avant le fix, la fonction nue les
+        perdait -> atomic_move tombait sur shutil.move SANS journal write-ahead).
+
+        On reproduit la construction exacte d'apply_core : un record_op porteur
+        de journal, enrobe d'un wrapper qui injecte row_id.
+        """
+        # Spy sur insert_pending_move pour prouver que le write-ahead se declenche.
+        orig_insert = self.store.apply.insert_pending_move
+        insert_calls = []
+
+        def _spy(**kw):
+            insert_calls.append(kw)
+            return orig_insert(**kw)
+
+        self.store.apply.insert_pending_move = _spy  # type: ignore[method-assign]
+
+        recorded = []
+        outer = RecordOpWithJournal(
+            lambda payload: recorded.append(payload), store=self.store, batch_id="b1"
+        )
+
+        # --- Construction identique a apply_core (boucle apply par-row) ---
+        def _inject_row_id(payload, _rid="row-42", _ref=outer):
+            if isinstance(payload, dict) and not payload.get("row_id"):
+                payload["row_id"] = _rid
+            _ref(payload)
+
+        row_record_op = RecordOpWithJournal(
+            _inject_row_id,
+            store=getattr(outer, "journal_store", None),
+            batch_id=getattr(outer, "journal_batch_id", None),
+        )
+        # -----------------------------------------------------------------
+
+        # (a) le write-ahead doit passer par le journal a travers le wrapper
+        atomic_move(row_record_op, src=self.src, dst=self.dst, op_type="MOVE_FILE")
+        self.assertEqual(len(insert_calls), 1, "journal write-ahead non declenche")
+        self.assertEqual(insert_calls[0]["op_type"], "MOVE_FILE")
+        self.assertEqual(insert_calls[0]["batch_id"], "b1", "batch_id non propage")
+        self.assertFalse(self.src.exists())
+        self.assertTrue(self.dst.exists())
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
+
+        # (b) l'appel du wrapper injecte toujours row_id et forwarde au record_op
+        row_record_op({"op_type": "MOVE_FILE"})
+        self.assertEqual(recorded[-1]["row_id"], "row-42")
+
 
 class ReconcilePendingMovesTests(unittest.TestCase):
     """Tests de reconcile_pending_moves : 4 verdicts + cleanup."""

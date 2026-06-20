@@ -560,6 +560,7 @@
       "processing": "Processing",
       "library": "Library",
       "quality": "Quality",
+      "doublons": "Duplicates",
       "history": "History",
       "qij": "QIJ",
       "settings": "Settings",
@@ -578,7 +579,7 @@
   },
   "topbar": {
     "search_label": "Search…",
-    "search_aria": "Open search (Cmd+K)",
+    "search_aria": "Open search ({{shortcut}})",
     "notifications_aria": "Notifications ({{count}} unread)",
     "theme_change_aria": "Change theme",
     "help_fab_aria": "Keyboard shortcuts help (?)",

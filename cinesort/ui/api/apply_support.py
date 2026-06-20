@@ -1,31 +1,31 @@
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
+import logging
 import shutil
 import sqlite3
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import logging
-
 import requests
-
-import cinesort.domain.core as core
-import cinesort.infra.state as state
-from cinesort.ui.api._validators import requires_valid_run_id
-from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 
 # Cf issue #83 : import direct au lieu de via re-export domain.core (qui cree un
 # cycle domain -> app). NB : find_duplicate_targets reste accede via core.X car
 # c'est un wrapper qui injecte 7 helpers internes de domain/core.py — pas un
 # simple re-export.
 import cinesort.app.plan_support as _plan_support_mod
+import cinesort.domain.core as core
 import cinesort.infra.plex_client as _plex_mod
+import cinesort.infra.state as state
+from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
 from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
@@ -35,8 +35,11 @@ from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
+from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
-import contextlib
+
+logger = logging.getLogger(__name__)
 
 _log = logging.getLogger(__name__)
 
@@ -437,6 +440,57 @@ def _execute_undo_ops(
                 continue
 
             if target_path.exists():
+                # R8-011 (F2-c) : sur FS INSENSIBLE A LA CASSE (Windows/SMB),
+                # target_path.exists() est VRAI quand current_path et target_path
+                # designent le MEME fichier physique en ne differant QUE par la casse
+                # (undo d'un rename casse-seule : "film" -> "Film"). Ce n'est PAS un
+                # conflit -> on fait le rename casse-seule au lieu de classer CONFLIT/
+                # FAILED. Sur FS SENSIBLE A LA CASSE (Linux), "Film" != "film" sont des
+                # fichiers distincts -> samefile()=False -> on retombe sur le vrai
+                # chemin conflit (comportement correct preserve sur les deux plateformes).
+                _case_only_same = False
+                # NB : on compare les STR (sensible a la casse) — l'egalite Path est
+                # insensible a la casse sur Windows (PureWindowsPath) et masquerait la
+                # difference de casse. samefile() confirme ensuite le meme fichier physique.
+                if str(current_path) != str(target_path):
+                    try:
+                        _case_only_same = current_path.samefile(target_path)
+                    except OSError:
+                        _case_only_same = False
+                if _case_only_same:
+                    try:
+                        from cinesort.app.apply_core import _case_only_rename_with_rollback
+
+                        # R8-089 (filet F2-c) : PAS de journaled_move ici. Le rename
+                        # casse-seule se fait en 2 temps (current -> .__tmp_ren -> target).
+                        # journaled_move ne peut PAS encadrer l'etat intermediaire .__tmp_ren
+                        # (ni src ni dst journalises) -> un hard-kill entre les 2 renames
+                        # ferait une FAUSSE alarme "FICHIER PERDU" au reconcile (src+dst
+                        # absents). _case_only_rename_with_rollback a son propre rollback
+                        # (tmp -> current) sur echec ; on reste coherent avec le site apply
+                        # (apply_core.py _case_only_rename_with_rollback, non journalise lui aussi).
+                        _case_only_rename_with_rollback(current_path, target_path)
+                        done += 1
+                        store.apply.mark_apply_operation_undo_status(
+                            op_id=op_id, undo_status="DONE", error_message=None
+                        )
+                        log_fn(
+                            "INFO",
+                            f"UNDO casse-seule {idx}/{len(reversible_ops)}: {current_path} -> {target_path}",
+                        )
+                    except (OSError, PermissionError, FileExistsError) as case_exc:
+                        failed += 1
+                        store.apply.mark_apply_operation_undo_status(
+                            op_id=op_id,
+                            undo_status="FAILED",
+                            error_message=f"Undo casse-seule echoue: {case_exc}",
+                        )
+                        log_fn(
+                            "ERROR",
+                            f"UNDO casse-seule echec {idx}/{len(reversible_ops)}: {current_path} -> {target_path}: {case_exc}",
+                        )
+                    continue
+
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
                 conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
@@ -712,6 +766,21 @@ def undo_selected_rows(
             "message": t("errors.preview_undo_selective"),
         }
 
+    # AUDIT 2026-06-11 (R3d, gap[5]) : enforcement backend du delai 24h sur
+    # l'undo SELECTIF aussi. La garde n'existait que dans undo_last_apply
+    # (L1018) ; undo_selected_rows allait directement de la selection a
+    # _execute_undo_ops, permettant un undo reel apres expiration. La dry_run
+    # au-dessus reste autorisee meme expiree (apercu UI). Miroir exact 410.
+    apply_ts = float(batch.get("started_ts") or 0.0)
+    if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+        return _err_response(
+            "L'annulation n'est plus possible (delai 24h depasse).",
+            category="state",
+            level="info",
+            log_module=__name__,
+            http_status=410,
+        )
+
     # Collect all reversible PENDING ops for the selected row_ids.
     target_row_ids = set(str(r) for r in row_ids)
     all_ops = store.apply.list_apply_operations(batch_id=bid)
@@ -733,80 +802,110 @@ def undo_selected_rows(
             "message": t("errors.no_reversible_op_pending"),
         }
 
-    log_fn = api._file_logger(run_paths)
-    log_fn("INFO", f"=== UNDO SELECTIVE start batch={bid} row_ids={row_ids} ===")
+    # AUDIT 2026-06-11 (R3d, gap[6]) : l'undo selectif mute FS+DB du meme run
+    # que l'apply ; il DOIT acquerir le slot apply pour ne pas courir avec un
+    # apply concurrent (avant, seuls apply_changes/build_apply_preview le
+    # prenaient). Slot occupe -> 409.
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
 
-    cfg = api._cfg_from_run_row(_row)
-    empty_bucket = cfg.root / cfg.empty_folders_folder_name
-    residual_bucket = cfg.root / cfg.cleanup_residual_folders_folder_name
+        log_fn = api._file_logger(run_paths)
+        log_fn("INFO", f"=== UNDO SELECTIVE start batch={bid} row_ids={row_ids} ===")
 
-    undo_counts = _execute_undo_ops(
-        api,
-        selected_ops,
-        store,
-        log_fn,
-        run_paths,
-        empty_bucket=empty_bucket,
-        residual_bucket=residual_bucket,
-        atomic=bool(atomic),
-    )
+        cfg = api._cfg_from_run_row(_row)
+        empty_bucket = cfg.root / cfg.empty_folders_folder_name
+        residual_bucket = cfg.root / cfg.cleanup_residual_folders_folder_name
 
-    # Si l'undo a été abandonné atomiquement (hash mismatch), remonter le rapport.
-    if undo_counts.get("aborted_atomic"):
-        log_fn("WARN", f"UNDO SELECTIVE atomique refuse batch={bid}: hash mismatch")
+        undo_counts = _execute_undo_ops(
+            api,
+            selected_ops,
+            store,
+            log_fn,
+            run_paths,
+            empty_bucket=empty_bucket,
+            residual_bucket=residual_bucket,
+            atomic=bool(atomic),
+        )
+
+        # Si l'undo a été abandonné atomiquement (hash mismatch), remonter le rapport.
+        if undo_counts.get("aborted_atomic"):
+            log_fn("WARN", f"UNDO SELECTIVE atomique refuse batch={bid}: hash mismatch")
+            return {
+                "ok": False,
+                "batch_id": bid,
+                "dry_run": False,
+                "status": "ABORTED_HASH_MISMATCH",
+                "message": t("errors.undo_atomic_refused"),
+                "preverify": undo_counts.get("preverify"),
+            }
+
+        # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
+        remaining = store.apply.list_apply_operations(batch_id=bid)
+        all_resolved = all(
+            str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
+        )
+        if all_resolved:
+            batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
+        else:
+            batch_status = "UNDONE_PARTIAL"
+        store.apply.mark_apply_batch_undo_status(
+            batch_id=bid,
+            status=batch_status,
+            summary={
+                "undo_selective": True,
+                "row_ids": list(target_row_ids),
+                **undo_counts,
+            },
+        )
+
+        log_fn(
+            "INFO",
+            f"=== UNDO SELECTIVE done batch={bid} done={undo_counts['done']} failed={undo_counts['failed']} status={batch_status} ===",
+        )
+
         return {
-            "ok": False,
+            "ok": True,
             "batch_id": bid,
             "dry_run": False,
-            "status": "ABORTED_HASH_MISMATCH",
-            "message": t("errors.undo_atomic_refused"),
-            "preverify": undo_counts.get("preverify"),
-        }
-
-    # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
-    remaining = store.apply.list_apply_operations(batch_id=bid)
-    all_resolved = all(
-        str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
-    )
-    if all_resolved:
-        batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
-    else:
-        batch_status = "UNDONE_PARTIAL"
-    store.apply.mark_apply_batch_undo_status(
-        batch_id=bid,
-        status=batch_status,
-        summary={
-            "undo_selective": True,
+            "status": batch_status,
+            "counts": {
+                "done": undo_counts["done"],
+                "skipped": undo_counts["skipped"],
+                "failed": undo_counts["failed"],
+            },
             "row_ids": list(target_row_ids),
-            **undo_counts,
-        },
-    )
-
-    log_fn(
-        "INFO",
-        f"=== UNDO SELECTIVE done batch={bid} done={undo_counts['done']} failed={undo_counts['failed']} status={batch_status} ===",
-    )
-
-    return {
-        "ok": True,
-        "batch_id": bid,
-        "dry_run": False,
-        "status": batch_status,
-        "counts": {
-            "done": undo_counts["done"],
-            "skipped": undo_counts["skipped"],
-            "failed": undo_counts["failed"],
-        },
-        "row_ids": list(target_row_ids),
-        "message": t("errors.undo_selective_done")
-        if undo_counts["failed"] == 0
-        else t("errors.undo_selective_done_with_anomalies"),
-    }
+            "message": t("errors.undo_selective_done")
+            if undo_counts["failed"] == 0
+            else t("errors.undo_selective_done_with_anomalies"),
+        }
 
 
 @requires_valid_run_id
 def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
     """Historique de tous les applies d'un run."""
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'historique.
+    try:
+        return _list_apply_history_impl(api, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("list_apply_history failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "apply_history_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger l'historique d'application.",
+        }
+
+
+def _list_apply_history_impl(api: Any, run_id: str) -> Dict[str, Any]:
+    """Implementation reelle de list_apply_history, sans wrap global (Vague G)."""
     found = api._find_run_row(run_id)
     if not found:
         return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
@@ -818,6 +917,22 @@ def list_apply_history(api: Any, run_id: str) -> Dict[str, Any]:
         batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=20)
     except (sqlite3.Error, AttributeError, OSError):
         return _err_response("Historique apply indisponible.", category="state", level="warning", log_module=__name__)
+
+    # Vague P / VP-A : annoter chaque batch avec mode atomique + rollback status
+    # (badge "Mode atomique" + indicateur rollback dans UI historique).
+    # Tolerant si la table n'existe pas (DB pre-migration 029) : on retourne
+    # les batches non annotes — UI affichera "mode standard".
+    try:
+        atomic_modes = store.apply.list_atomic_modes_for_run(run_id=run_id)
+    except (sqlite3.Error, AttributeError, OSError):
+        atomic_modes = {}
+    if atomic_modes:
+        for batch in batches:
+            bid = str(batch.get("batch_id") or "")
+            mode = atomic_modes.get(bid)
+            if mode is not None:
+                batch["atomic_mode"] = mode
+
     return {"ok": True, "run_id": run_id, "batches": batches}
 
 
@@ -1020,9 +1135,22 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
             "message": t("errors.no_reversible_op_to_undo"),
         }
 
-    return _execute_and_finalize_undo(
-        api, run_id, uctx, reversible_ops, store, run_paths=run_paths, atomic=bool(atomic)
-    )
+    # AUDIT 2026-06-11 (R3d, gap[6]) : l'undo reel mute FS+DB du meme run que
+    # l'apply ; il DOIT acquerir le slot apply pour ne pas courir avec un
+    # apply concurrent (avant, seuls apply_changes/build_apply_preview le
+    # prenaient). Slot occupe -> 409, comme apply.
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
+        return _execute_and_finalize_undo(
+            api, run_id, uctx, reversible_ops, store, run_paths=run_paths, atomic=bool(atomic)
+        )
 
 
 @requires_valid_run_id
@@ -1033,16 +1161,21 @@ def _validate_apply(
     dry_run: bool,
     quarantine_unapproved: bool,
 ) -> Dict[str, Any]:
+    """Valide le contexte d'apply (rows, decisions, disk space).
+
+    Fix audit 2026-05-25 (v1.5.3) Vague H : l'acquisition/release du
+    ``_apply_slot`` n'est plus geree ici — c'est la responsabilite du caller
+    via ``api._apply_slot_guard(run_id)`` (context manager qui libere le
+    slot meme en cas d'exception). Cf ``apply_changes`` et
+    ``build_apply_preview``.
+    """
     if not isinstance(decisions, dict):
         return _err_response(
             t("errors.payload_decisions_invalid"), category="validation", level="info", log_module=__name__
         )
-    if not api._acquire_apply_slot(run_id):
-        return _err_response(t("errors.apply_already_in_progress"), category="state", level="info", log_module=__name__)
     try:
         ctx = api._run_context_for_apply(run_id)
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
-        api._release_apply_slot(run_id)
         api.log_api_exception(
             "apply",
             exc,
@@ -1057,19 +1190,46 @@ def _validate_apply(
         return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
 
     if not ctx:
-        api._release_apply_slot(run_id)
         return _err_response(t("errors.plan_unavailable"), category="state", level="warning", log_module=__name__)
     cfg, run_paths, rows, log_fn, store = ctx
 
     if not rows:
-        api._release_apply_slot(run_id)
         return _err_response(t("errors.plan_empty_or_missing"), category="state", level="warning", log_module=__name__)
 
     incoming = decisions if isinstance(decisions, dict) else {}
+    # Fix R6-02 : projette le tri-etat `decision` -> `ok` AVANT _merge_decisions
+    # et _normalize_decisions_for_rows, sinon un client API qui envoie
+    # `{decision: "accepted"}` sans `ok` voit tous ses films traites comme
+    # rejected (run_data_support.py:292 lit raw.get("ok", False)).
+    # Import tardif pour eviter un cycle au chargement du module.
+    try:
+        from cinesort.ui.api.run_flow_support import (
+            _project_decisions_ok_from_tri_state,
+        )
+        incoming = _project_decisions_ok_from_tri_state(incoming)
+    except ImportError:
+        # Environnement degrade : on continue sans projection (shape legacy
+        # {ok: bool} reste fonctionnelle, backward compat ABSOLUE).
+        pass
     disk_decisions = api._load_decisions_from_validation(run_paths)
     merged_decisions = api._merge_decisions(incoming, disk_decisions)
+    # NB : `decision_presence` (presence = any decided row, approved OR
+    # rejected) reste tel quel car _apply_rows_fn s'en sert pour distinguer
+    # "validation_absente" (pas decidee) de "user_rejected" (decidee mais
+    # ok=False). Changer sa semantique casserait apply_core.py:1296,1436.
     decision_presence = {key for key, value in merged_decisions.items() if isinstance(value, dict)}
     safe_decisions = api._normalize_decisions_for_rows(rows, merged_decisions)
+    # Fix R6-04 : pour le pre-check espace disque, on ne sommerait que les
+    # films APPROUVES (ok=True). Sinon estimate_apply_size inclut les
+    # rejected/deferred (cf disk_space_check.py:67-77) et peut faussement
+    # refuser un apply avec "Espace disque insuffisant" sur un run a 990
+    # rejected + 10 approved. Calcule apres _normalize_decisions_for_rows
+    # qui resout le tri-etat (les decisions deferred deviennent ok=False).
+    approved_keys = {
+        key
+        for key, value in safe_decisions.items()
+        if isinstance(value, dict) and value.get("ok") is True
+    }
     try:
         state.atomic_write_json(run_paths.validation_json, safe_decisions)
     except (OSError, PermissionError) as exc:
@@ -1080,9 +1240,8 @@ def _validate_apply(
     # des fichiers a deplacer (avec marge 10%). Evite l'apply qui s'arrete a
     # mi-parcours, laissant DB/FS dans un etat partiel (cf CR-1).
     if not dry_run:
-        ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, decision_presence)
+        ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, approved_keys)
         if not ok_disk:
-            api._release_apply_slot(run_id)
             _disk_msg = disk_info.get("message") or t("errors.disk_space_insufficient")
             log_fn("ERROR", _disk_msg)
             return {
@@ -1113,6 +1272,8 @@ def _execute_apply(
     run_id: str,
     batch_state: List[Any],
     preview_ops_out: Optional[List[Dict[str, Any]]] = None,
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    apply_atomic: bool = False,
 ) -> Tuple[Any, Optional[str], int]:
     """Applique un batch.
 
@@ -1197,6 +1358,33 @@ def _execute_apply(
             apply_batch_id = None
             log_fn("WARN", f"Journal apply indisponible: {exc}")
 
+        # Vague P / VP-A : memoriser le mode atomique pour ce batch (opt-in
+        # strict, default False). Tolerant : un echec n'empeche pas l'apply
+        # de continuer — au pire on perd le badge UI "mode atomique" mais le
+        # rollback_forward est toujours declenchable manuellement.
+        if apply_batch_id is not None and bool(apply_atomic):
+            try:
+                store.apply.upsert_atomic_mode(str(apply_batch_id), True)
+                log_fn("INFO", f"Mode atomique active pour batch {apply_batch_id}")
+            except (sqlite3.Error, AttributeError, OSError, TypeError) as exc:
+                log_fn("WARN", f"Mode atomique non persiste batch {apply_batch_id}: {exc}")
+        elif apply_batch_id is None and bool(apply_atomic):
+            # MEGA-HOTFIX bug #2 : avant ce fix, le mode atomique demande par
+            # l'utilisateur etait silencieusement ignore quand insert_apply_batch
+            # echouait (apply_batch_id reste None). Resultat : l'apply s'execute
+            # en mode NON-atomique sans aucune trace dans les logs, et le
+            # rollback_forward n'est plus declenchable (pas de batch_id pour
+            # tracer les operations). Fallback explicite : on log un WARN clair
+            # indiquant que le mode atomique est desactive faute de batch
+            # persiste, et l'apply continue en mode best-effort (backward compat).
+            log_fn(
+                "WARN",
+                "Mode atomique demande mais desactive : "
+                "insert_apply_batch a echoue (apply_batch_id=None), "
+                "le rollback_forward ne sera pas disponible pour ce batch. "
+                "L'apply continue en mode non-atomique (best-effort).",
+            )
+
         # P2.3 : ouvrir le journal d'audit JSONL pour ce batch (apply réel uniquement)
         try:
             auditor = ApplyAuditLogger.open_for_run(
@@ -1227,6 +1415,49 @@ def _execute_apply(
                     duplicate_losers.add(lid_s)
     except (OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Lecture duplicate_decisions impossible: {exc}")
+
+    # AUDIT 2026-06-14 (R7-3) : appliquer les overrides TMDb manuels (choix d'un
+    # autre candidat via set_film_tmdb_candidate, table film_tmdb_overrides) sur
+    # les PlanRows AVANT le calcul des destinations. Sans ca, l'apply renommait
+    # avec le match auto et le choix utilisateur etait silencieusement perdu.
+    # No-op si aucun override (comportement inchange pour le cas courant).
+    try:
+        for _r in rows:
+            _rid_row = str(getattr(_r, "row_id", "") or "")
+            if not _rid_row:
+                continue
+            _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
+            if not _ov:
+                continue
+            if int(_ov.get("tmdb_id") or 0) > 0:
+                _r.tmdb_id = int(_ov["tmdb_id"])
+            if _ov.get("proposed_title"):
+                _r.proposed_title = str(_ov["proposed_title"])
+            if int(_ov.get("proposed_year") or 0) > 0:
+                _r.proposed_year = int(_ov["proposed_year"])
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
+
+    # AUDIT 2026-06-14 (R7-4) : collecter les films marques pour suppression
+    # depuis les DEUX mecanismes historiques (modal -> table DB ; bulk ->
+    # deletion_marks.json), unifies, pour les router vers
+    # _review/_user_marked_for_deletion/ a l'apply. Avant, le marquage etait
+    # write-only (aucun consommateur) -> promesse UI jamais tenue.
+    marked_for_deletion: Set[str] = set()
+    try:
+        for _m in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
+            _mid = str(_m.get("row_id") or "").strip()
+            if _mid:
+                marked_for_deletion.add(_mid)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Lecture marked_for_deletion (DB) impossible: {exc}")
+    try:
+        from cinesort.ui.api.library_actions_support import list_deletion_marks_row_ids
+        for _mid in list_deletion_marks_row_ids(api, run_id):
+            if _mid:
+                marked_for_deletion.add(str(_mid))
+    except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Lecture deletion_marks.json impossible: {exc}")
 
     # Multi-root : grouper les rows par source_root et appeler apply_rows par root
     rows_by_root: Dict[str, List[Any]] = {}
@@ -1269,6 +1500,16 @@ def _execute_apply(
                 enable_tmdb=cfg.enable_tmdb,
                 tmdb_language=cfg.tmdb_language,
                 incremental_scan_enabled=cfg.incremental_scan_enabled,
+                # ITER7 : propager le reglage UI "Extensions en minuscule" au
+                # cfg recopie multi-root (sinon le default True s'applique et
+                # le toggle OFF est silencieusement neutralise sur les apply
+                # multi-root).
+                lowercase_extensions=cfg.lowercase_extensions,
+                # ITER7 etape 3 : meme propagation pour le selecteur UI
+                # "Separateur". Sans cette ligne, le default " " ecraserait la
+                # valeur utilisateur sur les recopies multi-root (cause racine
+                # secondaire identifiee G.e pour lowercase_extensions).
+                separator=getattr(cfg, "separator", " "),
             )
         else:
             cfg_for_root = cfg
@@ -1300,6 +1541,9 @@ def _execute_apply(
             decision_presence=decision_presence,
             record_op=record_op_for_apply,
             duplicate_loser_row_ids=duplicate_losers if duplicate_losers else None,
+            marked_for_deletion_row_ids=marked_for_deletion if marked_for_deletion else None,
+            progress_cb=progress_cb,
+            audit_logger=auditor,
         )
 
         if result is None:
@@ -1385,6 +1629,24 @@ def _cleanup_apply(
             )
         except (OSError, TypeError, ValueError) as exc:
             log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except RuntimeError as exc:
+            # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
+            # (sous-classe de RuntimeError, definie dans
+            # cinesort.infra.db.repositories.apply) en cas de transition d'etat
+            # invalide (ex : batch deja CLOSED ou ROLLED_BACK, batch_id
+            # inexistant en base). Avant ce fix, l'exception remontait au
+            # caller et faisait crasher l'apply ALORS QUE l'apply lui-meme
+            # s'est deroule correctement — bug critique : utilisateur voit une
+            # erreur 500 sur un apply reussi. On attrape via la classe parente
+            # RuntimeError (ApplyBatchStateError n'est pas exportee via le
+            # public API du module repositories) et on log un WARN explicite :
+            # le batch est peut-etre deja finalise ailleurs, l'apply reel a
+            # reussi, on preserve la backward compat.
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise (transition d'etat refusee, "
+                f"batch_id={apply_batch_id}) : {exc}",
+            )
     log_fn(
         "INFO",
         "=== APPLY done "
@@ -1473,6 +1735,8 @@ def _summarize_apply(
             f"- Fusions realisees : {result.merges_count}\n"
             f"- Duplicats identiques deplaces : {result.duplicates_identical_moved_count}\n"
             f"- Duplicats identiques supprimes logiquement : {result.duplicates_identical_deleted_count}\n"
+            f"- Doublons (decision utilisateur) deplaces : {result.duplicates_user_decided_moved_count}\n"
+            f"- Films marques pour suppression deplaces : {result.marked_for_deletion_moved_count}\n"
             f"- Conflits isoles en _review : {result.conflicts_quarantined_count}\n"
             f"- Conflits sidecars gardes des deux cotes : {result.sidecar_conflicts_kept_both_count}\n"
             f"- Conflits sidecars isoles : {result.conflicts_sidecars_quarantined_count}\n"
@@ -1542,6 +1806,17 @@ def _summarize_apply(
             action_lines.append(f"- Conflits sidecars conserves: {review_root / '_conflicts_sidecars'}")
         if result.duplicates_identical_moved_count > 0:
             action_lines.append(f"- Duplicates identiques deplaces: {review_root / '_duplicates_identical'}")
+        if result.duplicates_user_decided_moved_count > 0:
+            # R8-018 : chemin de recuperation REEL des perdants d'une decision utilisateur
+            # (avant, ces fichiers etaient comptes en _duplicates_identical -> chemin mensonger).
+            action_lines.append(f"- Doublons decides (perdants) deplaces: {review_root / '_duplicates_user_decided'}")
+        if result.marked_for_deletion_moved_count > 0:
+            # R8-087 (filet F2-b) : le compteur marked existait (R7-4) mais n'avait NI ligne de
+            # synthese NI chemin de recuperation -> bucket silencieux dans le rapport d'apply
+            # (asymetrie aggravee par l'ajout du chemin loser R8-018). On expose le bucket reel.
+            action_lines.append(
+                f"- Films marques pour suppression deplaces: {review_root / '_user_marked_for_deletion'}"
+            )
         if result.leftovers_moved_count > 0:
             action_lines.append(f"- Leftovers deplaces: {review_root / '_leftovers'}")
         if result.empty_folders_moved_count > 0:
@@ -1674,7 +1949,7 @@ def refresh_jellyfin_library_now(api: Any) -> Dict[str, Any]:
         return {"ok": True, "message": "Refresh Jellyfin declenche."}
     except (IntegrationError, OSError, requests.RequestException) as exc:
         _log.warning("refresh_jellyfin_library_now echoue: %s", exc)
-        return _err_response(f"Echec refresh Jellyfin : {exc}", category="resource", level="error", log_module=__name__)
+        return _safe_integration_error(exc, category="resource", log_module=__name__)
 
 
 def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
@@ -1708,7 +1983,7 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
         return {"ok": True, "message": "Refresh Plex declenche."}
     except (IntegrationError, OSError, requests.RequestException) as exc:
         _log.warning("refresh_plex_library_now echoue: %s", exc)
-        return _err_response(f"Echec refresh Plex : {exc}", category="resource", level="error", log_module=__name__)
+        return _safe_integration_error(exc, category="resource", log_module=__name__)
 
 
 def _snapshot_jellyfin_watched(api: Any, log_fn: Callable[[str, str], None]) -> Optional[Dict[str, Any]]:
@@ -1781,8 +2056,63 @@ def apply_changes(
     cleanup_scope_label: Callable[[str], str],
     cleanup_status_label: Callable[..., str],
     cleanup_reason_label: Callable[[str], str],
+    apply_atomic: bool = False,
 ) -> Dict[str, Any]:
-    _log.info("api: apply run_id=%s dry_run=%s", run_id, dry_run)
+    """Applique les decisions.
+
+    Vague P / VP-A : `apply_atomic` kwarg OPT-IN strict (default False).
+    Si True ET apply reel (non dry-run), une exception en cours de batch
+    declenche un `rollback_forward` (revert FS+DB du journal). La signature
+    de retour reste `{ok: bool, ...}` (backward compat ABSOLUE — AC-1).
+    """
+    _log.info("api: apply run_id=%s dry_run=%s atomic=%s", run_id, dry_run, bool(apply_atomic))
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : context manager pour garantir
+    # le release du slot meme si une exception se propage au-dela des except
+    # locaux (avant ce fix, un crash inattendu laissait le slot bloque).
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            # R6-HTTP409-001 : conflit de concurrence (slot deja occupe) ->
+            # HTTP 409 (opt-in Phase 11 v7.8.0). Backward compat : data.ok=false
+            # reste inchange, seul le code HTTP change.
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
+        return _apply_changes_body(
+            api,
+            run_id,
+            decisions,
+            dry_run,
+            quarantine_unapproved,
+            cleanup_scope_label=cleanup_scope_label,
+            cleanup_status_label=cleanup_status_label,
+            cleanup_reason_label=cleanup_reason_label,
+            apply_atomic=bool(apply_atomic),
+        )
+
+
+def _apply_changes_body(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    dry_run: bool,
+    quarantine_unapproved: bool,
+    *,
+    cleanup_scope_label: Callable[[str], str],
+    cleanup_status_label: Callable[..., str],
+    cleanup_reason_label: Callable[[str], str],
+    apply_atomic: bool = False,
+) -> Dict[str, Any]:
+    """Corps de ``apply_changes`` une fois le slot apply acquis (cf
+    ``_apply_slot_guard``). Le release est gere par le context manager
+    parent — pas de ``finally`` ici.
+
+    Vague P / VP-A : `apply_atomic` declenche un `rollback_forward` si le
+    batch crashe APRES journalisation (cf. except Exception en bas).
+    """
     validation = _validate_apply(api, run_id, decisions, dry_run, quarantine_unapproved)
     if not validation.get("ok"):
         return validation
@@ -1790,6 +2120,27 @@ def apply_changes(
 
     log_fn("INFO", f"=== APPLY start (dry_run={dry_run}, quarantine={quarantine_unapproved}) ===")
     batch_state: List[Any] = [None, 0]  # [apply_batch_id, op_index] — mutable for _execute_apply
+
+    # Progress apply : on attache un callback au RunState si present (run en
+    # memoire). En mode DB-only, rs vaut None et le callback aussi : pas de
+    # polling temps reel possible mais l'apply fonctionne quand meme.
+    rs = None
+    try:
+        rs = api._get_run(run_id)
+    except Exception:
+        rs = None
+    if rs is not None:
+        try:
+            rs.apply_begin(total=len(rows), dry_run=bool(dry_run), phase="rows")
+        except Exception:
+            _log.debug("apply_begin a echoue, on continue sans progress", exc_info=True)
+    _apply_cb: Optional[Callable[[int, int, str], None]] = None
+    if rs is not None:
+        def _apply_cb(idx: int, total: int, current: str, _rs: Any = rs) -> None:  # noqa: E306
+            try:
+                _rs.apply_progress(idx, total, current, "rows")
+            except Exception:
+                _log.debug("apply_progress a echoue", exc_info=True)
 
     # Jellyfin Phase 2 : snapshot watched AVANT apply
     watched_ctx = None
@@ -1811,8 +2162,15 @@ def apply_changes(
                 api=api,
                 run_id=run_id,
                 batch_state=batch_state,
+                progress_cb=_apply_cb,
+                apply_atomic=bool(apply_atomic),
             )
         except _DuplicateCheckError as exc:
+            if rs is not None:
+                try:
+                    rs.apply_end(error=str(exc))
+                except Exception:
+                    _log.debug("apply_end a echoue", exc_info=True)
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
@@ -1844,7 +2202,27 @@ def apply_changes(
             cleanup_reason_label=cleanup_reason_label,
         )
 
+        if rs is not None:
+            try:
+                rs.apply_progress(
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    "Synchronisation Jellyfin...",
+                    "jellyfin",
+                )
+            except Exception:
+                _log.debug("apply_progress phase jellyfin a echoue", exc_info=True)
         _trigger_jellyfin_refresh(api, log_fn, dry_run=dry_run)
+        if rs is not None:
+            try:
+                rs.apply_progress(
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    int(getattr(rs, "apply_total", 0) or 0),
+                    "Synchronisation Plex...",
+                    "plex",
+                )
+            except Exception:
+                _log.debug("apply_progress phase plex a echoue", exc_info=True)
         _trigger_plex_refresh(api, log_fn, dry_run=dry_run)
 
         # Jellyfin Phase 2 : restore watched APRES refresh
@@ -1884,6 +2262,11 @@ def apply_changes(
             except Exception as backup_exc:
                 log_fn("WARN", f"DB backup post-apply ignore: {backup_exc}")
 
+        if rs is not None:
+            try:
+                rs.apply_end(error=None)
+            except Exception:
+                _log.debug("apply_end OK a echoue", exc_info=True)
         return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
@@ -1907,6 +2290,64 @@ def apply_changes(
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
                 )
         log_fn("ERROR", f"Echec application : {exc}")
+
+        # Vague P / VP-A : rollback forward atomique si opt-in active.
+        # AC-3 : rollback FS+DB coordonne — si DB rollback echoue, FS revert
+        # tente quand meme + log d'audit. La fonction retourne toujours un
+        # dict synthese qu'on logge sans propager (le caller recoit l'erreur
+        # initiale via _err_response).
+        atomic_rollback_summary: Optional[Dict[str, Any]] = None
+        if bool(apply_atomic) and apply_batch_id is not None:
+            try:
+                atomic_rollback_summary = _atomic_rollback_forward(
+                    store,
+                    str(apply_batch_id),
+                    audit_fn=log_fn,
+                )
+                log_fn(
+                    "INFO",
+                    f"Rollback atomique batch={apply_batch_id} status="
+                    f"{atomic_rollback_summary.get('rollback_status')} "
+                    f"counts={atomic_rollback_summary.get('counts')}",
+                )
+            except Exception as rb_exc:  # noqa: BLE001 - rollback must never re-raise
+                log_fn(
+                    "ERROR",
+                    f"Rollback atomique a leve une exception batch={apply_batch_id}: {rb_exc}",
+                )
+
+            # R8-015 (F2-c) : refleter le resultat du rollback dans apply_batches.status.
+            # Le batch a ete clos FAILED ci-dessus AVANT le revert ; si le revert a
+            # COMPLETEMENT restaure le FS, le statut doit passer a ROLLED_BACK_BY_ATOMIC
+            # (sinon apply_batches.status reste FAILED et ne dit pas si le FS est restaure).
+            # Un revert partiel/echoue reste FAILED (l'etat est ambigu, garde la trace
+            # rollback_status=ROLLBACK_PARTIAL/FAILED dans apply_batch_modes). Tolerant.
+            if (
+                atomic_rollback_summary is not None
+                and bool(atomic_rollback_summary.get("ok"))
+                and str(atomic_rollback_summary.get("rollback_status") or "") == "ROLLED_BACK_BY_ATOMIC"
+                and apply_batch_id is not None
+            ):
+                try:
+                    store.apply.close_apply_batch(
+                        batch_id=str(apply_batch_id),
+                        status="ROLLED_BACK_BY_ATOMIC",
+                        summary={
+                            "run_id": run_id,
+                            "dry_run": False,
+                            "error": str(exc),
+                            "ops_count": int(op_index),
+                            "rollback_status": "ROLLED_BACK_BY_ATOMIC",
+                            "rollback_counts": atomic_rollback_summary.get("counts"),
+                        },
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    log_fn(
+                        "WARN",
+                        f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "
+                        f"batch={apply_batch_id}: {st_exc}",
+                    )
+
         api.log_api_exception(
             "apply",
             exc,
@@ -1916,11 +2357,32 @@ def apply_changes(
                 "dry_run": bool(dry_run),
                 "quarantine_unapproved": bool(quarantine_unapproved),
                 "decision_count": len(decisions),
+                "apply_atomic": bool(apply_atomic),
+                "atomic_rollback_status": (
+                    str((atomic_rollback_summary or {}).get("rollback_status") or "")
+                    if atomic_rollback_summary
+                    else ""
+                ),
             },
         )
-        return _err_response(t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__)
-    finally:
-        api._release_apply_slot(run_id)
+        if rs is not None:
+            try:
+                rs.apply_end(error=str(exc))
+            except Exception:
+                _log.debug("apply_end KO a echoue", exc_info=True)
+        err_payload = _err_response(
+            t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__
+        )
+        # AC-1 : on ENRICHIT le payload {ok: False, ...} avec la synthese
+        # du rollback sans casser la signature (champ optionnel).
+        if atomic_rollback_summary is not None:
+            err_payload["atomic_rollback"] = atomic_rollback_summary
+        if apply_batch_id is not None:
+            err_payload["apply_batch_id"] = apply_batch_id
+        return err_payload
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : plus de `finally:
+    # api._release_apply_slot(run_id)` ici — gere par `_apply_slot_guard`
+    # dans `apply_changes`.
 
 
 @requires_valid_run_id
@@ -2031,6 +2493,42 @@ def build_apply_preview(
         }
     """
     _log.info("api: build_apply_preview run_id=%s", run_id)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : utilise le context manager
+    # pour eviter qu'un crash laisse le slot bloque (le code precedent
+    # acquerait le slot via _validate_apply mais ne le liberait JAMAIS
+    # — leak permanent du run_id).
+    with api._apply_slot_guard(run_id) as acquired:
+        if not acquired:
+            # R6-HTTP409-001 : conflit de concurrence (slot deja occupe) ->
+            # HTTP 409 (opt-in Phase 11 v7.8.0). Backward compat : data.ok=false
+            # reste inchange, seul le code HTTP change.
+            return _err_response(
+                t("errors.apply_already_in_progress"),
+                category="state",
+                level="info",
+                log_module=__name__,
+                http_status=409,
+            )
+        return _build_apply_preview_body(
+            api,
+            run_id,
+            decisions,
+            cleanup_scope_label=cleanup_scope_label,
+            cleanup_status_label=cleanup_status_label,
+            cleanup_reason_label=cleanup_reason_label,
+        )
+
+
+def _build_apply_preview_body(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    *,
+    cleanup_scope_label: Callable[[str], str],
+    cleanup_status_label: Callable[..., str],
+    cleanup_reason_label: Callable[[str], str],
+) -> Dict[str, Any]:
+    """Corps de ``build_apply_preview`` une fois le slot acquis."""
     validation = _validate_apply(api, run_id, decisions, dry_run=True, quarantine_unapproved=False)
     if not validation.get("ok"):
         return validation
@@ -2084,11 +2582,77 @@ def build_apply_preview(
                 "main_from": None,
                 "main_to": None,
             }
+        # Fix audit 2026-05-25 (v1.5.3) Vague F : enrichissement de chaque op
+        # avec une decomposition dossier/fichier pour eviter d'afficher dans
+        # l'UI un src->dst brut qui suggere a tort un renommage du fichier
+        # video. apply_core.py ne renomme JAMAIS les fichiers video : seul
+        # le dossier parent est renomme/deplace.
+        src_path = str(op.get("src_path") or "")
+        dst_path = str(op.get("dst_path") or "")
+        op_type = str(op.get("op_type") or "")
+        try:
+            src_p = Path(src_path) if src_path else None
+            dst_p = Path(dst_path) if dst_path else None
+        except (ValueError, OSError):  # chemins malformes : best-effort
+            src_p = None
+            dst_p = None
+        folder_old_name = src_p.parent.name if src_p is not None else ""
+        folder_new_name = dst_p.parent.name if dst_p is not None else ""
+        video_filename = src_p.name if src_p is not None else ""
+        dst_filename = dst_p.name if dst_p is not None else ""
+        # Determiner le type d'action pour le rendu UI
+        if op_type == "MOVE_DIR":
+            # Renommage de dossier : on deplace le dossier lui-meme,
+            # les fichiers video a l'interieur conservent leur nom.
+            action_summary = "folder_rename"
+            # Pour un MOVE_DIR, src/dst sont des dossiers : folder_old/new_name
+            # est le nom du dossier lui-meme (pas du parent).
+            folder_old_name = src_p.name if src_p is not None else folder_old_name
+            folder_new_name = dst_p.name if dst_p is not None else folder_new_name
+            video_filename = ""  # un MOVE_DIR ne concerne pas un fichier specifique
+        elif op_type == "MOVE_FILE":
+            # Deplacement de fichier : nom de fichier conserve par apply_core,
+            # seul le dossier parent change. Si le nom change quand meme
+            # (TV episodes), on l'indique distinctement.
+            if video_filename and dst_filename and video_filename != dst_filename:
+                action_summary = "video_rename_tv"
+            elif folder_old_name != folder_new_name:
+                action_summary = "folder_rename_and_video_move"
+            else:
+                action_summary = "video_move"
+        else:
+            action_summary = op_type.lower() or "unknown"
+        # Fix audit 2026-05-30 (APPLY-1) Vague J — defense en profondeur cote UI :
+        # meme si une op a echappe au backend (regression future), on ne doit
+        # PAS la presenter comme un rename si folder_old_name et folder_new_name
+        # sont equivalents au sens filesystem Windows/SMB (case-insensitive +
+        # NFC/NFD insensitive). Pour MOVE_FILE, on verifie en plus que le nom
+        # de fichier video reste identique (sinon c'est un vrai rename TV).
+        def _fs_equivalent_name(a: str, b: str) -> bool:
+            if not a or not b:
+                return False
+            return (
+                unicodedata.normalize("NFC", a).casefold()
+                == unicodedata.normalize("NFC", b).casefold()
+            )
+
+        if op_type == "MOVE_DIR" and _fs_equivalent_name(folder_old_name, folder_new_name):
+            action_summary = "noop_equivalent_fs"
+        elif (
+            op_type == "MOVE_FILE"
+            and _fs_equivalent_name(folder_old_name, folder_new_name)
+            and (not video_filename or not dst_filename or video_filename == dst_filename)
+        ):
+            action_summary = "noop_equivalent_fs"
         slim_op = {
-            "op_type": str(op.get("op_type") or ""),
-            "src_path": str(op.get("src_path") or ""),
-            "dst_path": str(op.get("dst_path") or ""),
+            "op_type": op_type,
+            "src_path": src_path,  # preserve pour retro-compat
+            "dst_path": dst_path,  # preserve pour retro-compat
             "reversible": bool(op.get("reversible")),
+            "folder_old_name": folder_old_name,
+            "folder_new_name": folder_new_name,
+            "video_filename": video_filename,
+            "action_summary": action_summary,
         }
         films_map[rid]["ops"].append(slim_op)
         if slim_op["op_type"] == "MOVE_DIR" and not films_map[rid]["has_move_dir"]:
@@ -2101,9 +2665,16 @@ def build_apply_preview(
 
     films_list = list(films_map.values())
     # Classifier chaque film par type de changement
+    # Fix audit 2026-05-30 (APPLY-1) : on exclut les ops marquees
+    # "noop_equivalent_fs" du decompte des ops effectives. Un film
+    # dont TOUTES les ops sont equivalentes FS doit etre classe "noop"
+    # pour ne pas apparaitre comme un changement dans l'UI.
     for film in films_list:
-        n_move_dir = sum(1 for op in film["ops"] if op["op_type"] == "MOVE_DIR")
-        n_move_file = sum(1 for op in film["ops"] if op["op_type"] == "MOVE_FILE")
+        effective_ops = [
+            op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"
+        ]
+        n_move_dir = sum(1 for op in effective_ops if op["op_type"] == "MOVE_DIR")
+        n_move_file = sum(1 for op in effective_ops if op["op_type"] == "MOVE_FILE")
         if n_move_dir + n_move_file == 0:
             film["change_type"] = "noop"
         elif n_move_dir > 0 and n_move_file == 0:
@@ -2114,6 +2685,14 @@ def build_apply_preview(
             film["change_type"] = "move_mixed"
 
     # Stats globales à partir du résultat dry-run
+    # Fix audit 2026-05-30 (APPLY-1) : nouveau compteur `noop_equivalent_fs`
+    # pour observability des ops detectees comme equivalentes FS cote UI.
+    noop_equivalent_fs_count = sum(
+        1
+        for f in films_list
+        for op in f["ops"]
+        if op.get("action_summary") == "noop_equivalent_fs"
+    )
     totals = {
         "films": len(films_list),
         "moves": int(getattr(result, "moves", 0) or 0),
@@ -2125,6 +2704,7 @@ def build_apply_preview(
         "orphan_ops": len(orphan_ops),
         "changes_count": sum(1 for f in films_list if f["change_type"] != "noop"),
         "noop_count": sum(1 for f in films_list if f["change_type"] == "noop"),
+        "noop_equivalent_fs": noop_equivalent_fs_count,
     }
 
     return {

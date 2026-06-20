@@ -129,7 +129,9 @@ function _renderLastRunCard(latestRun, kpis) {
   const date = formatRelativeTime(startedDate);
   const total = latestRun.total_rows != null ? Number(latestRun.total_rows) : null;
   const avgScore = kpis && kpis.score_avg != null ? Number(kpis.score_avg) : (latestRun.avg_score_v2 != null ? Number(latestRun.avg_score_v2) : null);
-  const avgConfidence = latestRun.avg_confidence_pct;
+  // R6-I : la confiance moyenne vient de kpis.confidence_avg (runs_history n'a
+  // pas avg_confidence_pct -> affichait toujours "—").
+  const avgConfidence = kpis && kpis.confidence_avg != null ? Number(kpis.confidence_avg) : latestRun.avg_confidence_pct;
   const scoreTxt = avgScore != null && avgScore > 0 ? `${Math.round(avgScore)}/100` : "— (pas calculé)";
   const confTxt = avgConfidence != null ? `${Math.round(avgConfidence)}%` : "—";
   const totalTxt = total != null ? `${total} films analysés` : "— films";
@@ -161,21 +163,39 @@ function _renderLastRunCard(latestRun, kpis) {
  * configuree mais hors ligne ⚠.
  */
 const _INTEGRATIONS = [
-  { key: "tmdb", label: "TMDb", settingKey: "tmdb_api_key" },
-  { key: "jellyfin", label: "Jellyfin", settingKey: "jellyfin_enabled" },
-  { key: "plex", label: "Plex", settingKey: "plex_enabled" },
-  { key: "radarr", label: "Radarr", settingKey: "radarr_enabled" },
-  { key: "omdb", label: "OMDb", settingKey: "omdb_enabled" },
+  // settingKeys[] : on considere l'integration "configuree" si AU MOINS UNE
+  // des clefs est renseignee (string non vide) OU le flag *_enabled === true.
+  // Fix bug #1 : avant on ne regardait que *_enabled, donc un Jellyfin/Plex/
+  // Radarr/OMDb avec url+api_key mais sans flag enabled passait "Non configuré".
+  { key: "tmdb", label: "TMDb", settingKeys: ["tmdb_api_key"] },
+  { key: "jellyfin", label: "Jellyfin", settingKeys: ["jellyfin_enabled", "jellyfin_url", "jellyfin_api_key"] },
+  { key: "plex", label: "Plex", settingKeys: ["plex_enabled", "plex_url", "plex_token"] },
+  { key: "radarr", label: "Radarr", settingKeys: ["radarr_enabled", "radarr_url", "radarr_api_key"] },
+  { key: "omdb", label: "OMDb", settingKeys: ["omdb_enabled", "omdb_api_key"] },
 ];
+
+/** Retourne true si AU MOINS UNE des settingKeys de l'integration est renseignee
+ *  (string non vide) OU egale à true (flag *_enabled).
+ */
+function _isIntegrationConfigured(integration, settings) {
+  const settingsObj = settings || {};
+  // Backward compat : tolere l'ancien champ settingKey (singulier).
+  const keys = Array.isArray(integration.settingKeys)
+    ? integration.settingKeys
+    : (integration.settingKey ? [integration.settingKey] : []);
+  for (const k of keys) {
+    const val = settingsObj[k];
+    if ((typeof val === "string" && val.trim() !== "") || val === true) return true;
+  }
+  return false;
+}
 
 /** Etat de chaque integration : "ok" (configuré + ping OK),
  *  "off" (non configuré) ou "offline" (configuré mais ping fail).
  *  Phase 5 spec §1 : la pastille passe à ⚠ orange si hors ligne.
  */
 function _integrationState(integration, settings, pingResults) {
-  const settingsObj = settings || {};
-  const val = settingsObj[integration.settingKey];
-  const configured = (typeof val === "string" && val.trim() !== "") || val === true;
+  const configured = _isIntegrationConfigured(integration, settings);
   if (!configured) return "off";
   const pr = pingResults && pingResults[integration.key];
   if (pr === false) return "offline";
@@ -243,9 +263,12 @@ function _pingCacheSet(key, ok) {
 /** Ping une seule intégration. Retourne true (ok) / false (offline) ou null
  *  si on ne peut pas la tester (ex : pas d'endpoint dispo, ou pas configurée).
  */
-async function _pingIntegration(key, settings) {
+async function _pingIntegration(key, settings, signal) {
   const cached = _pingCacheGet(key);
   if (cached !== undefined) return cached;
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : si la vue est deja detached avant
+  // de meme lancer la requete, on annule (evite fetch inutile + DOM detached).
+  if (signal && signal.aborted) return null;
   // Fix audit 2026-05-24 : avant, les pings Jellyfin/Plex/Radarr passaient un
   // objet vide {} aux facades integrations/test_*_connection. Or ces facades
   // attendent { url, api_key, timeout_s } et retournent generalement une
@@ -256,37 +279,44 @@ async function _pingIntegration(key, settings) {
   // ses propres settings persistes (cf doc facades).
   const s = settings || {};
   try {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : signal abort propage a apiPost
+    // pour annuler les pings en cours si la vue est demontee pendant l'attente.
+    const _opts = signal ? { signal } : {};
     let res = null;
     if (key === "tmdb") {
       const apiKey = String(s.tmdb_api_key || "");
       if (!apiKey) return null;
-      res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 });
+      res = await apiPost("integrations/test_tmdb_key", { api_key: apiKey, state_dir: "", timeout_s: 5 }, _opts);
     } else if (key === "jellyfin") {
       const url = String(s.jellyfin_url || "");
       const apiKey = String(s.jellyfin_api_key || "");
       const payload = (url || apiKey)
         ? { url, api_key: apiKey, timeout_s: 5 }
         : {}; // settings vides : backend doit lire ses propres settings persistes
-      res = await apiPost("integrations/test_jellyfin_connection", payload);
+      res = await apiPost("integrations/test_jellyfin_connection", payload, _opts);
     } else if (key === "plex") {
       const url = String(s.plex_url || "");
       const token = String(s.plex_token || "");
       const payload = (url || token)
         ? { url, api_key: token, timeout_s: 5 }
         : {};
-      res = await apiPost("integrations/test_plex_connection", payload);
+      res = await apiPost("integrations/test_plex_connection", payload, _opts);
     } else if (key === "radarr") {
       const url = String(s.radarr_url || "");
       const apiKey = String(s.radarr_api_key || "");
       const payload = (url || apiKey)
         ? { url, api_key: apiKey, timeout_s: 5 }
         : {};
-      res = await apiPost("integrations/test_radarr_connection", payload);
+      res = await apiPost("integrations/test_radarr_connection", payload, _opts);
     } else if (key === "omdb") {
       const apiKey = String(s.omdb_api_key || "");
-      res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 });
+      res = await apiPost("integrations/test_omdb_connection", { api_key: apiKey, timeout_s: 5 }, _opts);
     }
-    const ok = !!(res && (res.ok === true || (res.data && res.data.ok === true) || (res.ok !== false && res.data && res.data.connected === true)));
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+    // apiPost retourne { ok, status, data: {...payload backend...} }. Le ok du
+    // payload backend est dans res.data.ok ; res.ok est le ok HTTP de l'enveloppe.
+    const _payload = (res && res.data) || res || {};
+    const ok = !!(_payload.ok === true || _payload.connected === true);
     _pingCacheSet(key, ok);
     return ok;
   } catch (_err) {
@@ -298,26 +328,33 @@ async function _pingIntegration(key, settings) {
 /** Lance les pings en arrière-plan, met à jour le DOM au fil des résultats.
  *  N'attend pas que les pings se terminent (fire-and-forget).
  */
-function _runEnvironmentPingsBackground(container, settings) {
+function _runEnvironmentPingsBackground(container, settings, signal) {
   for (const it of _INTEGRATIONS) {
-    const val = (settings || {})[it.settingKey];
-    const configured = (typeof val === "string" && val.trim() !== "") || val === true;
-    if (!configured) continue;
+    // Fix bug #1 : utilise _isIntegrationConfigured (multi-keys) au lieu de
+    // tester uniquement *_enabled, sinon on ne ping pas un Jellyfin/Plex/etc.
+    // configure via url+api_key sans flag enabled.
+    if (!_isIntegrationConfigured(it, settings)) continue;
     // Cache hit ? Applique direct sans refetch.
     const cached = _pingCacheGet(it.key);
     if (cached !== undefined) {
       _applyPingResultToDom(container, it.key, cached);
       continue;
     }
-    // Fire-and-forget : on update le DOM quand le ping retourne.
-    _pingIntegration(it.key, settings).then((ok) => {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : fire-and-forget AVEC signal abort.
+    // Si l'utilisateur navigue avant la fin du ping, _abortController.abort()
+    // annule la requete ; _applyPingResultToDom verifie isConnected en plus.
+    _pingIntegration(it.key, settings, signal).then((ok) => {
       if (ok === null) return;
+      if (signal && signal.aborted) return;
       _applyPingResultToDom(container, it.key, ok);
-    }).catch(() => { /* déjà cache à false */ });
+    }).catch(() => { /* deja cache a false, ou abort */ });
   }
 }
 
 function _applyPingResultToDom(container, key, ok) {
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : guard DOM detache. Sans ce check,
+  // un ping fire-and-forget qui revient apres navigation manipulerait un
+  // conteneur orphelin (querySelector OK mais aucun effet visible + warnings).
   if (!container || !container.isConnected) return;
   const pill = container.querySelector(`[data-accueil-env-bar] [data-integration="${key}"]`);
   if (!pill) return;
@@ -332,7 +369,12 @@ function _applyPingResultToDom(container, key, ok) {
     pill.classList.add("is-offline");
     if (sym) sym.textContent = "⚠";
     pill.dataset.integrationState = "offline";
-    const label = pill.textContent.trim();
+    // Fix bug #3 : textContent inclut le symbole ☑/⚠/☐ du <span> (DOM concat
+    // tout le sous-arbre). Au lieu de pill.textContent.trim() on lit le label
+    // canonique depuis _INTEGRATIONS via data-integration -> evite "TMDb⚠" colle.
+    const intKey = pill.dataset.integration || "";
+    const intMeta = _INTEGRATIONS.find((i) => i.key === intKey);
+    const label = (intMeta && intMeta.label) || intKey || "Integration";
     pill.title = `${label} configuré mais hors ligne — clique pour diagnostiquer`;
   }
 }
@@ -379,7 +421,9 @@ function _renderCtaScan(roots, scanProgress) {
         <p class="accueil-cta-scan-targets">Sur ${rootsLabel}</p>
       </div>
       <div class="accueil-actions">
-        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan-direct">▶ Démarrer</button>
+        <!-- Fix audit 2026-06-07 UX medium : harmoniser verbe "Lancer" (titre H2,
+             raccourci aide.js, traitement.js) entre titre et CTA, eviter incoherence. -->
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-action="start-scan-direct">▶ Lancer le scan</button>
         <button type="button" class="v5-btn v5-btn--secondary" data-accueil-action="open-scan-options">⚙ Options…</button>
       </div>
     </section>
@@ -461,6 +505,15 @@ function _renderHealth(stats) {
 }
 
 const _INSIGHT_ROUTE_BY_TYPE = {
+  // R8-051 + R8-049 (F5) : types RÉELLEMENT émis par _compute_active_insights : statut
+  // (run_in_progress), célébration (new_platinum_month, dnr_partial) + les 8 types MÉTIER
+  // ci-dessous (quality_reject/duplicates_probable/…). Filet F5 : entrées mortes
+  // new_rejects/duplicates_to_resolve retirées (renommées en quality_reject/duplicates_probable).
+  run_in_progress: "/accueil",
+  dnr_partial: "/qualite",
+  new_platinum_month: "/qualite",
+  // Vocabulaire "métier" (8 types) émis par le producteur enrichi (R8-049) -> routes vers
+  // de vrais filtres bibliothèque.
   duplicates_probable: "/bibliotheque?filter=duplicates",
   films_not_identified: "/bibliotheque?filter=not_identified",
   films_low_confidence: "/bibliotheque?filter=low_confidence",
@@ -496,10 +549,16 @@ function _librarianIdToRoute(id) {
       return "/bibliotheque?filter=duplicates";
     case "subs_missing":
     case "subs_missing_fr":
+    case "missing_subtitles": // R8-052 (F5) : id réel émis par librarian.py
       return "/bibliotheque?filter=subs_missing_fr";
     case "not_identified":
     case "films_not_identified":
+    case "unidentified": // R8-052 : id réel librarian
       return "/bibliotheque?filter=not_identified";
+    case "low_resolution": // R8-052 : id réel librarian
+      return "/qualite";
+    case "collections_info": // R8-052 : id réel librarian
+      return "/bibliotheque?filter=sagas_incomplete";
     case "codec_obsolete":
       return "/bibliotheque?filter=codec_obsolete";
     case "low_confidence":
@@ -672,8 +731,16 @@ function _renderRecentActivity(runs) {
                  aria-label="${escapeHtml(tooltip)}"></button>`;
     }).join("");
     const isToday = c.label === "Auj.";
+    // Fix bug #4 : c.date est construit en heure locale (minuit local). Un
+    // toISOString() le convertit en UTC -> sur fuseau negatif (ou proche de
+    // minuit positif) data-day-iso renvoie le jour calendaire precedent et
+    // casse les selecteurs e2e. On construit l'ISO YYYY-MM-DD localement.
+    const _y = c.date.getFullYear();
+    const _mm = String(c.date.getMonth() + 1).padStart(2, "0");
+    const _dd = String(c.date.getDate()).padStart(2, "0");
+    const _dayIsoLocal = `${_y}-${_mm}-${_dd}`;
     return `
-      <div class="accueil-timeline-day ${isToday ? "is-today" : ""}" data-day-iso="${escapeHtml(c.date.toISOString().slice(0, 10))}">
+      <div class="accueil-timeline-day ${isToday ? "is-today" : ""}" data-day-iso="${escapeHtml(_dayIsoLocal)}">
         <div class="accueil-timeline-bullets">${bullets}</div>
         <div class="accueil-timeline-day-label">
           <span class="accueil-timeline-day-name">${escapeHtml(c.label)}</span>
@@ -745,9 +812,15 @@ function _resolveLatestRun(payload) {
 // silencieuse pour un onboarding decouverte.
 function _renderSetupBanner(settings) {
   const s = settings || {};
+  // AUDIT 2026-06-14 (R6-G) : le GET masque les secrets -> `tmdb_api_key` revient
+  // vide ("••••" ou ""), donc tester sa valeur donnait une FAUSSE alerte
+  // "TMDb n'est pas configuré" alors que la clé est bien là (cf pastille ☑TMDb
+  // verte + Paramètres "Configuré"). On lit le flag canonique `_has_tmdb_api_key`
+  // (présence réelle de la clé), avec repli sur la valeur si elle n'est pas masquée.
   const tmdbKey = typeof s.tmdb_api_key === "string" ? s.tmdb_api_key.trim() : "";
+  const hasTmdbKey = s._has_tmdb_api_key === true || tmdbKey !== "";
   const tmdbEnabled = s.tmdb_enabled !== false; // par defaut on suppose enabled
-  const tmdbMissing = !tmdbKey || tmdbEnabled === false;
+  const tmdbMissing = !tmdbEnabled || !hasTmdbKey;
 
   const secondaryMissing = [];
   if (!s.jellyfin_enabled && !(typeof s.jellyfin_api_key === "string" && s.jellyfin_api_key.trim())) {
@@ -893,10 +966,15 @@ function _buildInspectorSections(payload, stats, settings) {
     },
     {
       title: "Raccourcis",
+      // Fix bug #2 : raccourcis alignes sur la vraie table de core/keyboard.js.
+      // Ctrl+S = save-request (PAS "Nouveau scan"). Les vrais raccourcis utiles
+      // pour la navigation depuis l'Accueil sont Alt+1..7, plus Ctrl+B/I/K/, et ?.
       html: `
         <dl class="accueil-inspector-shortcuts">
-          <div><dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Nouveau scan</dd></div>
-          <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Recherche / palette</dd></div>
+          <div><dt><kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>7</kbd></dt><dd>Navigation directe (Accueil → Aide)</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>Recherche / palette de commandes</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>B</kbd></dt><dd>Replier / déplier la sidebar</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>I</kbd></dt><dd>Afficher / masquer l'inspecteur</dd></div>
           <div><dt><kbd>Ctrl</kbd>+<kbd>,</kbd></dt><dd>Paramètres</dd></div>
           <div><dt><kbd>?</kbd></dt><dd>Aide</dd></div>
         </dl>
@@ -928,37 +1006,49 @@ async function _triggerStartPlan(container, btn) {
   }
   try {
     const res = await apiPost("run/start_plan", { settings: _currentSettings });
-    const data = res && (res.data || res);
-    if (res && res.ok === false) {
-      const msg = (res.message || res.error || "Échec du démarrage.").toString();
-      _showErrorBanner(container, msg);
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+    // L'enveloppe apiPost a un res.ok HTTP (toujours true sur 2xx) ; le ok
+    // metier du backend est dans res.data.ok. Avant, on confondait les deux
+    // et un start_plan en erreur metier (res.data.ok=false) passait silencieux.
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok === false) {
+      // Fix audit 2026-06-07 UX : ne plus exposer le message brut du backend
+      // (souvent jargon technique anglais). Log technique + message UX clair.
+      const technicalMsg = (_payload.message || _payload.error || "").toString();
+      if (technicalMsg) console.error("[accueil] start_plan refused:", technicalMsg);
+      _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "▶ Démarrer";
+        btn.textContent = "▶ Lancer le scan";
       }
       return;
     }
-    const runId = data && (data.run_id || data.runId);
+    const runId = _payload.run_id || _payload.runId;
     if (runId) {
       // Démarrer le polling pour transitionner la card vers "scan en cours".
       _startScanPolling(container);
     } else {
-      _showErrorBanner(container, "Aucun run_id retourné par start_plan.");
+      // Fix audit 2026-06-07 UX high : retirer jargon "run_id"/"start_plan".
+      _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "▶ Démarrer";
+        btn.textContent = "▶ Lancer le scan";
       }
     }
   } catch (err) {
-    _showErrorBanner(container, err && err.message ? String(err.message) : "Erreur réseau lors du démarrage.");
+    // Fix audit 2026-06-07 UX high : err.message brut expose du jargon (TypeError,
+    // NetworkError…). Log technique en console, message UX clair a l'ecran.
+    console.error("[accueil] start_plan failed:", err);
+    _showErrorBanner(container, "Impossible de démarrer l'analyse. Réessayer ?");
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "▶ Démarrer";
+      btn.textContent = "▶ Lancer le scan";
     }
   }
 }
 
 function _showErrorBanner(container, msg) {
+  if (!container || !container.isConnected) return;
   try {
     let banner = container.querySelector(".accueil-scan-error-banner");
     if (!banner) {
@@ -988,8 +1078,11 @@ function _startScanPolling(container) {
     }
     try {
       const res = await apiPost("run/get_dashboard", { run_id: "latest" });
-      if (!res || res.ok === false) return;
-      const payload = res.data || res;
+      // Fix audit 2026-05-25 (v1.5.3) Vague F : pattern standardise res.data.ok.
+      // Le polling get_dashboard peut renvoyer ok=false metier (run perdu, db
+      // inaccessible) alors que l'HTTP est 200. On lit le ok du payload.
+      const payload = (res && res.data) || res || {};
+      if (payload.ok === false) return;
       const scanProgress = _extractScanProgress(payload);
       const ctaSection = _pollContainer.querySelector(".accueil-cta-scan");
       if (!ctaSection) return;
@@ -1001,8 +1094,12 @@ function _startScanPolling(container) {
         _rebindCtaScanEvents(_pollContainer);
       } else {
         // Run terminé : full re-render via initAccueil.
+        // Fix audit 2026-05-25 (v1.5.3) Vague F : sauve reference DOM avant nullification
+        const _savedContainer = _pollContainer;
         _stopScanPolling();
-        initAccueil(_pollContainer);
+        if (_savedContainer && _savedContainer.isConnected) {
+          initAccueil(_savedContainer);
+        }
       }
     } catch (_err) { /* silencieux */ }
   };
@@ -1060,7 +1157,7 @@ function _openScanOptionsDrawer(container) {
       </label>
       <div class="accueil-scan-drawer-actions">
         <button type="button" class="v5-btn v5-btn--ghost" data-accueil-scan-drawer-cancel>Annuler</button>
-        <button type="button" class="v5-btn v5-btn--primary" data-accueil-scan-drawer-start>▶ Démarrer</button>
+        <button type="button" class="v5-btn v5-btn--primary" data-accueil-scan-drawer-start>▶ Lancer le scan</button>
       </div>
     </div>
   `;
@@ -1246,17 +1343,26 @@ export async function initAccueil(container) {
     return;
   }
 
-  if (!dashRes || dashRes.ok === false) {
-    const msg = (dashRes && (dashRes.message || dashRes.error)) || "Erreur de chargement du dashboard.";
+  // AUDIT 2026-06-10 (REAL 2/2) : le ok METIER est dans res.data.ok, pas au
+  // top-level de l'enveloppe apiPost {status, data}. Avant, dashRes.ok===false
+  // n'etait jamais vrai -> une erreur metier (DB inaccessible, 401, 429) etait
+  // rendue comme un succes avec le payload d'erreur comme donnees. Meme pattern
+  // que _triggerStartPlan / pings (res.data || res).
+  const _dashPayload = (dashRes && dashRes.data) || dashRes || {};
+  if (!dashRes || _dashPayload.ok === false) {
+    const msg = (_dashPayload.message || _dashPayload.error) || "Erreur de chargement du dashboard.";
     container.innerHTML = _renderError(msg);
     _bindEvents(container);
     return;
   }
 
-  const dashboardData = dashRes.data || dashRes;
-  const stats = (statsRes && statsRes.ok !== false) ? (statsRes.data || statsRes) : {};
-  const settings = (settingsRes && settingsRes.ok !== false) ? (settingsRes.data || settingsRes) : {};
-  const updateInfo = (updateRes && updateRes.ok !== false) ? (updateRes.data || updateRes) : null;
+  const dashboardData = _dashPayload;
+  const _statsP = (statsRes && statsRes.data) || statsRes || {};
+  const stats = _statsP.ok !== false ? _statsP : {};
+  const _setP = (settingsRes && settingsRes.data) || settingsRes || {};
+  const settings = _setP.ok !== false ? _setP : {};
+  const _updP = (updateRes && updateRes.data) || updateRes || null;
+  const updateInfo = _updP && _updP.ok !== false ? _updP : null;
   _currentSettings = settings;
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings, updateInfo);
@@ -1264,7 +1370,9 @@ export async function initAccueil(container) {
 
   // Phase 5 : lance les pings en arrière-plan pour détecter les intégrations
   // hors-ligne. Les pastilles passent à ⚠ orange au fil des résultats.
-  _runEnvironmentPingsBackground(container, settings);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : on transmet signal pour cancel
+  // propre en cas de navigation pendant l'attente d'un ping reseau.
+  _runEnvironmentPingsBackground(container, settings, signal);
 
   // Phase 5 : si un scan est actif au boot, démarrer le polling pour refresh.
   const initialScan = _extractScanProgress(dashboardData);

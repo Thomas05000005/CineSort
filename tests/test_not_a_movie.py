@@ -14,13 +14,13 @@ import unittest
 from pathlib import Path
 
 from cinesort.domain.scan_helpers import (
-    _NOT_A_MOVIE_THRESHOLD,
     _NAM_NO_TMDB_PTS,
     _NAM_SHORT_TITLE_PTS,
     _NAM_SIZE_SMALL_PTS,
     _NAM_SIZE_TINY_PTS,
     _NAM_SUSPECT_NAME_PTS,
     _NAM_UNCOMMON_EXT_PTS,
+    _NOT_A_MOVIE_THRESHOLD,
     not_a_movie_score,
 )
 

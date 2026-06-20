@@ -22,7 +22,6 @@ from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
-
 # ---------------------------------------------------------------------------
 # Helpers partages
 # ---------------------------------------------------------------------------
@@ -155,7 +154,10 @@ class RecordApplyOpFailureTests(unittest.TestCase):
         def _fail(_data):
             raise OSError("journal SQLite inaccessible")
 
-        with self.assertLogs("cinesort.app.apply_core", level=logging.ERROR) as cm:
+        # Fix audit 2026-05-26 (v1.5.6) Vague L : niveau abaisse a WARNING en Vague H.7
+        # (4 logger.error -> warning pour reduire le bruit ERROR non-fatal). Aligner
+        # le test sur le nouveau contrat.
+        with self.assertLogs("cinesort.app.apply_core", level=logging.WARNING) as cm:
             ok = record_apply_op(_fail, op_type="MOVE", src_path=Path("/a"), dst_path=Path("/b"))
         self.assertFalse(ok)
         self.assertTrue(any("echec journalisation" in m for m in cm.output))
@@ -171,18 +173,72 @@ class RecordApplyOpFailureTests(unittest.TestCase):
 
 
 class RollbackTmpRenameTests(unittest.TestCase):
-    def test_apply_core_logs_rollback_failure(self) -> None:
-        """M4 : le code source doit contenir un logger.error explicite sur le rollback."""
+    """Fix audit 2026-05-26 (v1.5.6) Vague L : test reecrit pour valider le
+    COMPORTEMENT runtime du chemin rollback, plus seulement le code source.
+
+    L'ancien test cherchait juste les strings "rollback rename echoue" et
+    "as rollback_err" dans le source. Vacuous : aucun changement de
+    comportement (ex. transformer le log en print, ou retrograder en debug)
+    n'aurait casse le test, et n'importe quel refactor du nom de variable
+    rollback_err le rendait rouge sans bug.
+
+    Le nouveau test reproduit la condition reelle :
+      1. Cree un dossier dont le rename case-only declenche le pattern
+         folder.rename(tmp) -> tmp.rename(dst) du _execute_apply
+      2. Mock Path.rename pour que le SECOND rename (tmp -> dst) leve OSError
+      3. ET que le ROLLBACK (tmp -> folder original) leve aussi OSError
+      4. Verifie que le logger emet un message contenant "rollback rename
+         echoue" via assertLogs (comportement de log effectif, pas source)
+    """
+
+    def test_rollback_failure_emits_warning_log(self) -> None:
         import cinesort.app.apply_core as apply_core_mod
 
-        source = Path(apply_core_mod.__file__).read_text(encoding="utf-8")
-        self.assertIn("rollback rename echoue", source)
-        self.assertIn(".__tmp_ren", source)
-        # Le bloc doit capturer l'exception dans une variable nommee (pas `except OSError: pass`)
-        idx = source.find("rollback rename echoue")
-        self.assertGreater(idx, 0)
-        context = source[max(0, idx - 300) : idx]
-        self.assertIn("as rollback_err", context)
+        tmp = tempfile.mkdtemp(prefix="cinesort_rollback_log_")
+        try:
+            root = Path(tmp)
+            folder = root / "Film"
+            folder.mkdir()
+            (folder / "video.mkv").write_bytes(b"x")
+            dst = root / "film"  # case-only rename
+
+            # Mock pathlib.Path.rename pour faire echouer les renames a partir
+            # du 2e appel et le rollback aussi.
+            calls = {"n": 0}
+            original_rename = Path.rename
+
+            def _flaky_rename(self_path: Path, target):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    # 1er rename : folder -> tmp (.__tmp_ren). On le laisse passer.
+                    return original_rename(self_path, target)
+                if calls["n"] == 2:
+                    # 2e rename : tmp -> dst. On fait echouer.
+                    raise OSError("simulated tmp->dst failure")
+                if calls["n"] == 3:
+                    # 3e rename : rollback tmp -> folder original. On fait echouer aussi
+                    # pour declencher la branche logger.warning("rollback rename echoue").
+                    raise OSError("simulated rollback failure")
+                return original_rename(self_path, target)
+
+            with mock.patch.object(Path, "rename", _flaky_rename), self.assertLogs(
+                apply_core_mod.__name__, level=logging.WARNING
+            ) as caplog:
+                # On invoque directement le helper interne qui contient le bloc
+                # rollback : _move_folder_with_case_rename (chemin folder.name.lower()
+                # == dst.name.lower()). On attend qu'il leve in fine (le 2e rename
+                # raise) tout en loggant le rollback echoue.
+                with self.assertRaises(OSError):
+                    apply_core_mod._case_only_rename_with_rollback(folder, dst)
+
+            log_text = "\n".join(caplog.output)
+            self.assertIn(
+                "rollback rename echoue",
+                log_text,
+                f"Le log warning rollback rename echoue est attendu. Logs: {log_text!r}",
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

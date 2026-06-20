@@ -1,6 +1,7 @@
 """V5bis-05 — Vérifie settings-v5.js porté."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

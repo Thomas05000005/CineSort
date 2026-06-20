@@ -107,10 +107,10 @@ class ValidateToolPathBinaryNameTests(unittest.TestCase):
 
     def test_validate_rejects_wrong_binary_name(self) -> None:
         """Si on pointe ffprobe vers calc.exe, validate_tool_path doit refuser."""
-        from cinesort.infra.probe.tools_manager import validate_tool_path
-
         # Cree un faux executable au mauvais nom
         import tempfile
+
+        from cinesort.infra.probe.tools_manager import validate_tool_path
 
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "calc.exe"
@@ -124,9 +124,9 @@ class ValidateToolPathBinaryNameTests(unittest.TestCase):
             self.assertIn("invalide", result["message"].lower())
 
     def test_validate_rejects_arbitrary_exe(self) -> None:
-        from cinesort.infra.probe.tools_manager import validate_tool_path
-
         import tempfile
+
+        from cinesort.infra.probe.tools_manager import validate_tool_path
 
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "malware.exe"

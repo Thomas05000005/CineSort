@@ -73,12 +73,19 @@ function _normalizeTierDist(rawDist) {
 }
 
 function _resolveTierDist(stats) {
-  if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
-    const v2 = _normalizeTierDist(stats.v2_tier_distribution.counts);
-    const v2sum = _TIER_ORDER.reduce((s, t) => s + (v2[t] || 0), 0);
-    if (v2sum > 0) return v2;
+  // AUDIT 2026-06-14 (R6-F) : la V1 (quality_reports) couvre TOUS les films
+  // classes du dernier run ; la V2 (perceptuel) est PARTIELLE (analyse opt-in,
+  // souvent quelques films seulement) et donc non representative de la
+  // bibliotheque. On prend la V1 comme distribution complete, V2 seulement en
+  // repli si la V1 est absente. Evite le faux "100% Bronze / X films classes".
+  if (stats && stats.tier_distribution) {
+    const v1 = _normalizeTierDist(stats.tier_distribution);
+    const v1sum = _TIER_ORDER.reduce((s, t) => s + (v1[t] || 0), 0);
+    if (v1sum > 0) return v1;
   }
-  if (stats && stats.tier_distribution) return _normalizeTierDist(stats.tier_distribution);
+  if (stats && stats.v2_tier_distribution && stats.v2_tier_distribution.counts) {
+    return _normalizeTierDist(stats.v2_tier_distribution.counts);
+  }
   return {};
 }
 
@@ -124,12 +131,17 @@ function _renderHeader(stats) {
   // (y compris ceux sans tier calcule), pas "X films classes". On utilise la
   // somme par tier pour afficher le vrai nombre de films classes.
   const total = totalScored;
-  const healthPct = totalScored > 0
-    ? Math.round(((dist.platinum + dist.gold + dist.silver) / totalScored) * 100)
-    : 0;
+  // Fix audit 2026-05-25 (v1.5.5) Vague J : NaN% quand dist n'a aucun
+  // platinum/gold/silver (ex: 853 films tous en Reject -> dist={reject:853}).
+  // `undefined + 0 + 0 = NaN`. On garde toutes les valeurs en `|| 0` ET on
+  // verifie `Number.isFinite` en sortie pour blinder contre divisions douteuses.
+  const _healthy = (dist.platinum || 0) + (dist.gold || 0) + (dist.silver || 0);
+  const _healthRaw = totalScored > 0 ? (_healthy / totalScored) * 100 : 0;
+  const healthPct = Number.isFinite(_healthRaw) ? Math.round(_healthRaw) : 0;
 
+  // AUDIT 2026-06-11 (R4-P7) : genres retire du compte — le controle a ete
+  // retire du drawer (les rows n'ont pas les genres TMDb, filtre sans effet).
   const activeFilterCount = (_state.filters.decades.length
-    + _state.filters.genres.length
     + _state.filters.sources.length
     + _state.filters.audio_languages.length);
 
@@ -204,21 +216,32 @@ function _renderRejectSection(stats) {
     const rowId = String(f.row_id || "");
     const title = String(f.title || "(sans titre)");
     const year = f.year ? Number(f.year) : null;
-    const score = f.score_v2 != null ? Math.round(Number(f.score_v2)) : null;
+    // Iter13 etape 4 (2026-06-10) : degradation visible. Quand le probe a
+    // echoue (apres retry+breaker iter1-3), on AFFICHE EXPLICITEMENT
+    // "Indisponible" plutot qu'un score Silver-cap trompeur. Le film reste
+    // identifie et renommable (acquis racine C iter4) ; seule la mesure
+    // qualite manque - et on le dit franchement a l'utilisateur.
+    const qualityUnavailable = Boolean(f.quality_unavailable)
+      || String(f.probe_quality || "").toUpperCase() === "FAILED";
+    const score = (!qualityUnavailable && f.score_v2 != null)
+      ? Math.round(Number(f.score_v2))
+      : null;
     const poster = f.poster_url || "";
     const warningsCount = Array.isArray(f.warnings) ? f.warnings.length : 0;
     return `
       <button type="button" class="qualite-reject-card" data-qualite-reject-card="${escapeHtml(rowId)}" data-qualite-reject-index="${idx}" aria-label="${escapeHtml(title)} (${year || "?"})">
         <div class="qualite-reject-poster">
           ${poster
-            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
             : `<div class="qualite-reject-poster-empty" aria-hidden="true">🎬</div>`}
-          ${score != null ? `<span class="qualite-reject-score" title="Score V2">${score}</span>` : ""}
+          ${qualityUnavailable
+            ? `<span class="qualite-reject-score qualite-reject-unavailable" title="Probe indisponible : qualite non mesuree">Indispo</span>`
+            : (score != null ? `<span class="qualite-reject-score" title="Score V2">${score}</span>` : "")}
         </div>
         <div class="qualite-reject-meta">
           <span class="qualite-reject-title">${escapeHtml(title)}</span>
           <span class="qualite-reject-year">${year || "—"}</span>
-          ${warningsCount > 0 ? `<span class="qualite-reject-warnings">⚠ ${warningsCount}</span>` : ""}
+          ${qualityUnavailable ? `<span class="qualite-reject-warnings" title="Qualite non verifiee">⚠ Qualite indisponible</span>` : (warningsCount > 0 ? `<span class="qualite-reject-warnings">⚠ ${warningsCount}</span>` : "")}
         </div>
       </button>
     `;
@@ -310,7 +333,12 @@ function _renderSubsSection(stats) {
   const subsInsight = insights.find((i) => String(i.type || i.code || "").includes("subs_missing"));
   const count = subsInsight && subsInsight.count != null ? Number(subsInsight.count) : null;
   const lsugs = stats && stats.librarian && stats.librarian.suggestions;
-  const subsLs = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || "").includes("subs_missing")) : null;
+  // R8-050 (F5) : la source réelle est librarian.suggestions id="missing_subtitles"
+  // (le producteur d'insights n'émet PAS subs_missing). AVANT : .includes("subs_missing")
+  // ne matchait jamais l'id "missing_subtitles" -> section « Subs FR manquants » toujours « — ».
+  const subsLs = Array.isArray(lsugs)
+    ? lsugs.find((s) => { const id = String(s.id || ""); return id.includes("subtitle") || id.includes("subs_missing"); })
+    : null;
   const finalCount = count != null ? count : (subsLs && subsLs.count != null ? Number(subsLs.count) : null);
   return `
     <section class="qualite-section qualite-subs" aria-labelledby="qualite-subs-title">
@@ -375,7 +403,7 @@ function _renderDecadesSection(stats) {
  */
 function _renderEvolutionSection() {
   const hist = _state.history;
-  const period = (hist && hist.period_days) || _state.filters.period_days || 30;
+  const period = _normalizePeriodDays(hist && hist.period_days != null ? hist.period_days : _state.filters.period_days);
   const points = Array.isArray(hist && hist.points) ? hist.points : [];
   const validPoints = points.filter((p) => p && p.avg_score != null);
 
@@ -591,7 +619,15 @@ function _buildInspectorSections() {
       contextual = {
         title: `Tier ${escapeHtml(tierLabel)}`,
         html: films.length > 0
-          ? `<ul class="qualite-inspector-list">${films.slice(0, 10).map((f) => `<li><strong>${escapeHtml(String(f.title || "?"))}</strong>${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""} <span class="qualite-inspector-score">${f.score_v2 != null ? Math.round(Number(f.score_v2)) : "—"}/100</span></li>`).join("")}</ul>`
+          ? `<ul class="qualite-inspector-list">${films.slice(0, 10).map((f) => {
+              // Iter13 etape 4 : afficher "Indisponible" si probe FAILED.
+              const unavailable = Boolean(f.quality_unavailable)
+                || String(f.probe_quality || "").toUpperCase() === "FAILED";
+              const scoreLabel = unavailable
+                ? `<span class="qualite-inspector-score qualite-reject-unavailable" title="Probe indisponible">Indisponible</span>`
+                : `<span class="qualite-inspector-score">${f.score_v2 != null ? Math.round(Number(f.score_v2)) : "—"}/100</span>`;
+              return `<li><strong>${escapeHtml(String(f.title || "?"))}</strong>${f.year ? ` <span class="qualite-saga-year">(${Number(f.year)})</span>` : ""} ${scoreLabel}</li>`;
+            }).join("")}</ul>`
           : `<p class="qualite-empty-msg">Aucun film dans ce tier.</p>`,
       };
       break;
@@ -607,8 +643,12 @@ function _buildInspectorSections() {
           html: `
             <dl class="qualite-inspector-dl">
               <div><dt>Année</dt><dd>${film.year || "—"}</dd></div>
-              <div><dt>Score V2</dt><dd>${film.score_v2 != null ? Math.round(Number(film.score_v2)) + "/100" : "—"}</dd></div>
-              <div><dt>Tier</dt><dd>${escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")}</dd></div>
+              <div><dt>Score V2</dt><dd>${(Boolean(film.quality_unavailable) || String(film.probe_quality || "").toUpperCase() === "FAILED")
+                ? `<span class="qualite-reject-unavailable" title="Probe indisponible apres retry+breaker">Indisponible</span>`
+                : (film.score_v2 != null ? Math.round(Number(film.score_v2)) + "/100" : "—")}</dd></div>
+              <div><dt>Tier</dt><dd>${(Boolean(film.quality_unavailable) || String(film.probe_quality || "").toUpperCase() === "FAILED")
+                ? `<span title="Qualite non verifiee : tier base sur le nom seul">${escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")} <em>(estime)</em></span>`
+                : escapeHtml(_TIER_LABELS[String(film.tier || "").toLowerCase()] || film.tier || "—")}</dd></div>
             </dl>
             <p class="qualite-inspector-warnings-title">Warnings :</p>
             ${warningsList}
@@ -745,9 +785,18 @@ async function _loadByDecade(signal, filters) {
   }
 }
 
+// AUDIT 2026-06-11 (R4-P8) : `x || 30` avalait period_days=0 ('Tout', supporté
+// backend 0=all par quality/get_history) -> la période 'Tout' renvoyait
+// toujours 30 jours. 0 est une valeur VALIDE ; seuls null/undefined/NaN/<0
+// retombent sur 30.
+function _normalizePeriodDays(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+}
+
 async function _loadHistory(signal, periodDays) {
   try {
-    const res = await apiPost("quality/get_history", { period_days: Number(periodDays) || 30 }, { signal });
+    const res = await apiPost("quality/get_history", { period_days: _normalizePeriodDays(periodDays) }, { signal });
     const data = _resolveData(res);
     if (data && data.ok !== false) {
       _state.history = data;
@@ -810,7 +859,10 @@ function _bindEvents(container) {
     row.style.cursor = "pointer";
   });
 
-  // Clic sur card Reject -> inspecteur (mode C) ; navigation /film/:id si dispo
+  // Clic sur card Reject -> inspecteur (mode C) avec warnings/score V2
+  // Fix audit 2026-06-07 : la navigation immediate vers /film/:id demontait la
+  // vue Qualite et rendait le contexte inspecteur 'reject_card' invisible.
+  // L'inspecteur expose desormais un bouton 'Ouvrir la fiche' pour naviguer.
   container.querySelectorAll("[data-qualite-reject-card]").forEach((card) => {
     card.addEventListener("click", () => {
       const idx = Number(card.dataset.qualiteRejectIndex);
@@ -819,10 +871,6 @@ function _bindEvents(container) {
       _state.inspectorSection = "reject_card";
       _state.inspectorPayload = { film };
       _updateInspector();
-      // Ouverture inline via /film/:id (sinon inspecteur seul affiche les details)
-      if (film.row_id) {
-        navigateTo(`/film/${encodeURIComponent(film.row_id)}`);
-      }
     });
   });
 
@@ -902,7 +950,7 @@ function _openFiltersDrawer(container) {
       try {
         await Promise.all([
           _loadByDecade(signal, newFilters),
-          _loadHistory(signal, newFilters.period_days || 30),
+          _loadHistory(signal, _normalizePeriodDays(newFilters.period_days)),
           _loadRejectFilms(signal),
           _loadSagas(signal),
         ]);
@@ -924,7 +972,7 @@ function _confirmRecompute() {
     consequence: `Cette opération va re-scorer ${total > 0 ? total + " " : ""}films classés à partir du profil de qualité actuel. ${eta}. Aucune modification sur les fichiers du disque. Réversible.`,
     confirmLabel: "Lancer le re-calcul",
     cancelLabel: "Annuler",
-    countdownSeconds: 0,
+    countdownSeconds: total > 50 ? 3 : 0,
     onConfirm: async () => {
       await _startRecompute();
     },
@@ -989,7 +1037,16 @@ function _pollRecompute(jobId, total) {
     clearInterval(_state.recomputePollTimer);
     _state.recomputePollTimer = null;
     if (status === "done") {
-      showToast({ type: "success", text: `✓ Scores re-calculés (${progress}/${totalJob})`, duration: 4500 });
+      // AUDIT 2026-06-14 (R7-11) : tenir compte des echecs metier (data.errors)
+      // -> ne plus afficher un toast vert "N/N" quand des films ont echoue.
+      const errs = Number(data.errors || 0);
+      if (errs >= totalJob && totalJob > 0) {
+        showToast({ type: "error", text: `Re-calcul : ${errs}/${totalJob} en échec (vérifiez ffprobe/médias).`, duration: 6000 });
+      } else if (errs > 0) {
+        showToast({ type: "warn", text: `Scores re-calculés : ${totalJob - errs}/${totalJob} OK, ${errs} échec(s).`, duration: 6000 });
+      } else {
+        showToast({ type: "success", text: `✓ Scores re-calculés (${progress}/${totalJob})`, duration: 4500 });
+      }
     } else if (status === "failed") {
       showToast({ type: "error", text: `Re-calcul échoué : ${data.error || "erreur inconnue"}` });
     } else if (status === "cancelled") {
@@ -1043,7 +1100,7 @@ export async function initQualite(container) {
       _loadRejectFilms(signal),
       _loadSagas(signal),
       _loadByDecade(signal, _state.filters),
-      _loadHistory(signal, _state.filters.period_days || 30),
+      _loadHistory(signal, _normalizePeriodDays(_state.filters.period_days)),
     ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;

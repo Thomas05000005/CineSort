@@ -9,10 +9,32 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from cinesort.domain.core import windows_safe
+from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
+
+# --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
+# Symetrique a `tmdb_tag` produit par build_naming_context (ligne ~191).
+# Supporte les variantes Plex / Jellyfin / Radarr / TRaSH :
+#   {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345}, {tmdb_12345}
+#   [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567]
+# La regex tolere espaces internes et casse melangee.
+_PROVIDER_TMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*tmdb(?:id)?\s*[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    re.IGNORECASE,
+)
+_PROVIDER_IMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*imdb(?:id)?\s*[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    re.IGNORECASE,
+)
+
+# VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
+# domain<->domain core -> duplicate_support -> (lazy) naming -> core.
+# `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
+# compat avec les callers externes (apply_core, plan_support_*, etc.).
+from cinesort.domain.path_utils import windows_safe
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +73,10 @@ _KNOWN_VARS = frozenset(
         # Edition (Director's Cut, Extended, IMAX, etc.)
         "edition",
         "edition-tag",
+        # ITER7 etape 3 : variable opt-in alimentee par cfg.separator (UI).
+        # Permet aux templates custom d'utiliser le selecteur "Separateur" sans
+        # casser les templates existants qui n'y font pas reference.
+        "sep",
     }
 )
 
@@ -68,8 +94,17 @@ _CLEANUP_PATTERNS = [
     (re.compile(r"\s{2,}"), " "),  # espaces multiples
 ]
 
-# Seuil de warning pour la longueur du path
+# Seuil de warning pour la longueur du path (preventif, ~20 chars de marge avant MAX_PATH)
 _PATH_LENGTH_WARNING = 240
+
+# VQ-3 : kill-switch MAX_PATH Windows. La limite historique Windows est 260
+# chars (avec terminateur null). Au-dela on bascule en OSError obscur "Le
+# chemin specifie est introuvable" ou "Nom de fichier trop long" selon le cas.
+# Le kill-switch refuse de tenter le rename/move quand la cible depasserait
+# ce seuil, en remontant un SKIP propre plutot qu'une exception cryptique.
+# Le seuil exact 260 garde 0 char de marge ; on accepte 259 chars max pour
+# inclure le terminateur null cote API Win32.
+_PATH_LENGTH_KILL_SWITCH = 259
 
 
 # --- Presets --------------------------------------------------------------
@@ -141,7 +176,80 @@ PREVIEW_MOCK_CONTEXT: Dict[str, str] = {
     "ep_title": "",
     "edition": "",
     "edition-tag": "",
+    "sep": " ",
 }
+
+
+# --- Provider tags parsing (B02-TAGS-BRACKETS) ----------------------------
+
+
+@dataclass(frozen=True)
+class ProviderTags:
+    """Tags providers extraits d'un nom de dossier/fichier.
+
+    Tous les champs sont optionnels : `ProviderTags()` est l'absence de tag.
+    `tmdb_id` est un int positif si trouve, `imdb_id` une chaine "ttXXXXXXX"
+    lowercase.
+    """
+
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+    @property
+    def has_any(self) -> bool:
+        """True si au moins un tag a ete extrait."""
+        return self.tmdb_id is not None or self.imdb_id is not None
+
+
+def extract_provider_tags(name: str) -> ProviderTags:
+    """Extrait `{tmdb-XXX}` / `[imdbid-ttXXX]` depuis un nom de dossier/fichier.
+
+    Symetrique a la sortie de `build_naming_context` (cle `tmdb_tag`).
+    Supporte les variantes Plex / Jellyfin / Radarr / TRaSH.
+
+    Args:
+        name: Nom de dossier ou fichier (sans extension).
+
+    Returns:
+        ProviderTags(tmdb_id=..., imdb_id=...) ou ProviderTags() si rien trouve.
+    """
+    if not name:
+        return ProviderTags()
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    m = _PROVIDER_TMDB_TAG_RE.search(name)
+    if m:
+        try:
+            value = int(m.group(1))
+            if value > 0:
+                tmdb_id = value
+        except (ValueError, TypeError):
+            tmdb_id = None
+    m = _PROVIDER_IMDB_TAG_RE.search(name)
+    if m:
+        imdb_id = m.group(1).lower()
+    return ProviderTags(tmdb_id=tmdb_id, imdb_id=imdb_id)
+
+
+def strip_provider_tags(name: str) -> str:
+    """Retire les tags providers d'un nom pour le pipeline de nettoyage.
+
+    A appeler AVANT `clean_title_guess` / `parse_scene_title` afin d'eviter
+    que les chiffres TMDb (ex `27205`) ne polluent le titre extrait ou ne
+    soient confondus avec une annee.
+
+    Args:
+        name: Nom brut (dossier ou fichier).
+
+    Returns:
+        Nom debarrasse des `{tmdb-...}` / `[imdbid-...]`, espaces normalises.
+    """
+    if not name:
+        return name
+    cleaned = _PROVIDER_TMDB_TAG_RE.sub(" ", name)
+    cleaned = _PROVIDER_IMDB_TAG_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 # --- Construction du contexte --------------------------------------------
@@ -161,6 +269,7 @@ def build_naming_context(
     tv_episode: int = 0,
     tv_episode_title: str = "",
     edition: str = "",
+    separator: Optional[str] = None,
 ) -> Dict[str, str]:
     """Construit le dictionnaire de variables pour le template de renommage."""
     ctx: Dict[str, str] = {}
@@ -210,6 +319,17 @@ def build_naming_context(
     ed = str(edition or "").strip()
     ctx["edition"] = ed
     ctx["edition-tag"] = f"{{edition-{ed}}}" if ed else ""
+
+    # ITER7 etape 3 : variable opt-in {sep} approvisionnee depuis cfg.separator.
+    # Coerce-and-default identique a Config.normalized()/_save_section_naming.
+    # Templates existants ("{title} ({year})") ne referencent pas {sep} -> rendu
+    # strictement inchange (STOP_FORK CUSTOM TEMPLATE preserve, voir
+    # docs/internal/BILAN_ITER7_2026-06-08.md section 1.d). Cle absente ou
+    # invalide -> defaut " " (espace) aligne sur le sentinel save UI.
+    sep_value = str(separator) if separator is not None else " "
+    if sep_value not in {".", " ", "_", "-"}:
+        sep_value = " "
+    ctx["sep"] = sep_value
 
     return ctx
 
@@ -302,21 +422,58 @@ def check_path_length(root: str, folder_name: str) -> Optional[str]:
     return None
 
 
+def check_path_length_killswitch(target_path: str) -> Optional[str]:
+    """VQ-3 : kill-switch MAX_PATH Windows.
+
+    Retourne un message d'erreur (a logger + remonter via res.error_messages)
+    si `target_path` depasse la limite historique Windows (MAX_PATH = 260).
+    Retourne None si le path est exploitable.
+
+    Backward compat : tout path <= 259 chars renvoie None (comportement
+    identique a l'absence de check). Seuls les paths anormalement longs
+    sont rejetes.
+
+    Args:
+        target_path: Chemin complet cible (str ou repr de Path).
+
+    Returns:
+        Message d'erreur explicite si > 259 chars, None sinon.
+    """
+    path_str = str(target_path)
+    length = len(path_str)
+    if length > _PATH_LENGTH_KILL_SWITCH:
+        preview = path_str[:80] + "..." if length > 80 else path_str
+        return (
+            f"PATH_TOO_LONG : chemin cible {length} chars (max Windows "
+            f"MAX_PATH = {_PATH_LENGTH_KILL_SWITCH + 1}), skip pour eviter "
+            f"OSError obscur : {preview}"
+        )
+    return None
+
+
 # --- Helpers prives -------------------------------------------------------
 
 
 def _resolution_label(video: Dict[str, Any]) -> str:
-    """Determine le label de resolution a partir des dimensions video."""
+    """Determine le label de resolution a partir des dimensions video.
+
+    Hotfix2 2026-06-02 (SCAN-1 propagation) : utilise width+height (et non
+    plus height seule) pour aligner sur quality_score._resolution_label.
+    L'ancienne logique classait les films cinema 1920x800 (ratio 2.35:1) en
+    720p alors que ce sont des 1080p natifs. Pattern coherent : width est le
+    critere principal (1920 = 1080p toujours, peu importe l aspect ratio).
+    """
     h = video.get("height")
     w = video.get("width")
     if not h and not w:
         return ""
-    height = int(h or 0)
-    if height >= 2160:
+    width = max(0, int(w or 0))
+    height = max(0, int(h or 0))
+    if width >= 3800 or height >= 2100:
         return "2160p"
-    if height >= 1080:
+    if width >= 1900 or height >= 1000:
         return "1080p"
-    if height >= 720:
+    if width >= 1280 or height >= 680:
         return "720p"
     if height >= 480:
         return "480p"
@@ -362,17 +519,11 @@ def _hdr_label(video: Dict[str, Any]) -> str:
 
 
 def _channels_label(channels: Any) -> str:
-    """Formate le nombre de canaux audio en label lisible."""
-    ch = int(channels or 0)
-    if ch <= 0:
-        return ""
-    if ch == 2:
-        return "2.0"
-    if ch == 6:
-        return "5.1"
-    if ch == 8:
-        return "7.1"
-    return f"{ch}ch"
+    """Formate le nombre de canaux audio en label lisible.
+
+    VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `""`).
+    """
+    return _format_audio_channels(channels, invalid="")
 
 
 # --- Conformance check ----------------------------------------------------
@@ -401,5 +552,9 @@ def folder_matches_template(
 
 
 def _norm_compare(s: str) -> str:
-    """Normalise une chaine pour la comparaison de conformance."""
-    return re.sub(r"\s+", " ", s.strip().lower())
+    """Normalise une chaine pour la comparaison de conformance.
+
+    NFC-normalise puis casefold pour gerer correctement les equivalences
+    Windows/SMB (case-only, NFC vs NFD, eszett allemand, ligatures).
+    """
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", s or "").strip().casefold())

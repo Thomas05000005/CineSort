@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# VQ-1 : import top-level desormais sur. La chaine
+# duplicate_support -> naming -> path_utils est un DAG (path_utils est une
+# feuille), plus de cycle vers core.
+from cinesort.domain.naming import folder_matches_template as _folder_matches_template
 
 _MOVIE_DIR_RE = re.compile(r"^\s*(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)\s*$")
 
@@ -61,12 +67,27 @@ def single_folder_is_conform(
 ) -> bool:
     # Check 1 : template actif (si fourni)
     if naming_template:
-        # Lazy intentionnel : cycle reel detecte. duplicate_support -> naming
-        # -> domain.core -> duplicate_support (cf core.py:1352 _find_video_case_insensitive).
-        from cinesort.domain.naming import folder_matches_template
-
-        if folder_matches_template(folder_name, naming_template, title, year):
+        # VQ-1 : ancien lazy import remplace par alias top-level
+        # `_folder_matches_template` (cycle casse via path_utils).
+        if _folder_matches_template(folder_name, naming_template, title, year):
             return True
+
+    # Check 1bis : defense en profondeur — equivalence FS Windows/SMB.
+    # os.listdir peut retourner NFD (macOS/SMB) alors que windows_safe applique
+    # NFC cote template. La comparaison via _norm_compare (lower+collapse spaces)
+    # ne couvre pas NFC vs NFD car les bytes different meme apres lower().
+    # Cette verification capture aussi les cas ou Check 1 echoue parce que le
+    # template est vide ou ou movie_dir_title_year ne match pas mais le folder
+    # est en fait equivalent au format "Title (Year)" attendu.
+    if 1900 <= int(year or 0) <= 2100:
+        expected_folder = windows_safe(f"{title or ''} ({int(year)})")
+        try:
+            norm_folder = unicodedata.normalize("NFC", folder_name or "").casefold()
+            norm_expected = unicodedata.normalize("NFC", expected_folder).casefold()
+            if norm_folder == norm_expected:
+                return True
+        except (TypeError, ValueError):
+            pass
 
     # Check 2 : fallback format historique "Title (Year)"
     expected_title = windows_safe(title or "")
@@ -251,13 +272,27 @@ def find_duplicate_targets(
         if not bool(dec.get("ok", False)):
             continue
 
+        # AUDIT 2026-06-14 (R6-A) : un episode TV n'est PAS un doublon de film.
+        # Plusieurs episodes d'une serie partagent le meme titre+annee mais sont
+        # des fichiers distincts -> l'ancienne branche "collection" les groupait
+        # a tort (ex: dossier "A Knight ..." = 6 tv_episode). Choix utilisateur
+        # "1 liste par identite" : on exclut les episodes de la detection.
+        if getattr(row, "kind", "") == "tv_episode":
+            continue
+
         title = str(dec.get("title") or row.proposed_title).strip() or row.proposed_title
         try:
             year = int(dec.get("year") or row.proposed_year)
         except (ValueError, TypeError):
             year = int(row.proposed_year or 0)
-        if not (1900 <= year <= 2100):
-            continue
+        # Fix bug TV series / BONUS Star Wars : ne plus skip silencieusement les
+        # rows avec year invalide. On flag 'year_missing' et on continue avec
+        # un movie_key construit sur le title seul (year=0 -> norme via movie_key).
+        year_invalid = not (1900 <= year <= 2100)
+        if year_invalid:
+            if hasattr(row, "warning_flags") and "year_missing" not in row.warning_flags:
+                row.warning_flags.append("year_missing")
+            year = 0
 
         total_checked += 1
         row_edition = getattr(row, "edition", None)
@@ -271,6 +306,8 @@ def find_duplicate_targets(
                 "year": str(year),
                 "target": str(target),
                 "source_folder": str(row.folder),
+                # R6-A : racine d'origine (multi-root) pour etiqueter la portee.
+                "source_root": str(getattr(row, "source_root", None) or ""),
             }
         )
 
@@ -340,8 +377,34 @@ def find_duplicate_targets(
             if conflict or ((not matched_target) and existing_norm not in target_norms):
                 existing_elsewhere.append(existing_path)
 
-        if (not has_plan_dupe) and (not existing_elsewhere):
+        # AUDIT 2026-06-14 (R6-A) : "1 liste par identite". On emet un groupe des
+        # qu'au moins 2 films partagent la meme identite (titre+annee), MEME si
+        # leurs dossiers de destination different (doublons cross-racine que
+        # l'ancienne condition has_plan_dupe ratait -> "65 detectes / 5
+        # affiches"). La collision de destination reste un signal interne
+        # (plan_conflict) pour la securite d'apply.
+        identity_dupe = len(items) >= 2
+        if (not identity_dupe) and (not existing_elsewhere):
             continue
+
+        # Portee du doublon (badge informatif, la liste reste unique) :
+        #  - cross_root : copies dans des racines differentes (source_root) ;
+        #  - same_root  : meme racine mais dossiers parents differents ;
+        #  - same_folder: meme dossier parent.
+        roots = {str(it.get("source_root") or "").strip() for it in items}
+        roots.discard("")
+        parents = set()
+        for it in items:
+            try:
+                parents.add(norm_win_path(Path(it["source_folder"]).parent))
+            except (ValueError, TypeError, OSError):
+                pass
+        if len(roots) > 1:
+            scope = "cross_root"
+        elif len(parents) > 1:
+            scope = "same_root"
+        else:
+            scope = "same_folder"
 
         groups.append(
             {
@@ -350,6 +413,7 @@ def find_duplicate_targets(
                 "rows": items,
                 "existing_paths": existing_elsewhere[:8],
                 "plan_conflict": bool(has_plan_dupe),
+                "scope": scope,
             }
         )
         if len(groups) >= max_groups:

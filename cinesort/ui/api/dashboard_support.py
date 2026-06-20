@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections import Counter
 import csv
 import io
 import json
 import logging
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,10 +15,12 @@ from cinesort.app.export_support import export_html_report
 from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
+from cinesort.domain.probe_models import probe_quality_is_failed, probe_quality_is_partial_or_failed
 from cinesort.infra.db import SQLiteStore
 from cinesort.ui.api import notifications_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api.run_data_support import compute_total_fallback, count_plan_rows
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -65,7 +67,21 @@ def _runs_history_payload(
         duration_s = 0
         if started_ts > 0 and ended_ts > 0 and ended_ts >= started_ts:
             duration_s = int(round(ended_ts - started_ts))
-        total_rows = int(stats_obj.get("planned_rows") or run_row.get("total") or 0)
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : source unique de verite =
+        # count_plan_rows(plan.jsonl). Fallback sur stats.planned_rows /
+        # run_row.total uniquement si plan.jsonl absent (run en cours, run
+        # FAILED avant ecriture du plan).
+        # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Fallback delegue a
+        # compute_total_fallback() pour aligner avec history/run_flow.
+        run_paths_for_count = api._run_paths_for(
+            normalize_user_path(run_row.get("state_dir"), state_dir),
+            run_id,
+            ensure_exists=False,
+        )
+        total_rows = count_plan_rows(
+            run_paths_for_count,
+            fallback=compute_total_fallback(run_row, stats_obj),
+        )
         applied_rows = int(stats_obj.get("applied_count") or 0)
         qstats = quality_counts.get(run_id, {})
         history.append(
@@ -78,6 +94,11 @@ def _runs_history_payload(
                         ensure_exists=False,
                     ).run_dir
                 ),
+                # AUDIT 2026-06-10 : exposer le `status` (DB) — sans lui le CTA
+                # "Reprendre la validation" (accueil showResume, statut
+                # AWAITING_VALIDATION) et les filtres Statut/Undone de l'historique
+                # ne matchaient jamais. Source : runs.status (list_runs SELECT *).
+                "status": str(run_row.get("status") or "PENDING"),
                 "started_ts": started_ts,
                 "ended_ts": ended_ts,
                 "duration_s": duration_s,
@@ -88,6 +109,52 @@ def _runs_history_payload(
             }
         )
     return history
+
+
+def _active_run_id(api: Any) -> Optional[str]:
+    """run_id du run actuellement en cours (running et pas done), ou None.
+
+    AUDIT 2026-06-10 : get_dashboard ne renvoyait pas `active_run_id` (il
+    n'existait que sur GET /api/health). L'accueil (_extractScanProgress) le
+    lisait dans le payload get_dashboard -> la carte "Scan en cours" ne
+    s'affichait jamais. Meme logique que rest_server._find_active_run_id.
+    """
+    runs = getattr(api, "_runs", None)
+    runs_lock = getattr(api, "_runs_lock", None)
+    if not runs or not runs_lock:
+        return None
+    try:
+        with runs_lock:
+            for run_id, rs in runs.items():
+                if getattr(rs, "running", False) and not getattr(rs, "done", False):
+                    return str(run_id)
+    except (RuntimeError, AttributeError):
+        return None
+    return None
+
+
+def _active_run_info(api: Any) -> Optional[Dict[str, Any]]:
+    """AUDIT 2026-06-14 (R7-7) : bloc de progression du scan en cours, lu par
+    accueil.js _extractScanProgress (total_rows/current_index/phase/status).
+    get_dashboard n'exposait qu'active_run_id -> barre figee a "0/0" sans ETA.
+    None si aucun scan actif."""
+    try:
+        rid = _active_run_id(api)
+        if not rid:
+            return None
+        rs = api._get_run(rid)
+        if rs is None:
+            return None
+        running = bool(getattr(rs, "running", False))
+        return {
+            "run_id": str(rid),
+            "status": "running" if running else "idle",
+            "phase": "running" if running else "idle",
+            "total_rows": int(getattr(rs, "total", 0) or 0),
+            "current_index": int(getattr(rs, "idx", 0) or 0),
+        }
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
 
 
 def _empty_dashboard_payload(mode: str, runs_history: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -205,10 +272,102 @@ def _build_dashboard_section(
     scores = [int(item.get("score") or 0) for item in reports]
     scored_movies = len(scores)
     score_avg = round(sum(scores) / scored_movies, 1) if scored_movies else 0.0
+    # AUDIT 2026-06-14 (R6-I) : confiance moyenne (identification) = moyenne des
+    # PlanRow.confidence (0..100). Avant, l'accueil lisait latestRun.
+    # avg_confidence_pct qui n'existe pas dans runs_history -> "Confiance
+    # moyenne : —". On la calcule ici et on l'expose dans kpis.
+    confidences = [int(getattr(r, "confidence", 0) or 0) for r in rows]
+    confidence_avg = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
+    # AUDIT 2026-06-14 (R6-I) : Etape 2 "Verification" affichait toujours "0 cas"
+    # car le backend n'exposait ni review_queue_count ni conflicts_count. On les
+    # calcule depuis les rows : "cas a verifier" = film avec une alerte OU une
+    # confiance faible ; "conflits" = film avec un flag d'incoherence de source.
+    _CONFLICT_FLAGS = frozenset({
+        "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
+        "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
+        "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
+    })
+    review_queue_count = 0
+    conflicts_count = 0
+    for _r in rows:
+        _flags = set(getattr(_r, "warning_flags", []) or [])
+        _label = str(getattr(_r, "confidence_label", "") or "").lower()
+        if _flags or _label == "low":
+            review_queue_count += 1
+        if _flags & _CONFLICT_FLAGS:
+            conflicts_count += 1
     premium_count = sum(1 for score in scores if score >= 85)
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
     stats_obj = _parse_stats_json(run_row.get("stats_json"))
-    total_movies = int(stats_obj.get("planned_rows") or len(rows) or 0)
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-1. Aligner sur la source
+    # unique de verite count_plan_rows(plan.jsonl) au lieu de len(rows). Le bug
+    # subtil : si rows etait charge depuis un cache memoire RunState desynchro
+    # apres une re-ecriture du plan, len(rows) divergait de count_plan_rows()
+    # utilise par get_status / get_history_stats / runs_history. On standardise
+    # toutes les surfaces compteur sur count_plan_rows. Fallback senior : on
+    # garde l'ancienne priorite (stats.planned_rows puis 0) pour les cas ou le
+    # plan.jsonl est inaccessible, mais on log un debug pour aider diagnostic.
+    total_movies = count_plan_rows(
+        run_paths,
+        fallback=int(stats_obj.get("planned_rows") or 0),
+    )
+
+    # VAL-1 : compteurs validated/rejected calcules en live sur les decisions
+    # persistees pour que les KPI cards refletent la realite immediatement
+    # apres bulk-approve. Recalcul a chaque appel (cf get_dashboard pour le
+    # contournement du cache _load_dashboard_cache).
+    # R6-06 : compteur tri-etat explicite. Les decisions `deferred` sont
+    # persistees avec ok=false (via to_legacy_ok_bool) — sans separation,
+    # elles enflaient rejected_count et la carte "En attente" restait a 0.
+    # On prefere le champ explicite `decision` (accepted/rejected/deferred),
+    # fallback sur `ok` pour les payloads legacy sans `decision`.
+    try:
+        decisions = api._load_decisions_from_validation(run_paths) or {}
+    except (OSError, TypeError, ValueError, AttributeError):
+        decisions = {}
+    accepted_count = 0
+    rejected_count = 0
+    deferred_count = 0
+    for d in decisions.values():
+        if not isinstance(d, dict):
+            continue
+        decision_val = d.get("decision")
+        if decision_val == "accepted":
+            accepted_count += 1
+        elif decision_val == "rejected":
+            rejected_count += 1
+        elif decision_val == "deferred":
+            deferred_count += 1
+        elif decision_val is None:
+            # Fallback legacy : pas de champ `decision`, on retombe sur `ok`.
+            if d.get("ok") is True:
+                accepted_count += 1
+            elif d.get("ok") is False:
+                rejected_count += 1
+    # Backward compat : validated_count = accepted_count (ancien alias).
+    validated_count = accepted_count
+
+    # SCAN-1 : diagnostic scan expose depuis stats_obj pour la carte
+    # "Diagnostic scan : N fichiers exclus par categorie". Sans cela
+    # l'utilisateur ne peut pas savoir POURQUOI il manque des films.
+    scan_diagnostic = {
+        "films_rejected_ext": int(stats_obj.get("films_rejected_ext") or 0),
+        "films_rejected_size": int(stats_obj.get("films_rejected_size") or 0),
+        "films_rejected_name": int(stats_obj.get("films_rejected_name") or 0),
+        "folders_rejected_underscore": int(stats_obj.get("folders_rejected_underscore") or 0),
+        "folders_rejected_depth": int(stats_obj.get("folders_rejected_depth") or 0),
+        "folders_rejected_scandir_error": int(
+            stats_obj.get("folders_rejected_scandir_error") or 0
+        ),
+    }
+    scan_diagnostic["total_excluded"] = int(
+        scan_diagnostic["films_rejected_ext"]
+        + scan_diagnostic["films_rejected_size"]
+        + scan_diagnostic["films_rejected_name"]
+        + scan_diagnostic["folders_rejected_underscore"]
+        + scan_diagnostic["folders_rejected_depth"]
+        + scan_diagnostic["folders_rejected_scandir_error"]
+    )
 
     score_bins = [0 for _ in range(10)]
     resolutions = {"2160p": 0, "1080p": 0, "720p": 0, "other": 0}
@@ -242,7 +401,8 @@ def _build_dashboard_section(
         detected = metrics.get("detected") if isinstance(metrics.get("detected"), dict) else {}
         thresholds = metrics.get("thresholds_used") if isinstance(metrics.get("thresholds_used"), dict) else {}
         probe_quality = str(metrics.get("probe_quality") or "")
-        if probe_quality.upper() in {"PARTIAL", "FAILED"}:
+        # BUG-018 (hotfix1) : helper centralise (case-insensitive) au lieu de .upper() inline.
+        if probe_quality_is_partial_or_failed(probe_quality):
             probe_partial_count += 1
 
         row_id = str(report.get("row_id") or "")
@@ -328,7 +488,8 @@ def _build_dashboard_section(
                 action="Verifier pistes audio et langues dans le fichier.",
             )
 
-        if probe_quality.upper() == "FAILED":
+        # BUG-018 (hotfix1) : helper centralise vs .upper() inline.
+        if probe_quality_is_failed(probe_quality):
             add_anomaly(
                 "WARN",
                 "PROBE_FAILED",
@@ -377,13 +538,36 @@ def _build_dashboard_section(
     ]
     audio_top = [{"label": label, "count": int(count)} for label, count in audio_counter.most_common(6)]
 
+    # R8-066 (F5) : nombre de groupes de doublons DÉCIDÉS (même source que l'onglet
+    # Historique : list_duplicate_decisions). AVANT : `duplicates_groups` absent des
+    # kpis live -> stat « Groupes de doublons » toujours 0 + fallback d'estimation
+    # des moves faussé (traitement.js:245/641/1444). NB : décidés (cohérent avec
+    # l'historique), pas l'ensemble détecté (la détection n'est pas dans ce chemin).
+    duplicates_groups = 0
+    try:
+        duplicates_groups = len(store.apply.list_duplicate_decisions(run_id=run_id) or [])
+    except (AttributeError, OSError, KeyError, TypeError, ValueError):
+        duplicates_groups = 0
+
     return {
         "kpis": {
             "score_avg": score_avg,
+            "confidence_avg": confidence_avg,  # R6-I : confiance moyenne d'identification
+            "review_queue_count": int(review_queue_count),  # R6-I : Etape 2 "cas a verifier"
+            "conflicts_count": int(conflicts_count),  # R6-I : Etape 2 "conflits"
             "score_premium_pct": score_premium_pct,
             "total_movies": total_movies,
             "scored_movies": scored_movies,
             "probe_partial_count": probe_partial_count,
+            # VAL-1 : exposition validated/rejected pour les KPI cards
+            # Traitement (Valides / Rejetes / En attente).
+            # R6-06 : exposition explicite tri-etat (accepted/rejected/
+            # deferred). validated_count == accepted_count (backward compat).
+            "validated_count": int(validated_count),
+            "rejected_count": int(rejected_count),
+            "accepted_count": int(accepted_count),
+            "deferred_count": int(deferred_count),
+            "duplicates_groups": int(duplicates_groups),  # R8-066 (F5)
         },
         "distributions": {
             "score_bins": bins_payload,
@@ -397,6 +581,8 @@ def _build_dashboard_section(
             "sdr_4k": sdr_4k,
             "vo_missing": vo_missing,
         },
+        # SCAN-1 : carte "Diagnostic scan" avec breakdown des exclusions.
+        "scan_diagnostic": scan_diagnostic,
         "message": "Dashboard genere avec succes." if scored_movies else "Run non score ou partiellement score.",
         "rows": _build_library_rows(rows, reports),
     }
@@ -512,7 +698,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         )
 
         if not run_row:
-            return _empty_dashboard_payload(mode, runs_history)
+            return {**_empty_dashboard_payload(mode, runs_history), "active_run_id": _active_run_id(api)}
 
         resolved_run_id = str(run_row.get("run_id") or "")
         run_paths = api._run_paths_for(
@@ -524,8 +710,47 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         # (hors cache dashboard) — countdown qui s'ecoule entre deux GET.
         pending_undo = _build_pending_undo_payload(store, resolved_run_id)
 
+        # VAL-1 : recalcul live de validated_count / rejected_count pour que
+        # les KPI cards refletent immediatement bulk-approve / annulation sans
+        # attendre l'invalidation du cache dashboard.
+        # R6-06 : meme logique tri-etat que _build_dashboard_section.
+        try:
+            _decisions_live = api._load_decisions_from_validation(run_paths) or {}
+        except (OSError, TypeError, ValueError, AttributeError):
+            _decisions_live = {}
+        accepted_live = 0
+        rejected_live = 0
+        deferred_live = 0
+        for d in _decisions_live.values():
+            if not isinstance(d, dict):
+                continue
+            decision_val = d.get("decision")
+            if decision_val == "accepted":
+                accepted_live += 1
+            elif decision_val == "rejected":
+                rejected_live += 1
+            elif decision_val == "deferred":
+                deferred_live += 1
+            elif decision_val is None:
+                if d.get("ok") is True:
+                    accepted_live += 1
+                elif d.get("ok") is False:
+                    rejected_live += 1
+        validated_live = accepted_live
+
         cached_payload = api._load_dashboard_cache(run_row=run_row, run_paths=run_paths, store=store)
         if isinstance(cached_payload, dict):
+            # VAL-1 : injecter les compteurs live dans kpis pour contourner le cache stale.
+            cached_kpis = cached_payload.get("kpis") if isinstance(cached_payload.get("kpis"), dict) else {}
+            if isinstance(cached_kpis, dict):
+                cached_kpis = dict(cached_kpis)
+                cached_kpis["validated_count"] = int(validated_live)
+                cached_kpis["rejected_count"] = int(rejected_live)
+                # R6-06 : injection tri-etat dans le cache pour la carte
+                # "En attente" / "Reporte".
+                cached_kpis["accepted_count"] = int(accepted_live)
+                cached_kpis["deferred_count"] = int(deferred_live)
+                cached_payload = {**cached_payload, "kpis": cached_kpis}
             return {
                 "ok": True,
                 "mode": mode,
@@ -534,6 +759,8 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 **cached_payload,
                 "runs_history": runs_history,
                 "pending_undo": pending_undo,
+                "active_run_id": _active_run_id(api),
+                "run_info": _active_run_info(api),
             }
 
         run_state = api._get_run(resolved_run_id)
@@ -566,8 +793,14 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             **cached_section,
             "runs_history": runs_history,
             "pending_undo": pending_undo,
+            "active_run_id": _active_run_id(api),
+            "run_info": _active_run_info(api),
         }
-    except (OSError, TypeError, ValueError) as exc:
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter
+    # HTTP 500 sur RuntimeError/MemoryError/etc (cas run obsolete + DB locked).
+    # On preserve le message historique (test_dashboard verifie l'egalite stricte)
+    # et on ajoute user_message + error pour le contrat homogene Vague F.
+    except Exception as exc:  # noqa: BLE001 - boundary top-level pour endpoint accueil
         api.log_api_exception(
             "get_dashboard",
             exc,
@@ -576,9 +809,17 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             store=store if "store" in locals() else None,
             extra={"requested_run_id": target_run},
         )
-        return _err_response(
-            "Impossible de charger la synthese du run.", category="runtime", level="warning", log_module=__name__
-        )
+        logger.exception("get_dashboard failed for run_id=%s", target_run)
+        return {
+            "ok": False,
+            "error": "dashboard_load_failed",
+            "message": "Impossible de charger la synthese du run.",
+            "user_message": (
+                "Impossible de charger la synthese du run. Relance un scan ou "
+                "redemarre l'app."
+            ),
+            "detail": str(exc),
+        }
 
 
 def _load_report_context(api: Any, run_id: str) -> Optional[Tuple[Any, Any, list, Any, str, Dict[str, Any]]]:
@@ -616,6 +857,116 @@ def _load_report_context(api: Any, run_id: str) -> Optional[Tuple[Any, Any, list
     return store, run_paths, rows, run_state, cfg_root, run_row
 
 
+_CATEGORY_LABELS_FR_FALLBACK: Dict[str, str] = {
+    "video": "Vidéo",
+    "audio": "Audio",
+    "extras": "Extras",
+    "custom_rules": "Règles personnalisées",
+}
+
+
+def compose_score_explanation(
+    quality_report: Optional[Dict[str, Any]],
+    custom_rules_result: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Compose les sources `score_explanation` (build_rich_explanation) et
+    `applied_rule_ids` (apply_custom_rules) en une structure waterfall unifiee
+    pour l'inspecteur frontend.
+
+    VO-C-BACKEND : helper PURE (stateless, deterministe). Ne modifie aucune
+    des sources et n'execute aucune logique de scoring : se contente d'agreger
+    les champs deja calcules pour exposer une vue waterfall coherente au
+    frontend.
+
+    Args:
+        quality_report: dict report qualite (peut contenir `metrics` ou etre
+            deja le metrics) OU directement le dict `score_explanation`. Si
+            None ou vide -> renvoie None (backward compat : le frontend gere
+            l'absence).
+        custom_rules_result: dict retourne par `apply_custom_rules`
+            (contient `applied_rule_ids`). Optionnel : si None, on tente de
+            recuperer `applied_rule_ids` depuis `quality_report.metrics`.
+
+    Returns:
+        dict {categories, baseline, suggestions, applied_rule_ids, narrative,
+              top_positive, top_negative} ou None si pas d'explanation
+        disponible.
+
+        - categories : list[{name, label, contribution, ...}] avec videos/
+          audio/extras venant de build_rich_explanation + une entree
+          custom_rules ajoutee SI applied_rule_ids non vide.
+        - applied_rule_ids : list[str] toujours presente (vide si pas de
+          regles appliquees).
+        - autres champs : passthrough depuis build_rich_explanation.
+    """
+    if not quality_report or not isinstance(quality_report, dict):
+        return None
+
+    # Le quality_report peut etre soit le report complet (contient `metrics`),
+    # soit directement le metrics, soit directement le score_explanation.
+    explanation: Dict[str, Any] = {}
+    metrics: Dict[str, Any] = {}
+    if isinstance(quality_report.get("score_explanation"), dict):
+        # quality_report est en realite le metrics dict
+        explanation = quality_report["score_explanation"]
+        metrics = quality_report
+    elif isinstance(quality_report.get("metrics"), dict):
+        metrics = quality_report["metrics"]
+        if isinstance(metrics.get("score_explanation"), dict):
+            explanation = metrics["score_explanation"]
+    elif "categories" in quality_report or "narrative" in quality_report:
+        # quality_report est en realite le score_explanation deja extrait
+        explanation = quality_report
+
+    if not explanation:
+        return None
+
+    # categories : dict -> list, en ajoutant une entree custom_rules si pertinent.
+    raw_categories = explanation.get("categories") or {}
+    categories_list: List[Dict[str, Any]] = []
+    if isinstance(raw_categories, dict):
+        for name, info in raw_categories.items():
+            if not isinstance(info, dict):
+                continue
+            entry = {"name": str(name), **info}
+            entry.setdefault("label", _CATEGORY_LABELS_FR_FALLBACK.get(str(name), str(name)))
+            categories_list.append(entry)
+    elif isinstance(raw_categories, list):
+        categories_list = [dict(item) for item in raw_categories if isinstance(item, dict)]
+
+    # applied_rule_ids : priorite au parametre explicite, sinon depuis metrics.
+    applied_rule_ids: List[str] = []
+    if custom_rules_result and isinstance(custom_rules_result, dict):
+        raw = custom_rules_result.get("applied_rule_ids") or []
+        if isinstance(raw, list):
+            applied_rule_ids = [str(r) for r in raw if str(r or "").strip()]
+    if not applied_rule_ids and metrics:
+        raw = metrics.get("applied_rule_ids") or []
+        if isinstance(raw, list):
+            applied_rule_ids = [str(r) for r in raw if str(r or "").strip()]
+
+    # Si des regles ont ete appliquees, ajouter une categorie synthetique
+    # custom_rules pour la cohérence du waterfall (contribution non chiffrée
+    # ici car deja agregee dans la video subscore par compute_quality_score).
+    if applied_rule_ids and not any(c.get("name") == "custom_rules" for c in categories_list):
+        categories_list.append({
+            "name": "custom_rules",
+            "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
+            "rule_ids": list(applied_rule_ids),
+            "rules_count": len(applied_rule_ids),
+        })
+
+    return {
+        "categories": categories_list,
+        "baseline": dict(explanation.get("baseline") or {}),
+        "suggestions": list(explanation.get("suggestions") or []),
+        "applied_rule_ids": applied_rule_ids,
+        "narrative": str(explanation.get("narrative") or ""),
+        "top_positive": list(explanation.get("top_positive") or []),
+        "top_negative": list(explanation.get("top_negative") or []),
+    }
+
+
 def _build_row_payload(
     run_id: str,
     row: Any,
@@ -625,13 +976,15 @@ def _build_row_payload(
     """Construit le payload d'une row pour le report. Retourne (payload, decision_ok, tier, is_partial)."""
     metrics = quality.get("metrics") if isinstance(quality.get("metrics"), dict) else {}
     probe_quality = str(metrics.get("probe_quality") or "")
-    is_partial = probe_quality.upper() in {"PARTIAL", "FAILED"}
+    # BUG-018 (hotfix1) : helper centralise (case-insensitive) au lieu de .upper() inline.
+    is_partial = probe_quality_is_partial_or_failed(probe_quality)
     tier = str(quality.get("tier") or "").strip()
     decision_ok = to_bool(decision.get("ok"), False)
 
     detected = metrics.get("detected") or {} if metrics else {}
     subscores = metrics.get("subscores") or {} if metrics else {}
     explanation = metrics.get("score_explanation") or {} if metrics else {}
+    score_explanation_full = compose_score_explanation(metrics) if metrics else None
 
     payload = {
         "run_id": run_id,
@@ -661,6 +1014,10 @@ def _build_row_payload(
         "quality_subscore_audio": int(subscores.get("audio") or 0),
         "quality_subscore_extras": int(subscores.get("extras") or 0),
         "quality_explanation": str(explanation.get("narrative") or ""),
+        # VO-C-BACKEND : payload waterfall complet (categories + baseline +
+        # suggestions + applied_rule_ids + narrative + top_positive/negative).
+        # None si pas d'explanation disponible (backward compat frontend).
+        "score_explanation_full": score_explanation_full,
         "warning_flags": "|".join(row.warning_flags) if row.warning_flags else "",
         "nfo_present": bool(row.nfo_path),
         "subtitle_count": int(getattr(row, "subtitle_count", 0) or 0),
@@ -945,7 +1302,14 @@ def _compute_librarian_suggestions(
         )
         rows = api._load_rows_from_plan_jsonl(run_paths)
         reports = store.quality.list_quality_reports(run_id=latest_run_id)
-        return generate_suggestions(rows, reports, settings)
+        result = generate_suggestions(rows, reports, settings)
+        # R8-049 (F5) : compte des films basse-confiance d'identification, source de
+        # l'insight métier `films_low_confidence` (le librarian n'émet pas ce type).
+        if isinstance(result, dict):
+            result["low_confidence_count"] = sum(
+                1 for r in rows if 0 < int(getattr(r, "confidence", 0) or 0) < 50
+            )
+        return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         logger.debug("librarian suggestions error: %s", exc)
         return empty
@@ -1106,9 +1470,11 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     # Constituer une map par date
     by_date: Dict[str, Dict[str, Any]] = {r["date"]: r for r in raw}
 
-    # Generer 30 points consecutifs
+    # Generer exactement 30 points consecutifs (J-29 .. J0).
+    # Fix : range(30,-1,-1) produisait 31 points (de 30 a 0 inclus), decalait
+    # la fenetre et dupliquait la donnee de J-30.
     points: List[Dict[str, Any]] = []
-    for i in range(30, -1, -1):
+    for i in range(29, -1, -1):
         ts = now - i * 86400.0
         date_str = time.strftime("%Y-%m-%d", time.localtime(ts))
         pt = by_date.get(date_str)
@@ -1128,14 +1494,24 @@ def _compute_active_insights(
     store: Any,
     run_ids: List[str],
     settings: Dict[str, Any],
+    librarian_data: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """v7.6.0 Vague 2 : insights proactifs affiches sur la Home.
 
     Retourne une liste triee par severity desc + count desc :
       [{type, severity, count, label, filter_hint, icon}]
-    Max 5 insights.
+    Max 8 insights.
+
+    R8-049/051/052 (F5) : émet le VOCABULAIRE MÉTIER attendu par le front
+    (_INSIGHT_ROUTE_BY_TYPE dans accueil.js : quality_reject, duplicates_probable,
+    films_not_identified, subs_missing_fr, sagas_incomplete, films_low_confidence,
+    health_low). AVANT, ce producteur n'émettait que des types « physiques »
+    (new_rejects, duplicates_to_resolve…) qu'AUCUNE route/notification ne reconnaissait
+    -> panneaux morts, clics non routés, miroir Centre de notifications vide.
+    Les types métier sont dérivés du bibliothécaire (generate_suggestions) déjà calculé.
     """
     insights: List[Dict[str, Any]] = []
+    librarian_data = librarian_data if isinstance(librarian_data, dict) else {}
 
     # 1. Run actif en cours
     try:
@@ -1164,7 +1540,9 @@ def _compute_active_insights(
             if reject_count > 0:
                 insights.append(
                     {
-                        "type": "new_rejects",
+                        # R8-049 (F5) : type métier `quality_reject` (routé /qualite par le front),
+                        # avant `new_rejects` que _INSIGHT_ROUTE_BY_TYPE ne connaissait pas.
+                        "type": "quality_reject",
                         "severity": "warning",
                         "count": reject_count,
                         "label": f"{reject_count} film{'s' if reject_count > 1 else ''} classe{'s' if reject_count > 1 else ''} Reject dans le dernier scan",
@@ -1175,25 +1553,65 @@ def _compute_active_insights(
         except (AttributeError, OSError):
             pass
 
-    # 3. Doublons a trancher (sur le dernier run)
-    if run_ids:
-        try:
-            anomaly_counts = store.anomaly.get_anomaly_counts_for_runs([run_ids[0]])
-            dup_count = int(anomaly_counts.get(run_ids[0], 0) or 0)
-            # Filtre approximatif : compte total d'anomalies, ajustable si besoin
-            if dup_count > 3:
-                insights.append(
-                    {
-                        "type": "duplicates_to_resolve",
-                        "severity": "warning",
-                        "count": dup_count,
-                        "label": f"{dup_count} anomalies a traiter",
-                        "filter_hint": {"warning": "anomaly"},
-                        "icon": "alert-circle",
-                    }
-                )
-        except (AttributeError, OSError):
-            pass
+    # 3. Insights MÉTIER dérivés du bibliothécaire (R8-049/051/052 F5) : on traduit les
+    #    suggestions generate_suggestions vers les types attendus par _INSIGHT_ROUTE_BY_TYPE
+    #    (accueil.js). Avant, le seul insight « doublons » comptait des ANOMALIES (label
+    #    trompeur « X anomalies à traiter ») et portait un type mort `duplicates_to_resolve`.
+    _LIBRARIAN_TO_INSIGHT = {
+        # librarian id -> (type métier, severity, icon, filter_hint)
+        "duplicates": ("duplicates_probable", "warning", "copy", {"filter": "duplicates"}),
+        "unidentified": ("films_not_identified", "warning", "help-circle", {"filter": "not_identified"}),
+        "missing_subtitles": ("subs_missing_fr", "info", "message-square", {"filter": "subs_missing_fr"}),
+        "collections_info": ("sagas_incomplete", "info", "layers", {"filter": "sagas_incomplete"}),
+    }
+    for sug in librarian_data.get("suggestions") or []:
+        if not isinstance(sug, dict):
+            continue
+        mapping = _LIBRARIAN_TO_INSIGHT.get(str(sug.get("id") or ""))
+        if not mapping:
+            continue
+        count = int(sug.get("count") or 0)
+        if count <= 0:
+            continue
+        itype, severity, icon, filter_hint = mapping
+        insights.append(
+            {
+                "type": itype,
+                "severity": severity,
+                "count": count,
+                "label": str(sug.get("message") or itype),
+                "filter_hint": filter_hint,
+                "icon": icon,
+            }
+        )
+
+    # 3b. Films basse confiance d'identification (films_low_confidence).
+    low_conf = int(librarian_data.get("low_confidence_count") or 0)
+    if low_conf > 0:
+        insights.append(
+            {
+                "type": "films_low_confidence",
+                "severity": "info",
+                "count": low_conf,
+                "label": f"{low_conf} film{'s' if low_conf > 1 else ''} a verifier (identification incertaine)",
+                "filter_hint": {"filter": "low_confidence"},
+                "icon": "help-circle",
+            }
+        )
+
+    # 3c. Sante bibliotheque faible (health_low).
+    health = int(librarian_data.get("health_score") or 100)
+    if health < 60:
+        insights.append(
+            {
+                "type": "health_low",
+                "severity": "warning" if health < 40 else "info",
+                "count": health,
+                "label": f"Sante bibliotheque : {health}/100",
+                "filter_hint": None,
+                "icon": "activity",
+            }
+        )
 
     # 4. DNR partiel (nouveau insight §15)
     try:
@@ -1234,8 +1652,9 @@ def _compute_active_insights(
     severity_order = {"warning": 0, "info": 1, "success": 2}
     insights.sort(key=lambda it: (severity_order.get(it["severity"], 9), -int(it.get("count") or 0)))
 
-    # Limite a 5 insights
-    return insights[:5]
+    # R8-049 (F5) : limite portée à 8 (les 7 types métier + statut run_in_progress
+    # peuvent coexister ; avant [:5] tronquait silencieusement les insights métier).
+    return insights[:8]
 
 
 def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
@@ -1273,23 +1692,29 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
         # 3. Global tier distribution
-        tier_data = store.quality.get_global_tier_distribution(limit_runs=lim)
+        # AUDIT 2026-06-14 (R6-F) : distribution "etat courant" = DERNIER run
+        # SEULEMENT (limit_runs=1). Avant, l'agregation sur `lim` runs (20)
+        # cumulait les films de plusieurs scans -> "films classes" gonfle et
+        # tiers fausses sur la page Qualite (ex: 1249 quasi tout Bronze) alors
+        # que la Biblio (V1 dernier run) montre la vraie repartition.
+        tier_data = store.quality.get_global_tier_distribution(limit_runs=1)
 
         # 4. Top anomaly codes
         top_anomalies = store.anomaly.get_top_anomaly_codes(limit_runs=lim, limit_codes=10)
 
         # 5. Aggregated summary
-        total_films = sum(r.get("total_rows", 0) for r in runs_summary)
-        all_scored = sum(qc.get("scored_movies", 0) for qc in quality_counts.values())
-        all_premium = sum(qc.get("premium_count", 0) for qc in quality_counts.values())
-        weighted_scores = [
-            (qc["score_avg"], qc["scored_movies"]) for qc in quality_counts.values() if qc.get("scored_movies", 0) > 0
-        ]
-        if weighted_scores:
-            total_weight = sum(w for _, w in weighted_scores)
-            avg_score = sum(s * w for s, w in weighted_scores) / total_weight if total_weight else 0.0
-        else:
-            avg_score = 0.0
+        # AUDIT 2026-06-14 (R7-5) : complement de R6-F. total_films/avg_score/
+        # premium_pct etaient cumules sur `lim` runs (defaut 20) alors que chaque
+        # run est un snapshot complet independant -> un film present dans N scans
+        # etait compte N fois (KPI gonfles). On scope au DERNIER run, comme la
+        # distribution par tier (limit_runs=1) et la Bibliotheque.
+        latest_rid = run_ids[0] if run_ids else None
+        latest_summary = next((r for r in runs_summary if r.get("run_id") == latest_rid), None)
+        total_films = int(latest_summary.get("total_rows", 0)) if latest_summary else 0
+        latest_qc = quality_counts.get(latest_rid, {}) if latest_rid else {}
+        all_scored = int(latest_qc.get("scored_movies", 0) or 0)
+        all_premium = int(latest_qc.get("premium_count", 0) or 0)
+        avg_score = float(latest_qc.get("score_avg", 0.0) or 0.0)
         premium_pct = (all_premium / all_scored * 100) if all_scored else 0.0
 
         # 6. Trend (↑↓→)
@@ -1350,9 +1775,12 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         librarian_data = _compute_librarian_suggestions(api, store, run_ids[0] if run_ids else "", settings)
 
         # 12. v7.6.0 Vague 2 — Home overview-first payloads
-        v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids)
+        # AUDIT 2026-06-14 (R6-F) : V2 perceptuel du DERNIER run uniquement
+        # (run_ids[:1]). Avant, le cumul sur 20 runs donnait ~1265 lignes quasi
+        # toutes "bronze" (perceptuel partiel/ancien) -> faux "Sante 0% / tout Bronze".
+        v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids[:1])
         trend_30days = _compute_trend_30days(store)
-        insights = _compute_active_insights(api, store, run_ids, settings)
+        insights = _compute_active_insights(api, store, run_ids, settings, librarian_data)
 
         # 13. Spec 10 Qualite — by_decade distribution top-level (best-effort).
         # Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
@@ -1395,14 +1823,25 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             # Spec 10 Qualite — distribution films par decennie
             "by_decade": by_decade,
         }
-    except (OSError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("get_global_stats error: %s", exc, exc_info=True)
-        return _err_response(
-            f"Impossible de calculer les statistiques globales: {exc}",
-            category="runtime",
-            level="error",
-            log_module=__name__,
-        )
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : dash-1. L'ancien tuple
+    # (OSError, KeyError, TypeError, ValueError) laissait passer RuntimeError,
+    # AttributeError, MemoryError, etc., provoquant un HTTP 500 cote pywebview
+    # quand par exemple la couche store/perceptual levait une RuntimeError
+    # ("dependency unavailable"). On wrap en Exception et on renvoie un payload
+    # standardise {ok:False, error, user_message, message} aligne avec les
+    # autres endpoints Vague F/G (get_status / get_plan / get_history_stats /
+    # cancel_run).
+    except Exception as exc:  # noqa: BLE001 - boundary top-level dashboard global
+        logger.exception("get_global_stats failed: %s", exc)
+        return {
+            "ok": False,
+            "error": "global_stats_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de calculer les statistiques globales. "
+                "Relance un scan ou redemarre l'app."
+            ),
+        }
 
 
 # =========================================================
@@ -1428,7 +1867,7 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
     Retourne {validation, application, quality} pour le run le plus recent.
     Un compteur a 0 signifie "rien a faire", le badge correspondant restera invisible.
     """
-    empty = {"validation": 0, "application": 0, "quality": 0}
+    empty = {"validation": 0, "application": 0, "quality": 0, "duplicates": 0}
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
@@ -1467,10 +1906,34 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         application = 0 if last_batch else len(approved_ids)
         quality = sum(1 for r in rows if getattr(r, "warning_flags", None))
 
+        # AUDIT 2026-06-13 (R5-E) : badge "Doublons" = films dans un groupe de
+        # doublons (meme titre+annee >= 2 occurrences). Meme semantique que le
+        # chip biblio "Dans doublons" (library_support._count_duplicates_and_sagas).
+        dup_keys: Counter = Counter()
+        for r in rows:
+            title = str(getattr(r, "proposed_title", "") or "").strip().lower()
+            if not title:
+                continue
+            year = int(getattr(r, "proposed_year", 0) or 0)
+            dup_keys[(title, year)] += 1
+        duplicates = sum(
+            1
+            for r in rows
+            if str(getattr(r, "proposed_title", "") or "").strip()
+            and dup_keys[
+                (
+                    str(getattr(r, "proposed_title", "") or "").strip().lower(),
+                    int(getattr(r, "proposed_year", 0) or 0),
+                )
+            ]
+            >= 2
+        )
+
         return {
             "validation": int(validation),
             "application": int(application),
             "quality": int(quality),
+            "duplicates": int(duplicates),
         }
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.debug("get_sidebar_counters fallback (err=%s)", exc)

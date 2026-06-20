@@ -33,10 +33,9 @@ const MODULES = [
   "./views/qualite.js",
   "./views/traitement.js",
   "./views/bibliotheque.js",
-  "./views/film-detail.js",
+  // D1 (R8) : views/film-detail.js supprimé (route servie par components/film-detail.js mode B).
   // Fix audit 2026-05-24 : ajout des modules omis (decouvertes audit Agent 3).
   // Si un import casse dans ces fichiers, le bisect detecte maintenant.
-  "./views/qij.js",
   "./views/about.js",
   "./core/nav-abort.js",
   "./core/cache.js",

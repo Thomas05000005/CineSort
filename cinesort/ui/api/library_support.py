@@ -17,10 +17,12 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.tiers_helpers import reconcile_display_tier
 from cinesort.infra import state
-from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +74,21 @@ def _classify_resolution(width: int, height: int) -> str:
 
 
 def _classify_hdr(probe_video: Dict[str, Any]) -> str:
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : metrics.detected utilise les cles
+    # hdr_dolby_vision / hdr10_plus / hdr10 (cf quality_score.py:1331-1333). Les
+    # anciennes cles has_dv / has_hdr10_plus / has_hdr10 / dv_profile ne sont pas
+    # persistees dans metrics.detected. On accepte les deux schemas pour eviter
+    # de casser un eventuel appelant qui passerait encore le NormalizedProbe brut.
     if not isinstance(probe_video, dict):
         return "sdr"
-    if probe_video.get("has_hdr10_plus"):
+    if probe_video.get("hdr10_plus") or probe_video.get("has_hdr10_plus"):
         return "hdr10_plus"
-    if probe_video.get("has_dv"):
+    if probe_video.get("hdr_dolby_vision") or probe_video.get("has_dv"):
         profile = str(probe_video.get("dv_profile") or "").strip()
         if profile == "5":
             return "dv_p5"
         return "dv"
-    if probe_video.get("has_hdr10"):
+    if probe_video.get("hdr10") or probe_video.get("has_hdr10"):
         return "hdr10"
     return "sdr"
 
@@ -117,6 +124,34 @@ def _extract_row_warnings(perceptual_row: Optional[Dict[str, Any]]) -> List[str]
             if "fake_4k" in adj:
                 flags.append("fake_4k_confirmed")
     return sorted(set(flags))
+
+
+def _build_display_tier_fields(
+    perc: Optional[Dict[str, Any]],
+    qual: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    """VN-B.2 : retourne les champs tier reconcilies pour une row library.
+
+    - display_tier : echelle V2 canonique (lowercase platinum/gold/silver/bronze/
+      reject), single source of truth pour le badge UI.
+    - tier_source : "perceptual" | "quality_v1" | "quality_v2" | "fallback",
+      preserve pour debug et instrumentation.
+    - tier_v2 : alias backward compat sur display_tier (memes valeurs, les
+      anciens callers continuent de fonctionner sans changement).
+    """
+    perc_tier = (perc or {}).get("global_tier_v2") if perc else None
+    qual_tier = (qual or {}).get("tier") if qual else None
+    display_tier, tier_source = reconcile_display_tier(
+        perc_tier_v2=perc_tier,
+        qual_tier_v1=qual_tier,
+        default="unknown",
+    )
+    return {
+        "display_tier": display_tier,
+        "tier_source": tier_source,
+        # Backward compat : conserve l'ancien champ pour les callers existants.
+        "tier_v2": display_tier,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +192,88 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         return []
     plan_rows = plan_result.get("rows") or []
 
+    # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides) sur
+    # chaque row -> la biblio reflete le match choisi (tmdb_id/titre/annee) et ne
+    # revient plus au match auto au reload. No-op si aucun override.
+    from cinesort.ui.api.film_support import overlay_tmdb_override
+    for _r in plan_rows:
+        overlay_tmdb_override(store, run_id, _r)
+
+    # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
+    # batch via integrations.get_tmdb_posters(). Avant : `r.get("poster_url")`
+    # retournait toujours None car PlanRow n'a PAS de champ poster_url plat (le
+    # poster vit sur les Candidate enfants, pas sur le row) -> les 853 cartes
+    # affichaient toutes le placeholder clapper. Maintenant : on collecte tous
+    # les tmdb_id non nuls, on appelle 1 fois get_tmdb_posters([...], "w342")
+    # et on mappe poster par tmdb_id. Cache TMDb local evite la re-frappe HTTP
+    # entre 2 appels. Films non identifies (tmdb_id=None) gardent leur
+    # placeholder coté UI avec lien "Identifier manuellement".
+    #
+    # Fix audit 2026-05-25 (v1.5.5) Vague J : root cause des 853 cartes sans
+    # poster. PlanRow.tmdb_id est TOUJOURS None apres scan (le linker ecrit le
+    # tmdb_id sur les Candidate enfants, pas au top-level du row). Resultat
+    # Vague I.D collectait tmdb_ids=[] -> aucun batch poster lance -> 853
+    # placeholders. Fix : extraire tmdb_id depuis candidates[0] (best score) en
+    # plus du top-level. Persiste en `chosen_tmdb_id` dans la row Library pour
+    # exposer au frontend et permettre identification implicite.
+    def _resolve_tmdb_id(row_dict: Dict[str, Any]) -> Optional[int]:
+        """Resoud le tmdb_id effectif d'une PlanRow : top-level d'abord, puis
+        candidat de meilleur score (>=0.7), sinon None."""
+        tid_top = row_dict.get("tmdb_id")
+        if tid_top:
+            try:
+                v = int(tid_top)
+                if v > 0:
+                    return v
+            except (TypeError, ValueError):
+                pass
+        # Fallback : best candidate avec tmdb_id (la liste est deja ordonnee par
+        # score desc cote linker domain).
+        best: Optional[int] = None
+        best_score = -1.0
+        for cand in (row_dict.get("candidates") or []):
+            if not isinstance(cand, dict):
+                continue
+            cid = cand.get("tmdb_id")
+            if not cid:
+                continue
+            try:
+                score = float(cand.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score < 0.7:
+                # Confiance candidat insuffisante : on n'auto-resolve pas.
+                continue
+            if score > best_score:
+                try:
+                    best = int(cid)
+                    best_score = score
+                except (TypeError, ValueError):
+                    continue
+        return best
+
+    # Map row_id -> tmdb_id resolu (pour eviter de recalculer dans la boucle out)
+    resolved_tmdb_by_row: Dict[str, int] = {}
+    tmdb_ids: List[int] = []
+    for r in plan_rows:
+        rid = str(r.get("row_id") or "")
+        tid = _resolve_tmdb_id(r)
+        if tid and tid > 0:
+            resolved_tmdb_by_row[rid] = tid
+            if tid not in tmdb_ids:
+                tmdb_ids.append(tid)
+    posters_by_tmdb: Dict[str, str] = {}
+    if tmdb_ids:
+        try:
+            poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
+            if poster_res and poster_res.get("ok"):
+                raw_map = poster_res.get("posters") or {}
+                # Normaliser cles en str (l'API retourne str(int) deja, mais on
+                # protege contre les eventuels int).
+                posters_by_tmdb = {str(k): v for k, v in raw_map.items() if v}
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("library_support poster batch fetch error: %s", exc)
+
     out: List[Dict[str, Any]] = []
     for r in plan_rows:
         row_id = str(r.get("row_id") or "")
@@ -167,27 +284,106 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         metrics = (qual or {}).get("metrics") if qual else None
         if not isinstance(metrics, dict):
             metrics = {}
-        probe_video = metrics.get("video") or {}
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : la vraie structure persistee
+        # par compute_quality_score est metrics["detected"] (dict imbrique), PAS
+        # metrics["video"] / metrics["audio"]. Cf cinesort/domain/quality_score.py
+        # _build_quality_metrics_helper (lignes 1318-1372). Les cles correctes :
+        #   detected.width / detected.height (int)
+        #   detected.video_codec (str) — pas "codec"
+        #   detected.duration_s (float)
+        #   detected.audio_tracks_count + detected.languages (langues AUDIO ISO639)
+        #   detected.audio_best_codec / detected.audio_best_channels
+        #   detected.hdr_dolby_vision / detected.hdr10 / detected.hdr10_plus (bool)
+        #   detected.file_size_bytes (estimation bitrate*duration, voir lib-2)
+        # Avant ce fix : metrics.get("video") = None partout -> width/height/codec/
+        # hdr = "unknown" sur 100% des films, et metrics.get("duration_s") = None
+        # car duration_s est dans detected, pas top-level metrics.
+        detected = metrics.get("detected") if isinstance(metrics, dict) else None
+        if not isinstance(detected, dict):
+            detected = {}
+        probe_video = detected  # pour _classify_hdr (cles hdr10/hdr_dolby_vision)
 
-        width = int(probe_video.get("width") or 0)
-        height = int(probe_video.get("height") or 0)
-        duration_s = float(metrics.get("duration_s") or 0)
+        width = int(detected.get("width") or 0)
+        height = int(detected.get("height") or 0)
+        duration_s = float(detected.get("duration_s") or 0)
 
         # Phase 4 spec 07 : exposer audio_langs / subs_langs / subs_missing pour
-        # compteurs chips + export. audio_languages est dans metrics.audio.
-        audio_metrics = metrics.get("audio") if isinstance(metrics, dict) else None
+        # compteurs chips + export.
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : les langues audio sont dans
+        # detected.languages (liste de str ISO639-2/3 brutes, ex ["eng","fra"]). Avant :
+        # on lisait metrics.audio (liste de dicts {language: ...}) qui n'a jamais
+        # existe -> audio_languages = [] systematiquement, cassant le compteur chip
+        # "audio_langs" et le filtre subtitle_languages.
+        raw_audio_langs = detected.get("languages")
         audio_langs: List[str] = []
-        if isinstance(audio_metrics, list):
-            for stream in audio_metrics:
-                if isinstance(stream, dict):
-                    lang = str(stream.get("language") or "").strip().lower()
-                    if lang and lang not in audio_langs:
-                        audio_langs.append(lang)
+        if isinstance(raw_audio_langs, list):
+            for lang in raw_audio_langs:
+                lang_norm = str(lang or "").strip().lower()
+                if lang_norm and lang_norm not in audio_langs:
+                    audio_langs.append(lang_norm)
 
-        subtitle_languages = [str(s).lower() for s in (r.get("subtitle_languages") or [])]
-        subtitle_missing_langs = [str(s).lower() for s in (r.get("subtitle_missing_langs") or [])]
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 2 — la PlanRow ne capture pas
+        # les pistes subtitle EMBARQUEES (scan sans probe). On enrichit ici depuis
+        # `quality_reports.metrics.subtitles_embedded` (persiste par _probe_and_score
+        # apres get_quality_report), pour aligner le compte "sans subs FR" entre la
+        # vue Bibliotheque et le rapport Qualite. Si pas de quality_report disponible,
+        # fallback transparent sur les langues externes detectees au scan.
+        scan_subtitle_languages = [str(s).lower() for s in (r.get("subtitle_languages") or [])]
+        embedded_subs_raw = metrics.get("subtitles_embedded") if isinstance(metrics, dict) else None
+        embedded_langs: List[str] = []
+        if isinstance(embedded_subs_raw, list):
+            try:
+                from cinesort.domain.subtitle_helpers import _normalize_iso639
+
+                for track in embedded_subs_raw:
+                    if not isinstance(track, dict):
+                        continue
+                    raw_lang = (track.get("language") or "").strip().lower()
+                    if not raw_lang:
+                        continue
+                    # AUDIT 2026-06-11 (R4-P14) : conserver le code BRUT quand
+                    # _normalize_iso639 ne le connait pas (hin, tam...) — sinon la
+                    # piste disparait de la row et un film sous-titre hindi matche
+                    # encore "Aucun" malgre le fix filtre (cause amont du residuel
+                    # P3 confirme par la revue adversaire). Symetrique de
+                    # _to_iso639_1. Les tags speciaux (forced/sdh...) sont ensuite
+                    # neutralises au filtrage par _NON_LANG_CODES.
+                    normalized = _normalize_iso639(raw_lang) or raw_lang
+                    if normalized and normalized not in embedded_langs:
+                        embedded_langs.append(normalized)
+            except (ImportError, AttributeError, KeyError, TypeError, ValueError):
+                embedded_langs = []
+        # Union langues externes (PlanRow) + langues embarquees (quality_report metrics)
+        merged_langs = list(scan_subtitle_languages)
+        for lang in embedded_langs:
+            if lang not in merged_langs:
+                merged_langs.append(lang)
+        subtitle_languages = merged_langs
+        # Recalcul missing_langs en filtrant les langues finalement presentes
+        scan_missing = [str(s).lower() for s in (r.get("subtitle_missing_langs") or [])]
+        subtitle_missing_langs = [lang for lang in scan_missing if lang not in subtitle_languages]
         proposed_source = str(r.get("proposed_source") or "").strip().lower()
         confidence = int(r.get("confidence") or 0)
+
+        # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : resolve poster_url via
+        # le batch posters_by_tmdb pre-calcule en haut de fonction. Fallback sur
+        # le 1er candidat TMDb avec poster_url si tmdb_id direct absent (cas des
+        # rows non encore identifies mais avec candidats suggeres).
+        #
+        # Fix audit 2026-05-25 (v1.5.5) Vague J : utilise tmdb_id RESOLU (top-level
+        # OU best candidate) au lieu du seul top-level. Sans ca, 853/853 PlanRows
+        # avaient tmdb_id=None donc poster_url=None malgre des candidats avec
+        # tmdb_id valide.
+        poster_url: Optional[str] = None
+        resolved_tid = resolved_tmdb_by_row.get(row_id)
+        if resolved_tid:
+            poster_url = posters_by_tmdb.get(str(resolved_tid))
+        if not poster_url:
+            for cand in (r.get("candidates") or []):
+                cand_poster = cand.get("poster_url") if isinstance(cand, dict) else None
+                if cand_poster:
+                    poster_url = cand_poster
+                    break
 
         row = {
             "row_id": row_id,
@@ -195,22 +391,50 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "year": int(r.get("proposed_year") or 0),
             # Issue audit Tier 2 : tmdb_id absent ici cassait le match Jellyfin
             # DateCreated dans library_timeline_support (fallback toujours fs mtime).
-            "tmdb_id": r.get("tmdb_id"),
+            # Fix audit 2026-05-25 (v1.5.5) Vague J : expose le tmdb_id RESOLU
+            # (top-level OU best candidate score>=0.7) pour que le frontend
+            # affiche un poster + un libelle "identifie" plutot que "Identifier"
+            # quand la confidence est forte. Sans ca : 836 films avec candidats
+            # haute confiance affichaient quand meme le placeholder "Identifier"
+            # parce que PlanRow.tmdb_id top-level reste None apres scan.
+            "tmdb_id": resolved_tmdb_by_row.get(row_id) or r.get("tmdb_id"),
             "duration_s": duration_s,
             "duration_min": int(duration_s / 60) if duration_s > 0 else 0,
-            "codec": _normalize_codec(probe_video.get("codec")),
+            # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-1) : la cle persistee est
+            # detected.video_codec (pas .codec). Cf quality_score.py:1329.
+            "codec": _normalize_codec(detected.get("video_codec") or detected.get("codec")),
             "resolution": _classify_resolution(width, height),
             "width": width,
             "height": height,
             "hdr": _classify_hdr(probe_video),
-            "tier_v2": str((perc or {}).get("global_tier_v2") or "unknown").lower(),
-            "score_v2": (perc or {}).get("global_score_v2"),
+            # VN-B.2 (Vague N batch 2) : reconciliation V1/V2 explicite via
+            # cinesort.domain.tiers_helpers.reconcile_display_tier. Avant : fallback
+            # `perc.global_tier_v2 OR qual.tier` melangeait 2 echelles incomparables
+            # (V1 seuils 70/66/55/40 capitalized vs V2 seuils 90/80/65/50 lowercase),
+            # exposant l'utilisateur a un Platinum V1 affiche comme "platinum" V2
+            # alors qu'il serait Silver/Bronze V2 reel.
+            #
+            # Le tuple (display_tier, tier_source) est la single source of truth pour
+            # le frontend (badge UI). On preserve tier_v2 pour backward compat
+            # (legacy callers) mais display_tier doit etre privilegie.
+            # Voir cinesort/domain/tiers_helpers.py::reconcile_display_tier docstring.
+            **_build_display_tier_fields(perc, qual),
+            "score_v2": (perc or {}).get("global_score_v2") or (qual or {}).get("score"),
+            # Iter13 etape 4 (2026-06-10) : EXPOSER probe_quality pour signaler
+            # explicitement a l'UI quand les metadonnees qualite sont indisponibles
+            # (probe FAILED apres retry+breaker iter1-3). Sans ce flag, l'UI
+            # affichait un score Silver-cap silencieux (degradation INVISIBLE) au
+            # lieu d'un marqueur "Indisponible" honnete. Acquis racine C iter4 :
+            # identification (titre/year/tmdb_id) reste DECOUPLEE du probe et
+            # le film reste renommable meme avec probe FAILED.
+            "probe_quality": str(metrics.get("probe_quality") or "UNKNOWN").upper(),
+            "quality_unavailable": str(metrics.get("probe_quality") or "").upper() == "FAILED",
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
             "added_ts": float(r.get("mtime") or 0),
             "path": r.get("source_path") or "",
-            "poster_url": r.get("poster_url"),
+            "poster_url": poster_url,
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),
             "edition": r.get("edition"),
@@ -219,8 +443,22 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "subtitle_languages": subtitle_languages,
             "subtitle_missing_langs": subtitle_missing_langs,
             "proposed_source": proposed_source,
+            # AUDIT 2026-06-11 (R3) : source MEDIA (bluray/web/dvd/other) derivee du
+            # nom video, pour le filtre Source du drawer (distincte de
+            # proposed_source = source d'identification).
+            "media_source": _media_source_label(r.get("video") or r.get("source_path") or ""),
             "confidence": confidence,
-            "size_bytes": int(r.get("size_bytes") or metrics.get("size_bytes") or 0),
+            # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-2) : metrics["size_bytes"]
+            # n'existe pas. La taille estimee est dans detected.file_size_bytes
+            # (bitrate_kbps * duration_s, cf _estimate_file_size en domain/quality_score.py).
+            # Avant : metrics.get("size_bytes") = None -> tous les size_bytes
+            # provenaient uniquement de PlanRow.size_bytes (lui-meme souvent 0
+            # tant que le scan FS n'a pas posé la stat), cassant le tri/filtre taille.
+            "size_bytes": int(
+                r.get("size_bytes")
+                or detected.get("file_size_bytes")
+                or 0
+            ),
         }
 
         # Si grain dans metrics
@@ -230,6 +468,11 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             row["grain_era_v2"] = gi.get("film_era_v2")
             row["grain_nature"] = gi.get("nature")
 
+        # AUDIT 2026-06-13 (R5-B) : exposer l'etat d'identification (source unique
+        # = _row_unidentified) pour que la carte UI n'affiche "Identifier" QUE sur
+        # les vrais non-identifies, pas sur les films NFO/nom sans tmdb_id.
+        row["identified"] = not _row_unidentified(row)
+
         out.append(row)
 
     return out
@@ -238,6 +481,89 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Filtrage
 # ---------------------------------------------------------------------------
+
+# AUDIT 2026-06-11 (R3) : les filtres du drawer avance (source/codec/resolution/
+# langues/sous-titres) ne matchaient JAMAIS car les valeurs du drawer differaient
+# du vocabulaire backend. On normalise au moment du match.
+
+# Codec : backend _normalize_codec produit h264/hevc/av1/unknown ; drawer envoie
+# h264/h265/av1/other.
+_DRAWER_CODEC_ALIAS = {"h265": "hevc", "h264": "h264", "av1": "av1"}
+_KNOWN_CODECS = {"h264", "hevc", "av1"}
+# Resolution : backend _classify_resolution produit 4k/1080p/720p/sd/unknown ;
+# drawer envoie 480p/720p/1080p/4k/other.
+_DRAWER_RES_ALIAS = {"480p": "sd", "720p": "720p", "1080p": "1080p", "4k": "4k"}
+_KNOWN_RES = {"4k", "1080p", "720p", "sd"}
+# Source media : source_hint (release_name_parser) -> vocabulaire drawer.
+_SOURCE_HINT_TO_DRAWER = {
+    "bluray": "bluray", "remux": "bluray",
+    "webdl": "web", "webrip": "web",
+    "dvd": "dvd",
+    "hdtv": "other", "cam": "other",
+}
+# AUDIT 2026-06-11 (R4-P5) : le drawer Qualite (qualite-filters-drawer.js) envoie
+# des LIBELLES ('BluRay'/'WEB-DL'/'WEB-Rip'/'DVD'/'HDTV'/'Autre') sous la cle
+# 'sources' (pluriel) ; le drawer Biblio envoie bluray/web/dvd/other sous
+# 'source'. On normalise les libelles vers le vocabulaire backend.
+_DRAWER_SOURCE_ALIAS = {
+    "web-dl": "web", "web-rip": "web", "webdl": "web", "webrip": "web",
+    "hdtv": "other", "autre": "other",
+}
+
+
+def _media_source_label(video_name: str) -> str:
+    """Derive le label source media (bluray/web/dvd/other) depuis le nom du
+    fichier video, pour le filtre Source du drawer (AUDIT 2026-06-11 R3 : avant,
+    le filtre comparait a proposed_source = source d'IDENTIFICATION nfo/name/tmdb,
+    jamais a la source media)."""
+    name = str(video_name or "").strip()
+    if not name:
+        return ""
+    try:
+        from cinesort.domain.release_name_parser import parse_release_name  # noqa: PLC0415
+        hint = str(parse_release_name(name).source_hint or "").strip().lower()
+    except (ImportError, OSError, TypeError, ValueError):
+        return ""
+    return _SOURCE_HINT_TO_DRAWER.get(hint, "other" if hint else "")
+
+
+# Codes ISO639 / tags de piste qui ne designent PAS une langue identifiable :
+# exclus du comptage "multi"/"autre" (sinon eng+und ou eng+forced compteraient
+# 2 langues) mais CONSERVES comme presence de piste (un film avec une piste
+# 'und' ou 'forced' a bien de l'audio/des sous-titres -> ne matche pas "Aucun").
+# Revue adversaire R4 (P3 v2) : ajoute mul + tags speciaux forced/sdh/cc/
+# commentary (que _LANG_MAP mappe a '' et que le fallback brut reintroduisait
+# comme fausses langues) + la plage ISO 639-2 usage local qaa..qtz (convention
+# pistes commentaire), via _is_non_language_code (520 codes, pas de frozenset).
+_NON_LANG_CODES = frozenset(
+    {"und", "unknown", "zxx", "mis", "mul", "multi", "forced", "sdh", "cc", "commentary"}
+)
+
+
+def _is_non_language_code(code: str) -> bool:
+    if code in _NON_LANG_CODES:
+        return True
+    # Plage ISO 639-2 reservee usage local : qaa..qtz.
+    return len(code) == 3 and code.startswith("q") and "a" <= code[1] <= "t"
+
+
+def _to_iso639_1(lang: str) -> str:
+    """Normalise un code langue ISO639-2/3 (eng/fra/fre) en ISO639-1 (en/fr).
+
+    AUDIT 2026-06-11 (R4-P3) : un code HORS _LANG_MAP (~25 langues : hin, tam,
+    ukr...) retombait sur "" via _normalize_iso639 puis etait discard() par les
+    filtres -> un film ['eng','hin'] ne matchait pas "multi" et un film ['hin']
+    matchait "none". On conserve desormais le code brut (lowercased) quand la
+    normalisation ne le connait pas : la piste reste comptee.
+    """
+    raw = str(lang or "").strip().lower()
+    if not raw:
+        return ""
+    try:
+        from cinesort.domain.subtitle_helpers import _normalize_iso639  # noqa: PLC0415
+        return str(_normalize_iso639(raw) or "").strip().lower() or raw
+    except (ImportError, OSError, TypeError, ValueError):
+        return raw
 
 
 def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
@@ -262,25 +588,91 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         wanted = {str(v).lower() for v in filter_list}
         return any(str(rv or "").lower() in wanted for rv in row_vals)
 
-    if not _in_list(row.get("tier_v2"), filters.get("tier_v2")):
+    # VN-B.2 : filtre par tier accepte les deux cles (tier_v2 legacy, display_tier
+    # nouveau). row.display_tier == row.tier_v2 depuis la reconciliation, mais on
+    # les supporte tous deux cote filtres entrants pour fluidifier la migration UI.
+    tier_filter = filters.get("tier_v2") or filters.get("display_tier")
+    if not _in_list(row.get("display_tier") or row.get("tier_v2"), tier_filter):
         return False
-    if not _in_list(row.get("codec"), filters.get("codec")):
-        return False
-    if not _in_list(row.get("resolution"), filters.get("resolution")):
-        return False
+    # Codec : drawer h265 -> backend hevc ; "other" = hors {h264,hevc,av1}.
+    codec_filter = filters.get("codec")
+    if codec_filter:
+        rc = str(row.get("codec") or "").strip().lower()
+        wanted = {_DRAWER_CODEC_ALIAS.get(str(f).lower(), str(f).lower()) for f in codec_filter}
+        ok = (rc in wanted) or ("other" in wanted and rc not in _KNOWN_CODECS)
+        if not ok:
+            return False
+    # Resolution : drawer 480p -> backend sd ; "other" = hors {4k,1080p,720p,sd}.
+    res_filter = filters.get("resolution")
+    if res_filter:
+        rr = str(row.get("resolution") or "").strip().lower()
+        wanted = {_DRAWER_RES_ALIAS.get(str(f).lower(), str(f).lower()) for f in res_filter}
+        ok = (rr in wanted) or ("other" in wanted and rr not in _KNOWN_RES)
+        if not ok:
+            return False
     if not _in_list(row.get("hdr"), filters.get("hdr")):
         return False
     if not _in_list(row.get("grain_era_v2"), filters.get("grain_era_v2")):
         return False
     if not _in_list(row.get("grain_nature"), filters.get("grain_nature")):
         return False
-    # Phase 5 spec 07 : source / audio_langs / subtitle_langs (drawer avance)
-    if not _in_list(row.get("proposed_source"), filters.get("source")):
-        return False
-    if not _any_in_list(row.get("audio_languages"), filters.get("audio_languages")):
-        return False
-    if not _any_in_list(row.get("subtitle_languages"), filters.get("subtitle_languages")):
-        return False
+    # Source media (bluray/web/dvd/other) derivee du nom video, PAS proposed_source.
+    # AUDIT 2026-06-11 (R4-P5) : accepte aussi la cle 'sources' (pluriel) du
+    # drawer Qualite et normalise ses libelles (WEB-DL/WEB-Rip->web, HDTV/Autre
+    # ->other). Avant, la cle pluriel n'etait jamais lue -> filtre mort.
+    source_filter = filters.get("source") or filters.get("sources")
+    if source_filter:
+        media_src = row.get("media_source")
+        if media_src is None:  # defensif : derive a la volee si absent du payload
+            media_src = _media_source_label(row.get("video") or row.get("path") or "")
+        wanted = {_DRAWER_SOURCE_ALIAS.get(str(f).lower(), str(f).lower()) for f in source_filter}
+        ms = str(media_src or "").lower()
+        ok = (ms in wanted) or ("other" in wanted and ms not in {"bluray", "web", "dvd"})
+        if not ok:
+            return False
+
+    # Decennies (drawer Qualite, cle 'decades', values '1990' — tolere '1990s').
+    # AUDIT 2026-06-11 (R4-P5) : jamais lu avant -> filtre mort. Un film sans
+    # annee (year=0) est exclu quand le filtre est actif (aligne sur
+    # compute_by_decade qui skip les annees invalides). NB : le filtre 'genres'
+    # du meme drawer reste NON applicable ici — les rows n'embarquent pas les
+    # genres TMDb (manque de donnees, pas de mapping possible) ; period_days est
+    # consomme separement par quality/get_history.
+    decades_filter = filters.get("decades")
+    if decades_filter:
+        year = int(row.get("year") or 0)
+        decade = str((year // 10) * 10) if year > 0 else ""
+        wanted = {str(f).strip().lower().rstrip("s") for f in decades_filter}
+        if decade not in wanted:
+            return False
+    # Audio langues : normalise ISO639-1 (eng->en) + "multi" = >=2 vraies langues.
+    # AUDIT 2026-06-11 (R4-P3) : "multi" compte les langues IDENTIFIABLES
+    # distinctes (les codes non mappes type hin/tam sont conserves bruts par
+    # _to_iso639_1, donc comptes) en excluant _NON_LANG_CODES (eng+und n'est
+    # pas un film multi-langues).
+    audio_filter = filters.get("audio_languages")
+    if audio_filter:
+        norm_row = {_to_iso639_1(l) for l in (row.get("audio_languages") or [])}
+        norm_row.discard("")
+        wanted = {str(f).lower() for f in audio_filter}
+        real_langs = {l for l in norm_row if not _is_non_language_code(l)}
+        # R4-P5 : 'Autre' (drawer Qualite) = au moins une vraie langue hors fr/en.
+        ok = (
+            bool(norm_row & wanted)
+            or ("multi" in wanted and len(real_langs) >= 2)
+            or (("autre" in wanted or "other" in wanted) and bool(real_langs - {"fr", "en"}))
+        )
+        if not ok:
+            return False
+    # Sous-titres : "none" = AUCUN sous-titre ; sinon normalise ISO639-1.
+    sub_filter = filters.get("subtitle_languages")
+    if sub_filter:
+        norm_row = {_to_iso639_1(l) for l in (row.get("subtitle_languages") or [])}
+        norm_row.discard("")
+        wanted = {str(f).lower() for f in sub_filter}
+        ok = bool(norm_row & wanted) or ("none" in wanted and not norm_row)
+        if not ok:
+            return False
 
     # Warnings : OR interne (au moins un warning du filtre present dans la row)
     wflags = filters.get("warnings")
@@ -427,6 +819,40 @@ def get_library_filtered(
         }
       }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500
+    # quand le run est obsolete / la base inaccessible / la facade leve.
+    try:
+        return _get_library_filtered_impl(api, run_id, filters, sort, page, page_size)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level pour endpoint UI
+        logger.exception(
+            "get_library_filtered failed for run_id=%s page=%s", run_id, page
+        )
+        return {
+            "ok": False,
+            "error": "library_load_failed",
+            "message": str(exc),
+            "user_message": (
+                "Impossible de charger la bibliotheque (run obsolete ou base "
+                "inaccessible). Relance un scan ou redemarre l'app."
+            ),
+            "rows": [],
+            "total": 0,
+            "page": int(page or 1),
+            "pages": 0,
+            "page_size": int(page_size or 50),
+            "stats": {"by_tier": {}},
+        }
+
+
+def _get_library_filtered_impl(
+    api: Any,
+    run_id: Optional[str],
+    filters: Optional[Dict[str, Any]],
+    sort: str,
+    page: int,
+    page_size: int,
+) -> Dict[str, Any]:
+    """Implementation reelle de get_library_filtered, sans wrap global (Vague F)."""
     filters = filters or {}
     page = max(1, int(page or 1))
     page_size = max(1, min(500, int(page_size or 50)))
@@ -467,10 +893,11 @@ def get_library_filtered(
 
     total = len(filtered)
 
-    # Stats pour la sidebar (counts par tier)
+    # Stats pour la sidebar (counts par tier). VN-B.2 : lecture sur display_tier
+    # (single source of truth) avec fallback tier_v2 pour rows pre-VN-B.2.
     by_tier: Dict[str, int] = {}
     for r in filtered:
-        t = str(r.get("tier_v2") or "unknown").lower()
+        t = str(r.get("display_tier") or r.get("tier_v2") or "unknown").lower()
         by_tier[t] = by_tier.get(t, 0) + 1
 
     sorted_rows = _apply_sort(filtered, sort)
@@ -672,7 +1099,8 @@ def get_scoring_rollup(
         if score is not None:
             bucket["score_sum"] += float(score)
             bucket["score_samples"] += 1
-        tier = str(r.get("tier_v2") or "unknown").lower()
+        # VN-B.2 : lecture sur display_tier (single source of truth).
+        tier = str(r.get("display_tier") or r.get("tier_v2") or "unknown").lower()
         if tier in bucket["tier_distribution"]:
             bucket["tier_distribution"][tier] += 1
         if len(bucket["top_film_ids"]) < 5:
@@ -720,10 +1148,39 @@ def _row_subs_missing_fr(row: Dict[str, Any]) -> bool:
 
 
 def _row_unidentified(row: Dict[str, Any]) -> bool:
-    """True si la row n'a pas ete identifiee par TMDb (cf domain/librarian.py)."""
+    """True si le film n'a PAS pu etre identifie (titre+annee fiables).
+
+    AUDIT 2026-06-13 (R5-A) : l'ancienne version exigeait `tmdb_id > 0` EN
+    PREMIER (`if tmdb_id_int <= 0: return True`). Or l'identification ne passe
+    pas forcement par TMDb : un film resolu par fichier NFO ou par parsing du
+    nom n'a AUCUN tmdb_id mais EST parfaitement identifie (titre + annee +
+    confiance). Sur une biblio reelle 100% NFO (TMDb desactive), ce bug
+    classait les 1027 films "non identifies" et affichait "Identifier" partout.
+    Le tmdb_id ne sert qu'aux jaquettes / au match Jellyfin, PAS a decider de
+    l'identification.
+
+    Critere corrige :
+    - tmdb_id resolu (> 0) => identifie (raccourci suffisant).
+    - sinon : identifie si proposed_source est fiable (nfo / name / tmdb /
+      imdb ...), confiance >= seuil low (60) ET une annee est resolue.
+    - non identifie si source unknown/vide, confiance < 60, ou annee absente.
+    """
+    tmdb_id = row.get("tmdb_id")
+    try:
+        if tmdb_id is not None and int(tmdb_id) > 0:
+            return False  # tmdb_id resolu : identifie (raccourci).
+    except (TypeError, ValueError):
+        pass
     src = str(row.get("proposed_source") or "").strip().lower()
-    conf = int(row.get("confidence") or 0)
-    return src in ("unknown", "") or conf == 0
+    if src in ("", "unknown"):
+        return True
+    if int(row.get("confidence") or 0) < 60:
+        return True
+    # La row Library expose `year`, la PlanRow `proposed_year` : on tolere les 2.
+    year = int(row.get("proposed_year") or row.get("year") or 0)
+    if year <= 0:
+        return True
+    return False
 
 
 def _row_recently_modified(row: Dict[str, Any], now_ts: float, window_s: float) -> bool:
@@ -821,7 +1278,8 @@ def get_library_counters_by_chip(
 
     now_ts = time.time()
     for row in scoped_rows:
-        tier = str(row.get("tier_v2") or "unknown").lower()
+        # VN-B.2 : lecture sur display_tier (single source of truth).
+        tier = str(row.get("display_tier") or row.get("tier_v2") or "unknown").lower()
         if tier in counts:
             counts[tier] += 1
         else:
@@ -877,13 +1335,15 @@ def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any
 
 
 def _confidence_label_from_value(value: int) -> str:
-    """Reproduit la grille de labels utilisee par compute_confidence."""
-    v = int(value or 0)
-    if v >= 85:
-        return "high"
-    if v >= 60:
-        return "med"
-    return "low"
+    """Reproduit la grille de labels utilisee par compute_confidence.
+
+    VN-C.1 (batch 2) : delegation au module canonique
+    cinesort.domain.confidence_thresholds (source unique CONF_HIGH=85 /
+    CONF_MEDIUM=60). Anciens seuils hardcode 85/60 ici => meme valeurs,
+    mais maintenant pilotes depuis 1 endroit.
+    """
+    from cinesort.domain.confidence_thresholds import confidence_label  # noqa: PLC0415
+    return confidence_label(value)
 
 
 def _format_proposed_path(api: Any, run_id: str, title: str, year: int) -> str:
@@ -1008,6 +1468,31 @@ def set_film_tmdb_candidate(
             log_module=__name__,
         )
 
+    # VP-G-LOCKS-001 (Fix #5 ROADMAP_VAGUE_P) : Identify manuel via Modal Film
+    # provoque la transition path:<sha1> -> tmdb:<new_id>. Sans migration, les
+    # locks poses avant Identify restent orphelins sur l'ancien path:<sha1>
+    # et seront ecrases au prochain rescan/refresh. Pattern identique a
+    # library_actions_support.py:340-361 (_rematch_tmdb_and_update_plan).
+    try:
+        old_film_id = compute_film_id(row)
+        new_film_id = f"tmdb:{tmdb_int}"
+        if old_film_id and old_film_id != new_film_id and is_path_film_id(old_film_id):
+            repo = getattr(store, "field_locks", None)
+            if repo is not None:
+                try:
+                    migrated = repo.migrate_locks(old_film_id, new_film_id)
+                    if migrated:
+                        logger.info(
+                            "field_locks migrate %s -> %s : %d lock(s)",
+                            old_film_id,
+                            new_film_id,
+                            migrated,
+                        )
+                except (OSError, AttributeError, TypeError, ValueError) as exc:
+                    logger.warning("migrate_locks failed: %s", exc)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("field_locks migration failed (best-effort): %s", exc)
+
     return {
         "ok": True,
         "run_id": rid,
@@ -1021,6 +1506,41 @@ def set_film_tmdb_candidate(
     }
 
 
+def clear_tmdb_override(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """AUDIT 2026-06-14 (R7-12) : annule l'override TMDb manuel (revient au match
+    auto). Reversibilite promise par set_film_tmdb_candidate, jusqu'ici sans
+    appelant de prod (methode repo orpheline)."""
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.clear_tmdb_override(run_id=rid, row_id=str(row_id))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(f"clear_tmdb_override echoue : {exc}", category="runtime", level="error", log_module=__name__)
+    removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
+    return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
+
+
+def unmark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """AUDIT 2026-06-14 (R7-12) : annule le marquage pour suppression d'un film
+    (avant : impossible -> il partait au bucket au prochain apply sans recours)."""
+    rid = _resolve_run_id(api, run_id)
+    if not rid:
+        return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
+    store = _get_store(api)
+    if store is None:
+        return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    try:
+        res = store.film_modal.unmark_for_deletion(run_id=rid, row_id=str(row_id))
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(f"unmark_for_deletion echoue : {exc}", category="runtime", level="error", log_module=__name__)
+    removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
+    return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
+
+
 def mark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
     """Spec 06 §3.7 : marque un film pour le bucket `_user_marked_for_deletion/`.
 
@@ -1030,6 +1550,21 @@ def mark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[str,
 
     Retourne : { ok, marked, run_id, row_id, source_path, marked_at }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _mark_for_deletion_impl(api, run_id, row_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("mark_for_deletion failed for run_id=%s row_id=%s", run_id, row_id)
+        return {
+            "ok": False,
+            "error": "mark_for_deletion_failed",
+            "message": str(exc),
+            "user_message": "Impossible de marquer ce film. Verifie l'etat du run et reessaie.",
+        }
+
+
+def _mark_for_deletion_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+    """Implementation reelle de mark_for_deletion, sans wrap global (Vague F)."""
     rid = _resolve_run_id(api, run_id)
     if not rid:
         return _err_response("Aucun run disponible.", category="state", level="info", log_module=__name__)
@@ -1078,6 +1613,21 @@ def mark_alert_ignored(api: Any, row_id: str, alert_code: str) -> Dict[str, Any]
 
     Retourne : { ok, ignored, row_id, alert_code, ignored_at }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : wrap global pour eviter HTTP 500.
+    try:
+        return _mark_alert_ignored_impl(api, row_id, alert_code)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("mark_alert_ignored failed for row_id=%s alert_code=%s", row_id, alert_code)
+        return {
+            "ok": False,
+            "error": "mark_alert_ignored_failed",
+            "message": str(exc),
+            "user_message": "Impossible d'ignorer cette alerte. Reessaie dans quelques instants.",
+        }
+
+
+def _mark_alert_ignored_impl(api: Any, row_id: str, alert_code: str) -> Dict[str, Any]:
+    """Implementation reelle de mark_alert_ignored, sans wrap global (Vague F)."""
     rid_s = str(row_id or "").strip()
     code_s = str(alert_code or "").strip()
     if not rid_s:
@@ -1137,3 +1687,171 @@ def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
         res = str(row.get("resolution") or "").strip()
         return res.upper() if res and res != "unknown" else None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Vague P / VP-G : Field locks UI endpoints (cablage final integration)
+# ---------------------------------------------------------------------------
+# Audit prealable VP-G (cf docs/internal/AUDIT_VP_G_LIB_VALIDATION_V5_LEGACY.md)
+# a identifie 3 endpoints attendus par `web/dashboard/views/library/lib-validation.js`
+# mais inexistants cote backend : `library/set_field_lock`,
+# `library/clear_field_lock`, `library/list_field_locks`.
+#
+# Le repository `FieldLocksRepository` existe deja (cf
+# `cinesort/infra/db/repositories/field_locks.py`). On ajoute juste la couche
+# UI/facade pour exposer les routes via introspection
+# `rest_server._get_api_methods` (pass 2 `/api/library/{method}`).
+#
+# Memo `feedback_cinesort_v76_ui` : endpoints dans `library_support.py`,
+# pas dans un controller. Pas de duplication de logique : delegation au repo.
+
+
+_VALID_LOCK_SOURCES = {
+    "ui_lock",
+    "manual_identify",
+    "user_edit",
+    "auto_match",
+}
+
+
+def _get_field_locks_repo_safe(api: Any):
+    """Acces best-effort au FieldLocksRepository (sans crash si infra HS).
+
+    Retourne None si infra non disponible ou si l'attribut `field_locks`
+    n'existe pas sur le store (cas tests legers).
+    """
+    store = _get_store(api)
+    if store is None:
+        return None
+    return getattr(store, "field_locks", None)
+
+
+def set_field_lock(
+    api: Any,
+    film_id: str,
+    field_name: str,
+    locked_value: Any = None,
+    source: str = "ui_lock",
+) -> Dict[str, Any]:
+    """Vague P / VP-G : pose un verrou sur un champ d'un film.
+
+    Args:
+        film_id: cle stable du film (`tmdb:<id>` ou `path:<sha1>`).
+        field_name: nom du champ a verrouiller (ex. "title", "year").
+        locked_value: valeur a verrouiller (serialisee JSON cote repo).
+        source: origine du lock (`ui_lock` par defaut, audit only).
+
+    Returns:
+        `{ok: True, locked_at: float}` en cas de succes,
+        `{ok: False, message: ..., user_message: ...}` sinon.
+    """
+    fid = str(film_id or "").strip()
+    fname = str(field_name or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+    if not fname:
+        return _err_response("field_name requis.", category="validation", level="info", log_module=__name__)
+
+    src = str(source or "ui_lock").strip().lower()
+    if src not in _VALID_LOCK_SOURCES:
+        src = "ui_lock"
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        return _err_response(
+            "Store SQLite indisponible (field_locks).",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    try:
+        res = repo.set_lock(fid, fname, locked_value, source=src)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Persistance lock echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    if not res or not res.get("ok"):
+        return _err_response(
+            str((res or {}).get("reason") or "set_lock refuse"),
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+    return {
+        "ok": True,
+        "film_id": fid,
+        "field_name": fname,
+        "locked_at": float(res.get("locked_at") or 0.0),
+        "source": src,
+    }
+
+
+def clear_field_lock(api: Any, film_id: str, field_name: str) -> Dict[str, Any]:
+    """Vague P / VP-G : retire un verrou champ-par-champ.
+
+    Returns:
+        `{ok: True, removed: bool, film_id, field_name}` en cas de succes,
+        `{ok: False, ...}` sinon. `removed=False` si aucun lock n'existait
+        (idempotence OK, ce n'est pas une erreur).
+    """
+    fid = str(film_id or "").strip()
+    fname = str(field_name or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+    if not fname:
+        return _err_response("field_name requis.", category="validation", level="info", log_module=__name__)
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        return _err_response(
+            "Store SQLite indisponible (field_locks).",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    try:
+        res = repo.clear_lock(fid, fname)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        return _err_response(
+            f"Suppression lock echouee : {exc}",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
+    return {
+        "ok": True,
+        "removed": bool((res or {}).get("removed")),
+        "film_id": fid,
+        "field_name": fname,
+    }
+
+
+def list_field_locks(api: Any, film_id: str) -> Dict[str, Any]:
+    """Vague P / VP-G : liste tous les verrous d'un film.
+
+    Returns:
+        `{ok: True, film_id, locks: [...]}` ou erreur.
+
+    Chaque lock = `{field_name, locked_value, locked_at, source, run_id, row_id}`.
+    """
+    fid = str(film_id or "").strip()
+    if not fid:
+        return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
+
+    repo = _get_field_locks_repo_safe(api)
+    if repo is None:
+        # Best-effort : si le store est HS, on renvoie liste vide plutot
+        # qu'une erreur dure -> UI affiche "aucun lock" et ne bloque pas
+        # l'utilisateur. Symetrie avec _list_locked_field_names dans
+        # library_actions_support.
+        logger.debug("list_field_locks : repo indisponible, retour liste vide")
+        return {"ok": True, "film_id": fid, "locks": []}
+    try:
+        locks = repo.list_locks(fid)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("list_field_locks repo error film_id=%s: %s", fid, exc)
+        return {"ok": True, "film_id": fid, "locks": []}
+    return {"ok": True, "film_id": fid, "locks": list(locks or [])}

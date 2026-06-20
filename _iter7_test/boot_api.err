@@ -1,0 +1,90 @@
+REST rate-limiter init: 5 failures / 60s window (global cap 20), localhost exempted
+[REST] CineSort API standalone sur http://127.0.0.1:8642 (localhost only)
+[REST] Astuce : ajoutez --public pour autoriser l'acces depuis le LAN.
+[REST] Ctrl+C pour arreter.
+V5-03 : purge cache TMDb (TTL 42j) — checked=42 purged=0 preserved_legacy=0
+retention cron demarre (retention=90j, initial_delay=60s, interval=86400s)
+quarantine ttl cron demarre (ttl=30j, initial_delay=60s, interval=86400s)
+REST API started on http://127.0.0.1:8642 (167 endpoints)
+network: IP locale detectee = 10.2.0.2 (UDP)
+REST: dashboard accessible a http://10.2.0.2:8642/dashboard/
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+db: 31 migrations disponibles, schema actuel v0
+db: tracking schema_migrations a echoue pour v1 (001_init_runs_errors.sql): no such table: schema_migrations
+db: migration 001_init_runs_errors.sql appliquee -> v1
+db: tracking schema_migrations a echoue pour v2 (002_probe_cache.sql): no such table: schema_migrations
+db: migration 002_probe_cache.sql appliquee -> v2
+db: tracking schema_migrations a echoue pour v3 (003_quality_score_tables.sql): no such table: schema_migrations
+db: migration 003_quality_score_tables.sql appliquee -> v3
+db: tracking schema_migrations a echoue pour v4 (004_anomalies_table.sql): no such table: schema_migrations
+db: migration 004_anomalies_table.sql appliquee -> v4
+db: tracking schema_migrations a echoue pour v5 (005_apply_undo_journal.sql): no such table: schema_migrations
+db: migration 005_apply_undo_journal.sql appliquee -> v5
+db: tracking schema_migrations a echoue pour v6 (006_incremental_scan_cache.sql): no such table: schema_migrations
+db: migration 006_incremental_scan_cache.sql appliquee -> v6
+db: tracking schema_migrations a echoue pour v7 (007_undo_v5_row_id.sql): no such table: schema_migrations
+db: migration 007_undo_v5_row_id.sql appliquee -> v7
+db: tracking schema_migrations a echoue pour v8 (008_incr_row_cache.sql): no such table: schema_migrations
+db: migration 008_incr_row_cache.sql appliquee -> v8
+db: tracking schema_migrations a echoue pour v9 (009_perceptual_reports.sql): no such table: schema_migrations
+db: migration 009_perceptual_reports.sql appliquee -> v9
+db: tracking schema_migrations a echoue pour v10 (010_add_missing_indexes.sql): no such table: schema_migrations
+db: migration 010_add_missing_indexes.sql appliquee -> v10
+db: tracking schema_migrations a echoue pour v11 (011_rename_tiers.sql): no such table: schema_migrations
+db: migration 011_rename_tiers.sql appliquee -> v11
+db: migration 012_schema_history.sql appliquee -> v12
+db: migration 013_apply_ops_checksum.sql appliquee -> v13
+db: migration 014_user_quality_feedback.sql appliquee -> v14
+db: migration 015_audio_fingerprint.sql appliquee -> v15
+db: migration 016_audio_spectral.sql appliquee -> v16
+db: migration 017_ssim_self_ref.sql appliquee -> v17
+db: migration 018_global_score_v2.sql appliquee -> v18
+db: migration 019_apply_pending_moves.sql appliquee -> v19
+db: migration 020_quality_reports_perf_indexes.sql appliquee -> v20
+db: migration 021_fk_cascade.sql appliquee -> v21
+db: migration 022_drop_redundant_indexes.sql appliquee -> v22
+db: migration 023_film_modal_state.sql appliquee -> v23
+db: migration 024_duplicate_decisions.sql appliquee -> v24
+db: migration 025_run_pause_status.sql appliquee -> v25
+db: migration 026_self_healing_023.sql appliquee -> v26
+db: migration 027_self_healing_023_v2.sql appliquee -> v27
+db: migration 028_pragma_history.sql appliquee -> v28
+db: migration 029_apply_atomic_mode.sql appliquee -> v29
+db: migration 030_field_locks.sql appliquee -> v30
+db: migration 031_tri_etat_decisions.sql appliquee -> v31
+reconcile_pending_batches: no pending batches to reconcile
+api: start_plan run_id=20260609_130654_926
+job: demarrage thread run_id=20260609_130654_926
+REST POST /api/run/start_plan -> 200 (219ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_status -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_plan -> 200 (0ms)
+scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootA\Movies (incremental=False)
+scan: phase 1 decouverte = 9 dossiers en 0.00s
+scan: VO-B phase 1 parallele = 9 candidates (workers=4)
+scan: termine C:\Users\blanc\projects\CineSort\test_library\RootA\Movies -> 9 rows
+scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootB\Movies (incremental=False)
+scan: phase 1 decouverte = 6 dossiers en 0.00s
+scan: VO-B phase 1 parallele = 6 candidates (workers=4)
+scan: termine C:\Users\blanc\projects\CineSort\test_library\RootB\Movies -> 8 rows
+scan: debut analyse C:\Users\blanc\projects\CineSort\test_library\RootB\Shows (incremental=False)
+scan: phase 1 decouverte = 2 dossiers en 0.00s
+scan: VO-B phase 1 parallele = 2 candidates (workers=4)
+scan: termine C:\Users\blanc\projects\CineSort\test_library\RootB\Shows -> 3 rows
+job: termine run_id=20260609_130654_926 en 0.1s
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_status -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_plan -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+REST POST /api/run/get_plan -> 200 (0ms)
+Auth bypass localhost (client=127.0.0.1, bind=127.0.0.1) — desktop trusted mode
+api: build_apply_preview run_id=20260609_130654_926
+apply: 9 rows a traiter (dry_run=True)
+apply: termine — renames=1 moves=0 skipped=8 quarantined=0 errors=0 (dry_run=True)
+apply: 8 rows a traiter (dry_run=True)
+apply: termine — renames=0 moves=4 skipped=4 quarantined=0 errors=0 (dry_run=True)
+apply: 3 rows a traiter (dry_run=True)
+apply: termine — renames=0 moves=2 skipped=1 quarantined=0 errors=0 (dry_run=True)
+REST POST /api/run/build_apply_preview -> 200 (46ms)

@@ -1,7 +1,7 @@
 """V2-04 — verifie qu'aucune des 9 vues migrees ne reste sur Promise.all (audit ID-ROB-002)."""
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 # Migration B (PR1 #257 + PR2) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cinesort.app.notify_service import NotifyService, EVENT_SCAN_DONE, EVENT_APPLY_DONE, EVENT_UNDO_DONE, EVENT_ERROR
+from cinesort.app.notify_service import EVENT_APPLY_DONE, EVENT_ERROR, EVENT_SCAN_DONE, EVENT_UNDO_DONE, NotifyService
 
 # Migration B (PR #257) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard
@@ -135,7 +135,7 @@ class NotificationsModuleTests(unittest.TestCase):
     """Test the low-level notifications module."""
 
     def test_import_works(self) -> None:
-        from cinesort.infra.notifications import show_balloon, cleanup
+        from cinesort.infra.notifications import cleanup, show_balloon
 
         self.assertTrue(callable(show_balloon))
         self.assertTrue(callable(cleanup))
@@ -187,6 +187,7 @@ class NotificationsIntegrationTests(unittest.TestCase):
     def test_api_notify_settings_synced_on_save(self) -> None:
         import shutil
         import tempfile
+
         import cinesort.ui.api.cinesort_api as backend
 
         tmp = tempfile.mkdtemp(prefix="cinesort_notif_")
@@ -217,6 +218,7 @@ class NotificationsSettingsPersistenceTests(unittest.TestCase):
     def test_settings_round_trip(self) -> None:
         import shutil
         import tempfile
+
         import cinesort.ui.api.cinesort_api as backend
 
         tmp = tempfile.mkdtemp(prefix="cinesort_notif_rt_")

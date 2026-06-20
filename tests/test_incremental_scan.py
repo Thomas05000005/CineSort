@@ -4,11 +4,11 @@ import shutil
 import tempfile
 import time
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 
 

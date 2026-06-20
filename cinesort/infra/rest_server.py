@@ -21,6 +21,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlsplit
 
 from cinesort.infra.log_context import (
     clear_request_id,
@@ -390,26 +391,153 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # V6-01 : root des fichiers locales/. Initialise par RestApiServer (cf
     # `locales_root = _resolve_locales_root()` plus bas).
     locales_root: Optional[Path] = None
+    # 2026-06-08 : adresse de bind effective ("127.0.0.1" ou "0.0.0.0"). Utilisee
+    # par _check_auth pour decider si le bypass d'auth localhost est sur (cf
+    # plus bas). Initialisee par RestApiServer.start() depuis self._host.
+    bind_host: str = "127.0.0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug("REST %s", format % args)
 
-    # --- CORS ---------------------------------------------------------------
+    # --- CORS / CSRF --------------------------------------------------------
+
+    def _allowed_origin(self, origin: Optional[str]) -> Optional[str]:
+        """Retourne l'Origin a refleter dans ACAO si elle est autorisee, sinon None.
+
+        Autorise : localhost (127.0.0.1 / localhost / ::1) UNIQUEMENT sur le port
+        d'ecoute du serveur (R8-031, F3 ; scheme libre, port contraint),
+        l'origine PROPRE du serveur (meme Host -> dashboard LAN auto-servi), ou
+        la `cors_origin` explicitement configuree (non '*'). Toute autre origine
+        (un site web externe) est refusee : ferme la lecture cross-site et, via
+        `_is_forbidden_cross_site`, la CSRF possible par le bypass auth loopback.
+        """
+        o = (origin or "").strip()
+        if not o or o.lower() == "null":
+            return None
+        try:
+            parts = urlsplit(o)
+            host = (parts.hostname or "").lower()
+        except ValueError:
+            return None
+        if host in {"127.0.0.1", "localhost", "::1"}:
+            # R8-031 (F3) : n'autoriser le loopback QUE sur le port d'ecoute
+            # effectif du serveur. Sans ce controle, une 2e app locale hostile
+            # (ex. http://localhost:9999) etait traitee comme origine autorisee
+            # -> sa requete passait la garde CSRF via le bypass auth loopback.
+            # Le scheme reste libre (http/https loopback), seul le PORT doit
+            # matcher. own_port indeterminable (tests sans socket) -> on autorise
+            # (ne casse pas l'usage local quand on ne peut pas introspecter).
+            try:
+                origin_port = parts.port
+            except ValueError:
+                return None
+            if origin_port is None:
+                origin_port = 443 if (parts.scheme or "").lower() == "https" else 80
+            own_port = self._own_port()
+            if own_port is None or origin_port == own_port:
+                return o
+            return None
+        # Same-origin : Origin == scheme://<Host> (cas du dashboard servi en LAN
+        # depuis 0.0.0.0 ou l'utilisateur ouvre http://<ip-lan>:8642).
+        own_host = (self.headers.get("Host") or "").strip().lower()
+        if own_host and o.split("://", 1)[-1].lower() == own_host:
+            return o
+        cfg = (self.cors_origin or "").strip()
+        if cfg and cfg != "*" and o == cfg:
+            return o
+        return None
+
+    def _own_port(self) -> Optional[int]:
+        """Port d'ecoute effectif du serveur (R8-031, F3).
+
+        Prefere `server.server_address[1]` (non spoofable). Fallback : le port du
+        header `Host` (cas navigateur : le browser y met l'autorite cible, donc le
+        vrai port). None si indeterminable (handler de test sans socket ni Host).
+        """
+        srv = getattr(self, "server", None)
+        addr = getattr(srv, "server_address", None) if srv is not None else None
+        if addr and len(addr) >= 2:
+            try:
+                return int(addr[1])
+            except (TypeError, ValueError):
+                pass
+        try:
+            host_hdr = (self.headers.get("Host") or "").strip()
+        except AttributeError:
+            return None
+        if ":" in host_hdr:
+            try:
+                return int(host_hdr.rsplit(":", 1)[1])
+            except ValueError:
+                return None
+        return None
+
+    def _is_forbidden_cross_site(self) -> bool:
+        """Garde CSRF : True si la requete vient d'un navigateur sur une origine
+        non autorisee. Un navigateur envoie TOUJOURS `Origin` sur une requete
+        cross-origin (et sur les POST same-origin) ; un client non-navigateur
+        (curl, cron, code natif) n'en envoie pas. Sans ce garde, n'importe quel
+        site visite par l'utilisateur peut POSTer sur l'API locale et le bypass
+        auth loopback l'autoriserait (AUDIT 2026-06-10, REAL 2/2)."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return False
+        return self._allowed_origin(origin) is None
+
+    def _is_cross_site_get(self) -> bool:
+        """Garde CSRF pour les GET a effet de bord (R8-030, F3).
+
+        Les <img>/<script>/<link> cross-site n'envoient PAS d'`Origin` (requete
+        no-cors), donc `_is_forbidden_cross_site` (base sur Origin) ne les attrape
+        pas. Mais les navigateurs modernes envoient `Sec-Fetch-Site: cross-site`
+        sur CES requetes. On combine les deux signaux : une requete est cross-site
+        si son Origin est present+interdit OU si `Sec-Fetch-Site == cross-site`.
+        Un client non-navigateur (curl, pywebview natif) n'envoie ni l'un ni
+        l'autre -> traite comme NON cross-site (usage local legitime preserve).
+        """
+        if self._is_forbidden_cross_site():
+            return True
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        return sec_fetch_site == "cross-site"
+
+    def _poster_trusted_caller(self) -> bool:
+        """Appelant autorise a declencher les EFFETS DE BORD du proxy poster
+        (purge `force` + fetch TMDb/ecriture cache) (R8-094/R8-095, filet F3).
+
+        TRUSTED si : requete navigateur same-origin/same-site (dashboard local ou
+        LAN auto-servi), OU client loopback natif (desktop pywebview/curl local).
+        NON trusted : navigateur cross-site (amplification CSRF, cf
+        `_is_cross_site_get`) ET client LAN non-navigateur (curl distant en bind
+        0.0.0.0, sans Origin ni Sec-Fetch -> ne doit pas bruler le quota TMDb).
+        Les appelants non fiables n'obtiennent QUE la lecture du cache.
+        """
+        if self._is_cross_site_get():
+            return False
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if sec_fetch_site in {"same-origin", "same-site"}:
+            return True
+        return self._client_ip() in _LOCAL_CLIENT_IPS
 
     def _send_cors_headers(self) -> None:
-        # Cf issue #69 : Vary: Origin obligatoire quand on echo une origin
-        # specifique (cache HTTP correcte cote browser/proxy). Pour le default
-        # "*" on n'a pas besoin de Vary mais le mettre quand meme ne nuit pas
-        # — il signale juste que la reponse depend de l'Origin (info honnete).
-        self.send_header("Access-Control-Allow-Origin", self.cors_origin)
-        if self.cors_origin != "*":
+        # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
+        # On reflete uniquement une origine autorisee (localhost / same-origin /
+        # cors_origin configuree). Cf issue #69 : Vary: Origin obligatoire quand
+        # on echo une origine specifique (cache HTTP correcte browser/proxy).
+        allowed = self._allowed_origin(self.headers.get("Origin"))
+        if allowed is not None:
+            self.send_header("Access-Control-Allow-Origin", allowed)
             self.send_header("Vary", "Origin")
+        elif self.cors_origin and self.cors_origin != "*":
+            # Origine LAN explicitement configuree : comportement existant conserve.
+            self.send_header("Access-Control-Allow-Origin", self.cors_origin)
+            self.send_header("Vary", "Origin")
+        # Sinon : aucune ACAO emise. Les requetes same-origin (sans Origin) n'en
+        # ont pas besoin ; les requetes cross-site ne peuvent pas lire la reponse.
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Max-Age", "86400")
         # NB : pas de "Access-Control-Allow-Credentials: true" — l'auth Bearer
-        # passe par header Authorization, pas par cookie. Le combo "*" +
-        # credentials est interdit par la spec CORS, on est conforme.
+        # passe par header Authorization, pas par cookie.
 
     def do_OPTIONS(self) -> None:
         # V3-04 polish v7.7.0 : positionner aussi un request_id pour les
@@ -427,27 +555,160 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # --- Auth ---------------------------------------------------------------
 
     def _check_auth(self) -> bool:
+        # 2026-06-08 — BYPASS LOCALHOST DESKTOP TRUSTED
+        # Cause racine : 4 hotfixes successifs (_mask_secrets, _safeBearer,
+        # utf-8-sig, native_boot) n'ont pas fait disparaitre les 401 silencieux
+        # en local. Tant que le token transitant par PowerShell/JS storage subit
+        # une mutation invisible (BOM U+FEFF, percent-decode, normalisation
+        # unicode), l'auth Bearer echoue de facon non-reproductible.
+        # Approche radicale : en mode desktop pywebview (bind 127.0.0.1), le
+        # process REST tourne dans le meme contexte utilisateur que le client.
+        # Un attaquant local a deja le shell — l'auth Bearer ne protege rien.
+        # On bypass donc l'auth quand TOUS les criteres sont reunis :
+        #   1. client_ip ∈ _LOCAL_CLIENT_IPS (loopback v4/v6)
+        #   2. bind_host == "127.0.0.1" (PAS 0.0.0.0 / expose LAN)
+        #   3. feature flag CINESORT_DISABLE_LOCAL_AUTH != "1" (kill-switch)
+        # Le bypass est volontairement DESACTIVE quand bind 0.0.0.0 : on ne
+        # peut pas distinguer un client LAN qui spoof 127.0.0.1 dans son
+        # interface vs un vrai loopback. Securite critique.
+        client_ip = self.client_address[0] if self.client_address else ""
+        bypass_disabled = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH", "0").strip() == "1"
+        if (
+            not bypass_disabled
+            and client_ip in _LOCAL_CLIENT_IPS
+            and self.bind_host == "127.0.0.1"
+        ):
+            logger.info(
+                "Auth bypass localhost (client=%s, bind=%s) — desktop trusted mode",
+                client_ip,
+                self.bind_host,
+            )
+            return True
         if not self.auth_token:
             return False
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
+            # DEBUG VERBOSE 2026-06-08 : signaler header manquant/malforme.
+            if os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
+                logger.warning(
+                    "[DEBUG-AUTH] header Authorization absent ou non-Bearer: %r",
+                    auth[:40] if auth else "<empty>",
+                )
             return False
-        return hmac.compare_digest(auth[7:].strip().encode(), self.auth_token.encode())
+        bearer = auth[7:].strip()
+        match = hmac.compare_digest(bearer.encode(), self.auth_token.encode())
+        # DEBUG VERBOSE 2026-06-08 : si mismatch, dump codepoints des deux cotes
+        # pour identifier la divergence exacte (BOM, trailing whitespace, etc.).
+        if not match and os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
+            try:
+                bearer_cps = [f"U+{ord(c):04X}" for c in bearer]
+                token_cps = [f"U+{ord(c):04X}" for c in self.auth_token]
+                bearer_non_ascii = [(i, ord(c)) for i, c in enumerate(bearer) if ord(c) > 0x7F]
+                token_non_ascii = [(i, ord(c)) for i, c in enumerate(self.auth_token) if ord(c) > 0x7F]
+                logger.warning(
+                    "[DEBUG-AUTH] MISMATCH bearer_len=%d token_len=%d",
+                    len(bearer),
+                    len(self.auth_token),
+                )
+                logger.warning("[DEBUG-AUTH] bearer codepoints=%s", bearer_cps)
+                logger.warning("[DEBUG-AUTH] server token codepoints=%s", token_cps)
+                if bearer_non_ascii:
+                    logger.warning("[DEBUG-AUTH] bearer NON-ASCII pos+cp=%s", bearer_non_ascii)
+                if token_non_ascii:
+                    logger.warning("[DEBUG-AUTH] server token NON-ASCII pos+cp=%s", token_non_ascii)
+                # Comparaison char-par-char pour pointer la 1ere divergence
+                for i in range(max(len(bearer), len(self.auth_token))):
+                    b = bearer[i] if i < len(bearer) else None
+                    t = self.auth_token[i] if i < len(self.auth_token) else None
+                    if b != t:
+                        bo = f"U+{ord(b):04X}" if b is not None else "<EOS>"
+                        to_ = f"U+{ord(t):04X}" if t is not None else "<EOS>"
+                        logger.warning(
+                            "[DEBUG-AUTH] 1ere divergence pos=%d bearer=%s server=%s", i, bo, to_,
+                        )
+                        break
+            except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+                logger.warning("[DEBUG-AUTH] dump failed: %s", _dbg_exc)
+        return match
+
+    def _has_bearer_header(self) -> bool:
+        """True si la requete porte un header Authorization Bearer non-vide.
+
+        FIX 2026-06-07 (faux 429 TMDb test) : on doit distinguer deux cas d'echec
+        d'auth qui produisent tous deux un 401 cote handler legacy :
+
+        1. Token ABSENT/MALFORME (header omis par _safeBearer cote front quand le
+           token storage contient un codepoint non-ASCII type BOM U+FEFF). C'est
+           un bug client/config, pas une tentative d'attaque -> on NE doit PAS
+           incrementer le compteur du rate-limiter, sinon les 5 pings parallels
+           de l'Accueil saturent immediatement le seuil (5/60s) et le 1er click
+           "Tester" sur Parametres tombe en 429 "Trop de tentatives" avant meme
+           de toucher la logique auth/TMDb. L'utilisateur croit avoir fait 1
+           requete, en realite 5 401 silencieux ont deja epuise le quota.
+
+        2. Token PRESENT mais FAUX : vrai vecteur d'attaque -> on garde le
+           comptage record_failure() comme avant.
+        """
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return False
+        return bool(auth[7:].strip())
 
     def _client_ip(self) -> str:
         """Retourne l'adresse IP du client (premier element du tuple)."""
         return self.client_address[0] if self.client_address else "unknown"
 
     def _is_rate_limited(self) -> bool:
-        """Verifie si l'IP du client est bloquee par le rate limiter."""
-        if self.rate_limiter and self.rate_limiter.is_blocked(self._client_ip()):
-            self._respond_json(429, {"ok": False, "message": "Trop de tentatives. Reessayez dans 60 secondes."})
+        """Verifie si l'IP du client est bloquee par le rate limiter.
+
+        FIX DEFINITIF 2026-06-07 (saturation 5/60s par 401 silents en local) :
+        on exempte TOTALEMENT les IPs locales (_LOCAL_CLIENT_IPS). Cause racine
+        documentee : quand le storage frontend contient un codepoint non-ASCII
+        (BOM U+FEFF injecte via PowerShell ?ntoken=..., ou URL-decode incorrect),
+        _safeBearer() omet silencieusement le header Authorization. Les 5 pings
+        parallels de l'Accueil saturent alors le compteur per-IP (5/60s) en moins
+        d'une seconde, et chaque action utilisateur suivante tombe en 429
+        "Trop de tentatives" avant meme d'atteindre la logique auth.
+        En contexte desktop pywebview (bind 127.0.0.1 par defaut), il n'y a
+        AUCUNE surface d'attaque a proteger via rate-limit : un attaquant local
+        a deja le shell. Le rate-limit reste pleinement actif pour les IPs
+        distantes (supervision LAN, dashboard distant).
+        """
+        client_ip = self._client_ip()
+        if client_ip in _LOCAL_CLIENT_IPS:
+            return False
+        if self.rate_limiter and self.rate_limiter.is_blocked(client_ip):
+            # ITER14 RATE_LIMIT_429_FACADE : Retry-After indique au client le delai
+            # avant retry (RFC 7231 §7.1.3). Valeur = window_s (60s par defaut)
+            # = duree maximale residuelle avant que le compteur per-IP se vide.
+            # Seuil 5 echecs / 60s INCHANGE (cf _RATE_LIMIT_MAX_FAILURES / _RATE_LIMIT_WINDOW_S).
+            retry_after = str(int(self.rate_limiter._window))
+            self._respond_json(
+                429,
+                {"ok": False, "message": "Trop de tentatives. Reessayez dans 60 secondes."},
+                extra_headers={"Retry-After": retry_after},
+            )
             return True
         return False
 
     def _send_unauthorized(self) -> None:
-        if self.rate_limiter:
-            self.rate_limiter.record_failure(self._client_ip())
+        # FIX 2026-06-07 (faux 429 TMDb test) : on ne comptabilise pas les 401
+        # causes par un header Authorization manquant/malforme (token absent ou
+        # vide). Voir _has_bearer_header() pour la justification detaillee.
+        # Backward compat : un vrai mauvais token continue d'incrementer le
+        # compteur (comportement antérieur preserve pour les attaquants reels).
+        #
+        # FIX DEFINITIF 2026-06-07 (suite) : meme reflexion que _is_rate_limited
+        # — on n'enregistre AUCUN echec pour les IPs locales, sinon le compteur
+        # pourrait encore servir a calculer is_blocked sur un autre handler si
+        # un futur refactor oublie l'exemption a l'entree. Defense en profondeur.
+        client_ip = self._client_ip()
+        if (
+            self.rate_limiter
+            and self._has_bearer_header()
+            and client_ip not in _LOCAL_CLIENT_IPS
+        ):
+            self.rate_limiter.record_failure(client_ip)
         self._respond_json(401, {"ok": False, "message": "Cle d'acces invalide ou manquante."})
 
     # --- Response helpers ---------------------------------------------------
@@ -464,7 +725,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         with contextlib.suppress(AttributeError, OSError):
             self.send_header("X-Request-ID", rid)
 
-    def _respond_json(self, status: int, data: Any) -> None:
+    def _respond_json(self, status: int, data: Any, extra_headers: Optional[Dict[str, str]] = None) -> None:
         try:
             body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError) as exc:
@@ -477,6 +738,11 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # V3-04 : header X-Request-ID systematique sur les reponses JSON
         # (succes ET erreurs 4xx/5xx).
         self._send_request_id_header()
+        # ITER14 RATE_LIMIT_429_FACADE : extra headers optionnels (ex: Retry-After
+        # sur les 429). Backward compat : extra_headers=None ne change rien.
+        if extra_headers:
+            for hname, hvalue in extra_headers.items():
+                self.send_header(hname, hvalue)
         self.end_headers()
         self.wfile.write(body)
 
@@ -719,8 +985,93 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             self._respond_json(200, self.openapi_spec)
             return
 
+        # Iter12 / ETAPE 1b : proxy poster TMDb avec validation stricte
+        # anti-SSRF/anti-open-relay + cache disque local.
+        # Cf cinesort/infra/integrations/poster_proxy.py (whitelist sizes,
+        # regex id, scrub cle API). Pas d'auth Bearer requise sur cette
+        # route : sert directement <img src="/api/poster?id=...&size=..."> et
+        # le bypass loopback du _check_auth de cette classe couvre deja le
+        # cas pywebview natif. Note : on n'invoque PAS self._check_auth ici
+        # car le navigateur ne peut pas mettre d'header Authorization sur
+        # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
+        # serait de toute facon active.
+        if clean == "/api/poster":
+            from urllib.parse import parse_qs  # noqa: PLC0415
+
+            from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
+            from cinesort.infra.state import default_state_dir  # noqa: PLC0415
+            # Resoudre state_dir : preferer l'API si disponible, sinon
+            # default_state_dir() (compat tests sans API monte).
+            api = getattr(self, "api", None)
+            state_dir = None
+            if api is not None:
+                get_state = getattr(api, "_get_state_dir", None)
+                if callable(get_state):
+                    try:
+                        state_dir = get_state()
+                    except Exception:  # noqa: BLE001 — boundary
+                        state_dir = None
+            if state_dir is None:
+                state_dir = default_state_dir()
+            cache_root = Path(state_dir) / "cache" / "posters"
+            # Parser la query string (premier raw seulement, jamais liste).
+            raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
+            parsed = parse_qs(raw_query, keep_blank_values=True)
+            flat_query: Dict[str, str] = {}
+            for key, values in parsed.items():
+                if values:
+                    flat_query[key] = values[0]
+            # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
+            # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
+            # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
+            # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
+            # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
+            # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
+            poster_trusted = self._poster_trusted_caller()
+            if "force" in flat_query and not poster_trusted:
+                flat_query.pop("force", None)
+                logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
+            try:
+                # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
+                # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
+                poster_proxy.serve_poster(
+                    self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted
+                )
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+                logger.debug(
+                    "REST GET /api/poster client disconnect (%s, %.0fms)",
+                    type(exc).__name__,
+                    (time.monotonic() - _t0) * 1000,
+                )
+            except Exception as exc:  # noqa: BLE001 — boundary
+                logger.exception("REST 500 /api/poster: %s", exc)
+                with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                    self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
+            return
+
         # Fichiers statiques du dashboard distant
-        if clean == _DASHBOARD_PREFIX or path.startswith(_DASHBOARD_PREFIX + "/"):
+        # FIX bug CSS 2026-06-05 : "/dashboard" (sans slash final) doit rediriger
+        # vers "/dashboard/" (avec slash) pour que le navigateur resolve correctement
+        # les chemins relatifs des assets dans index.html (./styles.css, ./app.js, etc.).
+        # Sans cette redirection, ./styles.css est resolu en /styles.css (au lieu de
+        # /dashboard/styles.css) car la base URL "/dashboard" n'a pas de segment final,
+        # donc le navigateur retombe sur la racine "/" et tous les assets renvoient 404
+        # (page HTML brute sans CSS).
+        # On compare sur `path` (et non `clean`) car `clean = path.rstrip("/")`
+        # supprimerait le slash final qui distingue justement les 2 cas.
+        if path == _DASHBOARD_PREFIX:
+            # Preserver la query string eventuelle
+            query = ""
+            if "?" in self.path:
+                query = "?" + self.path.split("?", 1)[1]
+            self.send_response(301)
+            self.send_header("Location", _DASHBOARD_PREFIX + "/" + query)
+            self.send_header("Content-Length", "0")
+            self._send_cors_headers()
+            self._send_request_id_header()
+            self.end_headers()
+            return
+        if path == _DASHBOARD_PREFIX + "/" or path.startswith(_DASHBOARD_PREFIX + "/"):
             self._serve_dashboard_file(path.split("?")[0])
             return
 
@@ -761,6 +1112,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             self._respond_json(404, {"ok": False, "message": "Endpoint inconnu"})
             return
 
+        # Garde CSRF : rejette les POST cross-site venant d'un navigateur AVANT
+        # toute action. Indispensable car le bypass auth loopback autoriserait
+        # sinon une page malveillante a piloter l'API locale (start_plan/apply).
+        if self._is_forbidden_cross_site():
+            logger.warning("REST 403 cross-site POST from origin=%r", self.headers.get("Origin"))
+            self._respond_json(403, {"ok": False, "message": "Origine non autorisee"})
+            return
+
         # Rate limiting : bloquer avant meme de verifier le token
         if self._is_rate_limited():
             logger.warning("REST 429 rate limit %s", self._client_ip())
@@ -770,6 +1129,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             logger.warning("REST auth failure from %s for %s", self._client_ip(), path)
             self._send_unauthorized()
             return
+        # B05-401-INCOHERENT (Fix B / S6 audit) : auth ok -> reset compteur
+        # d'echecs pour cette IP. Sans cet appel, un client qui a fait 4 echecs
+        # recents reste au bord du plafond meme apres avoir trouve le bon token
+        # et peut s'auto-ban au moindre hickup reseau ulterieur. Le commentaire
+        # de record_success() decrivait deja l'intention, mais le hookup
+        # manquait.
+        if self.rate_limiter:
+            self.rate_limiter.record_success(self._client_ip())
 
         method_name = path[5:]  # strip "/api/"
         method = self.api_methods.get(method_name)
@@ -939,8 +1306,21 @@ class RestApiServer:
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._rate_limiter = _RateLimiter()
+        # FIX DEFINITIF 2026-06-07 : log d'observabilite au boot pour distinguer
+        # rapidement saturation (X/N) vs token absent vs autre cause.
+        logger.info(
+            "REST rate-limiter init: %d failures / %.0fs window (global cap %d), localhost exempted",
+            self._rate_limiter._max,
+            self._rate_limiter._window,
+            self._rate_limiter._max_global,
+        )
         self._is_https = False  # True si le serveur tourne effectivement en HTTPS
         self.dashboard_url: str = ""  # URL publique du dashboard, remplie au start()
+        # B05-401-INCOHERENT (Fix A) : on garde une ref a la classe handler
+        # creee dynamiquement dans start() pour pouvoir hot-swap le token
+        # sans redemarrer le serveur. L'absence de cette ref etait la cause
+        # racine de l'incoherence 401 apres save_settings.
+        self._handler_cls: Optional[type] = None
 
     @property
     def host(self) -> str:
@@ -1008,8 +1388,15 @@ class RestApiServer:
                 "dashboard_root": dashboard_root,
                 "shared_root": shared_root,
                 "locales_root": locales_root,
+                # 2026-06-08 : expose le bind effectif au handler pour que
+                # _check_auth puisse decider si le bypass localhost est sur
+                # (uniquement vrai bind 127.0.0.1, pas 0.0.0.0 expose LAN).
+                "bind_host": self._host,
             },
         )
+        # B05-401-INCOHERENT (Fix A) : conserver la ref pour permettre la
+        # mutation runtime du token via update_auth_token().
+        self._handler_cls = handler
 
         self._server = ThreadingHTTPServer((self._host, self._port), handler)
         self._server.daemon_threads = True
@@ -1063,16 +1450,125 @@ class RestApiServer:
         logger.info("REST: dashboard accessible a %s", self.dashboard_url)
 
     def stop(self) -> None:
-        """Stop the HTTP server."""
-        if self._server:
-            self._server.shutdown()
+        """Stop the HTTP server.
+
+        H10 (hotfix2) : l'ancien code faisait join(timeout=5) puis NULL la ref
+        sans verifier is_alive(). Si le thread refusait de mourir (handler bloque,
+        socket non liberee), on se retrouvait avec un thread daemon orphelin
+        tournant a vide et une socket potentiellement encore ouverte, ce qui
+        faisait echouer le bind au prochain start().
+
+        Nouveau pattern :
+        - boucle de courts join(0.5) tant que is_alive() et timeout restant
+        - si is_alive() apres timeout : force-close de la socket sous-jacente
+          pour debloquer serve_forever() et liberer le port
+        - les refs ne sont nullifiees qu'apres best-effort de nettoyage
+        """
+        server = self._server
+        thread = self._thread
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.shutdown()
             with contextlib.suppress(OSError):
-                self._server.server_close()
-            self._server = None
-        if self._thread:
-            self._thread.join(timeout=5)
-            self._thread = None
+                server.server_close()
+        if thread is not None:
+            timeout_remaining = 5.0
+            step = 0.5
+            while thread.is_alive() and timeout_remaining > 0:
+                thread.join(step)
+                timeout_remaining -= step
+            if thread.is_alive():
+                # Le thread refuse de mourir : on force-close la socket
+                # sous-jacente pour debloquer serve_forever() et eviter de
+                # garder le port occupe (regression bind au restart).
+                logger.warning(
+                    "REST: thread %s toujours vivant apres timeout, "
+                    "force-close de la socket pour liberer le port.",
+                    thread.name,
+                )
+                if server is not None:
+                    sock = getattr(server, "socket", None)
+                    if sock is not None:
+                        with contextlib.suppress(OSError):
+                            sock.close()
+                # Dernier essai bref de join apres force-close
+                thread.join(timeout=1.0)
+                if thread.is_alive():
+                    logger.error(
+                        "REST: thread %s orphelin (daemon=%s) — la socket "
+                        "a ete fermee mais le thread n'a pas pu etre joint.",
+                        thread.name,
+                        thread.daemon,
+                    )
+        self._server = None
+        self._thread = None
+        # B05-401-INCOHERENT (Fix A) : on jette la ref handler pour eviter
+        # tout hot-swap de token apres stop() (no-op silencieux sinon).
+        self._handler_cls = None
         logger.info("REST API stopped.")
+
+    def update_auth_token(self, new_token: str) -> None:
+        """Hot-swap du token Bearer sans redemarrage du serveur.
+
+        B05-401-INCOHERENT (Fix A) : avant ce patch, le token etait fige a la
+        creation du serveur. Apres save_settings (rest_api_token), le fichier
+        settings.json contenait le nouveau token mais le handler en memoire
+        validait encore avec l'ancien -> tout nouveau client recoit 401.
+
+        On mute ici l'attribut de classe `auth_token` sur la sous-classe
+        Handler creee dans start() ET on reset les compteurs rate-limit :
+        un changement volontaire de token ne doit pas heriter des bans
+        accumules sous l'ancien token.
+
+        No-op si le serveur n'est pas demarre (handler_cls est None).
+
+        R2-LAN-TOKEN-BYPASS-HOT-SWAP : si le serveur ecoute reellement sur 0.0.0.0
+        (exposition LAN), on REFUSE le hot-swap vers un token plus court que
+        MIN_LAN_TOKEN_LENGTH. Sans cette garde, un utilisateur pourrait demarrer
+        avec un token long (passant la validation __init__), puis sauvegarder un
+        token court via les settings : le bind 0.0.0.0 resterait actif avec un
+        token faible, contournant silencieusement la protection lan_demoted.
+        L'utilisateur doit restart avec une config valide.
+        """
+        new_token = str(new_token or "")
+        # Garde anti-bypass LAN : si on ecoute sur 0.0.0.0 et le nouveau token
+        # est trop court, on refuse le swap (ne pas degrader la posture de
+        # securite d'un serveur deja expose au LAN).
+        # DPAPI-R6-02 : EXCEPTION kill-switch — un token vide ("") est une
+        # invalidation volontaire (rotation post-compromission). L'invalidation
+        # immediate est plus prioritaire que la garde anti-degradation : on
+        # autorise toujours le hot-swap vers "" meme sur 0.0.0.0.
+        if (
+            new_token
+            and self._host == "0.0.0.0"
+            and len(new_token) < self.MIN_LAN_TOKEN_LENGTH
+        ):
+            logger.warning(
+                "REST: hot-swap du token REFUSE — le serveur ecoute sur 0.0.0.0 "
+                "(exposition LAN) et le nouveau token est trop court "
+                "(%d caracteres, minimum %d). Token et bind inchanges. "
+                "Pour appliquer ce token, redemarrez le serveur avec une "
+                "configuration valide (token >= %d caracteres ou bind 127.0.0.1).",
+                len(new_token),
+                self.MIN_LAN_TOKEN_LENGTH,
+                self.MIN_LAN_TOKEN_LENGTH,
+            )
+            return
+        self._token = new_token
+        if self._handler_cls is not None:
+            self._handler_cls.auth_token = new_token
+            # Reset compteurs : un changement de token volontaire ne doit
+            # pas heriter des bans accumules sous l'ancien token.
+            with contextlib.suppress(Exception):
+                self._rate_limiter.reset()
+            if not new_token:
+                logger.warning(
+                    "REST: token REST efface — auth desactivee (kill-switch)"
+                )
+            else:
+                logger.info(
+                    "REST: auth token hot-swapped (len=%d)", len(new_token)
+                )
 
     def join(self) -> None:
         """Block until the server thread ends (standalone mode)."""

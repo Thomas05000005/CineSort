@@ -8,6 +8,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
+# Fix audit 2026-05-26 (v1.5.6) Vague L (subs-1) : reutilise la normalisation de
+# langue partagee pour que la detection "sans subs FR" cote Qualite/health
+# (generate_suggestions) consomme EXACTEMENT la meme source de verite que la vue
+# Bibliotheque (library_support._build_library_rows) : union des sous-titres
+# externes (PlanRow.subtitle_languages) + pistes EMBARQUEES persistees dans
+# quality_reports.metrics.subtitles_embedded. Avant, generate_suggestions
+# ignorait les embedded -> divergence de comptage entre les 2 vues (BUG 2 Vague I
+# faussement corrige).
+from cinesort.domain.subtitle_helpers import _normalize_iso639
+
 # Codecs video consideres comme obsoletes
 _OBSOLETE_CODECS = frozenset({"mpeg4", "xvid", "divx", "wmv", "mpeg2", "mpeg1"})
 
@@ -40,6 +50,16 @@ def generate_suggestions(
     expected_langs = s.get("subtitle_expected_languages") or ["fr"]
     if isinstance(expected_langs, str):
         expected_langs = [l.strip() for l in expected_langs.split(",") if l.strip()]
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-3) : normaliser les langues
+    # ATTENDUES via _LANG_MAP avant comparaison (symetrie). Une saisie
+    # 'french'/'francais'/'fra'/'fre' doit matcher 'fr'. On garde une version
+    # brute (pour l'affichage du libelle) et une version normalisee (pour la
+    # comparaison). Les tags non resolvables retombent sur leur forme lower().
+    expected_norm: List[str] = []
+    for raw in expected_langs:
+        norm = _normalize_iso639(raw) or str(raw).strip().lower()
+        if norm and norm not in expected_norm:
+            expected_norm.append(norm)
 
     # Index quality reports par row_id
     qr_by_id: Dict[str, Dict[str, Any]] = {}
@@ -101,13 +121,43 @@ def generate_suggestions(
         )
 
     # --- C. Sous-titres manquants ---
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-1) : MEME source de verite que
+    # library_support._build_library_rows. On fusionne :
+    #   - langues EXTERNES detectees au scan (PlanRow.subtitle_languages)
+    #   - langues EMBARQUEES persistees dans quality_reports.metrics.subtitles_embedded
+    # toutes normalisees via _normalize_iso639 ('fra'/'fre'/'french' -> 'fr').
+    # Une langue attendue est "manquante" si elle n'est PAS dans cette union.
+    # Avant : on lisait seulement PlanRow.subtitle_missing_langs (calcule au scan
+    # SANS les pistes embarquees) -> divergence avec la vue Bibliotheque.
     missing_sub_films: List[str] = []
     for row in rows:
-        missing = getattr(row, "subtitle_missing_langs", None) or []
-        if isinstance(missing, str):
-            missing = missing.split("|")
-        if any(lang in missing for lang in expected_langs):
-            rid = str(getattr(row, "row_id", ""))
+        rid = str(getattr(row, "row_id", ""))
+
+        # Langues presentes : externes (PlanRow) ∪ embarquees (quality_report)
+        present_langs: Set[str] = set()
+        external = getattr(row, "subtitle_languages", None) or []
+        if isinstance(external, str):
+            external = external.split("|")
+        for lang in external:
+            norm = _normalize_iso639(lang) or str(lang).strip().lower()
+            if norm:
+                present_langs.add(norm)
+
+        qr = qr_by_id.get(rid) or {}
+        qr_metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+        embedded = qr_metrics.get("subtitles_embedded")
+        if isinstance(embedded, list):
+            for track in embedded:
+                if not isinstance(track, dict):
+                    continue
+                raw_lang = (track.get("language") or "").strip().lower()
+                if not raw_lang:
+                    continue
+                norm = _normalize_iso639(raw_lang)
+                if norm:
+                    present_langs.add(norm)
+
+        if any(lang not in present_langs for lang in expected_norm):
             title = str(getattr(row, "proposed_title", "") or rid)
             missing_sub_films.append(title)
             problem_ids.add(rid)

@@ -1,0 +1,15 @@
+{
+  "perceptual_launched": false,
+  "warn_skip": true,
+  "auto_recompute_started": false,
+  "matches": [
+    "perceptual_auto_on_quality active mais perceptual_enabled=False -> analyse perceptuelle skip (active aussi le moteur)."
+  ],
+  "tag": "on_engine",
+  "overrides": {
+    "perceptual_auto_on_quality": true,
+    "perceptual_enabled": true,
+    "auto_recompute_quality_on_scan": true
+  },
+  "run_id": "20260609_174949_995"
+}

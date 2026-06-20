@@ -20,10 +20,13 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.app.merge_metadata import merge_metadata
+from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
@@ -66,6 +69,16 @@ def _read_deletion_marks(path: Path) -> Dict[str, Any]:
 
 def _write_deletion_marks(path: Path, data: Dict[str, Any]) -> None:
     state.atomic_write_json(path, data)
+
+
+def list_deletion_marks_row_ids(api: Any, run_id: str) -> List[str]:
+    """AUDIT 2026-06-14 (R7-4) : row_ids marques pour suppression via le mecanisme
+    bulk (deletion_marks.json). Consomme par l'apply (apply_support) pour router
+    ces films vers _review/_user_marked_for_deletion/. [] si rien/erreur."""
+    path = _deletion_marks_path(api, run_id)
+    if path is None:
+        return []
+    return [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
 
 
 def _persist_marks(api: Any, run_id: str, new_row_ids: List[str]) -> int:
@@ -236,10 +249,51 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
     }
 
 
-def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
-    """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl."""
+def _get_field_locks_repo(api: Any):
+    """Best-effort acces au FieldLocksRepository via le store.
+
+    Retourne None si infra non dispo, ou si l'attribut field_locks n'existe
+    pas (tests avec mocks legers). Toujours wrappe en try/except — un echec
+    d'acces field_locks ne doit JAMAIS faire planter rescan/rematch.
+    """
     try:
         settings = api.settings.get_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        store, _runner = api._get_or_create_infra(state_dir)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("_get_field_locks_repo: infra unavailable: %s", exc)
+        return None
+    return getattr(store, "field_locks", None)
+
+
+def _list_locked_field_names(api: Any, film_id: str) -> List[str]:
+    """Liste les noms de champs verrouilles pour film_id (vide si aucun)."""
+    if not film_id:
+        return []
+    repo = _get_field_locks_repo(api)
+    if repo is None:
+        return []
+    try:
+        locks = repo.list_locks(film_id)
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("list_locks failed film_id=%s: %s", film_id, exc)
+        return []
+    return [str(lk.get("field_name") or "") for lk in locks if lk.get("field_name")]
+
+
+def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
+    """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl.
+
+    Vague P / VP-C :
+        - Consulte `field_locks` AVANT d'ecraser les champs de target.
+        - Appelle `migrate_locks(old_film_id, new_film_id)` lors de la
+          transition `path:<sha1>` -> `tmdb:<id>` (fix #5 ROADMAP_VAGUE_P).
+    """
+    try:
+        # AUDIT 2026-06-10 : _internal_settings (secrets en clair) au lieu du
+        # payload masque -> _build_tmdb_client_optional construisait sinon un
+        # TmdbClient avec tmdb_api_key="••••••••" et tout re-match echouait 401.
+        settings = api._internal_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -285,12 +339,69 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     from cinesort.app.plan_support import plan_row_to_jsonable, replan_single_row  # noqa: PLC0415
 
     kind = "collection" if str(target.get("kind") or "") == "collection" else "single"
-    new_row = replan_single_row(cfg, folder_path, video_path, tmdb=tmdb, kind=kind)
+
+    # AUDIT 2026-06-11 (R3e gap[3] + R4-P4) : passer la VRAIE racine du scan a
+    # replan (cfg a root=folder_path, donc sans racine explicite folder_name
+    # serait derive du stem fichier -> replan non idempotent). R4-P4 : en
+    # multi-roots, runs.root ne stocke que roots[0] ; passer roots[0] pour un
+    # film d'un root SECONDAIRE faussait folder_name (un film pose a la racine
+    # de R2 heritait du nom du dossier R2 au lieu du stem). On choisit donc le
+    # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
+    # P4 v2 : la row porte source_root (le root EXACT du scan, core.py:424) —
+    # candidat autoritaire teste en premier, avant les roots reconstruits de la DB.
+    scan_root = _resolve_scan_root_for_replan(
+        api, run_id, folder_path, priority_candidates=[target.get("source_root")]
+    )
+
+    new_row = replan_single_row(
+        cfg, folder_path, video_path, tmdb=tmdb, kind=kind, library_root=scan_root
+    )
     if new_row is None:
         return None
 
     new_row_json = plan_row_to_jsonable(new_row)
     new_row_json["row_id"] = str(row_id)
+
+    # Vague P / VP-C : barriere merge_metadata + migrate_locks.
+    # 1. Calcul des film_id ancien / nouveau.
+    # 2. Si transition path: -> tmdb:, migrate_locks vers le nouveau id.
+    # 3. Consulte les locks (nouveau id) et applique merge_metadata pour
+    #    ne pas ecraser les champs verrouilles.
+    try:
+        old_film_id = compute_film_id(target)
+        new_film_id = compute_film_id(new_row_json)
+        if (
+            old_film_id
+            and new_film_id
+            and old_film_id != new_film_id
+            and is_path_film_id(old_film_id)
+        ):
+            repo = _get_field_locks_repo(api)
+            if repo is not None:
+                try:
+                    migrated = repo.migrate_locks(old_film_id, new_film_id)
+                    if migrated:
+                        logger.info(
+                            "field_locks migrate %s -> %s : %d lock(s)",
+                            old_film_id,
+                            new_film_id,
+                            migrated,
+                        )
+                except (OSError, AttributeError, TypeError, ValueError) as exc:
+                    logger.warning("migrate_locks failed: %s", exc)
+
+        locked_names = _list_locked_field_names(api, new_film_id)
+        if locked_names:
+            # source = nouvelle row enrichie, target = ancienne row preservee
+            new_row_json = merge_metadata(
+                source=new_row_json,
+                target=target,
+                locked_fields=locked_names,
+                replace_data=True,
+            )
+            new_row_json["row_id"] = str(row_id)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("field_locks integration failed (best-effort): %s", exc)
 
     all_rows[target_idx] = new_row_json
     tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
@@ -306,6 +417,91 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
             tmdb.flush()
 
     return new_row_json
+
+
+def _resolve_scan_root_for_replan(
+    api: Any,
+    run_id: str,
+    folder_path: Path,
+    *,
+    priority_candidates: Optional[List[Any]] = None,
+) -> Optional[Path]:
+    """Retourne la racine du scan qui CONTIENT folder_path, ou None.
+
+    AUDIT 2026-06-11 (R4-P4) : runs.root ne stocke que roots[0] (compat). Les
+    roots complets d'un scan multi-roots sont dans runs.config_json ('roots',
+    fallback 'root'/'library_path'). Un candidat n'est retenu que s'il est
+    folder_path lui-meme ou un de ses ancetres : passer un root etranger a
+    replan_single_row fausserait _folder_is_root (un film pose a la racine d'un
+    root secondaire perdrait son stem). None = compat pre-R3e (cfg.root==folder).
+
+    Revue adversaire R4 (P4 v2) :
+    - `priority_candidates` (ex: PlanRow.source_root, le root AUTORITATIF du
+      scan porte par la row) sont testes en premier, ordre fourni.
+    - Parmi les candidats DB, le PLUS PROFOND gagne : avec des roots imbriques
+      (Films + Films/Films4K, config seulement warnee par validate_roots), le
+      premier-match retournait Films pour un film de Films4K -> folder_name
+      contamine, la classe de bug que ce helper doit eliminer.
+    - Les candidats sont normalises (strip/quotes, expandvars, expanduser)
+      avant resolve : config_json persiste les roots BRUTS pre-normalisation.
+    """
+
+    def _norm(raw: Any) -> Optional[Path]:
+        text = str(raw or "").strip().strip('"').strip()
+        if not text:
+            return None
+        try:
+            return Path(os.path.expandvars(text)).expanduser().resolve()
+        except (OSError, ValueError):
+            return None
+
+    try:
+        folder_res = folder_path.resolve()
+    except (OSError, ValueError):
+        folder_res = folder_path
+
+    def _contains(cand: Path) -> bool:
+        return cand == folder_res or cand in folder_res.parents
+
+    for raw in priority_candidates or []:
+        cand_p = _norm(raw)
+        if cand_p is not None and _contains(cand_p):
+            return cand_p
+
+    try:
+        found = api._find_run_row(run_id)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if not found:
+        return None
+    row = found[0]
+
+    candidates: List[str] = []
+    root_str = str(row.get("root") or "").strip()
+    if root_str:
+        candidates.append(root_str)
+    cfg_raw = row.get("config_json")
+    try:
+        cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) and cfg_raw.strip() else cfg_raw
+    except (TypeError, ValueError, json.JSONDecodeError):
+        cfg = None
+    if isinstance(cfg, dict):
+        roots_raw = cfg.get("roots")
+        if isinstance(roots_raw, list):
+            candidates.extend(str(r) for r in roots_raw if str(r or "").strip())
+        for key in ("root", "library_path"):
+            val = str(cfg.get(key) or "").strip()
+            if val:
+                candidates.append(val)
+
+    best: Optional[Path] = None
+    for cand in candidates:
+        cand_p = _norm(cand)
+        if cand_p is None or not _contains(cand_p):
+            continue
+        if best is None or len(cand_p.parts) > len(best.parts):
+            best = cand_p
+    return best
 
 
 def _build_cfg_for_row(api: Any, settings: Dict[str, Any], *, root: Path):
@@ -351,12 +547,27 @@ def _build_tmdb_client_optional(settings: Dict[str, Any], state_dir: Path):
 
 
 def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
-    """Build un job_fn compatible JobRunner pour rescanner N rows via le vrai pipeline."""
+    """Build un job_fn compatible JobRunner pour rescanner N rows via le vrai pipeline.
 
-    def job_fn(should_cancel) -> Dict[str, Any]:
+    VN-E.3 : accepte `should_pause` (kwarg optionnel) injecte par le JobRunner.
+    La cancellation prevaut sur la pause.
+    """
+
+    def job_fn(should_cancel, should_pause=None) -> Dict[str, Any]:
+        import time as _time
+
         processed = 0
         skipped = 0
         for rid in row_ids:
+            # VN-E.3 : pause cooperative AVANT cancel check.
+            if should_pause is not None:
+                try:
+                    while bool(should_pause()):
+                        if should_cancel():
+                            break
+                        _time.sleep(0.5)
+                except Exception:  # noqa: BLE001
+                    pass
             if should_cancel():
                 break
             try:

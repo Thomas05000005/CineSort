@@ -18,11 +18,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from cinesort.infra.radarr_client import RadarrClient
 from cinesort.app.radarr_sync import (
     build_radarr_report,
     should_propose_upgrade,
 )
+from cinesort.infra.radarr_client import RadarrClient
 
 # Migration B (PR #257) : legacy frontend supprime.
 # TODO Phase 2/3 : porter les invariants utiles vers de nouveaux tests dashboard

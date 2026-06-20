@@ -27,12 +27,14 @@
  *   integrations/get_tmdb_posters(tmdb_ids, size) — recharger posters batch
  */
 
-import { escapeHtml } from "../core/dom.js";
+import { escapeHtml, posterProxyUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { renderFilmDetail } from "../components/film-detail.js";
+import { openDuplicateComparatorModal } from "../components/duplicate-comparator-modal.js";
 import { showToast } from "../components/toast.js";
+import { buildEmptyState, bindEmptyStateCta } from "../components/empty-state.js";
 import {
   openLibraryAdvancedDrawer,
   ADVANCED_DRAWER_DEFAULTS,
@@ -145,6 +147,9 @@ function _initState() {
     counters: {}, // 11 compteurs library/get_library_counters_by_chip
     tierFilter: localStorage.getItem(LS_TIER) || "all",
     activeChips: new Set(), // non-tier chips actifs
+    // R7-13 : warnings d'une playlist appliquee (ex preset "DNR partiel") ->
+    // emis dans _buildFilters (le backend filtre par filters.warnings).
+    playlistWarnings: [],
     search: "",
     sort: localStorage.getItem(LS_SORT) || "title",
     viewMode: localStorage.getItem(LS_VIEW) || "grid",
@@ -162,6 +167,15 @@ function _initState() {
 }
 
 /* --- Helpers --- */
+
+// VN-B.2 (Vague N batch 2) : lecture single source of truth display_tier
+// (echelle V2 lowercase reconciliee cote backend via tiers_helpers.
+// reconcile_display_tier). Fallback sur tier_v2 pour les reponses servies par
+// d'eventuels backends pre-VN-B.2 encore en cache.
+function _rowDisplayTier(row) {
+  if (!row) return "unknown";
+  return String(row.display_tier || row.tier_v2 || "unknown").toLowerCase();
+}
 
 function _tierBadge(tier) {
   const t = String(tier || "unknown").toLowerCase();
@@ -206,7 +220,8 @@ function _totalDuration(rows) {
 function _tierDistribution(rows) {
   const dist = {};
   rows.forEach((r) => {
-    const t = String(r.tier_v2 || "unknown").toLowerCase();
+    // VN-B.2 : single source of truth display_tier (echelle V2 canonique).
+    const t = _rowDisplayTier(r);
     dist[t] = (dist[t] || 0) + 1;
   });
   return dist;
@@ -304,18 +319,56 @@ function _renderNonTierChips() {
   `;
 }
 
+// AUDIT 2026-06-13 (R5-F) : la selection contient-elle >=2 versions du meme
+// film (meme titre+annee normalises) ? -> propose le pont vers le comparateur.
+function _selectionHasDuplicatePair() {
+  if (!_state || _state.selected.size < 2) return false;
+  const counts = new Map();
+  for (const id of _state.selected) {
+    const r = _state.rows.find((x) => String(x.row_id) === String(id));
+    if (!r) continue;
+    const key = `${String(r.title || "").trim().toLowerCase()}|${r.year || 0}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (counts.get(key) >= 2) return true;
+  }
+  return false;
+}
+
 function _renderBulkToolbar() {
   const n = _state.selected.size;
   if (n === 0) return "";
+  // AUDIT 2026-06-13 (R5-D) : barre de progression de l'analyse perceptuelle
+  // batch (job async). Affichee tant que _state.perceptualJob est actif ; mise
+  // a jour en place par _pollPerceptualJob (pas de full re-render par tick).
+  const pj = _state.perceptualJob;
+  const percHtml = pj ? `
+    <div class="bibliotheque-perc-progress" role="status" aria-live="polite">
+      <div class="bibliotheque-perc-progress-bar">
+        <div class="bibliotheque-perc-progress-fill" data-perc-progress-fill
+             style="--progress: ${pj.total > 0 ? (pj.done / pj.total) : 0}"></div>
+      </div>
+      <span class="bibliotheque-perc-progress-label" data-perc-progress-label>
+        Analyse perceptuelle : ${pj.done}/${pj.total}…
+      </span>
+    </div>` : "";
+  const disabled = pj ? "disabled" : "";
+  // AUDIT 2026-06-13 (R5-F) : pont vers le comparateur quand la selection
+  // contient au moins 2 versions du MEME film (meme titre+annee). Repond au cas
+  // d'usage "je selectionne 1080p + 4k du meme film et je veux les comparer".
+  const compareBtn = _selectionHasDuplicatePair()
+    ? `<button type="button" class="v5-btn v5-btn--primary" data-bibliotheque-bulk="compare" title="Comparer les versions du même film (frames, audio, qualité)">⊟ Comparer les versions</button>`
+    : "";
   return `
     <div class="bibliotheque-bulk-toolbar" role="region" aria-label="Actions groupées">
       <span class="bibliotheque-bulk-count">✓ ${n} film${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}</span>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual">▶ Analyser perceptuel</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan">↻ Re-scanner</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Recharger les posters TMDb">🖼 Posters TMDb</button>
+      ${compareBtn}
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="perceptual" ${disabled}>▶ Analyser perceptuel</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="rescan" ${disabled}>↻ Re-scanner</button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="refresh-posters" title="Récupérer les jaquettes TMDb (résout aussi les films NFO par titre + année)">🖼 Récupérer jaquettes</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-bulk="export">📤 Exporter…</button>
       <button type="button" class="v5-btn v5-btn--danger" data-bibliotheque-bulk="delete">🗑 Marquer pour suppression</button>
       <button type="button" class="v5-btn v5-btn--ghost" data-bibliotheque-bulk="clear">Annuler sélection</button>
+      ${percHtml}
     </div>
   `;
 }
@@ -394,9 +447,39 @@ function _renderFilmCard(row) {
   const warningBadge = warningsCount > 0
     ? `<span class="bibliotheque-card-warn" title="${warningsCount} alerte(s)">⚠ ${warningsCount}</span>`
     : "";
-  const poster = row.poster_url
-    ? `<img class="bibliotheque-card-poster-img" src="${escapeHtml(row.poster_url)}" alt="${escapeHtml(title)}" loading="lazy">`
-    : `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true">🎬</div>`;
+  // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : placeholder enrichi pour
+  // les films sans poster TMDb. Si tmdb_id existe (poster pas encore charge ou
+  // 404 TMDb) -> placeholder simple. Si pas de tmdb_id (film non identifie) ->
+  // CTA "Identifier" pour rediriger l'utilisateur vers le modal candidats TMDb.
+  // Avant : tous les films sans poster_url affichaient le meme clapper muet,
+  // aucun feedback "non identifie" -> capture 5/6 du rapport audit montraient
+  // 853 cartes identiques sans differenciation.
+  let poster;
+  // Iter12 ETAPE 2 : prioriser le proxy `/api/poster?id=...&size=w185` quand
+  // `tmdb_id` est disponible (CSP resserree en section 4 sans casser l'affichage).
+  // Fallback sur `poster_url` direct pour backward compat (acquis 242cf339).
+  // R7-8 : row._posterBust (pose par "Recuperer jaquettes") force le proxy a
+  // re-telecharger + le navigateur a re-requeter ; absent au rendu normal.
+  const proxiedPoster = posterProxyUrl(row.tmdb_id, "w185", row._posterBust);
+  const posterSrc = proxiedPoster || row.poster_url || "";
+  // AUDIT 2026-06-13 (R5-B) : "Identifier" ne doit s'afficher QUE sur les vrais
+  // non-identifies. Un film identifie par NFO/nom (sans tmdb_id ni jaquette) a
+  // un clap propre, pas un CTA "Identifier" intempestif. `row.identified` est
+  // calcule cote backend (source unique = _row_unidentified). Fallback sur
+  // tmdb_id si le champ est absent (payload ancien).
+  const isIdentified = (row.identified === true) || (row.identified == null && !!row.tmdb_id);
+  if (posterSrc) {
+    poster = `<img class="bibliotheque-card-poster-img" src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="lazy">`;
+  } else if (isIdentified) {
+    poster = `<div class="bibliotheque-card-poster-placeholder" aria-hidden="true" title="${escapeHtml(title)} — identifié (pas de jaquette)">🎬</div>`;
+  } else {
+    poster = `<div class="bibliotheque-card-poster-placeholder bibliotheque-card-poster-placeholder--unidentified"
+                   data-bibliotheque-unidentified="${escapeHtml(rowId)}"
+                   title="Film non identifié — clic pour identifier manuellement">
+                <span aria-hidden="true">🎬</span>
+                <span class="bibliotheque-card-unidentified-cta">Identifier</span>
+              </div>`;
+  }
   const selected = _state.selected.has(rowId);
   return `
     <article class="bibliotheque-card${selected ? " is-selected" : ""}"
@@ -407,7 +490,7 @@ function _renderFilmCard(row) {
              aria-label="${escapeHtml(title)} ${row.year || ""}">
       <div class="bibliotheque-card-poster">
         ${poster}
-        ${_tierBadge(row.tier_v2)}
+        ${_tierBadge(_rowDisplayTier(row))}
         ${warningBadge}
         <label class="bibliotheque-card-check" onclick="event.stopPropagation()">
           <input type="checkbox" data-bibliotheque-select="${escapeHtml(rowId)}"${selected ? " checked" : ""} aria-label="Sélectionner">
@@ -459,7 +542,7 @@ function _renderTableRow(row) {
       <td><input type="checkbox" data-bibliotheque-select="${escapeHtml(rowId)}"${selected ? " checked" : ""}></td>
       <td class="bibliotheque-table-title">${escapeHtml(row.title || "Sans titre")}${warn}</td>
       <td>${row.year || "—"}</td>
-      <td>${_tierBadge(row.tier_v2)}</td>
+      <td>${_tierBadge(_rowDisplayTier(row))}</td>
       <td>${_formatConfidence(row.confidence)}</td>
       <td>${_formatScore(row.score_v2)}</td>
       <td>${escapeHtml(row.resolution || "—")}</td>
@@ -472,9 +555,43 @@ function _renderTableRow(row) {
 
 function _renderGrid() {
   if (_state.rows.length === 0 && !_state.loading) {
+    // Fix audit 2026-06-07 : distinguer bibliotheque totalement vide (0 film
+    // en base) vs filtres actifs avec 0 resultat. Le message + CTA "Effacer
+    // les filtres" sont trompeurs quand l'utilisateur n'a juste pas encore
+    // scanne sa bibliotheque.
+    const hasActiveFilters = (
+      (_state.tierFilter && _state.tierFilter !== "all") ||
+      (_state.activeChips && _state.activeChips.size > 0) ||
+      (_state.search && _state.search.length > 0) ||
+      _state.advancedActive
+    );
+    if (_state.total === 0 && !hasActiveFilters) {
+      // iter11 EMPTY_STATE 4.3.1 : composant uniforme buildEmptyState. Wrapper
+      // .bibliotheque-empty conserve pour back-compat CSS (components.css L7166).
+      return `
+        <div class="bibliotheque-empty">
+          ${buildEmptyState({
+            variant: "card",
+            icon: "library",
+            title: "Aucun film importé",
+            message: "Votre bibliothèque est vide. Lancez un scan pour découvrir vos films.",
+            ctaLabel: "Lancer un scan",
+            ctaRoute: "/processing?step=scan",
+            testId: "bibliotheque-empty-cta",
+          })}
+        </div>
+      `;
+    }
+    // iter11 EMPTY_STATE 4.3.2 : composant uniforme. Bouton reset conserve son
+    // attribut data-bibliotheque-reset via class + handler delegue (L1087).
     return `
       <div class="bibliotheque-empty">
-        <p>Aucun film ne correspond à ces filtres.</p>
+        ${buildEmptyState({
+          variant: "card",
+          icon: "search",
+          title: "Aucun résultat",
+          message: "Aucun film ne correspond à ces filtres.",
+        })}
         <button type="button" class="v5-btn v5-btn--secondary" data-bibliotheque-reset>Effacer les filtres</button>
       </div>
     `;
@@ -509,7 +626,14 @@ function _renderInfiniteSentinel() {
 
 function _renderBody() {
   if (_state.loading && _state.rows.length === 0) {
-    return `<div class="bibliotheque-section bibliotheque-loading">Chargement…</div>`;
+    // Fix audit 2026-05-25 (v1.5.3) Vague G : harmonise avec doublons.js,
+    // skeleton + header dedie pour lever l'ambiguite avec liste vide.
+    return `
+      <div class="bibliotheque-section">
+        <div class="bibliotheque-loading-header">⏳ Chargement de la bibliothèque…</div>
+        ${[1,2,3,4,5].map(() => `<div class="v5-skeleton v5-skeleton-row"></div>`).join("")}
+      </div>
+    `;
   }
   if (_state.error) {
     return `<div class="bibliotheque-section bibliotheque-error">${escapeHtml(_state.error)}</div>`;
@@ -539,6 +663,9 @@ function _render() {
   _bindGridDragSelect();
   _setupScrollObserver();
   _updateInspector();
+  // iter11 EMPTY_STATE : cabler navigation CTA empty-state (route hash).
+  // Idempotent : bindEmptyStateCta marque chaque bouton via dataset.
+  try { bindEmptyStateCta(_container); } catch (_e) { /* tolerant */ }
 }
 
 /* --- Inspecteur droit --- */
@@ -614,6 +741,10 @@ function _buildFilters({ includeAdvanced = true } = {}) {
   if (_state.activeChips.size > 0) {
     filters.chips = Array.from(_state.activeChips);
   }
+  // R7-13 : warnings issus d'une playlist appliquee (le backend filtre dessus).
+  if (Array.isArray(_state.playlistWarnings) && _state.playlistWarnings.length > 0) {
+    filters.warnings = _state.playlistWarnings.slice();
+  }
   if (includeAdvanced && _state.advancedActive) {
     const adv = _state.advanced || {};
     if (adv.year_min && adv.year_min > 1900) filters.year_min = adv.year_min;
@@ -650,7 +781,12 @@ async function _fetchCounters() {
   delete filters.chips;
   try {
     const res = await apiPost("library/get_library_counters_by_chip", { filters });
-    if (!res || res.ok === false) return;
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
+    // (unmount entre temps -> NPE sur _state.counters).
+    if (!_state) return;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (!res || _payload.ok === false) return;
     const data = res.data || res;
     _state.counters = data.counts || {};
   } catch (_e) {
@@ -659,6 +795,11 @@ async function _fetchCounters() {
 }
 
 async function _fetchLibrary({ append = false } = {}) {
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garde contre _state null. Le module
+  // remet _state = null au unmount(). Si _fetchLibrary() est rappele depuis un
+  // timer/promise residuel apres demontage de la vue, on aurait :
+  //   "Cannot set properties of null (setting 'error')" -> banniere rouge.
+  if (!_state) return;
   if (_abortController && !append) {
     _abortController.abort();
   }
@@ -669,6 +810,9 @@ async function _fetchLibrary({ append = false } = {}) {
     _state.rowsByPage = new Map();
     _state.rows = [];
     _state.page = 1;
+    // Fix audit 2026-06-07 : reset focus-by-click au reload (filtre/tri
+    // change) pour ne pas figer le hover sur un focus obsolete.
+    _state._focusedByClick = false;
   } else {
     _state.loadingMore = true;
   }
@@ -703,8 +847,13 @@ async function _fetchLibrary({ append = false } = {}) {
       },
       { signal },
     );
-    if (!res || res.ok === false) {
-      _state.error = (res && (res.message || res.error)) || "Erreur de chargement.";
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : la requete await a pu terminer
+    // APRES le unmount() de la vue (navigation rapide). _state est alors null.
+    if (!_state) return;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (!res || _payload.ok === false) {
+      _state.error = (res && (res.message || res.error)) || _payload.message || _payload.error || "Erreur de chargement.";
       _state.loading = false;
       _state.loadingMore = false;
       _render();
@@ -729,10 +878,39 @@ async function _fetchLibrary({ append = false } = {}) {
     _render();
 
     if (!append) {
-      void _fetchCounters().then(() => _render());
+      void _fetchCounters().then(() => {
+        if (!_state) return;
+        // Fix audit 2026-06-07 : _render() detruit innerHTML et tue le focus
+        // de la search input (10k films -> counters lents -> utilisateur tape
+        // pendant le delai -> caracteres perdus). On preserve activeElement +
+        // selection + valeur courante autour du _render().
+        const active = document.activeElement;
+        const wasSearch = !!(active && active.matches && active.matches("[data-bibliotheque-search]"));
+        let savedValue = "";
+        let savedStart = 0;
+        let savedEnd = 0;
+        if (wasSearch) {
+          savedValue = active.value || "";
+          try {
+            savedStart = active.selectionStart || 0;
+            savedEnd = active.selectionEnd || 0;
+          } catch (_e) { /* certains inputs ne supportent pas selectionStart */ }
+        }
+        _render();
+        if (wasSearch && _container) {
+          const inp = _container.querySelector("[data-bibliotheque-search]");
+          if (inp) {
+            // Restaure la valeur tapee pendant le fetch (peut differer de _state.search).
+            if (savedValue && savedValue !== inp.value) inp.value = savedValue;
+            try { inp.focus(); inp.setSelectionRange(savedStart, savedEnd); } catch (_e) { /* noop */ }
+          }
+        }
+      });
     }
   } catch (err) {
     if (err && err.name === "AbortError") return;
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     _state.error = err ? String(err.message || err) : "Erreur réseau";
     _state.loading = false;
     _state.loadingMore = false;
@@ -988,6 +1166,7 @@ function _bindEvents(container) {
       _state.tierFilter = "all";
       _state.search = "";
       _state.activeChips.clear();
+      _state.playlistWarnings = []; // R7-13 : reset du filtre warnings de playlist
       _state.advancedActive = false;
       _state.advanced = { ...ADVANCED_DRAWER_DEFAULTS };
       localStorage.setItem(LS_TIER, "all");
@@ -1091,10 +1270,23 @@ function _bindEvents(container) {
       _handleBulkAction(action);
       return;
     }
+    // Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : clic sur placeholder
+    // "Identifier" -> ouvre le mode C (modal Detail) qui permet de selectionner
+    // un candidat TMDb manuellement via run/refine_row.
+    const unidBtn = t.closest("[data-bibliotheque-unidentified]");
+    if (unidBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      renderFilmDetail({ mode: "C", rowId: unidBtn.dataset.bibliothequeUnidentified, runId: _runId || null });
+      return;
+    }
     // Carte film : focus inspecteur (Spec 06)
     const card = t.closest(".bibliotheque-card");
     if (card && card.dataset.rowId) {
       _state.focusedRowId = card.dataset.rowId;
+      // Fix audit 2026-06-07 : flag focus-by-click empeche le hover (mouseover
+      // delegation) d'ecraser la selection quand l'utilisateur bouge la souris.
+      _state._focusedByClick = true;
       _updateInspector();
       return;
     }
@@ -1102,6 +1294,7 @@ function _bindEvents(container) {
     const tr = t.closest(".bibliotheque-table-row");
     if (tr && t.tagName !== "INPUT" && tr.dataset.rowId) {
       _state.focusedRowId = tr.dataset.rowId;
+      _state._focusedByClick = true;
       _updateInspector();
     }
   }, opts);
@@ -1137,6 +1330,16 @@ function _bindEvents(container) {
       if (_state.selected.has(rowId)) _state.selected.delete(rowId);
       else _state.selected.add(rowId);
       _render();
+      // Fix audit 2026-06-07 : _render() detruit l'arbre DOM via innerHTML,
+      // la carte focusee disparait et le focus retombe au body -> impossible
+      // d'enchainer Space/Fleche/Space (a11y keyboard-first cassee).
+      // On restaure le focus sur la nouvelle carte avec le meme rowId.
+      if (_container) {
+        const restored = _container.querySelector(`[data-row-id="${rowId}"]`);
+        if (restored && typeof restored.focus === "function") {
+          try { restored.focus(); } catch (_e) { /* noop */ }
+        }
+      }
     }
   }, opts);
 
@@ -1156,6 +1359,11 @@ function _bindEvents(container) {
       if (!tr || !tr.dataset.rowId) return;
       // Anti-flood : ne refocus que si on change de ligne.
       if (_state.focusedRowId === tr.dataset.rowId) return;
+      // Fix audit 2026-06-07 : si l'utilisateur a une selection active OU a
+      // explicitement focuse une ligne par clic, le hover ne doit PAS ecraser
+      // l'inspecteur. Sinon la selection saute en continu vers la ligne survolee.
+      if (_state.selected && _state.selected.size > 0) return;
+      if (_state._focusedByClick) return;
       _state.focusedRowId = tr.dataset.rowId;
       _updateInspector();
     });
@@ -1193,6 +1401,26 @@ function _bindEvents(container) {
     }
   }, opts);
 
+  // AUDIT 2026-06-14 (R6-H) : filet de securite jaquettes. Le proxy /api/poster
+  // renvoie un corps JSON (404 "poster indisponible" / 503 "cle TMDb absente"),
+  // PAS une image -> sans onerror, le navigateur affiche une icone d'image
+  // cassee. Les events 'error' des <img> ne bouillonnent pas -> on ecoute en
+  // phase CAPTURE et on remplace l'<img> en echec par le placeholder 🎬.
+  const _captureOpts = { capture: true };
+  if (_eventsController) _captureOpts.signal = _eventsController.signal;
+  container.addEventListener("error", (ev) => {
+    const img = ev.target;
+    if (!img || img.tagName !== "IMG") return;
+    if (!img.classList || !img.classList.contains("bibliotheque-card-poster-img")) return;
+    if (img.dataset && img.dataset.posterFallbackDone === "1") return; // idempotent
+    const ph = document.createElement("div");
+    ph.className = "bibliotheque-card-poster-placeholder";
+    ph.setAttribute("aria-hidden", "true");
+    ph.title = img.alt ? `${img.alt} — jaquette indisponible` : "Jaquette indisponible";
+    ph.textContent = "🎬";
+    if (img.parentNode) img.parentNode.replaceChild(ph, img);
+  }, _captureOpts);
+
 }
 
 /**
@@ -1224,7 +1452,10 @@ function _handleBulkAction(action) {
     return; // ignore le 2eme click pendant que le 1er est en cours
   }
   _state.bulkInFlight = true;
-  const bulkBtns = Array.from(document.querySelectorAll("[data-biblio-bulk-action]"));
+  // Fix audit 2026-06-07 : selecteur corrige. Les boutons sont rendus avec
+  // data-bibliotheque-bulk (cf _renderBulkToolbar l.323-328), pas
+  // data-biblio-bulk-action -> aucun bouton n'etait jamais disable visuellement.
+  const bulkBtns = Array.from(document.querySelectorAll("[data-bibliotheque-bulk]"));
   bulkBtns.forEach((b) => { b.disabled = true; b.dataset.bulkPending = "1"; });
   const release = () => {
     _state.bulkInFlight = false;
@@ -1237,6 +1468,41 @@ function _handleBulkAction(action) {
     // delete passe par une modale + confirmation ; le release est fait dans
     // _confirmBulkDelete via onConfirm/onCancel (cf signature).
     _confirmBulkDelete(ids, release);
+    return;
+  }
+  if (action === "compare") {
+    // AUDIT 2026-06-14 (R6-B) : ouvre DIRECTEMENT le comparateur sur les films
+    // selectionnes (mode lecture seule), au lieu de naviguer vers #/doublons ou
+    // l'utilisateur devait re-trouver son film (l'ancien R5-F supposait a tort
+    // que la biblio etait un groupe de doublons). Le modal gere 2 films (A/B)
+    // ou 3+ (barre de paires). readOnly:true : la biblio n'a pas de group_key
+    // et ne propose pas de decision winner (cf vue Doublons pour decider).
+    if (!_runId) {
+      showToast({ type: "warn", text: "Aucun run actif pour comparer." });
+      release();
+      return;
+    }
+    const selectedRows = _state.rows.filter((r) => _state.selected.has(String(r.row_id)));
+    if (selectedRows.length < 2) {
+      showToast({ type: "warn", text: "Sélectionnez au moins 2 films à comparer." });
+      release();
+      return;
+    }
+    const cmpRows = selectedRows.map((r) => ({
+      row_id: String(r.row_id),
+      label: r.title || String(r.row_id),
+      file_name: r.title || "",
+    }));
+    openDuplicateComparatorModal({
+      runId: _runId,
+      rows: cmpRows,
+      rowA: cmpRows[0].row_id,
+      rowB: cmpRows[1].row_id,
+      title: selectedRows[0].title || "",
+      year: selectedRows[0].year || "",
+      readOnly: true,
+    });
+    release();
     return;
   }
   if (action === "perceptual") {
@@ -1268,59 +1534,123 @@ function _handleBulkAction(action) {
  * Pas d'UI gallery a ce stade (cf consigne issue #350 : un bouton simple suffit).
  */
 async function _bulkRefreshPosters(rowIds) {
-  // Mapping rowId -> tmdb_id et inverse pour le patch d'apres reponse.
-  const tmdbByRow = new Map();
+  // AUDIT 2026-06-13 (R5-H2) : recupere les jaquettes pour 2 cas :
+  //  - films AVEC tmdb_id -> integrations/get_tmdb_posters (par id) ;
+  //  - films identifies SANS tmdb_id (NFO/nom) -> integrations/
+  //    enrich_tmdb_ids_by_title (recherche titre+annee, PERSISTE le tmdb_id).
+  // Avant, le bouton ignorait les films NFO ("Aucun film identifie TMDb").
+  const withId = new Map();    // rid -> tmdb_id
+  const withoutId = [];        // rids identifies mais sans tmdb_id
   rowIds.forEach((rid) => {
     const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-    if (r && r.tmdb_id) {
-      const tid = parseInt(r.tmdb_id, 10);
-      if (Number.isFinite(tid) && tid > 0) tmdbByRow.set(String(rid), tid);
-    }
+    if (!r) return;
+    const tid = parseInt(r.tmdb_id, 10);
+    if (Number.isFinite(tid) && tid > 0) withId.set(String(rid), tid);
+    else if (r.identified !== false) withoutId.push(String(rid));
   });
-  if (tmdbByRow.size === 0) {
-    showToast({ type: "warn", text: "Aucun film identifié TMDb dans la sélection." });
+  if (withId.size === 0 && withoutId.length === 0) {
+    showToast({ type: "warn", text: "Aucun film identifié dans la sélection." });
     return;
   }
-  const tmdbIds = Array.from(new Set(Array.from(tmdbByRow.values())));
-  // Backend cap : 20 IDs max par appel (cf tmdb_support.get_tmdb_posters).
-  // On previent l'utilisateur si la selection depasse pour eviter l'illusion
-  // que tout a ete traite alors que seuls les 20 premiers le sont.
-  if (tmdbIds.length > 20) {
-    showToast({
-      type: "warn",
-      text: `Seuls les 20 premiers films identifiés sur ${tmdbIds.length} seront rechargés (limite TMDb).`,
-      duration: 6000,
-    });
-  }
+  let patched = 0;
+  let notConfigured = false; // R6-H : clé TMDb absente détectée (message précis)
   try {
-    const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
-    const data = res && res.data ? res.data : res;
-    if (!data || data.ok === false) {
-      throw new Error((data && (data.message || data.error)) || "Erreur TMDb posters.");
-    }
-    // La reponse est typiquement {ok, posters: {<tmdb_id>: <url>}} (cf
-    // _get_tmdb_posters_impl dans cinesort/ui/api/tmdb_support.py). Tolere
-    // aussi `data.urls` au cas ou la shape change.
-    const map = data.posters || data.urls || {};
-    let patched = 0;
-    tmdbByRow.forEach((tid, rid) => {
-      const url = map[String(tid)] || map[tid];
-      if (!url) return;
-      const r = _state.rows.find((row) => String(row.row_id) === String(rid));
-      if (r) {
-        r.poster_url = String(url);
-        patched += 1;
+    // 1) Films NFO/nom sans tmdb_id : resoudre par titre+annee (persiste).
+    if (withoutId.length > 0) {
+      if (!_runId) {
+        showToast({ type: "warn", text: "Aucun run actif pour résoudre les films NFO." });
+      } else {
+        const res = await apiPost("integrations/enrich_tmdb_ids_by_title", { run_id: _runId, row_ids: withoutId });
+        if (!_state) return;
+        const d = (res && res.data) || res || {};
+        if (d.ok === false) {
+          showToast({ type: "error", text: d.message || d.error || "Erreur TMDb (clé configurée ?)." });
+        } else {
+          const map = d.posters || {};
+          const idMap = d.ids || {}; // R6-H : tmdb_id resolus par row_id
+          // R6-H : patcher r.tmdb_id en memoire -> le rendu passe par le proxy
+          // /api/poster?id=<tmdb_id> et affiche la jaquette fraiche (avant,
+          // seul r.poster_url etait patche, ignore par le rendu si tmdb_id vide).
+          const touched = new Set([...Object.keys(idMap), ...Object.keys(map)]);
+          touched.forEach((rid) => {
+            const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+            if (!r) return;
+            if (idMap[rid] != null) { r.tmdb_id = idMap[rid]; r.identified = true; }
+            if (map[rid]) r.poster_url = String(map[rid]);
+            r._posterBust = Date.now(); // R7-8 : force le rechargement visuel
+            patched += 1;
+          });
+        }
       }
-    });
+    }
+    // 2) Films deja identifies TMDb : recharger les posters par id.
+    if (withId.size > 0) {
+      const tmdbIds = Array.from(new Set(Array.from(withId.values())));
+      const res = await apiPost("integrations/get_tmdb_posters", { tmdb_ids: tmdbIds, size: "w185" });
+      if (!_state) return;
+      const d = (res && res.data) || res || {};
+      // R6-H : get_tmdb_posters renvoie ok:true + reason:"tmdb_not_configured"
+      // (pas ok:false) quand la cle manque -> on capte pour un message precis.
+      if (d && d.reason === "tmdb_not_configured") notConfigured = true;
+      const map = (d && (d.posters || d.urls)) || {};
+      withId.forEach((tid, rid) => {
+        const url = map[String(tid)] || map[tid];
+        if (!url) return;
+        const r = _state.rows.find((row) => String(row.row_id) === String(rid));
+        if (r) { r.poster_url = String(url); r._posterBust = Date.now(); patched += 1; }
+      });
+    }
+    if (!_state) return;
     if (patched > 0) {
       _render();
-      showToast({ type: "success", text: `${patched} poster${patched > 1 ? "s" : ""} TMDb rechargé${patched > 1 ? "s" : ""}.` });
+      showToast({ type: "success", text: `${patched} jaquette${patched > 1 ? "s" : ""} récupérée${patched > 1 ? "s" : ""}.` });
+    } else if (notConfigured) {
+      showToast({ type: "warn", text: "Clé TMDb non configurée (Paramètres ▸ TMDb)." });
     } else {
-      showToast({ type: "warn", text: "Aucun poster reçu (TMDb a peut-être un cache vide pour ces IDs)." });
+      showToast({ type: "warn", text: "Aucune jaquette trouvée (vérifiez la clé TMDb dans Paramètres)." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
   }
+}
+
+// AUDIT 2026-06-13 (R5-D) : analyse perceptuelle batch ASYNC avec progression.
+// Avant : appel BLOQUANT quality/analyze_perceptual_batch -> requete suspendue
+// plusieurs minutes sans feedback, toast "lancee" trompeur (l'await avait deja
+// attendu la fin), grille jamais rafraichie. Desormais : queue_perceptual_batch
+// -> job_id -> barre de progression done/total -> refresh grille + recap honnete.
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function _pollPerceptualJob(jobId, maxAttempts = 1800, delayMs = 1000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (!_state) return null;  // unmount -> stop poll
+    try {
+      const res = await apiPost("quality/get_perceptual_job_status", { job_id: jobId });
+      if (!_state) return null;
+      const d = (res && res.data) || res || {};
+      if (d.ok === false) return null;
+      // Mise a jour EN PLACE de la barre (pas de full _render par tick).
+      if (_state.perceptualJob) {
+        _state.perceptualJob.done = Number(d.done || 0);
+        _state.perceptualJob.total = Number(d.total || _state.perceptualJob.total || 0);
+        _state.perceptualJob.status = String(d.status || "running");
+        const total = _state.perceptualJob.total || 0;
+        const done = _state.perceptualJob.done || 0;
+        const fill = document.querySelector("[data-perc-progress-fill]");
+        const label = document.querySelector("[data-perc-progress-label]");
+        if (fill) fill.style.setProperty("--progress", total > 0 ? (done / total) : 0);
+        if (label) label.textContent = `Analyse perceptuelle : ${done}/${total}…`;
+      }
+      const st = String(d.status || "").toLowerCase();
+      if (st === "done" || st === "error" || st === "cancelled") return d;
+    } catch (_e) {
+      // Erreur reseau transitoire : on retente au prochain tick.
+    }
+    await _sleep(delayMs);
+  }
+  return null;
 }
 
 async function _bulkPerceptual(rowIds) {
@@ -1328,17 +1658,48 @@ async function _bulkPerceptual(rowIds) {
     showToast({ type: "warn", text: "Aucun run actif." });
     return;
   }
+  _state.perceptualJob = { total: rowIds.length, done: 0, status: "running", jobId: null };
+  _render();
   try {
-    const res = await apiPost("quality/analyze_perceptual_batch", {
+    const res = await apiPost("quality/queue_perceptual_batch", {
       run_id: _runId,
       row_ids: rowIds,
     });
-    if (res && res.ok !== false) {
-      showToast({ type: "success", text: `Analyse perceptuelle lancée sur ${rowIds.length} films.` });
+    if (!_state) return;
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok === false || !_payload.job_id) {
+      _state.perceptualJob = null;
+      _render();
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur perceptuelle." });
+      return;
+    }
+    _state.perceptualJob = { total: _payload.total || rowIds.length, done: 0, status: "running", jobId: _payload.job_id };
+    _render();
+    showToast({ type: "info", text: `Analyse perceptuelle de ${_payload.total || rowIds.length} films démarrée…`, duration: 2000 });
+
+    const final = await _pollPerceptualJob(_payload.job_id);
+    if (!_state) return;
+    _state.perceptualJob = null;
+
+    if (!final) {
+      _render();
+      showToast({ type: "warn", text: "Analyse perceptuelle interrompue (statut indisponible)." });
+      return;
+    }
+    const okCount = Number(final.success_count != null ? final.success_count : (final.results || []).length);
+    const errCount = Number(final.error_count != null ? final.error_count : (final.errors || []).length);
+    const total = Number(final.total || rowIds.length);
+    // Refresh de la grille pour exposer les nouveaux scores perceptuels.
+    await _fetchLibrary();
+    if (!_state) return;
+    if (final.status === "error" && okCount === 0) {
+      showToast({ type: "error", text: `Analyse perceptuelle échouée (${errCount} erreur${errCount > 1 ? "s" : ""}).` });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur perceptuelle." });
+      const errPart = errCount > 0 ? `, ${errCount} erreur${errCount > 1 ? "s" : ""}` : "";
+      showToast({ type: "success", text: `Analyse perceptuelle terminée : ${okCount}/${total} analysé${okCount > 1 ? "s" : ""}${errPart}.` });
     }
   } catch (err) {
+    if (_state) { _state.perceptualJob = null; _render(); }
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
   }
 }
@@ -1346,11 +1707,13 @@ async function _bulkPerceptual(rowIds) {
 async function _bulkRescan(rowIds) {
   try {
     const res = await apiPost("run/rescan_rows_bulk", { row_ids: rowIds });
-    if (res && res.ok !== false) {
-      const jobId = res.job_id || (res.data && res.data.job_id) || "?";
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      const jobId = _payload.job_id || res.job_id || "?";
       showToast({ type: "success", text: `Re-scan lancé (job ${jobId}) sur ${rowIds.length} films.` });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur re-scan." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur re-scan." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1413,8 +1776,10 @@ async function _doExport(rowIds, fmt) {
       row_ids: rowIds,
       format: fmt,
     });
-    if (res && res.ok !== false) {
-      const filePath = res.file_path || (res.data && res.data.file_path);
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      const filePath = _payload.file_path || res.file_path;
       showToast({
         type: "success",
         text: filePath
@@ -1423,7 +1788,7 @@ async function _doExport(rowIds, fmt) {
         duration: 8000,
       });
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur export." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur export." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1518,14 +1883,11 @@ function _applyPlaylist(playlistId) {
   }
   // warnings / chips -> activeChips
   _state.activeChips.clear();
-  if (Array.isArray(filters.warnings)) {
-    filters.warnings.forEach((_w) => {
-      // Fix audit 2026-05-24 : mapping `dnr_partial` -> `recently_modified`
-      // etait faux semantiquement (dnr_partial = warning DNR partiel, sans
-      // rapport avec une modif recente). Aucun mapping exact n'existe a ce
-      // jour ; on ne fait plus rien tant qu'on n'a pas de correspondance sure.
-    });
-  }
+  // R7-13 : la playlist transporte un filtre `warnings` (ex preset "DNR partiel"
+  // = {warnings:["dnr_partial"]}). Avant, la boucle etait vide -> le filtre etait
+  // perdu (toast succes sans filtrage). On le stocke pour _buildFilters (le
+  // backend filtre par filters.warnings, library_support.py:678).
+  _state.playlistWarnings = Array.isArray(filters.warnings) ? filters.warnings.map((w) => String(w)) : [];
   if (Array.isArray(filters.chips)) {
     filters.chips.forEach((k) => _state.activeChips.add(String(k)));
   }
@@ -1595,12 +1957,14 @@ function _promptSavePlaylist() {
 async function _doSavePlaylist(name, filters) {
   try {
     const res = await apiPost("library/save_smart_playlist", { name, filters });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
       showToast({ type: "success", text: `Playlist "${name}" enregistrée.` });
       await _fetchPlaylists();
       _render();
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur enregistrement." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur enregistrement." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1618,8 +1982,10 @@ function _confirmDeletePlaylist(playlistId) {
     actions: [
       { label: "Annuler", cls: "", onClick: () => {} },
       {
+        // Fix audit 2026-06-07 UX high : migration vers v5-btn--danger (cohesion
+        // visuelle avec les autres confirmations destructives v5).
         label: "Supprimer",
-        cls: "btn-danger",
+        cls: "v5-btn v5-btn--danger",
         onClick: () => {
           try { closeModal(); } catch (_e) { /* noop */ }
           void _doDeletePlaylist(playlistId);
@@ -1632,12 +1998,14 @@ function _confirmDeletePlaylist(playlistId) {
 async function _doDeletePlaylist(playlistId) {
   try {
     const res = await apiPost("library/delete_smart_playlist", { playlist_id: playlistId });
-    if (res && res.ok !== false) {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
       showToast({ type: "success", text: "Playlist supprimée." });
       await _fetchPlaylists();
       _render();
     } else {
-      showToast({ type: "error", text: (res && (res.message || res.error)) || "Erreur suppression." });
+      showToast({ type: "error", text: _payload.message || _payload.error || "Erreur suppression." });
     }
   } catch (err) {
     showToast({ type: "error", text: String(err && err.message ? err.message : err) });
@@ -1647,14 +2015,21 @@ async function _doDeletePlaylist(playlistId) {
 async function _fetchPlaylists() {
   try {
     const res = await apiPost("library/get_smart_playlists", {});
-    if (res && res.ok !== false) {
-      _state.playlists = Array.isArray(res.playlists) ? res.playlists : [];
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : revérifier _state apres await
+    // (unmount entre temps -> NPE sur _state.playlists).
+    if (!_state) return;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : res.ok -> payload.ok (apiPost wrappe {data,ok}).
+    const _payload = (res && res.data) || res || {};
+    if (_payload.ok !== false) {
+      _state.playlists = Array.isArray(_payload.playlists) ? _payload.playlists : (Array.isArray(res.playlists) ? res.playlists : []);
       _state.playlistsLoaded = true;
     } else {
       _state.playlists = [];
       _state.playlistsLoaded = true;
     }
   } catch (err) {
+    // Fix audit 2026-05-25 (v1.5.4) Vague I : meme garde dans le catch.
+    if (!_state) return;
     // Silencieux : la zone playlists tolere l'erreur, on log juste.
     console.warn("[bibliotheque] get_smart_playlists ko :", err && err.message ? err.message : err);
     _state.playlists = [];

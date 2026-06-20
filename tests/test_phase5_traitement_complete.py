@@ -309,17 +309,37 @@ class LifecycleTests(unittest.TestCase):
     def test_unmount_exports(self) -> None:
         self.assertIn("export function unmountTraitement(", self.js)
 
+    def _extract_unmount_traitement_body(self) -> str:
+        # Fix oracle iter10 (2026-06-09) : l'ancien regex non-greedy
+        # r'export function unmountTraitement\(.*?\}\s*$' s'arretait au PREMIER
+        # } rencontre (celui du if _hasUnsavedValidationDecisions L2537-2539)
+        # avant _stopPolling/unmountDoublons -> faux negatifs.
+        # On parse maintenant la balance d'accolades pour extraire le vrai
+        # corps complet de la fonction.
+        m = re.search(r"export\s+function\s+unmountTraitement\s*\([^)]*\)\s*\{", self.js)
+        assert m is not None, "declaration unmountTraitement introuvable"
+        start = m.end() - 1  # index du { ouvrant
+        depth = 0
+        i = start
+        n = len(self.js)
+        while i < n:
+            ch = self.js[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.js[m.start() : i + 1]
+            i += 1
+        raise AssertionError("Accolade fermante non trouvee pour unmountTraitement")
+
     def test_unmount_cleans_polling(self) -> None:
         # unmountTraitement doit appeler _stopPolling
-        m = re.search(r"export function unmountTraitement\(.*?\}\s*$", self.js, re.DOTALL | re.MULTILINE)
-        self.assertIsNotNone(m)
-        block = m.group(0)
+        block = self._extract_unmount_traitement_body()
         self.assertIn("_stopPolling", block)
 
     def test_unmount_cleans_doublons(self) -> None:
-        m = re.search(r"export function unmountTraitement\(.*?\}\s*$", self.js, re.DOTALL | re.MULTILINE)
-        self.assertIsNotNone(m)
-        block = m.group(0)
+        block = self._extract_unmount_traitement_body()
         self.assertIn("unmountDoublons", block)
 
 

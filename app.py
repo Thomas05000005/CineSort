@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import traceback
@@ -7,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 
 from cinesort.ui.api.cinesort_api import CineSortApi
-import contextlib
 
 DEV_MODE_ENV_VAR = "DEV_MODE"
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
@@ -272,20 +272,65 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     # on persiste IMMEDIATEMENT le token de `s` (ainsi tout get_settings ulterieur
     # renvoie la meme valeur). Si non vide, on reutilise celui du disque pour
     # eviter toute divergence.
+    # DEBUG VERBOSE 2026-06-08 : trace exhaustif si CINESORT_DEBUG actif. Cible
+    # le bug auth persistant apres 4 hotfixes (_mask_secrets / _safeBearer /
+    # utf-8-sig / native_boot). Logue codepoints char-par-char du token AVANT
+    # url-encode pour identifier tout caractere > 0x7F qui casse _safeBearer.
+    _DEBUG_TOKEN = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+    def _dbg_codepoints(label: str, value: str) -> None:
+        """Logue codepoint-par-codepoint un token, signale tout > 0x7F."""
+        if not _DEBUG_TOKEN:
+            return
+        try:
+            length = len(value)
+            cps = [f"U+{ord(c):04X}" for c in value]
+            non_ascii = [(i, c, ord(c)) for i, c in enumerate(value) if ord(c) > 0x7F]
+            print(f"[DEBUG-TOKEN] {label} len={length}", file=sys.stderr)
+            print(f"[DEBUG-TOKEN] {label} codepoints={cps}", file=sys.stderr)
+            if non_ascii:
+                for i, c, o in non_ascii:
+                    print(
+                        f"[DEBUG-TOKEN] {label} NON-ASCII pos={i} char={c!r} U+{o:04X}",
+                        file=sys.stderr,
+                    )
+            else:
+                print(f"[DEBUG-TOKEN] {label} 100% ASCII OK", file=sys.stderr)
+        except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+            print(f"[DEBUG-TOKEN] {label} dump failed: {_dbg_exc}", file=sys.stderr)
+
     try:
         import json as _json
         from pathlib import Path as _Path
 
         settings_path = _Path(api._state_dir) / "settings.json" if hasattr(api, "_state_dir") else None
         if settings_path and settings_path.is_file():
-            raw = _json.loads(settings_path.read_text(encoding="utf-8"))
+            # Fix BOM : settings.json peut contenir un BOM UTF-8 (editeurs Windows,
+            # outils PowerShell par defaut). 'utf-8' strict leve UnicodeDecodeError,
+            # le bloc except masque le token avec _SECRET_MASK -> 401 systematique.
+            # 'utf-8-sig' tolere ET supprime le BOM si present.
+            _raw_bytes = settings_path.read_bytes()
+            if _DEBUG_TOKEN:
+                print(
+                    f"[DEBUG-TOKEN] settings.json bytes_len={len(_raw_bytes)} "
+                    f"first_4_bytes={_raw_bytes[:4]!r}",
+                    file=sys.stderr,
+                )
+            raw = _json.loads(settings_path.read_text(encoding="utf-8-sig"))
             persisted_token = str(raw.get("rest_api_token") or "").strip()
             in_memory_token = str(s.get("rest_api_token") or "").strip()
+            _dbg_codepoints("persisted_token (settings.json)", persisted_token)
+            _dbg_codepoints("in_memory_token (api.settings)", in_memory_token)
             if persisted_token:
                 # Source de verite = disque. Synchronise s en cas de drift.
                 token = persisted_token
                 if persisted_token != in_memory_token:
                     s = {**s, "rest_api_token": persisted_token}
+                    if _DEBUG_TOKEN:
+                        print(
+                            "[DEBUG-TOKEN] DRIFT detecte persisted!=in_memory, sync vers disque",
+                            file=sys.stderr,
+                        )
             elif in_memory_token:
                 # Disque vide mais memoire a un token (auto-gen) : persister maintenant
                 # AVANT de demarrer le serveur, pour eviter qu'un autre get_settings
@@ -300,6 +345,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     except Exception as exc:
         token = str(s.get("rest_api_token") or "").strip()
         print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
+    _dbg_codepoints("token FINAL passe a RestApiServer", token)
     port = int(s.get("rest_api_port") or 8642)
     is_public = bool(s.get("rest_api_enabled"))
     host = "0.0.0.0" if is_public else "127.0.0.1"
@@ -315,9 +361,20 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     )
     try:
         server.start()
-    except RuntimeError as exc:
-        # M1 : HTTPS demande mais cert/key invalide — ne pas fallback silencieux
-        print(f"[REST] Serveur REST non demarre: {exc}", file=sys.stderr)
+    except (OSError, RuntimeError) as exc:
+        # R5-finding-1 : OSError = port deja utilise (WinError 10048 / EADDRINUSE).
+        # M1 : RuntimeError = HTTPS demande mais cert/key invalide.
+        import errno
+        if isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048):
+            msg = (
+                f"Le port REST {port} est deja utilise par un autre processus. "
+                "Fermez CineSort dans une autre session Windows ou modifiez "
+                "'rest_api_port' dans settings.json."
+            )
+        else:
+            msg = f"Serveur REST non demarre: {exc}"
+        print(f"[REST] {msg}", file=sys.stderr)
+        _startup_error(msg)
         return None
     proto = "https" if server._is_https else "http"
     # H-4 audit QA 20260428 : si exposition LAN demandee mais retrogradee
@@ -341,6 +398,7 @@ def main_api() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
+        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -351,12 +409,18 @@ def main_api() -> None:
     install_global_scrubber()
     # V3-04 polish v7.7.0 : injecter run_id + request_id dans tous les logs.
     install_log_context_filter()
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min)
+    install_repeated_exception_dedup(max_per_minute=5)
 
     # V3-04 : niveau de log configurable. Valeur lue depuis env vars
     # CINESORT_LOG_LEVEL > CINESORT_DEBUG > defaut INFO. Le setting
     # `log_level` du settings.json est applique plus loin une fois l'API creee.
     boot_level = resolve_log_level(None)
     _logging_api.basicConfig(level=boot_level, format="%(message)s")
+    # AUDIT 2026-06-10 : re-synchroniser le scrubber APRES basicConfig pour
+    # couvrir le StreamHandler console qu'il vient de creer (un filtre de logger
+    # ne s'applique pas aux records propagees vers ce handler).
+    install_global_scrubber()
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
@@ -436,6 +500,20 @@ def main_api() -> None:
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
         print(f"[REST] spec 09 retention cron init echouee: {_ret_exc}", file=sys.stderr)
 
+    # VQ-2 QUARANTAINE-TTL : cron TTL du bucket FS `_review` (defaut 30j, 0 OFF).
+    try:
+        from cinesort.app.quarantine_ttl import (
+            DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+        )
+        from cinesort.app.quarantine_ttl import (
+            start_quarantine_ttl_cron,
+        )
+
+        quarantaine_ttl_api = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+        start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl_api)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
+        print(f"[REST] vq-2 quarantine ttl cron init echouee: {_qttl_exc}", file=sys.stderr)
+
     server.start()
     try:
         server.join()
@@ -469,6 +547,59 @@ def _update_splash(splash_window: object, step: int, text: str, percent: int) ->
         pass  # splash peut etre deja ferme
 
 
+def _configure_webview2_runtime() -> None:
+    """V3.1 SCAFFOLDING — Configure WebView2 pour utiliser le runtime bundle si dispo.
+
+    Quand le build a embarque le runtime "Fixed Version" via le spec
+    (CINESORT_BUNDLE_WEBVIEW2=1 ; cf CineSort.spec section V3.1), le repertoire
+    `webview2_fixed/` est extrait sous `sys._MEIPASS` au demarrage de l'EXE
+    onefile. On expose alors son chemin via les variables d'environnement
+    standards WebView2 (`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`) et on isole les
+    donnees utilisateur dans `%LOCALAPPDATA%/CineSort/webview2_userdata`.
+
+    Si le bundle est absent (build standard, comportement historique),
+    on ne touche a aucune variable d'env -> WebView2 retombe sur le
+    runtime Evergreen installe par Microsoft Edge (backward-compat ABSOLUE).
+    Aucune erreur n'est levee dans ce chemin.
+    """
+    try:
+        bundle_root = Path(resource_path("webview2_fixed"))
+    except Exception:
+        return
+    if not bundle_root.is_dir():
+        return
+
+    # Sanity-check : msedgewebview2.exe doit etre present a la racine du bundle.
+    if not (bundle_root / "msedgewebview2.exe").is_file():
+        print(
+            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - "
+            "fallback Evergreen.",
+            file=sys.stderr,
+        )
+        return
+
+    # WEBVIEW2_BROWSER_EXECUTABLE_FOLDER : utilise par la loader API
+    # CreateCoreWebView2EnvironmentWithOptions cote WebView2 SDK pour pointer
+    # sur un runtime fixe (cf doc Microsoft Edge WebView2 distribution modes).
+    os.environ.setdefault(
+        "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
+        str(bundle_root),
+    )
+    # Donnees utilisateur (cache, cookies, IndexedDB) — isolees du profil global
+    # pour eviter conflit avec un Edge installe. Doit etre ECRIVABLE (pas dans
+    # sys._MEIPASS qui est read-only).
+    userdata_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview2_userdata"
+    try:
+        userdata_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER", str(userdata_dir))
+    print(
+        f"[WEBVIEW2] Runtime Fixed bundle actif: {bundle_root}",
+        file=sys.stderr,
+    )
+
+
 def _check_dpapi_availability() -> None:
     """Warn loudly if Windows DPAPI is unavailable.
 
@@ -495,6 +626,14 @@ def _check_dpapi_availability() -> None:
 
 
 def main() -> None:
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : requis pour PyInstaller +
+    # ProcessPoolExecutor. Safety net : si un module quelconque (current ou futur)
+    # spawn un subprocess via multiprocessing dans le bundle frozen, freeze_support()
+    # evite que l'enfant ne re-execute main() en boucle infinie (fork-bomb classique
+    # sur Windows). Doit etre appele au TOUT debut, avant toute init lourde.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     # H-3 audit QA 20260428 : installer le scrubber AVANT toute creation
     # d'API/logger pour capturer les premiers logs de boot eux-memes.
     # H-6 audit QA 20260429 : installer aussi un RotatingFileHandler pour
@@ -505,6 +644,7 @@ def main() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
+        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -514,6 +654,9 @@ def main() -> None:
 
     boot_level = resolve_log_level(None)
     _logging_main.basicConfig(level=boot_level, format="%(message)s")
+    # AUDIT 2026-06-10 : re-synchroniser le scrubber APRES basicConfig (couvre le
+    # StreamHandler console cree par basicConfig).
+    install_global_scrubber()
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
@@ -522,10 +665,21 @@ def main() -> None:
 
     _check_dpapi_availability()
 
+    # V3.1 SCAFFOLDING — Si le build a embarque le runtime WebView2 Fixed
+    # Version, expose le chemin via les env vars standards AVANT d'importer
+    # `webview` (les loaders WebView2 lisent l'env au premier
+    # CreateCoreWebView2Environment). En l'absence de bundle, no-op silencieux
+    # -> repli automatique sur le runtime Evergreen installe.
+    _configure_webview2_runtime()
+
     # Cf issue #68 : verrou inter-process avant toute initialisation lourde.
     # Empeche 2 CineSort.exe simultanees sur le meme state_dir (corruption DB
     # via apply_rows concurrents). Le lock est libere automatiquement par l'OS
     # a la mort du process — pas de stale lock meme apres kill -9.
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : InstanceLock confirme avant
+    # SQLite (CineSortApi() plus bas declenche SQLiteStore.initialize()).
+    # L'ordre acquire() -> CineSortApi() ne doit PAS etre modifie : inverser
+    # casserait la garantie anti-corruption multi-instance.
     from cinesort.infra.single_instance import InstanceLock
 
     instance_lock = InstanceLock(state_dir)
@@ -570,13 +724,20 @@ def main() -> None:
         api = CineSortApi()
 
         # --- 1. Creer le splash HTML (visible immediatement) ---
+        # Fix audit 2026-05-25 (v1.5.4) : splash AGRANDI pour masquer la main
+        # window noire pendant que WebView2 initialise (20s typique avant que
+        # events.loaded ne firing). Avant : splash 520x320 et main 1250x820 ->
+        # l'utilisateur voyait la main noire DEPASSER autour du splash centre.
+        # Le contenu du splash (logo+barre) reste centre grace au flex CSS et au
+        # max-width:440px applique sur .splash dans web/splash.html. on_top=True
+        # garantit que le splash reste au premier plan tant que pas detruit.
         splash_url = Path(resource_path("web/splash.html")).resolve().as_uri()
         splash = webview.create_window(
             "CineSort",
             url=splash_url,
             frameless=True,
-            width=520,
-            height=320,
+            width=1400,
+            height=900,
             on_top=True,
             resizable=False,
             text_select=False,
@@ -627,17 +788,88 @@ def main() -> None:
 
             port = getattr(rest_server, "_port", 8642)
             proto = "https" if getattr(rest_server, "_is_https", False) else "http"
-            _desktop_dashboard_token = str(settings_early.get("rest_api_token") or "")
+            # CAUSE RACINE 2026-06-07 : api.settings.get_settings() passe par
+            # get_settings_payload() -> _mask_secrets() qui remplace rest_api_token
+            # par 8 bullets U+2022. URL-encoded en %E2%80%A2 x8, le frontend les
+            # decode, _URLSAFE_TOKEN_RE = /^[A-Za-z0-9_\-]{1,128}$/ rejette,
+            # setToken() ne stocke rien -> 401 systematiques + saturation rate-limit
+            # (ce dernier desormais corrige par exemption localhost, mais le token
+            # absent doit etre fixe a la source).
+            # FIX : on utilise rest_server._token, deja resolu (et clair) dans
+            # _start_rest_server via lecture brute settings.json en utf-8-sig.
+            # Defense en profondeur : strip + suppression d'eventuel BOM U+FEFF.
+            _desktop_dashboard_token = str(getattr(rest_server, "_token", "") or "")
+            # Defense en profondeur : strip whitespace + suppression d'un eventuel
+            # BOM UTF-8 (U+FEFF / ZWNBSP) qui pourrait survivre a la lecture brute
+            # si settings.json a ete sauve par PowerShell sans -Encoding utf8.
+            _desktop_dashboard_token = _desktop_dashboard_token.strip().replace("﻿", "")
+            # DEBUG VERBOSE 2026-06-08 : dump codepoints du token tel quel
+            # APRES recuperation depuis rest_server._token + strip. Permet de
+            # detecter une corruption survenue entre _start_rest_server et ici.
+            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            if _DEBUG_NB:
+                try:
+                    cps = [f"U+{ord(c):04X}" for c in _desktop_dashboard_token]
+                    non_ascii = [(i, c, ord(c)) for i, c in enumerate(_desktop_dashboard_token) if ord(c) > 0x7F]
+                    print(
+                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} "
+                        f"codepoints={cps}",
+                        file=sys.stderr,
+                    )
+                    for i, c, o in non_ascii:
+                        print(
+                            f"[DEBUG-NTOKEN] NON-ASCII pos={i} char={c!r} U+{o:04X}",
+                            file=sys.stderr,
+                        )
+                except Exception as _dbg_exc:  # noqa: BLE001 — debug only
+                    print(f"[DEBUG-NTOKEN] dump failed: {_dbg_exc}", file=sys.stderr)
             if _desktop_dashboard_token:
-                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={quote(_desktop_dashboard_token)}&native=1"
-                # DEBUG : afficher l'URL injectee (token tronque pour lisibilite)
-                print(
-                    f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
-                    file=sys.stderr,
-                )
+                _encoded_token = quote(_desktop_dashboard_token)
+                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={_encoded_token}&native=1"
+                # ITER15 5.2 : reduire verbosite — l'URL main_url avec ntoken
+                # tronque est un detail de boot natif normal, pas une condition
+                # d'erreur. Logge uniquement en mode CINESORT_DEBUG. Le bypass
+                # loopback rend de toute facon l'absence de token benigne en
+                # local. GARDE-FOU : ne change pas la matrice auth iter5/iter14.
+                if _DEBUG_NB:
+                    print(
+                        f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
+                        file=sys.stderr,
+                    )
+                    print(
+                        f"[DEBUG-NTOKEN] url-encoded ntoken={_encoded_token!r} "
+                        f"(len_raw={len(_desktop_dashboard_token)} len_encoded={len(_encoded_token)})",
+                        file=sys.stderr,
+                    )
+                    # Detecter si l'encodage a transforme un % qui revele BOM/non-ASCII
+                    if "%" in _encoded_token:
+                        print(
+                            f"[DEBUG-NTOKEN] ATTENTION : ntoken contient %-escapes "
+                            f"(probable codepoint > 0x7F encode) -> {_encoded_token}",
+                            file=sys.stderr,
+                        )
             else:
                 main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
-                print("[REST] AVERTISSEMENT : main_url SANS ntoken (token vide dans settings_early)", file=sys.stderr)
+                # ITER15 5.2 + 5.4 : token vide reste une condition d'erreur (en
+                # mode web/LAN, l'utilisateur ne peut pas se connecter ; en mode
+                # natif, le bypass loopback peut sauver mais reste un signal
+                # anormal). On migre vers logger.error pour beneficier du
+                # scrubber et de la categorisation centralisee (deja preparee
+                # iter5). ITER15 5.4 enrichit le contexte diagnostic (proto,
+                # port, native, type) pour faciliter le tri post-mortem.
+                # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
+                import logging as _logging_nb
+                _logger_nb = _logging_nb.getLogger("cinesort.app.native_boot")
+                _token_type = type(_desktop_dashboard_token).__name__
+                _logger_nb.error(
+                    "REST main_url sans ntoken — auth web/LAN impossible, "
+                    "bypass loopback requis pour mode natif "
+                    "[diag: proto=%s port=%s token_type=%s token_falsy=%r native=1]",
+                    proto,
+                    port,
+                    _token_type,
+                    not _desktop_dashboard_token,
+                )
         else:
             # Fallback : charger l'index local (mode preview ou serveur REST mort)
             index = resource_path(index_rel)
@@ -652,6 +884,11 @@ def main() -> None:
         # Sans hidden, la window est initialisee des create_window et evaluate_js
         # fonctionne tout de suite. Le splash frameless reste sur on_top pour
         # masquer le boot visuel.
+        # Fix audit 2026-05-25 (v1.5.4) : background_color cohérent avec le
+        # thème luxe (#0a0a0f matche le gradient du splash) au lieu du blanc/
+        # noir par défaut. Si jamais la main window deborde du splash pendant
+        # le chargement WebView2, l'utilisateur voit du dark cohérent, pas du
+        # noir choquant.
         main_window = webview.create_window(
             title,
             url=main_url,
@@ -659,6 +896,7 @@ def main() -> None:
             width=1250,
             height=820,
             min_size=(1000, 700),
+            background_color="#0a0a0f",
         )
 
         # Fix 2026-05-24 ecran noir post-v1.3.0 :
@@ -766,6 +1004,21 @@ def main() -> None:
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
                     _log.warning("spec 09: retention cron init echouee — %s", _ret_exc)
 
+                # VQ-2 QUARANTAINE-TTL : cron TTL bucket FS `_review`
+                # (defaut 30j, 0 desactive). Le cron tourne toutes les 24h.
+                try:
+                    from cinesort.app.quarantine_ttl import (
+                        DEFAULT_TTL_DAYS as _Q_DEFAULT_TTL,
+                    )
+                    from cinesort.app.quarantine_ttl import (
+                        start_quarantine_ttl_cron,
+                    )
+
+                    quarantaine_ttl = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+                    start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl)
+                except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
+                    _log.warning("vq-2: quarantine ttl cron init echouee — %s", _qttl_exc)
+
                 # Fix 2026-05-24 ecran noir post-v1.3.0 :
                 # Le bootstrap natif (token, mode native, force #/accueil) est
                 # entierement gere par l'IIFE _detectNativeBoot dans
@@ -841,9 +1094,23 @@ def main() -> None:
         # storage_path : isole le storage CineSort dans %LOCALAPPDATA%/CineSort/webview.
         _storage_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview"
         _storage_dir.mkdir(parents=True, exist_ok=True)
+        # VN-A.5 : DevTools (F12) actif uniquement en mode developpeur. Triggers :
+        #   - env CINESORT_DEBUG=1/true/yes/on
+        #   - env DEV_MODE=1 ou flag CLI --dev (cf is_dev_mode)
+        #   - flag file %APPDATA%/CineSort/debug.flag present
+        # En prod (sans aucun de ces triggers), F12 est inerte -> evite que
+        # l'utilisateur final tombe sur les internes WebView2 par accident.
+        _debug_flag_file = Path(os.environ.get("APPDATA", ".")) / "CineSort" / "debug.flag"
+        _devtools_enabled = (
+            str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            or is_dev_mode()
+            or _debug_flag_file.exists()
+        )
+        if _devtools_enabled:
+            _log.info("DevTools active (mode developpeur detecte)")
         webview.start(
             _startup,
-            debug=False,
+            debug=_devtools_enabled,
             private_mode=False,
             storage_path=str(_storage_dir),
         )

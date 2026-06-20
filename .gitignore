@@ -20,6 +20,7 @@ venv*/
 build/
 dist/
 packages/
+*.egg-info/
 web/_backup_*/
 .tmp_test/
 .tmp_audit/
@@ -85,3 +86,21 @@ ci_log.txt
 
 # Release notes temporaires (uploadees sur GitHub Release puis supprimees)
 .release_notes_*.md
+
+# V3.1 SCAFFOLDING — Bundle WebView2 Fixed Version (genere par
+# scripts/download_webview2_fixed.py, lourd ~120 MB, EULA Microsoft).
+# Ne JAMAIS commit. Cf docs/RELEASE.md section "Bundle WebView2".
+webview2_fixed/
+webview2_fixed.cab
+
+# R8 F6-b option (a) : artefacts REGENERABLES sortis du suivi (disque intact,
+# historique passe inchange — la purge historique = chantier separe). Cf
+# docs/internal/r8/F6B_GIT_ANALYSIS.md. NE PAS confondre avec baseline_r8/ et
+# docs/internal/r8/ (preuves R8, restent suivies).
+docs/internal/observe/
+dist_backup_*/
+test_library/
+FAIL_*.png
+# Logs pytest bruts régénérables (étape squash-merge) — on garde les VRAIES preuves
+# R8 (R8_CORRECTIONS.md, scripts *_diff.py, baseline_r8/, *.out.txt) mais pas ces dumps.
+docs/internal/r8/suite_*.txt

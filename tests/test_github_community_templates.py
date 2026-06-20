@@ -1,9 +1,9 @@
 """V4-03 — Vérifie l'existence et la validité des fichiers community GitHub."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
-
 
 REQUIRED_FILES = [
     ".github/ISSUE_TEMPLATE/bug_report.yml",

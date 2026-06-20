@@ -23,6 +23,12 @@ if _e2e_dir not in sys.path:
     sys.path.insert(0, _e2e_dir)
 
 # Importer les donnees de test et les fonctions utilitaires
+import contextlib
+import shutil
+import tempfile
+import time
+from http.client import HTTPConnection
+
 from create_test_data import (  # noqa: E402
     _TOKEN,
     build_plan_rows,
@@ -31,11 +37,6 @@ from create_test_data import (  # noqa: E402
     write_plan_file,
 )
 
-import shutil
-import tempfile
-import time
-from http.client import HTTPConnection
-import contextlib
 from tests._helpers import find_free_port as _find_free_port
 
 

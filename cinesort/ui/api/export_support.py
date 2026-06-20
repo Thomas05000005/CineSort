@@ -197,7 +197,9 @@ def export_full_library(api: Any) -> Dict[str, Any]:
             "film_count": len(films),
         }
     except (AttributeError, OSError, TypeError) as exc:
-        logger.error("export_full_library failed: %s", exc)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+        # (l'export echoue, l'app continue, l'utilisateur reverra le bouton retry)
+        logger.warning("export_full_library failed: %s", exc)
         return _err_response(f"Export echoue : {exc}", category="runtime", level="error", log_module=__name__)
 
 

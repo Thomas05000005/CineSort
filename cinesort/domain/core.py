@@ -6,7 +6,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -37,22 +37,32 @@ logger = logging.getLogger(__name__)
 #
 # TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation.
 import cinesort.domain.duplicate_support as core_duplicate_support
+from cinesort.domain.confidence_thresholds import (
+    CONF_HIGH as _CONF_HIGH,
+)
+from cinesort.domain.confidence_thresholds import (
+    CONF_MEDIUM as _CONF_MEDIUM,
+)
 from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
+)
+from cinesort.domain.scan_helpers import (
     iter_videos,
-    stream_scan_targets as _stream_scan_targets,
 )
 from cinesort.domain.title_helpers import (
+    ProviderTags,
     _expand_tmdb_queries,
     _extract_trailing_sequel_num,
+    _norm_for_tokens,
     _title_similarity,
     _tmdb_prefix_equivalent,
-    _norm_for_tokens,
     clean_title_guess,
+    extract_provider_tags,
     extract_year,
     infer_name_year,
-    title_prefix_before_parenthesized_year,
+    strip_provider_tags,
     title_match_score,
+    title_prefix_before_parenthesized_year,
     tokens,
 )
 
@@ -67,7 +77,6 @@ if TYPE_CHECKING:
 
 _COMPAT_SCAN_EXPORTS = (
     _collect_non_video_extensions,
-    _stream_scan_targets,
     iter_videos,
 )
 
@@ -76,7 +85,22 @@ _COMPAT_SCAN_EXPORTS = (
 # CONFIG
 # =========================================================
 
-VIDEO_EXTS_DEFAULT = {".mkv", ".mp4", ".avi", ".m2ts"}
+VIDEO_EXTS_DEFAULT = {
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".m2ts",
+    ".m4v",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".ts",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".ogv",
+    ".vob",
+}
 
 # Phase 6 (v7.8.0) : VIDEO_EXTS_ALL = union maximale des extensions video
 # reconnues dans toute la codebase. Avant ce constant, apply_core/apply_support
@@ -98,7 +122,7 @@ VIDEO_EXTS_ALL = frozenset(
 )
 SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
 
-MIN_VIDEO_BYTES = 50 * 1024 * 1024  # 50MB
+MIN_VIDEO_BYTES = 10 * 1024 * 1024  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
 
 GENERIC_SIDE_FILES_DEFAULT = {
     "movie.nfo",
@@ -216,10 +240,38 @@ class Config:
 
     # Scan
     incremental_scan_enabled: bool = False
+    # Seuil minimal taille fichier video (en octets). None = utilise MIN_VIDEO_BYTES (10MB).
+    # Permet de configurer le seuil pour bibliotheques avec courts metrages / animations.
+    min_video_bytes: Optional[int] = None
+    # VO-B : nombre de workers pour la pre-extraction locale parallele de
+    # `_filter_dossiers_phase`. 1 (default) = comportement sequentiel strict
+    # historique (pas de ThreadPoolExecutor cree). >=2 active la parallelisation
+    # Phase 1 (iter_videos + collect_non_video_extensions). Plafonne a 32.
+    # Voir cinesort/app/_local_candidate.py et docs/internal/VO_B_ANALYSIS.md.
+    scan_max_workers: int = 1
 
     # Profils de renommage
     naming_movie_template: str = "{title} ({year})"
     naming_tv_template: str = "{series} ({year})"
+
+    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)"
+    # Persiste par _save_section_naming (ui/api/settings_support.py L1608-1609)
+    # Consomme par apply_core (ext_case_for_video) pour ajuster la casse de
+    # l'extension du fichier video cible (single, collection, TV, quarantine).
+    # True = .MKV source -> .mkv cible ; False = preservation casse source.
+    lowercase_extensions: bool = True
+
+    # ITER7 etape 3 - Reglage UI "Separateur" (selecteur {".", " ", "_", "-"})
+    # Persiste par _save_section_naming (ui/api/settings_support.py L1611-1613)
+    # avec coerce-and-default (sep in {".", " ", "_", "-"} sinon ".").
+    # Approvisionne le pipeline Domain -> App via cfg.separator. Exposee comme
+    # variable opt-in `{sep}` dans le contexte template (build_naming_context),
+    # ce qui permet aux templates custom de l'utiliser sans rupture (templates
+    # existants type "{title} ({year})" ne referencent pas {sep} donc rendu
+    # strictement inchange : STOP_FORK CUSTOM TEMPLATE preserve).
+    # Default " " (espace) aligne sur le comportement historique du template
+    # "{title} ({year})" et sur le sentinel "valeur saine" du selecteur UI.
+    separator: str = " "
 
     def normalized(self) -> "Config":
         collection_name = windows_safe(str(self.collection_root_name or "_Collection")) or "_Collection"
@@ -260,8 +312,19 @@ class Config:
             enable_tmdb=self.enable_tmdb,
             tmdb_language=self.tmdb_language,
             incremental_scan_enabled=bool(self.incremental_scan_enabled),
+            min_video_bytes=int(self.min_video_bytes) if self.min_video_bytes is not None else None,
+            scan_max_workers=max(1, int(self.scan_max_workers or 1)),
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
+            lowercase_extensions=bool(self.lowercase_extensions),
+            # ITER7 etape 3 : coerce-and-default identique a _save_section_naming
+            # pour proteger les configs anciennes ou editees a la main contre une
+            # valeur invalide qui sortirait du jeu {".", " ", "_", "-"}.
+            separator=(
+                str(self.separator)
+                if str(self.separator) in {".", " ", "_", "-"}
+                else " "
+            ),
         )
 
 
@@ -285,6 +348,15 @@ class Stats:
     incremental_cache_rows_reused: int = 0
     incremental_cache_row_hits: int = 0
     incremental_cache_row_misses: int = 0
+    # Phase 2 SCAN-1 (observabilite) : compteurs detailles de rejet pour debug post-scan.
+    # Exposes via dashboard_support dans une carte "Diagnostic scan".
+    films_rejected_ext: int = 0  # fichier video : extension hors VIDEO_EXTS
+    films_rejected_size: int = 0  # fichier video : taille < MIN_VIDEO_BYTES
+    films_rejected_name: int = 0  # fichier video : nom matche IGNORE_VIDEO_NAME_RE (sample/trailer/teaser)
+    folders_rejected_underscore: int = 0  # dossier prefixe '_' (skip _Collection, _Vide, etc.)
+    folders_rejected_depth: int = 0  # dossier au-dela de max_depth
+    folders_rejected_scandir_error: int = 0  # echec os.scandir (PermissionError, OSError, timeout SMB)
+    folders_rejected_tv_like_count_videos: int = 0  # dossier rejete par looks_tv_like (compte videos)
 
 
 def _stats_add_ignore(stats: Stats, reason: str) -> None:
@@ -363,12 +435,24 @@ class PlanRow:
 # =========================================================
 # PATH + NAME HELPERS
 # =========================================================
-
-
-def _norm_win_path(p: Path) -> PureWindowsPath:
-    s = str(p).replace("/", "\\")
-    s = os.path.normcase(os.path.normpath(s))
-    return PureWindowsPath(s)
+#
+# VQ-1 (refactor) : `windows_safe` et `_norm_win_path` ont ete extraits vers
+# `cinesort.domain.path_utils` (feuille du graphe d'imports) pour casser le
+# cycle domain<->domain :
+#
+#   AVANT : core -> duplicate_support -> (lazy) naming -> core
+#   APRES : core -> path_utils  ; naming -> path_utils  (plus de retour vers core)
+#
+# Les noms sont RE-EXPORTES ici pour preserver integralement la backward
+# compatibility : app/apply_core, app/plan_support_*, app/cleanup,
+# ui/api/run_data_support, ui/api/settings_support et tests/test_domain_core
+# continuent d'utiliser `cinesort.domain.core.windows_safe` /
+# `core_mod._norm_win_path` sans aucune modification.
+from cinesort.domain.path_utils import (  # noqa: E402  (re-export volontaire)
+    _norm_win_path,
+    norm_win_path,
+    windows_safe,
+)
 
 
 def ensure_inside_root(cfg: Config, dst: Path) -> None:
@@ -379,42 +463,6 @@ def ensure_inside_root(cfg: Config, dst: Path) -> None:
         dst_pw.relative_to(root_pw)
     except ValueError:
         raise RuntimeError(f"REFUS: destination hors ROOT: {dst}") from None
-
-
-def windows_safe(name: str) -> str:
-    """Sanitise *name* for use as a Windows filename (reserved chars, DOS names, length)."""
-    name = unicodedata.normalize("NFC", name)
-    name = re.sub(r'[<>:"/\\|?*]', "", name).strip().rstrip(".")
-    name = re.sub(r"\s+", " ", name)
-    reserved = {
-        "con",
-        "prn",
-        "aux",
-        "nul",
-        "com1",
-        "com2",
-        "com3",
-        "com4",
-        "com5",
-        "com6",
-        "com7",
-        "com8",
-        "com9",
-        "lpt1",
-        "lpt2",
-        "lpt3",
-        "lpt4",
-        "lpt5",
-        "lpt6",
-        "lpt7",
-        "lpt8",
-        "lpt9",
-    }
-    if name.lower() in reserved:
-        name = f"_{name}"
-    if not name:
-        name = "_untitled"
-    return name[:180].strip()
 
 
 def _is_cancel_requested(should_cancel: Optional[Callable[[], bool]]) -> bool:
@@ -746,16 +794,63 @@ def build_candidates_from_nfo(nfo: NfoInfo) -> List[Candidate]:
 def build_candidates_from_name(
     folder_name: str, video_name: str, *, preferred_year: Optional[int] = None
 ) -> List[Candidate]:
+    # B02 : extraction prealable des tags providers {tmdb-XXX} / [imdbid-ttXXX]
+    # depuis le nom de dossier ET du fichier video. Si un tmdb_id est trouve,
+    # on emet un Candidate haute confiance (source="name_tag", score=0.98) qui
+    # sera ensuite verifie via tmdb.find_by_tmdb_id(...) cote app (symetrique
+    # au flow NFO dans _augment_candidates_from_nfo_tmdb_id). On strippe AUSSI
+    # les tags des noms pour que clean_title_guess()/infer_name_year() ne
+    # voient pas les chiffres TMDb ou les accolades.
+    folder_tags = extract_provider_tags(folder_name)
+    video_tags = extract_provider_tags(video_name)
+    # Priorite : tag du dossier > tag du fichier (le dossier est la source de
+    # verite pour le contenu du film, le fichier peut etre un .partN).
+    tmdb_id_from_tag = folder_tags.tmdb_id or video_tags.tmdb_id
+    imdb_id_from_tag = folder_tags.imdb_id or video_tags.imdb_id
+
+    folder_clean = strip_provider_tags(folder_name) if (folder_tags.tmdb_id or folder_tags.imdb_id) else folder_name
+    video_clean = strip_provider_tags(video_name) if (video_tags.tmdb_id or video_tags.imdb_id) else video_name
+
     y = preferred_year
     if y is None:
-        y, _, _ = infer_name_year(folder_name, video_name)
-    t = clean_title_guess(folder_name)
+        y, _, _ = infer_name_year(folder_clean, video_clean)
+    t = clean_title_guess(folder_clean)
     if not (2 <= len(t) <= 70):
-        t = clean_title_guess(video_name)
-    out = []
+        t = clean_title_guess(video_clean)
+    out: List[Candidate] = []
+
+    # B02 : Candidate deterministe issu du tag provider (court-circuit fuzzy).
+    # On ne l'emet que si on a aussi pu deduire un titre/annee de base (pour
+    # permettre le cross-check de similarite cote app), sinon on degrade
+    # gracieusement vers les Candidates classiques.
+    # REG-TAGS-03 : tant que la verification TMDb (tmdb.find_by_tmdb_id) n'est
+    # pas cablee cote app (cf _augment_candidates_from_name_tags actuellement
+    # code mort), on ne peut PAS faire confiance aveuglement au tag : un dossier
+    # malicieux/errone `{tmdb-999999999}` injecterait un faux match deterministe
+    # dominant. On degrade donc gracieusement le score a 0.72 (niveau d'un
+    # name+year+folder_y match) jusqu'a ce que la verification soit cablee.
+    if tmdb_id_from_tag and t:
+        note_bits = []
+        if folder_tags.tmdb_id:
+            note_bits.append("folder tag")
+        elif video_tags.tmdb_id:
+            note_bits.append("video tag")
+        if imdb_id_from_tag:
+            note_bits.append(f"imdb={imdb_id_from_tag}")
+        out.append(
+            Candidate(
+                title=t,
+                year=y,
+                source="name_tag",
+                tmdb_id=tmdb_id_from_tag,
+                score=0.72,
+                note=", ".join(note_bits),
+            )
+        )
+
     if t and y:
-        folder_y = extract_year(folder_name)
-        video_y = extract_year(video_name)
+        folder_y = extract_year(folder_clean)
+        video_y = extract_year(video_clean)
         score = 0.60
         if folder_y and video_y and folder_y == video_y == y:
             score = 0.72
@@ -1163,6 +1258,12 @@ def compute_confidence(
             score -= 8  # P1.1.b : NFO valide côté folder XOR filename, suspicion
     elif chosen.source == "tmdb":
         score += 48
+    elif chosen.source in ("name_tag", "name_tmdb", "name_imdb"):
+        # REG-TAGS-04 : un tag provider explicite dans le nom (dossier ou fichier)
+        # est une intention utilisateur deterministe. On le traite comme un match
+        # high-confidence (entre nfo_ok=65 et tmdb=48) car l'utilisateur a
+        # explicitement annote le contenu avec un ID provider.
+        score += 60
     else:
         score += 45
 
@@ -1172,7 +1273,7 @@ def compute_confidence(
     if consensus_bonus is not None and consensus_bonus > 0.0:
         score += int(min(0.10, consensus_bonus) * 40)
 
-    if chosen.source == "name" and chosen.year:
+    if chosen.source in ("name", "name_tag") and chosen.year:
         score += 5
 
     if year_delta_reject:
@@ -1215,7 +1316,12 @@ def compute_confidence(
             score = min(score, 59)  # cap sous le seuil "med"
 
     score = max(0, min(100, score))
-    label = "high" if score >= 80 else "med" if score >= 60 else "low"
+    # VN-C.1 (batch 2) : seuils unifies via domain.confidence_thresholds.
+    # Avant : >= 80 / >= 60 (hardcode). Apres : CONF_HIGH=85 / CONF_MEDIUM=60.
+    # Impact backward-compat : un score 80-84 retourne desormais "med"
+    # (au lieu de "high"). Aligne avec le frontend (traitement.js +
+    # lib-validation.js) qui utilisait deja 85/60.
+    label = "high" if score >= _CONF_HIGH else "med" if score >= _CONF_MEDIUM else "low"
     return score, label
 
 
@@ -1243,6 +1349,12 @@ SKIP_REASON_MERGED = "skip_merged"
 SKIP_REASON_CONFLIT_QUARANTAINE = "skip_conflit_quarantaine"
 SKIP_REASON_ERREUR_PRECEDENTE = "skip_erreur_precedente"
 SKIP_REASON_AUTRE = "skip_autre"
+# VQ-3 : kill-switch MAX_PATH Windows. Le check check_path_length_killswitch
+# (domain/naming.py) bloque toute operation rename/move qui produirait un
+# path > 259 chars sur Windows. Sans ce skip distinct, l'utilisateur voyait
+# un OSError cryptique "Le chemin specifie est introuvable" ou pire un
+# rename partiel laissant le FS dans un etat intermediaire.
+SKIP_REASON_PATH_TOO_LONG = "skip_path_too_long"
 
 ANALYSE_IGNORE_LABELS_FR = {
     "ignore_tv_like": "Ignoré (ressemble à une série)",
@@ -1264,6 +1376,7 @@ SKIP_REASON_LABELS_FR = {
     SKIP_REASON_CONFLIT_QUARANTAINE: "Conflit -> quarantaine",
     SKIP_REASON_ERREUR_PRECEDENTE: "Erreur précédente",
     SKIP_REASON_AUTRE: "Autre",
+    SKIP_REASON_PATH_TOO_LONG: "Chemin trop long (MAX_PATH Windows)",
 }
 
 
@@ -1277,6 +1390,15 @@ class ApplyResult:
     skipped: int = 0
     errors: int = 0
     merges_count: int = 0
+    # AUDIT 2026-06-14 (R7-4) : compteur des films marques pour suppression
+    # deplaces vers _review/_user_marked_for_deletion/ a l'apply.
+    marked_for_deletion_moved_count: int = 0
+    # R8-018 (F2-b) : compteur DEDIE des doublons "perdants" d'une decision utilisateur
+    # deplaces vers _review/_duplicates_user_decided/. Avant, ces moves incrementaient
+    # duplicates_identical_moved_count (doublons byte-identiques) -> invariant
+    # moved==deleted casse + chemin de recuperation mensonger (UI pointait
+    # _duplicates_identical alors que les fichiers sont dans _duplicates_user_decided).
+    duplicates_user_decided_moved_count: int = 0
     duplicates_identical_moved_count: int = 0
     # Backward-compatible alias kept for older consumers.
     duplicates_identical_deleted_count: int = 0
@@ -1293,6 +1415,12 @@ class ApplyResult:
     total_rows: int = 0
     considered_rows: int = 0
     skip_reasons: Dict[str, int] = field(default_factory=dict)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : messages contextualises remontes
+    # a l'UI (ex : "FICHIER VERROUILLE : 'Film.mkv' est ouvert dans VLC...")
+    # quand un PermissionError empeche le move/rename. Liste vide si aucune
+    # erreur visible n'est a remonter ; res.errors reste le compteur faisant
+    # foi pour l'agregation.
+    error_messages: list = field(default_factory=list)
 
 
 @dataclass
@@ -1308,6 +1436,8 @@ class ApplyExecutionContext:
     leftovers_root: Path
     # Phase 6 doublons (spec 01-doublons.md §3.7) : bucket des losers post-decision UI.
     duplicates_user_decided_root: Optional[Path] = None
+    # AUDIT 2026-06-14 (R7-4) : bucket des films marques pour suppression par l'utilisateur.
+    marked_for_deletion_root: Optional[Path] = None
     touched_top_level_dirs: Set[Path] = field(default_factory=set)
     folder_map: Dict[str, str] = field(default_factory=dict)
     dedup_seen_ops: Set[Tuple[str, str, str]] = field(default_factory=set)

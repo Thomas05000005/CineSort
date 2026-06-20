@@ -5,7 +5,6 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-
 _VIEWS = ("jellyfin.js", "plex.js", "radarr.js", "logs.js")
 _DASHBOARD_VIEWS_DIR = Path("web/dashboard/views")
 

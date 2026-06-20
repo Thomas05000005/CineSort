@@ -85,7 +85,22 @@ def atomic_write_json(p: Path, obj) -> None:
     tmp = p.with_name(tmp_name)
     try:
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, p)
+        # R8-026 (F2-d) : retry court sur os.replace. Sur Windows, os.replace leve
+        # PermissionError (WinError 5/32) quand un lecteur concurrent (poller UI, 2e onglet)
+        # tient le fichier destination ouvert -> le write etait PERDU (l'ancienne valeur restait).
+        # Boucle bornee (5x, backoff ~50ms) ; l'atomicite n'est PAS affectee (os.replace reste
+        # atomique, jamais de JSON corrompu). On re-leve apres epuisement des tentatives.
+        _replace_exc: Optional[PermissionError] = None
+        for _attempt in range(5):
+            try:
+                os.replace(tmp, p)
+                _replace_exc = None
+                break
+            except PermissionError as exc:
+                _replace_exc = exc
+                time.sleep(0.05 * (_attempt + 1))
+        if _replace_exc is not None:
+            raise _replace_exc
     finally:
         # Best-effort cleanup : tmp.exists() / tmp.unlink() ne peuvent lever
         # qu'OSError (PermissionError, FileNotFoundError en derivent). Les
@@ -102,13 +117,43 @@ def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+_PRESERVED_REVIEW_DIRNAME = "_preserved_review"
+
+
 def clean_old_runs(state_dir: Path, keep_last: int = 10) -> None:
     runs = state_dir / "runs"
     if not runs.exists():
         return
-    items = sorted([d for d in runs.iterdir() if d.is_dir()], key=lambda x: x.name, reverse=True)
+    # R8-002 (F1, PERTE DE DONNEES) : la retention-runs supprimait les vieux run_dirs
+    # entiers (shutil.rmtree), DETRUISANT au passage <run_dir>/_review qui contient les
+    # ORIGINAUX quarantines de l'apply (buckets conflict/duplicate/leftover, cf
+    # apply_support: run_review_root). Ces originaux etaient perdus AVANT revue
+    # utilisateur, quel que soit le TTL quarantaine configure. Garde-fou : on NE detruit
+    # JAMAIS une quarantaine NON REVUE -> on PRESERVE tout <run_dir>/_review contenant
+    # des fichiers, en le relocant sous runs/_preserved_review/ (exclu de la retention),
+    # avant de supprimer le reste du run_dir.
+    preserved_root = runs / _PRESERVED_REVIEW_DIRNAME
+    items = sorted(
+        [d for d in runs.iterdir() if d.is_dir() and d.name != _PRESERVED_REVIEW_DIRNAME],
+        key=lambda x: x.name,
+        reverse=True,
+    )
     for d in items[keep_last:]:
         try:
+            review = d / "_review"
+            if review.is_dir() and any(p.is_file() for p in review.rglob("*")):
+                preserved_root.mkdir(parents=True, exist_ok=True)
+                dest = preserved_root / d.name
+                if dest.exists():
+                    suffix = 1
+                    while (preserved_root / f"{d.name}__{suffix}").exists():
+                        suffix += 1
+                    dest = preserved_root / f"{d.name}__{suffix}"
+                shutil.move(str(review), str(dest))
+                _debug_log_state(
+                    state_dir,
+                    f"clean_old_runs PRESERVE quarantaine non revue: {review} -> {dest}",
+                )
             shutil.rmtree(d)
         except OSError as exc:
             _debug_log_state(state_dir, f"clean_old_runs warning path={d} error={exc}")

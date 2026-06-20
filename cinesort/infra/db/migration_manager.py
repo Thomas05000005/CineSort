@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from contextlib import closing
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .connection import connect_sqlite
 
@@ -21,6 +21,14 @@ _IDEMPOTENT_ERROR_FRAGMENTS = (
 
 
 def _is_idempotent_error(exc: sqlite3.OperationalError) -> bool:
+    # R8-021 RETRACTE (F2-d, attrape par le filet F2-d 3/3) : on N'attrape PAS
+    # IntegrityError (UNIQUE/PK). Raison : les migrations de RECONSTRUCTION (021/025 :
+    # INSERT INTO X_new SELECT ... FROM X ; DROP TABLE X ; RENAME) rejouees par le
+    # bootstrap sur une source CORROMPUE (PK dupliquees) levent une PK IntegrityError ;
+    # la "skipper" laisserait X_new VIDE puis DROP+RENAME ECRASERAIT silencieusement la
+    # table = PERTE DE DONNEES (meme classe que le bug 025 NULL R8-019). Bloquer le boot
+    # sur IntegrityError est le comportement SUR (recuperable via backup), donc on garde
+    # OperationalError uniquement.
     msg = str(exc).lower()
     return any(fragment in msg for fragment in _IDEMPOTENT_ERROR_FRAGMENTS)
 
@@ -31,25 +39,107 @@ def _split_sql_statements(sql: str) -> List[str]:
     Ignore les commentaires `-- ...` et les instructions vides.
     Filtre les `PRAGMA user_version = X` qui sont gerees separement par le manager.
 
+    Fix audit 2026-05-25 (v1.5.3) Vague H+ : on RETIRE d'abord les commentaires
+    `-- ...` ligne-par-ligne AVANT de split sur `;`. L'ancienne implementation
+    splitait d'abord sur `;` puis retirait les commentaires — donc un `;` au
+    milieu d'un commentaire produisait deux fragments dont le second commencait
+    par du SQL non-commente et plantait avec `syntax error`. Bug latent sur les
+    futures migrations qui auraient un `;` dans un commentaire descriptif.
+
     NB: cette fonction ne supporte PAS les triggers `CREATE TRIGGER ... BEGIN ... END;`
     qui contiennent plusieurs `;` — aucune migration n'en utilise actuellement.
+    NB: ne gere pas non plus les `--` a l'interieur d'une string SQL ('--'),
+    mais aucune migration n'en utilise non plus.
+
+    Fix BUG-015 (hotfix1) : refus explicite des commentaires bloc `/* ... */`
+    et detection des `;` dans literals string SQL ('...') qui pourraient
+    produire un split incorrect. Si sqlparse est disponible on l'utilise,
+    sinon on refuse explicitement les SQL qui contiennent `/*` ou des literals
+    string avec `;` plutot que de continuer silencieusement et produire un
+    SQL malforme.
+
+    Fix BUG-015 (hotfix2) : sqlparse n'est PAS une dependance declaree dans
+    pyproject.toml. L'ancien code levait ValueError en chaine d'ImportError
+    quand `/*` apparaissait dans le SQL, ce qui bloquait le demarrage de
+    l'app au runtime. On capture ImportError et on tombe en fallback sur
+    le stripper de commentaires bloc + split ligne-par-ligne, avec un
+    WARNING log pour signaler que la couverture sqlparse n'est pas active.
+    Aucune migration actuelle n'utilise `/*`, mais on garde un stripper
+    minimal pour ne pas planter si une migration future en introduit une.
     """
+    # BUG-015 (hotfix2) : sqlparse n'est PAS dans pyproject.toml.
+    # On tente l'import ; si absent on tombe en fallback safe au lieu
+    # de raise ValueError qui empechait l'app de demarrer.
+    if "/*" in sql:
+        try:
+            import sqlparse  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning(
+                "_split_sql_statements: commentaire bloc /* ... */ detecte dans "
+                "le SQL mais sqlparse n'est pas installe. Fallback : strip naif "
+                "des blocs /* ... */ puis split simple. Pour une couverture "
+                "complete (literals contenant /*, blocs imbriques) installer "
+                "sqlparse ou retirer les commentaires bloc de la migration."
+            )
+            # Strip naif des blocs /* ... */ non-imbriques.
+            # Ne gere PAS les /* a l'interieur d'un literal string SQL,
+            # mais aucune migration actuelle n'en utilise.
+            sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+            # Continuer avec le fallback simple ci-dessous.
+        else:
+            out: List[str] = []
+            for stmt in sqlparse.split(sql):
+                cleaned_stmt = sqlparse.format(
+                    stmt, strip_comments=True
+                ).strip().rstrip(";").strip()
+                if not cleaned_stmt:
+                    continue
+                if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
+                    continue
+                out.append(cleaned_stmt)
+            return out
+
+    cleaned_lines: List[str] = []
+    for line in sql.splitlines():
+        idx = line.find("--")
+        if idx >= 0:
+            line = line[:idx]
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines)
+
+    # BUG-015 : detection des `;` dans literals string SQL.
+    # On parse caractere-par-caractere pour ignorer les `;` a l'interieur
+    # de '...' (SQLite utilise ' pour string literals, '' pour escape).
     out: List[str] = []
-    for raw in sql.split(";"):
-        # Retirer les commentaires ligne a ligne
-        lines = []
-        for line in raw.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("--"):
+    buf: List[str] = []
+    in_string = False
+    i = 0
+    n = len(cleaned)
+    while i < n:
+        ch = cleaned[i]
+        if ch == "'":
+            buf.append(ch)
+            if in_string and i + 1 < n and cleaned[i + 1] == "'":
+                # Escape '' a l'interieur d'une string
+                buf.append(cleaned[i + 1])
+                i += 2
                 continue
-            lines.append(line)
-        stmt = "\n".join(lines).strip()
-        if not stmt:
+            in_string = not in_string
+            i += 1
             continue
-        # PRAGMA user_version est gere explicitement par apply() — ne pas double-executer
-        if stmt.upper().startswith("PRAGMA USER_VERSION"):
+        if ch == ";" and not in_string:
+            stmt = "".join(buf).strip()
+            if stmt and not stmt.upper().startswith("PRAGMA USER_VERSION"):
+                out.append(stmt)
+            buf = []
+            i += 1
             continue
-        out.append(stmt)
+        buf.append(ch)
+        i += 1
+    # Dernier fragment sans `;` terminal
+    tail = "".join(buf).strip()
+    if tail and not tail.upper().startswith("PRAGMA USER_VERSION"):
+        out.append(tail)
     return out
 
 
@@ -58,13 +148,30 @@ class MigrationManager:
     Applies SQL migrations in ascending order based on numeric file prefix.
     """
 
-    def __init__(self, db_path: Path, migrations_dir: Path, *, busy_timeout_ms: int = 5000):
+    def __init__(
+        self,
+        db_path: Path,
+        migrations_dir: Path,
+        *,
+        busy_timeout_ms: int = 5000,
+        pragma_profile_name: Optional[str] = None,
+    ):
         self.db_path = Path(db_path)
         self.migrations_dir = Path(migrations_dir)
         self.busy_timeout_ms = int(max(1, busy_timeout_ms))
+        # Fix PRAGMA-05 : propager le profil PRAGMA explicite (e.g., 'nas_smb')
+        # aux connexions ouvertes pendant apply_migrations(). Sans ca, les
+        # migrations tournaient en autodetect meme si SQLiteStore avait recu
+        # un override explicite, ouvrant une fenetre de corruption type
+        # Sonarr #1886 sur NAS mal classifie par l'autodetect.
+        self.pragma_profile_name: Optional[str] = pragma_profile_name
 
     def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(str(self.db_path), busy_timeout_ms=self.busy_timeout_ms)
+        return connect_sqlite(
+            str(self.db_path),
+            busy_timeout_ms=self.busy_timeout_ms,
+            profile=self.pragma_profile_name,
+        )
 
     def _list_migrations(self) -> List[Tuple[int, Path]]:
         if not self.migrations_dir.exists():
@@ -133,7 +240,14 @@ class MigrationManager:
                     # cette migration uniquement. PRAGMA foreign_keys ne fonctionne
                     # PAS dans une transaction, donc on le pose avant BEGIN et on
                     # le restaure apres COMMIT.
-                    needs_fk_disable = "@manager: disable_fk" in sql
+                    # BUG-014 (hotfix1) : matcher STRICT ligne commencant par
+                    # `-- @manager: disable_fk` apres trim, pour eviter qu'un
+                    # commentaire descriptif (ex: "ne PAS utiliser
+                    # @manager: disable_fk ici") n'active le PRAGMA a tort.
+                    needs_fk_disable = any(
+                        line.strip().startswith("-- @manager: disable_fk")
+                        for line in sql.splitlines()
+                    )
                     if needs_fk_disable:
                         conn.execute("PRAGMA foreign_keys = OFF")
 
@@ -146,6 +260,8 @@ class MigrationManager:
                                 conn.execute(stmt)
                                 conn.execute(f"RELEASE SAVEPOINT {sp_name}")
                             except sqlite3.OperationalError as stmt_exc:
+                                # R8-021 RETRACTE : on N'attrape PAS IntegrityError (swallow
+                                # un UNIQUE/PK sur INSERT...SELECT de rebuild = wipe silencieux).
                                 # H-1 audit 20260428 : ALTER TABLE ADD COLUMN n'est pas
                                 # IF NOT EXISTS-able avant SQLite 3.35. Si la colonne existe
                                 # deja (DB clonee, restauree, ou migration partiellement
@@ -194,10 +310,9 @@ class MigrationManager:
             # Recuperer la version app depuis le fichier VERSION si possible
             app_version = ""
             try:
-                from pathlib import Path as _P
-
                 # Le repo root est 3 niveaux au-dessus de ce fichier (cinesort/infra/db)
-                version_file = _P(__file__).resolve().parents[3] / "VERSION"
+                # M-03 (refactor #84) : Path deja importe au top-level
+                version_file = Path(__file__).resolve().parents[3] / "VERSION"
                 if version_file.is_file():
                     app_version = version_file.read_text(encoding="utf-8").strip()
             except (OSError, PermissionError):
@@ -207,9 +322,24 @@ class MigrationManager:
                 (int(version), str(name), app_version),
             )
             conn.commit()
-        except sqlite3.DatabaseError:
-            # Table absente (migrations anterieures a 012) : silence.
-            pass
+        except sqlite3.Error as exc:
+            # BUG-013 (hotfix1) : capter sqlite3.Error (parent de OperationalError,
+            # DatabaseError, IntegrityError, etc.) au lieu du seul DatabaseError, et
+            # logger en debug au lieu d'un pass silencieux. La migration principale
+            # a deja ete committee (user_version a jour) ; on accepte que le tracking
+            # dans schema_migrations puisse echouer (table absente avant migration 012,
+            # DB lock transitoire, etc.).
+            # ITER15 5.4 : downgrade warning -> debug. Le cas dominant en pratique
+            # est "no such table: schema_migrations" pour v1..v11 sur DB neuve, AVANT
+            # que la migration 012 ne cree la table de tracking. Idempotent, non
+            # critique, et bruyant au boot (11 lignes / boot). On garde la trace
+            # mais hors du niveau WARNING par defaut. Aucun effet runtime.
+            logger.debug(
+                "db: tracking schema_migrations a echoue pour v%d (%s): %s",
+                int(version),
+                name,
+                exc,
+            )
 
     def apply_migrations(self) -> int:
         """

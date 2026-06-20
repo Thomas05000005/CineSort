@@ -26,7 +26,6 @@ from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.facades import runtime_facade
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -78,21 +77,19 @@ class FrontendApiCallsTests(unittest.TestCase):
         )
 
     def test_film_detail_uses_perceptual_batch(self):
-        path = _ROOT / "web" / "dashboard" / "views" / "film-detail.js"
+        # R8-053/054/055 (F5, D1) : la vue standalone web/dashboard/views/film-detail.js
+        # a été SUPPRIMÉE ; le composant components/film-detail.js est désormais la fiche
+        # film canonique. Il délègue le perceptuel à la modale (get_perceptual_details) et
+        # ne doit PAS appeler l'endpoint inexistant analyze_perceptual_single comme apiPost.
+        # L'ancienne assertion "analyze_perceptual_batch" était propre à l'implémentation
+        # de la vue supprimée (design différent du composant) -> retirée.
+        path = _ROOT / "web" / "dashboard" / "components" / "film-detail.js"
         content = path.read_text(encoding="utf-8")
-        # Le mot "analyze_perceptual_single" peut apparaitre dans un commentaire
-        # explicatif (fix audit), donc on cherche uniquement l'usage comme
-        # endpoint : entre guillemets avec slash prefix typique apiPost.
         self.assertNotIn(
             '"quality/analyze_perceptual_single"',
             content,
-            "film-detail.js ne doit plus appeler l'endpoint inexistant "
+            "film-detail.js ne doit pas appeler l'endpoint inexistant "
             "`quality/analyze_perceptual_single`.",
-        )
-        self.assertIn(
-            "quality/analyze_perceptual_batch",
-            content,
-            "film-detail.js doit utiliser `quality/analyze_perceptual_batch`.",
         )
 
 

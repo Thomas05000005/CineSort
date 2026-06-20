@@ -59,8 +59,17 @@ async function _load() {
     _render(container, settings, conn, lib);
   } catch (err) {
     if (isAbortError(err)) return;
-    container.innerHTML = `<p class="status-msg error">${escapeHtml(t("legacy.jellyfin.error_prefix"))} ${escapeHtml(String(err))}</p>`;
+    // Fix audit 2026-06-07 UX high : ne plus exposer String(err) ("TypeError:
+    // Failed to fetch", "AbortError…") plein ecran. Message francais court +
+    // bouton Reessayer ; details restent en console pour le debug.
     console.error("[jellyfin]", err);
+    container.innerHTML = `
+      <div class="card">
+        <p class="status-msg error">Impossible de joindre Jellyfin. Vérifier que le serveur est en ligne.</p>
+        <button type="button" class="btn btn-primary mt-4" data-jellyfin-retry>Réessayer</button>
+      </div>`;
+    const retryBtn = container.querySelector("[data-jellyfin-retry]");
+    if (retryBtn) retryBtn.addEventListener("click", () => { _load(); });
   }
 }
 

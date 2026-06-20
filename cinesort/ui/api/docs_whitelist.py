@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import Dict
 
-
 # Identifiant logique -> chemin relatif depuis la racine du projet.
 # Tous les fichiers doivent etre dans `docs/` (filtre defensif dans le loader).
 DOCS_WHITELIST: Dict[str, str] = {
