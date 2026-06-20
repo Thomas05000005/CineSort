@@ -27,8 +27,14 @@ def _extract_local_tmdb_id(row: Any) -> Optional[int]:
     candidates = getattr(row, "candidates", None) or []
     for c in candidates:
         tid = getattr(c, "tmdb_id", None)
-        if tid and isinstance(tid, int) and tid > 0:
-            return tid
+        if not tid:
+            continue
+        try:
+            tid_int = int(tid)
+        except (TypeError, ValueError):
+            continue
+        if tid_int > 0:
+            return tid_int
     return None
 
 
