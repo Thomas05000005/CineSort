@@ -583,7 +583,7 @@ def apply_contextual_adjustments(
             video_subs = _patch(video_subs, "resolution", ADJUSTMENT_IMAX_TYPED_BONUS, "imax_typed")
 
     # Regle 6 — fake lossless (codec claim lossless mais cutoff spectral bas)
-    audio_tracks = (normalized_probe or {}).get("audio") or []
+    audio_tracks = (normalized_probe or {}).get("audio_tracks") or []
     has_lossless_codec = any(
         str((t or {}).get("codec", "")).lower() in ("flac", "truehd", "dts-hd ma", "mlp")
         for t in (audio_tracks if isinstance(audio_tracks, list) else [])

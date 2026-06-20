@@ -433,7 +433,7 @@ class TestContextualAdjustments(unittest.TestCase):
             confidence=0.8,
             label_fr="L",
         )
-        probe = {"audio": [{"codec": "flac"}]}
+        probe = {"audio_tracks": [{"codec": "flac"}]}
         _, a, trace = apply_contextual_adjustments(
             _v_subs(70),
             audio_subs,
