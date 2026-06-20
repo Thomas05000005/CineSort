@@ -245,8 +245,12 @@ class OmdbClient:
 
     def _save_cache_atomic(self) -> None:
         try:
+            # Snapshot sous lock pour eviter RuntimeError dict changed
+            # during iteration si un thread appelle _cache_set en parallele.
+            with self._lock:
+                snapshot = dict(self._cache)
             tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(self._cache, ensure_ascii=False), encoding="utf-8")
+            tmp.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self.cache_path)
         except (OSError, PermissionError) as exc:
             logger.debug("omdb cache save warning: %s", exc)
