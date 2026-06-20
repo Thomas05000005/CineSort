@@ -106,7 +106,14 @@ def clean_old_runs(state_dir: Path, keep_last: int = 10) -> None:
     runs = state_dir / "runs"
     if not runs.exists():
         return
-    items = sorted([d for d in runs.iterdir() if d.is_dir()], key=lambda x: x.name, reverse=True)
+
+    def _mtime_of(d: Path) -> float:
+        try:
+            return d.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    items = sorted([d for d in runs.iterdir() if d.is_dir()], key=_mtime_of, reverse=True)
     for d in items[keep_last:]:
         try:
             shutil.rmtree(d)
