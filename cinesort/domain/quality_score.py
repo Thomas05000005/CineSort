@@ -852,15 +852,12 @@ def _score_video(
     # P4.2 : ajuster le seuil selon le genre (animation tolère bitrate bas,
     # action exige plus). Applique le multiplicateur bitrate_leniency.
     if threshold_kbps > 0 and primary_genre:
-        try:
-            adjusted = _adj_th(threshold_kbps, primary_genre)
-            if adjusted != threshold_kbps:
-                reasons.append(
-                    f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s"
-                )
-                threshold_kbps = adjusted
-        except ImportError:
-            pass
+        adjusted = _adj_th(threshold_kbps, primary_genre)
+        if adjusted != threshold_kbps:
+            reasons.append(
+                f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s"
+            )
+            threshold_kbps = adjusted
 
     if bitrate_kbps is None:
         video_sub -= 8
