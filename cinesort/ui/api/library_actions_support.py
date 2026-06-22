@@ -680,23 +680,6 @@ def rescan_row(
 # ---------------------------------------------------------------------------
 
 
-_EXPORT_FIELDS = (
-    "row_id",
-    "title",
-    "year",
-    "score_v2",
-    "tier_v2",
-    "path",
-    "size_bytes",
-    "duration_min",
-    "codec",
-    "resolution",
-    "audio_languages",
-    "subtitle_languages",
-    "warnings",
-)
-
-
 def _exports_dir() -> Path:
     """Repertoire des exports : `%LOCALAPPDATA%/CineSort/exports/`."""
     base = state.default_state_dir() / "exports"
