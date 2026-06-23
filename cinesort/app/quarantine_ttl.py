@@ -516,7 +516,10 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
                 if not dry_run:
                     with contextlib.suppress(OSError):
                         child.rmdir()
-            elif child.is_file():
+            elif child.is_file() and child.name != _TTL_MANIFEST_NAME:
+                # Ne pas supprimer/compter le manifest TTL interne (cf
+                # purge_review_bucket qui l'exclut deja). Il est resynchronise
+                # plus bas et ne doit pas gonfler les stats considered/deleted.
                 try:
                     top_stats["considered"] += 1
                     size = int(child.stat().st_size)
