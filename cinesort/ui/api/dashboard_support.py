@@ -1516,7 +1516,7 @@ def _compute_active_insights(
     # 1. Run actif en cours
     try:
         for r in store.run.list_runs(limit=1):
-            if r.get("status") == "running":
+            if str(r.get("status") or "").upper() == "RUNNING":
                 insights.append(
                     {
                         "type": "run_in_progress",
