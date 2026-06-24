@@ -187,6 +187,14 @@ class TestBuildVideoSubscores(unittest.TestCase):
         _, flags = build_video_subscores(v, None, probe, None)
         self.assertIn("hdr_metadata_missing", flags)
 
+    def test_hdr10_with_zero_maxcll_flag(self):
+        # MaxCLL/MaxFALL absents arrivent normalises a 0.0 (pas None) : le flag
+        # doit quand meme se lever.
+        v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
+        probe = {"video": {"hdr10": True, "max_cll": 0, "max_fall": 0}}
+        _, flags = build_video_subscores(v, None, probe, None)
+        self.assertIn("hdr_metadata_missing", flags)
+
     def test_labels_fr_present(self):
         v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
         subs, _ = build_video_subscores(v, None, None, None)

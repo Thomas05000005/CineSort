@@ -174,7 +174,10 @@ def _score_hdr(video: Any, normalized_probe: Optional[Dict[str, Any]]) -> Tuple[
 
     if has_dv and dv_profile == "5":
         flags.append("dv_profile_5")
-    if has_hdr10 and (max_cll is None or max_fall is None):
+    # MaxCLL/MaxFALL absents sont normalises a 0.0 (hdr_analysis._extract_content_light
+    # fait float(... or 0)), pas a None : tester `not` couvre 0 ET None, en coherence
+    # avec validate_hdr qui utilise `max_cll <= 0`.
+    if has_hdr10 and (not max_cll or not max_fall):
         flags.append("hdr_metadata_missing")
 
     if has_dv and dv_profile in ("8.1", "8.2", "8.4"):
