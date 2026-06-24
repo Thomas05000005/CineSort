@@ -298,13 +298,16 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
         return 50.0, 0.0, "bronze"
     verdict = str(getattr(audio, "lossy_verdict", "unknown") or "unknown")
     conf = float(getattr(audio, "lossy_confidence", 0) or 0)
-    if verdict == "lossless":
+    # Les verdicts proviennent de spectral_analysis.classify_cutoff :
+    # lossless / lossless_native_nyquist / lossless_vintage_master / lossy_high /
+    # lossy_mid / lossy_low / lossy_ambiguous_sbr / silent_segment / error.
+    if verdict in ("lossless", "lossless_native_nyquist", "lossless_vintage_master"):
         return 100.0, max(conf, 0.8), "platinum"
-    if verdict == "high_bitrate_lossy":
+    if verdict == "lossy_high":
         return 75.0, max(conf, 0.7), "gold"
-    if verdict == "medium_bitrate_lossy":
+    if verdict == "lossy_mid":
         return 55.0, max(conf, 0.7), "silver"
-    if verdict == "low_bitrate_lossy":
+    if verdict == "lossy_low":
         return 30.0, max(conf, 0.7), "bronze"
     return 60.0, 0.0, "bronze"
 

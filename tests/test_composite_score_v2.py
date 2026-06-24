@@ -224,10 +224,33 @@ class TestBuildAudioSubscores(unittest.TestCase):
         self.assertEqual(spec.tier, "platinum")
 
     def test_low_bitrate_lossy_bronze(self):
-        a = AudioPerceptual(lossy_verdict="low_bitrate_lossy", lossy_confidence=0.85)
+        a = AudioPerceptual(lossy_verdict="lossy_low", lossy_confidence=0.85)
         subs = build_audio_subscores(a)
         spec = next(s for s in subs if s.name == "spectral_cutoff")
         self.assertEqual(spec.tier, "bronze")
+        self.assertEqual(spec.value, 30.0)
+        self.assertGreater(spec.confidence, 0.0)
+
+    def test_mid_bitrate_lossy_silver(self):
+        a = AudioPerceptual(lossy_verdict="lossy_mid", lossy_confidence=0.9)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "silver")
+        self.assertEqual(spec.value, 55.0)
+
+    def test_high_bitrate_lossy_gold(self):
+        a = AudioPerceptual(lossy_verdict="lossy_high", lossy_confidence=0.88)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "gold")
+        self.assertEqual(spec.value, 75.0)
+
+    def test_lossless_native_nyquist_platinum(self):
+        a = AudioPerceptual(lossy_verdict="lossless_native_nyquist", lossy_confidence=0.9)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "platinum")
+        self.assertEqual(spec.value, 100.0)
 
     def test_drc_cinema_highest(self):
         a = AudioPerceptual(drc_category="cinema", drc_confidence=0.9)
@@ -541,7 +564,7 @@ class TestOrchestrator(unittest.TestCase):
             resolution_height=2160,
             fake_4k_verdict_combined="fake_4k_confirmed",
         )
-        a = AudioPerceptual(audio_score=55, lossy_verdict="low_bitrate_lossy", lossy_confidence=0.9)
+        a = AudioPerceptual(audio_score=55, lossy_verdict="lossy_low", lossy_confidence=0.9)
         g = GrainAnalysis(is_animation=False, grain_nature="encode_noise")
         r = compute_global_score_v2(v, a, g, None, duration_s=7200)
         # Video subscores penalises lourdement, audio aussi
