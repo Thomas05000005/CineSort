@@ -138,7 +138,18 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
 
 def to_optional_bool(value: Any) -> Optional[bool]:
     """Parse *value* en bool, retourne None si vide / non reconnu."""
-    s = str(value or "").strip().lower()
+    if value is None:
+        return None
+    # Fast-path types booleen/numerique AVANT la coercion str, comme
+    # to_optional_int / to_optional_bitrate. Sans ce garde, `str(value or "")`
+    # transforme le booleen False et l'entier 0 en "" -> retourne None au lieu
+    # de False (confusion sentinelle absent vs faux ; ex. flag ffprobe "forced"
+    # renvoye numerique 0 par MediaInfo JSON).
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
     if not s:
         return None
     if s in {"1", "true", "yes", "oui"}:

@@ -97,6 +97,17 @@ class TestConversionsDedup(unittest.TestCase):
             self.assertEqual(_bool_from_text(raw), to_optional_bool(raw), f"{raw!r}")
             self.assertEqual(_bool_from_text(raw), expected, f"{raw!r} -> {expected}")
 
+    def test_optional_bool_preserves_native_false_and_zero(self) -> None:
+        """Audit 2026-06-25 : un booleen/entier natif falsy ne doit pas
+        devenir None (confusion sentinelle absent vs False)."""
+        self.assertIs(to_optional_bool(False), False)
+        self.assertIs(to_optional_bool(True), True)
+        self.assertIs(to_optional_bool(0), False)
+        self.assertIs(to_optional_bool(1), True)
+        self.assertIs(to_optional_bool(0.0), False)
+        self.assertIsNone(to_optional_bool(None))
+        self.assertIsNone(to_optional_bool(""))
+
     def test_canonical_module_does_not_import_probe(self) -> None:
         """cinesort.domain.conversions ne doit pas dependre de cinesort.infra.*."""
         import inspect
