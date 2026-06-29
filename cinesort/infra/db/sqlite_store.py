@@ -57,11 +57,13 @@ def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
     dans tout le chemin.
     """
     try:
-        path_str = str(db_path).lower()
+        parts = [p.lower() for p in Path(db_path).parts]
     except (TypeError, ValueError):
         return None
-    for marker in _CLOUD_SYNC_MARKERS:
-        if marker.lower() in path_str:
+    markers_lower = {m.lower(): m for m in _CLOUD_SYNC_MARKERS}
+    for part in parts:
+        marker = markers_lower.get(part)
+        if marker is not None:
             return marker
     return None
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
