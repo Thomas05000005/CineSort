@@ -761,9 +761,11 @@ def _detect_cross_root_duplicates(rows: List["PlanRow"]) -> int:
 
     dup_count = 0
     for key, group in by_key.items():
-        roots_seen = {r.source_root for r in group if r.source_root}
+        roots_seen = sorted({r.source_root for r in group if r.source_root})
         if len(roots_seen) < 2:
             continue
+        # Un film dupliquE, peu importe le nombre de rows qu'il flague.
+        dup_count += 1
         for row in group:
             if "duplicate_cross_root" not in (row.warning_flags or []):
                 if row.warning_flags is None:
@@ -772,7 +774,6 @@ def _detect_cross_root_duplicates(rows: List["PlanRow"]) -> int:
                 other_roots = [r for r in roots_seen if r != row.source_root]
                 if other_roots:
                     row.notes = (row.notes or "") + f" | Aussi dans: {', '.join(other_roots)}"
-                dup_count += 1
     return dup_count
 
 
