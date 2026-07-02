@@ -72,6 +72,17 @@ class EstimateApplySizeTests(unittest.TestCase):
         size = estimate_apply_size([row], approved_keys={"r1"})
         self.assertEqual(size, 0)
 
+    def test_size_empty_row_id_not_counted(self) -> None:
+        # Une row au row_id vide ne peut pas etre approuvee (approved_keys est
+        # indexe par row_id) : elle doit etre exclue de l'estimation, sinon on
+        # sur-estime et on declenche un faux "espace insuffisant".
+        folder = self.tmp / "Ghost"
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 5000)
+        row = _make_row(str(folder), "movie.mkv", row_id="")
+        size = estimate_apply_size([row], approved_keys={"r1"})
+        self.assertEqual(size, 0)
+
 
 class CheckDiskSpaceTests(unittest.TestCase):
     def setUp(self) -> None:
