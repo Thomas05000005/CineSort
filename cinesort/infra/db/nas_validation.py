@@ -197,6 +197,11 @@ def run_nas_benchmark(
     started_monotonic = time.monotonic()
 
     wal_before = _wal_size_bytes(db_path)
+    # Mesure a chaud : la taille du WAL doit etre capturee APRES les ecritures
+    # mais AVANT le wal_checkpoint(TRUNCATE) du finally (qui remet le WAL a ~0).
+    # Sinon wal_growth_kb vaut toujours ~0. Defaut = wal_before si le bench
+    # echoue avant la fin des ecritures.
+    wal_after = wal_before
 
     write_times_ms: List[float] = []
     read_times_ms: List[float] = []
@@ -259,6 +264,8 @@ def run_nas_benchmark(
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             read_times_ms.append(elapsed_ms)
 
+        # Capturer la taille du WAL a son pic, avant le TRUNCATE du finally.
+        wal_after = _wal_size_bytes(db_path)
         ok = True
     except (sqlite3.Error, OSError, RuntimeError) as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
@@ -281,7 +288,6 @@ def run_nas_benchmark(
             except sqlite3.Error:
                 pass
 
-    wal_after = _wal_size_bytes(db_path)
     wal_growth_kb = max(0.0, (wal_after - wal_before) / 1024.0)
     total_duration_s = time.monotonic() - started_monotonic
     finished_at = datetime.now(timezone.utc)

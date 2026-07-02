@@ -188,6 +188,32 @@ class RunNasBenchmarkTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_wal_growth_measured_before_truncate(self):
+        """Regression #701 : wal_growth_kb doit refleter le pic du WAL.
+
+        Le finally execute PRAGMA wal_checkpoint(TRUNCATE) qui remet le WAL a
+        ~0. La taille doit donc etre capturee APRES les ecritures mais AVANT ce
+        TRUNCATE, sinon la metrique vaut toujours 0. On force journal_mode=WAL
+        sur la DB puis on verifie que le benchmark rapporte une croissance > 0.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "wal_bench.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("CREATE TABLE seed (id INTEGER PRIMARY KEY)")
+            conn.commit()
+            conn.close()
+
+            # Assez d'ecritures pour faire grossir le WAL de maniere mesurable.
+            result = run_nas_benchmark(db_path, n_writes=300, n_reads=100)
+            self.assertTrue(result["ok"], f"ok=False : {result.get('error')}")
+            self.assertGreater(
+                result["wal_growth_kb"],
+                0.0,
+                "wal_growth_kb doit etre > 0 : la mesure est capturee avant le "
+                "wal_checkpoint(TRUNCATE) du finally.",
+            )
+
     def test_benchmark_result_is_json_serializable(self):
         """Le dict resultat doit etre json.dumps-able sans custom encoder."""
         with tempfile.TemporaryDirectory() as tmp:
