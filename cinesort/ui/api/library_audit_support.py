@@ -47,6 +47,45 @@ def _decade_from_year(year: int) -> Optional[str]:
     return str((y // 10) * 10)
 
 
+def _resolve_row_tmdb_id(row_dict: Dict[str, Any]) -> Optional[int]:
+    """Resoud le tmdb_id effectif d'une PlanRow.
+
+    `PlanRow` n'expose PAS de `tmdb_id` top-level (seulement
+    `tmdb_collection_id`) : le tmdb_id reel vit sur les `Candidate`. On lit donc
+    le top-level d'abord (au cas ou), puis le meilleur candidat de score >= 0.7.
+    Miroir de `library_support._resolve_tmdb_id`. Audit 2026-07-08.
+    """
+    tid_top = row_dict.get("tmdb_id")
+    if tid_top:
+        try:
+            v = int(tid_top)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    best: Optional[int] = None
+    best_score = -1.0
+    for cand in row_dict.get("candidates") or []:
+        if not isinstance(cand, dict):
+            continue
+        cid = cand.get("tmdb_id")
+        if not cid:
+            continue
+        try:
+            score = float(cand.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < 0.7:
+            continue
+        if score > best_score:
+            try:
+                best = int(cid)
+                best_score = score
+            except (TypeError, ValueError):
+                continue
+    return best
+
+
 # ---------------------------------------------------------------------------
 # Endpoint 3 : get_films_by_decade
 # ---------------------------------------------------------------------------
@@ -198,6 +237,9 @@ def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any
 
     `_build_library_rows` perd certains champs (tmdb_collection_id, tmdb_id) car
     il aggrege juste pour la library_facade. Ici on lit le plan brut.
+
+    Le tmdb_id est resolu depuis les `Candidate` (`_resolve_row_tmdb_id`) car
+    `PlanRow` n'a pas de champ `tmdb_id` top-level. Audit 2026-07-08.
     """
     try:
         plan = api.run.get_plan(run_id)
@@ -214,7 +256,7 @@ def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any
                 "row_id": str(r.get("row_id") or ""),
                 "title": r.get("proposed_title") or r.get("nfo_title") or "",
                 "year": int(r.get("proposed_year") or 0),
-                "tmdb_id": r.get("tmdb_id"),
+                "tmdb_id": _resolve_row_tmdb_id(r),
                 "tmdb_collection_id": r.get("tmdb_collection_id"),
                 "tmdb_collection_name": r.get("tmdb_collection_name"),
             }

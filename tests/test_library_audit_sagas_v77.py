@@ -49,5 +49,54 @@ class LibraryAuditSagasTests(unittest.TestCase):
         self.assertIsNone(library_audit_support._fetch_collection_parts(api, 99))
 
 
+class ResolveRowTmdbIdTests(unittest.TestCase):
+    """Audit 2026-07-08 — `PlanRow` n'a pas de `tmdb_id` top-level : il doit
+    etre resolu depuis le meilleur `Candidate` de score >= 0.7. Avant, le champ
+    top-level (toujours absent) etait lu tel quel -> tmdb_id toujours None ->
+    ownership par tmdb_id mort -> films possedes faussement listes 'manquants'.
+    """
+
+    def test_resolves_from_best_candidate(self) -> None:
+        row = {
+            "candidates": [
+                {"tmdb_id": 120, "score": 0.95},
+                {"tmdb_id": 999, "score": 0.60},
+            ]
+        }
+        self.assertEqual(library_audit_support._resolve_row_tmdb_id(row), 120)
+
+    def test_low_score_candidate_ignored(self) -> None:
+        row = {"candidates": [{"tmdb_id": 999, "score": 0.5}]}
+        self.assertIsNone(library_audit_support._resolve_row_tmdb_id(row))
+
+    def test_top_level_wins_if_present(self) -> None:
+        row = {"tmdb_id": 42, "candidates": [{"tmdb_id": 120, "score": 0.95}]}
+        self.assertEqual(library_audit_support._resolve_row_tmdb_id(row), 42)
+
+    def test_no_candidates_returns_none(self) -> None:
+        self.assertIsNone(library_audit_support._resolve_row_tmdb_id({}))
+
+    def test_load_plan_rows_populates_tmdb_id_from_candidate(self) -> None:
+        """Bout-en-bout : un plan dont les rows n'ont que des candidats doit
+        produire des rows avec un `tmdb_id` non-None (set d'ownership non vide)."""
+        plan = {
+            "ok": True,
+            "rows": [
+                {
+                    "row_id": "r1",
+                    "proposed_title": "The Fellowship of the Ring",
+                    "proposed_year": 2001,
+                    "tmdb_collection_id": 119,
+                    "tmdb_collection_name": "The Lord of the Rings",
+                    "candidates": [{"tmdb_id": 120, "score": 0.9}],
+                }
+            ],
+        }
+        api = SimpleNamespace(run=SimpleNamespace(get_plan=lambda _rid: plan))
+        rows = library_audit_support._load_plan_rows_with_collection(api, "run1")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tmdb_id"], 120)
+
+
 if __name__ == "__main__":
     unittest.main()
