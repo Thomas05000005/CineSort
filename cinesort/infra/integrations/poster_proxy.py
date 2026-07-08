@@ -29,6 +29,7 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -333,7 +334,13 @@ def _atomic_write(target: Path, payload: bytes) -> None:
     que `os.replace` est atomique cote filesystem (memes device).
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
+    # Nom de `.tmp` unique par processus/thread/instant : le serveur cache est
+    # multi-thread (ThreadingHTTPServer) et deux requetes concurrentes sur le
+    # meme poster partageaient sinon le meme `.tmp`, corrompant l'ecriture
+    # (CWE-362). Audit 2026-07-08.
+    tmp = target.with_name(
+        f"{target.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}"
+    )
     try:
         with open(tmp, "wb") as f:
             f.write(payload)
