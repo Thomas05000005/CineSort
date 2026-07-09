@@ -17,9 +17,18 @@ Invariants proteges :
 from __future__ import annotations
 
 import io
+import socket
+import threading
+import time as _time
 import unittest
+from unittest import mock
 
-from cinesort.infra.rest_server import _MAX_BODY_SIZE, _CineSortHandler
+import cinesort.infra.rest_server as rest_server
+from cinesort.infra.rest_server import (
+    _DRAIN_BODY_MAX_WALL_S,
+    _MAX_BODY_SIZE,
+    _CineSortHandler,
+)
 
 
 class _FakeConnection:
@@ -92,6 +101,141 @@ class DrainRequestBodyTests(unittest.TestCase):
         handler = _make_handler(2, b"{}", consumed=None)
         handler._drain_request_body()
         self.assertEqual(handler.rfile.tell(), 0)
+
+
+class _SlowDripFakeReader:
+    """rfile d'un client 'slow drip' modelisant un BufferedReader.
+
+    - read1(n) rend AU PLUS UN paquet (1 octet ici) : la boucle du drain reprend
+      la main a chaque paquet et peut re-tester la deadline wall-clock.
+    - read(n) est INTERDIT. Le vrai BufferedReader.read(n) BOUCLE des recv() pour
+      accumuler n octets et ne rend jamais la main sous un client lent ; le drain
+      DOIT donc utiliser read1(). Un appel a read() = regression SEC-1 -> on
+      echoue immediatement (au lieu de hanger le test).
+    """
+
+    def __init__(self) -> None:
+        self.reads = 0
+
+    def read1(self, _n: int) -> bytes:
+        self.reads += 1
+        return b"x"
+
+    def read(self, _n: int) -> bytes:  # pragma: no cover - doit ne jamais etre appele
+        raise AssertionError(
+            "drain a appele rfile.read() au lieu de read1() : regression SEC-1 "
+            "(read() bloque en accumulant n octets -> deadline wall-clock inefficace)"
+        )
+
+
+class _FakeClock:
+    """time.monotonic() deterministe : avance de `step` s a chaque appel."""
+
+    def __init__(self, step: float) -> None:
+        self.t = 0.0
+        self.step = step
+
+    def __call__(self) -> float:
+        v = self.t
+        self.t += self.step
+        return v
+
+
+class DrainBodyWallClockSEC1Tests(unittest.TestCase):
+    """[SEC-1] Le drain d'un client lent est borne par un budget wall-clock."""
+
+    def test_slow_drip_client_ne_retient_pas_le_thread(self) -> None:
+        # Content-Length enorme (mais <= _MAX_BODY_SIZE pour ne pas tomber dans
+        # l'abort 413) + flux qui ne finit jamais. Horloge factice avancant de 1s
+        # par appel -> la deadline (_DRAIN_BODY_MAX_WALL_S = 10s) doit couper la
+        # boucle apres ~10 iterations, PAS apres Content-Length lectures. Le fake
+        # INTERDIT read() : garde-fou contre une regression vers rfile.read().
+        handler = _CineSortHandler.__new__(_CineSortHandler)
+        handler.headers = {"Content-Length": str(_MAX_BODY_SIZE)}
+        reader = _SlowDripFakeReader()
+        handler.rfile = reader
+        handler.connection = _FakeConnection()
+        handler._body_consumed = False
+
+        with mock.patch.object(rest_server.time, "monotonic", _FakeClock(step=1.0)):
+            handler._drain_request_body()
+
+        # Sans le fix : reads ~ _MAX_BODY_SIZE (16M). Avec : borne par la deadline.
+        self.assertLess(
+            reader.reads,
+            int(_DRAIN_BODY_MAX_WALL_S) + 5,
+            "le drain n'est pas borne par le budget wall-clock (DoS SEC-1)",
+        )
+        self.assertTrue(handler._body_consumed)
+
+    def test_client_rapide_draine_tout_avant_la_deadline(self) -> None:
+        # Non-regression : un client qui envoie son body d'un bloc est draine en
+        # entier (close -> FIN) ; l'horloge n'avance pas assez pour couper.
+        handler = _make_handler(4, b"abcd")
+        with mock.patch.object(rest_server.time, "monotonic", _FakeClock(step=0.001)):
+            handler._drain_request_body()
+        self.assertEqual(handler.rfile.tell(), 4, "body complet non draine")
+
+
+class DrainBodyRealSocketSEC1Tests(unittest.TestCase):
+    """[SEC-1] Preuve sur SOCKET REELLE : un client slow-drip via un vrai
+    BufferedReader (socket.makefile) est borne et rend la main. C'est le test
+    fidele au vecteur reel (le fake ne prouve que la boucle read1)."""
+
+    def test_slow_drip_reel_est_borne_et_rend_la_main(self) -> None:
+        srv, cli = socket.socketpair()
+        stop = threading.Event()
+        result: dict = {}
+
+        def _drip() -> None:
+            try:
+                while not stop.is_set():
+                    cli.sendall(b"x")
+                    _time.sleep(0.2)
+            except OSError:
+                pass
+
+        handler = _CineSortHandler.__new__(_CineSortHandler)
+        handler.headers = {"Content-Length": str(_MAX_BODY_SIZE)}
+        handler.rfile = srv.makefile("rb", -1)  # vrai BufferedReader
+        handler.connection = srv
+        handler._body_consumed = False
+
+        def _run() -> None:
+            t0 = _time.monotonic()
+            try:
+                handler._drain_request_body()
+            finally:
+                result["elapsed"] = _time.monotonic() - t0
+
+        drip = threading.Thread(target=_drip, daemon=True)
+        worker = threading.Thread(target=_run, daemon=True)
+        try:
+            # Constantes reduites pour un test rapide (budget 1s, timeout par-recv 0.5s).
+            with mock.patch.object(rest_server, "_DRAIN_BODY_TIMEOUT_S", 0.5), \
+                 mock.patch.object(rest_server, "_DRAIN_BODY_MAX_WALL_S", 1.0):
+                drip.start()
+                worker.start()
+                worker.join(timeout=5.0)
+                # Regression (read() bloquant) : le worker serait encore vivant.
+                self.assertFalse(
+                    worker.is_alive(),
+                    "le drain n'a pas rendu la main en 5s (slow-drip non borne = regression SEC-1)",
+                )
+                self.assertLess(
+                    result.get("elapsed", 999.0),
+                    3.0,
+                    f"drain trop long: {result.get('elapsed')}s (budget wall-clock 1.0s)",
+                )
+        finally:
+            stop.set()
+            for s in (srv, cli):
+                try:
+                    s.close()
+                except OSError:
+                    pass
+            drip.join(timeout=1.0)
+            worker.join(timeout=2.0)
 
 
 if __name__ == "__main__":

@@ -28,15 +28,17 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 ## Etat actuel du projet (9 juillet 2026)
 
 ### Version & branches
-- **R8 POUSSÉ** : `origin/main` = **`650d162`** (« R8: corrections F1→F6 », squash de la campagne
-  R8). Aucun tag ne pointe dessus (dernier tag = v1.5.2-beta @ 0882c50, commit d'avant) — le
-  tag/release R8 reste une décision Thomas.
-- **Campagne « vérification totale » en cours** sur `verif/totale-2026-07` (~76 commits au-dessus de
-  650d162, **jamais poussée**, push = décision Thomas). Lots A→D + toutes les vagues de fix + Phases
-  5/6/7. Traçabilité : `docs/internal/verif_totale_2026_07/` (PLAN + SYNTHESE_LOT_A..E + LOT_C/D_FIX
-  + RAPPORT_VERIF_TOTALE + SECURITE_POUR_OPUS + PHASE5_ARBITRAGES).
-- **Sécurité réservée à Opus** (décision utilisateur 2026-07-08) : `SECURITE_POUR_OPUS.md` (drain body
-  DoS, rest_api_token clair, DPAPI-NG, rate-limit tuning). NE PAS corriger en session Fable.
+- **Campagne « vérification totale » POUSSÉE + TAGUÉE** (2026-07-09) : `origin/main` = **`f486f98`**
+  (squash de `verif/totale-2026-07`, 75 commits, sans artefacts debug), tag annoté
+  **`verif-totale-2026-07`**. Base = R8 `650d162`. Lots A→D + vagues de fix + Phases 5/6/7.
+  Traçabilité : `docs/internal/verif_totale_2026_07/` (PLAN + SYNTHESE_LOT_A..E + LOT_C/D_FIX +
+  RAPPORT_VERIF_TOTALE + SECURITE_POUR_OPUS + PHASE5_ARBITRAGES).
+- **Sécurité TRAITÉE par Opus** (session 2026-07-10, branche `security/opus-2026-07`) : les 4 items de
+  `SECURITE_POUR_OPUS.md` sont résolus (SEC-1 drain DoS borné, SEC-2 token REST chiffré au repos,
+  SEC-3 DPAPI-NG, SEC-4 rate-limit tranché) + FIX-4 (boot headless `--api`). 2 passes de revue
+  adversaire (3 bugs réels attrapés avant tout tag). **Prête à merger (squash) ; push = décision
+  utilisateur.** ⚠️ La consigne « NE PAS corriger la sécu en session Fable » reste valable pour Fable ;
+  Opus peut la traiter.
 
 ### Ce que la campagne a livré (2026-07)
 - **8 matrices de câblage** rejouables (`matrices/mX_*.json`) + **5 tests de contrat CI**
@@ -470,10 +472,11 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-07-09 (Campagne vérif totale Lots A→D + Phases 5/6/7 sur verif/totale-2026-07 :
-8 matrices, 5 contrats CI, 17 findings runtime + 18 findings métier corrigés, ~4160 l. JS mort purgées,
-import-linter 3/3, ~6062 tests ; cf docs/internal/verif_totale_2026_07/RAPPORT_VERIF_TOTALE.md.
-Sécurité→Opus, arbitrages+push+tag→Thomas).*
+*Last updated : 2026-07-10 (2026-07-09 : campagne vérif totale POUSSÉE sur origin/main = f486f98 + tag
+verif-totale-2026-07. 2026-07-10 : cycle SÉCURITÉ Opus sur security/opus-2026-07 — SEC-1/2/3/4 +
+FIX-4 résolus, 2 passes revue adversaire (3 bugs réels attrapés), 25 tests SEC + import-linter 3/3 ;
+prête à merger, push = décision utilisateur ; cf SECURITE_POUR_OPUS.md. Arbitrages produit→Thomas
+via PHASE5_ARBITRAGES.md).*
 
 ---
 

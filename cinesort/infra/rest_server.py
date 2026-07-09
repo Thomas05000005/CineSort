@@ -120,11 +120,28 @@ _MAX_BODY_SIZE = 16 * 1024 * 1024
 # [BUG-LOTD-401-RST-BODY] : budget de lecture du drain de body avant fermeture.
 # Court : un client qui annonce un body mais ne l'envoie jamais ne doit pas
 # retenir le thread apres l'emission de la reponse d'erreur.
+# _DRAIN_BODY_TIMEOUT_S = timeout PAR recv (detecte un client totalement muet).
 _DRAIN_BODY_TIMEOUT_S = 5.0
+# [SEC-1] Budget wall-clock TOTAL du drain (anti-DoS). Le timeout par-recv seul
+# ne borne pas un client "slow drip" (1 octet toutes les 4 s) : chaque octet
+# rearme le timeout et un thread non authentifie reste retenu indefiniment.
+# On plafonne la duree totale du drain : passe ce budget, on abandonne et on
+# ferme (un RST pour un client malveillant/lent est acceptable — seuls les
+# clients legitimes qui envoient leur body d'un bloc beneficient du drain FIN).
+_DRAIN_BODY_MAX_WALL_S = 10.0
 
 # --- Rate limiting 401 ---------------------------------------------------
 # Apres _RATE_LIMIT_MAX_FAILURES echecs d'auth depuis la meme IP en
 # _RATE_LIMIT_WINDOW_S secondes, on repond 429.
+#
+# [SEC-4 — arbitrage 2026-07, tranche par Opus] Proposition wip/b4 de desserrer
+# ce seuil 5 -> 20 (« eviter les faux 429 en usage local au boot ») REJETEE :
+# la cause racine des faux 429 locaux est deja traitee A LA SOURCE — les IPs
+# locales sont TOTALEMENT exemptees du rate-limit (_is_rate_limited) et un 401
+# sans/avec header Bearer malforme n'incremente PAS le compteur (_has_bearer_header).
+# Le seuil ne s'applique donc qu'aux IPs DISTANTES (dashboard LAN), ou 5 echecs/
+# 60s/IP est precisement la protection brute-force voulue. L'elargir a 20 ne
+# gagnerait rien en local (deja exempte) et affaiblirait la seule surface reelle.
 _RATE_LIMIT_MAX_FAILURES = 5
 _RATE_LIMIT_WINDOW_S = 60.0
 
@@ -993,9 +1010,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         if remaining <= 0 or remaining > _MAX_BODY_SIZE:
             return
         with contextlib.suppress(OSError, ValueError):
-            self.connection.settimeout(_DRAIN_BODY_TIMEOUT_S)
+            # [SEC-1] Deadline wall-clock TOTALE, correctement appliquee.
+            # PIEGE : self.rfile est un BufferedReader dont read(n) BOUCLE des
+            # recv() pour accumuler n octets et ne rend PAS la main tant que le
+            # client draine lentement (chaque octet arrive avant le timeout
+            # par-recv) -> une deadline testee seulement en haut de boucle ne
+            # serait jamais atteinte. On lit donc par read1() (AU PLUS UN recv ->
+            # la boucle reprend la main a chaque paquet et re-teste la deadline)
+            # ET on borne le timeout par-recv par le budget restant : un client
+            # lent-mais-pas-muet trippe le timeout par-recv avant de depasser la
+            # deadline ; un client totalement muet est coupe par le timeout aussi.
+            deadline = time.monotonic() + _DRAIN_BODY_MAX_WALL_S
+            _read1 = getattr(self.rfile, "read1", None) or self.rfile.read
             while remaining > 0:
-                chunk = self.rfile.read(min(remaining, 65536))
+                budget = deadline - time.monotonic()
+                if budget <= 0:
+                    break
+                self.connection.settimeout(min(_DRAIN_BODY_TIMEOUT_S, budget))
+                chunk = _read1(min(remaining, 65536))
                 if not chunk:
                     break
                 remaining -= len(chunk)

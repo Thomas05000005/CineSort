@@ -26,9 +26,9 @@ from cinesort.infra.local_secret_store import (
     SECRET_PROTECTION_UNAVAILABLE,
     WINDOWS_DPAPI_CURRENT_USER,
     protect_secret,
-    unprotect_secret,
 )
 from cinesort.infra.log_context import is_remote_request, normalize_log_level_setting
+from cinesort.infra.security import secret_storage as _secret_storage
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err
 
@@ -113,6 +113,15 @@ SMTP_PASSWORD_PURPOSE = "email_smtp_password"
 OMDB_KEY_SECRET_FIELD = "omdb_api_key_secret"
 OMDB_KEY_PURPOSE = "omdb_api_key"
 
+# [SEC-2] Bearer token de l'API REST locale. Auparavant stocke EN CLAIR dans
+# settings.json (seul secret non chiffre) : un settings.json exfiltre donnait
+# l'acces API LAN. Desormais chiffre au repos sous l'enveloppe {scheme, blob_b64}
+# comme les autres secrets. read_settings dechiffre -> `rest_api_token` clair en
+# memoire (consomme par le boot serveur REST, reveal_rest_token, hot-reload) ;
+# write_settings re-chiffre ; _mask_secrets masque au GET frontend.
+REST_TOKEN_SECRET_FIELD = "rest_api_token_secret"
+REST_TOKEN_PURPOSE = "rest_api_token"
+
 # Audit ID-J-001 : backup auto + rotation 5 sur settings.json (V1-M10).
 # Chaque write_settings cree un .bak.YYYYMMDD-HHMMSS prealable, puis purge
 # au-dela des 5 plus recents. Protection contre erreurs utilisateur (vidage
@@ -182,6 +191,46 @@ def _rotate_settings_backups(settings_path: Path, keep: int = DEFAULT_SETTINGS_B
     return deleted
 
 
+# [SEC-3] Migration DPAPI legacy -> DPAPI-NG. Les 5 secrets (TMDb, Jellyfin,
+# Plex, Radarr, SMTP) etaient chiffres via `protect_secret`/`unprotect_secret`
+# (DPAPI CurrentUser legacy). On route desormais par la couche NG
+# (`secret_storage`), qui : (1) chiffre TOUJOURS en NG a l'ecriture ; (2) lit
+# indifferemment un blob NG (magic) ou legacy (fallback transparent) a la
+# lecture. L'enveloppe de stockage {scheme, blob_b64} est INCHANGEE : le champ
+# `scheme` reste WINDOWS_DPAPI_CURRENT_USER (marqueur "protege DPAPI"), NG vs
+# legacy se distinguant par le magic du blob. Retro-compat totale : un
+# settings.json existant (blobs legacy) reste lisible ; la migration effective
+# se fait au prochain SAVE (chemin d'ecriture -> NG). Signatures identiques aux
+# helpers legacy pour un swap 1:1 des sites d'appel.
+
+
+def _protect_secret_ng(raw: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Chiffre `raw` en DPAPI-NG. Repli legacy si NG indisponible.
+
+    Retourne (ok, blob_b64, error), meme contrat que `protect_secret`.
+    """
+    try:
+        return True, _secret_storage.save_secret(purpose, raw), ""
+    except _secret_storage.SecretStorageError:
+        # NG indisponible (Windows tres ancien sans ncrypt) : on ne regresse pas
+        # la protection — repli sur DPAPI legacy (toujours present via crypt32).
+        return protect_secret(raw, purpose=purpose)
+
+
+def _unprotect_secret_ng(blob_b64: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Dechiffre un blob NG OU legacy (retro-compat). (ok, value, error).
+
+    `secret_storage.load_secret` gere le routage NG/legacy. La re-ecriture en NG
+    du blob (migration disque) intervient au prochain SAVE, pas ici (les
+    extracteurs de lecture ne mutent pas settings.json).
+    """
+    try:
+        result = _secret_storage.load_secret(purpose, blob_b64)
+        return True, result.value, ""
+    except _secret_storage.SecretStorageError as exc:
+        return False, "", str(exc)
+
+
 def _extract_protected_secret(
     data: Dict[str, Any],
     *,
@@ -200,7 +249,7 @@ def _extract_protected_secret(
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=purpose)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=purpose)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Secret protege illisible ({purpose}): {error}"
@@ -238,7 +287,7 @@ def _persist_protected_secret(
         if isinstance(orig_blob, dict):
             payload[secret_field] = orig_blob
         return False, ""
-    ok, blob_b64, error = protect_secret(raw, purpose=purpose)
+    ok, blob_b64, error = _protect_secret_ng(raw, purpose=purpose)
     if ok and blob_b64:
         payload[secret_field] = {
             "scheme": WINDOWS_DPAPI_CURRENT_USER,
@@ -385,7 +434,7 @@ def extract_tmdb_key_from_settings_payload(data: Dict[str, Any]) -> Tuple[str, s
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=TMDB_KEY_PURPOSE)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=TMDB_KEY_PURPOSE)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Cle TMDb protegee illisible pour cet utilisateur Windows: {error}"
@@ -407,7 +456,7 @@ def extract_jellyfin_key_from_settings_payload(data: Dict[str, Any]) -> Tuple[st
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=JELLYFIN_KEY_PURPOSE)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=JELLYFIN_KEY_PURPOSE)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Cle Jellyfin protegee illisible: {error}"
@@ -501,6 +550,29 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
                     data[f"_orig_{secret_field}"] = orig_blob
             else:
                 data.pop(warning_key, None)
+
+        # [SEC-2] rest_api_token : dechiffrer l'enveloppe -> valeur claire en
+        # memoire. Retro-compat : un settings.json d'avant SEC-2 porte un
+        # `rest_api_token` EN CLAIR sans enveloppe -> on le laisse tel quel (il
+        # sera migre, valeur INCHANGEE, au prochain write_settings).
+        rest_secret = data.get(REST_TOKEN_SECRET_FIELD)
+        if isinstance(rest_secret, dict):
+            data.pop(REST_TOKEN_SECRET_FIELD, None)
+            scheme = str(rest_secret.get("scheme") or "").strip().lower()
+            blob_b64 = str(rest_secret.get("blob_b64") or "").strip()
+            if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
+                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(
+                    blob_b64, purpose=REST_TOKEN_PURPOSE
+                )
+                if ok_rt:
+                    data["rest_api_token"] = value_rt
+                else:
+                    # Blob illisible (reinstall Windows / changement de profil) :
+                    # ne pas ecraser par du vide -> preserver le blob pour un
+                    # futur re-essai ; token clair vide (auth distante a
+                    # re-generer). apply_settings_defaults en generera un neuf.
+                    data["rest_api_token"] = ""
+                    data["_orig_rest_api_token_secret"] = rest_secret
 
         _migrate_root_to_roots(data)
         return data
@@ -612,7 +684,7 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     persisted = False
 
     if remember_key and secret_value:
-        ok, blob_b64, error = protect_secret(secret_value, purpose=TMDB_KEY_PURPOSE)
+        ok, blob_b64, error = _protect_secret_ng(secret_value, purpose=TMDB_KEY_PURPOSE)
         if ok and blob_b64:
             payload[TMDB_KEY_SECRET_FIELD] = {
                 "scheme": WINDOWS_DPAPI_CURRENT_USER,
@@ -647,7 +719,7 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     jf_warning = ""
 
     if jf_secret:
-        ok_jf, blob_jf, err_jf = protect_secret(jf_secret, purpose=JELLYFIN_KEY_PURPOSE)
+        ok_jf, blob_jf, err_jf = _protect_secret_ng(jf_secret, purpose=JELLYFIN_KEY_PURPOSE)
         if ok_jf and blob_jf:
             payload[JELLYFIN_KEY_SECRET_FIELD] = {
                 "scheme": WINDOWS_DPAPI_CURRENT_USER,
@@ -703,6 +775,28 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     )
     payload.pop("omdb_key_protection", None)
     payload.pop("omdb_key_warning", None)
+
+    # [SEC-2] rest_api_token : chiffrer au repos (jamais ecrit en clair sur
+    # disque). La valeur claire vient de _save_section_rest_api (echo unmask).
+    # Repli sur stockage clair UNIQUEMENT si DPAPI est totalement indisponible
+    # (NG + legacy KO -> plateforme non-Windows) : la cible etant Windows, le
+    # token est toujours chiffre en prod ; on ne casse pas l'auth ailleurs.
+    rest_token = str(payload.pop("rest_api_token", "") or "").strip()
+    payload.pop(REST_TOKEN_SECRET_FIELD, None)
+    orig_rest_blob = payload.pop("_orig_rest_api_token_secret", None)
+    if rest_token:
+        ok_rt, blob_rt, _err_rt = _protect_secret_ng(rest_token, purpose=REST_TOKEN_PURPOSE)
+        if ok_rt and blob_rt:
+            payload[REST_TOKEN_SECRET_FIELD] = {
+                "scheme": WINDOWS_DPAPI_CURRENT_USER,
+                "blob_b64": blob_rt,
+            }
+        else:
+            payload["rest_api_token"] = rest_token  # repli clair (non-Windows)
+    elif isinstance(orig_rest_blob, dict):
+        # Aucune valeur claire (blob illisible a la lecture) : preserver le blob
+        # d'origine plutot que de perdre definitivement le secret.
+        payload[REST_TOKEN_SECRET_FIELD] = orig_rest_blob
 
     # Audit ID-J-001 (V1-M10) : backup auto + rotation avant ecriture.
     target_path = settings_path(state_dir)
@@ -1216,6 +1310,12 @@ def _mask_secrets(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload[f"_has_{field}"] = bool(value)
         if value:
             payload[field] = _SECRET_MASK
+    # [SEC-2 FIX-3] Ne jamais exposer les blobs `_orig_*` (enveloppes chiffrees
+    # preservees par read_settings quand un dechiffrement echoue) sur la surface
+    # GET externe : internes de persistance, pas des champs UI. Machine-bound
+    # donc inutiles ailleurs, mais on n'expose aucun materiel secret au frontend.
+    for key in [k for k in payload if k.startswith("_orig_")]:
+        payload.pop(key, None)
     return payload
 
 
