@@ -255,7 +255,10 @@ def export_nfo_for_run(
         folder = str(row.get("folder") or "").strip()
         video = str(row.get("video") or "").strip()
         title = str(row.get("decision_title") or row.get("proposed_title") or "").strip()
-        year = int(row.get("decision_year") or row.get("proposed_year") or 0)
+        try:
+            year = int(row.get("decision_year") or row.get("proposed_year") or 0)
+        except (TypeError, ValueError):
+            year = 0
 
         if not folder or not video or not title:
             skipped_no_data += 1

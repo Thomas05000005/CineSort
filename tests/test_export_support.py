@@ -175,6 +175,17 @@ class TestExportNfoForRun(unittest.TestCase):
         self.assertEqual(result["skipped_no_data"], 1)
         self.assertEqual(result["written"], 0)
 
+    def test_non_numeric_year_does_not_crash(self):
+        # Regression #720 : une année non numérique ne doit pas planter tout l'export.
+        rows = [
+            {"folder": "D:\\Films\\A", "video": "a.mkv", "proposed_title": "A", "proposed_year": "N/A"},
+            {"folder": "D:\\Films\\B", "video": "b.mkv", "proposed_title": "B", "proposed_year": 2021},
+        ]
+        result = export_nfo_for_run(rows, dry_run=True)
+        self.assertTrue(result["ok"])
+        # Les 2 rows sont traitées (year=0 pour la 1re) au lieu d'un crash global.
+        self.assertEqual(result["written"], 2)
+
     def test_skip_existing_nfo(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video = Path(tmpdir) / "film.mkv"
