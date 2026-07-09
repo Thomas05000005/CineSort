@@ -2,8 +2,8 @@
 
 Migration #85 phase B6 (2026-05-16) : meme pattern que B1-B5 :
 - Code metier vit DANS RunRepository
-- _RunMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _RunMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.run (heritage MRO supprime en B8)
 
 Note specifique B6 : `insert_run_pending` appelle `initialize()` en fallback
 si la table runs n'existe pas. Dans RunRepository (_BaseRepository compose),

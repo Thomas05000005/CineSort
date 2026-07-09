@@ -562,14 +562,14 @@ class IntegrationsFacadeFullMigrationTests(unittest.TestCase):
         sentinel = {"ok": True, "posters": {}}
         with patch.object(self.api, "_get_tmdb_posters_impl", return_value=sentinel) as mocked:
             result = self.api.integrations.get_tmdb_posters([27205, 19995], size="w185")
-        mocked.assert_called_once_with([27205, 19995], "w185")
+        mocked.assert_called_once_with([27205, 19995], "w185", force_refresh=False)
         self.assertEqual(result, sentinel)
 
     def test_get_tmdb_posters_default_size(self) -> None:
         sentinel = {"ok": True}
         with patch.object(self.api, "_get_tmdb_posters_impl", return_value=sentinel) as mocked:
             self.api.integrations.get_tmdb_posters([1])
-        mocked.assert_called_once_with([1], "w92")
+        mocked.assert_called_once_with([1], "w92", force_refresh=False)
 
     # ----- Jellyfin (3) -----
 

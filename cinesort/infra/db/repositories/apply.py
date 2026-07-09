@@ -2,8 +2,8 @@
 
 Migration #85 phase B7 (2026-05-16) : meme pattern que B1-B6 :
 - Code metier vit DANS ApplyRepository
-- _ApplyMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _ApplyMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.apply (heritage MRO supprime en B8)
 
 Note specifique B7 : `mark_apply_batch_undo_status` appelle `self.close_apply_batch`
 en interne. Dans ApplyRepository, `self.close_apply_batch` est la methode locale
@@ -344,21 +344,27 @@ class ApplyRepository(_BaseRepository):
     # --- Undo v5: per-row methods ---
 
     def list_apply_batches_for_run(self, *, run_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Return all batches for a run (not just the last DONE), most recent first."""
+        """Return all batches for a run (not just the last DONE), most recent first.
+
+        R2 (revue round 2) : `limit <= 0` = AUCUNE borne (tous les batches du run,
+        deja fini). Utilise par le balayage d'integrite des MKDIR en undo, ou
+        borner (ORDER BY started_ts DESC LIMIT 1000) jetait les PLUS ANCIENS
+        batches -> un dossier saga cree par un vieux batch restait orphelin.
+        """
         self._ensure_apply_journal_tables()
-        lim = max(1, int(limit))
-        with self._managed_conn() as conn:
-            cur = conn.execute(
-                """
+        lim = int(limit)
+        base_sql = """
                 SELECT batch_id, run_id, started_ts, ended_ts, dry_run,
                        quarantine_unapproved, status, summary_json, app_version
                 FROM apply_batches
                 WHERE run_id=?
                 ORDER BY started_ts DESC
-                LIMIT ?
-                """,
-                (str(run_id), lim),
-            )
+        """
+        with self._managed_conn() as conn:
+            if lim <= 0:
+                cur = conn.execute(base_sql, (str(run_id),))
+            else:
+                cur = conn.execute(base_sql + " LIMIT ?", (str(run_id), lim))
             rows = cur.fetchall()
         out: List[Dict[str, Any]] = []
         for row in rows:

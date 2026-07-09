@@ -2495,13 +2495,30 @@ function _onContainerClick(event) {
     } else if (action === "rename") {
       renderFilmDetail({ mode: "C", rowId, runId });
     } else if (action === "ignore") {
-      apiPost("run/mark_alert_ignored", { run_id: runId, row_id: rowId }, { signal: _signal() })
-        .then((res) => {
-          if (res?.data?.ok !== false) {
-            showToast({ type: "info", text: "Alerte ignorée." });
+      // E2 (verif totale 2026-07) : run/mark_alert_ignored n'a jamais existe
+      // (la methode vit sur la facade library, signature (row_id, alert_code))
+      // -> 404 systematique. On ignore chaque warning_flag de la row (backend
+      // idempotent par couple row/code), meme source que les badges affiches.
+      const row = (_validationPlan?.rows || []).find((r) => String(r.row_id) === String(rowId));
+      const codes = Array.isArray(row?.warning_flags)
+        ? row.warning_flags
+        : String(row?.warning_flags || "").split(",").filter(Boolean);
+      if (!codes.length) {
+        showToast({ type: "info", text: "Aucune alerte à ignorer sur cette ligne." });
+        return;
+      }
+      Promise.all(
+        codes.map((code) =>
+          apiPost("library/mark_alert_ignored", { row_id: rowId, alert_code: code }, { signal: _signal() })
+        )
+      )
+        .then((results) => {
+          const failed = results.filter((res) => res?.data?.ok === false).length;
+          if (!failed) {
+            showToast({ type: "info", text: codes.length > 1 ? `${codes.length} alertes ignorées.` : "Alerte ignorée." });
             return _loadPlan().then(() => _renderInPlace());
           }
-          showToast({ type: "error", text: "Échec de l'ignorance." });
+          showToast({ type: "error", text: `Échec : ${failed}/${codes.length} alertes non ignorées.` });
         })
         .catch(() => showToast({ type: "error", text: "Erreur lors de l'ignorance." }));
     }

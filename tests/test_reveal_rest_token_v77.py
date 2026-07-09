@@ -11,7 +11,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 _API = _ROOT / "cinesort" / "ui" / "api" / "cinesort_api.py"
 _FAC = _ROOT / "cinesort" / "ui" / "api" / "facades" / "settings_facade.py"
-_STATUS = _ROOT / "web" / "dashboard" / "views" / "status.js"
+_PARAMS = _ROOT / "web" / "dashboard" / "views" / "parametres.js"
 
 
 class RevealRestTokenTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class RevealRestTokenTests(unittest.TestCase):
         self.assertIn("def reveal_rest_token(self)", _FAC.read_text(encoding="utf-8"))
 
     def test_front_fetches_real_token(self):
-        js = _STATUS.read_text(encoding="utf-8")
+        js = _PARAMS.read_text(encoding="utf-8")  # Phase 5 : reveal deplace en parametres.js (LOTC-B3)
         self.assertIn('apiPost("settings/reveal_rest_token")', js)
 
 

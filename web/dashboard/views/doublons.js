@@ -349,7 +349,7 @@ function _renderGroupCard(group) {
       <header class="doublons-card-header">
         <div class="doublons-card-poster" aria-hidden="true">
           ${posterUrl
-            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
+            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" />`
             : `<div class="doublons-card-poster-placeholder">🎬</div>`}
         </div>
         <div class="doublons-card-title-block">
@@ -603,7 +603,7 @@ function _renderRightPanel() {
       title: "📌 Groupe sélectionné",
       html: `
         ${posterUrl
-          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" /></div>`
+          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" /></div>`
           : `<div class="doublons-inspector-poster doublons-inspector-poster--empty">🎬</div>`}
         <h4 class="doublons-inspector-title">${escapeHtml(title)}${escapeHtml(year)}</h4>
         ${runtime ? `<p class="doublons-inspector-meta">${escapeHtml(String(runtime))} min</p>` : ""}
@@ -1185,6 +1185,18 @@ async function _loadGroups(force = false) {
 
 /* --- Events --- */
 
+// LOTC-C1 : la CSP (script-src 'self') bloque les 'onerror' inline -> filet
+// jaquettes via listener 'error' delegue en phase capture (les events error
+// des <img> ne bouillonnent pas), meme pattern que la grille Bibliotheque
+// (R6-H). Sur document car l'inspecteur (right-panel) est rendu HORS
+// _container. Bind a l'init, retire au unmount ; fonction nommee -> no dup.
+function _onPosterError(ev) {
+  const img = ev.target;
+  if (!img || img.tagName !== "IMG" || typeof img.closest !== "function") return;
+  if (!img.closest(".doublons-card-poster, .doublons-inspector-poster")) return;
+  img.style.display = "none";
+}
+
 function _bindEvents() {
   if (!_container) return;
   const retryBtn = _container.querySelector("[data-doublons-retry]");
@@ -1270,6 +1282,7 @@ export async function initDoublons(container) {
   }
   _keyboardHandler = _onKeydown;
   document.addEventListener("keydown", _keyboardHandler);
+  document.addEventListener("error", _onPosterError, true); // LOTC-C1
   await _loadGroups();
 }
 
@@ -1280,6 +1293,7 @@ export function unmountDoublons() {
     document.removeEventListener("keydown", _keyboardHandler);
     _keyboardHandler = null;
   }
+  document.removeEventListener("error", _onPosterError, true); // LOTC-C1
   if (typeof setRightPanelSections === "function") {
     setRightPanelSections([]);
   }

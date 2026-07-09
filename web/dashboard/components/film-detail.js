@@ -193,13 +193,19 @@ function _renderHero(data) {
   // Iter12 ETAPE 2 : prioriser le proxy `/api/poster` (size w342 pour fiche film).
   // tmdbIdForRefresh est deja resolu plus haut depuis row/topCand. Fallback
   // sur `posterUrl` direct preserve backward compat (acquis 242cf339).
-  const proxiedPosterUrl = posterProxyUrl(tmdbIdForRefresh, "w342");
+  // E4-bis : propage le bust d'un refresh manuel pour que les re-renders
+  // (changement d'onglet...) gardent l'image fraiche au lieu du cache proxy.
+  const proxiedPosterUrl = posterProxyUrl(
+    tmdbIdForRefresh, "w342", _state.data && _state.data._posterBust
+  );
   const posterSrc = proxiedPosterUrl || posterUrl || "";
-  // AUDIT 2026-06-14 (R6-H) : onerror -> placeholder. Le proxy /api/poster peut
+  // AUDIT 2026-06-14 (R6-H) : fallback placeholder. Le proxy /api/poster peut
   // renvoyer un corps JSON (404 sans poster / 503 cle absente) au lieu d'une
   // image ; sans ce filet, l'<img> affiche une icone cassee.
+  // LOTC-C1 : la CSP script-src 'self' bloque les handlers inline -> filet
+  // deplace vers le listener 'error' delegue _onPosterError (phase capture).
   const posterInner = posterSrc
-    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'film-detail-poster film-detail-poster--placeholder',textContent:'🎬'}))">`
+    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager">`
     : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
   const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 
@@ -330,7 +336,7 @@ function _renderCandidate(candidate, isChosen) {
   const rawPoster = candidate.poster_url || (candidate.poster_path ? `https://image.tmdb.org/t/p/w92${candidate.poster_path.startsWith("/") ? "" : "/"}${candidate.poster_path}` : null);
   const poster = _resizePosterUrl(rawPoster, "w185") || rawPoster;
   const posterHtml = poster
-    ? `<img class="film-detail-candidate-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(tit)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'">`
+    ? `<img class="film-detail-candidate-poster" src="${escapeHtml(poster)}" alt="${escapeHtml(tit)}" loading="lazy">`
     : `<div class="film-detail-candidate-poster film-detail-candidate-poster--placeholder" aria-hidden="true">🎬</div>`;
 
   const metaParts = [];
@@ -635,11 +641,18 @@ function _renderActions(data) {
   const deleteBtn = d.is_marked_for_deletion
     ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="unmark-delete">↩ Annuler le marquage suppression</button>`
     : `<button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>`;
+  // E3 (verif totale 2026-07) : open_path est exclu du REST par design
+  // (_EXCLUDED_METHODS, anti path-traversal) — ouvrir l'explorateur n'a de
+  // sens qu'en mode desktop pywebview, via le bridge natif. En mode
+  // navigateur pur, le bouton n'est pas rendu.
+  const openFolderBtn = (window.pywebview && window.pywebview.api)
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>`
+    : "";
   return `
     <footer class="film-detail-actions">
       <button type="button" class="v5-btn v5-btn--primary" data-film-action="validate">✓ Valider</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="analyze-perceptual">▶ Analyser perceptuel</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>
+      ${openFolderBtn}
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="rescan">↻ Re-scanner</button>
       ${overrideBtn}
       ${deleteBtn}
@@ -650,6 +663,13 @@ function _renderActions(data) {
 /* ===========================================================
  * Render principal
  * =========================================================== */
+
+// E3-bis (revue Lot E) : window.pywebview est injecte de maniere asynchrone
+// (event pywebviewready) — une fiche rendue AVANT l'injection n'aurait jamais
+// son bouton "Ouvrir dossier". Re-render du contenu quand le bridge arrive.
+window.addEventListener("pywebviewready", () => {
+  if (_state.containerEl && _state.data && !_state.loading) _renderAll();
+});
 
 function _renderAll() {
   if (!_state.containerEl || !_state.data) return;
@@ -678,9 +698,37 @@ function _renderAll() {
  * Event handlers
  * =========================================================== */
 
+// LOTC-C1 : la CSP (script-src 'self') bloque les handlers 'onerror' inline ->
+// filet jaquettes via listener 'error' DELEGUE en phase capture (les events
+// error des <img> ne bouillonnent pas), meme pattern que la grille
+// Bibliotheque (R6-H). Fonction nommee -> addEventListener repete = no-op.
+function _onPosterError(ev) {
+  const img = ev.target;
+  if (!img || img.tagName !== "IMG" || !img.classList) return;
+  if (img.dataset && img.dataset.posterFallbackDone === "1") return; // idempotent
+  if (img.dataset) img.dataset.posterFallbackDone = "1";
+  if (img.classList.contains("film-detail-poster")) {
+    // Poster principal : placeholder 🎬 (comportement R6-H conserve).
+    const ph = document.createElement("div");
+    ph.className = "film-detail-poster film-detail-poster--placeholder";
+    ph.setAttribute("aria-hidden", "true");
+    ph.textContent = "🎬";
+    img.replaceWith(ph);
+  } else if (
+    img.classList.contains("film-detail-candidate-poster")
+    || img.classList.contains("tmdb-manual-search-poster")
+  ) {
+    // Vignettes secondaires (R7-16) : masquage simple conserve.
+    img.style.display = "none";
+  }
+}
+
 function _bindEvents() {
   const root = _state.containerEl;
   if (!root) return;
+
+  // LOTC-C1 : filet jaquettes (capture, cf. _onPosterError ci-dessus).
+  root.addEventListener("error", _onPosterError, true);
 
   // Onglets
   root.querySelectorAll("[data-film-tab]").forEach((btn) => {
@@ -950,14 +998,21 @@ async function _refreshPosterUnit(tmdbId, btn) {
     if (!newUrl) {
       throw new Error("Poster introuvable dans la réponse.");
     }
-    // Cache-bust pour forcer le rechargement visuel meme si l'URL est identique.
-    const bust = newUrl + (newUrl.includes("?") ? "&" : "?") + "_ts=" + Date.now();
+    // E4-bis (revue Lot E) : le rendu prefere le proxy /api/poster (cache
+    // disque immuable 30j) — sans bust force=1 cote proxy, l'image fraiche
+    // affichee ici serait ecrasee par l'ancienne au prochain re-render.
+    // posterProxyUrl(bust) => &force=1&v=<ts> (pattern R7-8).
+    const bustTs = Date.now();
+    const proxied = posterProxyUrl(tmdbId, "w342", bustTs);
     if (img) {
-      img.src = bust;
+      img.src = proxied || newUrl + (newUrl.includes("?") ? "&" : "?") + "_ts=" + bustTs;
       img.style.opacity = "1";
     }
     // Memorise pour les re-renders ulterieurs (changement d'onglet, etc.).
-    if (_state.data) _state.data.poster_url = newUrl;
+    if (_state.data) {
+      _state.data.poster_url = newUrl;
+      _state.data._posterBust = bustTs;
+    }
     showToast({ type: "success", text: "Poster rafraîchi depuis TMDb." });
   } catch (e) {
     console.error("[film-detail] refresh-poster:", e);
@@ -1037,7 +1092,7 @@ function _renderTmdbSearchResults(results) {
           : "";
         const posterUrl = r.poster_url ? escapeHtml(String(r.poster_url)) : "";
         const posterBlock = posterUrl
-          ? `<img class="tmdb-manual-search-poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" width="92" height="138" onerror="this.onerror=null;this.style.display='none'">`
+          ? `<img class="tmdb-manual-search-poster" src="${posterUrl}" alt="Affiche ${title}" loading="lazy" width="92" height="138">`
           : `<div class="tmdb-manual-search-poster tmdb-manual-search-poster--empty" aria-hidden="true">🎞</div>`;
         return `
           <li class="tmdb-manual-search-item" data-tmdb-id="${tid}">
@@ -1152,6 +1207,8 @@ function _openTmdbManualSearchModal(_rowId, _runId) {
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) _closeTmdbManualSearchModal();
   });
+  // LOTC-C1 : overlay hors containerEl -> filet jaquettes dedie (capture).
+  overlay.addEventListener("error", _onPosterError, true);
   overlay.querySelectorAll("[data-tmdb-search-close]").forEach((b) => {
     b.addEventListener("click", _closeTmdbManualSearchModal);
   });
@@ -1208,9 +1265,17 @@ async function _openFolder(row) {
     showToast({ type: "warn", text: "Aucun chemin de dossier disponible." });
     return;
   }
+  // E3 (verif totale 2026-07) : l'ancien apiPost("open_path") tombait sur
+  // _EXCLUDED_METHODS (exclusion REST deliberee, anti path-traversal) => mort
+  // partout. Le bridge pywebview natif expose open_path directement (meme
+  // validation cote CineSortApi) ; hors desktop le bouton n'est pas rendu,
+  // ce garde couvre le cas residuel (bridge disparu apres render).
+  if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_path === "function")) {
+    showToast({ type: "warn", text: "Disponible uniquement dans l'application de bureau." });
+    return;
+  }
   try {
-    const res = await apiPost("open_path", { path });
-    const data = res && res.data ? res.data : res;
+    const data = await window.pywebview.api.open_path(path);
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Ouverture refusée.");
     }

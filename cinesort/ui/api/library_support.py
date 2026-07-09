@@ -12,7 +12,9 @@ Les Smart Playlists sont persistees dans settings.json sous la cle
 
 from __future__ import annotations
 
+import json
 import logging
+import sqlite3
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -774,6 +776,24 @@ def _apply_sort(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
         return rows
 
 
+def _rescan_target_run_id(run: Dict[str, Any]) -> Optional[str]:
+    """LOTC-B1 : run utilitaire de bulk re-scan -> run_id cible, sinon None."""
+    raw = run.get("config_json")
+    cfg: Any = raw
+    if isinstance(raw, str):
+        if "rescan_run_id" not in raw:
+            return None
+        try:
+            cfg = json.loads(raw)
+        except ValueError:
+            return None
+    if isinstance(cfg, dict):
+        target = cfg.get("rescan_run_id")
+        if target:
+            return str(target)
+    return None
+
+
 def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
     if run_id:
         return str(run_id)
@@ -781,9 +801,23 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
-        runs = store.run.list_runs(limit=1)
-        if runs:
-            return str(runs[0].get("run_id") or "")
+        # LOTC-B1 : rescan_rows_bulk cree un run de tracking JobRunner SANS plan
+        # propre ; resoudre "latest" sur lui rendait la bibliotheque vide pour
+        # toute la session. On saute ces runs utilitaires (marqueur config
+        # rescan_run_id) et, si la fenetre ne contient qu'eux, on retombe sur
+        # le run qu'ils re-scannaient (qui porte le plan).
+        runs = store.run.list_runs(limit=20)
+        rescan_fallback: Optional[str] = None
+        for run in runs or []:
+            target = _rescan_target_run_id(run)
+            if target:
+                rescan_fallback = rescan_fallback or target
+                continue
+            rid = str(run.get("run_id") or "")
+            if rid:
+                return rid
+        if rescan_fallback:
+            return rescan_fallback
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("_resolve_run_id error: %s", exc)
     return None
@@ -1315,7 +1349,10 @@ def _get_store(api: Any):
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
         return store
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+    # R2 (revue Lot E round 2) : + sqlite3.Error (n'herite pas d'OSError) et
+    # RuntimeError (rollback migration dans initialize()) — sinon le helper
+    # "retourne None si indispo" laissait remonter les erreurs SQLite.
+    except (OSError, AttributeError, KeyError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
         logger.warning("library_support _get_store error: %s", exc)
         return None
 

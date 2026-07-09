@@ -2,8 +2,8 @@
 
 Migration #85 phase B5 (2026-05-16) : meme pattern que B1-B4 :
 - Code metier vit DANS QualityRepository
-- _QualityMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _QualityMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.quality (heritage MRO supprime en B8)
 
 Methodes exposees :
     get_active_quality_profile, save_quality_profile, get_quality_report,

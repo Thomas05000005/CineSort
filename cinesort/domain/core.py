@@ -11,31 +11,16 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tupl
 
 logger = logging.getLogger(__name__)
 
-# M10 + Issue #83 : couplage domain->app residuel, dette technique documentee.
+# Issue #83 : le cycle domain->app est CASSE (verifie par import-linter,
+# contrat `domain_pure` KEPT en CI : domain n'importe ni app, ni infra, ni ui).
+# Ce module n'importe plus rien de cinesort.app ; les alias historiques
+# core_apply_support/core_plan_support et les re-exports ont ete supprimes
+# (les commentaires "compatibility" plus bas ne sont que de la memoire
+# d'archeologie pour les rares appelants externes qui pointaient vers ces
+# re-exports et doivent desormais importer depuis cinesort.app directement).
 #
-# Etat actuel (#83 phases 1 + 2 appliquees) :
-# - Phase 1 (PR #126) : domain/perceptual ne depend plus de
-#   infra/subprocess_safety (Service Locator via domain/_runners.py).
-# - Phase 2 (cette PR) : callers externes (app/cleanup, tests/test_naming)
-#   migres vers les vraies origines au lieu de passer par domain.core
-#   re-exports. Surface de cycle reduite.
-#
-# Cycle restant (phase 3 future) :
-# Les imports top-level ci-dessous (lignes ~ apres ce commentaire) cassent
-# la regle "domain ne depend pas d'app" car le CODE INTERNE de ce module
-# utilise ~41 helpers d'app.apply_core et app.plan_support via les alias
-# core_apply_support.X et core_plan_support.X plus bas (lignes ~1216-1492).
-#
-# Pour casser ce cycle proprement il faut decider :
-# (a) Bouger ces helpers vers domain (s'ils sont metier pur), ou
-# (b) Bouger les fonctions de domain/core qui les utilisent vers app
-#     (si elles sont en fait orchestration applicative).
-#
-# C'est une vraie decision architecturale (5-7 jours selon audit), pas un
-# simple refactor. Phase 3 a planifier en sprint dedie avec validation
-# manuelle de chaque deplacement.
-#
-# TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation.
+# TmdbClient est sous TYPE_CHECKING car utilise uniquement comme annotation
+# (seule exception whitelistee du contrat domain_pure, cf .importlinter).
 import cinesort.domain.duplicate_support as core_duplicate_support
 from cinesort.domain.confidence_thresholds import (
     CONF_HIGH as _CONF_HIGH,
@@ -784,10 +769,32 @@ def nfo_soft_consistent(*, name_year: Optional[int], nfo_year: Optional[int], co
 # =========================================================
 
 
+def _nfo_tmdbid_as_int(raw: object) -> Optional[int]:
+    """Parse tolerant du <tmdbid> NFO (str) vers int, None si inexploitable."""
+    s = str(raw or "").strip()
+    if not s.isdigit():
+        return None
+    val = int(s)
+    return val if val > 0 else None
+
+
 def build_candidates_from_nfo(nfo: NfoInfo) -> List[Candidate]:
     out: List[Candidate] = []
     if (nfo.title or nfo.originaltitle) and nfo.year:
-        out.append(Candidate(title=str(nfo.title or nfo.originaltitle), year=int(nfo.year), source="nfo", score=0.90))
+        # GAP-NFO-TMDBID (Lot D 2026-07) : le <tmdbid> du NFO est une identite
+        # TMDb gratuite (zero reseau) — sans elle, jaquettes/doublons dependaient
+        # d'une resolution TMDb differee par titre. L'anti-NFO-pollue reste
+        # assure cote app : _augment_candidates_from_nfo_tmdb_id retire cet id
+        # si le cross-check TMDb (quand il est possible) le rejette.
+        out.append(
+            Candidate(
+                title=str(nfo.title or nfo.originaltitle),
+                year=int(nfo.year),
+                source="nfo",
+                tmdb_id=_nfo_tmdbid_as_int(nfo.tmdbid),
+                score=0.90,
+            )
+        )
     return out
 
 
@@ -817,6 +824,12 @@ def build_candidates_from_name(
     t = clean_title_guess(folder_clean)
     if not (2 <= len(t) <= 70):
         t = clean_title_guess(video_clean)
+    # LOTD-DUP-TITLE-YEAR (revue round 1) : le proposed_title reste INTACT —
+    # "Blade Runner 2049" (film-annee sorti en 2017) ne doit JAMAIS devenir
+    # "Blade Runner", le renommage disque suit le titre (seed torrents). La
+    # tolerance "Titre 2005"|2005 == "Titre"|2005 est desormais portee
+    # UNIQUEMENT par la cle de dedoublonnage/identite (duplicate_support.movie_key
+    # + film_history.film_identity_key via title_helpers.strip_trailing_year_if_equal).
     out: List[Candidate] = []
 
     # B02 : Candidate deterministe issu du tag provider (court-circuit fuzzy).

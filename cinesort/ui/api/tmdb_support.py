@@ -17,7 +17,9 @@ from cinesort.ui.api.settings_support import normalize_user_path
 logger = logging.getLogger(__name__)
 
 
-def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+def get_tmdb_posters(
+    api: Any, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False
+) -> Dict[str, Any]:
     if not isinstance(tmdb_ids, list):
         return _err_response(
             t("errors.payload_tmdb_ids_invalid"), category="validation", level="info", log_module=__name__
@@ -68,7 +70,14 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         )
         posters: Dict[str, str] = {}
         for movie_id in ids:
-            url = tmdb.get_movie_poster_thumb_url(movie_id, size=size or "w92")
+            # E4 (verif totale 2026-07) : le bouton refresh jaquette envoie
+            # force_refresh=true depuis 2026-05-24 mais le parametre n'existait
+            # pas cote backend (TypeError => 400). E4-bis (revue) : bypass de
+            # LECTURE du cache (pas de purge) — le fallback stale survit si
+            # TMDb est injoignable.
+            url = tmdb.get_movie_poster_thumb_url(
+                movie_id, size=size or "w92", force_refresh=force_refresh
+            )
             if url:
                 posters[str(movie_id)] = url
         tmdb.flush()

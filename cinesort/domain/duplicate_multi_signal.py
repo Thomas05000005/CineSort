@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy as _normalize_for_fuzzy
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,13 @@ def _index_token(norm_title: str) -> str:
 
 def _strict_key(candidate: MultiSignalCandidate, *, norm_for_tokens) -> str:
     """Cle Phase A: identique a `duplicate_support.movie_key`."""
-    base = f"{norm_for_tokens(candidate.title)}|{int(candidate.year or 0)}"
+    # R2 (revue round 2) : realigne sur movie_key qui strippe desormais l'annee
+    # de queue == annee du couple ("Titre 2005"|2005 == "Titre"|2005). Sans ce
+    # strip, la Phase A multi-signal et movie_key divergeaient (invariant
+    # docstring "identique a movie_key" casse).
+    year = int(candidate.year or 0)
+    key_title = strip_trailing_year_if_equal(candidate.title, year)
+    base = f"{norm_for_tokens(key_title)}|{year}"
     edition = (candidate.edition or "").strip().lower()
     if edition:
         return f"{base}|{edition}"

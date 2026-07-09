@@ -25,20 +25,33 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 ---
 
-## Etat actuel du projet (4 juin 2026)
+## Etat actuel du projet (9 juillet 2026)
 
-### Version
-- **v1.5.2-beta** (publique). Iteration beta consolidant la cloture de la roadmap initiale 6 vagues (M / N / O / P / Q / R) livree en juin 2026. Build EXE stable a 53.7 MB. Roadmap : v1.0 stable apres retours beta + Vague S+ (Linux port, B8 cleanup, 8 methodes orphelines UI), puis v1.1 features, v2.0 port Linux/Mac.
+### Version & branches
+- **R8 POUSSÉ** : `origin/main` = **`650d162`** (« R8: corrections F1→F6 », squash de la campagne
+  R8). Aucun tag ne pointe dessus (dernier tag = v1.5.2-beta @ 0882c50, commit d'avant) — le
+  tag/release R8 reste une décision Thomas.
+- **Campagne « vérification totale » en cours** sur `verif/totale-2026-07` (~76 commits au-dessus de
+  650d162, **jamais poussée**, push = décision Thomas). Lots A→D + toutes les vagues de fix + Phases
+  5/6/7. Traçabilité : `docs/internal/verif_totale_2026_07/` (PLAN + SYNTHESE_LOT_A..E + LOT_C/D_FIX
+  + RAPPORT_VERIF_TOTALE + SECURITE_POUR_OPUS + PHASE5_ARBITRAGES).
+- **Sécurité réservée à Opus** (décision utilisateur 2026-07-08) : `SECURITE_POUR_OPUS.md` (drain body
+  DoS, rest_api_token clair, DPAPI-NG, rate-limit tuning). NE PAS corriger en session Fable.
 
-> Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta, v1.5.x-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), refactor architectural (#83, #84), et roadmap 6 vagues (juin 2026). Aucune regression fonctionnelle, bundle EXE stabilise a 53.7 MB.
-
-### Cycle adversarial en cours (3-4 juin 2026)
-- **Branche** : `fix/v150-batch-bugs` (152 commits ahead vs origin, jamais pousses)
-- **Etat** : 30 fichiers modifies en working tree, 543 commits sur 30 derniers jours
-- **Vagues** : M / N / O / P / Q / **R completes** (tags `vague-r-complete`, `vague-r-hotfix1/2/3-full`)
-- **Hotfix cycles** : 5 rounds adversarial bug hunts (R1=10crit, R2=5crit, R3=3, R4=1crit+17high, audit=0crit+16high) + 4 hotfixes precedents (post-fix rates 79%/93%/100%/100%) + hotfix6 (92% postfix, 1 revert auto)
-- **Hotfix7 EN COURS** (worktree `w4yqqdf25`) : BugHunt R6 sur 10 angles + sequence corrigee. Tests biblio virtuelle: 11 bugs identifies -> 3 reels confirmes, 8 false positives.
-- **Tag le plus recent** : `verify-fix-retest-complete` (2026-06-04)
+### Ce que la campagne a livré (2026-07)
+- **8 matrices de câblage** rejouables (`matrices/mX_*.json`) + **5 tests de contrat CI**
+  (`tests/test_contract_*.py`) qui verrouillent le câblage UI↔API, settings, i18n, CSS, façades.
+- **Runtime** (Lot C) : 13 vues balayées Playwright, 17 findings runtime corrigés (dont la course
+  racine dedup+abort de `core/api.js`), 6 sweeps permanents `tests/e2e_dashboard/test_lotc_sweep_*`.
+- **Métier** (Lot D) : 7 chaînes bout-en-bout `tests/test_lotd_chain_*` (biblio virtuelle jetable),
+  18 findings dont la régression titre « Blade Runner 2049 » (titre proposé INTACT, tolérance
+  d'année portée UNIQUEMENT par la clé de dédup).
+- **Purge Phase 5** : ~4 160 lignes de JS mort supprimées (6 vues + 20 modules non routés +
+  bootstrap-bisect hors prod), famille i18n `qij.*` (144 clés), bloc CSS `.omdb-status*` mort ;
+  cloud-sync par segment (fini le faux WARNING `xbox`), docstrings B8/6-façades à jour, tiers
+  délégués à `tiers_helpers` (dedup), `wip/b4` de Thomas réconcilié (PAGE_SIZE 200, To, etc.).
+- **Décisions produit en attente** (`PHASE5_ARBITRAGES.md`) : i18n FR-only vs câbler, ~21 settings
+  fantômes, ~60 méthodes façade sans UI, R8-079, tag release.
 - **Mega-hotfix** : tag `mega-hotfix` (2026-06-04) consolide les fixes B01-B05 du verify-cycle
 - **Worktrees actifs** : 2 (CineSort principal sur fix/v150-batch-bugs + CineSort-B4 sur main)
 
@@ -89,7 +102,7 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 - **SQLite WAL** (31 migrations, schema v31 — derniere: `031_tri_etat_decisions.sql`)
 - **Dependances clefs** : `requests`, `rapidfuzz` (matching), `segno` (QR), `onnxruntime` + `numpy` (LPIPS perceptuel)
 - **Probe** : ffprobe + mediainfo (binaires externes)
-- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **441 fichiers test_*.py** (396 racine + 45 sous-dossiers), 35 tests v77, top modules: phase (54), perceptual (15), apply (13), quality (12), tmdb (10)
+- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **~497 fichiers test_*.py** (446 racine + sous-dossiers), **6062 tests collectés** (unitaires + contrats CI + chaînes Lot D + sweeps runtime Lot C). Les 74 fichiers morts « Legacy frontend removed » ont été supprimés (Phase 0.4). Config pytest dans `[tool.pytest.ini_options]`. **Lancer avec `.venv/Scripts/python.exe` (3.13)** — le `python` global est un 3.12 qui produit des faux échecs ; périmètre CI = `--ignore` e2e/e2e_dashboard/e2e_desktop/manual/live/stress, SANS `--timeout`.
 - **Qualite** : ruff (lint + format), import-linter, pre-commit, codecov (coverage), bandit, mypy
 - **Build** : PyInstaller (~54 MB onefile EXE Windows — **`dist/CineSort.exe` est le livrable final**, `build/CineSort/` est intermediaire PyInstaller a ignorer)
 
@@ -147,6 +160,31 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 ---
 
 ## Sessions recentes
+
+### 7-9 juillet 2026 — Campagne « vérification totale » (Lots A→D + Phases 5/6/7) ✅
+
+Grande campagne sur `verif/totale-2026-07` (base `650d162` = origin/main, ~76 commits, jamais poussée).
+Objectif : prouver le câblage A→Z de chaque fonction (UI→JS→REST→façade→backend→DB→rendu→CSS), le
+verrouiller par des tests de contrat permanents, puis corriger tout ce qui pêche. Détail complet :
+`docs/internal/verif_totale_2026_07/RAPPORT_VERIF_TOTALE.md`.
+
+- **Lot A** : assainissement (36 artefacts debug dé-trackés, 74 tests morts supprimés, locks pydantic
+  régénérés, baseline verte nominative) + **8 matrices de câblage** rejouables (M1 UI→API … M8 timers).
+- **Lot B** : **5 tests de contrat CI** (`tests/test_contract_*.py`) — chaque `apiPost` matche une
+  méthode façade, chaque clé settings a un lecteur, i18n ⊆ locales, hex tiers ∈ tokens.css, façades.
+- **Lot E** : 5 boutons UI cassés réparés + fuite codepoints token DEBUG soldée + 12 bugs de revue.
+- **Lot C** (runtime Playwright, 13 vues) : 17 findings dont la **course racine dedup+abort** de
+  `core/api.js` (accueil vide au boot, historique gelé…). Gate groupé 45/45.
+- **Lot D** (7 chaînes métier, biblio virtuelle) : 18 findings dont exports UI jamais fonctionnels,
+  crash `get_quality_report`, R8-080, et la **régression titre « Blade Runner 2049 »** (titre proposé
+  INTACT, tolérance d'année UNIQUEMENT dans la clé de dédup `strip_trailing_year_if_equal`).
+- **Phases 5/6/7** : purge ~4 160 l. JS mort + i18n `qij.*` + CSS `.omdb-status*` mort ; cloud-sync
+  par segment ; docstrings B8/6-façades ; tiers délégués à `tiers_helpers` ; `wip/b4` réconcilié ;
+  a11y (dead omdb) ; docs de clôture.
+- **Méthodologie** : multi-agents en parallèle (worktrees), **2-3 rounds de revue adversaire** avant
+  chaque clôture — a attrapé des bugs réels DANS les fixes à chaque vague (règle validée).
+- **Sécurité → Opus** (`SECURITE_POUR_OPUS.md`), **arbitrages produit → Thomas**
+  (`PHASE5_ARBITRAGES.md`), **push/tag → Thomas**.
 
 ### 14 juin 2026 — Vagues R6 + R7 + audit patterns (44 fixes) ✅
 
@@ -432,7 +470,10 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-14 (Vagues R6 + R7 + audit patterns : 44 fixes, 0 regression, 166 GATEs verts, import-linter 3/3, EXE rebuild ; cf AUDIT_PATTERNS_R6_2026-06-14.md).*
+*Last updated : 2026-07-09 (Campagne vérif totale Lots A→D + Phases 5/6/7 sur verif/totale-2026-07 :
+8 matrices, 5 contrats CI, 17 findings runtime + 18 findings métier corrigés, ~4160 l. JS mort purgées,
+import-linter 3/3, ~6062 tests ; cf docs/internal/verif_totale_2026_07/RAPPORT_VERIF_TOTALE.md.
+Sécurité→Opus, arbitrages+push+tag→Thomas).*
 
 ---
 

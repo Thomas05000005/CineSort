@@ -602,6 +602,22 @@ function _extractAccueilSuggestions(stats) {
   return [];
 }
 
+/** LOTC-M2 : filter_hint est un DICT backend ({filter:"x"} | {tier:[...],run_id})
+ * — rendu via String() il affichait "[object Object]". Libelle "cle : valeur"
+ * lisible, chaine vide si inexploitable (le hint est alors masque). */
+function _formatFilterHint(hint) {
+  if (hint == null) return "";
+  if (typeof hint === "string") return hint;
+  if (typeof hint !== "object") return String(hint);
+  const parts = [];
+  for (const [k, v] of Object.entries(hint)) {
+    if (v == null) continue;
+    const val = Array.isArray(v) ? v.join(", ") : (typeof v === "object" ? "" : String(v));
+    if (val) parts.push(`${k} : ${val}`);
+  }
+  return parts.join(" · ");
+}
+
 function _renderSuggestions(stats) {
   const items = _extractAccueilSuggestions(stats);
   if (items.length === 0) {
@@ -623,7 +639,8 @@ function _renderSuggestions(stats) {
     const labelStr = it.label;
     const messageStartsWithCount = it.count != null && /^\d/.test(labelStr.trim());
     const prefix = it.count != null && !messageStartsWithCount ? `${it.count} ` : "";
-    const filterHint = it.filter_hint ? `<span class="accueil-suggestion-hint">${escapeHtml(String(it.filter_hint))}</span>` : "";
+    const hintText = _formatFilterHint(it.filter_hint); // LOTC-M2
+    const filterHint = hintText ? `<span class="accueil-suggestion-hint">${escapeHtml(hintText)}</span>` : "";
     return `
       <li class="accueil-suggestion-row ${sevClass}" data-target-route="${escapeHtml(it.route)}">
         <span class="accueil-suggestion-dot" aria-hidden="true">${sevDot}</span>

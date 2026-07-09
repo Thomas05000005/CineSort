@@ -66,8 +66,24 @@ _LOCAL_uncommitted_changes_backup.patch
 # Exceptions : templates de configuration versionnes (pas de secrets reels)
 !.env.example
 !settings.json.example
-# Local settings (contiennent cles DPAPI, tokens)
-settings.json
+# Local settings (contiennent cles DPAPI, tokens) — ancre racine pour ne pas
+# masquer .vscode/settings.json ou des fixtures de test
+/settings.json
+
+# Artefacts de debug de session (regenerables, jamais commites — cf
+# docs/internal/verif_totale_2026_07/PLAN_VERIF_TOTALE.md Phase 0.3)
+*.err
+*.out
+*.pid
+_iter*
+_observe_*
+_pytest_*
+_rebuild_*
+_revue_*
+_verif_*
+.tmp_*
+observe_*.out
+postmortem_*.log
 
 # Audits visuels manuels : screenshots et videos (gros artefacts, regenerables)
 tests/manual/screenshots/

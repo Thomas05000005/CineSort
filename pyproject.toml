@@ -93,6 +93,15 @@ include-package-data = false
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# Phase 0.4 vérif totale : le périmètre de test vit ici, plus seulement dans ci.yml.
+# Pas d'addopts pour ne pas changer le comportement CI (--ignore=tests/e2e --timeout=60
+# restent explicites dans .github/workflows/ci.yml).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "runtime: tests qui démarrent l'app ou le serveur réel (exclus des sweeps rapides)",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120

@@ -421,3 +421,25 @@ def _expand_tmdb_queries(queries: List[str]) -> List[str]:
                 break
 
     return out
+
+
+_IDENTITY_TRAILING_YEAR_RE = re.compile(r"^(?P<head>.+?)[\s._-]+(?P<yr>19\d{2}|20\d{2})$")
+
+
+def strip_trailing_year_if_equal(title: str, year: Optional[int]) -> str:
+    """Retire l'annee de QUEUE du titre UNIQUEMENT si elle egale `year`.
+
+    LOTD-DUP-TITLE-YEAR (revue round 1) : sert a NORMALISER la cle de
+    dedoublonnage/identite, PAS le titre affiche/renomme. Sans TMDb,
+    "Titre 2005"|2005 et "Titre"|2005 (dossier "Titre (2005)") doivent
+    matcher le meme film. Un film-annee comme "Blade Runner 2049" sorti en
+    2017 garde son titre : 2049 != 2017 -> pas de strip. N'est JAMAIS applique
+    au proposed_title (le renommage disque reste intact, seed torrents sauf).
+    """
+    if not title or not year:
+        return title
+    m = _IDENTITY_TRAILING_YEAR_RE.match(title.strip())
+    if not m or int(m.group("yr")) != int(year):
+        return title
+    head = m.group("head").strip(" -_.")
+    return head or title

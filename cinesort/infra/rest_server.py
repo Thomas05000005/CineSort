@@ -62,7 +62,7 @@ _EXCLUDED_METHODS: Set[str] = {
     "progress",
 }
 
-# Issue #84 PR 8 : noms des 5 facades introduites par le refactor god class.
+# Issue #84 PR 8 : noms des 6 facades introduites par le refactor god class.
 # Le dispatcher REST decouvre les methodes de chaque facade et les expose sous
 # l'URL "/api/{facade_name}/{method_name}" en plus des methodes directes
 # (backward-compat preservee jusqu'a la PR 10).
@@ -116,6 +116,11 @@ def _legacy_pass1_disabled() -> bool:
 
 # Maximum request body size (16 MB).
 _MAX_BODY_SIZE = 16 * 1024 * 1024
+
+# [BUG-LOTD-401-RST-BODY] : budget de lecture du drain de body avant fermeture.
+# Court : un client qui annonce un body mais ne l'envoie jamais ne doit pas
+# retenir le thread apres l'emission de la reponse d'erreur.
+_DRAIN_BODY_TIMEOUT_S = 5.0
 
 # --- Rate limiting 401 ---------------------------------------------------
 # Apres _RATE_LIMIT_MAX_FAILURES echecs d'auth depuis la meme IP en
@@ -191,7 +196,7 @@ def _resolve_locales_root() -> Path:
 def _get_api_methods(api: Any) -> Dict[str, Any]:
     """Discover public callable methods on the API object.
 
-    Issue #84 PR 8 : decouvre aussi les methodes des 5 facades (api.run,
+    Issue #84 PR 8 : decouvre aussi les methodes des 6 facades (api.run,
     api.settings, ...) et les expose sous le path "{facade}/{method}".
 
     Resultat : les 2 voies sont actives simultanement, sans rupture
@@ -302,6 +307,47 @@ def generate_openapi_spec(api: Any, *, port: int = 8642) -> Dict[str, Any]:
             },
         },
     }
+
+
+def _log_auth_mismatch_debug(bearer: str, server_token: str) -> None:
+    """Diagnostic CINESORT_DEBUG d'un mismatch Bearer, sans fuite de secret.
+
+    Contrainte E1 (verif totale 2026-07) : aucun codepoint du token serveur ne
+    doit atteindre les logs, ni aucun codepoint ASCII du bearer (un bearer
+    quasi-correct reconstruirait le token). Seuls sortent : les longueurs, la
+    position de la 1ere divergence, et les codepoints NON-ASCII du bearer
+    (BOM U+FEFF & co — impossibles dans un token token_urlsafe, donc jamais
+    du materiel secret).
+    """
+    logger.warning(
+        "[DEBUG-AUTH] MISMATCH bearer_len=%d token_len=%d",
+        len(bearer),
+        len(server_token),
+    )
+    # E1-bis (revue Lot E) : l'exemption "non-ASCII = jamais du secret" n'est
+    # vraie que pour un token genere (token_urlsafe = ASCII pur). Un token
+    # colle a la main dans settings.json peut etre non-ASCII : dans ce cas on
+    # ne logge que les POSITIONS, jamais les codepoints.
+    token_is_ascii = server_token.isascii()
+    bearer_non_ascii = [
+        (i, f"U+{ord(c):04X}" if token_is_ascii else "<redacted>")
+        for i, c in enumerate(bearer)
+        if ord(c) > 0x7F
+    ]
+    if bearer_non_ascii:
+        logger.warning("[DEBUG-AUTH] bearer NON-ASCII pos+cp=%s", bearer_non_ascii)
+    for i in range(max(len(bearer), len(server_token))):
+        b = bearer[i] if i < len(bearer) else None
+        t = server_token[i] if i < len(server_token) else None
+        if b != t:
+            if b is None:
+                bearer_side = "<EOS>"
+            elif ord(b) > 0x7F:
+                bearer_side = f"U+{ord(b):04X}" if token_is_ascii else "<non-ascii>"
+            else:
+                bearer_side = "<ascii>"
+            logger.warning("[DEBUG-AUTH] 1ere divergence pos=%d bearer=%s", i, bearer_side)
+            break
 
 
 class _RateLimiter:
@@ -597,36 +643,17 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             return False
         bearer = auth[7:].strip()
         match = hmac.compare_digest(bearer.encode(), self.auth_token.encode())
-        # DEBUG VERBOSE 2026-06-08 : si mismatch, dump codepoints des deux cotes
-        # pour identifier la divergence exacte (BOM, trailing whitespace, etc.).
+        # DEBUG VERBOSE 2026-06-08 : si mismatch, aider a diagnostiquer la
+        # divergence (BOM, whitespace, longueur) SANS materiel secret.
+        # SECURITE (verif totale 2026-07, E1) : ne JAMAIS logger les codepoints
+        # du token serveur ni ceux ASCII du bearer — un bearer quasi-correct
+        # equivaut au secret, et le log_scrubber ne redacte pas une liste
+        # U+XXXX. Diagnostic conserve : longueurs, position de la 1ere
+        # divergence, codepoints NON-ASCII du bearer uniquement (BOM/artefacts
+        # cote client ; le token genere par token_urlsafe est ASCII pur).
         if not match and os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
             try:
-                bearer_cps = [f"U+{ord(c):04X}" for c in bearer]
-                token_cps = [f"U+{ord(c):04X}" for c in self.auth_token]
-                bearer_non_ascii = [(i, ord(c)) for i, c in enumerate(bearer) if ord(c) > 0x7F]
-                token_non_ascii = [(i, ord(c)) for i, c in enumerate(self.auth_token) if ord(c) > 0x7F]
-                logger.warning(
-                    "[DEBUG-AUTH] MISMATCH bearer_len=%d token_len=%d",
-                    len(bearer),
-                    len(self.auth_token),
-                )
-                logger.warning("[DEBUG-AUTH] bearer codepoints=%s", bearer_cps)
-                logger.warning("[DEBUG-AUTH] server token codepoints=%s", token_cps)
-                if bearer_non_ascii:
-                    logger.warning("[DEBUG-AUTH] bearer NON-ASCII pos+cp=%s", bearer_non_ascii)
-                if token_non_ascii:
-                    logger.warning("[DEBUG-AUTH] server token NON-ASCII pos+cp=%s", token_non_ascii)
-                # Comparaison char-par-char pour pointer la 1ere divergence
-                for i in range(max(len(bearer), len(self.auth_token))):
-                    b = bearer[i] if i < len(bearer) else None
-                    t = self.auth_token[i] if i < len(self.auth_token) else None
-                    if b != t:
-                        bo = f"U+{ord(b):04X}" if b is not None else "<EOS>"
-                        to_ = f"U+{ord(t):04X}" if t is not None else "<EOS>"
-                        logger.warning(
-                            "[DEBUG-AUTH] 1ere divergence pos=%d bearer=%s server=%s", i, bo, to_,
-                        )
-                        break
+                _log_auth_mismatch_debug(bearer, self.auth_token)
             except Exception as _dbg_exc:  # noqa: BLE001 — debug only
                 logger.warning("[DEBUG-AUTH] dump failed: %s", _dbg_exc)
         return match
@@ -945,6 +972,34 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         """Genere un request_id court (8 hex chars). Format compact pour les logs."""
         return uuid.uuid4().hex[:8]
 
+    def _drain_request_body(self) -> None:
+        """[BUG-LOTD-401-RST-BODY] Lit et jette le body non consomme avant close.
+
+        Les reponses precoces (401 auth, 410 legacy, 404 methode inconnue, 403
+        CSRF, 400, 429) partent AVANT la lecture du body : fermer la socket
+        avec des octets non lus dans le buffer de reception provoque un TCP
+        RST au lieu d'un FIN, et sous Windows le client peut PERDRE la reponse
+        d'erreur deja bufferisee (WinError 10053 au lieu du JSON 401).
+        Borne : un body > _MAX_BODY_SIZE n'est JAMAIS lu — l'abort du chemin
+        413 est un anti-DoS VOULU (Lot D) et doit rester intact.
+        """
+        if getattr(self, "_body_consumed", True):
+            return
+        self._body_consumed = True
+        try:
+            remaining = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            return
+        if remaining <= 0 or remaining > _MAX_BODY_SIZE:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            self.connection.settimeout(_DRAIN_BODY_TIMEOUT_S)
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+
     # --- GET ----------------------------------------------------------------
 
     def do_GET(self) -> None:
@@ -1096,9 +1151,13 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         token = set_request_id(self._new_request_id())
         # Cf issues #72 + #73 : flag is_remote_request si l'IP n'est pas locale.
         remote_token = set_remote_request(self._client_ip() not in _LOCAL_CLIENT_IPS)
+        self._body_consumed = False
         try:
             self._handle_post()
         finally:
+            # [BUG-LOTD-401-RST-BODY] : draine le body des reponses precoces
+            # (401/410/404/...) AVANT la fermeture, sinon RST -> JSON perdu.
+            self._drain_request_body()
             reset_remote_request(remote_token)
             clear_request_id()
             del token
@@ -1180,6 +1239,8 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
         params: Dict[str, Any] = {}
         if content_length > 0:
+            # [BUG-LOTD-401-RST-BODY] : body consomme ici -> drain final no-op.
+            self._body_consumed = True
             raw = self.rfile.read(content_length)
             try:
                 parsed = json.loads(raw.decode("utf-8"))

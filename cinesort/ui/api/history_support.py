@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -17,6 +18,42 @@ from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Retire des warning_flags les alertes ignorees persistees (spec 06 §3.3).
+
+    E2-bis (revue Lot E) : run/get_plan servait les warning_flags bruts — une
+    alerte ignoree via library/mark_alert_ignored re-apparaissait a chaque
+    reload de la vue Traitement (seul get_film_full filtrait,
+    cf film_support.py). Requete bulk (1 par plan), best-effort : en cas de
+    store indisponible, les flags bruts sont conserves.
+    """
+    try:
+        from cinesort.ui.api.library_support import _get_store
+
+        store = _get_store(api)
+        if store is None or not hasattr(store, "film_modal"):
+            return payload_rows
+        row_ids = [str(r.get("row_id") or "") for r in payload_rows if isinstance(r, dict)]
+        ignored = store.film_modal.list_ignored_alerts_bulk(row_ids)
+        if not ignored:
+            return payload_rows
+        for row in payload_rows:
+            if not isinstance(row, dict):
+                continue
+            codes = ignored.get(str(row.get("row_id") or ""))
+            flags = row.get("warning_flags")
+            if codes and isinstance(flags, list):
+                row["warning_flags"] = [f for f in flags if str(f) not in codes]
+    # R2 (revue Lot E round 2) : sqlite3.Error n'herite PAS d'OSError — sans
+    # lui, un 'database is locked' pendant un apply concurrent faisait echouer
+    # get_plan ENTIER alors que le plan etait servable (le best-effort promis
+    # ici ne couvrait que store=None). RuntimeError : rollback de migration
+    # dans store.initialize().
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+        logger.debug("subtract_ignored_flags error: %s", exc)
+    return payload_rows
 
 
 @requires_valid_run_id
@@ -54,7 +91,7 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
                 # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
                 # eviter la pollution des logs.
                 return _err_response(str(exc), category="state", level="debug", log_module=__name__)
-        return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
+        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
 
     found = api._find_run_row(run_id)
     if not found:
@@ -68,7 +105,7 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
     )
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {"ok": True, "rows": api._serialize_rows_for_payload(rows)}
+        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
         return _err_response(str(exc), category="state", level="debug", log_module=__name__)

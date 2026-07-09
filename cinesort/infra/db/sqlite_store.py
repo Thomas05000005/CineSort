@@ -56,13 +56,20 @@ def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
     normal). On compare segment par segment au lieu de chercher la sous-chaine
     dans tout le chemin.
     """
+    # Verif totale 2026-07 : l'ancien `marker.lower() in path_str` cherchait la
+    # sous-chaine dans TOUT le chemin -> faux positifs (D:\xbox\ matchait "Box",
+    # D:\mega games\ matchait "Mega"). On compare desormais segment par segment :
+    # match EXACT du nom de dossier, SAUF la famille OneDrive qui s'accole des
+    # suffixes sans separateur ("OneDrive - Personal", "OneDriveCommercial").
     try:
-        path_str = str(db_path).lower()
+        segments = [p.lower() for p in Path(db_path).parts]
     except (TypeError, ValueError):
         return None
-    for marker in _CLOUD_SYNC_MARKERS:
-        if marker.lower() in path_str:
-            return marker
+    markers_low = [(m, m.lower()) for m in _CLOUD_SYNC_MARKERS]
+    for seg in segments:
+        for marker, mlow in markers_low:
+            if seg == mlow or (mlow.startswith("onedrive") and seg.startswith("onedrive")):
+                return marker
     return None
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
 # apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap

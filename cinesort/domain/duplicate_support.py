@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # duplicate_support -> naming -> path_utils est un DAG (path_utils est une
 # feuille), plus de cycle vers core.
 from cinesort.domain.naming import folder_matches_template as _folder_matches_template
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal as _strip_trailing_year_if_equal
 
 _MOVIE_DIR_RE = re.compile(r"^\s*(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)\s*$")
 
@@ -48,7 +49,13 @@ def movie_key(
     edition: Optional[str] = None,
 ) -> str:
     normalized_year = int(year or 0)
-    base = f"{norm_for_tokens(title)}|{normalized_year}"
+    # LOTD-DUP-TITLE-YEAR (revue round 1) : sans TMDb, "Titre 2005"|2005 (nom
+    # "Titre.2005.720p") et "Titre"|2005 (dossier "Titre (2005)") sont le MEME
+    # film -> on strippe l'annee de queue == annee du couple AVANT de tokeniser,
+    # pour qu'ils partagent la cle. Le film-annee "Blade Runner 2049"|2017 garde
+    # son titre (2049 != 2017). Normalisation de cle SEULEMENT, jamais le renommage.
+    key_title = _strip_trailing_year_if_equal(title, normalized_year)
+    base = f"{norm_for_tokens(key_title)}|{normalized_year}"
     ed = (edition or "").strip().lower()
     if ed:
         return f"{base}|{ed}"

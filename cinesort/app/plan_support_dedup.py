@@ -322,7 +322,13 @@ def _augment_candidates_from_nfo_tmdb_id(
                 year_ok = False
         accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
         if accept:
-            already_have = any(getattr(c, "tmdb_id", None) == tmdb_result.id for c in nfo_cands)
+            # GAP-NFO-TMDBID : le candidat 'nfo' de base porte desormais l'id
+            # brut du NFO (propagation sans reseau) — il ne doit PAS bloquer
+            # l'ajout du candidat 'nfo_tmdb' VERIFIE (score 0.93 + poster).
+            already_have = any(
+                getattr(c, "tmdb_id", None) == tmdb_result.id and str(getattr(c, "source", "")) != "nfo"
+                for c in nfo_cands
+            )
             if not already_have:
                 note_extra = f" via {alt_source}" if alt_source else ""
                 nfo_tmdb_cand = core_mod.Candidate(
@@ -342,6 +348,12 @@ def _augment_candidates_from_nfo_tmdb_id(
                     sim_best,
                 )
         else:
+            # GAP-NFO-TMDBID : l'id NFO propage sans verification par
+            # build_candidates_from_nfo est refute par le cross-check TMDb
+            # (NFO pollue) -> on le retire du candidat 'nfo' de base.
+            for c in nfo_cands:
+                if str(getattr(c, "source", "")) == "nfo" and getattr(c, "tmdb_id", None) is not None:
+                    c.tmdb_id = None
             log(
                 "WARN",
                 f"NFO TMDb ID rejete {log_ctx}: "

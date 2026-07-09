@@ -200,7 +200,7 @@ import { initAccueil, unmountAccueil } from "./views/accueil.js";        // /acc
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
 // Traitement "agir : scan/review/apply"). /processing reste fonctionnelle :
 // elle est utilisee en INTERNE par traitement.js et qij.js comme etape stepper.
-import { initProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
+import { initProcessing, unmountProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
 // Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
 // 10 categories. Active sur /parametres ; /settings redirige vers /parametres
 // (preservation du fragment de section).
@@ -284,7 +284,17 @@ registerRoute("/film/:id", {
 // qij.js comme etape stepper du workflow (scan -> review -> apply). Mount
 // dedie #view-processing (vide dans index.html, initProcessing fait
 // container.innerHTML lui-meme).
-registerRoute("/processing", { view: "view-processing", guard: requireAuth, init: initProcessing });
+// E7-ter (revue Lot E) : cleanup retourne en SYNCHRONE (pattern des routes
+// canoniques) — le .then du router sur un init async pouvait ecraser le
+// cleanup d'une autre vue si l'utilisateur naviguait avant la resolution.
+registerRoute("/processing", {
+  view: "view-processing",
+  guard: requireAuth,
+  init: (el, opts) => {
+    initProcessing(el, opts).catch((e) => console.error("[processing] init:", e));
+    return unmountProcessing;
+  },
+});
 
 // === Alias rétrocompat : redirections vers routes canoniques FR ===========
 // Les anciennes URLs (/home /status /library /quality /help /logs /jellyfin

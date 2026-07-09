@@ -1961,12 +1961,13 @@ def apply_single(
     new_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
 
     # Si collection TMDb + collection_folder_enabled → placer dans _Collection/Saga/
+    # R8-085 : PAS de mkdir ici — un mkdir avant les gardes MAX_PATH/NOOP creait
+    # un dossier saga vide orphelin meme quand la row etait ensuite skippee.
     _coll_name = (tmdb_collection_name or "").strip()
+    coll_dir: Optional[Path] = None
     if _coll_name and cfg.enable_collection_folder:
         coll_dir = cfg.root / cfg.collection_root_name / core_mod.windows_safe(_coll_name)
         dst = coll_dir / new_name
-        if not dry_run:
-            coll_dir.mkdir(parents=True, exist_ok=True)
     else:
         dst = folder.parent / new_name
     core_mod.ensure_inside_root(cfg, dst)
@@ -2055,6 +2056,17 @@ def apply_single(
         return
 
     log("INFO", f"RENAME: {folder} -> {dst}")
+
+    # R8-085 A+B : mkdir saga APRES toutes les gardes (MAX_PATH, NOOP conforme,
+    # equivalence FS, merge) et via mkdir_counted — chaque niveau cree est
+    # journalise en op MKDIR pour que l'undo supprime les dossiers redevenus
+    # vides (restauration a l'identique). Le parent (<root>/_Collection) est
+    # journalise separement car mkdir_counted ne trace que le dernier segment.
+    if coll_dir is not None and not coll_dir.exists():
+        if not coll_dir.parent.exists():
+            mkdir_counted(coll_dir.parent, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
+        mkdir_counted(coll_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
+
     moved_from = folder
     moved_to = dst
     src_sha1: Optional[str] = None

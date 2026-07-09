@@ -176,7 +176,7 @@ class DenseTableTests(unittest.TestCase):
 
 
 class InfiniteScrollTests(unittest.TestCase):
-    """Spec 07 §8 : scroll infini via IntersectionObserver, batch 60."""
+    """Spec 07 §8 : scroll infini via IntersectionObserver, batch 200."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -189,8 +189,8 @@ class InfiniteScrollTests(unittest.TestCase):
     def test_sentinel(self) -> None:
         self.assertIn("data-bibliotheque-sentinel", self.js)
 
-    def test_batch_size_60(self) -> None:
-        self.assertIn("PAGE_SIZE = 60", self.js)
+    def test_batch_size_200(self) -> None:
+        self.assertIn("PAGE_SIZE = 200", self.js)
 
     def test_local_cache_rowsByPage(self) -> None:
         self.assertIn("rowsByPage", self.js)

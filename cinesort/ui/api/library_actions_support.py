@@ -633,6 +633,8 @@ def rescan_rows_bulk(
             job_fn=job_fn,
             root=str(state_dir),  # placeholder : rescan ne touche pas a la racine du scan
             state_dir=str(state_dir),
+            # LOTC-B1 : la cle config `rescan_run_id` marque ce run comme
+            # utilitaire (sans plan propre) pour que _resolve_run_id le saute.
             config={"rescan_run_id": resolved, "rescan_row_ids": valid},
         )
     except RuntimeError as exc:

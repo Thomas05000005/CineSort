@@ -29,6 +29,7 @@ from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_for
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
+from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.db import SQLiteStore
@@ -51,7 +52,6 @@ _log = logging.getLogger(__name__)
 # fois passe ce delai. Constante en miroir de dashboard_support._UNDO_DEADLINE_SECONDS
 # pour eviter une dependance circulaire entre modules ui.api.
 _UNDO_DEADLINE_SECONDS = 24 * 3600
-
 
 class _DuplicateCheckError(Exception):
     pass
@@ -595,6 +595,117 @@ def _execute_undo_ops(
     }
 
 
+def _collect_pending_mkdir_ops(
+    store: Any,
+    batch_id: str,
+    run_id: Optional[str],
+    log_fn: Callable[[str, str], None],
+) -> List[Dict[str, Any]]:
+    """FIX #9 : rassemble les ops MKDIR encore PENDING a nettoyer.
+
+    Quand `run_id` est fourni ET que le store sait lister les batches du run,
+    on balaye les MKDIR PENDING de TOUS les batches (pas seulement `batch_id`).
+    C'est necessaire car `mkdir_counted` ne rejournalise PAS un dossier saga
+    deja existant : l'op MKDIR qui "possede" `_Collection/<Saga>/` vit dans le
+    1er batch qui l'a cree, pas dans le 2e qui l'a reutilise. Sinon (run_id
+    absent, ou store legacy sans `list_apply_batches_for_run`), on retombe sur
+    le seul `batch_id` (comportement historique R8-085 B).
+
+    Ne renvoie que des ops `op_type == "MKDIR"` et `undo_status == "PENDING"`
+    (une op deja DONE = dossier deja supprime lors d'un undo precedent).
+    """
+    batch_ids: List[str] = []
+    if run_id:
+        lister = getattr(store.apply, "list_apply_batches_for_run", None)
+        if callable(lister):
+            try:
+                # R2 : limit=0 = TOUS les batches du run (borne naturelle) —
+                # l'ancien cap DESC jetait les PLUS ANCIENS, laissant orphelin
+                # un dossier saga cree par un vieux batch.
+                batches = lister(run_id=run_id, limit=0)
+                batch_ids = [str(b.get("batch_id") or "") for b in batches if b.get("batch_id")]
+            except (OSError, TypeError, ValueError, sqlite3.Error, AttributeError) as exc:
+                log_fn("WARN", f"UNDO MKDIR: liste des batches indisponible run={run_id}: {exc}")
+                batch_ids = []
+    if not batch_ids:
+        batch_ids = [str(batch_id)] if batch_id else []
+    # Defensif : garantir que le batch courant est balaye meme s'il n'apparait
+    # pas (encore) dans la liste retournee par le store.
+    if batch_id and str(batch_id) not in batch_ids:
+        batch_ids.append(str(batch_id))
+
+    collected: List[Dict[str, Any]] = []
+    for bid in batch_ids:
+        try:
+            ops = store.apply.list_apply_operations(batch_id=bid)
+        except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
+            log_fn("WARN", f"UNDO MKDIR: liste des ops indisponible batch={bid}: {exc}")
+            continue
+        for op in ops:
+            if str(op.get("op_type") or "") != "MKDIR":
+                continue
+            if str(op.get("undo_status") or "PENDING") != "PENDING":
+                continue
+            collected.append(op)
+    return collected
+
+
+def _undo_mkdir_ops(
+    store: Any,
+    batch_id: str,
+    log_fn: Callable[[str, str], None],
+    *,
+    run_id: Optional[str] = None,
+) -> int:
+    """R8-085 B + FIX #9 : supprime (rmdir) les dossiers crees par des ops MKDIR
+    redevenus VIDES apres restauration des moves.
+
+    Sans ce nettoyage, l'undo restaurait les films mais laissait les dossiers
+    saga `_Collection/<Saga>/` en orphelins vides (restauration PAS a
+    l'identique).
+
+    FIX #9 (orphelin saga inter-batch) : on ne se limite plus aux MKDIR du
+    `batch_id` en cours. Scenario du bug : un 1er apply cree `_Collection/<Saga>`
+    (MKDIR journalise dans batch 1) puis un 2e apply y range un autre film SANS
+    rejournaliser le dossier (mkdir_counted saute un dossier existant). Si le
+    batch 1 est annule d'abord, son MKDIR ne peut pas rmdir le dossier encore
+    occupe par le film du batch 2 et reste donc PENDING ; l'annulation du batch 2
+    videait alors le dossier mais l'ancien code, ne regardant que les MKDIR du
+    batch 2 (aucun), laissait `_Collection/<Saga>/` vide a jamais. On balaye
+    desormais les MKDIR PENDING de TOUS les batches du run (via `run_id`).
+
+    rmdir echoue silencieusement si non vide : jamais destructif, un dossier
+    encore occupe (undo selectif, autre film de la saga) est garde -> l'undo
+    selectif n'est pas casse. Les plus PROFONDS d'abord (tri par profondeur de
+    chemin decroissante), pour que l'enfant parte avant son parent meme quand
+    les niveaux viennent de batches differents.
+    """
+    removed = 0
+    mkdir_ops = _collect_pending_mkdir_ops(store, batch_id, run_id, log_fn)
+
+    def _depth(op: Dict[str, Any]) -> int:
+        raw = str(op.get("dst_path") or op.get("src_path") or "")
+        return len(Path(raw).parts) if raw else 0
+
+    for op in sorted(mkdir_ops, key=_depth, reverse=True):
+        raw = str(op.get("dst_path") or op.get("src_path") or "")
+        if not raw:
+            continue
+        path = Path(raw)
+        try:
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+                removed += 1
+                log_fn("INFO", f"UNDO MKDIR: dossier vide supprime {path}")
+                with contextlib.suppress(OSError, TypeError, ValueError):
+                    store.apply.mark_apply_operation_undo_status(
+                        op_id=int(op.get("id") or 0), undo_status="DONE", error_message=None
+                    )
+        except (OSError, PermissionError) as exc:
+            _log.debug("undo mkdir: rmdir %s skip: %s", path, exc)
+    return removed
+
+
 def _write_undo_summary(
     api: Any,
     run_paths: Any,
@@ -846,6 +957,13 @@ def undo_selected_rows(
                 "preverify": undo_counts.get("preverify"),
             }
 
+        # R8-085 B (parite avec l'undo complet) : rmdir des dossiers MKDIR
+        # journalises redevenus vides. Sans risque en selectif : un dossier
+        # saga encore occupe par d'autres films n'est pas vide -> conserve.
+        # FIX #9 : run_id -> balaye les MKDIR PENDING de TOUS les batches du run
+        # (dossier saga cree par un batch, vide par l'annulation d'un autre).
+        _undo_mkdir_ops(store, bid, log_fn, run_id=run_id)
+
         # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
         remaining = store.apply.list_apply_operations(batch_id=bid)
         all_resolved = all(
@@ -1000,6 +1118,13 @@ def _execute_and_finalize_undo(
     empty_reversed = undo_counts["empty_folder_dirs_reversed"]
     residual_reversed = undo_counts["cleanup_residual_dirs_reversed"]
 
+    # R8-085 B : apres restauration des moves, retirer les dossiers MKDIR
+    # journalises redevenus vides (ex. _Collection/<Saga>) — sinon l'undo
+    # laisse des orphelins et la restauration n'est pas a l'identique.
+    # FIX #9 : run_id -> balaye les MKDIR PENDING de TOUS les batches du run
+    # (saga reutilisee entre batches, MKDIR non rejournalise par le 2e apply).
+    mkdir_dirs_removed = _undo_mkdir_ops(store, batch_id, log_fn, run_id=run_id)
+
     status = "UNDONE_DONE" if failed == 0 else "UNDONE_PARTIAL"
     store.apply.mark_apply_batch_undo_status(
         batch_id=batch_id,
@@ -1017,6 +1142,7 @@ def _execute_and_finalize_undo(
                 "cleanup_residual_dirs": int(preview_categories.get("cleanup_residual_dirs") or 0),
                 "empty_folder_dirs_reversed": empty_reversed,
                 "cleanup_residual_dirs_reversed": residual_reversed,
+                "mkdir_dirs_removed": mkdir_dirs_removed,
             },
         },
     )
@@ -1458,6 +1584,12 @@ def _execute_apply(
                 marked_for_deletion.add(str(_mid))
     except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Lecture deletion_marks.json impossible: {exc}")
+
+    # LOTD-DUP-BUCKET-VIEWER : les buckets quarantaine de l'apply vivent sous
+    # <run_dir>/_review (ecritures conservees la, decision R8-002). On declare
+    # ce runs root au viewer quarantaine pour que les losers y soient VISIBLES.
+    with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
+        _register_runs_root(Path(run_paths.run_dir).parent)
 
     # Multi-root : grouper les rows par source_root et appeler apply_rows par root
     rows_by_root: Dict[str, List[Any]] = {}

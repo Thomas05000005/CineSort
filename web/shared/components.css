@@ -4044,10 +4044,12 @@ body.v5-notif-lock {
   transition: width var(--dur-base) var(--ease-out);
 }
 
+/* LOTC-M4 : replie, width:0 + header en display:none donnaient au toggle
+ * [data-v5-right-panel-toggle] un rect 0x0 -> impossible a re-deployer a la
+ * souris. On garde un rail de 28px ou seul le toggle reste visible. */
 .v5-right-panel.is-collapsed {
-  width: 0 !important;
-  min-width: 0;
-  border-left: none;
+  width: 28px !important;
+  min-width: 28px;
   overflow: hidden;
 }
 
@@ -4058,9 +4060,20 @@ body.v5-notif-lock {
 }
 
 .v5-right-panel.is-collapsed .v5-right-panel-handle,
-.v5-right-panel.is-collapsed .v5-right-panel-header,
-.v5-right-panel.is-collapsed .v5-right-panel-body {
+.v5-right-panel.is-collapsed .v5-right-panel-body,
+.v5-right-panel.is-collapsed .v5-right-panel-title {
   display: none;
+}
+
+.v5-right-panel.is-collapsed .v5-right-panel-header {
+  justify-content: center;
+  padding: var(--sp-2) 0;
+  border-bottom: none;
+}
+
+/* Chevron inverse en replie : il pointe vers l'ouverture, pas la fermeture. */
+.v5-right-panel.is-collapsed .v5-right-panel-toggle svg {
+  transform: rotate(180deg);
 }
 
 .v5-right-panel-handle {
@@ -6223,7 +6236,10 @@ body.v5-notif-lock {
 .aide-doc-drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* LOTC-Z3 : a 100, le drawer passait SOUS la topbar (--z-top-bar = 300)
+     -> croix Fermer recouverte par l'icone theme, incliquable. Aligne sur
+     la famille drawers de vue (1500, cf echelle documentee L7736+). */
+  z-index: 1500;
 }
 
 .aide-doc-drawer-backdrop {
@@ -7311,6 +7327,10 @@ body.v5-notif-lock {
 .bibliotheque-drawer-backdrop {
   position: absolute;
   inset: 0;
+  /* LOTC-Z2 : le backdrop est un FRERE rendu APRES l'aside (cf
+     library-advanced-drawer.js _buildHtml) ; sans z-index explicite il se
+     peignait au-dessus du panneau et interceptait tous ses clics. */
+  z-index: 0;
   background: rgba(0, 0, 0, 0.45);
   opacity: 0;
   transition: opacity 0.2s;
@@ -7325,6 +7345,8 @@ body.v5-notif-lock {
   top: 0;
   right: 0;
   bottom: 0;
+  /* LOTC-Z2 : au-dessus du backdrop (frere suivant dans le DOM). */
+  z-index: 1;
   width: 420px;
   max-width: 90vw;
   /* AUDIT 2026-06-14 (R6-E) : --surface-1 = 3,5% d'opacite -> panneau quasi
@@ -7601,61 +7623,11 @@ body.v5-notif-lock {
  * Utilise par settings.js (data-test-result-for="omdb_api_key")
  * et parametres.js (data-omdb-status).
  * =========================================================== */
-.omdb-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill, 999px);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium, 500);
-  line-height: 1.4;
-  border: 1px solid transparent;
-}
-.omdb-status__icon { display: inline-flex; align-items: center; }
-.omdb-status__label { display: inline-block; }
-.omdb-status__hint {
-  color: var(--text-2, #475569);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-normal, 400);
-  margin-left: var(--sp-1);
-}
-.omdb-status--ok {
-  background: rgba(22, 163, 74, 0.12);
-  color: #16a34a;
-  border-color: rgba(22, 163, 74, 0.30);
-}
-.omdb-status--warning {
-  background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.35);
-}
-.omdb-status--error {
-  background: rgba(185, 28, 28, 0.12);
-  /* R8-076 (F6-a) : #b91c1c (rouge sombre) donnait 2,79-2,91:1 sur les 5 thèmes (tous
-     sombres) -> sous WCAG AA 4.5:1. #f87171 (rouge clair) atteint 6,5:1 (mesuré Playwright
-     getComputedStyle + compositing alpha). Le fond/bordure teintés restent inchangés. */
-  color: #f87171;
-  border-color: rgba(185, 28, 28, 0.30);
-}
-.omdb-status--info {
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
-  border-color: rgba(59, 130, 246, 0.30);
-}
-.omdb-status--idle {
-  background: var(--surface-2, #f1f5f9);
-  color: var(--text-2, #475569);
-  border-color: var(--border-1, #e2e8f0);
-}
-.omdb-quota {
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--fw-semibold, 600);
-  padding-left: var(--sp-2);
-  border-left: 1px solid currentColor;
-  opacity: 0.9;
-}
+/* Purge verif totale 2026-07 (Phase 6) : bloc .omdb-status* / .omdb-quota
+   supprimé — composant omdb-status.js supprimé (mort). L'UI OMDb vivante
+   utilise .parametres-omdb-status--* (tokens --sev-*, ci-dessous). Ceci solde
+   aussi le finding a11y R8-076 sur .omdb-status--warning/--info (3,9:1 < AA) :
+   les classes sous le seuil étaient déjà mortes. */
 
 /* ===========================================================
  * PARAMETRES — Catégorie Intégrations / OMDb (spec 03)
@@ -7740,11 +7712,27 @@ body.v5-notif-lock {
  * Differente de .modal-overlay (legacy showModal) : ARIA alertdialog,
  * focus initial sur Annuler, bouton primary en variant --danger,
  * compteur anti-clic-reflexe optionnel.
+ *
+ * LOTC-Z1 — echelle des z-index overlays plein ecran (ce fichier) :
+ *     300  topbar (--z-top-bar, tokens.css)
+ *    1000  .qualite-drawer-overlay
+ *    1500  .bibliotheque-drawer-host / .aide-doc-drawer-overlay (drawers de vue)
+ *    1600  toasts (--z-toast, Z3-bis : au-dessus des drawers de vue)
+ *    1700  command palette (--z-palette, Z3-bis)
+ *    9000  .perceptual-modal-overlay / menus contextuels (9000-9100)
+ *    9999  .bibliotheque-drag-overlay
+ *   10001  .film-detail-modal-overlay (fiche film mode C)
+ *   10002  .tmdb-manual-search-overlay (ouverte DEPUIS la fiche film)
+ *   10100  .danger-modal-overlay — TOUJOURS au sommet : une confirmation
+ *          danger peut s'ouvrir depuis n'importe quel overlay (fiche film
+ *          incluse) et doit rester visible/cliquable (avant : 10000, rendue
+ *          SOUS la fiche film -> confirmation invisible).
+ *   99999  .skip-link (focus clavier uniquement)
  * =========================================================== */
 .danger-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: 10100;
   background: rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;

@@ -45,7 +45,10 @@ _log = logging.getLogger(__name__)
 # - v1 : regles originales (avant audit 2026-04-10)
 # - v2 : fix scoring strict (seuil 0.50, penalite annee, filtre bonus, cap confiance)
 # - v3 : fix post-run 20260410_131839 (confiance HIGH si deja conforme, cap conditionnel)
-_PLAN_CACHE_VERSION = 3
+# - v4 : LOTD-41-01 — les stats_json persistes avant le fix contiennent un
+#   incremental_cache_misses=+1 fantome rejoue a chaque hit ; on invalide pour
+#   reecrire des deltas propres (snapshot deplace apres _try_apply_folder_cache).
+_PLAN_CACHE_VERSION = 4
 
 # Seuil de films directement a la racine au-dela duquel on avertit l'utilisateur :
 # une racine contenant beaucoup de films non ranges signale probablement une
@@ -842,12 +845,18 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
         ctx.progress(idx, discover_total, str(folder))
         ctx.folders_seen_for_prune.append(str(folder))
 
-        rows_before = len(ctx.rows)
-        stats_before = stats_snapshot_for_cache(ctx.stats)
-
         folder_sig, cache_hit = _try_apply_folder_cache(ctx, folder)
         if cache_hit:
             continue
+
+        # LOTD-41-01 : snapshot APRES _try_apply_folder_cache — le miss (+1,
+        # L639) entrait sinon dans le delta persiste par persist_folder_cache
+        # et chaque HIT ulterieur rejouait un miss fantome (re-scan 100% cache
+        # affichait hits == misses dans stats_json/summary.txt). Les cles
+        # restent dans stats_snapshot_for_cache (R8-060/F5 intact) : leur
+        # delta par-dossier vaut simplement 0 desormais.
+        rows_before = len(ctx.rows)
+        stats_before = stats_snapshot_for_cache(ctx.stats)
 
         # SCAN-1 : on capture l'etat des compteurs detailles AVANT iter_videos pour
         # pouvoir distinguer la contribution de CE dossier (utile au diagnostic

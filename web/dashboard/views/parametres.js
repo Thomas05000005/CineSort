@@ -2177,11 +2177,50 @@ function _bindFields(container) {
   });
 
   // API-key show/hide
+  // LOTC-B3 : le GET settings renvoie le masque SEC-H3 ('••••••••') pour
+  // rest_api_token — basculer input.type revelait (et 📋 copiait) le MASQUE,
+  // 401 garanti cote appareil distant. On resout le vrai Bearer via
+  // settings/reveal_rest_token (R7-10, refuse hors localhost) avant d'afficher.
+  let _realRestToken = null;
+  const _isMaskedToken = (v) => /^[•*]+$/.test(String(v || "").trim());
+  const _restMsg = (text, isError) => {
+    const el = container.querySelector("[data-rest-token-msg]");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "parametres-test-result" + (text ? (isError ? " parametres-test-result--error" : " parametres-test-result--ok") : "");
+  };
+  const _getRealRestToken = async () => {
+    if (_realRestToken != null) return _realRestToken;
+    try {
+      const res = await apiPost("settings/reveal_rest_token");
+      const d = (res && res.data) || res || {};
+      if (d.ok && d.rest_api_token) {
+        _realRestToken = String(d.rest_api_token);
+        return _realRestToken;
+      }
+    } catch (_e) { /* refuse (distant) ou reseau : message cote appelant */ }
+    return null;
+  };
   container.querySelectorAll("[data-api-key-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const id = btn.dataset.apiKeyToggle;
       const input = container.querySelector("#" + id);
-      if (input) input.type = input.type === "password" ? "text" : "password";
+      if (!input) return;
+      const reveal = input.type === "password";
+      if (input.dataset.fieldKey === "rest_api_token") {
+        if (reveal && _isMaskedToken(input.value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé révélable en local uniquement.", true); return; }
+          input.value = real;
+          _restMsg("", false);
+        } else if (!reveal && _realRestToken != null && input.value === _realRestToken) {
+          // Re-masquage : restaurer le masque du GET pour ne pas laisser le
+          // vrai token dans le DOM (sans toucher _state.settings ni l'autosave ;
+          // une saisie manuelle de l'utilisateur est preservee telle quelle).
+          input.value = String(_state.settings.rest_api_token || "");
+        }
+      }
+      input.type = reveal ? "text" : "password";
     });
   });
 
@@ -2272,7 +2311,15 @@ function _bindFields(container) {
   if (copyBtn && tokenInput) {
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(tokenInput.value);
+        // LOTC-B3 : le champ peut contenir le masque SEC-H3 -> copier la vraie
+        // valeur revelee, jamais les puces.
+        let value = tokenInput.value;
+        if (_isMaskedToken(value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé copiable en local uniquement.", true); return; }
+          value = real;
+        }
+        await navigator.clipboard.writeText(value);
         if (msgEl) { msgEl.textContent = "✓ Copié"; msgEl.className = "parametres-test-result parametres-test-result--ok"; setTimeout(() => { msgEl.textContent = ""; }, 1800); }
       } catch (_e) { if (msgEl) msgEl.textContent = "Échec copie"; }
     });
@@ -2293,6 +2340,8 @@ function _bindFields(container) {
           tokenInput.value = b64;
           tokenInput.type = "text";
           _state.settings.rest_api_token = b64;
+          _realRestToken = b64; // LOTC-B3 : l'ancien token revele est perime
+
           if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
           _scheduleSave();
         },
@@ -2398,6 +2447,12 @@ function _bindFields(container) {
       try {
         // 1) On interroge le bucket pour avoir un decompte fiable (declenche
         // le countdown 3s si > 50 fichiers, exigence memoire utilisateur).
+        // FIX #2/#6/#10 : la modale doit refleter ce que "Vider maintenant"
+        // supprime REELLEMENT (purge_review_bucket_all scope <root>/_review sauf
+        // _duplicates_user_decided), pas l'agregat viewer files_count qui inclut
+        // aussi les buckets runs et les decisions preservees -> l'utilisateur
+        // confirmait N et obtenait deleted << N. On utilise donc le perimetre
+        // purgeable (purge_scope_*) et un echantillon filtre au meme perimetre.
         let total = 0;
         let sample = [];
         let sizeMo = "0";
@@ -2405,9 +2460,17 @@ function _bindFields(container) {
           const listRes = await apiPost("run/list_quarantine_bucket", { limit: 50 });
           const listData = listRes && listRes.data ? listRes.data : listRes;
           if (listData && listData.ok !== false) {
-            total = Number(listData.files_count || 0);
-            sample = (listData.files || []).slice(0, 10).map((f) => f.rel || f.path);
-            const sizeBytes = Number(listData.total_size_bytes || 0);
+            total = Number(listData.purge_scope_files_count || 0);
+            // R2 : echantillon backend aligne sur le perimetre purgeable
+            // (purge_scope_sample) — l'ancien filtre sur `files` (top-50 toutes
+            // buckets) pouvait etre vide alors que total > 0. Fallback conserve.
+            sample = Array.isArray(listData.purge_scope_sample) && listData.purge_scope_sample.length
+              ? listData.purge_scope_sample.slice(0, 10)
+              : (listData.files || [])
+                  .filter((f) => !f.source_root && f.subdir !== "_duplicates_user_decided")
+                  .slice(0, 10)
+                  .map((f) => f.rel || f.path);
+            const sizeBytes = Number(listData.purge_scope_size_bytes || 0);
             sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
           }
         } catch (_listErr) {

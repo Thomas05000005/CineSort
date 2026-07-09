@@ -81,18 +81,118 @@ function _dedupKey(method, url, body) {
 }
 
 /**
- * Wrap d'un executor avec dedup in-flight. Si une requete identique est deja
- * en vol, retourne sa Promise. Sinon execute et libere a la fin (succes ou
- * echec).
+ * Wrap d'un executor avec dedup in-flight.
+ *
+ * LOTC-F1 (verif totale 2026-07) : l'ancienne version rendait au 2e appelant
+ * la Promise du 1er, porteuse du SIGNAL DE NAVIGATION du 1er — quand une
+ * navigation abortait ce signal, le nouvel appelant recevait un AbortError
+ * qui ne le concernait pas et sa vue mourait sans retry (accueil vide au
+ * boot, historique/qualite geles en skeleton, ecran mort traitement->
+ * doublons, banniere parametres). Nouvelle mecanique :
+ *  - le fetch partage tourne sur un AbortController DEDIE (entry.ctrl) ;
+ *  - chaque appelant est compte (refs) ; son signal decremente a l'abort ;
+ *  - le fetch n'est aborte que si TOUS les appelants a signal ont abandonne
+ *    ET qu'aucun appelant sans signal n'est presente (celui-la n'abandonne
+ *    jamais) ;
+ *  - chaque appelant recoit une VUE PAR APPELANT de la promesse : s'il
+ *    aborte, LUI recoit AbortError ; les autres recoivent le resultat ;
+ *  - une entree deja settled/abortee n'est jamais servie a un nouvel
+ *    appelant (relance fraiche).
  */
-function _dedupExec(key, executor) {
-  const existing = _inFlightRequests.get(key);
-  if (existing) return existing;
-  const p = executor().finally(() => {
-    _inFlightRequests.delete(key);
+function _mkAbortError() {
+  try {
+    return new DOMException("Aborted", "AbortError");
+  } catch {
+    const e = new Error("Aborted");
+    e.name = "AbortError";
+    return e;
+  }
+}
+
+function _perCallerView(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(_mkAbortError());
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const onAbort = () => {
+      if (done) return;
+      done = true;
+      reject(_mkAbortError());
+    };
+    try { signal.addEventListener("abort", onAbort, { once: true }); } catch { /* no-op */ }
+    promise.then(
+      (v) => {
+        if (done) return;
+        done = true;
+        try { signal.removeEventListener("abort", onAbort); } catch { /* no-op */ }
+        resolve(v);
+      },
+      (e) => {
+        if (done) return;
+        done = true;
+        try { signal.removeEventListener("abort", onAbort); } catch { /* no-op */ }
+        reject(e);
+      },
+    );
   });
-  _inFlightRequests.set(key, p);
-  return p;
+}
+
+function _joinEntry(entry, signal) {
+  entry.refs += 1;
+  if (!signal) {
+    entry.signalless += 1;
+    return;
+  }
+  const onAbort = () => {
+    entry.abortedRefs += 1;
+    if (!entry.settled && entry.signalless === 0 && entry.abortedRefs >= entry.refs) {
+      try { entry.ctrl.abort(); } catch { /* no-op */ }
+    }
+  };
+  if (signal.aborted) {
+    onAbort();
+    return;
+  }
+  try {
+    signal.addEventListener("abort", onAbort, { once: true });
+    // F1-bis (revue Lot C-fix) : detacher au settle — les vues qui pollent
+    // avec le signal de nav (longue duree) accumulaient un listener + une
+    // closure retenant l'entry par tick, liberes seulement a la navigation.
+    entry.cleanups.push(() => {
+      try { signal.removeEventListener("abort", onAbort); } catch { /* no-op */ }
+    });
+  } catch { /* no-op */ }
+}
+
+function _dedupExec(key, executor, callerSignal) {
+  // F1-bis (revue Lot C-fix) : un appelant DEJA aborte recoit son AbortError
+  // immediatement — sans creer d'entree morte-nee (ctrl aborte, fetch mort-ne)
+  // ni de promesse orpheline (unhandled rejection).
+  if (callerSignal && callerSignal.aborted) {
+    return Promise.reject(_mkAbortError());
+  }
+  const existing = _inFlightRequests.get(key);
+  if (existing && !existing.settled && !existing.ctrl.signal.aborted) {
+    _joinEntry(existing, callerSignal);
+    return _perCallerView(existing.promise, callerSignal);
+  }
+  const entry = {
+    refs: 0,
+    abortedRefs: 0,
+    signalless: 0,
+    settled: false,
+    ctrl: new AbortController(),
+    cleanups: [],
+    promise: null,
+  };
+  _joinEntry(entry, callerSignal);
+  entry.promise = executor(entry.ctrl.signal).finally(() => {
+    entry.settled = true;
+    for (const fn of entry.cleanups.splice(0)) fn();
+    if (_inFlightRequests.get(key) === entry) _inFlightRequests.delete(key);
+  });
+  _inFlightRequests.set(key, entry);
+  return _perCallerView(entry.promise, callerSignal);
 }
 
 /**
@@ -300,9 +400,11 @@ async function _apiGetImpl(path, url) {
 /**
  * Appel POST generique vers /api/{method} avec body JSON.
  * V1.5.0 BUG #2 : dedup in-flight + backoff exp sur 5xx (3 retries max).
- * Note : on ne dedup PAS quand un opts.signal externe est fourni (l'appelant
- * controle son cycle de vie, et 2 appelants distincts pourraient l'abort
- * indirectement). Le timeoutMs interne reste dedupable.
+ * LOTC-F1 : la dedup est TOUJOURS active ; le signal de chaque appelant
+ * (compose avec son timeoutMs) est cable au refcount de la dedup et chaque
+ * appelant recoit une vue individuelle de la promesse partagee — son abort
+ * ne rejette que SA vue, le fetch partage ne s'arrete que quand tous les
+ * appelants a signal ont abandonne.
  * @param {string} method - nom de la methode API
  * @param {object} params - parametres JSON
  * @param {object} [opts] - options : { signal?: AbortSignal, timeoutMs?: number }
@@ -313,17 +415,31 @@ async function _apiGetImpl(path, url) {
 export function apiPost(method, params = {}, opts = {}) {
   const url = `${baseUrl()}/api/${method}`;
   const body = JSON.stringify(params);
-  // FIX 2026-06-05 (avalanche boot natif) : auparavant, la presence d'un
-  // opts.signal externe DESACTIVAIT la dedup in-flight. Resultat : accueil.js
-  // partait 4 fetchs concurrents avec un signal partage, et la dedup centrale
-  // etait court-circuitee -> settings/get_settings tire 2 fois (boot shell +
-  // accueil), get_dashboard 2 fois, etc. Salve 401/429 garantie au boot a froid.
-  //
-  // Nouvelle strategie : on dedup TOUJOURS. Si un signal externe est fourni,
-  // on l'observe pour pouvoir abort le fetch quand TOUS les callers concurrents
-  // ont abort. Le signal effectif passe au fetch est compose via _composeSignal.
+  // FIX 2026-06-05 (avalanche boot natif) : on dedup TOUJOURS, meme avec un
+  // opts.signal externe (sinon accueil.js partait 4 fetchs concurrents).
+  // LOTC-F1 (verif totale 2026-07) : le signal de l'appelant (compose avec
+  // son timeout eventuel) est cable au niveau de la dedup — le fetch partage
+  // tourne sur son propre controller et chaque appelant recoit une vue
+  // individuelle (cf _dedupExec). Le signal du 1er appelant ne peut plus
+  // tuer la vue du 2e.
+  const callerSignal = _composeSignal([opts.signal || null, _timeoutSignal(opts.timeoutMs)]);
   const key = _dedupKey("POST", url, body);
-  return _dedupExec(key, () => _apiPostImpl(method, params, opts, url, body));
+  return _dedupExec(key, (sharedSignal) => _apiPostImpl(method, params, url, body, sharedSignal), callerSignal);
+}
+
+/**
+ * Fabrique un AbortSignal de timeout (ou null si pas de timeoutMs).
+ * Extrait de _apiPostImpl (LOTC-F1) : le timeout appartient a l'APPELANT,
+ * pas au fetch partage.
+ */
+function _timeoutSignal(timeoutMs) {
+  if (!timeoutMs) return null;
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), timeoutMs);
+  return ctrl.signal;
 }
 
 /**
@@ -346,7 +462,7 @@ function _composeSignal(signals) {
   return ctrl.signal;
 }
 
-async function _apiPostImpl(method, params, opts, url, body) {
+async function _apiPostImpl(method, params, url, body, signal) {
   // V1.5.0 fix bug #1 : attendre que le token soit injecte avant de
   // partir. Au boot natif, _detectNativeBoot pose le token de maniere
   // synchrone mais les modules ES qui font Promise.all (accueil.js)
@@ -359,21 +475,9 @@ async function _apiPostImpl(method, params, opts, url, body) {
   const bearer = _safeBearer(token);
   if (bearer) headers["Authorization"] = bearer;
 
-  // V2-C R4-MEM-3 + fix 2026-06-05 : support timeout via AbortSignal.timeout.
-  // Si signal externe ET timeoutMs : on COMPOSE les deux (abort si un seul
-  // est abort). Avant le fix, le signal externe avait priorite et ecrasait
-  // le timeout.
-  let timeoutSignal = null;
-  if (opts.timeoutMs) {
-    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-      timeoutSignal = AbortSignal.timeout(opts.timeoutMs);
-    } else {
-      const ctrl = new AbortController();
-      setTimeout(() => ctrl.abort(), opts.timeoutMs);
-      timeoutSignal = ctrl.signal;
-    }
-  }
-  const signal = _composeSignal([opts.signal || null, timeoutSignal]);
+  // LOTC-F1 : `signal` = controller PARTAGE de la dedup (entry.ctrl), aborte
+  // uniquement quand tous les appelants a signal ont abandonne. Les timeouts
+  // et signaux individuels vivent au niveau apiPost/_dedupExec.
 
   // V1.5.0 BUG #2 : boucle retry avec backoff exp. PAS de retry sur 401/429.
   let resp = null;

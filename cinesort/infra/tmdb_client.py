@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
@@ -404,7 +405,12 @@ class TmdbClient:
             logger.debug("TMDb: GET /authentication -> %d (%.1fs)", r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, ConnectionError, TimeoutError) as e:
             logger.warning("TMDb: echec validate_key — %s", e)
-            return False, f"Erreur reseau: {e}"
+            # LOTD-INT-03 : str(e) requests embarque l'URL ?api_key=<cle en
+            # clair> ; les logs sont scrubbés, le message renvoye au FRONT ne
+            # l'est PAS (meme politique que safe_integration_error : exception
+            # complete cote serveur, diagnostic sans secret cote client).
+            host = urlsplit(url).netloc or "api.themoviedb.org"
+            return False, f"Erreur reseau: {type(e).__name__} ({host})"
 
         try:
             _body = getattr(r, "content", b"")
@@ -527,7 +533,7 @@ class TmdbClient:
                 self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
         return results
 
-    def _get_movie_detail_cached(self, movie_id: int) -> Optional[Dict[str, Any]]:
+    def _get_movie_detail_cached(self, movie_id: int, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """Recupere le detail d'un film TMDb (cache local). Stocke poster + collection.
 
         R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
@@ -540,9 +546,13 @@ class TmdbClient:
             return None
 
         cache_key = f"movie|{mid}"
-        cached = self._cache_get(cache_key)
-        if isinstance(cached, dict):
-            return cached
+        # E4-bis (revue Lot E) : force_refresh saute la LECTURE du cache mais
+        # ne purge rien — si le fetch echoue, le fallback stale (plus bas)
+        # reste disponible ; s'il reussit, _cache_set ecrase l'entree.
+        if not force_refresh:
+            cached = self._cache_get(cache_key)
+            if isinstance(cached, dict):
+                return cached
 
         # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
         # la cle de cache `movie|{mid}` n'inclut PAS la langue. cfg.tmdb_language
@@ -607,9 +617,13 @@ class TmdbClient:
             self._debug(f"movie detail cache save warning movie_id={mid} error={exc}")
         return cache_entry
 
-    def get_movie_poster_path(self, movie_id: int) -> Optional[str]:
-        """Retourne poster_path pour un film TMDb (cache local)."""
-        detail = self._get_movie_detail_cached(movie_id)
+    def get_movie_poster_path(self, movie_id: int, force_refresh: bool = False) -> Optional[str]:
+        """Retourne poster_path pour un film TMDb (cache local).
+
+        E4-bis : force_refresh saute la lecture du cache (re-fetch TMDb) en
+        conservant le fallback stale si l'API echoue.
+        """
+        detail = self._get_movie_detail_cached(movie_id, force_refresh=force_refresh)
         if not detail:
             return None
         poster = detail.get("poster_path")
@@ -650,8 +664,10 @@ class TmdbClient:
             return None
         return value if value > 0 else None
 
-    def get_movie_poster_thumb_url(self, movie_id: int, size: str = "w92") -> Optional[str]:
-        poster = self.get_movie_poster_path(movie_id)
+    def get_movie_poster_thumb_url(
+        self, movie_id: int, size: str = "w92", force_refresh: bool = False
+    ) -> Optional[str]:
+        poster = self.get_movie_poster_path(movie_id, force_refresh=force_refresh)
         if not poster:
             return None
         p = str(poster).strip()

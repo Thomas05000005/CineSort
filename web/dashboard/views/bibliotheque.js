@@ -41,7 +41,7 @@ import {
 } from "../components/library-advanced-drawer.js";
 import * as rightPanel from "../components/right-panel.js";
 
-const PAGE_SIZE = 60;
+const PAGE_SIZE = 200; // wip/b4 réconcilié (Phase 5) : moins de fetchs paginés sur grosses biblios
 const LS_VIEW = "cinesort.bibliotheque.view";
 const LS_TIER = "cinesort.bibliotheque.tier";
 const LS_SORT = "cinesort.bibliotheque.sort";
@@ -105,6 +105,7 @@ let _abortController = null;      // AbortController des fetchs library/* (lifec
 let _eventsController = null;     // AbortController des listeners DOM (lifecycle vue)
 let _eventsBound = false;         // garde idempotence delegation container-level
 let _scrollObserver = null;
+let _scrollObservedSentinel = null; // wip/b4 #82 : dernier sentinel observé (idempotence)
 let _runId = null; // dernier run_id reçu (pour appel quality/analyze_perceptual_batch)
 
 // Drag-select rectangulaire (spec 07 §5) : etat module-scope pour permettre
@@ -198,6 +199,8 @@ function _formatConfidence(c) {
 function _formatSize(bytes) {
   const n = Number(bytes || 0);
   if (!n) return "—";
+  // wip/b4 réconcilié (Phase 5) : palier To pour les grosses bibliothèques.
+  if (n >= 1024 * 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024 * 1024)).toFixed(1)} To`;
   if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} Go`;
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(0)} Mo`;
   return `${n} o`;
@@ -492,7 +495,7 @@ function _renderFilmCard(row) {
         ${poster}
         ${_tierBadge(_rowDisplayTier(row))}
         ${warningBadge}
-        <label class="bibliotheque-card-check" onclick="event.stopPropagation()">
+        <label class="bibliotheque-card-check">
           <input type="checkbox" data-bibliotheque-select="${escapeHtml(rowId)}"${selected ? " checked" : ""} aria-label="Sélectionner">
         </label>
       </div>
@@ -683,12 +686,16 @@ function _updateInspector() {
       .sort((a, b) => b[1] - a[1])
       .map(([t, n]) => `<li>${escapeHtml(TIER_LABELS[t] || t)} : <strong>${n}</strong></li>`)
       .join("");
+    // wip/b4 réconcilié (Phase 5) : label durée sans "0 h" superflu.
+    const _h = Math.floor(totalDuration / 60);
+    const _m = totalDuration % 60;
+    const durationLabel = `${_h > 0 ? `${_h} h ` : ""}${_m} min`;
     rightPanel.setSections([
       {
         title: `${selectedIds.length} films sélectionnés`,
         html: `
           <ul class="bibliotheque-inspector-aggregates">
-            <li>Durée totale : <strong>${Math.round(totalDuration / 60)} h ${totalDuration % 60} min</strong></li>
+            <li>Durée totale : <strong>${durationLabel}</strong></li>
             <li>Taille totale : <strong>${_formatSize(totalSize)}</strong></li>
           </ul>
           <h4>Distribution Tier</h4>
@@ -921,13 +928,19 @@ async function _fetchLibrary({ append = false } = {}) {
 /* --- Scroll infini (IntersectionObserver) --- */
 
 function _setupScrollObserver() {
+  const sentinel = _container && _container.querySelector("[data-bibliotheque-sentinel]");
+  // wip/b4 réconcilié (Phase 5, #82) : idempotence — si le sentinel DOM n'a pas
+  // changé et que l'observer tourne déjà, ne pas le réinstaller (évite le churn
+  // à chaque _render qui ne touche pas le sentinel).
+  if (_scrollObserver && sentinel && sentinel === _scrollObservedSentinel) return;
   if (_scrollObserver) {
     _scrollObserver.disconnect();
     _scrollObserver = null;
   }
-  const sentinel = _container && _container.querySelector("[data-bibliotheque-sentinel]");
+  _scrollObservedSentinel = null;
   if (!sentinel) return;
   if (typeof IntersectionObserver === "undefined") return;
+  _scrollObservedSentinel = sentinel;
   _scrollObserver = new IntersectionObserver(
     (entries) => {
       const entry = entries[0];
@@ -1235,8 +1248,10 @@ function _bindEvents(container) {
       }
       return;
     }
-    // Checkbox selection : stopPropagation pour eviter le focus inspecteur
-    if (t.closest("[data-bibliotheque-select]")) {
+    // Checkbox selection : stopPropagation pour eviter le focus inspecteur.
+    // LOTC-C1 : couvre aussi le <label> wrapper (.bibliotheque-card-check),
+    // dont l'ex-onclick inline etait bloque par la CSP script-src 'self'.
+    if (t.closest("[data-bibliotheque-select]") || t.closest(".bibliotheque-card-check")) {
       ev.stopPropagation();
       return;
     }
@@ -2039,7 +2054,21 @@ async function _fetchPlaylists() {
 
 /* --- Entrypoint --- */
 
-export async function initBibliotheque(container) {
+// R1-bis (revue Lot C-fix) : mapping des filtres de suggestion accueil
+// (data-target-route='/bibliotheque?filter=X') vers les chips existantes.
+// Sans consommation, l'utilisateur atterrissait sur la bibliotheque ENTIERE
+// en croyant voir le sous-ensemble annonce.
+const _QUERY_FILTER_TO_CHIP = {
+  sagas_incomplete: "sagas_incomplete",
+  subs_missing_fr: "subs_missing_fr",
+  not_identified: "unidentified",
+  unidentified: "unidentified",
+  duplicates: "in_duplicates",
+  in_duplicates: "in_duplicates",
+  recently_modified: "recently_modified",
+};
+
+export async function initBibliotheque(container, opts) {
   if (!container) return;
   // Si un mount precedent n'a pas ete proprement unmount, on nettoie ici pour
   // garantir un controller frais et eviter les listeners stacks.
@@ -2051,6 +2080,33 @@ export async function initBibliotheque(container) {
 
   _container = container;
   _state = _initState();
+  const queryFilter = opts && opts.query && opts.query.filter;
+  if (queryFilter) {
+    // R2 (revue round 2) : les liens first-party (Qualite podium/decennies,
+    // suggestions accueil) emettent aussi tier_*/decade_*/low_confidence —
+    // familles supportees NATIVEMENT par la vue, a consommer avant le
+    // fallback chips, sinon l'app declare casses ses propres liens.
+    const qf = String(queryFilter);
+    const tierMatch = qf.match(/^tier_(platinum|gold|silver|bronze|reject|unknown)$/);
+    const decadeMatch = qf.match(/^decade_(\d{4})$/);
+    const chip = _QUERY_FILTER_TO_CHIP[qf];
+    if (tierMatch) {
+      _state.tierFilter = tierMatch[1];
+    } else if (decadeMatch) {
+      _state.advancedActive = true;
+      _state.advanced.year_min = Number(decadeMatch[1]);
+      _state.advanced.year_max = Number(decadeMatch[1]) + 9;
+    } else if (qf === "low_confidence") {
+      _state.advancedActive = true;
+      _state.advanced.confidence_max = 50;
+    } else if (chip) {
+      _state.activeChips.add(chip);
+    } else {
+      // Filtre reellement non mappable (omdb_disagree, codec_obsolete...) :
+      // le dire plutot que d'afficher la bibliotheque entiere comme filtree.
+      showToast({ type: "info", text: `Filtre « ${qf} » non applicable — bibliothèque complète affichée.` });
+    }
+  }
   _state.loading = true;
   container.innerHTML = _renderSkeleton();
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
@@ -2082,6 +2138,7 @@ export function unmountBibliotheque() {
     _scrollObserver.disconnect();
     _scrollObserver = null;
   }
+  _scrollObservedSentinel = null; // wip/b4 #82 : reset idempotence au unmount
   // Drag-select : nettoyage listeners window + overlay residuel.
   _resetDragSelect();
   document.body.style.userSelect = "";

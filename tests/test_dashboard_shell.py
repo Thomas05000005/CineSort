@@ -172,14 +172,18 @@ class DashboardShellHttpTests(unittest.TestCase):
         """L'index contient les placeholder de chaque vue."""
         _, body, _ = self._get("/dashboard/index.html")
         html = body.decode("utf-8")
+        # Verif totale 2026-07 (Phase 5) : conteneurs orphelins retirés
+        # (view-home/quality/jellyfin/plex/radarr/logs — aucune route ne les
+        # activait). On vérifie les placeholders des vues VIVANTES.
         for view_id in (
             "view-login",
             "view-status",
             "view-library",
-            "view-jellyfin",
-            "view-logs",
-            "view-quality",
+            "view-processing",
+            "view-qij",
             "view-settings",
+            "view-help",
+            "view-film-detail",
         ):
             self.assertIn(f'id="{view_id}"', html, f"Vue {view_id} manquante")
 

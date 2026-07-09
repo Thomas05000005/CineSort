@@ -118,6 +118,10 @@ def extract_provider_tags(name: str) -> tuple[Optional[int], Optional[str]]:
 # Volontairement SANS langue ni edition residue : ces tokens peuvent apparaitre
 # dans des vrais titres ("The French Connection", "The Final Cut", "Theatre of
 # Blood"). Ils sont stripes plus tard en mode end-anchored seulement.
+# BUG-TITLE-CHANNEL-RESIDUE (Lot D 2026-07) : `h[\s.]?26[45]` au lieu de
+# `h\.?26[45]` — le `\.?` etait mort car les points sont deja remplaces par des
+# espaces avant le sub ; "H.265-EVO" devenait "H 265-EVO" jamais nettoye (meme
+# famille de residu colle au groupe que "7.1-GRP").
 _NOISE_RE = re.compile(
     r"""
     \b(
@@ -126,7 +130,7 @@ _NOISE_RE = re.compile(
         hdr10\+?|hdr|dv|dolby[\s.-]?vision|sdr|
         bluray|blu[\s.-]?ray|brrip|bdrip|bd[\s.-]?remux|bd[\s.-]?rip|
         web[\s.-]?dl|web[\s.-]?rip|hdtv|hdrip|remux|dvdrip|cam|camrip|telesync|telecine|
-        x265|x264|hevc|avc|xvid|divx|h\.?264|h\.?265|av1|vp9|
+        x265|x264|hevc|avc|xvid|divx|h[\s.]?26[45]|av1|vp9|
         truehd|dts[\s.-]?hd|dts[\s.-]?x|dts|atmos|aac|ac3|eac3|ddp|opus|flac|mp3|
         dd5\.?1|dd7\.?1|dd2\.?0|
         10bit|8bit|12bit|
@@ -213,6 +217,16 @@ _PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(?:19\d{2}|20\d{2})\s*[\)\]\}]")
 
 # Caracteres de garbage en fin de chaine apres nettoyage
 _TRAILING_GARBAGE_RE = re.compile(r"[\s\-_\.]+$")
+
+# LOTD-DUP-TITLE-YEAR + BUG-TITLE-CHANNEL-RESIDUE (Lot D 2026-07) : sur un nom
+# SANS vraie extension (dossier, release nue), Path.stem traitait le dernier
+# segment pointe comme une extension et mangeait ".2005" (l'annee -> identite
+# titre+annee divergente selon qu'un tag qualite suit ou non) ou ".1-GRP"
+# (canal "7.1" colle au release group -> residu "7" orphelin dans le titre).
+# On ne strippe le suffixe que s'il ressemble a une vraie extension de fichier
+# (point + lettre + alphanum) : comportement inchange pour ".mkv"/".FRENCH",
+# suffixes numeriques/composites (".2005", ".1-GRP", ".0") conserves.
+_REAL_FILE_EXT_RE = re.compile(r"^\.[A-Za-z][A-Za-z0-9]*$")
 
 # Release group extraction (Phase Dashboard Podiums).
 # Validation d'un candidat (2-25 chars alphanum + underscore, au moins une lettre).
@@ -366,8 +380,10 @@ def parse_scene_title(filename: str) -> str:
     # 1. Strip extension + separateurs
     # Note : Path(".mkv").stem retourne ".mkv" (cas hidden file). On filtre ce
     # cas degenere en cherchant "." final pour traiter comme une extension.
+    # LOTD-DUP-TITLE-YEAR / BUG-TITLE-CHANNEL-RESIDUE : suffixe strippe
+    # UNIQUEMENT s'il ressemble a une vraie extension (cf _REAL_FILE_EXT_RE).
     p = Path(filename)
-    name = p.stem if p.suffix else p.name
+    name = p.stem if (p.suffix and _REAL_FILE_EXT_RE.match(p.suffix)) else p.name
     if name.startswith("."):
         # Cas pathologique ".mkv" / ".mp4" - retour vide
         return ""

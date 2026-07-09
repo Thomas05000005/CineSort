@@ -71,8 +71,15 @@ def test_traitement_etape1_label_utf8_strict(dashboard_page) -> None:
     """Vue Traitement etape 1 : h2 doit afficher "Étape 1 — Analyse" exact-match."""
     # Naviguer vers /traitement (etape 1 = Analyse par defaut au mount).
     dashboard_page.evaluate("window.location.hash = '#/traitement'")
-    dashboard_page.wait_for_timeout(800)
-    dashboard_page.wait_for_selector("#traitement-panel-title", timeout=8000)
+    # Verif totale 2026-07 : attendre le PANNEAU final (titre prefixe "Étape")
+    # plutot qu'un hard-wait 800ms fragile — le skeleton intermediaire affiche
+    # brievement le label de step seul ("Analyse") et le timing du mount a bouge
+    # avec la dedup api.js (LOTC-F1). L'exact-match anti-mojibake reste ci-dessous.
+    dashboard_page.wait_for_function(
+        "() => { const el = document.querySelector('#traitement-panel-title');"
+        " return el && el.textContent.trim().startsWith('\\u00c9tape'); }",
+        timeout=8000,
+    )
     actual = dashboard_page.evaluate(
         "() => (document.querySelector('#traitement-panel-title')?.textContent || '').trim()"
     )

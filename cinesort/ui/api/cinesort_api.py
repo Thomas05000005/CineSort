@@ -2301,9 +2301,15 @@ class CineSortApi:
             quarantine_corrupted=quarantine_corrupted,
         )
 
-    def _get_tmdb_posters_impl(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
-        """Retourne les URLs de posters TMDb pour les IDs demandes (cache local)."""
-        return tmdb_support.get_tmdb_posters(self, tmdb_ids, size)
+    def _get_tmdb_posters_impl(
+        self, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False
+    ) -> Dict[str, Any]:
+        """Retourne les URLs de posters TMDb pour les IDs demandes (cache local).
+
+        E4 : force_refresh=True purge l'entree cache de chaque ID avant lookup
+        (bouton refresh jaquette de la fiche film).
+        """
+        return tmdb_support.get_tmdb_posters(self, tmdb_ids, size, force_refresh=force_refresh)
 
     def _enrich_tmdb_ids_by_title_impl(self, run_id: str, row_ids: Any) -> Dict[str, Any]:
         """R5-H2 : resout + persiste le tmdb_id de films identifies NFO/nom (sans

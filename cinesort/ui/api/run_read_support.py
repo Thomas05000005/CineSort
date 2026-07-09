@@ -96,11 +96,20 @@ def resolve_media_path_for_row(
         if candidate.exists() and candidate.is_file():
             return candidate
 
+    # LOTD-ITERVIDEOS-KWARG : min_video_bytes est keyword-only OBLIGATOIRE
+    # (scan_helpers.iter_videos) — sans lui le fallback levait TypeError et
+    # fuyait jusqu'au boundary de get_quality_report. Meme resolution du seuil
+    # que les autres appelants (cfg.min_video_bytes sinon core.MIN_VIDEO_BYTES,
+    # lu a l'appel car test_reset peut le patcher). TypeError/ValueError dans
+    # l'except : un cfg.min_video_bytes non numerique doit degrader en
+    # "media introuvable" (None), pas crasher.
     try:
-        videos = core.iter_videos(cfg, folder)
+        cfg_min = getattr(cfg, "min_video_bytes", None)
+        min_bytes = int(cfg_min) if cfg_min is not None else core.MIN_VIDEO_BYTES
+        videos = core.iter_videos(cfg, folder, min_video_bytes=min_bytes)
         if videos:
             return videos[0]
-    except (OSError, PermissionError):
+    except (OSError, PermissionError, TypeError, ValueError):
         return None
     return None
 

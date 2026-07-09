@@ -41,9 +41,11 @@ from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_n
 from cinesort.domain.tiers_helpers import (
     apply_tier_hierarchy as _apply_tier_hierarchy,
 )
+from cinesort.domain.tiers_helpers import cap_tier as _cap_tier_central
 from cinesort.domain.tiers_helpers import (
     default_hierarchy_config as _default_hierarchy_config,
 )
+from cinesort.domain.tiers_helpers import determine_tier as _determine_tier_central
 from cinesort.domain.tiers_helpers import (
     normalize_hierarchy_config as _normalize_hierarchy_config,
 )
@@ -1177,48 +1179,18 @@ def _apply_weights(
     return _clamp_0_100(score_f)
 
 
+# Verif totale 2026-07 (Phase 5) : _determine_tier / _cap_tier ne
+# reimplementent plus la logique tiers — delegation directe a tiers_helpers
+# (source unique de verite, retro-compat legacy premium/bon/moyen + cap
+# canonique). Les noms prives restent pour les call sites internes.
 def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
-    """Retourne le tier (Platinum / Gold / Silver / Bronze / Reject).
-
-    SCORE-02 (Vague M, M-06) : delegation a tiers_helpers.normalize_tiers pour
-    la retro-compat legacy (premium/bon/moyen). Defaults v1.5.7 70/66/55/40.
-    """
-    seuils = _normalize_tiers_central(tiers)
-    s = _to_int(score, 0)
-    if s >= seuils["platinum"]:
-        return "Platinum"
-    if s >= seuils["gold"]:
-        return "Gold"
-    if s >= seuils["silver"]:
-        return "Silver"
-    if s >= seuils["bronze"]:
-        return "Bronze"
-    return "Reject"
-
-
-# Fix audit 2026-05-26 (v1.5.6) Vague L : ordre des tiers, du meilleur au pire,
-# pour pouvoir CAPER un tier a un maximum (on ne descend jamais, on plafonne).
-_TIER_ORDER = ["Platinum", "Gold", "Silver", "Bronze", "Reject"]
+    """Tier (Platinum/Gold/Silver/Bronze/Reject) — delegue a tiers_helpers."""
+    return _determine_tier_central(score, tiers)
 
 
 def _cap_tier(tier: str, max_tier: str) -> str:
-    """Plafonne `tier` a `max_tier` (ne remonte jamais un tier vers le haut).
-
-    Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : quand le probe a echoue,
-    on ne peut PAS certifier Platinum/Gold sur un simple nom de fichier
-    declaratif (non verifie). On cape donc le tier a Silver maximum. Idem pour
-    une captation degradee (CAM) qui est plafonnee bien plus bas.
-    """
-    try:
-        cur = _TIER_ORDER.index(tier)
-    except ValueError:
-        return tier
-    try:
-        cap = _TIER_ORDER.index(max_tier)
-    except ValueError:
-        return tier
-    # Index plus grand = tier plus bas. On garde le plus bas des deux.
-    return _TIER_ORDER[max(cur, cap)]
+    """Plafonne `tier` a `max_tier` — delegue a tiers_helpers.cap_tier."""
+    return _cap_tier_central(tier, max_tier)
 
 
 # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : normaliseur central.

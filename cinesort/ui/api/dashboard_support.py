@@ -1190,7 +1190,9 @@ def write_run_report_file(
 
     out_path = run_paths.run_dir / f"{report_stem}.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(report_to_csv_text(report), encoding="utf-8-sig")
+    # LOTD-EXP-01 : csv.writer emet deja \r\n ; sans newline="" l'OS retraduit
+    # \n -> \r\n (=> \r\r\n sur disque, une ligne vide par enregistrement).
+    out_path.write_text(report_to_csv_text(report), encoding="utf-8-sig", newline="")
     return out_path
 
 
@@ -1222,6 +1224,13 @@ def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any
             export_format=export_format,
             report=report,
         )
+        # LOTD-EXP-02 : l'UI (#/logs) telecharge via Blob et exige "content" ;
+        # on renvoie le texte exact ecrit sur disque (lecture utf-8 stricte :
+        # le BOM du CSV reste en tete -> le download demeure lisible par Excel).
+        # LOTD-EXP-04 : newline="" desactive la traduction universal-newlines a la
+        # LECTURE ; sans ce kwarg le \r\n du CSV (fix EXP-01) est retraduit en \n
+        # -> le "content" renvoye a l'UI reperd les CRLF ecrits sur disque.
+        content = out_path.read_text(encoding="utf-8", newline="")
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(f"Echec export rapport: {exc}", category="runtime", level="error", log_module=__name__)
 
@@ -1231,6 +1240,7 @@ def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any
         "run_id": run_id,
         "format": export_format,
         "path": str(out_path),
+        "content": content,
         "rows_total": int(counts.get("rows_total") or 0),
     }
 
