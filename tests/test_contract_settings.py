@@ -65,10 +65,11 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "state_dir_example": "FANTOME - exemple onboarding, aucun lecteur",
     "tmdb_key_protection": "FANTOME - meta GET jamais affichee par l'UI",
     "tmdb_key_warning": "FANTOME - meta GET jamais affichee par l'UI",
-    # --- WRITE_ONLY (15) : UI ecrit/affiche, aucune lecture backend hors persistance ---
+    # --- WRITE_ONLY (13) : UI ecrit/affiche, aucune lecture backend hors persistance ---
+    # NB : auto_approve_enabled / auto_approve_threshold RETIRES 2026-07-10 — desormais
+    # LUS par history_support.load_validation (seed READ-TIME de la Validation via
+    # run_read_support.seed_auto_approve_decisions / is_auto_approvable). Feature cablee.
     "animation_level": "WRITE_ONLY - effet purement client-side (app.js:900 applique le niveau d'animation)",
-    "auto_approve_enabled": "WRITE_ONLY - toggle parametres.js:105, aucune logique d'auto-approbation ne lit la cle dans cinesort/",
-    "auto_approve_threshold": "WRITE_ONLY - seuil parametres.js:106 jamais lu (get_auto_approved_summary n'applique rien)",
     "cleanup_empty_folders": "WRITE_ONLY - toggle parametres.js:155, aucun lecteur backend",
     "cleanup_orphans": "WRITE_ONLY - toggle parametres.js:154, aucun lecteur backend",
     "dry_run_apply": "WRITE_ONLY - toggle dry-run cote UI (traitement.js) ; le backend lit le flag dry_run du payload run/apply, pas ce setting",

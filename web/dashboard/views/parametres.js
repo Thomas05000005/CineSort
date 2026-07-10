@@ -261,15 +261,12 @@ export const PARAMETRES_GROUPS = [
   {
     id: "apparence", label: "Apparence", icon: "🎨",
     sections: [
-      // Fix audit 2026-06-07 UX high : selecteur de langue manquant alors que
-      // le backend persiste deja `locale` (cinesort_api._apply_locale_setting).
-      // Sans ce champ, l'utilisateur ne peut pas changer la langue UI depuis
-      // les parametres (memoire user : francais).
-      { id: "langue", label: "Langue", fields: [
-        { key: "locale", label: "Langue de l'interface", type: "select", options: [
-          { v: "fr", l: "Français" }, { v: "en", l: "English" },
-        ], hint: "Le changement est appliqué à la prochaine ouverture des pages." },
-      ]},
+      // [FR-only 2026-07-10 / PHASE5_ARBITRAGES §1] Sélecteur de langue RETIRÉ :
+      // les 9 vues principales sont en français en dur (zéro appel t()), donc
+      // proposer « English » était une promesse trompeuse (seuls la sidebar, la
+      // top-bar et les messages backend basculaient). Le backend garde la
+      // machinerie `locale` (en.json + /api/settings/set_locale) pour un usage
+      // avancé via settings.json ; l'UI assume le français.
       { id: "theme", label: "Thème", fields: [
         { key: "theme", label: "Thème de l'interface", type: "select", options: [
           {v:"studio",l:"Studio"},{v:"cinema",l:"Cinéma"},{v:"luxe",l:"Luxe"},{v:"neon",l:"Neon"},

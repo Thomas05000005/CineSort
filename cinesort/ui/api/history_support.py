@@ -113,18 +113,36 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
 
 @requires_valid_run_id
 def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    from cinesort.domain.conversions import to_bool
+    from cinesort.ui.api.run_read_support import seed_auto_approve_decisions
+
     rs = api._get_run(run_id)
     if rs:
         path = rs.paths.validation_json
         if not path.exists():
-            return {"ok": True, "decisions": {}}
+            # [auto-approve] Première visite (aucune validation.json). Si
+            # auto_approve_enabled, on pré-remplit la Validation (overlay
+            # read-only, jamais persisté) ; sinon comportement inchangé (vide).
+            # Lecture settings défensive : un settings illisible → comportement
+            # historique (décisions vides), jamais une exception (revue adversaire).
+            try:
+                _auto_on = to_bool(api._get_settings_impl().get("auto_approve_enabled"), False)
+            except Exception:  # noqa: BLE001 — best-effort, pas d'auto-approve si settings KO
+                _auto_on = False
+            if not _auto_on:
+                return {"ok": True, "decisions": {}}
+            rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
+            seeded = seed_auto_approve_decisions(api, rows, {})
+            return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 rows = rs.rows
                 if not rows:
                     rows = api._load_rows_from_plan_jsonl(rs.paths)
-                return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, data)}
+                # [auto-approve] Overlay read-only ; no-op si le flag est off.
+                seeded = seed_auto_approve_decisions(api, rows, data)
+                return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
             return {"ok": True, "decisions": {}}
         except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
             api._debug_log(
@@ -145,7 +163,9 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
     data = api._load_decisions_from_validation(run_paths)
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, data)}
+        # [auto-approve] Overlay read-only ; no-op si le flag est off.
+        seeded = seed_auto_approve_decisions(api, rows, data)
+        return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         api._debug_log(
             state_dir=state_dir,

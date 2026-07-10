@@ -5,9 +5,64 @@ from typing import Any, Dict, List, Optional, Set
 
 import cinesort.domain.core as core
 from cinesort.app.cleanup import preview_cleanup_residual_folders as _preview_cleanup_fn
+from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.run_models import RunStatus
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
+
+# [auto-approve] Warnings qui EXCLUENT une row de l'auto-approbation. Source
+# unique partagée par get_auto_approved_summary (compteur dashboard) et le seed
+# READ-TIME de la Validation (seed_auto_approve_decisions).
+_AUTO_CRITICAL_WARNINGS = {"nfo_title_mismatch", "nfo_year_mismatch", "year_conflict_folder_file"}
+_AUTO_INTEGRITY_WARNINGS = {"integrity_header_invalid", "integrity_probe_failed"}
+
+
+def is_auto_approvable(row: Any, threshold: int) -> bool:
+    """[auto-approve] Prédicat UNIQUE : confiance ≥ seuil, titre + année présents,
+    aucun warning critique ni d'intégrité. Un film qui le satisfait peut être
+    pré-approuvé sans revue manuelle."""
+    flags = set(getattr(row, "warning_flags", None) or [])
+    has_title = bool(row.proposed_title and str(row.proposed_title).strip())
+    has_year = bool(row.proposed_year and int(row.proposed_year) >= 1900)
+    return (
+        int(row.confidence or 0) >= int(threshold)
+        and not (flags & _AUTO_CRITICAL_WARNINGS)
+        and not (flags & _AUTO_INTEGRITY_WARNINGS)
+        and has_title
+        and has_year
+    )
+
+
+def seed_auto_approve_decisions(
+    api: Any, rows: List[Any], existing: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """[auto-approve] Overlay READ-TIME (ne PERSISTE RIEN) des décisions pour la
+    Validation. Si `auto_approve_enabled`, pré-marque `decision=accepted`/`ok=True`
+    pour chaque row SANS décision existante ET auto-approuvable (confiance ≥
+    `auto_approve_threshold`). N'écrase JAMAIS une décision utilisateur existante.
+    Le résultat est destiné à l'affichage (Étape Validation pré-remplie) ; il
+    n'atteint le disque/apply QUE via un save_validation explicite de l'utilisateur.
+    """
+    try:
+        settings = api._get_settings_impl()
+    except Exception:  # noqa: BLE001 — best-effort : pas d'auto-approve si settings illisibles
+        return existing if isinstance(existing, dict) else {}
+    if not to_bool(settings.get("auto_approve_enabled"), False):
+        return existing if isinstance(existing, dict) else {}
+    threshold = to_int(settings.get("auto_approve_threshold"), 85)
+    base: Dict[str, Dict[str, Any]] = dict(existing) if isinstance(existing, dict) else {}
+    for row in rows:
+        rid = str(row.row_id)
+        if rid in base:
+            continue  # décision existante (utilisateur / disque) → ne pas écraser
+        if is_auto_approvable(row, threshold):
+            base[rid] = {
+                "ok": True,
+                "decision": "accepted",
+                "title": row.proposed_title,
+                "year": row.proposed_year,
+            }
+    return base
 
 
 @requires_valid_run_id
@@ -160,9 +215,6 @@ def get_auto_approved_summary(
             "quarantine_corrupted": quarantine_corrupted,
         }
 
-    critical_warnings = {"nfo_title_mismatch", "nfo_year_mismatch", "year_conflict_folder_file"}
-    # M-2 : flags d'integrite qui declenchent l'auto-quarantine si setting actif
-    integrity_warnings = {"integrity_header_invalid", "integrity_probe_failed"}
     auto_approved = 0
     manual_review = 0
     auto_quarantine = 0
@@ -170,12 +222,8 @@ def get_auto_approved_summary(
     auto_quarantine_row_ids: List[str] = []
 
     for row in rows:
-        confidence = int(row.confidence or 0)
         flags = set(row.warning_flags or [])
-        has_integrity_issue = bool(flags & integrity_warnings)
-        has_critical = bool(flags & critical_warnings)
-        has_title = bool(row.proposed_title and str(row.proposed_title).strip())
-        has_year = bool(row.proposed_year and int(row.proposed_year) >= 1900)
+        has_integrity_issue = bool(flags & _AUTO_INTEGRITY_WARNINGS)
 
         # M-2 : auto-quarantine prioritaire sur auto-approve
         if quarantine_corrupted and has_integrity_issue:
@@ -183,14 +231,8 @@ def get_auto_approved_summary(
             auto_quarantine_row_ids.append(str(row.row_id))
             continue
 
-        if (
-            enabled
-            and confidence >= threshold
-            and not has_critical
-            and not has_integrity_issue
-            and has_title
-            and has_year
-        ):
+        # Prédicat partagé avec le seed READ-TIME de la Validation (source unique).
+        if enabled and is_auto_approvable(row, threshold):
             auto_approved += 1
             auto_row_ids.append(str(row.row_id))
         else:
