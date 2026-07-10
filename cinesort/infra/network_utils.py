@@ -54,11 +54,15 @@ def is_safe_external_url(url: str) -> Tuple[bool, str]:
         return False, "Host absent"
     if host in _CLOUD_METADATA_HOSTS:
         return False, f"Host '{host}' interdit (cloud metadata)"
-    # Bloquer le bloc link-local IPv4 169.254.0.0/16
+    # Bloquer le bloc link-local (169.254.0.0/16 IPv4 ET fe80::/10 IPv6).
+    # On normalise d'abord la forme IPv4-mapped-in-IPv6 (::ffff:169.254.169.254),
+    # sinon le endpoint metadata cloud reste atteignable via cette ecriture.
     try:
         ip = ipaddress.ip_address(host)
-        if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.IPv4Network("169.254.0.0/16"):
-            return False, f"Host '{host}' interdit (link-local IPv4)"
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        if ip.is_link_local:
+            return False, f"Host '{host}' interdit (link-local)"
     except ValueError:
         pass  # host n'est pas une IP litterale, c'est un FQDN — OK
     return True, ""
