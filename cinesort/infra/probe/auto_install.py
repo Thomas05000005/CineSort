@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -79,6 +80,13 @@ def _resolve_expected_sha256(
 # firewall corporate qui drop) fait hang l'install indefiniment.
 # 120s couvre des downloads de ~120 MB sur une connexion lente (1 Mbps).
 _DOWNLOAD_TIMEOUT_S = 120.0
+
+# Borne anti-zip-bomb (CWE-409). Le SHA256 de l'archive est None par defaut
+# (rolling release gyan.dev), donc _verify_archive est fail-open : rien ne
+# controle la taille decompressee. Une entree ...ffprobe.exe de plusieurs Go
+# provoquerait un OOM avant meme d'executer le binaire. ffmpeg/ffprobe.exe font
+# ~100-170 Mo ; 300 Mo laisse une marge confortable pour les 3 binaires vises.
+_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 
 
 class IntegrityError(Exception):
@@ -179,6 +187,24 @@ def _find_in_zip(zf: zipfile.ZipFile, exe_name: str) -> Optional[str]:
     return None
 
 
+def _extract_entry_bounded(zf: zipfile.ZipFile, entry: str, dest: Path) -> None:
+    """Extrait `entry` vers `dest` en bornant la taille decompressee (anti zip-bomb).
+
+    `_find_in_zip` matche par suffixe de nom => l'attaquant controle le nom de
+    l'entree. On refuse (fail-closed) toute entree dont la taille decompressee
+    annoncee depasse _MAX_UNCOMPRESSED_BYTES, puis on copie en flux chunke plutot
+    que de charger l'entree entiere en memoire via zf.read().
+    """
+    info = zf.getinfo(entry)
+    if info.file_size > _MAX_UNCOMPRESSED_BYTES:
+        raise IntegrityError(
+            f"entree '{entry}' trop volumineuse ({info.file_size} octets decompresses, "
+            f"cap {_MAX_UNCOMPRESSED_BYTES})"
+        )
+    with zf.open(entry) as src, open(dest, "wb") as dst:
+        shutil.copyfileobj(src, dst, length=1 << 20)
+
+
 def install_ffprobe(
     progress_callback: Optional[Callable[[str], None]] = None,
     *,
@@ -223,7 +249,7 @@ def install_ffprobe(
             entry = _find_in_zip(zf, "ffprobe.exe")
             if not entry:
                 raise FileNotFoundError("ffprobe.exe non trouve dans l'archive")
-            ffprobe_path.write_bytes(zf.read(entry))
+            _extract_entry_bounded(zf, entry, ffprobe_path)
             logger.info("auto_install: ffprobe installe → %s", ffprobe_path)
 
             # Extraire aussi ffmpeg.exe (utile pour le perceptuel)
@@ -231,7 +257,7 @@ def install_ffprobe(
             if ffmpeg_entry:
                 ffmpeg_path = tools / "ffmpeg.exe"
                 if not ffmpeg_path.exists():
-                    ffmpeg_path.write_bytes(zf.read(ffmpeg_entry))
+                    _extract_entry_bounded(zf, ffmpeg_entry, ffmpeg_path)
                     logger.info("auto_install: ffmpeg installe → %s", ffmpeg_path)
 
     return str(ffprobe_path)
@@ -276,7 +302,7 @@ def install_mediainfo(
             entry = _find_in_zip(zf, "mediainfo.exe")
             if not entry:
                 raise FileNotFoundError("MediaInfo.exe non trouve dans l'archive")
-            mi_path.write_bytes(zf.read(entry))
+            _extract_entry_bounded(zf, entry, mi_path)
             logger.info("auto_install: MediaInfo installe → %s", mi_path)
 
     return str(mi_path)

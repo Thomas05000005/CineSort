@@ -115,6 +115,25 @@ class TestInstallFfprobe(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError):
                     install_ffprobe()
 
+    @patch("cinesort.infra.probe.auto_install._MAX_UNCOMPRESSED_BYTES", 4)
+    @patch("cinesort.infra.probe.auto_install.urlretrieve")
+    def test_rejects_oversized_entry(self, mock_urlretrieve):
+        """Une entree dont la taille decompressee depasse le cap -> IntegrityError (anti zip-bomb)."""
+
+        def fake_download(url, dest):
+            with zipfile.ZipFile(dest, "w") as zf:
+                zf.writestr("ffmpeg-7.1/bin/ffprobe.exe", b"way-too-large-payload")
+
+        mock_urlretrieve.side_effect = fake_download
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = Path(tmp) / "tools"
+            tools.mkdir()
+            with patch("cinesort.infra.probe.auto_install.get_tools_dir", return_value=tools):
+                with self.assertRaises(IntegrityError):
+                    install_ffprobe()
+                self.assertFalse((tools / "ffprobe.exe").exists())
+
 
 class TestInstallMediainfo(unittest.TestCase):
     """Tests pour install_mediainfo (mock urlretrieve)."""
