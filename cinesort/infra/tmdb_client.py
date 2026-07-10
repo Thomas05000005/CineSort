@@ -314,7 +314,11 @@ class TmdbClient:
                 return
             self._last_save_ts = now
 
-            tmp = self.cache_path.with_suffix(".tmp")
+            # Suffixe tmp UNIQUE par writer (pid+ns) : la purge concurrente au boot
+            # (thread cinesort-tmdb-purge, app.py) écrit le même cache_path. Un .tmp
+            # à nom fixe partagé permettait à un writer de tronquer le .tmp de l'autre
+            # en plein json.dump, puis promotion d'un JSON partiel via os.replace (CWE-362).
+            tmp = self.cache_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
@@ -1132,12 +1136,16 @@ def purge_expired_tmdb_cache(
         # Rien a faire : pas d'ecriture inutile
         return result
 
-    # Reecriture atomique (tmp -> rename)
+    # Reecriture atomique (tmp -> rename). Suffixe tmp UNIQUE (pid+ns) : cette purge
+    # tourne dans un thread daemon au boot pendant qu'un TmdbClient applicatif écrit le
+    # même cache_path ; un .tmp partagé à nom fixe corrompait le cache (CWE-362).
+    tmp = cache_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
     try:
-        tmp = cache_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(new_cache, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, cache_path)
     except (OSError, PermissionError) as exc:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
         result["error"] = f"write_error: {exc}"
         return result
 
