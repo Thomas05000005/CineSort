@@ -100,7 +100,16 @@ class SettingsDispatcherSectionsTests(unittest.TestCase):
 
     def _dispatcher_source(self) -> str:
         # Source du dispatcher central qui agrege toutes les sections.
-        return inspect.getsource(settings_support.save_settings_payload)
+        # Fix lost-update : save_settings_payload est devenu un wrapper qui
+        # prend le verrou par state_dir puis delegue a
+        # _save_settings_payload_locked (ou vivent les appels _save_section_*).
+        # On concatene les deux sources pour que le contrat « la section est
+        # appelee dans le flux de save » survive aux refactors wrapper/helper.
+        src = inspect.getsource(settings_support.save_settings_payload)
+        locked = getattr(settings_support, "_save_settings_payload_locked", None)
+        if locked is not None:
+            src += inspect.getsource(locked)
+        return src
 
     def test_save_section_omdb_exists(self):
         self.assertTrue(
