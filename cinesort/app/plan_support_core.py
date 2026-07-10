@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -979,14 +980,14 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
                 ctx.scan_index.prune_incremental_scan_cache(
                     root_path=ctx.root_key, keep_folders=ctx.folders_seen_for_prune
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge dossiers: {exc}")
         if hasattr(ctx.scan_index, "prune_incremental_row_cache"):
             try:
                 ctx.scan_index.prune_incremental_row_cache(
                     root_path=ctx.root_key, keep_video_paths=ctx.video_paths_seen
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge videos: {exc}")
     # Apply v2 row cache stats to main stats.
     if hasattr(ctx.stats, "incremental_cache_row_hits"):

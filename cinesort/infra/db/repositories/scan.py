@@ -23,6 +23,13 @@ from typing import Any, Dict, List, Optional
 from cinesort.infra.db.repositories._base import _BaseRepository
 
 
+# Taille de lot pour les DELETE ... IN (...) de purge. Une clause `NOT IN` avec
+# un placeholder par entrée conservée dépasse SQLITE_MAX_VARIABLE_NUMBER (999 sur
+# SQLite < 3.32) dès qu'une racine contient plus d'entrées que la limite →
+# sqlite3.OperationalError "too many SQL variables". On borne à 500 (< 999).
+_PRUNE_CHUNK = 500
+
+
 class ScanRepository(_BaseRepository):
     """Repository pour les caches incremental scan (file hashes, folder, row)."""
 
@@ -218,18 +225,29 @@ class ScanRepository(_BaseRepository):
                 )
                 return int(cur.rowcount or 0)
 
-            placeholders = ",".join("?" for _ in keep)
-            params = [root]
-            params.extend(keep)
-            cur = conn.execute(
-                f"""
-                DELETE FROM incremental_scan_cache
-                WHERE root_path=?
-                  AND folder_path NOT IN ({placeholders})
-                """,
-                tuple(params),
-            )
-            return int(cur.rowcount or 0)
+            # Chunké : on résout d'abord les dossiers obsolètes (existants moins
+            # ceux à conserver) puis on supprime par lots de _PRUNE_CHUNK. Évite la
+            # clause `NOT IN` non bornée (un placeholder par dossier conservé) qui
+            # lève OperationalError "too many SQL variables" sur les grosses racines.
+            keep_set = set(keep)
+            existing = [
+                str(r["folder_path"])
+                for r in conn.execute(
+                    "SELECT folder_path FROM incremental_scan_cache WHERE root_path=?",
+                    (root,),
+                )
+            ]
+            stale = [p for p in existing if p not in keep_set]
+            deleted = 0
+            for i in range(0, len(stale), _PRUNE_CHUNK):
+                chunk = stale[i : i + _PRUNE_CHUNK]
+                ph = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"DELETE FROM incremental_scan_cache WHERE root_path=? AND folder_path IN ({ph})",
+                    (root, *chunk),
+                )
+                deleted += int(cur.rowcount or 0)
+            return deleted
 
         return self._with_schema_group("incremental", op)
 
@@ -347,17 +365,26 @@ class ScanRepository(_BaseRepository):
                 )
                 return int(cur.rowcount or 0)
 
-            placeholders = ",".join("?" for _ in keep)
-            params = [root]
-            params.extend(keep)
-            cur = conn.execute(
-                f"""
-                DELETE FROM incremental_row_cache
-                WHERE root_path=?
-                  AND video_path NOT IN ({placeholders})
-                """,
-                tuple(params),
-            )
-            return int(cur.rowcount or 0)
+            # Chunké : mêmes raisons que prune_incremental_scan_cache — on borne le
+            # nombre de variables SQL en supprimant les vidéos obsolètes par lots.
+            keep_set = set(keep)
+            existing = [
+                str(r["video_path"])
+                for r in conn.execute(
+                    "SELECT video_path FROM incremental_row_cache WHERE root_path=?",
+                    (root,),
+                )
+            ]
+            stale = [p for p in existing if p not in keep_set]
+            deleted = 0
+            for i in range(0, len(stale), _PRUNE_CHUNK):
+                chunk = stale[i : i + _PRUNE_CHUNK]
+                ph = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"DELETE FROM incremental_row_cache WHERE root_path=? AND video_path IN ({ph})",
+                    (root, *chunk),
+                )
+                deleted += int(cur.rowcount or 0)
+            return deleted
 
         return self._with_schema_group("incremental", op)

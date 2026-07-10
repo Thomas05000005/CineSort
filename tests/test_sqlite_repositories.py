@@ -120,5 +120,55 @@ class BaseRepositoryInjectionTests(unittest.TestCase):
         self.assertIs(repo._store.__class__.__name__, "_FakeStore")
 
 
+class PruneIncrementalCacheBoundsTests(unittest.TestCase):
+    """Purge incrémentale : ne doit pas dépasser SQLITE_MAX_VARIABLE_NUMBER.
+
+    Avant le fix, prune_incremental_row_cache construisait une clause NOT IN
+    avec un placeholder par vidéo conservée : au-delà de la limite SQLite
+    (999 sur < 3.32), sqlite3.OperationalError "too many SQL variables".
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_prune_"))
+        self.store = SQLiteStore(self._tmp / "test.sqlite")
+        self.store.initialize()
+        self.root = "R:/lib"
+        for i in range(1200):
+            self.store.scan.upsert_incremental_row_cache(
+                root_path=self.root,
+                video_path=f"{self.root}/f{i}/v{i}.mkv",
+                video_size=1,
+                video_mtime_ns=1,
+                video_hash="h",
+                folder_path=f"{self.root}/f{i}",
+                nfo_sig=None,
+                cfg_sig="c",
+                kind="single",
+                row_json={},
+                run_id="r1",
+            )
+
+    def tearDown(self) -> None:
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_prune_keeps_all_over_variable_limit(self) -> None:
+        # keep = les 1200 vidéos -> l'ancienne clause NOT IN aurait levé
+        # OperationalError. Ici : aucune obsolète, 0 supprimée, aucune exception.
+        keep = [f"{self.root}/f{i}/v{i}.mkv" for i in range(1200)]
+        deleted = self.store.scan.prune_incremental_row_cache(
+            root_path=self.root, keep_video_paths=keep
+        )
+        self.assertEqual(deleted, 0)
+
+    def test_prune_deletes_stale_entries(self) -> None:
+        keep = [f"{self.root}/f{i}/v{i}.mkv" for i in range(100)]
+        deleted = self.store.scan.prune_incremental_row_cache(
+            root_path=self.root, keep_video_paths=keep
+        )
+        self.assertEqual(deleted, 1100)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
