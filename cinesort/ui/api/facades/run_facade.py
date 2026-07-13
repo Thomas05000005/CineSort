@@ -473,7 +473,7 @@ class RunFacade(_BaseFacade):
     def get_auto_approved_summary(
         self,
         run_id: str,
-        threshold: int = 85,
+        threshold: Optional[int] = None,
         enabled: bool = False,
         quarantine_corrupted: bool = False,
     ) -> Dict[str, Any]:

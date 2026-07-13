@@ -2281,7 +2281,7 @@ class CineSortApi:
     def _get_auto_approved_summary_impl(
         self,
         run_id: str,
-        threshold: int = 85,
+        threshold: Optional[int] = None,
         enabled: bool = False,
         quarantine_corrupted: bool = False,
     ) -> Dict[str, Any]:

@@ -274,7 +274,9 @@ def build_naming_context(
     """Construit le dictionnaire de variables pour le template de renommage."""
     ctx: Dict[str, str] = {}
 
-    # Toujours disponibles
+    # Toujours disponibles. NB : la déduplication de l'année de queue ("Titre 2005 (2005)")
+    # est faite dans _apply_template, conditionnée à la présence de {year} dans le template
+    # (un template custom SANS {year} conserve donc l'année du titre — pas de perte d'info).
     ctx["title"] = str(title or "").strip()
     ctx["year"] = str(year) if year and year > 0 else ""
     ctx["source"] = str(source or "").strip()
@@ -353,6 +355,24 @@ def format_tv_series_folder(template: str, context: Dict[str, str]) -> str:
 
 def _apply_template(template: str, context: Dict[str, str]) -> str:
     """Substitue les variables, nettoie les separateurs orphelins, sanitise pour Windows."""
+
+    # Fix double-année disque : si le template ré-injecte l'année via {year}, retirer l'année
+    # de QUEUE redondante du titre/série (proposed_title issu d'un nom de fichier peut finir par
+    # l'année, ex. "Le Havre 2011"). Sinon "{title} ({year})" produirait "Le Havre 2011 (2011)".
+    # CONDITIONNÉ à "{year}" dans le template -> un template SANS {year} conserve l'année du titre
+    # (pas de perte d'info). "Blade Runner 2049" (≠ année de sortie) et un titre-année nu ("1984")
+    # sont préservés par le helper. Copie locale : ne mute pas le contexte de l'appelant.
+    if "{year}" in (template or "") and context.get("year"):
+        try:
+            from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
+            _yr = int(context["year"])
+            context = dict(context)
+            for _key in ("title", "series", "original_title"):
+                if context.get(_key):
+                    context[_key] = strip_trailing_year_if_equal(context[_key], _yr)
+        except (TypeError, ValueError):
+            pass
 
     # Substituer les variables
     def _replacer(m: re.Match) -> str:

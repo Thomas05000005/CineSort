@@ -430,11 +430,15 @@ def strip_trailing_year_if_equal(title: str, year: Optional[int]) -> str:
     """Retire l'annee de QUEUE du titre UNIQUEMENT si elle egale `year`.
 
     LOTD-DUP-TITLE-YEAR (revue round 1) : sert a NORMALISER la cle de
-    dedoublonnage/identite, PAS le titre affiche/renomme. Sans TMDb,
-    "Titre 2005"|2005 et "Titre"|2005 (dossier "Titre (2005)") doivent
-    matcher le meme film. Un film-annee comme "Blade Runner 2049" sorti en
-    2017 garde son titre : 2049 != 2017 -> pas de strip. N'est JAMAIS applique
-    au proposed_title (le renommage disque reste intact, seed torrents sauf).
+    dedoublonnage/identite. Sans TMDb, "Titre 2005"|2005 et "Titre"|2005
+    (dossier "Titre (2005)") doivent matcher le meme film. Un film-annee comme
+    "Blade Runner 2049" sorti en 2017 garde son titre : 2049 != 2017 -> pas de
+    strip ; un titre-annee nu ("1984","2012") n'a pas de separateur -> preserve.
+    N'est JAMAIS applique au proposed_title stocke (cle dedup/seed torrents
+    intacte). Depuis le fix double-annee disque, ce helper est AUSSI applique au
+    titre/serie dans naming._apply_template UNIQUEMENT quand le template contient
+    {year} (evite "Titre 2005 (2005)") ; un template custom SANS {year} conserve
+    donc l'annee du titre.
     """
     if not title or not year:
         return title

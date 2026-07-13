@@ -774,15 +774,42 @@ function _renderVerificationStep() {
   const _readFlags = (r) => Array.isArray(r.warning_flags)
     ? r.warning_flags
     : String(r.warning_flags || "").split(",").filter(Boolean);
-  const flagged = rows.filter((r) => _readFlags(r).length > 0);
-  const filtered = flagged.filter((r) => {
-    if (_verifFilter === "all") return true;
+  // Liste = SEULEMENT les cas nécessitant une revue humaine = NON auto-approuvables
+  // (confiance < seuil OU flag bloquant : conflit / NFO / intégrité). Les auto-approuvables
+  // (pré-approuvés par le backend) et les faux subtitle_missing_fr (FR embarqué) ne
+  // polluent plus l'écran. `auto_approvable` vient du backend
+  // (history_support._enrich_plan_payload) -> source unique cohérente avec les compteurs.
+  // Fallback défensif : si l'enrichissement est absent (bool non fourni), on retombe sur
+  // "a des alertes" pour ne pas masquer de lignes.
+  const flagged = rows.filter((r) =>
+    (typeof r.auto_approvable === "boolean") ? !r.auto_approvable : _readFlags(r).length > 0
+  );
+  // "Tous problèmes" = la liste de REVUE (non auto-approuvables). Les puces de CATÉGORIE
+  // (Subs FR / Doublons / NFO) sont des LENTILLES sur TOUTE la bibliothèque : un film bien
+  // identifié à qui il ne manque qu'un sous-titre FR est auto-approuvable (donc hors revue)
+  // mais doit rester visible/compté via sa puce dédiée — sinon "Subs FR manquants" tombe à ~0.
+  const _matchCat = (r, cat) => {
     const flags = _readFlags(r);
-    if (_verifFilter === "subs") return flags.some((f) => String(f).startsWith("subtitle"));
-    if (_verifFilter === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
-    if (_verifFilter === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
-    return true;
-  });
+    if (cat === "subs") return flags.some((f) => String(f).startsWith("subtitle_missing_fr"));
+    if (cat === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
+    if (cat === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
+    return false;
+  };
+  const filtered = (_verifFilter === "all")
+    ? flagged.slice()
+    : rows.filter((r) => _matchCat(r, _verifFilter));
+  // Tri alphabétique FRANÇAIS (À avec A, Ç avec C, ponctuation/ellipse initiale ignorée,
+  // "Chapitre 2" avant "Chapitre 10"). La table n'était triée par rien -> elle héritait de
+  // l'ordre du scan (comparaison par point de code : "À…"/"Ç…"/"…" classés après Z).
+  const _frCollator = new Intl.Collator("fr", { sensitivity: "base", numeric: true, ignorePunctuation: true });
+  filtered.sort((a, b) => _frCollator.compare(
+    String(a.display_title || a.proposed_title || ""),
+    String(b.display_title || b.proposed_title || "")
+  ));
+  // Compteurs de puces : chaque catégorie compte sur TOUTE la biblio (lentille), pas seulement la revue.
+  const _nSubs = rows.filter((r) => _matchCat(r, "subs")).length;
+  const _nDups = rows.filter((r) => _matchCat(r, "dups")).length;
+  const _nNfo = rows.filter((r) => _matchCat(r, "nfo")).length;
 
   // Fix VAL-2 (2026-05-30) : suppression du slice(0,50) qui tronquait
   // silencieusement la liste. Si > 500 lignes, un info banner est affiche
@@ -791,9 +818,10 @@ function _renderVerificationStep() {
     const flags = _readFlags(r);
     return `
       <tr data-row-id="${escapeHtml(r.row_id || "")}">
-        <td class="traitement-verif-title">${escapeHtml(r.proposed_title || "—")}</td>
+        <td class="traitement-verif-title">${escapeHtml(r.display_title || r.proposed_title || "—")}</td>
         <td class="traitement-verif-year">${escapeHtml(String(r.proposed_year || ""))}</td>
         <td class="traitement-verif-alerts">
+          ${flags.length === 0 ? `<span class="traitement-verif-alert">confiance faible</span>` : ""}
           ${flags.slice(0, 3).map((f) => `<span class="traitement-verif-alert">${escapeHtml(f)}</span>`).join(" ")}
           ${flags.length > 3 ? `<span class="traitement-verif-alert-more">+${flags.length - 3}</span>` : ""}
         </td>
@@ -801,7 +829,7 @@ function _renderVerificationStep() {
         <td class="traitement-verif-actions">
           <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="rescan" data-row-id="${escapeHtml(r.row_id || "")}">↻ Re-scanner</button>
           <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="rename" data-row-id="${escapeHtml(r.row_id || "")}">✎ Renommer</button>
-          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-traitement-verif-action="ignore" data-row-id="${escapeHtml(r.row_id || "")}">Ignorer</button>
+          <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="ignore" data-row-id="${escapeHtml(r.row_id || "")}">Ignorer</button>
         </td>
       </tr>
     `;
@@ -815,13 +843,15 @@ function _renderVerificationStep() {
 
       <div class="traitement-verif-filters" role="tablist" aria-label="Filtres vérification">
         <button type="button" class="traitement-verif-filter ${_verifFilter === "all" ? "is-active" : ""}" data-traitement-verif-filter="all">Tous problèmes (${flagged.length})</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "subs" ? "is-active" : ""}" data-traitement-verif-filter="subs">Subs FR manquants</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "dups" ? "is-active" : ""}" data-traitement-verif-filter="dups">Doublons cross-root</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "nfo" ? "is-active" : ""}" data-traitement-verif-filter="nfo">NFO incohérent</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "subs" ? "is-active" : ""}" data-traitement-verif-filter="subs">Subs FR manquants (${_nSubs})</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "dups" ? "is-active" : ""}" data-traitement-verif-filter="dups">Doublons cross-root (${_nDups})</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "nfo" ? "is-active" : ""}" data-traitement-verif-filter="nfo">NFO incohérent (${_nNfo})</button>
       </div>
 
-      ${flagged.length === 0 ? `
-        <p class="traitement-placeholder">✅ Tous les fichiers passent les contrôles. Continuez vers Validation.</p>
+      ${filtered.length === 0 ? `
+        <p class="traitement-placeholder">${_verifFilter === "all"
+          ? "✅ Tous les fichiers passent les contrôles. Continuez vers Validation."
+          : "Aucun film dans cette catégorie."}</p>
       ` : `
         <table class="traitement-verif-table" role="grid">
           <thead>
@@ -982,7 +1012,7 @@ function _renderValidationStep() {
           <input type="checkbox" data-traitement-validation-check data-row-id="${escapeHtml(rowId)}" ${defaultChecked ? "checked" : ""}>
         </td>
         <td class="traitement-validation-confidence ${confCls}">${escapeHtml(confLabel)} (${conf})</td>
-        <td class="traitement-validation-title">${escapeHtml(r.proposed_title || "—")}</td>
+        <td class="traitement-validation-title">${escapeHtml(r.display_title || r.proposed_title || "—")}</td>
         <td class="traitement-validation-year">
           <input type="number" min="1900" max="2099" value="${escapeHtml(yearForRender)}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
         </td>

@@ -56,6 +56,97 @@ def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> Lis
     return payload_rows
 
 
+def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, Any]]) -> set:
+    """Langues sous-titres présentes (externe ∪ embarqué) pour une row de PAYLOAD (dict).
+    Même union externe∪embarqué que librarian.py:132-158 / library_support, mais lisant
+    le DICT payload sérialisé (source unique de la réconciliation côté écran Traitement)."""
+    from cinesort.domain.subtitle_helpers import _normalize_iso639
+
+    present: set = set()
+    for lang in (row.get("subtitle_languages") or []):
+        norm = _normalize_iso639(lang) or str(lang).strip().lower()
+        if norm:
+            present.add(norm)
+    qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
+    metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+    embedded = metrics.get("subtitles_embedded")
+    if isinstance(embedded, list):
+        for track in embedded:
+            if isinstance(track, dict):
+                raw = (track.get("language") or "").strip().lower()
+                if raw:
+                    norm = _normalize_iso639(raw)
+                    if norm:
+                        present.add(norm)
+    return present
+
+
+def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[écran Traitement/Vérification] Enrichit chaque row du payload :
+      - ``display_title`` : titre sans l'année dupliquée (colonne ANNÉE séparée),
+      - ``warning_flags`` : réconciliés — retire les faux ``subtitle_missing_<lang>``
+        dont la langue est en fait présente (FR muxé ignoré au scan),
+      - ``auto_approvable`` : bool (le frontend filtre « à examiner » sur NON auto_approvable
+        et affiche « Cas à vérifier » = nombre de NON auto_approvable, cohérent backend).
+    Best-effort : toute erreur (store/settings/quality indisponible) laisse le payload intact.
+    """
+    try:
+        from cinesort.domain.conversions import to_int
+        from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+        from cinesort.ui.api.library_support import _get_store
+        from cinesort.ui.api.run_read_support import (
+            _AUTO_CRITICAL_WARNINGS,
+            _AUTO_INTEGRITY_WARNINGS,
+            _CONFLICT_FLAGS,
+            build_qr_by_id,
+            reconcile_subtitle_flags,
+        )
+
+        store = _get_store(api)
+        qr_by_id: Dict[str, Dict[str, Any]] = {}
+        if store is not None and hasattr(store, "quality"):
+            with contextlib.suppress(Exception):
+                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+        try:
+            threshold = to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
+        except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
+            threshold = 85
+        blocking = _CONFLICT_FLAGS | _AUTO_CRITICAL_WARNINGS | _AUTO_INTEGRITY_WARNINGS
+
+        for row in payload_rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                # 1) titre d'affichage sans année dupliquée (helper testé, protège "Blade Runner 2049")
+                with contextlib.suppress(Exception):
+                    row["display_title"] = strip_trailing_year_if_equal(
+                        str(row.get("proposed_title") or ""), row.get("proposed_year")
+                    )
+                row.setdefault("display_title", str(row.get("proposed_title") or ""))
+                # 2) réconciliation sous-titres (faux subtitle_missing_<lang> retirés)
+                flags = row.get("warning_flags")
+                if isinstance(flags, list) and qr_by_id:
+                    present = _present_langs_from_payload(row, qr_by_id)
+                    row["warning_flags"] = reconcile_subtitle_flags(flags, present)
+                # 3) auto_approvable (sur les flags réconciliés). to_int : robuste à un
+                #    proposed_year/confidence non numérique (n'abandonne pas la boucle).
+                cur = {str(f) for f in (row.get("warning_flags") or [])}
+                has_title = bool(str(row.get("proposed_title") or "").strip())
+                has_year = to_int(row.get("proposed_year"), 0) >= 1900
+                row["auto_approvable"] = bool(
+                    to_int(row.get("confidence"), 0) >= threshold
+                    and not (cur & blocking)
+                    and has_title
+                    and has_year
+                )
+            except Exception as row_exc:  # noqa: BLE001 — best-effort PAR ROW
+                logger.debug("enrich_plan_payload row error: %s", row_exc)
+                continue
+    except Exception as exc:  # noqa: BLE001 — enrichissement best-effort
+        logger.debug("enrich_plan_payload error: %s", exc)
+    return payload_rows
+
+
 @requires_valid_run_id
 def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
     # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
@@ -91,7 +182,12 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
                 # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
                 # eviter la pollution des logs.
                 return _err_response(str(exc), category="state", level="debug", log_module=__name__)
-        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
+        return {
+            "ok": True,
+            "rows": _enrich_plan_payload(
+                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
+            ),
+        }
 
     found = api._find_run_row(run_id)
     if not found:
@@ -105,7 +201,12 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
     )
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
+        return {
+            "ok": True,
+            "rows": _enrich_plan_payload(
+                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
+            ),
+        }
     except (OSError, KeyError, TypeError, ValueError) as exc:
         # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
         return _err_response(str(exc), category="state", level="debug", log_module=__name__)

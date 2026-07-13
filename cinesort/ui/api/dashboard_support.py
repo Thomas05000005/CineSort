@@ -282,17 +282,41 @@ def _build_dashboard_section(
     # car le backend n'exposait ni review_queue_count ni conflicts_count. On les
     # calcule depuis les rows : "cas a verifier" = film avec une alerte OU une
     # confiance faible ; "conflits" = film avec un flag d'incoherence de source.
-    _CONFLICT_FLAGS = frozenset({
-        "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
-        "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
-        "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
-    })
+    # [partition] Source UNIQUE : is_auto_approvable (run_read_support). "cas à vérifier"
+    # = NON auto-approuvable (confiance < seuil, OU flag critique/intégrité/conflit, OU
+    # titre/année absent). "conflits" = flag de conflit, désormais SOUS-ENSEMBLE de
+    # "à examiner" (is_auto_approvable bloque sur _CONFLICT_FLAGS). Donc :
+    #   auto (843) + à-examiner (62) = total,  et  843 + 157 ne peut plus dépasser total.
+    # Avant : "à vérifier" = (flags OU low) comptait TOUT le run (905), et auto/conflits
+    # se chevauchaient. Le seuil est celui de l'auto-approbation (settings) -> cohérent
+    # avec la carte "Auto-approuvables (confiance ≥ N)".
+    from cinesort.domain.conversions import to_int as _to_int
+    from cinesort.ui.api.run_read_support import (
+        _CONFLICT_FLAGS,
+        effective_flags as _effective_flags,
+        ignored_alerts_by_row as _ignored_alerts_by_row,
+        is_auto_approvable_flags as _is_auto_approvable_flags,
+    )
+
+    try:
+        _auto_thr = _to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
+    except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
+        _auto_thr = 85
+    # Flags EFFECTIFS (bruts − alertes ignorées) = MÊME entrée que le payload get_plan
+    # (history_support._subtract_ignored_flags), sinon "Cas à vérifier" (KPI) diverge de la
+    # liste "Tous problèmes" dès qu'une alerte bloquante est ignorée par l'utilisateur.
+    _ignored = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
     review_queue_count = 0
     conflicts_count = 0
     for _r in rows:
-        _flags = set(getattr(_r, "warning_flags", []) or [])
-        _label = str(getattr(_r, "confidence_label", "") or "").lower()
-        if _flags or _label == "low":
+        _flags = _effective_flags(getattr(_r, "warning_flags", []), _ignored.get(str(getattr(_r, "row_id", ""))))
+        if not _is_auto_approvable_flags(
+            _flags,
+            getattr(_r, "confidence", 0),
+            getattr(_r, "proposed_title", ""),
+            getattr(_r, "proposed_year", 0),
+            _auto_thr,
+        ):
             review_queue_count += 1
         if _flags & _CONFLICT_FLAGS:
             conflicts_count += 1
