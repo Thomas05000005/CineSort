@@ -306,9 +306,14 @@ def build_subtitle_report(
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).
+    # Fix audit 2026-07-15 (subtitle-vobsub) : une paire VobSub (`.idx` + `.sub`
+    # de meme stem) est UN seul sous-titre en deux fichiers. Sans exclusion,
+    # `Movie.fr.idx` + `Movie.fr.sub` comptent 2x FR -> faux doublon de langue.
+    # Le `.idx` accompagne toujours son `.sub` (deja compte) ; il reste present
+    # dans count/formats/languages, seul le decompte des doublons l'ignore.
     lang_counts: Dict[str, int] = {}
     for s in matched:
-        if s.language:
+        if s.language and s.ext != ".idx":
             lang_counts[s.language] = lang_counts.get(s.language, 0) + 1
     duplicates = sorted(lang for lang, cnt in lang_counts.items() if cnt > 1)
 

@@ -258,6 +258,34 @@ class TestBuildSubtitleReport(unittest.TestCase):
             self.assertEqual(report.count, 2)
             self.assertEqual(report.duplicate_languages, ["fr"])
 
+    def test_vobsub_pair_not_flagged_as_duplicate(self):
+        # Une paire VobSub (.idx + .sub) de meme langue = UN sous-titre en deux
+        # fichiers -> ne doit PAS etre signalee comme doublon de langue.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.idx").write_text("")
+            (folder / "Movie.fr.sub").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.count, 2)  # 2 fichiers listes
+            self.assertEqual(report.languages, ["fr"])
+            self.assertEqual(report.duplicate_languages, [])  # mais 1 seule langue reelle
+
+    def test_vobsub_plus_srt_same_lang_is_real_duplicate(self):
+        # VobSub FR + un .srt FR = deux vrais sous-titres FR -> doublon conserve.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.idx").write_text("")
+            (folder / "Movie.fr.sub").write_text("")
+            (folder / "Movie.french.srt").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.duplicate_languages, ["fr"])
+
     def test_no_expected_languages(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
