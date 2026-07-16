@@ -27,24 +27,6 @@ logger = logging.getLogger(__name__)
 # Atmos/TrueHD = platinum, DTS-HD MA/EAC3/FLAC = gold, DTS/AC3 = silver, AAC/MP3/inconnu = bronze
 _TIER_MAP = {6: "platinum", 5: "platinum", 4: "gold", 3: "gold", 2: "silver", 1: "bronze", 0: "bronze"}
 
-# Paires codec compat normales (codec_a + codec_b même langue = pas un doublon)
-_COMPAT_PAIRS = frozenset(
-    {
-        ("truehd", "ac3"),
-        ("ac3", "truehd"),
-        ("truehd", "aac"),
-        ("aac", "truehd"),
-        ("dts-hd", "dts"),
-        ("dts", "dts-hd"),
-        ("dtshd", "dts"),
-        ("dts", "dtshd"),
-        ("eac3", "ac3"),
-        ("ac3", "eac3"),
-        ("flac", "aac"),
-        ("aac", "flac"),
-    }
-)
-
 
 def analyze_audio(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Analyse les pistes audio et retourne un rapport detaille."""
@@ -165,12 +147,9 @@ def _find_duplicate_tracks(tracks: List[Dict[str, Any]]) -> List[Dict[str, str]]
     for lang, codecs in by_lang.items():
         if len(codecs) <= 1:
             continue
-        # Verifier si c'est une paire compat normale
-        if len(codecs) == 2:
-            pair = (codecs[0], codecs[1])
-            if pair in _COMPAT_PAIRS:
-                continue
-        # Compter les occurrences de chaque codec
+        # Un doublon suspect = un MEME codec present 2+ fois sur la meme langue.
+        # Deux codecs differents (ex. TrueHD + AC3 fallback) donnent counts={a:1,b:1}
+        # et ne sont donc jamais flagues : aucune liste d'exemption necessaire.
         counts: Dict[str, int] = {}
         for c in codecs:
             counts[c] = counts.get(c, 0) + 1
