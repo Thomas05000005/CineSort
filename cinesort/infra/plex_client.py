@@ -110,6 +110,12 @@ class PlexClient:
         try:
             resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
+            # Borne anti-OOM alignee sur les clients freres (jellyfin/radarr/tmdb/omdb) :
+            # un serveur Plex usurpe/on-path ou une tres grosse bibliotheque ne doit
+            # pas forcer le parse JSON d'un body non borne dans le thread scan.
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise PlexError("Reponse Plex trop volumineuse")
             _log.debug("Plex: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
         except requests.ConnectionError as exc:

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, ".")
 
-from cinesort.infra.plex_client import PlexClient
+from cinesort.infra.plex_client import PlexClient, PlexError
 
 
 class PlexRetryTests(unittest.TestCase):
@@ -33,6 +34,33 @@ class PlexRetryTests(unittest.TestCase):
         client = PlexClient(base_url="http://test:32400", token="tok")
         self.assertEqual(client._session.headers.get("X-Plex-Product"), "CineSort")
         self.assertEqual(client._session.headers.get("X-Plex-Client-Identifier"), "cinesort-desktop")
+
+
+class PlexBodySizeGuardTests(unittest.TestCase):
+    """Audit 2026-07-16 A2 : _get borne le body a 10 Mo comme les clients freres."""
+
+    def _fake_resp(self, size: int):
+        resp = mock.Mock()
+        resp.status_code = 200
+        resp.raise_for_status = mock.Mock()
+        resp.content = b"x" * size
+        return resp
+
+    def test_oversized_body_raises_plexerror(self) -> None:
+        client = PlexClient(base_url="http://test:32400", token="tok")
+        with mock.patch.object(
+            client._session, "get", return_value=self._fake_resp(10_000_001)
+        ):
+            with self.assertRaises(PlexError):
+                client._get("/identity")
+
+    def test_normal_body_passes(self) -> None:
+        client = PlexClient(base_url="http://test:32400", token="tok")
+        with mock.patch.object(
+            client._session, "get", return_value=self._fake_resp(1024)
+        ):
+            resp = client._get("/identity")
+            self.assertEqual(resp.status_code, 200)
 
 
 if __name__ == "__main__":
