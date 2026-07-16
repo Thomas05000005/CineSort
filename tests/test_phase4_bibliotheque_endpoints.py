@@ -10,13 +10,44 @@ Couvre les 4 nouveaux endpoints :
 from __future__ import annotations
 
 import csv
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from cinesort.infra import state
+
+
+class _FakeFilmModal:
+    """AUDIT 2026-07-13 (HIGH-18) : store UNIQUE des marquages suppression (table
+    DB film_marked_for_deletion). Le mecanisme bulk n'ecrit plus dans
+    deletion_marks.json (store additif, sans annulation possible) -> le mock doit
+    exposer la meme surface que cinesort.infra.db.repositories.film_modal."""
+
+    def __init__(self) -> None:
+        self.marks: dict[tuple[str, str], str] = {}
+
+    def mark_for_deletion(self, *, run_id: str, row_id: str, source_path: str = "") -> dict:
+        self.marks[(str(run_id), str(row_id))] = str(source_path or "")
+        return {"ok": True, "marked_at": 1.0}
+
+    def unmark_for_deletion(self, *, run_id: str, row_id: str) -> dict:
+        return {"ok": True, "removed": self.marks.pop((str(run_id), str(row_id)), None) is not None}
+
+    def is_marked_for_deletion(self, *, run_id: str, row_id: str) -> bool:
+        return (str(run_id), str(row_id)) in self.marks
+
+    def list_marked_for_deletion(self, *, run_id: str) -> list:
+        return [
+            {"row_id": rid, "source_path": src, "marked_at": 1.0}
+            for (rid_run, rid), src in self.marks.items()
+            if rid_run == str(run_id)
+        ]
+
+    def get_tmdb_override(self, *, run_id: str, row_id: str):
+        """Aucun override manuel (le MagicMock renvoyait un mock truthy, ce qui
+        faisait ecraser titre/annee des rows Library par des MagicMock)."""
+        return None
 
 
 def _make_mock_api_with_rows(tmp_path: Path) -> MagicMock:
@@ -235,6 +266,7 @@ def _make_mock_api_with_rows(tmp_path: Path) -> MagicMock:
         },
     ]
     store.run.list_runs.return_value = [{"run_id": "r1"}]
+    store.film_modal = _FakeFilmModal()
     runner = MagicMock()
     runner.start_job.return_value = "job_xyz"
     api._get_or_create_infra.return_value = (store, runner)
@@ -374,11 +406,13 @@ class MarkForDeletionBulkTests(unittest.TestCase):
             self.assertTrue(res["ok"])
             self.assertEqual(res["count"], 3)
             self.assertEqual(res["failed"], [])
-            # Fichier deletion_marks.json existe et contient les row_ids
-            path = Path(tmp) / "runs" / "tri_films_r1" / "deletion_marks.json"
-            self.assertTrue(path.exists())
-            data = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(sorted(data["row_ids"]), ["f1", "f2", "f3"])
+            # AUDIT 2026-07-13 (HIGH-18) : le bulk ecrit dans le SEUL store de
+            # verite (table DB film_marked_for_deletion), celui que le modal sait
+            # annuler — plus dans deletion_marks.json (irrevocable / invisible).
+            store, _runner = api._get_or_create_infra.return_value
+            marked = sorted(m["row_id"] for m in store.film_modal.list_marked_for_deletion(run_id="r1"))
+            self.assertEqual(marked, ["f1", "f2", "f3"])
+            self.assertFalse((Path(tmp) / "runs" / "tri_films_r1" / "deletion_marks.json").exists())
 
     def test_bulk_idempotent_same_rows(self) -> None:
         """Marquer 2x les memes rows ne les recompte pas (count=0 au 2e appel)."""
@@ -551,9 +585,11 @@ class ExportFilmsTests(unittest.TestCase):
             self.assertEqual(res["count"], 2)
             file_path = Path(res["file_path"])
             self.assertTrue(file_path.exists())
-            # CSV parseable + 2 rows + headers
-            with open(file_path, encoding="utf-8") as fp:
-                reader = csv.reader(fp)
+            # AUDIT 2026-07-13 (M15) : convention Excel-FR alignee sur
+            # dashboard_support (BOM UTF-8 + separateur ";"). On lit donc en
+            # `utf-8-sig` (absorbe le BOM) et delimiter=";".
+            with open(file_path, encoding="utf-8-sig", newline="") as fp:
+                reader = csv.reader(fp, delimiter=";")
                 rows = list(reader)
             self.assertEqual(len(rows), 3)  # header + 2 rows
             header = rows[0]

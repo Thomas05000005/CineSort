@@ -19,8 +19,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.librarian import row_unidentified as _row_unidentified
 from cinesort.domain.tiers_helpers import reconcile_display_tier
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
@@ -171,6 +173,32 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("library_support cannot get store: %s", exc)
         return []
+
+    # AUDIT 2026-07-13 (HIGH-18) : migration a la lecture des marquages legacy
+    # (deletion_marks.json, ancien store bulk sans annulation possible) vers la
+    # table DB film_marked_for_deletion — seul store que le modal Film sait
+    # annuler (unmark_for_deletion) et lire (flag is_marked_for_deletion).
+    # Point d'entree naturel : la vue Bibliotheque est le chemin par lequel on
+    # ouvre le modal. No-op des que le fichier legacy a disparu.
+    try:
+        from cinesort.ui.api.library_actions_support import (  # noqa: PLC0415
+            migrate_legacy_deletion_marks,
+        )
+
+        migrate_legacy_deletion_marks(api, run_id)
+    # Revue adversaire 2026-07-13 (defaut 3) : + sqlite3.Error / RuntimeError,
+    # sinon une DB verrouillee fait planter TOUTE la vue Bibliotheque.
+    except (
+        ImportError,
+        OSError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        sqlite3.Error,
+    ) as exc:
+        logger.warning("migration deletion_marks legacy ignoree run_id=%s: %s", run_id, exc)
 
     # Perceptual reports indexes par row_id
     try:
@@ -391,6 +419,10 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "row_id": row_id,
             "title": r.get("proposed_title") or r.get("nfo_title") or "",
             "year": int(r.get("proposed_year") or 0),
+            # AUDIT 2026-07-15 (M4) : expose `kind` pour que le comptage doublons
+            # (_count_duplicates_and_sagas) puisse exclure les episodes TV, miroir
+            # exact du detecteur reel (duplicate_support.find_duplicate_targets).
+            "kind": str(r.get("kind") or ""),
             # Issue audit Tier 2 : tmdb_id absent ici cassait le match Jellyfin
             # DateCreated dans library_timeline_support (fallback toujours fs mtime).
             # Fix audit 2026-05-25 (v1.5.5) Vague J : expose le tmdb_id RESOLU
@@ -571,9 +603,14 @@ def _to_iso639_1(lang: str) -> str:
 def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """Applique tous les filtres actifs a une row. AND entre categories."""
 
-    # Search texte (titre)
-    q = str(filters.get("search") or "").strip().lower()
-    if q and q not in (row.get("title") or "").lower():
+    # Search texte (titre). AUDIT ULTRA 2026-07-13 (H15) : la comparaison etait
+    # un substring brut sur .lower() -> "amelie" ne trouvait pas "Amelie"
+    # (accent) car les titres TMDb sont stockes accentues (windows_safe force
+    # NFC sans replier les accents). On replie les accents des DEUX cotes
+    # (query ET titre) via normalize_for_fuzzy (lower + NFD + strip marques
+    # combinantes + ponctuation), le meme helper que le fuzzy des doublons.
+    q = normalize_for_fuzzy(str(filters.get("search") or ""))
+    if q and q not in normalize_for_fuzzy(str(row.get("title") or "")):
         return False
 
     def _in_list(row_val: Any, filter_list: Any) -> bool:
@@ -752,8 +789,10 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
 
 
 _SORT_KEY = {
-    "title": lambda r: (str(r.get("title") or "").lower(), r.get("year") or 0),
-    "title_desc": lambda r: tuple(-ord(c) for c in str(r.get("title") or "").lower()[:50]),
+    # M12 : cle sans accents (normalize_for_fuzzy = lower + NFD strip marques)
+    # pour classer "Élan"/"Été" avec leur lettre de base, pas apres "z"
+    # (point de code 'é'=0xE9 > 'z'=0x7A). Tie-break annee conserve.
+    "title": lambda r: (normalize_for_fuzzy(str(r.get("title") or "")), r.get("year") or 0),
     "score_desc": lambda r: -(r.get("score_v2") or 0),
     "score_asc": lambda r: r.get("score_v2") or 0,
     "year_desc": lambda r: -(r.get("year") or 0),
@@ -767,11 +806,21 @@ _SORT_KEY = {
     "size_asc": lambda r: r.get("size_bytes") or 0,
 }
 
+# M13 : les tris "descendants" purement textuels reutilisent la cle ascendante
+# avec reverse=True (inverse EXACT de l'ascendant). On evite ainsi la cle
+# -ord bricolee qui inversait mal les paires prefixe ("Avatar" avant
+# "Avatar 2"), tronquait a 50 caracteres et perdait le tie-break annee.
+_SORT_REVERSE = {
+    "title_desc": "title",
+}
+
 
 def _apply_sort(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
-    key = _SORT_KEY.get(sort or "title") or _SORT_KEY["title"]
+    sort = sort or "title"
+    reverse = sort in _SORT_REVERSE
+    key = _SORT_KEY.get(_SORT_REVERSE.get(sort, sort)) or _SORT_KEY["title"]
     try:
-        return sorted(rows, key=key)
+        return sorted(rows, key=key, reverse=reverse)
     except (TypeError, ValueError):
         return rows
 
@@ -1181,40 +1230,12 @@ def _row_subs_missing_fr(row: Dict[str, Any]) -> bool:
     return False
 
 
-def _row_unidentified(row: Dict[str, Any]) -> bool:
-    """True si le film n'a PAS pu etre identifie (titre+annee fiables).
-
-    AUDIT 2026-06-13 (R5-A) : l'ancienne version exigeait `tmdb_id > 0` EN
-    PREMIER (`if tmdb_id_int <= 0: return True`). Or l'identification ne passe
-    pas forcement par TMDb : un film resolu par fichier NFO ou par parsing du
-    nom n'a AUCUN tmdb_id mais EST parfaitement identifie (titre + annee +
-    confiance). Sur une biblio reelle 100% NFO (TMDb desactive), ce bug
-    classait les 1027 films "non identifies" et affichait "Identifier" partout.
-    Le tmdb_id ne sert qu'aux jaquettes / au match Jellyfin, PAS a decider de
-    l'identification.
-
-    Critere corrige :
-    - tmdb_id resolu (> 0) => identifie (raccourci suffisant).
-    - sinon : identifie si proposed_source est fiable (nfo / name / tmdb /
-      imdb ...), confiance >= seuil low (60) ET une annee est resolue.
-    - non identifie si source unknown/vide, confiance < 60, ou annee absente.
-    """
-    tmdb_id = row.get("tmdb_id")
-    try:
-        if tmdb_id is not None and int(tmdb_id) > 0:
-            return False  # tmdb_id resolu : identifie (raccourci).
-    except (TypeError, ValueError):
-        pass
-    src = str(row.get("proposed_source") or "").strip().lower()
-    if src in ("", "unknown"):
-        return True
-    if int(row.get("confidence") or 0) < 60:
-        return True
-    # La row Library expose `year`, la PlanRow `proposed_year` : on tolere les 2.
-    year = int(row.get("proposed_year") or row.get("year") or 0)
-    if year <= 0:
-        return True
-    return False
+# AUDIT 2026-07-15 (M2) : `_row_unidentified` est desormais un ALIAS de la
+# definition UNIQUE cinesort.domain.librarian.row_unidentified (importee en tete
+# de module). La carte Accueil "films non identifies" (librarian, section D) et
+# ce predicat rendaient un verdict OPPOSE sur le meme film (l'un ignorait
+# tmdb_id / proposed_year et testait conf == 0). Une seule source de verite
+# desormais, couvert par tests/test_identification_nfo_v77.py.
 
 
 def _row_recently_modified(row: Dict[str, Any], now_ts: float, window_s: float) -> bool:
@@ -1233,8 +1254,15 @@ def _count_duplicates_and_sagas(rows: List[Dict[str, Any]]) -> tuple[int, int]:
     by_titleyear: Dict[tuple, int] = {}
     sagas_count = 0
     for r in rows:
+        # AUDIT 2026-07-15 (M4) : un episode TV n'est PAS un doublon de film.
+        # Miroir EXACT de duplicate_support.find_duplicate_targets (skip
+        # kind == "tv_episode") : sans ce filtre, le chip "Dans doublons"
+        # promettait des doublons que l'ecran Doublons ne montre jamais.
+        # NB : on n'exclut QUE du comptage doublons ; le comptage sagas reste
+        # inchange (une saga peut contenir des episodes).
+        is_tv_episode = str(r.get("kind") or "") == "tv_episode"
         key = (str(r.get("title") or "").strip().lower(), int(r.get("year") or 0))
-        if key[0]:
+        if key[0] and not is_tv_episode:
             by_titleyear[key] = by_titleyear.get(key, 0) + 1
         if r.get("tmdb_collection_name"):
             sagas_count += 1
@@ -1570,11 +1598,79 @@ def unmark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     store = _get_store(api)
     if store is None:
         return _err_response("Store SQLite indisponible.", category="runtime", level="error", log_module=__name__)
+    # AUDIT 2026-07-13 (HIGH-18) : un film marque par l'ancien mecanisme bulk
+    # (deletion_marks.json) doit pouvoir etre demarque ici. On draine d'abord le
+    # store legacy vers la DB, sinon le DELETE ci-dessous ne trouve rien et le
+    # film repart quand meme au bucket au prochain apply.
+    try:
+        from cinesort.ui.api.library_actions_support import (  # noqa: PLC0415
+            migrate_legacy_deletion_marks,
+        )
+
+        migrate_legacy_deletion_marks(api, rid)
+    # Revue adversaire 2026-07-13 (defaut 3) : + sqlite3.Error / RuntimeError —
+    # un demarquage ne doit pas remonter une exception SQLite brute a l'UI.
+    except (
+        ImportError,
+        OSError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        sqlite3.Error,
+    ) as exc:
+        logger.warning("migration deletion_marks legacy ignoree run_id=%s: %s", rid, exc)
     try:
         res = store.film_modal.unmark_for_deletion(run_id=rid, row_id=str(row_id))
-    except (OSError, AttributeError, TypeError, ValueError) as exc:
+    # Revue adversaire R3 2026-07-13 (defaut 3) : l'except du drain ci-dessus
+    # couvrait sqlite3.Error/RuntimeError, mais PAS l'appel DB REEL de cette ligne
+    # (sqlite3.Error n'herite pas d'OSError) -> DB verrouillee = HTTP 500.
+    except (
+        OSError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        sqlite3.Error,
+    ) as exc:
         return _err_response(f"unmark_for_deletion echoue : {exc}", category="runtime", level="error", log_module=__name__)
     removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
+
+    # Revue adversaire R3 2026-07-13 (defaut 4) : le drain ci-dessus est
+    # best-effort et CONSERVE deletion_marks.json quand l'insertion DB echoue —
+    # or l'apply honore l'UNION DB + legacy (apply_support.py:1584). Sans ce
+    # retrait, un unmark repondait ok:True ("demarque" cote UI) alors que le film
+    # repartait au bucket au prochain apply. Si on n'arrive pas a retirer la
+    # marque legacy, on ne PRETEND PAS que le demarquage a reussi.
+    legacy_cleared = False
+    try:
+        from cinesort.ui.api.library_actions_support import (  # noqa: PLC0415
+            remove_legacy_deletion_mark,
+        )
+
+        legacy_cleared = remove_legacy_deletion_mark(api, rid, str(row_id))
+    except (
+        ImportError,
+        OSError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        sqlite3.Error,
+    ) as exc:
+        logger.warning("retrait deletion_marks legacy echoue run_id=%s: %s", rid, exc)
+        legacy_cleared = False
+    if not legacy_cleared:
+        return _err_response(
+            "Demarquage incomplet : la marque heritee (deletion_marks.json) n'a pas pu etre "
+            "retiree, le film repartirait au bucket au prochain apply. Reessaie.",
+            category="runtime",
+            level="error",
+            log_module=__name__,
+        )
     return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
 
 

@@ -6,7 +6,9 @@ corpus typique). Source duree : `probe.duration_s` via ProbeService.
 
 Strategie post-process (alignee sur OMDb Phase 6.2) :
 - Iterate sur les PlanRows
-- Skip si nfo_runtime existe (deja traite par phase 6.1 in-line)
+- Skip si nfo_runtime existe SAUF si phase 6.1 in-line a pose un
+  runtime_mismatch : dans ce cas le probe (duree MESUREE) reconcilie le flag,
+  car le NFO peut declarer un autre cut que le fichier reel (H5).
 - Skip si confidence deja >= 95 (deja tres confiant)
 - Pour chaque row eligible : probe le fichier (cache lookup d'abord, ffprobe
   si miss) + recupere TMDb runtime + applique score_runtime_delta
@@ -25,7 +27,11 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from cinesort.domain.runtime_matching import score_runtime_delta
+from cinesort.domain.runtime_matching import (
+    WARN_RUNTIME_MISMATCH,
+    _PENALTY_MISMATCH,
+    score_runtime_delta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,13 +137,22 @@ def cross_check_rows_with_probe(
                 log("INFO", f"Phase 6.1.b probe cross-check cancele apres {n_checked} films")
             break
 
-        # Skip si NFO runtime deja traite par phase 6.1 in-line
+        # H5 : la duree MESUREE par le probe fait autorite sur la duree DECLAREE
+        # par le NFO. Phase 6.1 in-line a deja score les rows AVEC nfo_runtime a
+        # partir du NFO ; on ne re-verifie via probe QUE si elle a pose un
+        # runtime_mismatch -- un NFO annoncant un autre cut (ex. 95 min) que le
+        # fichier reel (ex. 142 min = TMDb) produit un faux positif bloquant.
+        # Les rows sans ce flag restent intactes (pas de double comptage du bonus).
+        reconciling_nfo_mismatch = False
         if getattr(row, "nfo_runtime", None):
-            continue
+            existing_flags = getattr(row, "warning_flags", None) or []
+            if WARN_RUNTIME_MISMATCH not in existing_flags:
+                continue
+            reconciling_nfo_mismatch = True
 
-        # Skip rows deja tres confiantes
+        # Skip rows deja tres confiantes (sauf reconciliation d'un faux mismatch)
         confidence = int(getattr(row, "confidence", 0) or 0)
-        if confidence >= _CONFIDENCE_SKIP_THRESHOLD:
+        if confidence >= _CONFIDENCE_SKIP_THRESHOLD and not reconciling_nfo_mismatch:
             continue
 
         # Resolve video path
@@ -188,12 +203,53 @@ def cross_check_rows_with_probe(
         )
 
         n_checked += 1
+
+        if reconciling_nfo_mismatch:
+            # Phase 6.1 a pose un runtime_mismatch (-25) sur la foi du NFO.
+            if warning:
+                # Le probe (mesure) confirme AUSSI le mismatch -> flag justifie,
+                # deja pose, on ne re-penalise pas.
+                n_mismatch += 1
+                continue
+            # Le probe contredit le NFO : le fichier reel colle a TMDb -> le
+            # mismatch etait un FAUX POSITIF. On retire le flag et on annule la
+            # penalite NFO (-_PENALTY_MISMATCH = +25), puis on applique le bonus mesure.
+            #
+            # Defaut 3 (mineur, connu, erre vers le HAUT) : si la penalite NFO -25
+            # avait ete clampee a 0 (confidence de base < 25 avant phase 6.1), on
+            # sur-restaure de la difference. Non corrige ici : la base pre-penalite
+            # n'est pas memorisee sur la row (elle est posee dans _build_resolved_row,
+            # hors de ce module) -> impossible sans toucher d'autres fichiers.
+            flags = getattr(row, "warning_flags", None)
+            if flags and WARN_RUNTIME_MISMATCH in flags:
+                flags.remove(WARN_RUNTIME_MISMATCH)
+            reconciled_confidence = max(0, min(100, confidence - _PENALTY_MISMATCH + bonus))
+            row.confidence = reconciled_confidence
+            # La confidence remonte (souvent 90-100) : re-synchroniser le label,
+            # sinon une row reconciliee garde label="low" (badge faux + review count gonfle).
+            if hasattr(row, "confidence_label"):
+                from cinesort.domain.confidence_thresholds import confidence_label  # noqa: PLC0415
+
+                row.confidence_label = confidence_label(reconciled_confidence)
+            if bonus >= 20:
+                n_full_match += 1
+            elif bonus > 0:
+                n_soft_match += 1
+            continue
+
         if bonus == 0 and not warning:
             # Zone grise, pas de modification
             continue
 
         new_confidence = max(0, min(100, confidence + bonus))
         row.confidence = new_confidence
+        # Meme re-synchro que la branche de reconciliation ci-dessus : la
+        # confidence bouge (bonus/malus probe), donc le label doit suivre, sinon
+        # une row remontee garde un label perime (badge faux + review count gonfle).
+        if hasattr(row, "confidence_label"):
+            from cinesort.domain.confidence_thresholds import confidence_label  # noqa: PLC0415
+
+            row.confidence_label = confidence_label(new_confidence)
 
         if warning:
             flags = getattr(row, "warning_flags", None)

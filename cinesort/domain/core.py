@@ -376,7 +376,17 @@ class Candidate:
 @dataclass
 class PlanRow:
     row_id: str
-    kind: str  # "single" | "collection" | "tv_episode"
+    # AUDIT 2026-07-13 [CRIT-1] cause racine : ce commentaire OMETTAIT "extra" et
+    # c'est contre cette liste incomplete que la garde destructive `== "collection"`
+    # de apply_core avait ete ecrite (extra/tv_episode tombaient sur MOVE_DIR =
+    # dossier PARTAGE emporte). Liste EXHAUSTIVE des kinds ecrits par le planner :
+    #   - "single"     -> plan_support_replan.py:798 / apply_core.py:1044
+    #   - "collection" -> plan_support_replan.py:830
+    #   - "tv_episode" -> plan_support_replan.py:908,970
+    #   - "extra"      -> plan_support_core.py:760 (video bonus d'un dossier partage)
+    # INVARIANT DESTRUCTIF : SEUL "single" possede un dossier dedie ; tout autre kind
+    # partage son dossier -> ne jamais deplacer/supprimer le dossier entier.
+    kind: str  # "single" | "collection" | "tv_episode" | "extra"
     folder: str  # folder path (string)
     video: str  # video filename (can be empty for single if unknown)
     proposed_title: str

@@ -90,6 +90,13 @@ function _gradedCountdownSeconds(count) {
   return Math.max(0, Math.min(3, Math.round(linear)));
 }
 
+// M14 (audit ultra 2026-07-13) : collation FRANCAISE partagee, meme instance
+// d'Intl.Collator que la Bibliotheque (À classé avec A, Ç avec C, ellipse/
+// ponctuation initiale ignorée, "Chapitre 2" avant "Chapitre 10"). Reutilisee
+// par l'etape Verification (_renderVerificationStep) ET le tri de l'etape
+// Validation (_sortValidationRows) pour une collation coherente entre ecrans.
+const _FR_COLLATOR = new Intl.Collator("fr", { sensitivity: "base", numeric: true, ignorePunctuation: true });
+
 let _currentStep = "analyse";
 let _runInfo = null;
 let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
@@ -801,8 +808,7 @@ function _renderVerificationStep() {
   // Tri alphabétique FRANÇAIS (À avec A, Ç avec C, ponctuation/ellipse initiale ignorée,
   // "Chapitre 2" avant "Chapitre 10"). La table n'était triée par rien -> elle héritait de
   // l'ordre du scan (comparaison par point de code : "À…"/"Ç…"/"…" classés après Z).
-  const _frCollator = new Intl.Collator("fr", { sensitivity: "base", numeric: true, ignorePunctuation: true });
-  filtered.sort((a, b) => _frCollator.compare(
+  filtered.sort((a, b) => _FR_COLLATOR.compare(
     String(a.display_title || a.proposed_title || ""),
     String(b.display_title || b.proposed_title || "")
   ));
@@ -902,9 +908,15 @@ function _sortValidationRows(rows, sort) {
     let va;
     let vb;
     if (key === "titre" || key === "proposed_title") {
-      va = String(a.proposed_title || "").toLocaleLowerCase();
-      vb = String(b.proposed_title || "").toLocaleLowerCase();
-      return va.localeCompare(vb) * dirMult;
+      // M14 : collation FRANCAISE (meme Intl.Collator que la Bibliotheque et
+      // l'etape Verification) au lieu de toLocaleLowerCase()+localeCompare() SANS
+      // options — l'ancien tri ignorait numeric ("Film 10" avant "Film 2") et
+      // ignorePunctuation ("…Titre"/"À…" mal classes). Cle de tri alignee sur la
+      // cle AFFICHEE (display_title || proposed_title) et non proposed_title seul,
+      // sinon l'ordre divergeait visiblement du libelle rendu dans la colonne.
+      va = String(a.display_title || a.proposed_title || "");
+      vb = String(b.display_title || b.proposed_title || "");
+      return _FR_COLLATOR.compare(va, vb) * dirMult;
     }
     if (key === "annee" || key === "proposed_year") {
       va = Number(a.proposed_year) || 0;
@@ -995,7 +1007,9 @@ function _renderValidationStep() {
       defaultChecked = !!stState.ok;
     } else if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") defaultChecked = false;
-    else defaultChecked = conf >= _thr.high;
+    // H14 : defaut = verdict backend auto_approvable (source unique _defaultDecisionOk),
+    // pas la confiance brute >= high (qui pre-cochait des rows a flag bloquant).
+    else defaultChecked = _defaultDecisionOk(r);
     const yearForRender = stState && stState.year != null
       ? String(stState.year)
       : String(r.proposed_year || "");
@@ -1490,9 +1504,16 @@ function _applyPreviewOps(limit) {
 
 function _renderApplyStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
-  // VN-C.1 (batch 2) : seuil "auto-approve" = CONF_HIGH (85) via thresholds unifies.
-  const _autoThr = getConfidenceThresholdsSync().high;
-  const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= _autoThr);
+  // H14 + revue R2 : le compteur DOIT lire _decisionsState (la SOURCE DE VERITE
+  // des decisions, cf. _applyDecisionsToRows L1889), pas la chaine r.decision.
+  // L'ancien `r.decision === "approved"` (minuscule) ne matchait jamais un
+  // bulk-approve qui pose r.decision="APPROVED" (majuscule) -> sous-comptage des
+  // rows approuvees en masse mais non auto-approvables. On compte l'etat REEL
+  // (st.ok), avec repli sur le defaut backend pour une row pas encore seedee.
+  const approved = rows.filter((r) => {
+    const st = _decisionsState.get(String(r.row_id || ""));
+    return st ? st.ok : _defaultDecisionOk(r);
+  });
 
   // AUDIT 2026-06-13 (R5-P2) : déclenche le chargement du vrai plan backend.
   _ensureApplyPreview();
@@ -1838,6 +1859,20 @@ async function _loadPlan() {
   _initDecisionsState();
 }
 
+// H14 (audit ultra 2026-07-13) : defaut d'approbation d'une row = verdict
+// BACKEND `auto_approvable` (confiance >= seuil ET aucun flag bloquant
+// _AUTO_BLOCKING : history_support._enrich_plan_payload / run_read_support).
+// Un film confiance 92 + nfo_year_mismatch a auto_approvable=false et NE DOIT
+// PAS etre pre-coche. Fallback sur confiance >= high uniquement si
+// l'enrichissement backend est absent (bool non fourni), coherent avec le
+// filtre "a examiner" (meme vue, ligne ~785). Source UNIQUE partagee par les 4
+// sites (seed / rendu checkbox / compteur Application / dirty-check), sinon
+// _hasUnsavedValidationDecisions produirait un faux "decisions non enregistrees".
+function _defaultDecisionOk(r) {
+  if (typeof r.auto_approvable === "boolean") return r.auto_approvable;
+  return Number(r.confidence || 0) >= getConfidenceThresholdsSync().high;
+}
+
 // VN-C.2 : seed/refresh du state JS depuis _validationPlan. On ne touche jamais
 // au DOM ici (pas de querySelectorAll). On ne supprime pas non plus d'entree
 // existante en cas de re-load partiel — la suppression franche se fait au
@@ -1845,7 +1880,6 @@ async function _loadPlan() {
 function _initDecisionsState() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   if (rows.length === 0) return;
-  const thrHigh = getConfidenceThresholdsSync().high;
   const validIds = new Set();
   for (const r of rows) {
     const rowId = String(r.row_id || "");
@@ -1855,7 +1889,7 @@ function _initDecisionsState() {
     let ok;
     if (r.decision === "OK" || r.decision === "APPROVED") ok = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") ok = false;
-    else ok = Number(r.confidence || 0) >= thrHigh;
+    else ok = _defaultDecisionOk(r);
     const year = Number(r.proposed_year) || null;
     _decisionsState.set(rowId, { ok, year, decided_at: Date.now() });
   }
@@ -2663,7 +2697,6 @@ function _hasUnsavedValidationDecisions() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   if (rows.length === 0) return false;
   if (_decisionsState.size === 0) return false;
-  const thrHigh = getConfidenceThresholdsSync().high;
   for (const row of rows) {
     const rowId = String(row.row_id || "");
     const st = _decisionsState.get(rowId);
@@ -2671,7 +2704,9 @@ function _hasUnsavedValidationDecisions() {
     let defaultOk;
     if (row.decision === "OK" || row.decision === "APPROVED") defaultOk = true;
     else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultOk = false;
-    else defaultOk = Number(row.confidence || 0) >= thrHigh;
+    // H14 : meme defaut que le seed (_defaultDecisionOk), sinon une row jamais
+    // touchee par l'user apparaitrait faussement "non enregistree".
+    else defaultOk = _defaultDecisionOk(row);
     if (!!st.ok !== defaultOk) return true;
     const originalYear = Number(row.proposed_year) || null;
     const currentYear = st.year != null ? Number(st.year) || null : null;

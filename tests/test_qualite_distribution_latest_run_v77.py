@@ -29,9 +29,14 @@ class QualiteDistributionLatestRunTests(unittest.TestCase):
 
     def test_backend_v2_distribution_latest_run_only(self) -> None:
         src = _DASH.read_text(encoding="utf-8")
+        # AUDIT 2026-07-13 (HIGH-8 residu) : la V2 doit cibler le DERNIER run de
+        # SCAN (latest_scan_rid, resolu via get_latest_run qui exclut les runs
+        # utilitaires de bulk re-scan), plus run_ids[:1] brut qui prenait le
+        # parasite apres un re-scan groupe. Toujours un seul run (pas le cumul).
         self.assertIn(
-            "_compute_v2_tier_distribution(store, run_ids[:1])", src,
-            "La distribution V2 doit cibler le dernier run (run_ids[:1]), pas le cumul.",
+            "_compute_v2_tier_distribution(\n            store, [latest_scan_rid] if latest_scan_rid else []\n        )",
+            src,
+            "La distribution V2 doit cibler latest_scan_rid (dernier run de scan), pas le cumul ni le parasite.",
         )
 
     def test_frontend_prefers_v1_complete(self) -> None:

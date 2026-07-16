@@ -22,6 +22,15 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
 
+# AUDIT 2026-07-13 (HIGH-8) : exclut les runs utilitaires de bulk re-scan
+# (config_json {"rescan_run_id": ...}) de la resolution du "dernier run". Ces
+# runs de tracking n'ont ni plan.jsonl ni quality_reports -> sans ce filtre,
+# get_global_tier_distribution(limit_runs=1) resolvait le parasite apres un
+# re-scan groupe et renvoyait une distribution VIDE sur la page Qualite.
+# MEME predicat que run.py:_NOT_RESCAN_TRACKING_SQL (duplique volontairement
+# pour eviter un import inter-repository ; garder les deux synchronises).
+_NOT_RESCAN_TRACKING_SQL = "COALESCE(config_json, '') NOT LIKE '%\"rescan_run_id\"%'"
+
 
 class QualityRepository(_BaseRepository):
     """Repository pour les profils qualite + rapports + feedback user."""
@@ -346,14 +355,16 @@ class QualityRepository(_BaseRepository):
             except Exception:
                 pass
             cur = conn.execute(
-                """
+                f"""
                 SELECT COALESCE(LOWER(p.global_tier_v2), LOWER(q.tier)) AS tier_key,
                        COUNT(*) AS cnt
                 FROM quality_reports q
                 LEFT JOIN perceptual_reports p
                     ON p.run_id = q.run_id AND p.row_id = q.row_id
                 WHERE q.run_id IN (
-                    SELECT run_id FROM runs ORDER BY COALESCE(started_ts, created_ts) DESC LIMIT ?
+                    SELECT run_id FROM runs
+                    WHERE {_NOT_RESCAN_TRACKING_SQL}
+                    ORDER BY COALESCE(started_ts, created_ts) DESC LIMIT ?
                 )
                 GROUP BY tier_key
                 """,
@@ -367,10 +378,12 @@ class QualityRepository(_BaseRepository):
                 dist[str(key)] = int(row["cnt"] or 0)
 
             total_cur = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS cnt FROM quality_reports
                 WHERE run_id IN (
-                    SELECT run_id FROM runs ORDER BY COALESCE(started_ts, created_ts) DESC LIMIT ?
+                    SELECT run_id FROM runs
+                    WHERE {_NOT_RESCAN_TRACKING_SQL}
+                    ORDER BY COALESCE(started_ts, created_ts) DESC LIMIT ?
                 )
                 """,
                 (lim,),

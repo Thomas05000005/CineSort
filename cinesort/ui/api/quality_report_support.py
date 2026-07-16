@@ -107,7 +107,21 @@ def _probe_and_score(
     except (ImportError, KeyError, OSError, TypeError, ValueError, AttributeError):
         tmdb_genres = []
 
-    report = compute_quality_score(
+    # Fix audit ultra 2026-07-13 (HIGH-2 / HIGH-3) : ce call site etait le SEUL
+    # de production et appelait compute_quality_score SANS film_year,
+    # subtitle_info, encode_warnings ni audio_analysis. Consequence : 4 modules
+    # de scoring morts (_apply_era_bonuses / bloc sous-titres de _score_extras /
+    # _apply_encode_warnings / _apply_commentary_penalty) et 6 champs de
+    # rule_context bidon (year=0, subtitle_count=0, subtitle_languages=[],
+    # warning_flags=[]). Un upscale 1080p obtenait le meme tier qu'un vrai 1080p.
+    #
+    # Anti-pattern A : ces sources doivent exister AVANT le score final. On fait
+    # donc un two-pass. La passe 1 (compute_quality_score est PURE, aucune I/O)
+    # ne sert qu'a deriver `metrics.detected` (height/bitrate_kbps/video_codec
+    # deja normalises par _score_video) pour alimenter analyze_encode_quality
+    # sans reimplementer la normalisation. La passe 2 calcule et persiste le
+    # score DEFINITIF avec toutes ses sources.
+    _base_kwargs: Dict[str, Any] = dict(
         normalized_probe=normalized,
         profile=profile_json,
         folder_name=Path(str(row.folder or "")).name,
@@ -115,6 +129,25 @@ def _probe_and_score(
         expected_year=int(row.proposed_year or 0),
         release_name=str(row.video or ""),
         tmdb_genres=tmdb_genres or None,
+    )
+    _pre = compute_quality_score(**_base_kwargs)
+    _detected = (_pre.get("metrics") or {}).get("detected") or {}
+    encode_warnings = analyze_encode_quality(_detected)
+    audio_analysis = analyze_audio(normalized.get("audio_tracks") or [])
+    _subs = normalized.get("subtitles") if isinstance(normalized.get("subtitles"), list) else []
+    subtitle_info = {
+        "count": len(_subs),
+        "languages": [str(s.get("language") or "") for s in _subs if isinstance(s, dict) and s.get("language")],
+        "expected_languages": [],
+        "missing_languages": [],
+        "orphans": 0,
+    }
+    report = compute_quality_score(
+        **_base_kwargs,
+        film_year=(int(row.proposed_year or 0) or None),
+        encode_warnings=encode_warnings or None,
+        audio_analysis=audio_analysis,
+        subtitle_info=subtitle_info,
     )
     # Fix audit 2026-05-25 (v1.5.4) Vague I : persister les pistes subtitle EMBARQUEES
     # dans metrics pour que `_build_library_rows` puisse aligner le compte "sans subs FR"

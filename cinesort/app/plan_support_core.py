@@ -48,7 +48,42 @@ _log = logging.getLogger(__name__)
 # - v4 : LOTD-41-01 — les stats_json persistes avant le fix contiennent un
 #   incremental_cache_misses=+1 fantome rejoue a chaque hit ; on invalide pour
 #   reecrire des deltas propres (snapshot deplace apres _try_apply_folder_cache).
-_PLAN_CACHE_VERSION = 4
+# - v5 : HIGH-20 — le row_id passe de `hash(...) & 0xFFFFFFFF` (randomise,
+#   tronque a 32 bits) a blake2b/64 bits (_compute_row_id, plan_support_replan).
+#   Les deux caches persistants rejouent des PlanRow COMPLETES (row_id inclus)
+#   sans jamais rappeler _compute_row_id : incremental_row_cache (par video,
+#   `return [cached_row]` dans _plan_item) et incremental_scan_cache (par dossier,
+#   _try_apply_folder_cache). Aucun de leurs checks de validite ne porte sur le
+#   row_id -> sans bump, toute install avec incremental_scan_enabled=True
+#   garderait INDEFINIMENT ses row_id legacy 32 bits (fix = no-op la ou les
+#   collisions font mal : les grosses bibliotheques). Le bump change cfg_sig, qui
+#   est dans la cle de lecture des DEUX caches (WHERE ... AND cfg_sig=?) -> miss
+#   -> row recalculee avec le row_id 64 bits. Prix : un rescan complet unique.
+#   Les deux caches n'ont besoin d'AUCUNE migration (PK (root_path, video_path) /
+#   (root_path, folder_path) : l'upsert ecrase l'entree v4), MAIS l'etat
+#   utilisateur keye sur row_id, lui, est impacte :
+#     * film_marked_for_deletion / film_tmdb_overrides (023) et film_decisions_v2
+#       (031) : tous keyes AVEC le run_id et lus pour le run courant -> les lignes
+#       des runs anterieurs sont deja hors de portee, le bump ne change rien.
+#     * ignored_alerts (migration 023) : SEULE table keyee sur row_id SANS run_id
+#       (UNIQUE(row_id, alert_code)), sans aucun DELETE/prune/FK CASCADE. Cout
+#       ACTE et inevitable : des que le row_id change, les alertes explicitement
+#       acquittees par l'utilisateur REAPPARAISSENT une fois (elles sont relues
+#       par le row_id courant : plan.jsonl persiste garde ses row_id legacy et est
+#       relu SANS rescan, donc la reapparition survient des le rechargement de la
+#       vue Traitement du run en cours, pas seulement au rescan force). Les lignes
+#       legacy restent en base comme orphelines INOFFENSIVES (fail-open, non
+#       destructif) : on NE les purge PAS — une purge les rendrait irrecuperables
+#       et n'apporte rien (elles ne sont ni lues ni couteuses). Fix durable (hors
+#       de ce bump) : re-keyer ignored_alerts sur film_id (comme film_decisions_v2)
+#       pour l'immuniser contre tout changement de forme du row_id.
+_PLAN_CACHE_VERSION = 5
+
+# Valeurs connues de PlanRow.kind. Sert au garde-fou du deserialiseur de cache
+# ci-dessous : le kind pilote des chemins d'apply differents (et l'invariant
+# destructif "granularite" repose sur une egalite EXACTE a "single"), donc un
+# kind inattendu doit etre visible dans les logs, pas absorbe en silence.
+_KNOWN_PLAN_KINDS = ("single", "collection", "tv_episode", "extra")
 
 # Seuil de films directement a la racine au-dela duquel on avertit l'utilisateur :
 # une racine contenant beaucoup de films non ranges signale probablement une
@@ -56,10 +91,65 @@ _PLAN_CACHE_VERSION = 4
 _ROOT_BULK_WARNING_THRESHOLD = 20
 
 
+# AUDIT 2026-07-13 (vague 2) — alerte "Annee introuvable" (flag `year_missing`,
+# mappe dans web/dashboard/core/alert-labels.js, membre de _CONFLICT_FLAGS). Le
+# fix H12 a retire la SEULE source du flag (une mutation NON DETERMINISTE des
+# warning_flags PARTAGES a la lecture de check_duplicates, cf. duplicate_support)
+# -> depuis, l'alerte etait MORTE (jamais reproduite). On la restaure ICI, au
+# moment DETERMINISTE du plan, dans le builder de PlanRow (plan_support_replan).
+#
+# Definition alignee A L'IDENTIQUE sur `has_year` de
+# run_read_support.is_auto_approvable_flags (`bool(proposed_year and
+# int(proposed_year or 0) >= 1900)`), pour ne PAS introduire une 3e definition
+# divergente de l'annee "utilisable". Consequence : year_missing <=> NOT has_year
+# -> l'alerte couvre EXACTEMENT les rows deja NON auto-approvables via has_year.
+# Aucun changement de comportement d'auto-approbation (has_year bloquait deja) :
+# seule l'alerte est re-affichee et ecrite dans plan.jsonl (via asdict).
+def _has_usable_year(proposed_year: Any) -> bool:
+    """Miroir EXACT de run_read_support.is_auto_approvable_flags.has_year."""
+    try:
+        return bool(proposed_year and int(proposed_year or 0) >= 1900)
+    except (TypeError, ValueError):
+        return False
+
+
+def _apply_year_missing_flag(warning_flags: List[str], proposed_year: Any) -> None:
+    """Pose (une seule fois) `year_missing` quand la row n'a pas d'annee UTILISABLE.
+
+    Appele par les builders de PlanRow avec la valeur qui devient `proposed_year`,
+    de sorte que le flag persiste dans plan.jsonl de facon deterministe. Dedup-safe :
+    ne double jamais le flag s'il est deja present.
+    """
+    if not _has_usable_year(proposed_year) and "year_missing" not in warning_flags:
+        warning_flags.append("year_missing")
+
+
 def plan_row_to_jsonable(row: "PlanRow") -> Dict[str, Any]:
     data = asdict(row)
     data["candidates"] = [asdict(candidate) for candidate in (row.candidates or [])]
     return data
+
+
+def _normalize_plan_kind(raw: Any) -> str:
+    """Kind d'une PlanRow relue depuis le cache incremental.
+
+    Meme defaut que `_str_with_default(data, "kind", "single")` cote
+    run_data_support (deserialiseur de plan.jsonl consomme par l'apply) : les
+    deux chemins de lecture d'une PlanRow doivent produire le MEME kind pour la
+    meme donnee. Un kind inconnu est conserve tel quel (on ne devine pas a la
+    place de l'appelant) mais logue en WARNING : il ferait silencieusement
+    basculer la granularite destructive de l'apply (`row.kind == "single"` =
+    dossier entier, sinon fichier seul).
+    """
+    kind = str(raw or "single")
+    if kind not in _KNOWN_PLAN_KINDS:
+        _log.warning(
+            "plan_row_from_jsonable: kind inconnu %r (attendu %s). Row relue depuis "
+            "le cache incremental : la granularite d'apply depend de ce champ.",
+            kind,
+            ", ".join(_KNOWN_PLAN_KINDS),
+        )
+    return kind
 
 
 def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
@@ -90,7 +180,15 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
                 )
         return core_mod.PlanRow(
             row_id=str(data.get("row_id") or ""),
-            kind=str(data.get("kind") or ""),
+            # LOW (revue R2, meme classe que le CRITICAL row_id) : ce deserialiseur
+            # (cache incremental) defaultait kind a "" alors que row_from_json
+            # (run_data_support, deserialiseur de plan.jsonl utilise par l'apply)
+            # defaulte a "single" -> deux valeurs DIFFERENTES pour le MEME champ
+            # selon le chemin de lecture. Or apply_core teste `row.kind == "single"`
+            # (deplacement du DOSSIER entier) vs `!= "single"` (fichier seul) : un
+            # kind vide fait basculer la granularite DESTRUCTIVE. On aligne le
+            # defaut sur "single" et on logue tout kind hors des 4 valeurs connues.
+            kind=_normalize_plan_kind(data.get("kind")),
             folder=str(data.get("folder") or ""),
             video=str(data.get("video") or ""),
             proposed_title=str(data.get("proposed_title") or ""),

@@ -1339,6 +1339,31 @@ def _validate_apply(
         pass
     disk_decisions = api._load_decisions_from_validation(run_paths)
     merged_decisions = api._merge_decisions(incoming, disk_decisions)
+    # AUDIT 2026-07-13 (HIGH-14) : l'override TMDb manuel (film_tmdb_overrides) est
+    # la DERNIERE volonte explicite de l'utilisateur -> il prime sur le title/year
+    # de la decision, seedee par traitement.js depuis le plan PERIME (run/get_plan
+    # ne l'overlayait pas au seed). Sans ca, _normalize_decisions_for_rows
+    # materialise le title/year perime et apply_core (la decision gagne sur la row)
+    # rend l'overlay R7-3 (dans _execute_apply) inoperant sur le nommage disque :
+    # le TITRE et l'ANNEE etaient tous deux mutiles. On n'overlaye QUE les rows
+    # ayant deja une decision (un override sans approbation ne s'applique pas).
+    try:
+        for _ovr_row in rows:
+            _ovr_rid = str(getattr(_ovr_row, "row_id", "") or "")
+            if not _ovr_rid:
+                continue
+            _ovr_dec = merged_decisions.get(_ovr_rid)
+            if not isinstance(_ovr_dec, dict):
+                continue
+            _ovr = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_ovr_rid)
+            if not _ovr:
+                continue
+            if _ovr.get("proposed_title"):
+                _ovr_dec["title"] = str(_ovr["proposed_title"])
+            if int(_ovr.get("proposed_year") or 0) > 0:
+                _ovr_dec["year"] = int(_ovr["proposed_year"])
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        log_fn("WARN", f"Overlay overrides TMDb (decisions) impossible: {exc}")
     # NB : `decision_presence` (presence = any decided row, approved OR
     # rejected) reste tel quel car _apply_rows_fn s'en sert pour distinguer
     # "validation_absente" (pas decidee) de "user_rejected" (decidee mais
@@ -1564,26 +1589,43 @@ def _execute_apply(
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
-    # AUDIT 2026-06-14 (R7-4) : collecter les films marques pour suppression
-    # depuis les DEUX mecanismes historiques (modal -> table DB ; bulk ->
-    # deletion_marks.json), unifies, pour les router vers
-    # _review/_user_marked_for_deletion/ a l'apply. Avant, le marquage etait
-    # write-only (aucun consommateur) -> promesse UI jamais tenue.
+    # AUDIT 2026-06-14 (R7-4) : collecter les films marques pour suppression pour
+    # les router vers _review/_user_marked_for_deletion/ a l'apply.
+    #
+    # AUDIT 2026-07-13 (HIGH-18) : le store de verite est desormais UNIQUE (table
+    # DB film_marked_for_deletion) — le seul que l'UI sache annuler. L'ancien
+    # store bulk (deletion_marks.json) n'est plus ecrit ; migrate_legacy_deletion_marks
+    # le draine vers la DB (et retourne les row_ids concernes tant que la DB est
+    # indisponible, pour ne rien perdre). Sans ce drain, un film demarque par
+    # l'utilisateur repartait au bucket parce que le JSON, lui, ne connait aucun
+    # retrait.
+    #
+    # Revue adversaire 2026-07-13 (defaut 3) : + sqlite3.Error (n'herite PAS
+    # d'OSError) et RuntimeError — une DB verrouillee faisait sinon CRASHER
+    # l'apply entier depuis un simple filet best-effort.
     marked_for_deletion: Set[str] = set()
+    try:
+        from cinesort.ui.api.library_actions_support import migrate_legacy_deletion_marks
+        for _mid in migrate_legacy_deletion_marks(api, run_id):
+            if _mid:
+                marked_for_deletion.add(str(_mid))
+    except (
+        ImportError,
+        AttributeError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        sqlite3.Error,
+    ) as exc:
+        log_fn("WARN", f"Migration deletion_marks.json impossible: {exc}")
     try:
         for _m in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
             _mid = str(_m.get("row_id") or "").strip()
             if _mid:
                 marked_for_deletion.add(_mid)
-    except (AttributeError, OSError, TypeError, ValueError) as exc:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
         log_fn("WARN", f"Lecture marked_for_deletion (DB) impossible: {exc}")
-    try:
-        from cinesort.ui.api.library_actions_support import list_deletion_marks_row_ids
-        for _mid in list_deletion_marks_row_ids(api, run_id):
-            if _mid:
-                marked_for_deletion.add(str(_mid))
-    except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
-        log_fn("WARN", f"Lecture deletion_marks.json impossible: {exc}")
 
     # LOTD-DUP-BUCKET-VIEWER : les buckets quarantaine de l'apply vivent sous
     # <run_dir>/_review (ecritures conservees la, decision R8-002). On declare
@@ -1877,6 +1919,23 @@ def _summarize_apply(
             f"- Dossiers vides deplaces (_Vide) : {result.empty_folders_moved_count}\n"
             f"- Dossiers residuels deplaces (_Dossier Nettoyage) : {result.cleanup_residual_folders_moved_count}\n"
         )
+
+        # RELECTURE R2 [D2] : `result.error_messages` n'avait AUCUN lecteur. Les abandons
+        # fail-closed (row_id ambigu -> operation destructive NON executee) et les echecs
+        # filesystem n'apparaissaient nulle part : l'utilisateur lisait "Erreurs : 0 /
+        # Films marques deplaces : 0" alors que son action n'avait tout simplement pas eu
+        # lieu. On expose les messages dans le resume (surface lue par l'utilisateur).
+        error_messages = [str(msg) for msg in (getattr(result, "error_messages", None) or []) if str(msg).strip()]
+        if error_messages:
+            shown = error_messages[:20]
+            summary_block += (
+                "\n"
+                "ABANDONNE / EN ERREUR (a verifier)\n"
+                + "".join(f"- {msg}\n" for msg in shown)
+            )
+            if len(error_messages) > len(shown):
+                summary_block += f"- ... et {len(error_messages) - len(shown)} autre(s) message(s) dans le journal\n"
+
         if cleanup_diag:
             families = cleanup_diag.get("families") if isinstance(cleanup_diag.get("families"), list) else []
             families_label = ", ".join(str(item) for item in families if str(item).strip()) or "Aucune"
@@ -1932,6 +1991,17 @@ def _summarize_apply(
                 )
         action_lines: List[str] = []
         review_root = run_paths.run_dir / "_review"
+        if error_messages:
+            # [D2] : un abandon ne doit jamais tomber dans "Aucun point d'attention bloquant".
+            # [R3] Formulation prudente : selon le message, une action DESTRUCTIVE demandee
+            # (mise au bucket suppression / doublon) n'a pas ete appliquee, OU un fichier
+            # n'a pu etre traite. Une row abandonnee cote destructif peut avoir ete
+            # rangee/renommee par la boucle d'apply normale (cf. [D3]) : on n'affirme donc
+            # PAS "rien n'a bouge", on renvoie vers le detail.
+            action_lines.append(
+                f"- {len(error_messages)} message(s) a verifier "
+                "(cf. section ABANDONNE / EN ERREUR)."
+            )
         if result.conflicts_quarantined_count > 0:
             action_lines.append(f"- Conflits fichiers a verifier: {review_root / '_conflicts'}")
         if result.conflicts_sidecars_quarantined_count > 0:

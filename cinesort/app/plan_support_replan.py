@@ -9,12 +9,14 @@ serialisation viennent de `plan_support_core.py`.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import cinesort.domain.core as core_mod
 from cinesort.app.plan_support_core import (
+    _apply_year_missing_flag,
     _nfo_signature,
     _resolve_path_cached,
     plan_row_from_jsonable,
@@ -33,6 +35,24 @@ if TYPE_CHECKING:
     from cinesort.domain.core import Config, PlanRow
 
 _log = logging.getLogger(__name__)
+
+
+def _compute_row_id(prefix: str, folder: Path, video_name: str) -> str:
+    """Identifiant stable d'une ligne de plan (`prefix|<64 bits hex>`).
+
+    Le `row_id` sert de cle aux operations DESTRUCTIVES (deplacement des films
+    marques pour suppression, losers de doublons, decisions d'apply) : il doit
+    etre deterministe et assez large pour rendre les collisions negligeables.
+
+    L'implementation precedente, `hash((str(folder), video.name)) & 0xFFFFFFFF`,
+    etait randomisee par PYTHONHASHSEED et tronquee a 32 bits : ~0,3 % de
+    collision anniversaire sur 5 000 films, re-tiree a chaque scan. Une collision
+    fait resoudre un row_id marque vers le MAUVAIS PlanRow (les tables `by_row`
+    d'apply_core sont construites en last-wins) -> un film jamais marque sort de
+    la bibliotheque. blake2b/64 bits ramene cette probabilite a ~7e-13.
+    """
+    key = f"{folder}\x00{video_name}".encode("utf-8", "surrogatepass")
+    return f"{prefix}|{hashlib.blake2b(key, digest_size=8).hexdigest()}"
 
 
 def _try_lookup_row_cache(
@@ -207,6 +227,8 @@ def _build_unresolved_row(
         nfo_partial_match=nfo_state["nfo_partial_match"],
         title_ambiguity=title_ambiguous,
     )
+    # Alerte "Annee introuvable" DETERMINISTE au plan : proposed_year = name_year or 0.
+    _apply_year_missing_flag(warning_flags, name_year or 0)
     note = f"{note} Impossible de determiner un titre+annee fiables."
     fallback_title = (core_mod.clean_title_guess(video.name) or video.stem) if is_collection else folder_name
     return core_mod.PlanRow(
@@ -325,6 +347,13 @@ def _build_resolved_row(
         confidence = 90
         label = "high"
     # Phase 6.1 : runtime cross-check NFO vs TMDb, edition-aware.
+    # H5 : ici on n'a PAS acces au store/cache probe (pas de duree MESUREE au
+    # stade scan), donc on score sur la duree DECLAREE par le NFO. Un NFO
+    # annoncant un autre cut peut poser un runtime_mismatch a tort -- ce FAUX
+    # positif est reconcilie post-plan par cross_check_rows_with_probe (Phase
+    # 6.1.b), qui, lui, dispose du probe (duree reelle) et retire le flag si le
+    # fichier colle a TMDb. Ne PAS supprimer ce flag ici : il reste la seule
+    # couverture pour les fichiers dont le probe echoue en aval.
     runtime_warning: Optional[str] = None
     if nfo is not None and getattr(nfo, "runtime", None) and tmdb is not None and chosen.tmdb_id:
         try:
@@ -367,6 +396,8 @@ def _build_resolved_row(
     )
     if runtime_warning and runtime_warning not in warning_flags:
         warning_flags.append(runtime_warning)
+    # Alerte "Annee introuvable" DETERMINISTE au plan : proposed_year = int(chosen.year).
+    _apply_year_missing_flag(warning_flags, int(chosen.year))
     coll_id, coll_name = _resolve_tmdb_collection(cfg, chosen, folder_name, tmdb=tmdb, log=log)
     return core_mod.PlanRow(
         row_id=row_id,
@@ -558,7 +589,7 @@ def _plan_item(
 
     is_collection = kind == "collection"
     row_id_prefix = "C" if is_collection else "S"
-    row_id = f"{row_id_prefix}|{hash((str(folder), video.name)) & 0xFFFFFFFF:x}"
+    row_id = _compute_row_id(row_id_prefix, folder, video.name)
 
     # --- Scan v2: per-video row cache lookup ---
     cached_row = _try_lookup_row_cache(
@@ -644,7 +675,7 @@ def _plan_item(
     # VN-D.3 : runtime HARD filter sur les candidats TMDb.
     runtime_hard_excluded_flag: Optional[str] = None
     if tmdb_cands:
-        file_runtime_min = _resolve_file_runtime_min(nfo, folder, video)
+        file_runtime_min, runtime_source = _resolve_file_runtime_min(nfo, folder, video)
         if file_runtime_min is not None:
             tmdb_cands, _excluded_any = _apply_runtime_hard_filter_to_tmdb_cands(
                 tmdb_cands,
@@ -654,6 +685,7 @@ def _plan_item(
                 settings=getattr(cfg, "_runtime_filter_settings", None),
                 log=log,
                 log_ctx=log_ctx,
+                runtime_source=runtime_source,
             )
             if _excluded_any:
                 runtime_hard_excluded_flag = WARN_RUNTIME_HARD_EXCLUDED
@@ -892,7 +924,7 @@ def _plan_tv_episode(
     if tv is None:
         return []
 
-    row_id = f"T|{hash((str(folder), video.name)) & 0xFFFFFFFF:x}"
+    row_id = _compute_row_id("T", folder, video.name)
     series_name = tv.series_name
     season = tv.season
     episode = tv.episode

@@ -485,7 +485,12 @@ function _flushPendingScroll() {
   }, 80);
 }
 
-const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
+// Audit ultra 2026-07-13 (M5) : recalibre sur la grille backend CANONIQUE
+// v1.5.7 (cinesort/domain/quality_score.default_quality_profile()["tiers"] ==
+// cinesort/domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS = 70/66/55/40). L'ancienne
+// grille 85/68/54/30 (pre-v1.5.5) etait ECRITE en base au save de profil et
+// divergeait des seuils reellement appliques par le scoring.
+const _DEFAULT_TIERS = { platinum: 70, gold: 66, silver: 55, bronze: 40 };
 const _DEFAULT_WEIGHTS = {
   resolution: 0.25,
   bitrate: 0.20,

@@ -623,6 +623,18 @@ export function cachedGetSettings() {
   return _settingsInFlight;
 }
 
+// M21 (audit ultra 2026-07-13) : epoque des settings, incrementee a CHAQUE
+// invalidation (= chaque save_settings + retour focus tardif). Permet aux vues
+// qui gardent un cache derive des settings (ex. cache de ping d'accueil.js) de
+// ne se purger QU'APRES un changement reel, pas a chaque montage. Couvre aussi
+// les champs masques (cles/tokens) que get_settings ne renvoie jamais en clair.
+let _settingsEpoch = 0;
+
+/** Numero d'epoque des settings ; change a chaque invalidateSettingsCache(). */
+export function getSettingsEpoch() {
+  return _settingsEpoch;
+}
+
 /**
  * Invalide le cache get_settings. A appeler apres save_settings reussi
  * ou quand health.last_settings_ts change cote serveur.
@@ -630,6 +642,7 @@ export function cachedGetSettings() {
 export function invalidateSettingsCache() {
   _settingsCachePayload = null;
   _settingsCacheTs = 0;
+  _settingsEpoch += 1;
   // Note : on ne tue PAS _settingsInFlight si une requete est en cours,
   // car elle vient juste de partir et la donnee va etre fraiche.
 }

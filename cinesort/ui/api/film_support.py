@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
@@ -287,10 +288,41 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
 
         # R7-12 : flags d'etat pour exposer les actions d'annulation dans l'UI
         # (revenir au match auto / annuler le marquage pour suppression).
+        #
+        # Revue adversaire R3 2026-07-13 (defaut 5) : `is_marked_for_deletion` ne
+        # lit QUE la table DB, alors que l'apply honore l'UNION DB + legacy
+        # (apply_support.py:1584). C'etait le seul chemin de lecture des marques
+        # SANS le drain : sur une install portant encore un deletion_marks.json,
+        # ouvrir une fiche film affichait "Marquer pour suppression" pour un film
+        # qui SERA pourtant bucketise a l'apply. On draine donc ici aussi, et on
+        # prend l'UNION avec les row_ids restes en attente (drain DB en echec).
+        _legacy_marked = set()
+        try:
+            from cinesort.ui.api.library_actions_support import (  # noqa: PLC0415
+                migrate_legacy_deletion_marks,
+            )
+
+            _legacy_marked = set(migrate_legacy_deletion_marks(api, resolved_rid) or [])
+        except (
+            ImportError,
+            AttributeError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            sqlite3.Error,
+        ) as exc:
+            logger.warning("drain deletion_marks legacy ignore run_id=%s: %s", resolved_rid, exc)
+
+        _is_marked = str(row_id) in _legacy_marked
         try:
             _has_override = store.film_modal.get_tmdb_override(run_id=resolved_rid, row_id=str(row_id)) is not None
-            _is_marked = bool(store.film_modal.is_marked_for_deletion(run_id=resolved_rid, row_id=str(row_id)))
-        except (AttributeError, OSError, TypeError, ValueError):
+            # Revue adversaire R3 (defaut 5) : sqlite3.Error n'herite PAS d'OSError.
+            _is_marked = _is_marked or bool(
+                store.film_modal.is_marked_for_deletion(run_id=resolved_rid, row_id=str(row_id))
+            )
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
             pass
 
         # Perceptual

@@ -949,6 +949,87 @@ def _revert_moves(
             log("ERROR", f"ROLLBACK {label} ECHEC {dst_done} -> {src_orig}: {rb_exc}")
 
 
+def _row_target_key(row: "PlanRow") -> Tuple[str, str, str]:
+    """Cible REELLE d'une PlanRow pour une operation destructive.
+
+    Deux rows qui partagent cette cle designent exactement les memes octets sur le
+    disque : les deplacer via l'une ou l'autre donne le meme resultat.
+    """
+    folder = str(getattr(row, "folder", "") or "").casefold()
+    video = str(getattr(row, "video", "") or "").casefold()
+    kind = str(getattr(row, "kind", "") or "")
+    return (folder, video, kind)
+
+
+def _index_rows_by_id(
+    rows: list["PlanRow"],
+    *,
+    log: Callable[[str, str], None],
+    prefix: str,
+) -> Tuple[Dict[str, "PlanRow"], Set[str]]:
+    """Indexe les PlanRow par row_id pour les operations DESTRUCTIVES, en FAIL-CLOSED
+    sur les collisions AMBIGUES.
+
+    AUDIT 2026-07-13 [CRIT-2] : les deux index `by_row` etaient construits en
+    `by_row[rid] = r` last-wins SILENCIEUX. Si deux PlanRow partagent un row_id
+    (collision possible tant que des row_id legacy 32 bits circulent), le row_id
+    choisi par l'utilisateur resolvait vers le MAUVAIS PlanRow -> un film JAMAIS
+    marque sortait de la bibliotheque, et le film reellement vise y restait.
+
+    RELECTURE R2 [D1] : un row_id duplique n'est pas forcement ambigu. Des rows
+    STRICTEMENT IDENTIQUES (meme folder + meme video + meme kind) sont produites de
+    facon ROUTINIERE par des roots imbriques (`validate_roots` n'emet qu'un WARNING,
+    `plan_multi_roots` concatene sans dedup et `_compute_row_id` ne hashe pas le root)
+    : chaque film du root enfant apparait alors deux fois avec le MEME row_id. Les
+    declarer ambigues abandonnait l'operation destructive de l'utilisateur alors que
+    la cible etait parfaitement determinee (et spammait un ERROR par doublon du plan
+    ENTIER). On ne fail-close donc QUE si les rows en collision visent des cibles
+    DIFFERENTES ; sinon on garde la premiere, sans bruit.
+
+    Retourne `(by_row, ambiguous_row_ids)`.
+    """
+    by_row: Dict[str, "PlanRow"] = {}
+    ambiguous_row_ids: Set[str] = set()
+    for r in rows:
+        _rid = getattr(r, "row_id", None)
+        _rid_str = str(_rid) if _rid not in (None, "") else ""
+        if not _rid_str:
+            # BUG-009 (hotfix) : avant on filtrait silencieusement les row_id falsy
+            # (None, "", 0). Un loser dont le row_id etait vide etait absorbe en
+            # "row_id introuvable" sans signal clair -> on logge un WARN explicite.
+            log("WARN", f"{prefix} PlanRow sans row_id (folder={getattr(r, 'folder', '?')}), ignore")
+            continue
+        if _rid_str in by_row:
+            kept = by_row[_rid_str]
+            if _row_target_key(r) == _row_target_key(kept):
+                # Doublon EXACT (roots imbriques / plan concatene) : meme cible, aucune
+                # ambiguite -> on garde la premiere, silencieusement.
+                continue
+            if _rid_str not in ambiguous_row_ids:
+                ambiguous_row_ids.add(_rid_str)
+                log(
+                    "ERROR",
+                    f"{prefix} row_id DUPLIQUE dans le plan: {_rid_str} "
+                    f"(folder={getattr(r, 'folder', '?')} vs {getattr(kept, 'folder', '?')})",
+                )
+            continue
+        by_row[_rid_str] = r
+    return by_row, ambiguous_row_ids
+
+
+def _append_error_message(res: "ApplyResult", message: str) -> None:
+    """Ajoute un message d'erreur utilisateur a `res` (remontee UI / summary.txt).
+
+    RELECTURE R2 [D5] : une seule convention pour TOUS les appelants. Certains tests
+    anciens passent un `res` duck-type sans `error_messages` ; un append nu ferait
+    crasher tout l'apply (les branches fail-closed etaient hors du try/except OSError).
+    """
+    try:
+        res.error_messages.append(message)
+    except AttributeError:  # noqa: BLE001 - retro-compat tests anciens (res duck-type)
+        pass
+
+
 def move_duplicate_losers_to_user_decided(
     cfg: "Config",
     rows: list["PlanRow"],
@@ -959,7 +1040,7 @@ def move_duplicate_losers_to_user_decided(
     log: Callable[[str, str], None],
     res: "ApplyResult",
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> None:
+) -> Set[str]:
     """Phase 6 doublons (spec 01-doublons.md §3.7) : déplace les fichiers/dossiers
     "losers" d'une décision utilisateur vers `<root>/_review/_duplicates_user_decided/`.
 
@@ -970,33 +1051,44 @@ def move_duplicate_losers_to_user_decided(
 
     `loser_row_ids` : set des row_id dont la décision a marqué un autre row comme
     winner. Tolère un set vide (no-op).
+
+    Retourne l'ensemble des row_id ABANDONNES (fail-closed sur row_id ambigu) :
+    RIEN n'a bougé pour eux, l'appelant ne doit donc PAS les retirer de la boucle
+    d'apply normale (RELECTURE R2 [D3]).
     """
+    abandoned_row_ids: Set[str] = set()
     if not loser_row_ids:
-        return
+        return abandoned_row_ids
     if not dry_run:
         duplicates_user_decided_root.mkdir(parents=True, exist_ok=True)
 
-    # BUG-009 (hotfix) : avant on filtrait silencieusement les row_id falsy
-    # (None, "", 0) via `if getattr(r, "row_id", None)`. Resultat : un loser dont
-    # le row_id etait vide etait absorbe en "row_id introuvable" sans signal clair.
-    # On enforce desormais un row_id non-vide ET on logge un WARN explicite des
-    # qu'un row PlanRow arrive sans row_id, pour faciliter le diagnostic upstream.
-    by_row: Dict[str, "PlanRow"] = {}
-    for r in rows:
-        _rid = getattr(r, "row_id", None)
-        _rid_str = str(_rid) if _rid not in (None, "") else ""
-        if not _rid_str:
-            log(
-                "WARN",
-                f"DUPLICATE_LOSER PlanRow sans row_id (folder={getattr(r, 'folder', '?')}), ignore",
-            )
-            continue
-        by_row[_rid_str] = r
+    # BUG-009 + AUDIT 2026-07-13 [CRIT-2] (fail-closed sur row_id dupliques) :
+    # cf. _index_rows_by_id.
+    by_row, ambiguous_row_ids = _index_rows_by_id(rows, log=log, prefix="DUPLICATE_LOSER")
     losers_seen: Set[str] = set()
     for rid in loser_row_ids:
         if rid in losers_seen:
             continue
         losers_seen.add(rid)
+        # [CRIT-2] FAIL-CLOSED : row_id ambigu -> on ne peut pas savoir quel PlanRow
+        # l'utilisateur visait. On ABANDONNE l'operation destructive pour ce row_id
+        # (aucun deplacement) au lieu de resoudre vers le mauvais film.
+        if str(rid) in ambiguous_row_ids:
+            log(
+                "ERROR",
+                f"DUPLICATE_LOSER row_id {rid} AMBIGU (collision de row_id) -> "
+                f"ABANDON, aucun fichier deplace pour ce row_id",
+            )
+            # RELECTURE R2 [D2] : un abandon est une ERREUR visible (res.errors),
+            # sinon l'utilisateur lit "Erreurs : 0" alors que son action destructive
+            # n'a PAS eu lieu. [D5] : append protege (une seule convention).
+            res.errors += 1
+            _append_error_message(
+                res,
+                f"DUPLICATE_LOSER {rid}: row_id duplique dans le plan, deplacement abandonne (fail-closed)",
+            )
+            abandoned_row_ids.add(str(rid))
+            continue
         row = by_row.get(str(rid))
         if row is None:
             log("WARN", f"DUPLICATE_LOSER row_id introuvable, skip: {rid}")
@@ -1039,12 +1131,16 @@ def move_duplicate_losers_to_user_decided(
         # Comptage ATOMIQUE par loser : on n'ajoute à res qu'après succès complet du rid
         # (sinon un partiel/échec laissait un compteur faux).
         _moved_pairs: list[Tuple[Path, Path]] = []
-        _rid_count = 0
         try:
-            # Cas "collection" : on a un video_name dans un dossier partagé →
-            # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
-            # entier, car d'autres films peuvent y vivre).
-            if row.kind == "collection" and video_name:
+            # AUDIT 2026-07-13 [CRIT-1] : granularité destructive. SEUL kind="single"
+            # possède un dossier dédié ; "collection", "extra" (bonus_video,
+            # plan_support_core.py:751) et "tv_episode" vivent dans un dossier PARTAGÉ
+            # → déplacer SEULEMENT la vidéo + ses sidecars, jamais le dossier entier
+            # (l'ancienne garde `== "collection"` laissait extra/tv_episode tomber sur
+            # MOVE_DIR = film principal / série entière emportés). Sémantique alignée
+            # sur quarantine_row (`if row.kind == "single"` → dossier entier, sinon
+            # vidéo + sidecars).
+            if row.kind != "single" and video_name:
                 video = folder / video_name
                 if not video.exists():
                     # tolère case-insensitive : iter le dossier
@@ -1076,7 +1172,6 @@ def move_duplicate_losers_to_user_decided(
                     )
                     if moved_to is not None and not dry_run:
                         _moved_pairs.append((Path(moved_to), sidecar))
-                    _rid_count += 1
                 moved_to = move_to_review_bucket(
                     video,
                     src_anchor=folder,
@@ -1092,10 +1187,25 @@ def move_duplicate_losers_to_user_decided(
                 )
                 if moved_to is not None and not dry_run:
                     _moved_pairs.append((Path(moved_to), video))
-                _rid_count += 1
                 # R8-018 : compteur DEDIE (≠ duplicates_identical) -> invariant
                 # moved==deleted preserve + chemin de recuperation reel (_duplicates_user_decided).
-                res.duplicates_user_decided_moved_count += _rid_count
+                # RELECTURE R2 [D4] : on compte des FILMS (+1 par row), pas des FICHIERS.
+                # L'ancien `+= _rid_count` ajoutait video + sidecars -> un episode avec 2
+                # sous-titres s'affichait comme 3 "films deplaces" sous un libelle UI
+                # "Films ... deplaces", et divergeait de la branche single (`+= 1`).
+                res.duplicates_user_decided_moved_count += 1
+                continue
+
+            # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
+            # non-"single" SANS video_name est une row corrompue, pas une autorisation
+            # d'emporter un dossier partagé. On skip avec un WARN plutôt que de tomber
+            # silencieusement sur MOVE_DIR.
+            if row.kind != "single":
+                log(
+                    "WARN",
+                    f"DUPLICATE_LOSER row {rid} kind={row.kind!r} sans video, "
+                    f"skip (dossier partage jamais deplace en entier): {folder}",
+                )
                 continue
 
             # Cas "single" : déplace le dossier entier vers le bucket.
@@ -1124,11 +1234,10 @@ def move_duplicate_losers_to_user_decided(
             log("ERROR", f"DUPLICATE_LOSER echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
             _revert_moves(row_record_op, _moved_pairs, log, "DUPLICATE_LOSER")
             res.errors += 1
-            try:
-                res.error_messages.append(f"DUPLICATE_LOSER {getattr(folder, 'name', folder)}: {exc}")
-            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
-                pass
+            _append_error_message(res, f"DUPLICATE_LOSER {getattr(folder, 'name', folder)}: {exc}")
             continue
+
+    return abandoned_row_ids
 
 
 def move_marked_for_deletion_to_bucket(
@@ -1141,7 +1250,7 @@ def move_marked_for_deletion_to_bucket(
     log: Callable[[str, str], None],
     res: "ApplyResult",
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> None:
+) -> Set[str]:
     """AUDIT 2026-06-14 (R7-4) : deplace les films marques pour suppression par
     l'utilisateur vers `<root>/_review/_user_marked_for_deletion/`.
 
@@ -1150,24 +1259,42 @@ def move_marked_for_deletion_to_bucket(
     sont ensuite exclues. Deplacements via atomic_move + record_apply_op ->
     reversibles par l'undo. No-op si set vide. Securite torrents : on DEPLACE
     (jamais de suppression definitive), l'utilisateur videra le bucket lui-meme.
+
+    Retourne l'ensemble des row_id ABANDONNES (fail-closed sur row_id ambigu) :
+    RIEN n'a bougé pour eux -> l'appelant ne doit PAS les exclure de l'apply normal
+    (RELECTURE R2 [D3]).
     """
+    abandoned_row_ids: Set[str] = set()
     if not marked_row_ids:
-        return
+        return abandoned_row_ids
     if not dry_run:
         marked_for_deletion_root.mkdir(parents=True, exist_ok=True)
 
-    by_row: Dict[str, "PlanRow"] = {}
-    for r in rows:
-        _rid = getattr(r, "row_id", None)
-        _rid_str = str(_rid) if _rid not in (None, "") else ""
-        if _rid_str:
-            by_row[_rid_str] = r
+    # AUDIT 2026-07-13 [CRIT-2] : index fail-closed sur les row_id dupliques
+    # (cf. _index_rows_by_id). Bucket vide par l'utilisateur -> une resolution
+    # last-wins vers le mauvais PlanRow = perte definitive d'un film jamais marque.
+    by_row, ambiguous_row_ids = _index_rows_by_id(rows, log=log, prefix="MARKED_FOR_DELETION")
 
     seen: Set[str] = set()
     for rid in marked_row_ids:
         if rid in seen:
             continue
         seen.add(rid)
+        if str(rid) in ambiguous_row_ids:
+            log(
+                "ERROR",
+                f"MARKED_FOR_DELETION row_id {rid} AMBIGU (collision de row_id) -> "
+                f"ABANDON, aucun fichier deplace pour ce row_id",
+            )
+            # RELECTURE R2 [D2]/[D5] : abandon = erreur VISIBLE (res.errors) + append protege.
+            res.errors += 1
+            _append_error_message(
+                res,
+                f"MARKED_FOR_DELETION {rid}: row_id duplique dans le plan, "
+                f"deplacement abandonne (fail-closed)",
+            )
+            abandoned_row_ids.add(str(rid))
+            continue
         row = by_row.get(str(rid))
         if row is None:
             log("WARN", f"MARKED_FOR_DELETION row_id introuvable, skip: {rid}")
@@ -1201,10 +1328,13 @@ def move_marked_for_deletion_to_bucket(
         # boucle per-row L1650). Un fichier marqué verrouillé n'avorte PAS le batch ;
         # un item collection à moitié déplacé est rollback. Comptage atomique par rid.
         _moved_pairs: list[Tuple[Path, Path]] = []
-        _rid_count = 0
         try:
-            # Cas collection : deplacer SEULEMENT la video marquee + ses sidecars.
-            if row.kind == "collection" and video_name:
+            # AUDIT 2026-07-13 [CRIT-1] : granularité destructive (bucket vidé par
+            # l'utilisateur -> perte definitive). SEUL kind="single" possède un dossier
+            # dédié ; "collection", "extra" (bonus_video) et "tv_episode" partagent leur
+            # dossier avec d'autres vidéos NON marquées → déplacer SEULEMENT la vidéo
+            # marquée + ses sidecars. Sémantique alignée sur quarantine_row.
+            if row.kind != "single" and video_name:
                 video = folder / video_name
                 if not video.exists():
                     try:
@@ -1234,7 +1364,6 @@ def move_marked_for_deletion_to_bucket(
                     )
                     if moved_to is not None and not dry_run:
                         _moved_pairs.append((Path(moved_to), sidecar))
-                    _rid_count += 1
                 moved_to = move_to_review_bucket(
                     video,
                     src_anchor=folder,
@@ -1250,8 +1379,20 @@ def move_marked_for_deletion_to_bucket(
                 )
                 if moved_to is not None and not dry_run:
                     _moved_pairs.append((Path(moved_to), video))
-                _rid_count += 1
-                res.marked_for_deletion_moved_count += _rid_count
+                # RELECTURE R2 [D4] : +1 par FILM (row), pas par FICHIER deplace.
+                # Le libelle UI est "Films marques pour suppression deplaces" : compter
+                # les sidecars gonflait le chiffre (1 episode + 2 srt = 3 "films").
+                res.marked_for_deletion_moved_count += 1
+                continue
+
+            # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
+            # non-"single" SANS video_name est corrompue -> jamais MOVE_DIR, on skip.
+            if row.kind != "single":
+                log(
+                    "WARN",
+                    f"MARKED_FOR_DELETION row {rid} kind={row.kind!r} sans video, "
+                    f"skip (dossier partage jamais deplace en entier): {folder}",
+                )
                 continue
 
             # Cas single : deplacer le dossier entier.
@@ -1276,11 +1417,10 @@ def move_marked_for_deletion_to_bucket(
             log("ERROR", f"MARKED_FOR_DELETION echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
             _revert_moves(row_record_op, _moved_pairs, log, "MARKED_FOR_DELETION")
             res.errors += 1
-            try:
-                res.error_messages.append(f"MARKED_FOR_DELETION {getattr(folder, 'name', folder)}: {exc}")
-            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
-                pass
+            _append_error_message(res, f"MARKED_FOR_DELETION {getattr(folder, 'name', folder)}: {exc}")
             continue
+
+    return abandoned_row_ids
 
 
 def move_collection_folder(
@@ -1375,7 +1515,7 @@ def apply_rows(
     # Phase 6 doublons : déplacer les losers AVANT la boucle apply principale.
     losers_set: Set[str] = {str(r) for r in (duplicate_loser_row_ids or set()) if r}
     if losers_set and ctx.duplicates_user_decided_root is not None:
-        move_duplicate_losers_to_user_decided(
+        abandoned = move_duplicate_losers_to_user_decided(
             cfg,
             rows,
             losers_set,
@@ -1384,15 +1524,19 @@ def apply_rows(
             log=log,
             res=res,
             record_op=record_op,
-        )
+        ) or set()
         # Retirer les losers des rows à apply normalement.
-        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in losers_set]
+        # RELECTURE R2 [D3] : SAUF les row_id ABANDONNES par le fail-closed (rien n'a
+        # bouge pour eux). Les exclure quand meme laissait le film ni deplace ni
+        # renomme/range : disparition silencieuse du travail attendu.
+        excluded = losers_set - abandoned
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in excluded]
 
     # AUDIT 2026-06-14 (R7-4) : films marques pour suppression -> bucket dedie
     # AVANT la boucle apply, puis exclus (meme schema que les losers).
     marked_set: Set[str] = {str(r) for r in (marked_for_deletion_row_ids or set()) if r}
     if marked_set and ctx.marked_for_deletion_root is not None:
-        move_marked_for_deletion_to_bucket(
+        abandoned_marked = move_marked_for_deletion_to_bucket(
             cfg,
             rows,
             marked_set,
@@ -1401,8 +1545,10 @@ def apply_rows(
             log=log,
             res=res,
             record_op=record_op,
-        )
-        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in marked_set]
+        ) or set()
+        # [D3] : idem losers, les abandons fail-closed restent dans l'apply normal.
+        excluded_marked = marked_set - abandoned_marked
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in excluded_marked]
 
     migrate_legacy_collection_root(
         cfg,

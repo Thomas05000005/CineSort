@@ -177,6 +177,78 @@ def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
     return rows
 
 
+def _invalidate_dashboard_cache(api: Any, run_paths: Any) -> None:
+    """Supprime dashboard_cache.json (best-effort).
+
+    AUDIT 2026-07-13 (HIGH-17) : la signature du cache dashboard est calculee
+    sur plan.jsonl (mtime/taille, dashboard_cache_support.py:37) alors que le
+    payload est construit depuis RunState.rows. Une reecriture du plan change la
+    signature : un cache ecrit entre la reecriture et la resynchronisation
+    memoire serait valide au sens de load_dashboard_cache tout en contenant des
+    donnees perimees (empoisonnement persistant, survit au redemarrage). On le
+    purge donc a chaque reecriture du plan.
+    """
+    try:
+        cache_path = api._dashboard_cache_path(run_paths)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("dashboard cache path indisponible: %s", exc)
+        return
+    try:
+        cache_path.unlink(missing_ok=True)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("purge dashboard cache impossible path=%s: %s", cache_path, exc)
+
+
+def resync_run_state_rows(api: Any, run_id: str) -> bool:
+    """Recharge RunState.rows depuis plan.jsonl apres une reecriture du plan.
+
+    AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : `rs.rows` n'etait assigne QU'UNE fois
+    (fin de scan, run_flow_support.py:490) alors que plusieurs chemins
+    reecrivent plan.jsonl apres coup (re-match TMDb d'un rescan, enrichissement
+    tmdb_id). Or tous les lecteurs PREFERENT le snapshot memoire au fichier
+    (history_support._get_plan_impl, apply_support.run_context_for_apply,
+    dashboard_support, run_read_support) : sans resynchronisation, l'UI
+    reaffichait l'ancien match et surtout l'apply renommait les dossiers avec
+    l'ANCIEN titre/annee/edition, tant que l'app n'avait pas redemarre.
+
+    Best-effort : si le run n'est pas en memoire (les lecteurs relisent alors
+    plan.jsonl directement) ou si le plan est illisible, on laisse l'etat en
+    place plutot que de le corrompre.
+
+    Returns:
+        True si le snapshot memoire a ete rafraichi.
+    """
+    rid = str(run_id or "").strip()
+    if not rid:
+        return False
+    try:
+        run_state = api._get_run(rid)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.warning("resync_run_state_rows: _get_run echoue run_id=%s: %s", rid, exc)
+        return False
+    if run_state is None:
+        return False
+
+    run_paths = getattr(run_state, "paths", None)
+    if run_paths is None:
+        return False
+    try:
+        rows = load_rows_from_plan_jsonl(run_paths)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("resync_run_state_rows: relecture plan.jsonl echouee run_id=%s: %s", rid, exc)
+        return False
+
+    lock = getattr(run_state, "lock", None)
+    if lock is None:
+        run_state.rows = rows
+    else:
+        with lock:
+            run_state.rows = rows
+
+    _invalidate_dashboard_cache(api, run_paths)
+    return True
+
+
 # Fix audit 2026-05-25 (v1.5.4) Vague I : source unique de verite pour le
 # compteur "nombre de films d'un run". Le bug 853 vs 855 venait du fait que
 # - dashboard / library / apply : utilisaient stats.planned_rows (snapshot DB

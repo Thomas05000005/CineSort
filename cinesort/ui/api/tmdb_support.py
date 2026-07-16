@@ -226,6 +226,14 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
                 fp.write(json.dumps(r, ensure_ascii=False) + "\n")
         tmp_path.replace(plan_jsonl)
 
+        # AUDIT 2026-07-13 (HIGH-17) : toute reecriture de plan.jsonl doit
+        # resynchroniser le snapshot memoire (prefere au fichier par get_plan /
+        # apply / dashboard) et purger le cache dashboard, dont la signature est
+        # calculee sur plan.jsonl (sinon cache empoisonne avec des rows perimees).
+        from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
+
+        resync_run_state_rows(api, run_id)
+
     try:
         tmdb.flush()
     except (OSError, AttributeError):

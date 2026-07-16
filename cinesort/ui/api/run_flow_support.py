@@ -22,7 +22,6 @@ from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
 from cinesort.domain.conversions import to_bool, to_float
 from cinesort.domain.duplicate_compare import compare_duplicates
 from cinesort.domain.i18n_messages import t
-from cinesort.domain.librarian import generate_suggestions
 from cinesort.domain.run_models import RunStatus
 from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
@@ -344,13 +343,30 @@ def _validate_and_init_plan_context(
     }
 
 
-def _compute_subtitle_coverage(rows: list) -> float:
-    """Calcule le % de films avec sous-titres complets (pas de langue manquante)."""
-    if not rows:
-        return 100.0
-    total = len(rows)
-    complete = sum(1 for r in rows if not (getattr(r, "subtitle_missing_langs", None) or []))
-    return round(100 * complete / total, 1)
+def _build_scan_health_snapshot() -> Dict[str, Any]:
+    """Snapshot sante persiste dans runs.stats_json a la FIN du scan.
+
+    AUDIT 2026-07-13 (M1, anti-pattern A) : au scan AUCUN quality_report n'existe
+    encore en BDD — `recompute_all_scores` tourne en background (cf _build_plan_job_fn,
+    juste apres le scan). Toute metrique dependante du probe doit donc rester None,
+    sinon on FIGE une valeur fausse jamais reconciliee :
+      - health_score : autrefois calcule via generate_suggestions en lui passant
+        une liste de reports VIDE -> codecs obsoletes / basse resolution jamais
+        vus, et pistes de sous-titres EMBARQUEES invisibles (librarian.py ne peut
+        rien reconcilier) -> faux "sans subs FR" -> health_score errone.
+      - subtitle_coverage_pct : autrefois calcule sur `subtitle_missing_langs`
+        BRUT (etat scan pre-probe) -> couverture sous-estimee.
+    Mirroir de resolution_4k_pct / codec_modern_pct, deja a None pour ce motif.
+    Le dashboard recalcule ces metriques LIVE avec les vrais reports
+    (dashboard_support._compute_librarian_suggestions), et _compute_health_trend
+    ignore deja les snapshots dont health_score est None (dashboard_support.py).
+    """
+    return {
+        "health_score": None,  # requiert quality reports (pas dispo au scan)
+        "subtitle_coverage_pct": None,  # idem (pistes embarquees invisibles au scan)
+        "resolution_4k_pct": None,
+        "codec_modern_pct": None,
+    }
 
 
 def _build_plan_job_fn(
@@ -627,18 +643,10 @@ def _build_plan_job_fn(
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")
 
-            # Capturer le snapshot sante bibliotheque dans les stats
-            try:
-                lib_result = generate_suggestions(rows, [], settings)
-                stats_dict = dict(stats.__dict__)
-                stats_dict["health_snapshot"] = {
-                    "health_score": lib_result.get("health_score", 100),
-                    "subtitle_coverage_pct": _compute_subtitle_coverage(rows),
-                    "resolution_4k_pct": None,  # requiert quality reports (pas dispo au scan)
-                    "codec_modern_pct": None,  # idem
-                }
-            except (ImportError, KeyError, OSError, TypeError, ValueError):
-                stats_dict = dict(stats.__dict__)
+            # Snapshot sante bibliotheque : au scan on NE FIGE aucune metrique
+            # dependante du probe (anti-pattern A / M1, cf _build_scan_health_snapshot).
+            stats_dict = dict(stats.__dict__)
+            stats_dict["health_snapshot"] = _build_scan_health_snapshot()
 
             dlog("job_fn done")
             return stats_dict

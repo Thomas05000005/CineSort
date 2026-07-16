@@ -272,6 +272,40 @@ class ApplyRepository(_BaseRepository):
             "app_version": str(row["app_version"] or ""),
         }
 
+    def get_applied_counts_for_runs(self, run_ids: List[str]) -> Dict[str, int]:
+        """{run_id: applied_count} depuis le DERNIER batch reel (non dry-run) DONE de chaque run.
+
+        AUDIT 2026-07-13 (HIGH-7) : source de verite du nombre de films appliques =
+        apply_batches.summary_json.applied_count (ecrit par apply_support). Les
+        surfaces LECTURE (dashboard runs_history, inspecteur Historique) lisaient
+        runs.stats_json.applied_count, une cle JAMAIS ecrite apres un apply ->
+        "Appliques 0" partout malgre un apply reussi. Helper BULK (miroir de
+        run.get_error_counts_for_runs) pour eviter un N+1 sur la liste des runs.
+        """
+        ids = [str(x) for x in (run_ids or []) if str(x).strip()]
+        if not ids:
+            return {}
+        self._ensure_apply_journal_tables()
+        placeholders = ",".join("?" for _ in ids)
+        out: Dict[str, int] = {}
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                f"""
+                SELECT run_id, summary_json, started_ts
+                FROM apply_batches
+                WHERE run_id IN ({placeholders}) AND dry_run=0 AND status='DONE'
+                ORDER BY started_ts DESC
+                """,
+                tuple(ids),
+            )
+            for row in cur.fetchall():
+                rid = str(row["run_id"])
+                if rid in out:
+                    continue  # ORDER BY started_ts DESC -> 1er vu = dernier batch DONE
+                summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
+                out[rid] = int(summary.get("applied_count") or 0)
+        return out
+
     def list_apply_operations(self, *, batch_id: str) -> List[Dict[str, Any]]:
         """Retourne les operations apply du batch dans l'ordre d'execution (op_index croissant)."""
         self._ensure_apply_journal_tables()
