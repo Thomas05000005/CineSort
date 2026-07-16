@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
 # --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
@@ -296,7 +297,7 @@ def build_naming_context(
     # Probe audio (meilleure piste)
     audio_tracks = probe.get("audio_tracks") or []
     if audio_tracks:
-        best = audio_tracks[0]
+        best = _best_audio_track(audio_tracks)
         ctx["audio_codec"] = _codec_label(best.get("codec"))
         channels = best.get("channels")
         ctx["channels"] = _channels_label(channels) if channels else ""
@@ -524,6 +525,32 @@ def _channels_label(channels: Any) -> str:
     VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `""`).
     """
     return _format_audio_channels(channels, invalid="")
+
+
+def _audio_track_sort_key(track: Dict[str, Any]) -> Tuple[int, int, int]:
+    codec = str(track.get("codec") or "").strip().lower()
+    rank = _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    return (rank, _as_int(track.get("channels")), _as_int(track.get("bitrate")))
+
+
+def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Meilleure piste audio pour les placeholders {audio_codec}/{channels}.
+
+    Aligne sur `quality_score._best_audio_track` (R8-039) : rang codec d'abord
+    (lossless > lossy), puis canaux, puis bitrate. Avant, `audio_tracks[0]`
+    prenait l'ordre du conteneur -> une piste lossy compatible pouvait etiqueter
+    le fichier avec un codec inferieur a la vraie meilleure piste.
+    """
+    if not audio_tracks:
+        return {}
+    return max(audio_tracks, key=_audio_track_sort_key)
 
 
 # --- Conformance check ----------------------------------------------------
