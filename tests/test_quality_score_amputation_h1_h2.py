@@ -242,5 +242,67 @@ class CallSiteContractTests(unittest.TestCase):
         self.assertIn("fra", sub_info.get("languages") or [])
 
 
+class TmdbGenreScoringTests(unittest.TestCase):
+    """Audit 2026-07-17 (BUG) : le scoring genre-aware (``tmdb_genres``) etait
+    mort car ``api._tmdb_client()`` n'existe pas sur CineSortApi -> le garde
+    ``hasattr(api, "_tmdb_client")`` etait toujours False -> ``tmdb_genres``
+    restait ``[]`` sur le SEUL call site de production. Apres fix, le helper
+    ``_build_tmdb_client(api)`` construit le client et les genres TMDb
+    alimentent bien ``compute_quality_score``."""
+
+    def test_tmdb_genres_passed_to_score_when_candidate_has_tmdb_id(self) -> None:
+        api = MagicMock()
+        api._effective_probe_settings_for_runtime.return_value = {}
+        store = MagicMock()
+        store.quality.get_quality_report.return_value = None
+
+        cand = MagicMock()
+        cand.tmdb_id = 603
+        row = MagicMock()
+        row.folder = "/tmp/Movie (1999)"
+        row.proposed_title = "Movie"
+        row.proposed_year = 1999
+        row.video = "Movie.1080p.mkv"
+        row.candidates = [cand]
+
+        probe_result = {"normalized": _probe(9000), "cache_hit": False}
+
+        fake_tmdb = MagicMock()
+        fake_tmdb.get_movie_metadata_for_perceptual.return_value = {
+            "genres": ["Science Fiction", "Action"]
+        }
+        fake_report = {"score": 50, "tier": "Silver", "reasons": [], "metrics": {"detected": {}}}
+
+        with patch.object(quality_report_support, "ProbeService") as mock_probe_cls, patch.object(
+            quality_report_support, "_build_tmdb_client", return_value=fake_tmdb
+        ) as mock_build, patch.object(
+            quality_report_support, "compute_quality_score", return_value=fake_report
+        ) as mock_score:
+            mock_probe = MagicMock()
+            mock_probe.probe_file.return_value = probe_result
+            mock_probe_cls.return_value = mock_probe
+            quality_report_support._probe_and_score(
+                api,
+                store,
+                {"state_dir": "/tmp"},
+                "run_test",
+                "row_1",
+                row,
+                "/tmp/Movie/Movie.mkv",
+                profile_json={"id": "default", "version": 1},
+                active_profile_id="default",
+                active_profile_version=1,
+            )
+
+        mock_build.assert_called_once()
+        fake_tmdb.get_movie_metadata_for_perceptual.assert_called_once_with(603)
+        # Les deux passes du two-pass recoivent tmdb_genres (via _base_kwargs).
+        self.assertEqual(mock_score.call_count, 2)
+        for call in mock_score.call_args_list:
+            self.assertEqual(
+                call.kwargs.get("tmdb_genres"), ["Science Fiction", "Action"]
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
