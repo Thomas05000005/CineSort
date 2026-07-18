@@ -255,6 +255,14 @@ class CoreHeuristicsTests(unittest.TestCase):
         self.assertIn("Le Salaire de la peur (The Wages of Fear)", queries)
         self.assertEqual(len(queries), len(set(q.lower() for q in queries)))
 
+    def test_expand_tmdb_queries_splits_typographic_dash(self) -> None:
+        # en-dash (U+2013) et em-dash (U+2014) sont des separateurs de sous-titre
+        # courants ; le prefixe avant le tiret doit devenir une requete a part.
+        en_dash = core._expand_tmdb_queries(["Blade Runner – The Final Cut"])
+        self.assertIn("Blade Runner", en_dash)
+        em_dash = core._expand_tmdb_queries(["Blade Runner — The Final Cut"])
+        self.assertIn("Blade Runner", em_dash)
+
     def test_pick_best_candidate_prefers_consensus_sources(self) -> None:
         cands = [
             core.Candidate(title="Gravity", year=2013, source="name", score=0.70),

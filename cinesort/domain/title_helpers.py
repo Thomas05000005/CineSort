@@ -415,7 +415,7 @@ def _expand_tmdb_queries(queries: List[str]) -> List[str]:
         no_paren = re.sub(r"\([^)]*\)", " ", q2)
         add_query(no_paren)
 
-        for sep in (" - ", " ? ", " ? ", ":", "/", "|"):
+        for sep in (" - ", " – ", " — ", ":", "/", "|"):
             if sep in q2:
                 add_query(q2.split(sep, 1)[0])
                 break
