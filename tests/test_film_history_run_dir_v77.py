@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from cinesort.domain.film_history import _resolve_run_dir, get_film_timeline
+from cinesort.ui.api import film_history_support
 
 
 class _FakeRunRepo:
@@ -84,6 +87,34 @@ class FilmHistoryRunDirTests(unittest.TestCase):
         result = get_film_timeline("tmdb:27205", self.state_dir, store)
         self.assertEqual(result["scan_count"], 1, "le plan.jsonl du dossier tri_films_ doit etre trouve")
         self.assertEqual(len(result["events"]), 1)
+
+
+class FilmHistorySupportErrorHandlingTests(unittest.TestCase):
+    """Les endpoints support convertissent RuntimeError / sqlite3.Error en err() structurée."""
+
+    def _api_raising(self, exc):
+        def _boom(_state_dir):
+            raise exc
+
+        return SimpleNamespace(
+            settings=SimpleNamespace(get_settings=lambda: {"state_dir": tempfile.gettempdir()}),
+            _get_or_create_infra=_boom,
+        )
+
+    def test_get_film_history_wraps_sqlite_error(self) -> None:
+        api = self._api_raising(sqlite3.OperationalError("database is locked"))
+        res = film_history_support.get_film_history(api, "tmdb:1")
+        self.assertFalse(res["ok"])
+
+    def test_get_film_history_wraps_runtime_error(self) -> None:
+        api = self._api_raising(RuntimeError("migration rollback"))
+        res = film_history_support.get_film_history(api, "tmdb:1")
+        self.assertFalse(res["ok"])
+
+    def test_list_films_with_history_wraps_sqlite_error(self) -> None:
+        api = self._api_raising(sqlite3.OperationalError("database is locked"))
+        res = film_history_support.list_films_with_history(api, limit=10)
+        self.assertFalse(res["ok"])
 
 
 if __name__ == "__main__":
