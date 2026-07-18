@@ -336,6 +336,27 @@ class MergeDuplicatesTests(unittest.TestCase):
         self.assertTrue(mergeables[0].get("mergeable"))
         self.assertEqual(mergeables[0].get("kind"), "mergeable")
 
+    def test_plan_conflict_detected_when_targets_differ_only_by_case(self) -> None:
+        # Deux films de meme identite (titre/annee) dont les cibles ne different
+        # que par la casse pointent le MEME dossier sur un FS insensible a la
+        # casse : has_plan_dupe doit le voir (comparaison normalisee).
+        src_a = self.root / "a"
+        src_b = self.root / "b"
+        self._write(src_a / "movie.mkv", b"A")
+        self._write(src_b / "movie.mkv", b"B")
+
+        row_a = self._single_row("S|1", src_a, "Heat", 1995)
+        row_b = self._single_row("S|2", src_b, "HEAT", 1995)
+        decisions = {
+            "S|1": {"ok": True, "title": "Heat", "year": 1995},
+            "S|2": {"ok": True, "title": "HEAT", "year": 1995},
+        }
+
+        dup = plan_support.find_duplicate_targets(self._cfg(), [row_a, row_b], decisions)
+        groups = dup.get("groups") or []
+        self.assertEqual(len(groups), 1, "les deux casses doivent etre regroupees sous une identite")
+        self.assertTrue(groups[0].get("plan_conflict"), "collision de cible insensible a la casse non signalee")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

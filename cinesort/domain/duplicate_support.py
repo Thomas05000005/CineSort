@@ -443,9 +443,10 @@ def find_duplicate_targets(
         existing_paths = existing_idx.get(key, [])
         plan_targets = [item["target"] for item in items]
 
-        has_plan_dupe = len(set(plan_targets)) < len(plan_targets)
+        norm_targets = [norm_win_path(Path(target)) for target in plan_targets]
+        has_plan_dupe = len(set(norm_targets)) < len(norm_targets)
         existing_elsewhere = []
-        target_norms = {norm_win_path(Path(target)) for target in plan_targets}
+        target_norms = set(norm_targets)
         # REGRESSION M8 (relecture B2) : depuis la redirection saga, la cible d'un
         # single-saga (<root>/<_Collection>/<saga>/<nom>) DIVERGE de son dossier
         # SOURCE deja conforme (<root>/<nom>). existing_movie_folder_index indexe
