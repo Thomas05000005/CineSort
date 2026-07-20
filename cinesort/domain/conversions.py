@@ -138,7 +138,13 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
 
 def to_optional_bool(value: Any) -> Optional[bool]:
     """Parse *value* en bool, retourne None si vide / non reconnu."""
-    s = str(value or "").strip().lower()
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
     if not s:
         return None
     if s in {"1", "true", "yes", "oui"}:
