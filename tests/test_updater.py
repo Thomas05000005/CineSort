@@ -16,6 +16,8 @@ from cinesort.app.updater import (
     _build_update_info,
     _compare_versions,
     _parse_version,
+    _read_cache,
+    _write_cache,
     check_for_updates,
 )
 
@@ -52,6 +54,32 @@ class _FakeResponse:
 
     def __exit__(self, *_args) -> None:
         return None
+
+
+class WriteCacheAtomicTests(unittest.TestCase):
+    """_write_cache doit ecrire atomiquement (tmp + os.replace)."""
+
+    def test_roundtrip_and_no_tmp_leftover(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            _write_cache(cache_path, _fake_payload())
+            # Le cache est lisible immediatement...
+            got = _read_cache(cache_path, cache_ttl_s=3600)
+            self.assertIsInstance(got, dict)
+            self.assertEqual(got["tag_name"], "7.7.0")
+            # ...et aucun fichier .tmp residuel ne subsiste.
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
+
+    def test_replace_failure_cleans_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            with mock.patch.object(updater.os, "replace", side_effect=OSError("boom")):
+                _write_cache(cache_path, _fake_payload())
+            # Echec du replace -> pas de cache final, pas de .tmp orphelin.
+            self.assertFalse(cache_path.exists())
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
 
 
 class CompareVersionsTests(unittest.TestCase):
