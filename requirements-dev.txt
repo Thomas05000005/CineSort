@@ -3,7 +3,7 @@
 # scripts (capture_readme_screenshots, test_axe_dashboard). Etaient anciennement
 # dans requirements-preview.txt avant la suppression du mode preview (PR #257).
 playwright>=1.60.0,<2
-Pillow>=12.2
+Pillow>=12.3.0
 ruff>=0.15.14,<0.16
 coverage>=7.14.0,<8
 pre-commit>=4.6.0,<5
