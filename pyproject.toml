@@ -90,7 +90,7 @@ packages = ["cinesort"]
 include-package-data = false
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 # Phase 0.4 vérif totale : le périmètre de test vit ici, plus seulement dans ci.yml.
