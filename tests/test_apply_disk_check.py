@@ -67,6 +67,19 @@ class EstimateApplySizeTests(unittest.TestCase):
         size = estimate_apply_size([row], approved_keys={"r1"})
         self.assertEqual(size, 3010)
 
+    def test_size_collection_recurses_into_subdirs(self) -> None:
+        # Une collection avec des videos dans des sous-dossiers doit etre
+        # comptee recursivement (merge_dir_safe deplace src_dir.rglob("*")).
+        folder = self.tmp / "Saga"
+        (folder / "Part1").mkdir(parents=True)
+        (folder / "Part2").mkdir(parents=True)
+        (folder / "poster.jpg").write_bytes(b"a" * 100)
+        (folder / "Part1" / "p1.mkv").write_bytes(b"b" * 5000)
+        (folder / "Part2" / "p2.mkv").write_bytes(b"c" * 7000)
+        row = _make_row(str(folder), "")  # collection : video vide
+        size = estimate_apply_size([row], approved_keys={"r1"})
+        self.assertEqual(size, 12100)
+
     def test_size_missing_file_returns_zero(self) -> None:
         row = _make_row(str(self.tmp / "ghost"), "ghost.mkv")
         size = estimate_apply_size([row], approved_keys={"r1"})

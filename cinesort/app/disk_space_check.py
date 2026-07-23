@@ -32,9 +32,12 @@ def _row_estimated_size(row: Any) -> int:
     """Taille estimee des fichiers que ce row va deplacer.
 
     MVP : on prend la taille du fichier video principal (`folder/video`).
-    Pour les collections, on somme les videos directement dans `folder`
-    (sans recursion). Si stat echoue : on ignore et on retourne 0
-    (mieux laisser l'apply tenter que de bloquer sur un edge case).
+    Pour les collections, on somme RECURSIVEMENT tous les fichiers sous
+    `folder` (via rglob), pour rester coherent avec `merge_dir_safe` qui
+    deplace `src_dir.rglob("*")` : sommer seulement les fichiers immediats
+    sous-estimait l'espace des collections a sous-dossiers -> apply coupe
+    a mi-parcours par disque plein. Si stat echoue : on ignore et on
+    retourne 0 (mieux laisser l'apply tenter que de bloquer sur un edge case).
     """
     folder_str = str(getattr(row, "folder", "") or "")
     video_str = str(getattr(row, "video", "") or "")
@@ -50,10 +53,10 @@ def _row_estimated_size(row: Any) -> int:
         except (OSError, PermissionError):
             return 0
 
-    # Pas de video specifie (collection) : somme des fichiers immediats.
+    # Pas de video specifie (collection) : somme recursive (cf merge_dir_safe).
     total = 0
     try:
-        for entry in folder.iterdir():
+        for entry in folder.rglob("*"):
             if entry.is_file():
                 try:
                     total += int(entry.stat().st_size)
