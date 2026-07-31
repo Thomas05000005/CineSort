@@ -112,6 +112,46 @@ class TestRunParallelTasks(unittest.TestCase):
         # Execution sequentielle
         self.assertEqual(call_order, ["a", "b", "c"])
 
+    def test_timeout_enforced_on_single_task(self):
+        """Une tache unique qui hang DOIT etre bornee par timeout_per_task_s.
+
+        Regression : le fast-path sequentiel ignorait timeout_per_task_s des que
+        len(tasks) == 1, desactivant silencieusement le garde-fou anti-hang.
+        """
+
+        def hang():
+            time.sleep(2.0)
+            return "never"
+
+        t0 = time.time()
+        results = run_parallel_tasks({"solo": hang}, max_workers=4, timeout_per_task_s=0.15)
+        elapsed = time.time() - t0
+        self.assertLess(elapsed, 1.0, f"timeout non applique, elapsed={elapsed:.3f}s")
+        ok, exc = results["solo"]
+        self.assertFalse(ok)
+        self.assertIsInstance(exc, TimeoutError)
+
+    def test_timeout_enforced_with_single_worker(self):
+        """Sur machine <MIN_CPU_CORES (max_workers=1), le timeout reste applique."""
+
+        def hang():
+            time.sleep(2.0)
+            return "never"
+
+        t0 = time.time()
+        results = run_parallel_tasks(
+            {"a": hang, "b": hang}, max_workers=1, timeout_per_task_s=0.15
+        )
+        elapsed = time.time() - t0
+        self.assertLess(elapsed, 1.5, f"timeout non applique en mono-worker, elapsed={elapsed:.3f}s")
+        self.assertFalse(results["a"][0])
+        self.assertIsInstance(results["a"][1], TimeoutError)
+
+    def test_single_task_without_timeout_uses_fast_path(self):
+        """Sans timeout, une tache unique reste executee en fast-path (pas de regression)."""
+        results = run_parallel_tasks({"solo": lambda: 42}, max_workers=1)
+        self.assertEqual(results["solo"], (True, 42))
+
     def test_tasks_run_in_parallel(self):
         """Si 2 taches bloquent 0.2s chacune et pool=2, total < 0.4s."""
 

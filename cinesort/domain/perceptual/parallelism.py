@@ -103,8 +103,12 @@ def run_parallel_tasks(
     workers = max(1, int(max_workers))
     results: dict[str, tuple[bool, Any]] = {}
 
-    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool)
-    if workers <= 1 or len(tasks) == 1:
+    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool).
+    # Exception : si un timeout par tache est demande, on route TOUJOURS via le
+    # pool, car seul `fut.result(timeout=...)` peut borner une tache qui hang.
+    # Sinon le garde-fou anti-hang serait silencieusement desactive des qu'il
+    # n'y a qu'une tache (ou 1 worker sur machine <MIN_CPU_CORES).
+    if timeout_per_task_s is None and (workers <= 1 or len(tasks) == 1):
         for name, fn in tasks.items():
             if cancel_event is not None and cancel_event.is_set():
                 results[name] = (False, _CancelledError("cancelled"))
