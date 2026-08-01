@@ -268,7 +268,10 @@ def cfg_signature_for_incremental(cfg: "Config") -> str:
         # Toute evolution des regles -> nouveau cfg_sig -> cache invalide.
         "_plan_cache_version": int(_PLAN_CACHE_VERSION),
     }
-    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha1(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
 
 
 def stats_snapshot_for_cache(stats: "Stats") -> Dict[str, Any]:
@@ -415,7 +418,7 @@ def _nfo_signature(nfo_path: Optional[Path]) -> Optional[str]:
     if cached is not None:
         return cached
     try:
-        sig = hashlib.sha1(nfo_path.read_bytes()).hexdigest()
+        sig = hashlib.sha1(nfo_path.read_bytes(), usedforsecurity=False).hexdigest()
     except (PermissionError, OSError):
         return None
     # Cap simple pour eviter croissance illimitee (drop arbitraire des 100 plus
@@ -442,7 +445,7 @@ def folder_signature(
     try:
         scandir_ctx = _os.scandir(str(folder))
     except (OSError, PermissionError, FileNotFoundError):
-        return hashlib.sha1(b"").hexdigest()
+        return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
     try:
         for entry in scandir_ctx:
             name = entry.name
@@ -475,7 +478,7 @@ def folder_signature(
             scandir_ctx.close()
     items.sort(key=lambda t: t[0])
     payload = "\n".join(line for _k, line in items)
-    return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()
+    return hashlib.sha1(payload.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest()
 
 
 @functools.lru_cache(maxsize=16)
