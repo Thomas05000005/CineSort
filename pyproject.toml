@@ -57,7 +57,13 @@ dependencies = [
 dev = [
     "playwright>=1.60.0,<2",
     "Pillow>=12.3",
-    "ruff>=0.15.14,<0.16",
+    # EPINGLE EXACTEMENT (2026-08-02) : la borne flottante `>=0.15.14,<0.16`
+    # laissait la CI resoudre le dernier patch. Un formateur legerement different
+    # arrive, et les 930 fichiers du depot deviennent non conformes du jour au
+    # lendemain sans qu'aucun commit n'ait bouge — c'est ce qui a mis la CI au
+    # rouge sur `main` lui-meme et bloque ~180 PR. Toute montee de version doit
+    # etre DELIBEREE, avec le reformatage dans le meme commit.
+    "ruff==0.15.22",
     "coverage>=7.14.0,<8",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.0.3,<10",
