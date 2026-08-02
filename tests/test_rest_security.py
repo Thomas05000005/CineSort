@@ -126,7 +126,11 @@ class RestSecurityHttpTests(unittest.TestCase):
         raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
     def _request_with_origin(
-        self, method: str, path: str, body: Any = None, token: str | None = None,
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        token: str | None = None,
         origin: str | None = None,
     ) -> tuple:
         """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS).
@@ -270,8 +274,11 @@ class RestSecurityHttpTests(unittest.TestCase):
         externe est rejete 403 AVANT toute action, meme avec un token valide —
         ferme la CSRF possible via le bypass auth loopback."""
         status, data, _ = self._request_with_origin(
-            "POST", "/api/run/start_plan", body={"settings": {"library_path": str(self.root)}},
-            token=self.token, origin="https://evil.example.com",
+            "POST",
+            "/api/run/start_plan",
+            body={"settings": {"library_path": str(self.root)}},
+            token=self.token,
+            origin="https://evil.example.com",
         )
         self.assertEqual(status, 403)
         self.assertNotIn("run_id", data)
@@ -280,7 +287,10 @@ class RestSecurityHttpTests(unittest.TestCase):
         """Un POST same-origin (Origin localhost, le dashboard) n'est PAS bloque
         par le garde CSRF (il passe au flux normal auth/dispatch)."""
         status, _, _ = self._request_with_origin(
-            "POST", "/api/get_settings", body={}, token=self.token,
+            "POST",
+            "/api/get_settings",
+            body={},
+            token=self.token,
             origin=f"http://127.0.0.1:{self.port}",
         )
         self.assertNotEqual(status, 403, "le dashboard same-origin ne doit pas etre bloque")

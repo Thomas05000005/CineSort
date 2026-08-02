@@ -15,7 +15,6 @@ Couvre deux corrections :
 
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import unittest
@@ -137,9 +136,7 @@ class BuildEmptyStateEscapeTests(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parent.parent
 
     def test_buildEmptyState_escapes_all_user_fields(self) -> None:
-        src = (self.REPO_ROOT / "web" / "dashboard" / "components" / "empty-state.js").read_text(
-            encoding="utf-8"
-        )
+        src = (self.REPO_ROOT / "web" / "dashboard" / "components" / "empty-state.js").read_text(encoding="utf-8")
         # Import explicite de escapeHtml depuis le helper centralise.
         self.assertIn('import { escapeHtml } from "../core/dom.js"', src)
         # Champs user-facing : title, message, ctaLabel doivent etre echappes.
@@ -151,9 +148,7 @@ class BuildEmptyStateEscapeTests(unittest.TestCase):
             )
 
     def test_processing_view_does_not_double_escape(self) -> None:
-        src = (self.REPO_ROOT / "web" / "dashboard" / "views" / "processing.js").read_text(
-            encoding="utf-8"
-        )
+        src = (self.REPO_ROOT / "web" / "dashboard" / "views" / "processing.js").read_text(encoding="utf-8")
         # Ligne fixee : message ne doit plus etre pre-echappe car
         # buildEmptyState le fait deja.
         self.assertNotIn("message: _esc(msg)", src)
@@ -166,9 +161,7 @@ class BuildEmptyStateEscapeTests(unittest.TestCase):
         On parse la regex de remplacement pour confirmer le comportement
         (faute d'environnement JS, on imite la logique).
         """
-        dom_js = (self.REPO_ROOT / "web" / "dashboard" / "core" / "dom.js").read_text(
-            encoding="utf-8"
-        )
+        dom_js = (self.REPO_ROOT / "web" / "dashboard" / "core" / "dom.js").read_text(encoding="utf-8")
         # Verifie que les 5 remplacements XSS-safe sont presents.
         for entity in ("&amp;", "&lt;", "&gt;", "&quot;", "&#39;"):
             self.assertIn(entity, dom_js, msg=f"escapeHtml doit produire {entity}")

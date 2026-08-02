@@ -29,7 +29,6 @@ class PlanSupportFacadeReexportTests(unittest.TestCase):
     def test_jsonable_helpers_reexported(self) -> None:
         from cinesort.app.plan_support import (
             plan_row_from_jsonable,
-            plan_row_to_jsonable,
         )
 
         # Test smoke pour jsonable round-trip.

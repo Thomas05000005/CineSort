@@ -281,11 +281,13 @@ class BulkActionsWiringTests(unittest.TestCase):
         # progression done/total via get_perceptual_job_status), au lieu de
         # l'ancien appel BLOQUANT analyze_perceptual_batch.
         self.assertIn(
-            "quality/queue_perceptual_batch", self.js,
+            "quality/queue_perceptual_batch",
+            self.js,
             "L'action 'Analyser perceptuel' doit appeler quality/queue_perceptual_batch (async).",
         )
         self.assertIn(
-            "quality/get_perceptual_job_status", self.js,
+            "quality/get_perceptual_job_status",
+            self.js,
             "Le bulk perceptuel doit poller le statut du job (progression).",
         )
 

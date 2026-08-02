@@ -4,7 +4,9 @@ get_global_score_v2_trend et count_v2_tier_since utilisaient COUNT(*) ->
 re-scanner la meme biblio (nouveau run_id, memes row_id) comptait chaque film
 plusieurs fois. Passe a COUNT(DISTINCT row_id).
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

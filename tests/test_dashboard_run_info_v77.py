@@ -4,7 +4,9 @@ accueil.js _extractScanProgress lit payload.run_info (total_rows/current_index/
 phase/status) mais get_dashboard ne produisait jamais run_info -> "Scan en cours
 sur 0 films (0/0)" barre figee. Ajout d'un bloc run_info depuis le RunState actif.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

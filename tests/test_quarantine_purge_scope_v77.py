@@ -158,7 +158,8 @@ class RunBucketArrivalStabilityTests(_RegistryIsolationMixin, unittest.TestCase)
         a2 = qt._sync_arrival_manifest(self.bucket, persist=False, stable_arrival=True, now=9_000_000.0)
         self.assertIn(self.rel, a1)
         self.assertEqual(
-            a1[self.rel], a2[self.rel],
+            a1[self.rel],
+            a2[self.rel],
             "arrivee reancree a `now` a chaque appel -> age_days permanent 0 (FIX #7)",
         )
         # Ancre FS reelle (~maintenant), jamais la valeur `now` injectee.
@@ -191,7 +192,8 @@ class RunBucketArrivalStabilityTests(_RegistryIsolationMixin, unittest.TestCase)
         r2 = qt.list_review_bucket_files(cfg)
         self.assertEqual(r1["files_count"], 1, r1)
         self.assertEqual(
-            r1["files"][0]["arrival_ts"], r2["files"][0]["arrival_ts"],
+            r1["files"][0]["arrival_ts"],
+            r2["files"][0]["arrival_ts"],
             "arrival_ts d'un bucket run doit etre stable (FIX #7)",
         )
 

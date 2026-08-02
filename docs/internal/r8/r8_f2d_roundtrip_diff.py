@@ -9,12 +9,14 @@ Apres fix : chaque deserialiseur preserve les DEUX champs.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2d_roundtrip_diff.py
 """
+
 from __future__ import annotations
+
 import dataclasses
 import json
 
+from cinesort.app.plan_support_core import plan_row_from_jsonable, plan_row_to_jsonable
 from cinesort.domain import core
-from cinesort.app.plan_support_core import plan_row_to_jsonable, plan_row_from_jsonable
 from cinesort.ui.api.run_data_support import row_from_json
 
 
@@ -63,7 +65,9 @@ def run():
     print(f"  source_root reload      : {b2.get('source_root')} (attendu 'mk_source_root')")
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (les 2 deserialiseurs preservent nfo_runtime ET source_root)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (les 2 deserialiseurs preservent nfo_runtime ET source_root)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

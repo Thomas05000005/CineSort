@@ -84,9 +84,7 @@ class TestResolveAdaptiveTimeoutConfig(unittest.TestCase):
 
     def test_precedence_base_s_over_legacy(self) -> None:
         """probe_timeout_base_s doit primer sur probe_timeout_s."""
-        cfg = resolve_adaptive_timeout_config(
-            {"probe_timeout_s": 45.0, "probe_timeout_base_s": 90.0}
-        )
+        cfg = resolve_adaptive_timeout_config({"probe_timeout_s": 45.0, "probe_timeout_base_s": 90.0})
         self.assertEqual(cfg.base_s, 90.0)
 
     def test_env_primes_over_settings(self) -> None:

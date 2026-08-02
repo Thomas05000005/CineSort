@@ -51,13 +51,12 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "traitement.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'traitement.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_run_id_param_in_doublons_js(self):
@@ -67,13 +66,12 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "doublons.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'doublons.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_film_detail_uses_perceptual_batch(self):
@@ -88,8 +86,7 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             '"quality/analyze_perceptual_single"',
             content,
-            "film-detail.js ne doit pas appeler l'endpoint inexistant "
-            "`quality/analyze_perceptual_single`.",
+            "film-detail.js ne doit pas appeler l'endpoint inexistant `quality/analyze_perceptual_single`.",
         )
 
 

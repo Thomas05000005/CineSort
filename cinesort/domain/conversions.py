@@ -47,9 +47,7 @@ def to_bool(value: Any, default: bool) -> bool:
 _GROUPED_NUMBER_RE = re.compile(r"(\d{1,3}(?:[ \t,\.]\d{3})+)")
 _GROUP_SEP_RE = re.compile(r"[ \t,\.]")
 _FIRST_DIGITS_RE = re.compile(r"\d+")
-_BITRATE_UNIT_RE = re.compile(
-    r"([0-9]+(?:[.,][0-9]+)?)\s*(gb/s|gbit/s|gib/s|mb/s|mbit/s|mib/s|kb/s|kbit/s|kib/s)"
-)
+_BITRATE_UNIT_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)\s*(gb/s|gbit/s|gib/s|mb/s|mbit/s|mib/s|kb/s|kbit/s|kib/s)")
 
 
 def to_optional_float(value: Any) -> Optional[float]:

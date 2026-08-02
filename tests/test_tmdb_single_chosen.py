@@ -113,7 +113,8 @@ class GetFilmFullSingleChosenTests(unittest.TestCase):
         candidates = result["row"]["candidates"]
         chosen_flags = [bool(c.get("chosen")) for c in candidates]
         self.assertEqual(
-            sum(chosen_flags), 1,
+            sum(chosen_flags),
+            1,
             f"Un seul candidat doit avoir chosen=True (trouve {sum(chosen_flags)}: {chosen_flags})",
         )
         self.assertTrue(candidates[0]["chosen"], "Le premier candidat (top score) doit etre chosen")
@@ -169,7 +170,8 @@ class GetFilmFullSingleChosenTests(unittest.TestCase):
         candidates = result["row"]["candidates"]
         chosen_flags = [bool(c.get("chosen")) for c in candidates]
         self.assertEqual(
-            sum(chosen_flags), 1,
+            sum(chosen_flags),
+            1,
             f"Meme avec tmdb_id dupliques, un seul chosen attendu (trouve {chosen_flags})",
         )
         self.assertTrue(candidates[0]["chosen"], "Premier candidat avec tmdb_id 555 -> chosen")

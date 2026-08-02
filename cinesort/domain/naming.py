@@ -90,7 +90,16 @@ _CLEANUP_PATTERNS = [
     (re.compile(r"\{\s*\}"), ""),  # accolades vides (residuelles)
     (re.compile(r"\s*-\s*$"), ""),  # tiret en fin
     (re.compile(r"^\s*-\s*"), ""),  # tiret en debut
-    (re.compile(r"\s+-\s+(?=[\[\(])"), " "),  # tiret avant crochet/parenthese vide
+    # F14 : le pattern historique `\s+-\s+(?=[\[\(])` supprimait le tiret meme
+    # quand toutes les variables etaient PLEINES ("{title} - [{resolution}]" ->
+    # "Inception [1080p]"), violant le template configure. Les groupes vides ont
+    # deja ete retires par les patterns 1-3 : le seul indice restant d'une
+    # variable videe est le RESIDU d'espace (double espace) qu'elle laisse. On
+    # exige donc ce residu, d'un cote ou de l'autre du tiret. Ces deux patterns
+    # doivent rester AVANT le collapse `\s{2,}` ci-dessous, qui ecraserait le
+    # residu et les rendrait inoperants.
+    (re.compile(r"\s+-\s{2,}(?=[\[\(])"), " "),  # variable videe APRES le tiret
+    (re.compile(r"\s{2,}-\s+(?=[\[\(])"), " "),  # variable videe AVANT le tiret
     (re.compile(r"\s{2,}"), " "),  # espaces multiples
 ]
 

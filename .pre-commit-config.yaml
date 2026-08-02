@@ -10,7 +10,12 @@ repos:
       - id: check-toml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.6
+    # ALIGNE SUR LA CI (2026-08-02). Trois versions de ruff coexistaient :
+    # ce hook en 0.15.6, uv.lock en 0.15.16, et la CI qui resolvait 0.15.22 via
+    # une borne flottante. Un developpeur formatait donc localement avec une
+    # version que la CI rejetait ensuite. Ces trois points doivent monter
+    # ENSEMBLE, avec le reformatage dans le meme commit.
+    rev: v0.15.22
     hooks:
       - id: ruff
         name: ruff check

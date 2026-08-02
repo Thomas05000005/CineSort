@@ -10,6 +10,7 @@ Activation:
 
 NE PAS modifier code produit (cinesort/).
 """
+
 from __future__ import annotations
 
 import os
@@ -19,10 +20,7 @@ import time
 
 def main() -> int:
     sleep_s = float(os.environ.get("SLOW_PROBE_SLEEP_SECONDS", "35"))
-    sys.stderr.write(
-        f"[fake_probe slow_mediainfo] sleeping {sleep_s}s "
-        f"(args={sys.argv[1:]!r})\n"
-    )
+    sys.stderr.write(f"[fake_probe slow_mediainfo] sleeping {sleep_s}s (args={sys.argv[1:]!r})\n")
     sys.stderr.flush()
     time.sleep(sleep_s)
     return 0

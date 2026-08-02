@@ -242,7 +242,10 @@ class RecordApplyOpTests(unittest.TestCase):
         def _broken_recorder(_data: dict) -> None:
             raise OSError("DB verrouille")
 
-        with self.assertLogs("cinesort.app.apply_core", level=logging.ERROR) as cm:
+        # Le niveau attendu est WARNING depuis le fix audit 2026-05-25 (v1.5.3, Vague H) :
+        # l'echec de journalisation est NON FATAL (le move physique a deja reussi), il ne
+        # doit donc pas remonter en ERROR. Le test exigeait encore ERROR et echouait depuis.
+        with self.assertLogs("cinesort.app.apply_core", level=logging.WARNING) as cm:
             ok = record_apply_op(_broken_recorder, op_type="MOVE", src_path=Path("/a"), dst_path=Path("/b"))
         self.assertFalse(ok)
         self.assertTrue(any("echec journalisation" in msg for msg in cm.output))
