@@ -30,14 +30,14 @@ def _probe_2160p_premium_full() -> dict:
             "codec": "hevc",
             "width": 3840,
             "height": 2160,
-            "bitrate": 35000,
+            "bitrate": 35_000_000,
             "bit_depth": 10,
             "hdr_dolby_vision": True,
             "hdr10_plus": False,
             "hdr10": False,
         },
         "audio_tracks": [
-            {"codec": "TrueHD Atmos", "channels": 8, "bitrate": 4000, "language": "en"},
+            {"codec": "TrueHD Atmos", "channels": 8, "bitrate": 4_000_000, "language": "en"},
         ],
         "sources": {},
     }
@@ -50,11 +50,11 @@ def _probe_720p_modest_full() -> dict:
             "codec": "avc",
             "width": 1280,
             "height": 720,
-            "bitrate": 3000,
+            "bitrate": 3_000_000,
             "bit_depth": 8,
         },
         "audio_tracks": [
-            {"codec": "AAC", "channels": 2, "bitrate": 128, "language": "en"},
+            {"codec": "AAC", "channels": 2, "bitrate": 128_000, "language": "en"},
         ],
         "sources": {},
     }
@@ -155,10 +155,10 @@ class AC2CapTierStaysAuthorityTests(unittest.TestCase):
         # Force un cas ou V1 donnerait Bronze : on simule un probe FULL mais
         # avec un audio mediocre qui pourrait reduire le score.
         probe = _probe_2160p_premium_full()
-        probe["video"]["bitrate"] = 12000  # debit moyen pour 2160p
+        probe["video"]["bitrate"] = 12_000_000  # debit moyen pour 2160p (bits/s)
         # Forcons audio mediocre.
         probe["audio_tracks"] = [
-            {"codec": "AAC", "channels": 2, "bitrate": 128, "language": "en"},
+            {"codec": "AAC", "channels": 2, "bitrate": 128_000, "language": "en"},
         ]
         res = compute_quality_score(normalized_probe=probe, profile=prof)
         # Avec hierarchy ON + 2160p probe + DV : floor Gold (ou plus haut).

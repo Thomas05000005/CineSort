@@ -458,9 +458,15 @@ def reconcile_display_tier(
 # plafonne Silver meme si la hierarchie tentait de le pousser Platinum.
 
 # Defaults TRaSH/Radarr 2026 "Quality Trumps All" - DESACTIVES par defaut.
-# Les dimensions sont listees par ordre de priorite (la PREMIERE dimension
-# qui declenche un floor/ceiling l'emporte). L'utilisateur peut re-ordonner
-# via l'UI parametres (drag-and-drop, fix #4 ROADMAP).
+# Les dimensions sont listees par ordre de priorite. Semantique REELLE et
+# voulue (F01, corrigee 2026-08) : les FLOORS sont cumulatifs (chaque
+# dimension peut encore remonter le tier) mais un CEILING est VERROUILLANT
+# (une fois rencontre, aucune dimension suivante ne peut promouvoir au-dessus
+# de lui). Ce n'est donc PAS un "first dimension wins" litteral : un floor
+# resolution ne desactive pas les floors hdr/audio qui suivent.
+# L'utilisateur peut re-ordonner via l'UI parametres (drag-and-drop, fix #4
+# ROADMAP) : l'ordre determine quels ceilings sont deja actifs quand un floor
+# est evalue.
 DEFAULT_HIERARCHY_DIMENSIONS_ORDER: List[str] = [
     "resolution",
     "video_codec",
@@ -640,6 +646,97 @@ def _floor_tier(current: str, floor: str) -> str:
     return TIER_ORDER_BEST_FIRST[min(cur_idx, floor_idx)]
 
 
+def _floor_tier_capped(current: str, floor: str, ceiling: Optional[str]) -> str:
+    """``_floor_tier`` mais borne par un plafond deja rencontre (F01).
+
+    Un ceiling declenche sur une dimension VERROUILLE le reste de la boucle
+    ``apply_tier_hierarchy`` : les floors des dimensions suivantes ne peuvent
+    plus promouvoir AU-DESSUS de ce plafond (un 720p ne finit jamais Platinum
+    a cause d'un floor audio/release_group, cf. doc ligne 442-443).
+
+    >>> _floor_tier_capped("Silver", "Gold", None)
+    'Gold'
+    >>> _floor_tier_capped("Silver", "Gold", "Silver")
+    'Silver'
+    >>> _floor_tier_capped("Bronze", "Platinum", "Silver")
+    'Silver'
+    """
+    new_tier = _floor_tier(current, floor)
+    return cap_tier(new_tier, ceiling) if ceiling else new_tier
+
+
+def _apply_floor_with_audit(
+    *,
+    dimension: str,
+    value: str,
+    current: str,
+    floor: str,
+    ceiling: Optional[str],
+    applied: List[Dict[str, str]],
+) -> str:
+    """Applique un floor borne par ``ceiling`` et JOURNALISE la decision (F01).
+
+    Revue R1 : le verrou de plafond pouvait neutraliser un floor configure par
+    l'utilisateur en silence. Deux trous d'audit :
+
+    * floor INTEGRALEMENT neutralise (le tier ne bouge pas) -> ``applied``
+      restait vide, donc ``quality_score`` n'emettait ni facteur ni raison :
+      l'utilisateur ne voyait NULLE PART pourquoi son floor n'avait pas pris ;
+    * floor PARTIELLEMENT applique -> l'entree affichait le tier reellement
+      atteint et non le floor DEMANDE, ce qui est trompeur ("floor Bronze ->
+      Silver" alors que le floor configure valait Platinum).
+
+    Trois cas, donc :
+
+    * floor libre (aucun plafond ne mord) -> entree ``type="floor"``,
+      strictement identique a l'existant (backward compat des consommateurs) ;
+    * floor BORNE par le plafond -> entree ``type="floor_capped"`` portant en
+      plus ``requested`` (le floor configure) et ``ceiling`` (le plafond qui
+      l'a borne) ; ``from``/``to`` restent les tiers reels ;
+    * floor INTEGRALEMENT neutralise -> meme entree ``floor_capped``, avec
+      ``from == to``.
+
+    Retourne le nouveau tier (== ``current`` si rien n'a bouge).
+
+    >>> log = []
+    >>> _apply_floor_with_audit(dimension="audio", value="truehd_atmos",
+    ...     current="Silver", floor="Gold", ceiling=None, applied=log)
+    'Gold'
+    >>> log == [{"dimension": "audio", "type": "floor", "value": "truehd_atmos",
+    ...          "from": "Silver", "to": "Gold"}]
+    True
+    >>> log = []
+    >>> _apply_floor_with_audit(dimension="release_group", value="framestor",
+    ...     current="Silver", floor="Platinum", ceiling="Silver", applied=log)
+    'Silver'
+    >>> log[0]["type"], log[0]["requested"], log[0]["ceiling"], log[0]["to"]
+    ('floor_capped', 'Platinum', 'Silver', 'Silver')
+    >>> log = []
+    >>> _apply_floor_with_audit(dimension="release_group", value="framestor",
+    ...     current="Bronze", floor="Platinum", ceiling="Silver", applied=log)
+    'Silver'
+    >>> log[0]["type"], log[0]["from"], log[0]["to"], log[0]["requested"]
+    ('floor_capped', 'Bronze', 'Silver', 'Platinum')
+    """
+    wanted = _floor_tier(current, floor)
+    new_tier = _floor_tier_capped(current, floor, ceiling)
+    entry: Dict[str, str] = {
+        "dimension": dimension,
+        "type": "floor",
+        "value": value,
+        "from": current,
+        "to": new_tier,
+    }
+    if new_tier != wanted:
+        entry["type"] = "floor_capped"
+        entry["requested"] = normalize_tier_string(floor) or str(floor or "")
+        entry["ceiling"] = normalize_tier_string(ceiling) or str(ceiling or "")
+        applied.append(entry)
+    elif new_tier != current:
+        applied.append(entry)
+    return new_tier
+
+
 def apply_tier_hierarchy(
     tier_pondere: str,
     dimensions: Dict[str, Any],
@@ -653,7 +750,11 @@ def apply_tier_hierarchy(
             (legacy accepte via ``normalize_tier_string``).
         dimensions: Dict des dimensions techniques observees sur le fichier :
             - ``resolution_label`` (str) : "2160p" | "1080p" | "720p" | "SD"
-            - ``resolution_source`` (str) : "probe" | "name_fallback" | "unknown"
+            - ``resolution_source`` (str) : "probe" | "name_fallback" | "unknown".
+              F01 (revue R1) : la valeur ``"unknown"`` signale que la resolution
+              n'a PAS pu etre determinee (le label vaut alors "SD" par
+              convention attrape-tout, ce qui n'est PAS une mesure) ; la
+              dimension resolution est integralement ignoree dans ce cas.
             - ``video_codec`` (str) : "hevc" | "av1" | "avc" | ...
             - ``hdr`` (str) : "dolby_vision" | "hdr10_plus" | "hdr10" | ""
             - ``audio_codec`` (str) : "truehd_atmos" | "dts_hd_ma" | "dts" | ...
@@ -661,8 +762,20 @@ def apply_tier_hierarchy(
         hierarchy_config: Config user (default OFF si None).
 
     Returns:
-        (tier_final, applied_decisions) ou applied_decisions est la liste des
-        decisions qui ont modifie le tier (audit trail pour UI/logs).
+        (tier_final, applied_decisions) ou applied_decisions est l'audit trail
+        (UI/logs) des regles de hierarchie qui se sont declenchees. Chaque
+        entree porte ``dimension`` / ``type`` / ``value`` / ``from`` / ``to``,
+        avec trois ``type`` possibles :
+
+        * ``"floor"``   : promotion effective vers le floor configure ;
+        * ``"ceiling"`` : plafonnement effectif vers le ceiling configure ;
+        * ``"floor_capped"`` (F01, revue R1) : un floor configure a ete BORNE
+          par un plafond deja rencontre. Deux cles supplementaires expliquent
+          l'ecart : ``requested`` (le floor demande) et ``ceiling`` (le plafond
+          qui l'a borne). ``from == to`` quand le floor est INTEGRALEMENT
+          neutralise - c'est le seul type d'entree qui peut ne pas modifier le
+          tier, et il est emis PRECISEMENT pour que l'utilisateur voie pourquoi
+          son floor n'a pas pris (avant, ce cas ne laissait aucune trace).
 
         Si ``hierarchy_config["enabled"] == False`` : retourne
         ``(tier_pondere_normalized, [])`` - no-op strict.
@@ -711,48 +824,68 @@ def apply_tier_hierarchy(
 
     applied: List[Dict[str, str]] = []
     current_tier = tier_canonical
+    # F01 : verrou de plafond. Des qu'un ceiling est RENCONTRE (meme s'il ne
+    # modifie pas le tier courant, ex. entree deja Bronze), les floors des
+    # dimensions suivantes ne peuvent plus promouvoir au-dessus de lui.
+    # Plusieurs ceilings se cumulent au plus strict via ``cap_tier``.
+    active_ceiling: Optional[str] = None
 
     for dimension in cfg["order"]:
         # === Resolution ===
         if dimension == "resolution":
             res_label = str(dimensions.get("resolution_label") or "").strip()
             res_source = str(dimensions.get("resolution_source") or "").strip()
+            # F01 (revue R1) : ``_resolution_label`` (quality_score.py) rend le
+            # couple ATTRAPE-TOUT ("SD", "unknown") des que le probe n'a pas les
+            # dimensions ET que le nom ne porte aucun token de resolution. Ce
+            # n'est PAS une resolution SD, c'est une resolution INCONNUE : un
+            # vrai UHD Dolby Vision dont le probe rend PARTIAL (dimensions
+            # manquantes, cas nominal sur SMB) ou FAILED (probe_backend="none")
+            # tombe dessus des que son nom ne porte pas de token de resolution.
+            # Armer floor ou ceiling sur ce label degrade le fichier a tort, et
+            # depuis le verrou pose plus bas ce plafond devient DEFINITIF
+            # (retrogradation de 3 tiers, aucun floor ulterieur ne rattrape).
+            # Une source "unknown" ne doit donc alimenter NI floor NI ceiling.
+            # Backward compat : une source ABSENTE ou vide (appelants directs et
+            # tests qui ne passent que ``resolution_label``) reste traitee comme
+            # declarative, exactement comme avant.
+            res_known = bool(res_label) and res_source != "unknown"
             # Floor : utilise cle "{label}_probe" si source=probe pour
             # distinguer probe verifie du fallback nom (declaratif).
             if res_label and res_source == "probe":
                 key_probe = f"{res_label}_probe"
                 floor = cfg["resolution_floors"].get(key_probe)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "resolution",
-                            "type": "floor",
-                            "value": key_probe,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="resolution",
+                        value=key_probe,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
             # Floor (declaratif, fallback nom accepte) : on autorise aussi
             # les floors sans suffixe _probe pour le cas user opt-in qui
             # ne veut PAS exiger le probe verifie.
-            if res_label:
+            if res_known:
                 floor = cfg["resolution_floors"].get(res_label)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "resolution",
-                            "type": "floor",
-                            "value": res_label,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="resolution",
+                        value=res_label,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
             # Ceiling : plafonne vers le BAS (utilise cap_tier helper).
-            if res_label:
+            if res_known:
                 ceil = cfg["resolution_ceilings"].get(res_label)
                 if ceil:
+                    # F01 : poser le verrou AVANT le test de changement. Un
+                    # ceiling qui ne modifie rien (tier deja sous le plafond)
+                    # doit quand meme interdire toute promotion ulterieure.
+                    active_ceiling = ceil if active_ceiling is None else cap_tier(active_ceiling, ceil)
                     new_tier = cap_tier(current_tier, ceil)
                     if new_tier != current_tier:
                         applied.append({
@@ -770,16 +903,14 @@ def apply_tier_hierarchy(
             if codec:
                 floor = cfg["codec_floors"].get(codec)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "video_codec",
-                            "type": "floor",
-                            "value": codec,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="video_codec",
+                        value=codec,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
 
         # === HDR ===
         elif dimension == "hdr":
@@ -787,16 +918,14 @@ def apply_tier_hierarchy(
             if hdr:
                 floor = cfg["hdr_floors"].get(hdr)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "hdr",
-                            "type": "floor",
-                            "value": hdr,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="hdr",
+                        value=hdr,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
 
         # === Audio ===
         elif dimension == "audio":
@@ -804,16 +933,14 @@ def apply_tier_hierarchy(
             if audio:
                 floor = cfg["audio_floors"].get(audio)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "audio",
-                            "type": "floor",
-                            "value": audio,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="audio",
+                        value=audio,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
 
         # === Release group ===
         elif dimension == "release_group":
@@ -821,16 +948,14 @@ def apply_tier_hierarchy(
             if grp:
                 floor = cfg["group_floors"].get(grp)
                 if floor:
-                    new_tier = _floor_tier(current_tier, floor)
-                    if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "release_group",
-                            "type": "floor",
-                            "value": grp,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
-                        current_tier = new_tier
+                    current_tier = _apply_floor_with_audit(
+                        dimension="release_group",
+                        value=grp,
+                        current=current_tier,
+                        floor=floor,
+                        ceiling=active_ceiling,
+                        applied=applied,
+                    )
 
     return current_tier, applied
 

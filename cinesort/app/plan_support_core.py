@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -77,6 +78,14 @@ _log = logging.getLogger(__name__)
 #       et n'apporte rien (elles ne sont ni lues ni couteuses). Fix durable (hors
 #       de ce bump) : re-keyer ignored_alerts sur film_id (comme film_decisions_v2)
 #       pour l'immuniser contre tout changement de forme du row_id.
+#
+# NB (F08, revue post-merge 2026-07-18) : le PAYLOAD de
+# cfg_signature_for_incremental a gagne 4 cles (enable_tv_detection,
+# min_video_bytes, naming_movie_template, subtitle_expected_languages). Le
+# numero ci-dessous n'a PAS ete bumpe car ajouter une cle au payload change
+# deja le sha1 -> l'effet est exactement celui d'un bump (un rescan complet
+# unique), sans toucher au row_id (donc sans faire reapparaitre les
+# ignored_alerts acquittees, contrairement au bump v5).
 _PLAN_CACHE_VERSION = 5
 
 # Valeurs connues de PlanRow.kind. Sert au garde-fou du deserialiseur de cache
@@ -238,7 +247,44 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
         return None
 
 
-def cfg_signature_for_incremental(cfg: "Config") -> str:
+def _tmdb_api_key_fingerprint(api_key: Optional[str]) -> Optional[str]:
+    """Empreinte NON REVERSIBLE d'une cle TMDb (jamais la cle en clair).
+
+    F08 / revue adverse : `enable_tmdb` ne derive que de `tmdb_enabled`, jamais
+    de la presence d'une cle. Or `_init_tmdb_client` ne construit un client que
+    si `tmdb_enabled AND api_key` : coller sa cle apres un premier scan ne
+    bougeait NI cfg_sig NI folder_signature, donc l'enrichissement TMDb ne
+    reprenait jamais. Un simple booleen ne suffirait pas non plus — remplacer
+    une cle revoquee par une valide doit aussi invalider les caches.
+    """
+    key = (api_key or "").strip()
+    if not key:
+        return None
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
+
+def cfg_signature_for_incremental(
+    cfg: "Config",
+    *,
+    subtitle_expected_languages: Optional[List[str]] = None,
+    tmdb_api_key: Optional[str] = None,
+) -> str:
+    """Signature des reglages qui CHANGENT la sortie du plan.
+
+    Toute cle absente de ce payload = un reglage qu'on peut modifier sans
+    invalider les caches incrementaux -> le scan rejoue silencieusement
+    l'ancien resultat (F08).
+
+    `subtitle_expected_languages` n'est PAS un champ de Config (c'est un kwarg
+    de `plan_library`, pose par run_flow_support depuis les reglages) : il est
+    passe en keyword-only pour rester signable sans toucher a la dataclass
+    frozen. `None` (detection sous-titres desactivee) et `[]` (activee, aucune
+    langue attendue) doivent rester DISTINCTS.
+
+    `tmdb_api_key` idem : la cle n'est pas un champ de Config, `plan_library` la
+    lit sur le client TMDb effectivement construit. Seule son EMPREINTE entre
+    dans le payload.
+    """
     payload = {
         "root": str(cfg.root),
         "enable_collection_folder": bool(cfg.enable_collection_folder),
@@ -259,10 +305,36 @@ def cfg_signature_for_incremental(cfg: "Config") -> str:
         "detect_extras_in_single_folder": bool(cfg.detect_extras_in_single_folder),
         "extras_size_ratio": float(cfg.extras_size_ratio),
         "skip_tv_like": bool(cfg.skip_tv_like),
+        # F08 (revue post-merge 2026-07-18) : ces 4 entrees manquaient alors que
+        # chacune change la sortie du plan.
+        #  - enable_tv_detection : rows kind='tv_episode' vs 0 row + skipped_tv_like
+        #  - min_video_bytes     : filtre iter_videos (quelles videos existent)
+        #  - naming_movie_template : force confidence=90/'high' quand le dossier
+        #    est deja conforme (plan_support_replan._build_row_from_chosen)
+        #  - subtitle_expected_languages : flags subtitle_missing_* / langues
+        "enable_tv_detection": bool(cfg.enable_tv_detection),
+        # Revue adverse : signer `cfg.min_video_bytes` NU rendait la cle inerte —
+        # `build_cfg_from_settings` ne cable pas ce champ, il vaut donc toujours
+        # None et le seuil REELLEMENT applique au scan est la globale de module
+        # `core_mod.MIN_VIDEO_BYTES` (cf. _filter_dossiers_phase, qui retombe
+        # dessus). On signe donc le seuil EFFECTIF, celui qui filtre les videos.
+        "min_video_bytes": (
+            int(cfg.min_video_bytes) if cfg.min_video_bytes is not None else int(core_mod.MIN_VIDEO_BYTES)
+        ),
+        "naming_movie_template": str(cfg.naming_movie_template or ""),
+        "subtitle_expected_languages": (
+            None
+            if subtitle_expected_languages is None
+            else [str(item).strip().lower() for item in subtitle_expected_languages]
+        ),
         "title_match_min_cov": float(cfg.title_match_min_cov),
         "title_match_min_seq": float(cfg.title_match_min_seq),
         "max_year_delta_when_name_has_year": int(cfg.max_year_delta_when_name_has_year),
         "enable_tmdb": bool(cfg.enable_tmdb),
+        # Revue adverse : `enable_tmdb` reste True avec une cle VIDE (aucun
+        # client construit, aucun enrichissement). Sans cette empreinte, coller
+        # sa cle apres un premier scan ne relancait jamais TMDb.
+        "tmdb_api_key_sig": _tmdb_api_key_fingerprint(tmdb_api_key),
         "tmdb_language": str(cfg.tmdb_language),
         # BUG 1 : la version des regles de scoring fait partie de la signature.
         # Toute evolution des regles -> nouveau cfg_sig -> cache invalide.
@@ -647,7 +719,19 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
 
     ctx.cfg = ctx.cfg.normalized()
     ctx.incremental_enabled = bool(ctx.cfg.incremental_scan_enabled and ctx.scan_index is not None)
-    ctx.cfg_sig = cfg_signature_for_incremental(ctx.cfg) if ctx.incremental_enabled else ""
+    ctx.cfg_sig = (
+        cfg_signature_for_incremental(
+            ctx.cfg,
+            subtitle_expected_languages=ctx.subtitle_expected_languages,
+            # Revue adverse F08 : le client n'existe QUE si la cle est non vide
+            # (run_flow_support._init_tmdb_client). `None` ici couvre donc a la
+            # fois "TMDb desactive" et "TMDb active mais cle vide", et l'empreinte
+            # change des que l'utilisateur colle ou remplace sa cle.
+            tmdb_api_key=getattr(ctx.tmdb, "api_key", None),
+        )
+        if ctx.incremental_enabled
+        else ""
+    )
     ctx.root_key = str(ctx.cfg.root)
     if ctx.incremental_enabled:
         ctx.v2_kwargs = {
@@ -733,6 +817,21 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
                     cached_rows.append(row_obj)
         if isinstance(cached_stats_delta, dict):
             ctx.rows.extend(cached_rows)
+            # F26 (revue post-merge 2026-07-18) : SYMETRIE avec le chemin MISS
+            # (_classify_and_plan_folder alimente video_paths_seen). Sans cet
+            # append, un rescan 100% cache dossier laissait video_paths_seen
+            # VIDE alors que folders_seen_for_prune etait rempli -> Phase 3
+            # appelait prune_incremental_row_cache(keep=[]) = DELETE de TOUT le
+            # cache row du root (scan.py:343-348) : le cache row v2 etait
+            # structurellement mort des le 2e scan.
+            # La cle reconstruite est EXACTEMENT celle stockee par
+            # _store_row_cache (video_path=str(video) avec video = folder/nom,
+            # PlanRow.folder=str(folder) et PlanRow.video=video.name).
+            for row_obj in cached_rows:
+                cached_folder = str(getattr(row_obj, "folder", "") or "")
+                cached_video = str(getattr(row_obj, "video", "") or "")
+                if cached_folder and cached_video:
+                    ctx.video_paths_seen.append(str(Path(cached_folder) / cached_video))
             stats_apply_cached_delta(ctx.stats, cached_stats_delta)
             ctx.stats.incremental_cache_hits += 1
             ctx.stats.incremental_cache_rows_reused += len(cached_rows)
@@ -1060,6 +1159,21 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             break
 
 
+def _scan_saw_unreadable_folder(ctx: _PlanLibraryContext) -> bool:
+    """True si au moins un dossier n'a pas pu etre LU pendant ce scan.
+
+    Garde du prune du cache row : `keep_video_paths=[]` se traduit par un DELETE
+    TOTAL du cache row de ce root. C'est la semantique CORRECTE quand le root n'a
+    vraiment plus aucune video (les entrees pointent alors sur des fichiers
+    disparus), mais ce serait une purge a tort si le scan n'a rien vu parce qu'un
+    dossier etait illisible — un simple aller-retour NAS/permission viderait le
+    cache. `ignore_scandir_error` est le compteur alimente par scan_helpers a
+    chaque scandir/stat en echec.
+    """
+    reasons = getattr(ctx.stats, "analyse_ignores_par_raison", None) or {}
+    return int(reasons.get("ignore_scandir_error", 0) or 0) > 0
+
+
 def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
     """Phase 3 : finalise stats.planned_rows, purge les caches incrementaux pour
     les dossiers/videos disparus depuis la derniere passe, propage les compteurs
@@ -1072,19 +1186,38 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
         and (not core_mod._is_cancel_requested(ctx.should_cancel))
         and ctx.scan_index is not None
     ):
+        # F26 : sqlite3.Error n'herite PAS de OSError. Le prune est un
+        # best-effort (nettoyage de cache) : une DB verrouillee ou un
+        # "too many SQL variables" (keep_video_paths depasse
+        # SQLITE_MAX_VARIABLE_NUMBER sur les tres grosses bibliotheques) ne doit
+        # jamais faire echouer le scan.
         if hasattr(ctx.scan_index, "prune_incremental_scan_cache"):
             try:
                 ctx.scan_index.prune_incremental_scan_cache(
                     root_path=ctx.root_key, keep_folders=ctx.folders_seen_for_prune
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge dossiers: {exc}")
-        if hasattr(ctx.scan_index, "prune_incremental_row_cache"):
+        # F26 filet de securite : `keep_video_paths=[]` se traduit par un DELETE
+        # TOTAL du cache row pour ce root (scan.py). Le cas dangereux etait le
+        # rescan 100% cache, ou video_paths_seen restait vide alors que le root
+        # etait plein de films — c'est le defaut principal de F26, corrige en
+        # amont (_try_apply_folder_cache alimente desormais video_paths_seen).
+        #
+        # Revue adverse : le filet initial (`or not ctx.folders_seen_for_prune`)
+        # etait BINAIRE — des qu'un dossier avait ete vu sans aucune video, le
+        # prune etait saute meme quand des videos avaient reellement disparu, et
+        # le cache du root n'etait alors plus JAMAIS purge. On ne saute donc
+        # desormais le prune que dans le seul cas ou "0 video" n'est pas une
+        # observation fiable : un dossier illisible pendant ce scan.
+        if hasattr(ctx.scan_index, "prune_incremental_row_cache") and (
+            ctx.video_paths_seen or not _scan_saw_unreadable_folder(ctx)
+        ):
             try:
                 ctx.scan_index.prune_incremental_row_cache(
                     root_path=ctx.root_key, keep_video_paths=ctx.video_paths_seen
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge videos: {exc}")
     # Apply v2 row cache stats to main stats.
     if hasattr(ctx.stats, "incremental_cache_row_hits"):

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # -- Extensions sous-titres -------------------------------------------
 
@@ -119,6 +119,75 @@ _LANG_MAP: Dict[str, str] = {
     "vo": "en",
 }
 
+# F12 (revue post-merge 2026-07-18) — tags de VARIANTE places APRES le code
+# langue par les conventions Plex (`.fr.forced`, `.en.sdh`) et Jellyfin
+# (`.fr.default`, `.en.forced`, `.fr.cc`). Ces tokens ne sont PAS des langues :
+# la detection les traverse pour trouver le code langue reel juste avant. Tout
+# token INCONNU (donc potentiellement un morceau de titre) arrete la marche
+# arriere — c'est cette borne qui interdit de lire un mot du titre comme une
+# langue, elle ne doit jamais etre relachee en "scanner tous les tokens".
+_SUBTITLE_FLAG_TOKENS = frozenset({"forced", "sdh", "cc", "hi", "default", "foreign", "commentary"})
+
+
+def _subtitle_suffix_tokens(filename: str, video_stem: Optional[str] = None) -> Tuple[List[str], bool]:
+    """Tokens du nom de sous-titre situes APRES le nom de la video.
+
+    Retourne `(tokens, bornes)`. `bornes` vaut True uniquement quand le stem de
+    la video a reellement prefixe le nom : c'est la SEULE situation ou l'on sait
+    que tout ce qui reste est un tag, et donc la seule ou l'on s'autorise a
+    traverser un tag de variante pour lire la langue derriere.
+
+    F12 / revue adverse : la borne « premier token inconnu = stop » ne suffit
+    PAS quand le dernier mot du titre est lui-meme une cle de `_LANG_MAP`. La
+    marche arriere traversait le tag de variante puis lisait ce mot :
+    'Dr.No.forced.srt' rendait 'no' (norvegien) sur le film « Dr. No », et
+    'Movie.Chapter.It.forced.srt' rendait 'it'. Une langue INVENTEE remonte
+    ensuite telle quelle en Bibliotheque et au dashboard.
+
+    Quand l'appelant connait le stem de la video (chemin nominal :
+    `match_subtitles_to_video` / `build_subtitle_report`), la borne devient
+    EXACTE — seuls les tokens ajoutes apres le nom de la video peuvent etre des
+    tags. Sinon (sous-titre orphelin, appel direct) on retombe sur la borne
+    historique « ne jamais lire le premier token » (= le titre), strictement
+    inchangee.
+
+    Cas `sub_stem == video_stem` (aucun token ajoute) : on garde deliberement la
+    borne historique. 'Film.VOSTFR.srt' a cote de 'Film.VOSTFR.mkv' doit
+    continuer a rendre 'fr' — c'est le comportement d'avant F12, le corriger
+    ferait apparaitre de faux `subtitle_missing_fr`.
+    """
+    stem = Path(filename).stem
+    if video_stem:
+        prefix = video_stem.lower() + "."
+        if stem.lower().startswith(prefix):
+            return stem[len(prefix) :].split("."), True
+    parts = stem.split(".")
+    if len(parts) < 2:
+        return [], False
+    return parts[1:], False
+
+
+def _subtitle_flag_tokens(filename: str, *, video_stem: Optional[str] = None) -> Set[str]:
+    """Tags de variante (forced/sdh/cc/...) portes par un nom de sous-titre.
+
+    Revue adverse F12 : cette fonction balayait TOUS les tokens de suffixe alors
+    que sa docstring promettait le comportement de `detect_language_from_suffix`.
+    Un mot de titre homonyme d'un tag ('The.Foreign.Exchange.fr.srt' ->
+    {'foreign'}) faisait sauter le sous-titre du comptage `lang_counts`, donc
+    perdre un VRAI doublon de langue. On ne collecte donc que les tags
+    CONTIGUS en fin de nom, avec la meme borne d'arret.
+    """
+    tokens, _bounded = _subtitle_suffix_tokens(filename, video_stem)
+    found: Set[str] = set()
+    for raw in reversed(tokens):
+        token = raw.strip().lower()
+        if not token:
+            continue
+        if token not in _SUBTITLE_FLAG_TOKENS:
+            break
+        found.add(token)
+    return found
+
 
 # -- Dataclasses -------------------------------------------------------
 
@@ -150,17 +219,46 @@ class SubtitleReport:
 # -- Fonctions publiques -----------------------------------------------
 
 
-def detect_language_from_suffix(filename: str) -> str:
+def detect_language_from_suffix(filename: str, *, video_stem: Optional[str] = None) -> str:
     """Detecte la langue depuis le suffixe du nom de fichier.
 
     Ex: 'Inception.fr.srt' → 'fr', 'Movie.eng.srt' → 'en', 'Movie.srt' → ''
+
+    F12 (revue post-merge 2026-07-18) : la version precedente ne lisait que le
+    DERNIER token (`rsplit('.', 1)`), donc les conventions Plex/Jellyfin
+    `Film.fr.forced.srt` / `Film.en.sdh.srt` rendaient '' -> faux flag
+    `subtitle_missing_fr` sur un film qui A son sous-titre FR. On remonte
+    maintenant les tokens de droite a gauche en traversant UNIQUEMENT les tags
+    de variante connus (_SUBTITLE_FLAG_TOKENS) et on s'arrete au premier token
+    inconnu. Le premier token (le titre) n'est JAMAIS lu : 'The.Danish.Girl.srt'
+    ou 'French.Connection.1971.srt' rendent toujours ''.
+
+    `video_stem` (revue adverse) borne la marche arriere au nom de la video :
+    sans lui, traverser un tag de variante pouvait faire lire le DERNIER MOT DU
+    TITRE comme une langue ('Dr.No.forced.srt' -> 'no' sur le film « Dr. No »).
+    Aucune heuristique ne distingue 'Dr.No.forced' de 'Inception.fr.forced' sans
+    connaitre la video : hors de ce contexte on NE TRAVERSE DONC PAS, on rend
+    exactement ce que rendait la version d'avant F12 (dernier token seul). Le
+    chemin de production (`build_subtitle_report` -> `match_subtitles_to_video`)
+    fournit toujours `video_stem` et beneficie, lui, du support Plex/Jellyfin.
     """
-    stem = Path(filename).stem  # "Inception.fr" pour "Inception.fr.srt"
-    parts = stem.rsplit(".", 1)
-    if len(parts) < 2:
+    tokens, bounded = _subtitle_suffix_tokens(filename, video_stem)
+    if not tokens:
         return ""
-    tag = parts[-1].strip().lower()
-    return _LANG_MAP.get(tag, "")
+    if not bounded:
+        return _LANG_MAP.get(tokens[-1].strip().lower(), "")
+    for raw in reversed(tokens):
+        token = raw.strip().lower()
+        if not token:
+            continue
+        lang = _LANG_MAP.get(token, "")
+        if lang:
+            return lang
+        if token in _SUBTITLE_FLAG_TOKENS:
+            continue
+        # Token inconnu (mot du titre, resolution, groupe...) : on s'arrete.
+        return ""
+    return ""
 
 
 def find_subtitles_in_folder(folder: Path) -> List[SubtitleInfo]:
@@ -209,12 +307,18 @@ def match_subtitles_to_video(
         # Exact stem match (ex: Movie.srt ↔ Movie.mkv)
         # Ou prefix match (ex: Movie.fr.srt ↔ Movie.mkv)
         if sub_name_no_ext == vs or sub_name_no_ext.startswith(vs + "."):
+            # Revue adverse F12 : `find_subtitles_in_folder` a devine la langue
+            # SANS connaitre la video. Ici on la connait : on re-derive avec la
+            # borne exacte, seul endroit ou la mutilation 'Dr.No.forced.srt' ->
+            # 'no' peut etre coupee. Pour un match de stem EXACT, la re-derivation
+            # retombe sur la borne historique et rend la meme valeur.
+            lang = detect_language_from_suffix(sub.filename, video_stem=video_stem)
             matched.append(
                 SubtitleInfo(
                     filename=sub.filename,
                     ext=sub.ext,
-                    language=sub.language,
-                    language_source=sub.language_source,
+                    language=lang,
+                    language_source="suffix" if lang else "unknown",
                     is_orphan=False,
                 )
             )
@@ -261,6 +365,18 @@ def build_subtitle_report(
     orphan_count = sum(1 for s in all_subs if s.filename.lower() not in matched_filenames)
 
     # Langues externes (fichiers .srt/.ass/... a cote du .mkv)
+    #
+    # ARBITRAGE PRODUIT EN ATTENTE (revue adverse F12, non tranche ici) : un
+    # sous-titre FORCE (dialogues etrangers uniquement) est compte ci-dessous
+    # comme la langue PRESENTE, alors qu'il est exclu du comptage des doublons
+    # plus bas. Un film qui n'a QUE '.fr.forced.srt' perd donc le signal
+    # « sous-titre FR manquant » bien qu'il n'ait aucune piste FR complete.
+    # Le finding F08..F12 d'origine qualifiait explicitement ce flag de FAUX sur
+    # '.fr.forced.srt' : changer de convention est une decision produit, et la
+    # variante propre (flag dedie `subtitle_forced_only_<lang>`) demande de
+    # cabler un nouveau libelle cote dashboard/verification. A trancher avant de
+    # toucher a cette ligne.
+
     external_languages: Set[str] = {s.language for s in matched if s.language}
 
     # Langues embarquees (pistes subtitle dans le conteneur)
@@ -306,10 +422,19 @@ def build_subtitle_report(
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).
+    # F12 corollaire OBLIGATOIRE : depuis que `.fr.forced.srt` resout bien 'fr',
+    # la paire LEGITIME `Film.fr.srt` + `Film.fr.forced.srt` (piste complete +
+    # piste forcee, convention Plex/Jellyfin) compterait 2 fois 'fr' et leverait
+    # `subtitle_duplicate_lang` a tort. On ne compte donc que les sous-titres
+    # SANS tag de variante : deux `.fr.srt` restent impossibles (meme nom), deux
+    # variantes taguees ne sont pas un doublon utilisateur.
     lang_counts: Dict[str, int] = {}
     for s in matched:
-        if s.language:
-            lang_counts[s.language] = lang_counts.get(s.language, 0) + 1
+        if not s.language:
+            continue
+        if _subtitle_flag_tokens(s.filename, video_stem=video_stem):
+            continue
+        lang_counts[s.language] = lang_counts.get(s.language, 0) + 1
     duplicates = sorted(lang for lang, cnt in lang_counts.items() if cnt > 1)
 
     return SubtitleReport(

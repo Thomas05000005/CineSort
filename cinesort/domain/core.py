@@ -188,6 +188,25 @@ _TMDB_BONUS_KEYWORDS = frozenset(
     }
 )
 
+# F03/F34 : le filtre bonus se faisait par SOUS-CHAINE nue ("promo" in
+# "the promotion" -> True, "trailer" in "trailer park boys" -> True), ce qui
+# eliminait TOUS les resultats TMDb corrects pour une classe de titres
+# legitimes -> aucun tmdb_id, aucune jaquette, +25 pts "pas de match TMDb".
+# On exige desormais une frontiere de MOT (le mot-cle ne doit pas etre colle a
+# une lettre ou un chiffre), les mots-cles multi-mots restant supportes tels quels.
+_TMDB_BONUS_KEYWORD_RE = re.compile(
+    r"(?<![0-9a-z])(?:" + "|".join(re.escape(kw) for kw in sorted(_TMDB_BONUS_KEYWORDS)) + r")(?![0-9a-z])"
+)
+
+# Un regex PAR mot-cle : la neutralisation liee a la requete doit etre
+# selective. Une garde tout-ou-rien desactiverait les 7 autres mots-cles des que
+# la requete en contient un seul, ce qui reactiverait le probleme d'origine dans
+# l'autre sens (un vrai bonus « Behind the Scenes » redeviendrait candidat pour
+# la requete « Trailer Park Boys »).
+_TMDB_BONUS_KEYWORD_RES = tuple(
+    re.compile(r"(?<![0-9a-z])" + re.escape(kw) + r"(?![0-9a-z])") for kw in sorted(_TMDB_BONUS_KEYWORDS)
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -524,6 +543,29 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
         entries = list(folder.iterdir())
     except (OSError, PermissionError):
         return out
+    # F03 : arbitrage LONGEST-MATCH. `is_sidecar_for_video` matche par prefixe :
+    # dans un dossier PARTAGE, "Alien 2.srt" matche aussi "Alien.mkv". Sans
+    # arbitrage, le sous-titre d'un film etait revendique par le film au stem le
+    # plus court -> a l'apply (loser de doublon, marquage suppression, collection)
+    # le .srt partait avec le MAUVAIS film, voire dans un bucket de suppression.
+    # Regle retenue : le sidecar appartient a la video dont le stem est le plus
+    # specifique (le plus long) parmi celles qui le revendiquent — c'est la
+    # convention Plex/Jellyfin (le nom de base du sous-titre == celui de la video).
+    # Les videos que le SCAN rejette (sample/trailer/teaser) ne produisent aucune
+    # row : leur attribuer un sidecar le laisserait orphelin dans le dossier
+    # source au lieu de suivre le film. On ne les compte donc pas comme
+    # concurrentes. Import local : scan_helpers est un module feuille du domaine,
+    # l'importer au niveau module alourdirait le graphe pour un seul usage.
+    from cinesort.domain.scan_helpers import IGNORE_VIDEO_NAME_RE
+
+    sibling_video_stems = [
+        p.stem
+        for p in entries
+        if p.is_file()
+        and p != video
+        and p.suffix.lower() in cfg.video_exts
+        and not IGNORE_VIDEO_NAME_RE.search(p.stem)
+    ]
     for p in entries:
         if not p.is_file() or p == video:
             continue
@@ -531,6 +573,13 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
             continue
         name_l = p.name.lower()
         if is_sidecar_for_video(stem, p.stem):
+            if any(
+                len(other) > len(stem) and is_sidecar_for_video(other, p.stem)
+                for other in sibling_video_stems
+            ):
+                # Une autre video du dossier a un stem strictement plus specifique
+                # qui revendique aussi ce sidecar : il lui appartient.
+                continue
             out.append(p)
             continue
         if (not is_collection) and (name_l in cfg.generic_side_files):
@@ -995,10 +1044,18 @@ def build_candidates_from_tmdb(
     if is_short_title:
         min_sim = max(min_sim, _TMDB_SHORT_TITLE_MIN_SIM)
 
+    # F34 : un mot-cle present dans la REQUETE elle-meme (l'utilisateur cherche
+    # bel et bien "Trailer Park Boys") ne doit plus servir a filtrer — sinon on
+    # supprime le film recherche. La neutralisation est SELECTIVE : seuls les
+    # mots-cles presents dans la requete sont desarmes, les autres continuent
+    # d'ecarter les vrais bonus.
+    query_terms_lower = f"{query_clean} {query}".lower()
+    active_bonus_res = [rx for rx in _TMDB_BONUS_KEYWORD_RES if not rx.search(query_terms_lower)]
+
     for r in results:
         # FIX 4 : filtrer les bonus/documentaires promo par mot-cle dans le titre.
         combined_title_lower = f"{r.title or ''} {r.original_title or ''}".lower()
-        if any(kw in combined_title_lower for kw in _TMDB_BONUS_KEYWORDS):
+        if any(rx.search(combined_title_lower) for rx in active_bonus_res):
             continue
 
         title_sim = _title_similarity(query_clean, r.title)

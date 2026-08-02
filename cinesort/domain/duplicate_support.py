@@ -178,32 +178,61 @@ def existing_movie_folder_index(
     movie_key: Callable[[str, int], str],
 ) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
+
+    def _dirs(path: Path) -> List[Path]:
+        try:
+            return [child for child in path.iterdir() if child.is_dir()]
+        except (OSError, PermissionError, FileNotFoundError):
+            return []
+
+    def _index(path: Path) -> None:
+        pair = movie_dir_title_year(path.name)
+        if not pair:
+            return
+        title, year = pair
+        out.setdefault(movie_key(title, year), []).append(str(path))
+
     try:
         level1 = [path for path in cfg.root.iterdir() if path.is_dir()]
     except (OSError, PermissionError, FileNotFoundError):
         return out
 
+    # F18 : le dossier collections est un CONTENEUR TRANSPARENT. La cible reelle
+    # d'un single-saga est <root>/<collection_root>/<saga>/<Titre (Annee)>
+    # (planned_target_folder L160-171, miroir apply_core.py:2113) soit une
+    # profondeur 3, alors que la boucle historique (a) skippait tout dossier
+    # niveau-1 prefixe '_' — dont '_Collection' par defaut — et (b) n'indexait
+    # que 2 niveaux. Une copie deja rangee sous sa saga etait donc invisible du
+    # detecteur, la collision n'emergeant qu'a l'apply (merge_dir_safe).
+    # On teste le nom du dossier collections AVANT le skip '_' pour couvrir
+    # aussi un collection_root_name configure sans underscore.
+    #
+    # F18 (revue R1) : la transparence n'est valable que si la fonctionnalite
+    # collections est ACTIVE. Sinon planned_target_folder (L164/L169) ne vise
+    # JAMAIS <root>/<collection_root>/... et le dossier redevient ce que le
+    # commentaire ci-dessous decrit : un bucket interne CineSort, saute par le
+    # scan (scan_helpers.py:311, skip inconditionnel) et contenant de vraies
+    # copies parquees -> l'indexer fabrique des conflits fantomes (groupes a 1
+    # row citant une cible que rien ne planifie).
+    coll_root = str(getattr(cfg, "collection_root_name", "") or "").strip().lower()
+    collections_active = bool(getattr(cfg, "enable_collection_folder", False))
     for level1_dir in level1:
-        if level1_dir.name.startswith("_"):
+        name = level1_dir.name.lower()
+        if coll_root and collections_active and name == coll_root:
+            # Les sagas deviennent les "level1" -> la profondeur 3 est couverte.
+            containers = _dirs(level1_dir)
+        elif name.startswith("_"):
+            # _review / _Vide / _Conflicts / _Dossier Nettoyage restent exclus :
+            # ils contiennent de VRAIES copies mises de cote, les indexer
+            # creerait des conflits fantomes.
             continue
-        if level1_dir.name.lower() == "_review":
-            continue
+        else:
+            containers = [level1_dir]
 
-        pair = movie_dir_title_year(level1_dir.name)
-        if pair:
-            title, year = pair
-            out.setdefault(movie_key(title, year), []).append(str(level1_dir))
-
-        try:
-            children = [path for path in level1_dir.iterdir() if path.is_dir()]
-        except (OSError, PermissionError, FileNotFoundError):
-            children = []
-        for level2_dir in children:
-            pair2 = movie_dir_title_year(level2_dir.name)
-            if not pair2:
-                continue
-            title2, year2 = pair2
-            out.setdefault(movie_key(title2, year2), []).append(str(level2_dir))
+        for container in containers:
+            _index(container)
+            for child in _dirs(container):
+                _index(child)
     return out
 
 
@@ -443,9 +472,24 @@ def find_duplicate_targets(
         existing_paths = existing_idx.get(key, [])
         plan_targets = [item["target"] for item in items]
 
-        has_plan_dupe = len(set(plan_targets)) < len(plan_targets)
+        # F22 : la collision de destination se juge sur des chemins NORMALISES.
+        # NTFS est insensible a la casse et movie_key groupe deja en lower ->
+        # '...\\SEVEN (1995)' et '...\\Seven (1995)' sont le MEME dossier, mais
+        # la comparaison de chaines BRUTES les voyait distincts (plan_conflict
+        # faux negatif). norm_win_path rend un PureWindowsPath dont l'egalite et
+        # le hash sont insensibles a la casse MEME sous Linux/CI.
+        normalized_targets = []
+        for target in plan_targets:
+            try:
+                normalized_targets.append(norm_win_path(Path(target)))
+            except (ValueError, TypeError, OSError):
+                # Degradation sure : on retombe sur la comparaison brute pour ce
+                # seul chemin plutot que de faire echouer check_duplicates.
+                normalized_targets.append(str(target))
+
+        has_plan_dupe = len(set(normalized_targets)) < len(normalized_targets)
         existing_elsewhere = []
-        target_norms = {norm_win_path(Path(target)) for target in plan_targets}
+        target_norms = set(normalized_targets)
         # REGRESSION M8 (relecture B2) : depuis la redirection saga, la cible d'un
         # single-saga (<root>/<_Collection>/<saga>/<nom>) DIVERGE de son dossier
         # SOURCE deja conforme (<root>/<nom>). existing_movie_folder_index indexe

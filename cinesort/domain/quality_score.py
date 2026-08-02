@@ -514,28 +514,33 @@ def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:
 
 
 def _normalize_video_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
-    # Hotfix C5 (2026-06-02) : detection d'unite robuste pour 4K UHD REMUX.
-    # ANCIEN : `if n > 100000: n /= 1000` traitait tout > 100 Mbps comme bps.
-    # Or les 4K UHD REMUX reels atteignent legitiment 100-150 Mbps (= 100000-
-    # 150000 kbps), classes a tort en ~150 kbps (penalite -8 "bitrate faible"
-    # sur du contenu premium). FIX : seuil bps eleve a 500000 (= 500 Mbps,
-    # plafond physique sur tout disque BluRay/UHD-BD ; jamais atteint en
-    # kbps puisque ca correspondrait a 500 Gbps).
-    # Plages realistes VIDEO :
-    #   - kbps  : 500 - 200000  (SD a 4K UHD REMUX)
-    #   - Mbps  : 1 - 200       (peu probable car probe expose generalement kbps)
-    #   - bps   : 500000+       (> 500 Mbps = forcement bps)
+    # F16 (2026-08) : le bitrate video stocke est TOUJOURS en bits/s, exactement
+    # comme le bitrate audio (meme invariant, deja corrige cote audio par
+    # R8-038). La couche probe est le SEUL producteur de `video.bitrate` :
+    #   - infra/probe/_normalize_ffprobe.py:93  -> _to_bitrate_int(...)
+    #   - infra/probe/_normalize_mediainfo.py:84 -> _to_bitrate_int(...)
+    #   -> cinesort/domain/conversions.py:109 to_optional_bitrate, qui rend
+    #      TOUJOURS des bits/s (toute unite Kb/s / Mb/s / Gb/s est convertie).
+    # Les name-hints ne remplissent JAMAIS video.bitrate (_enrich_probe_with_
+    # name_hints ne synthetise qu'une piste AUDIO a bitrate 0), donc aucune
+    # autre unite n'entre ici.
+    # ANCIEN (hotfix C5, devenu faux) : `if n > 500000 -> /1000 sinon tel quel`.
+    # Un 1080p a 450 kb/s reels (= 450000 bps) etait lu comme 450000 kb/s ->
+    # "+18 Debit excellent" au lieu du malus -18, et _estimate_file_size rendait
+    # 303 GB au lieu de ~304 MB (x1000 sur metrics.detected + custom rules
+    # bitrate_kbps / file_size_gb).
+    # FIX : division INCONDITIONNELLE bps -> kbps.
     if raw_bitrate is None:
         return None
     n = _to_float(raw_bitrate, -1.0)
     if n <= 0:
         return None
-    # > 500000 : forcement bps (500 Mbps n'existe pas en kbps cinema video)
-    if n > 500000.0:
-        return int(round(n / 1000.0))
-    # < 1.0 : suspect, probablement Mbps fractionnel (ex: 0.8 Mbps SD legacy)
-    # mais on retourne tel quel int(0) -> None apres clamp. On laisse passer.
-    return int(round(n))
+    kbps = int(round(n / 1000.0))
+    # `or None` : une entree < 500 bps arrondirait a 0, et 0 n'est PAS None ->
+    # il serait traite comme un debit MESURE (ratio 0 -> penalite maximale) et
+    # accorderait +4 de confiance "debit present" (defaut note
+    # AUDIT_RELECTURE_2026-06-10.md:1050). On rend None = "debit non detecte".
+    return kbps or None
 
 
 def _normalize_audio_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
@@ -1227,6 +1232,77 @@ _PENALTY_UPSCALE = -8
 _PENALTY_REENCODE = -6
 _PENALTY_4K_LIGHT = -3
 _PENALTY_COMMENTARY_ONLY = -15
+# F32 : plancher dur des sous-scores video/audio d'une captation degradee
+# (CAM / TS / Screener). Re-applique APRES toutes les mutations de sous-scores
+# (compensations probe FAILED/PARTIAL, bonus Atmos deduit du nom, helpers
+# ere/encode/commentary/genre) pour que les tokens premium menteurs ne
+# puissent pas remonter le score au-dessus du plancher voulu.
+_CAM_SUBSCORE_CEILING = 14.0
+
+# F32 (revue R1) : les tokens CAM COURTS de ``release_name_parser._PATTERNS_CAM``
+# (CAM / TS / TC / WP / SCR) sont ambigus. Places en TETE du nom de fichier ils
+# sont le TITRE du film, pas un marqueur de captation : "Cam" (2018, Netflix),
+# "Ts", "Tc", "Wp"... Le re-plancher F32 ecrasant video_sub/audio_sub a 14 en
+# TOUTE FIN de calcul, il amplifiait ce faux positif pre-existant jusqu'a faire
+# basculer un vrai UHD REMUX de Bronze a Reject sur les chemins probe
+# FAILED/PARTIAL (SMB, fichier corrompu, probe_backend="none").
+#
+# Perimetre volontairement etroit :
+#   - on ne touche NI au detecteur (release_name_parser, hors perimetre de ce
+#     lot) NI au plancher initial (bloc `if cam_detected:` du scoring V1) NI au
+#     cap de tier Bronze (_cap_tier, autorite finale de securite). Une vraie
+#     CAM reste donc plafonnee exactement comme avant ;
+#   - seule la RE-application F32 est conditionnee, ce qui restaure le
+#     comportement d'avant-F32 sur la seule classe de faux positifs prouvee.
+# Le sens de l'erreur residuelle est conservateur : au moindre doute (token
+# ambigu present AILLEURS qu'en tete, forme longue non ambigue, nom vide) on
+# RE-APPLIQUE le plancher.
+_CAM_UNAMBIGUOUS_RE = re.compile(
+    r"\b(?:TELESYNC|TELECINE|CAMRIP|HDCAM|HDTS|DVDSCR|BDSCR|SCREENER|WORKPRINT)\b",
+    re.IGNORECASE,
+)
+_CAM_SHORT_TOKEN_RE = re.compile(r"\b(?:CAM|TS|TC|WP|SCR)\b", re.IGNORECASE)
+# Meme retrait d'extension que release_name_parser.parse_release_name, pour que
+# la position 0 se calcule sur exactement la meme chaine que la detection.
+_CAM_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,4}$")
+
+
+def _cam_signal_is_plausible(release_name: str) -> bool:
+    """False quand le SEUL signal CAM du nom est une abreviation en TETE (F32).
+
+    Un marqueur de captation reel est toujours pose APRES le titre (et le plus
+    souvent apres l'annee) : ``Film.2026.CAM.2160p...``. Un token CAM/TS/TC/WP/
+    SCR situe au tout debut du nom est le premier mot du TITRE.
+
+    >>> _cam_signal_is_plausible("Film.2026.CAM.2160p.REMUX.x265-GRP.mkv")
+    True
+    >>> _cam_signal_is_plausible("Cam.2018.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv")
+    False
+    >>> _cam_signal_is_plausible("Cam (2018) 1080p.mkv")
+    False
+    >>> _cam_signal_is_plausible("Ts.2019.2160p.UHD.BluRay.REMUX-GRP.mkv")
+    False
+    >>> # forme longue non ambigue n'importe ou -> vraie captation
+    >>> _cam_signal_is_plausible("Cam.2018.1080p.HDCAM.x264-GRP.mkv")
+    True
+    >>> # 2e occurrence ailleurs qu'en tete -> vraie captation du film "Cam"
+    >>> _cam_signal_is_plausible("Cam.2018.CAM.XviD-GRP.mkv")
+    True
+    >>> # nom absent : on ne relache rien
+    >>> _cam_signal_is_plausible("")
+    True
+    """
+    text = _CAM_EXT_RE.sub("", str(release_name or "")).strip()
+    if not text:
+        return True
+    if _CAM_UNAMBIGUOUS_RE.search(text):
+        return True
+    matches = list(_CAM_SHORT_TOKEN_RE.finditer(text))
+    if not matches:
+        # ``is_cam`` provient d'un pattern qu'on ne sait pas requalifier ici :
+        # on ne relache pas le plancher.
+        return True
+    return any(m.start() > 0 for m in matches)
 
 
 def _build_invalid_profile_result(
@@ -1979,9 +2055,11 @@ def compute_quality_score(
     if cam_detected:
         cam_label = f"Captation degradee ({name_info.cam_token.upper() or 'CAM'}) - qualite reelle tres faible"
         # Plancher dur : peu importe les tokens premium menteurs, une CAM ne
-        # peut pas avoir un bon subscore video/audio.
-        video_sub = min(float(video_sub), 14.0)
-        audio_sub = min(float(audio_sub), 14.0)
+        # peut pas avoir un bon subscore video/audio. (F32 : ce plancher est
+        # RE-applique juste avant _apply_weights, car les compensations probe
+        # et les helpers V4 qui suivent le contournaient.)
+        video_sub = min(float(video_sub), _CAM_SUBSCORE_CEILING)
+        audio_sub = min(float(audio_sub), _CAM_SUBSCORE_CEILING)
         factors.append({"category": "video", "delta": -30, "label": cam_label})
         reasons.append(f"-30 {cam_label}")
 
@@ -2099,6 +2177,43 @@ def compute_quality_score(
         reasons=reasons,
     )
 
+    # --- F13 : re-clamp des sous-scores dans [0, 100] ---
+    # Les clamps internes (_score_video / _score_audio / _score_extras) sont
+    # suivis de mutations NON re-clampees : compensations probe FAILED/PARTIAL,
+    # bonus Atmos deduit du nom, helpers ere / encode_warnings / commentary /
+    # genre. Sans ce re-clamp, metrics.subscores et build_rich_explanation
+    # exposent des valeurs hors bornes (ex. video = -4 ou 102) et _apply_weights
+    # pondere ces valeurs, ce qui devie du modele documente
+    # (explain_score.py:5 : "chacun 0..100 apres clamp").
+    # NOTE : on n'utilise PAS _clamp_0_100 (qui arrondit en int) et on ne
+    # reaffecte QUE les valeurs hors bornes, pour ne changer ni la valeur ni le
+    # type (int/float) des sous-scores deja en plage.
+    if not (0.0 <= float(video_sub) <= 100.0):
+        video_sub = max(0.0, min(100.0, float(video_sub)))
+    if not (0.0 <= float(audio_sub) <= 100.0):
+        audio_sub = max(0.0, min(100.0, float(audio_sub)))
+    if not (0.0 <= float(extras_sub) <= 100.0):
+        extras_sub = max(0.0, min(100.0, float(extras_sub)))
+
+    # --- F32 : re-application du plancher CAM ---
+    # Le plancher pose plus haut (bloc `if cam_detected:` juste apres le bonus
+    # de source deduit du nom) est contourne par QUATRE chemins :
+    # compensation probe FAILED, compensation PARTIAL, bonus Atmos deduit du
+    # nom, helpers V4 (ere/encode/commentary/genre). On le re-applique ici, en
+    # dernier, pour que "Film.CAM.2160p.REMUX.TrueHD.7.1" ne vaille pas 2x le
+    # plancher d'une CAM honnete. extras_sub reste HORS plancher (il mesure les
+    # metadonnees et le nommage, pas la qualite image/son).
+    # Revue R1 : ne PAS re-appliquer le plancher quand le seul signal CAM est
+    # une abreviation ambigue en tete de nom (= le titre du film, cf.
+    # _cam_signal_is_plausible). Le plancher initial, le facteur -30 et le cap
+    # de tier Bronze restent poses : on ne relache que l'ecrasement final, qui
+    # est la seule partie que F32 a ajoutee.
+    if cam_detected and _cam_signal_is_plausible(release_name):
+        if float(video_sub) > _CAM_SUBSCORE_CEILING:
+            video_sub = _CAM_SUBSCORE_CEILING
+        if float(audio_sub) > _CAM_SUBSCORE_CEILING:
+            audio_sub = _CAM_SUBSCORE_CEILING
+
     # --- Score pondere & tier ---
     score = _apply_weights(video_sub, audio_sub, extras_sub, prof["weights"])
     tier = _determine_tier(score, prof["tiers"])
@@ -2161,16 +2276,27 @@ def compute_quality_score(
         new_tier, hierarchy_decisions = _apply_tier_hierarchy(
             tier, hierarchy_dimensions, hierarchy_config,
         )
-        if new_tier != tier:
+        # F01 (revue R1) : le gate etait `if new_tier != tier`, donc un floor
+        # utilisateur INTEGRALEMENT neutralise par un plafond n'emettait NI
+        # facteur NI raison : l'ecran Qualite n'expliquait nulle part pourquoi
+        # le floor configure n'avait pas pris. On rend maintenant tout l'audit
+        # trail non vide (les entrees `floor_capped` peuvent avoir from == to) ;
+        # `tier = new_tier` reste un no-op quand rien n'a bouge.
+        if hierarchy_decisions:
             for dec in hierarchy_decisions:
-                factors.append({
-                    "category": "video" if dec["dimension"] in ("resolution", "video_codec", "hdr") else "audio",
-                    "delta": 0,
-                    "label": f"Hierarchy {dec['type']} ({dec['dimension']}={dec['value']}): {dec['from']} -> {dec['to']}",
-                })
-                reasons.append(
-                    f"+0 Hierarchie qualite {dec['type']} ({dec['dimension']}): {dec['from']} -> {dec['to']}"
-                )
+                category = "video" if dec["dimension"] in ("resolution", "video_codec", "hdr") else "audio"
+                if dec["type"] == "floor_capped":
+                    detail = (
+                        f"floor {dec.get('requested') or '?'} demande, plafond "
+                        f"{dec.get('ceiling') or '?'} -> {dec['to']}"
+                    )
+                    label = f"Hierarchy floor borne ({dec['dimension']}={dec['value']}): {detail}"
+                    reason = f"+0 Hierarchie qualite floor borne ({dec['dimension']}) : {detail}"
+                else:
+                    label = f"Hierarchy {dec['type']} ({dec['dimension']}={dec['value']}): {dec['from']} -> {dec['to']}"
+                    reason = f"+0 Hierarchie qualite {dec['type']} ({dec['dimension']}): {dec['from']} -> {dec['to']}"
+                factors.append({"category": category, "delta": 0, "label": label})
+                reasons.append(reason)
             tier = new_tier
 
     # --- Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : CAP de tier ---

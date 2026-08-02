@@ -78,6 +78,12 @@ class RunState:
         self.speed_ewma = 0.0
 
         self.logs: List[Dict[str, str]] = []  # {ts, level, msg}
+        # F19 : index ABSOLU du 1er item encore conserve dans self.logs. Le trim
+        # de retention (log(), plus bas) evince les plus anciens ; sans cet
+        # offset, les index de pagination de get_status (absolus) et les index
+        # de liste (relatifs) divergeaient -> next_log_index fige a
+        # MAX_RUN_LOG_ITEMS et panneau logs gele a vie.
+        self.logs_offset: int = 0
         self.rows: List[core.PlanRow] = []
         self.stats: Optional[core.Stats] = None
 
@@ -102,7 +108,12 @@ class RunState:
         with self.lock:
             self.logs.append(item)
             if len(self.logs) > MAX_RUN_LOG_ITEMS:
-                self.logs = self.logs[-MAX_RUN_LOG_ITEMS:]
+                # F19 : mutation EN PLACE + comptabilisation des items evinces,
+                # pour que logs_offset + len(self.logs) reste l'index absolu du
+                # prochain item a emettre (cf run_flow_support._get_status_impl).
+                excess = len(self.logs) - MAX_RUN_LOG_ITEMS
+                del self.logs[:excess]
+                self.logs_offset += excess
         # best-effort UI log persistence
         # Fix audit 2026-05-25 (v1.5.3) Vague H : file append protege par
         # _file_log_lock pour eviter les lignes interleavees multi-thread.

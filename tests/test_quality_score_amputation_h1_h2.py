@@ -36,17 +36,24 @@ from cinesort.ui.api import quality_report_support
 
 
 def _probe(bitrate_kbps: int, *, subtitles: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """Normalized probe dict d'un 1080p h264 (upscale si bitrate bas)."""
+    """Normalized probe dict d'un 1080p h264 (upscale si bitrate bas).
+
+    F16 : le champ `bitrate` d'une probe normalisee est en BITS/S (la couche
+    probe passe tout par conversions.to_optional_bitrate). Le parametre du
+    helper reste exprime en kb/s pour la lisibilite des appelants, la conversion
+    se fait ici. Avant ce correctif la fixture stockait des kb/s bruts, ce qui
+    faisait lire 9000 kb/s comme 9 kb/s une fois la normalisation corrigee.
+    """
     return {
         "probe_quality": "FULL",
         "video": {
             "width": 1920,
             "height": 1080,
             "codec": "h264",
-            "bitrate": bitrate_kbps,
+            "bitrate": int(bitrate_kbps) * 1000,
             "bit_depth": 8,
         },
-        "audio_tracks": [{"codec": "eac3", "channels": 6, "language": "eng", "bitrate": 640}],
+        "audio_tracks": [{"codec": "eac3", "channels": 6, "language": "eng", "bitrate": 640_000}],
         "subtitles": subtitles if subtitles is not None else [],
     }
 
