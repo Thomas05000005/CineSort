@@ -116,9 +116,7 @@ class FusionInputsFromGroupsTests(unittest.TestCase):
             quality=_FakeQualityRepo({"metrics": {"detected": {"duration_s": 7200.0}}}),
             perceptual=_FakePerceptualRepo({"audio_fingerprint": "AQAAxx"}),
         )
-        buckets = _build_fusion_inputs_from_groups(
-            self._groups(), self.rows, store=store, run_id="run1"
-        )
+        buckets = _build_fusion_inputs_from_groups(self._groups(), self.rows, store=store, run_id="run1")
 
         self.assertEqual(len(buckets), 1)
         self.assertEqual(buckets[0][0].duration_s, 7200.0)
@@ -129,9 +127,7 @@ class FusionInputsFromGroupsTests(unittest.TestCase):
             quality=_FakeQualityRepo(exc=sqlite3.OperationalError("database is locked")),
             perceptual=_FakePerceptualRepo(exc=sqlite3.OperationalError("database is locked")),
         )
-        buckets = _build_fusion_inputs_from_groups(
-            self._groups(), self.rows, store=store, run_id="run1"
-        )
+        buckets = _build_fusion_inputs_from_groups(self._groups(), self.rows, store=store, run_id="run1")
 
         self.assertEqual(len(buckets), 1, "sqlite3.Error n'herite PAS de OSError")
         self.assertEqual(buckets[0][0].duration_s, 0.0)

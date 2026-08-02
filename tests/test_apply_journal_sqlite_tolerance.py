@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 from cinesort.app import apply_core
 
@@ -131,7 +131,9 @@ class RecordApplyOpSqliteToleranceTests(unittest.TestCase):
                 record_op=_journal_verrouille,
             )
 
-            self.assertEqual(res.errors, 0, f"un echec de journal ne doit pas compter comme erreur : {res.error_messages}")
+            self.assertEqual(
+                res.errors, 0, f"un echec de journal ne doit pas compter comme erreur : {res.error_messages}"
+            )
             self.assertGreaterEqual(
                 res.renames + res.moves,
                 2,

@@ -82,8 +82,7 @@ class RunStatusLogPaginationTests(unittest.TestCase):
         data = self._poll(idx)
         self.assertTrue(
             data["logs"],
-            "Le flux de logs doit repartir apres le trim de retention "
-            "(sinon le panneau Traitement est gele a vie).",
+            "Le flux de logs doit repartir apres le trim de retention (sinon le panneau Traitement est gele a vie).",
         )
         self.assertEqual(data["logs"][-1]["msg"], "ligne 6099")
         self.assertEqual(data["next_log_index"], 6100)

@@ -55,9 +55,7 @@ class DuplicatesPlanConflictNormcaseTests(unittest.TestCase):
         )
 
     def _run(self, rows: list) -> dict:
-        decisions = {
-            r.row_id: {"ok": True, "title": r.proposed_title, "year": r.proposed_year} for r in rows
-        }
+        decisions = {r.row_id: {"ok": True, "title": r.proposed_title, "year": r.proposed_year} for r in rows}
         return plan_support.find_duplicate_targets(self._cfg(), rows, decisions)
 
     def test_case_divergent_titles_same_target_is_plan_conflict(self) -> None:
@@ -71,8 +69,7 @@ class DuplicatesPlanConflictNormcaseTests(unittest.TestCase):
         self.assertEqual(data["total_groups"], 1)
         self.assertTrue(
             bool(data["groups"][0]["plan_conflict"]),
-            "'SEVEN (1995)' et 'Seven (1995)' dans le meme parent = le MEME "
-            "dossier NTFS -> collision de destination.",
+            "'SEVEN (1995)' et 'Seven (1995)' dans le meme parent = le MEME dossier NTFS -> collision de destination.",
         )
 
     def test_distinct_parents_no_plan_conflict(self) -> None:

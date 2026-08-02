@@ -97,8 +97,7 @@ class DuplicatesCollectionRootDepth3Tests(unittest.TestCase):
         self.assertEqual(
             data["mergeable_count"],
             1,
-            "Deux copies binairement identiques vers la meme cible saga -> "
-            "fusion sure signalee a l'utilisateur.",
+            "Deux copies binairement identiques vers la meme cible saga -> fusion sure signalee a l'utilisateur.",
         )
 
     def test_review_bucket_is_never_indexed(self) -> None:

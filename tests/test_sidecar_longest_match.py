@@ -77,7 +77,9 @@ class SidecarLongestMatchTests(unittest.TestCase):
 
             attribues = []
             for video in ("Alien.mkv", "Alien 2.mkv"):
-                attribues.extend(p.name for p in core.classify_sidecars(cfg, folder, folder / video, is_collection=True))
+                attribues.extend(
+                    p.name for p in core.classify_sidecars(cfg, folder, folder / video, is_collection=True)
+                )
 
             self.assertEqual(sorted(attribues), sorted(noms), "aucun sidecar perdu")
             self.assertEqual(len(attribues), len(set(attribues)), "aucun sidecar attribue deux fois")
@@ -98,9 +100,7 @@ class SidecarLongestMatchTests(unittest.TestCase):
             (folder / "Alien.fr.srt").write_text("x", encoding="utf-8")
             cfg = _cfg(folder)
 
-            noms = sorted(
-                p.name for p in core.classify_sidecars(cfg, folder, folder / "Alien.mkv", is_collection=True)
-            )
+            noms = sorted(p.name for p in core.classify_sidecars(cfg, folder, folder / "Alien.mkv", is_collection=True))
             self.assertEqual(
                 noms,
                 ["Alien.fr.srt", "Alien.sample.fr.srt"],
