@@ -40,11 +40,7 @@ def candidate_from_json(data: Dict[str, Any]) -> core.Candidate:
     # tout candidat voyait son id+nom de collection nulles au rechargement.
     collection_id: int | None
     try:
-        collection_id = (
-            int(data["tmdb_collection_id"])
-            if data.get("tmdb_collection_id") not in (None, "", 0)
-            else None
-        )
+        collection_id = int(data["tmdb_collection_id"]) if data.get("tmdb_collection_id") not in (None, "", 0) else None
     except (OSError, KeyError, TypeError, ValueError):
         collection_id = None
     return core.Candidate(
@@ -137,6 +133,7 @@ def _parse_tv_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     memoire), apply rechargeait les rows via plan.jsonl puis apply_tv_episode
     renommait avec season=0/episode=0 -> fichiers TV 'S00E00 - .ext' (violation
     invariant renommage + perte d'info)."""
+
     def _opt_int(key: str) -> Optional[int]:
         v = data.get(key)
         return int(v) if v not in (None, "") else None

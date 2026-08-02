@@ -54,6 +54,7 @@ _log = logging.getLogger(__name__)
 # pour eviter une dependance circulaire entre modules ui.api.
 _UNDO_DEADLINE_SECONDS = 24 * 3600
 
+
 class _DuplicateCheckError(Exception):
     pass
 
@@ -1475,6 +1476,7 @@ def _validate_apply(
         from cinesort.ui.api.run_flow_support import (
             _project_decisions_ok_from_tri_state,
         )
+
         incoming = _project_decisions_ok_from_tri_state(incoming)
     except ImportError:
         # Environnement degrade : on continue sans projection (shape legacy
@@ -1520,9 +1522,7 @@ def _validate_apply(
     # rejected + 10 approved. Calcule apres _normalize_decisions_for_rows
     # qui resout le tri-etat (les decisions deferred deviennent ok=False).
     approved_keys = {
-        key
-        for key, value in safe_decisions.items()
-        if isinstance(value, dict) and value.get("ok") is True
+        key for key, value in safe_decisions.items() if isinstance(value, dict) and value.get("ok") is True
     }
     try:
         state.atomic_write_json(run_paths.validation_json, safe_decisions)
@@ -2012,6 +2012,7 @@ def _execute_apply(
     marked_for_deletion: Set[str] = set()
     try:
         from cinesort.ui.api.library_actions_support import migrate_legacy_deletion_marks
+
         for _mid in migrate_legacy_deletion_marks(api, run_id):
             if _mid:
                 marked_for_deletion.add(str(_mid))
@@ -2199,8 +2200,7 @@ def _cleanup_apply(
             # reussi, on preserve la backward compat.
             log_fn(
                 "WARN",
-                f"Journal apply non finalise (transition d'etat refusee, "
-                f"batch_id={apply_batch_id}) : {exc}",
+                f"Journal apply non finalise (transition d'etat refusee, batch_id={apply_batch_id}) : {exc}",
             )
     log_fn(
         "INFO",
@@ -2309,11 +2309,7 @@ def _summarize_apply(
         error_messages = [str(msg) for msg in (getattr(result, "error_messages", None) or []) if str(msg).strip()]
         if error_messages:
             shown = error_messages[:20]
-            summary_block += (
-                "\n"
-                "ABANDONNE / EN ERREUR (a verifier)\n"
-                + "".join(f"- {msg}\n" for msg in shown)
-            )
+            summary_block += "\nABANDONNE / EN ERREUR (a verifier)\n" + "".join(f"- {msg}\n" for msg in shown)
             if len(error_messages) > len(shown):
                 summary_block += f"- ... et {len(error_messages) - len(shown)} autre(s) message(s) dans le journal\n"
 
@@ -2393,10 +2389,7 @@ def _summarize_apply(
             # n'a pu etre traite. Une row abandonnee cote destructif peut avoir ete
             # rangee/renommee par la boucle d'apply normale (cf. [D3]) : on n'affirme donc
             # PAS "rien n'a bouge", on renvoie vers le detail.
-            action_lines.append(
-                f"- {len(error_messages)} message(s) a verifier "
-                "(cf. section ABANDONNE / EN ERREUR)."
-            )
+            action_lines.append(f"- {len(error_messages)} message(s) a verifier (cf. section ABANDONNE / EN ERREUR).")
         if result.conflicts_quarantined_count > 0:
             action_lines.append(f"- Conflits fichiers a verifier: {review_root / '_conflicts'}")
         if result.conflicts_sidecars_quarantined_count > 0:
@@ -2733,6 +2726,7 @@ def _apply_changes_body(
             _log.debug("apply_begin a echoue, on continue sans progress", exc_info=True)
     _apply_cb: Optional[Callable[[int, int, str], None]] = None
     if rs is not None:
+
         def _apply_cb(idx: int, total: int, current: str, _rs: Any = rs) -> None:  # noqa: E306
             try:
                 _rs.apply_progress(idx, total, current, "rows")
@@ -2956,9 +2950,7 @@ def _apply_changes_body(
                 "decision_count": len(decisions),
                 "apply_atomic": bool(apply_atomic),
                 "atomic_rollback_status": (
-                    str((atomic_rollback_summary or {}).get("rollback_status") or "")
-                    if atomic_rollback_summary
-                    else ""
+                    str((atomic_rollback_summary or {}).get("rollback_status") or "") if atomic_rollback_summary else ""
                 ),
             },
         )
@@ -3219,6 +3211,7 @@ def _build_apply_preview_body(
                 action_summary = "video_move"
         else:
             action_summary = op_type.lower() or "unknown"
+
         # Fix audit 2026-05-30 (APPLY-1) Vague J — defense en profondeur cote UI :
         # meme si une op a echappe au backend (regression future), on ne doit
         # PAS la presenter comme un rename si folder_old_name et folder_new_name
@@ -3228,10 +3221,7 @@ def _build_apply_preview_body(
         def _fs_equivalent_name(a: str, b: str) -> bool:
             if not a or not b:
                 return False
-            return (
-                unicodedata.normalize("NFC", a).casefold()
-                == unicodedata.normalize("NFC", b).casefold()
-            )
+            return unicodedata.normalize("NFC", a).casefold() == unicodedata.normalize("NFC", b).casefold()
 
         if op_type == "MOVE_DIR" and _fs_equivalent_name(folder_old_name, folder_new_name):
             action_summary = "noop_equivalent_fs"
@@ -3267,9 +3257,7 @@ def _build_apply_preview_body(
     # dont TOUTES les ops sont equivalentes FS doit etre classe "noop"
     # pour ne pas apparaitre comme un changement dans l'UI.
     for film in films_list:
-        effective_ops = [
-            op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"
-        ]
+        effective_ops = [op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"]
         n_move_dir = sum(1 for op in effective_ops if op["op_type"] == "MOVE_DIR")
         n_move_file = sum(1 for op in effective_ops if op["op_type"] == "MOVE_FILE")
         if n_move_dir + n_move_file == 0:
@@ -3285,10 +3273,7 @@ def _build_apply_preview_body(
     # Fix audit 2026-05-30 (APPLY-1) : nouveau compteur `noop_equivalent_fs`
     # pour observability des ops detectees comme equivalentes FS cote UI.
     noop_equivalent_fs_count = sum(
-        1
-        for f in films_list
-        for op in f["ops"]
-        if op.get("action_summary") == "noop_equivalent_fs"
+        1 for f in films_list for op in f["ops"] if op.get("action_summary") == "noop_equivalent_fs"
     )
     totals = {
         "films": len(films_list),

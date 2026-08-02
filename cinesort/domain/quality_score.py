@@ -1102,8 +1102,7 @@ def _score_extras(
     elif probe_quality == "UNKNOWN":
         # Pas de penalite ni de bonus : on log un warning a la place du malus.
         logger.warning(
-            "scoring/_score_extras: probe_quality=UNKNOWN (champ absent), "
-            "neutre - ni bonus ni penalite metadata."
+            "scoring/_score_extras: probe_quality=UNKNOWN (champ absent), neutre - ni bonus ni penalite metadata."
         )
     else:
         # FAILED (ou valeur fallback FAILED): probe a echoue, penalite normale.
@@ -1514,6 +1513,7 @@ def _apply_custom_rules_helper(
     # le caller passe un NormalizedProbe dataclass (le call site compute_quality_score
     # transmettait la variable brute non convertie, cf bug critique fix).
     normalized_probe = _normalize_probe_arg(normalized_probe)
+
     # Hotfix BUG-010 FIX COMPLET (2026-06-02) : helper defensif applique PARTOUT
     # dans le helper + rule_context. _vr a remplace les acces direct vr["..."]
     # qui levaient KeyError silencieusement (degrade silencieux par le
@@ -1618,9 +1618,7 @@ def _compute_confidence_helper(
         confidence_reasons.append("Probe partielle (certaines metadonnees manquent).")
     elif probe_quality == "UNKNOWN":
         # Neutre : ni bonus ni malus. Warning deja log dans _score_extras.
-        confidence_reasons.append(
-            "Probe non renseignee (UNKNOWN): confidence neutre, donnees a interpreter."
-        )
+        confidence_reasons.append("Probe non renseignee (UNKNOWN): confidence neutre, donnees a interpreter.")
     else:
         # FAILED : probe explicite a echoue.
         confidence_value -= 28
@@ -1964,8 +1962,8 @@ def compute_quality_score(
             # Valeur vide explicite ou non reconnue : on degrade vers FAILED
             # avec un warning explicite (pas silencieux comme avant).
             logger.warning(
-                "scoring: probe_quality present mais invalide (%r), "
-                "fallback FAILED", raw_probe_quality,
+                "scoring: probe_quality present mais invalide (%r), fallback FAILED",
+                raw_probe_quality,
             )
             probe_quality = "FAILED"
 
@@ -2070,11 +2068,13 @@ def compute_quality_score(
     if name_info.audio_is_atmos or name_info.audio_is_dts_x:
         # Verifier qu'on n'a pas deja un bonus atmos via le probe (best_audio)
         best_codec_lower = str(best_audio.get("codec") or "").lower()
-        if ("atmos" not in best_codec_lower) and ("dts:x" not in best_codec_lower) and ("dts-x" not in best_codec_lower):
+        if (
+            ("atmos" not in best_codec_lower)
+            and ("dts:x" not in best_codec_lower)
+            and ("dts-x" not in best_codec_lower)
+        ):
             atmos_bonus = +3
-            atmos_label = (
-                "Atmos detecte dans le nom" if name_info.audio_is_atmos else "DTS:X detecte dans le nom"
-            )
+            atmos_label = "Atmos detecte dans le nom" if name_info.audio_is_atmos else "DTS:X detecte dans le nom"
             audio_sub = max(0.0, min(100.0, float(audio_sub) + atmos_bonus))
             factors.append({"category": "audio", "delta": atmos_bonus, "label": atmos_label})
             reasons.append(f"+{atmos_bonus} {atmos_label}")
@@ -2117,17 +2117,13 @@ def compute_quality_score(
         # Penalite d'incertitude residuelle (le nom n'est pas le probe).
         uncertainty_penalty = 5
         video_sub = max(0.0, float(video_sub) - uncertainty_penalty)
-        factors.append(
-            {"category": "probe", "delta": -uncertainty_penalty, "label": "Incertitude : probe absent"}
-        )
+        factors.append({"category": "probe", "delta": -uncertainty_penalty, "label": "Incertitude : probe absent"})
         reasons.append(f"-{uncertainty_penalty} Incertitude : score base sur le nom de fichier seul")
     elif probe_quality == "PARTIAL" and name_filled_fields:
         # Compensation partielle : le probe a quand meme apporte qqch.
         if "audio_track_synth" in name_filled_fields:
             audio_sub = min(100.0, float(audio_sub) + 6)
-            factors.append(
-                {"category": "probe", "delta": 6, "label": "Compensation audio (synthese nom)"}
-            )
+            factors.append({"category": "probe", "delta": 6, "label": "Compensation audio (synthese nom)"})
             reasons.append("+6 Compensation audio (synthese depuis le nom)")
         # Compense le debit non mesure quand on n'a pas de bitrate.
         if not _to_int(video.get("bitrate"), 0):
@@ -2265,16 +2261,21 @@ def compute_quality_score(
             "resolution_source": vr.get("resolution_source"),
             "video_codec": vr.get("video_codec"),
             "hdr": (
-                "dolby_vision" if (vr.get("has_dv") and hdr_is_probe)
-                else "hdr10_plus" if (vr.get("has_hdr10p") and hdr_is_probe)
-                else "hdr10" if (vr.get("has_hdr10") and hdr_is_probe)
+                "dolby_vision"
+                if (vr.get("has_dv") and hdr_is_probe)
+                else "hdr10_plus"
+                if (vr.get("has_hdr10p") and hdr_is_probe)
+                else "hdr10"
+                if (vr.get("has_hdr10") and hdr_is_probe)
                 else ""
             ),
             "audio_codec": _hierarchy_audio_codec_token(best_audio),
             "release_group": str(name_info.release_group or "").lower() if name_info else "",
         }
         new_tier, hierarchy_decisions = _apply_tier_hierarchy(
-            tier, hierarchy_dimensions, hierarchy_config,
+            tier,
+            hierarchy_dimensions,
+            hierarchy_config,
         )
         # F01 (revue R1) : le gate etait `if new_tier != tier`, donc un floor
         # utilisateur INTEGRALEMENT neutralise par un plafond n'emettait NI
@@ -2311,9 +2312,7 @@ def compute_quality_score(
                 f"Tier plafonne a Silver : probe indisponible, qualite non verifiee "
                 f"(tier brut {tier} non certifiable sur le seul nom de fichier)"
             )
-            factors.append(
-                {"category": "probe", "delta": 0, "label": f"Cap probe FAILED: {tier} -> {capped}"}
-            )
+            factors.append({"category": "probe", "delta": 0, "label": f"Cap probe FAILED: {tier} -> {capped}"})
             tier = capped
     if cam_detected:
         # Une CAM/TS/Screener est plafonnee a Bronze maximum (jamais Silver+).

@@ -537,7 +537,7 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         # On verifie le contrat de la cap : peu importe combien de logs
         # pre-existent, apres avoir push MAX+250 logs, len == MAX et le
         # premier message survivant est log-(pre + 250 - 0) calcule.
-        pre = len(rs.logs)
+        len(rs.logs)
         for i in range(api_mod.MAX_RUN_LOG_ITEMS + 250):
             rs.log("DEBUG", f"log-{i}")
 

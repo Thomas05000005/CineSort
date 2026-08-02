@@ -63,9 +63,7 @@ class CiWorkflowsCompatTests(unittest.TestCase):
         ci = (WORKFLOWS_DIR / "ci.yml").read_text(encoding="utf-8")
         # pytest, unittest discover, ou coverage run -m pytest.
         has_tests = bool(
-            re.search(r"\bpytest\b", ci)
-            or re.search(r"unittest\s+discover", ci)
-            or re.search(r"coverage\s+run", ci)
+            re.search(r"\bpytest\b", ci) or re.search(r"unittest\s+discover", ci) or re.search(r"coverage\s+run", ci)
         )
         self.assertTrue(has_tests, "ci.yml ne lance pas de tests Python")
 

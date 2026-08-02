@@ -80,6 +80,8 @@ def strip_provider_tags(name: str) -> str:
     cleaned = _TMDB_TAG_RE.sub(" ", name)
     cleaned = _IMDB_TAG_RE.sub(" ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
 REMASTER_HINT_RE = re.compile(
     r"\b("
     r"remaster(?:ed)?|restor(?:ed|ation)|restaure(?:e|es|ee|ees)?|"

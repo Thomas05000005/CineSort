@@ -119,16 +119,17 @@ class RunState:
         # _file_log_lock pour eviter les lignes interleavees multi-thread.
         try:
             self.paths.ui_log_txt.parent.mkdir(parents=True, exist_ok=True)
-            with self._file_log_lock:
-                with open(self.paths.ui_log_txt, "a", encoding="utf-8") as f:
-                    f.write(f"[{ts}] {level}: {msg}\n")
+            with self._file_log_lock, open(self.paths.ui_log_txt, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {level}: {msg}\n")
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             if _env_truthy("CINESORT_DEBUG"):
                 try:
-                    with self._file_log_lock:
-                        with open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f:
-                            f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
+                    with (
+                        self._file_log_lock,
+                        open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f,
+                    ):
+                        f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
                 except (OSError, PermissionError):
                     return
 
@@ -183,9 +184,7 @@ class RunState:
         with self.lock:
             prev_idx = self.apply_idx
             prev_ts = (
-                self.apply_progress_samples[-1][0]
-                if self.apply_progress_samples
-                else (self.apply_started_ts or now)
+                self.apply_progress_samples[-1][0] if self.apply_progress_samples else (self.apply_started_ts or now)
             )
 
             self.apply_idx = int(idx or 0)

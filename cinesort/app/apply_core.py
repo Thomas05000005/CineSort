@@ -40,8 +40,7 @@ def _name_eq_fs(a: str, b: str) -> bool:
     "video missing" (et compromet l'apply_rollback faute de src_sha1).
     """
     return (
-        unicodedata.normalize("NFC", str(a or "")).casefold()
-        == unicodedata.normalize("NFC", str(b or "")).casefold()
+        unicodedata.normalize("NFC", str(a or "")).casefold() == unicodedata.normalize("NFC", str(b or "")).casefold()
     )
 
 
@@ -821,7 +820,10 @@ def move_file_with_collision_policy(
         # path conflicts_root/conflict_context() suppose un fichier en dst.
         if dst_file.exists():
             if not dst_file.is_file():
-                log("WARN", f"CONFLICT (race) detected pre-move (dst is not a file): {src_file} -> {dst_file}, quarantining")
+                log(
+                    "WARN",
+                    f"CONFLICT (race) detected pre-move (dst is not a file): {src_file} -> {dst_file}, quarantining",
+                )
             else:
                 log("WARN", f"CONFLICT (race) detected pre-move: {src_file} -> {dst_file}, quarantining")
             qdst = move_to_review_bucket(
@@ -1088,7 +1090,7 @@ def _append_error_message(res: "ApplyResult", message: str) -> None:
     anciens passent un `res` duck-type sans `error_messages` ; un append nu ferait
     crasher tout l'apply (les branches fail-closed etaient hors du try/except OSError).
     """
-    try:
+    try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
         res.error_messages.append(message)
     except AttributeError:  # noqa: BLE001 - retro-compat tests anciens (res duck-type)
         pass
@@ -1354,8 +1356,7 @@ def move_marked_for_deletion_to_bucket(
             res.errors += 1
             _append_error_message(
                 res,
-                f"MARKED_FOR_DELETION {rid}: row_id duplique dans le plan, "
-                f"deplacement abandonne (fail-closed)",
+                f"MARKED_FOR_DELETION {rid}: row_id duplique dans le plan, deplacement abandonne (fail-closed)",
             )
             abandoned_row_ids.add(str(rid))
             continue
@@ -1583,16 +1584,19 @@ def apply_rows(
     # Phase 6 doublons : déplacer les losers AVANT la boucle apply principale.
     losers_set: Set[str] = {str(r) for r in (duplicate_loser_row_ids or set()) if r}
     if losers_set and ctx.duplicates_user_decided_root is not None:
-        abandoned = move_duplicate_losers_to_user_decided(
-            cfg,
-            rows,
-            losers_set,
-            duplicates_user_decided_root=ctx.duplicates_user_decided_root,
-            dry_run=dry_run,
-            log=log,
-            res=res,
-            record_op=record_op,
-        ) or set()
+        abandoned = (
+            move_duplicate_losers_to_user_decided(
+                cfg,
+                rows,
+                losers_set,
+                duplicates_user_decided_root=ctx.duplicates_user_decided_root,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=record_op,
+            )
+            or set()
+        )
         # Retirer les losers des rows à apply normalement.
         # RELECTURE R2 [D3] : SAUF les row_id ABANDONNES par le fail-closed (rien n'a
         # bouge pour eux). Les exclure quand meme laissait le film ni deplace ni
@@ -1604,16 +1608,19 @@ def apply_rows(
     # AVANT la boucle apply, puis exclus (meme schema que les losers).
     marked_set: Set[str] = {str(r) for r in (marked_for_deletion_row_ids or set()) if r}
     if marked_set and ctx.marked_for_deletion_root is not None:
-        abandoned_marked = move_marked_for_deletion_to_bucket(
-            cfg,
-            rows,
-            marked_set,
-            marked_for_deletion_root=ctx.marked_for_deletion_root,
-            dry_run=dry_run,
-            log=log,
-            res=res,
-            record_op=record_op,
-        ) or set()
+        abandoned_marked = (
+            move_marked_for_deletion_to_bucket(
+                cfg,
+                rows,
+                marked_set,
+                marked_for_deletion_root=ctx.marked_for_deletion_root,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=record_op,
+            )
+            or set()
+        )
         # [D3] : idem losers, les abandons fail-closed restent dans l'apply normal.
         excluded_marked = marked_set - abandoned_marked
         rows = [r for r in rows if str(getattr(r, "row_id", "")) not in excluded_marked]
@@ -1845,10 +1852,16 @@ def apply_rows(
                 # apparaissent comme `user_rejected` dans apply_audit.jsonl,
                 # ce qui fausse la tracabilite post-apply (cf apply_audit.py
                 # objectif "pourquoi ce fichier a ete deplace la").
-                _dec_reason = "user_approved" if ok else (
-                    "user_deferred" if dec.get("decision") == "deferred"
-                    else "validation_absente" if row.row_id not in ctx.decision_keys
-                    else "user_rejected"
+                _dec_reason = (
+                    "user_approved"
+                    if ok
+                    else (
+                        "user_deferred"
+                        if dec.get("decision") == "deferred"
+                        else "validation_absente"
+                        if row.row_id not in ctx.decision_keys
+                        else "user_rejected"
+                    )
                 )
                 audit_logger.row_decision(
                     row_id=str(row.row_id),
@@ -2020,7 +2033,7 @@ def apply_rows(
             err_msg = _locked_msg(folder.name)
             res.errors += 1
             # Remonter le message a l'UI via ApplyResult.error_messages (cf core.py).
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 res.error_messages.append(err_msg)
             except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
                 pass
@@ -2101,9 +2114,7 @@ def apply_rows(
                     int(res.sidecar_conflicts_kept_both_count),
                     int(res.duplicates_identical_moved_count),
                 )
-                _conflict_delta = tuple(
-                    _audit_post_conflicts[i] - _audit_pre_conflicts[i] for i in range(3)
-                )
+                _conflict_delta = tuple(_audit_post_conflicts[i] - _audit_pre_conflicts[i] for i in range(3))
                 if _conflict_delta[0] > 0:
                     audit_logger.conflict(
                         row_id=str(row.row_id),
@@ -2295,7 +2306,7 @@ def apply_single(
     _path_err = check_path_length_killswitch(str(dst)) or check_path_length_killswitch(_candidate_inner_path)
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass
@@ -2411,9 +2422,7 @@ def apply_single(
             # comportement SMB est variable. On force une erreur explicite et
             # cohrente plutot que de perdre des donnees.
             if dst.exists():
-                raise FileExistsError(
-                    f"apply_single: destination apparue pendant l'apply (race condition) : {dst}"
-                )
+                raise FileExistsError(f"apply_single: destination apparue pendant l'apply (race condition) : {dst}")
             folder.rename(dst)
 
     # P1.3 : record l'op même en dry_run pour la preview UI
@@ -2495,7 +2504,7 @@ def apply_collection_item(
     _path_err = check_path_length_killswitch(str(_candidate_video_path))
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass
@@ -2556,7 +2565,11 @@ def apply_collection_item(
             dst = sub_dir / sidecar.name
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
-                op_key = (str(core_mod._norm_win_path(sidecar)), str(core_mod._norm_win_path(dst)), "collection_sidecar")
+                op_key = (
+                    str(core_mod._norm_win_path(sidecar)),
+                    str(core_mod._norm_win_path(dst)),
+                    "collection_sidecar",
+                )
                 if op_key in dedup_seen_ops:
                     log("INFO", f"SKIP_DEDUP collection_sidecar: {sidecar} -> {dst}")
                     core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
@@ -2706,7 +2719,7 @@ def apply_tv_episode(
             if not sc.exists():
                 continue
             if sc.name.startswith(video.stem):
-                suffix_chain = sc.name[len(video.stem):]
+                suffix_chain = sc.name[len(video.stem) :]
                 dst_sc = target_dir / f"{target_stem}{suffix_chain}"
             else:
                 dst_sc = target_dir / sc.name
@@ -2724,7 +2737,7 @@ def apply_tv_episode(
             break
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass

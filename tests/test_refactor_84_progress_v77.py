@@ -105,10 +105,7 @@ class TestRefactor84LazyImportProgress(unittest.TestCase):
                 f"Soit on a regresse (ajout d'un lazy import), soit on a converti "
                 f"et on doit BAISSER la borne MAX_LAZY_IMPORTS.\n\n"
                 f"Top fichiers :\n"
-                + "\n".join(
-                    f"  {c:3d}  {p}"
-                    for p, c in sorted(by_file.items(), key=lambda x: -x[1])[:15]
-                )
+                + "\n".join(f"  {c:3d}  {p}" for p, c in sorted(by_file.items(), key=lambda x: -x[1])[:15])
             ),
         )
 

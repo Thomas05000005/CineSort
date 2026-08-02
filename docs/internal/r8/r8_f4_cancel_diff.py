@@ -11,7 +11,9 @@ AVANT le batch -> les deux events sont le MÊME.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_cancel_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import threading
 import types
@@ -56,11 +58,15 @@ def run():
     print("=== R8-037 — câblage cancel_event run <-> batch perceptuel ===")
     print(f"  get_cancel_event(run) is rt.cancel_event : {got is ev}")
     print(f"  AVANT : _resolve_cancel_event(api) = {avant}  (None -> annulation INERTE)")
-    print(f"  APRÈS : event résolu avant set = {resolved_before is not None} (set={resolved_before.is_set() if resolved_before else None})")
+    print(
+        f"  APRÈS : event résolu avant set = {resolved_before is not None} (set={resolved_before.is_set() if resolved_before else None})"
+    )
     print(f"  APRÈS : après request_cancel (ev.set) -> _resolve.is_set() = {apres_sees_cancel}  (annulation VUE)")
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (event du run câblé sur api -> annulation propagée au batch)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (event du run câblé sur api -> annulation propagée au batch)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

@@ -71,6 +71,8 @@ def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
             if seg == mlow or (mlow.startswith("onedrive") and seg.startswith("onedrive")):
                 return marker
     return None
+
+
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
 # apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap
 # ordonne (toutes les migrations en mode CREATE TABLE IF NOT EXISTS),
@@ -295,10 +297,7 @@ class _StoreBase:
         # migration_manager.py (BUG-014 hotfix1) pour coherence : sans ca, le
         # bootstrap differerait du chemin migration-par-migration et un faux
         # positif desactiverait silencieusement les FK pour TOUT le bootstrap.
-        needs_fk_disable = any(
-            line.strip().startswith("-- @manager: disable_fk")
-            for line in script.splitlines()
-        )
+        needs_fk_disable = any(line.strip().startswith("-- @manager: disable_fk") for line in script.splitlines())
         with self._managed_conn() as conn:
             if needs_fk_disable:
                 conn.execute("PRAGMA foreign_keys = OFF")
@@ -507,8 +506,7 @@ class _StoreBase:
                     conn.execute("PRAGMA wal_checkpoint(RESTART)")
                 except sqlite3.OperationalError as exc:
                     logger.warning(
-                        "wal_checkpoint failed before integrity_check (%s) — "
-                        "integrity check may use stale WAL pages",
+                        "wal_checkpoint failed before integrity_check (%s) — integrity check may use stale WAL pages",
                         exc,
                     )
                 row = conn.execute("PRAGMA integrity_check").fetchone()

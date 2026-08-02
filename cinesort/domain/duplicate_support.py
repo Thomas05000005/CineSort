@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import re
 import unicodedata
 from pathlib import Path
@@ -14,7 +15,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # reconcilier les 'subtitle_missing_<lang>' cote serialisation (MEDI-31).
 from cinesort.domain.naming import (
     build_naming_context as _build_naming_context,
+)
+from cinesort.domain.naming import (
     folder_matches_template as _folder_matches_template,
+)
+from cinesort.domain.naming import (
     format_movie_folder as _format_movie_folder,
 )
 from cinesort.domain.subtitle_helpers import _normalize_iso639
@@ -337,15 +342,15 @@ def _reconciled_row_flags(row: Any) -> List[str]:
     Bibliotheque qui, eux, ont le quality_report.
     """
     present: set = set()
-    for lang in (getattr(row, "subtitle_languages", None) or []):
+    for lang in getattr(row, "subtitle_languages", None) or []:
         norm = _normalize_iso639(str(lang)) or str(lang).strip().lower()
         if norm:
             present.add(norm)
     out: List[str] = []
-    for flag in (getattr(row, "warning_flags", None) or []):
+    for flag in getattr(row, "warning_flags", None) or []:
         text = str(flag)
         if text.startswith("subtitle_missing_"):
-            raw = text[len("subtitle_missing_"):].strip().lower()
+            raw = text[len("subtitle_missing_") :].strip().lower()
             lang = _normalize_iso639(raw) or raw
             if lang and lang in present:
                 continue  # faux positif : la langue EST presente -> drop
@@ -373,12 +378,8 @@ def _template_varies_by_edition(template: str) -> bool:
     CONSTRUCTION, robuste a toute variable d'edition presente/future, aucune
     heuristique de sous-chaine fragile.
     """
-    with_edition = _format_movie_folder(
-        template, _build_naming_context(title="Film", year=2000, edition="Edition")
-    )
-    without_edition = _format_movie_folder(
-        template, _build_naming_context(title="Film", year=2000, edition="")
-    )
+    with_edition = _format_movie_folder(template, _build_naming_context(title="Film", year=2000, edition="Edition"))
+    without_edition = _format_movie_folder(template, _build_naming_context(title="Film", year=2000, edition=""))
     return with_edition != without_edition
 
 
@@ -405,9 +406,7 @@ def find_duplicate_targets(
     # par le template la porte (sinon la cle diverge de existing_movie_folder_index
     # qui indexe "Titre (Annee)" SANS edition -> detection cible-existante morte,
     # et deux editions visant le meme dossier ne sont plus vues comme un conflit).
-    template_uses_edition = _template_varies_by_edition(
-        str(getattr(cfg, "naming_movie_template", "") or "")
-    )
+    template_uses_edition = _template_varies_by_edition(str(getattr(cfg, "naming_movie_template", "") or ""))
 
     for row in rows:
         dec = decisions.get(row.row_id, {})
@@ -558,9 +557,7 @@ def find_duplicate_targets(
                 break
 
             if conflict or (
-                (not matched_target)
-                and existing_norm not in target_norms
-                and existing_norm not in source_norms
+                (not matched_target) and existing_norm not in target_norms and existing_norm not in source_norms
             ):
                 existing_elsewhere.append(existing_path)
 
@@ -582,10 +579,8 @@ def find_duplicate_targets(
         roots.discard("")
         parents = set()
         for it in items:
-            try:
+            with contextlib.suppress(ValueError, TypeError, OSError):
                 parents.add(norm_win_path(Path(it["source_folder"]).parent))
-            except (ValueError, TypeError, OSError):
-                pass
         if len(roots) > 1:
             scope = "cross_root"
         elif len(parents) > 1:

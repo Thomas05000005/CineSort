@@ -64,8 +64,7 @@ KNOWN_FALLBACK_ORPHANS: frozenset[str] = frozenset()
 KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
 # t('cle') / t("cle") — lookbehind exclut .t( split( etc. ; groupe 3 = 1er
 # char apres la string ("+" => concat dynamique, pas une cle complete).
-STATIC_RE = re.compile(
-    r"""(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)+?)\1\s*(.)?""", re.S)
+STATIC_RE = re.compile(r"""(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)+?)\1\s*(.)?""", re.S)
 TPL_RE = re.compile(r"(?<![\w$.])t\(\s*`([^`]*)`", re.S)
 LABELKEY_RE = re.compile(r"""\blabelKey\s*:\s*(['"])([A-Za-z0-9_.\-]+)\1""")
 FALLBACK_KEY_RE = re.compile(r'^\s*"([^"]+)"\s*:', re.M)
@@ -83,8 +82,7 @@ def _load_flat(path: Path) -> dict[str, str]:
             if isinstance(v, dict):
                 walk(v, key)
             else:
-                flat[key] = v if isinstance(v, str) else json.dumps(
-                    v, ensure_ascii=False)
+                flat[key] = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
 
     walk(data)
     return flat
@@ -99,45 +97,65 @@ def _strip_js_comments(src: str) -> str:
     """
     out: list[str] = []
     i, n = 0, len(src)
-    state = "code"          # code | line | block | sq | dq | tpl
+    state = "code"  # code | line | block | sq | dq | tpl
     while i < n:
         c = src[i]
         nxt = src[i + 1] if i + 1 < n else ""
         if state == "code":
             if c == "/" and nxt == "/":
-                state = "line"; out.append("  "); i += 2; continue
+                state = "line"
+                out.append("  ")
+                i += 2
+                continue
             if c == "/" and nxt == "*":
-                state = "block"; out.append("  "); i += 2; continue
+                state = "block"
+                out.append("  ")
+                i += 2
+                continue
             if c == "'":
                 state = "sq"
             elif c == '"':
                 state = "dq"
             elif c == "`":
                 state = "tpl"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
         elif state == "line":
             if c == "\n":
-                state = "code"; out.append(c)
+                state = "code"
+                out.append(c)
             else:
                 out.append(" ")
             i += 1
         elif state == "block":
             if c == "*" and nxt == "/":
-                state = "code"; out.append("  "); i += 2; continue
-            out.append(c if c == "\n" else " "); i += 1
+                state = "code"
+                out.append("  ")
+                i += 2
+                continue
+            out.append(c if c == "\n" else " ")
+            i += 1
         elif state in ("sq", "dq"):
             quote = "'" if state == "sq" else '"'
             if c == "\\":
-                out.append(c); out.append(nxt); i += 2; continue
+                out.append(c)
+                out.append(nxt)
+                i += 2
+                continue
             if c == quote or c == "\n":
                 state = "code"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
         else:  # tpl — approximation suffisante (pas de nesting de backticks)
             if c == "\\":
-                out.append(c); out.append(nxt); i += 2; continue
+                out.append(c)
+                out.append(nxt)
+                i += 2
+                continue
             if c == "`":
                 state = "code"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
     return "".join(out)
 
 
@@ -183,8 +201,7 @@ def _collect_static_refs() -> dict[str, list[str]]:
                 refs.setdefault(body, []).append(f"{rel}:{_line_of(src, m.start())}")
 
         for m in LABELKEY_RE.finditer(src):
-            refs.setdefault(m.group(2), []).append(
-                f"{rel}:{_line_of(src, m.start())} (labelKey)")
+            refs.setdefault(m.group(2), []).append(f"{rel}:{_line_of(src, m.start())} (labelKey)")
     return refs
 
 
@@ -218,7 +235,8 @@ class I18nContractTests(unittest.TestCase):
 
     def test_scanner_finds_corpus(self) -> None:
         self.assertGreaterEqual(
-            len(self.static_refs), 20,
+            len(self.static_refs),
+            20,
             msg=(
                 f"Seulement {len(self.static_refs)} cles i18n statiques trouvees "
                 f"dans web/ (attendu >= 20). Le scanner est probablement casse "
@@ -231,12 +249,14 @@ class I18nContractTests(unittest.TestCase):
         # Seuil abaisse a 20 (anti-vacuite) ; les 9 vues vivantes restent
         # majoritairement FR-only (i18n a cabler = decision produit, hors purge).
         self.assertGreaterEqual(
-            len(self.fr), 500,
+            len(self.fr),
+            500,
             msg=f"locales/fr.json aplati = {len(self.fr)} cles (attendu >= 500) : "
-                f"fichier tronque ou aplatissement casse.",
+            f"fichier tronque ou aplatissement casse.",
         )
         self.assertGreaterEqual(
-            len(self.fallback_keys), 10,
+            len(self.fallback_keys),
+            10,
             msg=(
                 f"_FALLBACK_FR de {I18N_JS_REL} = {len(self.fallback_keys)} cles "
                 f"(attendu >= 10, etat 2026-07-08 = 22) : extraction cassee ou "
@@ -254,12 +274,10 @@ class I18nContractTests(unittest.TestCase):
             in_fr, in_en = key in self.fr, key in self.en
             if in_fr and in_en:
                 continue
-            side = ("fr.json ET en.json" if not in_fr and not in_en
-                    else ("fr.json" if not in_fr else "en.json"))
+            side = "fr.json ET en.json" if not in_fr and not in_en else ("fr.json" if not in_fr else "en.json")
             missing[key] = (side, self.static_refs[key][:3])
 
-        new = {k: v for k, v in missing.items()
-               if k not in KNOWN_MISSING_LOCALE_KEYS}
+        new = {k: v for k, v in missing.items() if k not in KNOWN_MISSING_LOCALE_KEYS}
         self.assertFalse(
             new,
             msg=(
@@ -270,9 +288,9 @@ class I18nContractTests(unittest.TestCase):
                     for k, (side, locs) in sorted(new.items())
                 )
                 + "\nCorriger : ajouter la cle (fr ET en) dans locales/*.json, "
-                  "ou corriger la faute de frappe dans l'appel t()/labelKey. "
-                  "NE PAS l'ajouter a KNOWN_MISSING_LOCALE_KEYS (liste gelee, "
-                  "elle ne peut que retrecir)."
+                "ou corriger la faute de frappe dans l'appel t()/labelKey. "
+                "NE PAS l'ajouter a KNOWN_MISSING_LOCALE_KEYS (liste gelee, "
+                "elle ne peut que retrecir)."
             ),
         )
 
@@ -303,14 +321,12 @@ class I18nContractTests(unittest.TestCase):
                 "NOUVELLES divergences de cles entre locales/fr.json et "
                 "locales/en.json :\n"
                 + "\n".join(
-                    f"  - '{k}' presente uniquement dans "
-                    f"{'fr.json' if k in fr_only else 'en.json'}"
-                    for k in new
+                    f"  - '{k}' presente uniquement dans {'fr.json' if k in fr_only else 'en.json'}" for k in new
                 )
                 + "\nCorriger : ajouter la traduction manquante dans l'autre "
-                  "locale (meme arborescence de cles), ou retirer la cle des "
-                  "deux si elle est morte. NE PAS l'ajouter a "
-                  "KNOWN_LOCALE_DIVERGENCES (liste gelee)."
+                "locale (meme arborescence de cles), ou retirer la cle des "
+                "deux si elle est morte. NE PAS l'ajouter a "
+                "KNOWN_LOCALE_DIVERGENCES (liste gelee)."
             ),
         )
 
@@ -339,9 +355,9 @@ class I18nContractTests(unittest.TestCase):
                 f"locales/fr.json :\n"
                 + "\n".join(f"  - '{k}'" for k in new)
                 + "\nLe fallback hardcode doit rester un sous-ensemble de "
-                  "fr.json (sinon il masque une cle morte ou une faute de "
-                  "frappe). Corriger : ajouter la cle dans locales/fr.json ET "
-                  "en.json, ou corriger/retirer l'entree du fallback."
+                "fr.json (sinon il masque une cle morte ou une faute de "
+                "frappe). Corriger : ajouter la cle dans locales/fr.json ET "
+                "en.json, ou corriger/retirer l'entree du fallback."
             ),
         )
 

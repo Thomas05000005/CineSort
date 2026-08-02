@@ -104,8 +104,10 @@ class PlanSupportSmokeTests(unittest.TestCase):
     def test_plan_multi_roots_dedup_cross_root(self) -> None:
         from cinesort.app.plan_support_dedup import plan_multi_roots
 
-        with tempfile.TemporaryDirectory(prefix="multi_a_") as tmp_a, \
-             tempfile.TemporaryDirectory(prefix="multi_b_") as tmp_b:
+        with (
+            tempfile.TemporaryDirectory(prefix="multi_a_") as tmp_a,
+            tempfile.TemporaryDirectory(prefix="multi_b_") as tmp_b,
+        ):
             root_a = Path(tmp_a)
             root_b = Path(tmp_b)
             self._make_movie_folder(root_a, "Inception", 2010)

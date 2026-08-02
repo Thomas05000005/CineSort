@@ -100,9 +100,7 @@ class CollectionFolderAliasTests(unittest.TestCase):
     def test_collection_folder_alias_wins_when_both_provided(self) -> None:
         """Quand les deux cles sont presentes, la cle UI prime (cas reel : la
         meme payload poussee depuis le formulaire UI utilisera la nouvelle cle)."""
-        result = self._save_cleanup(
-            {"collection_folder": "UIValue", "collection_folder_name": "BackendValue"}
-        )
+        result = self._save_cleanup({"collection_folder": "UIValue", "collection_folder_name": "BackendValue"})
         self.assertEqual(result["collection_folder_name"], "UIValue")
 
     def test_default_when_neither_provided(self) -> None:

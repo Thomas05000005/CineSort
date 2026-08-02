@@ -953,10 +953,8 @@ def _classify_and_plan_folder(
             )
             if looks_bonus:
                 for r in new_rows:
-                    try:
+                    with contextlib.suppress(AttributeError, TypeError):
                         r.kind = "extra"
-                    except (AttributeError, TypeError):
-                        pass
                     flags = getattr(r, "warning_flags", None)
                     if flags is not None and "bonus_video" not in flags:
                         flags.append("bonus_video")
@@ -971,9 +969,7 @@ def _classify_and_plan_folder(
     return ctx.check_cancel()
 
 
-def _merge_local_candidate_into_ctx(
-    ctx: _PlanLibraryContext, local: "LocalCandidate"
-) -> None:
+def _merge_local_candidate_into_ctx(ctx: _PlanLibraryContext, local: "LocalCandidate") -> None:
     """Rejoue les buckets locaux d'un LocalCandidate sur ctx.stats (Phase 2).
 
     VO-B : iter_videos a tourne en Phase 1 avec un bucket prive (thread-safe).
@@ -1099,9 +1095,7 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             ignores_par_raison_after = dict(ctx.stats.analyse_ignores_par_raison or {})
 
             def _delta(reason: str) -> int:
-                return int(ignores_par_raison_after.get(reason, 0)) - int(
-                    ignores_par_raison_before.get(reason, 0)
-                )
+                return int(ignores_par_raison_after.get(reason, 0)) - int(ignores_par_raison_before.get(reason, 0))
 
             delta_ext = _delta("ignore_extension")
             delta_size = _delta("ignore_taille_min")
@@ -1114,9 +1108,9 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             if delta_name > 0 and hasattr(ctx.stats, "films_rejected_name"):
                 ctx.stats.films_rejected_name = int(ctx.stats.films_rejected_name or 0) + delta_name
             if delta_scandir > 0 and hasattr(ctx.stats, "folders_rejected_scandir_error"):
-                ctx.stats.folders_rejected_scandir_error = int(
-                    ctx.stats.folders_rejected_scandir_error or 0
-                ) + delta_scandir
+                ctx.stats.folders_rejected_scandir_error = (
+                    int(ctx.stats.folders_rejected_scandir_error or 0) + delta_scandir
+                )
 
             # ITER15 #1 (2026-06-10) : `ignore_non_supporte` est le compteur
             # ROLLUP DOSSIER ("aucun fichier video exploitable", cf. core.py L1365
@@ -1137,9 +1131,9 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             else:
                 non_video_exts_iter = core_mod._collect_non_video_extensions(ctx.cfg, folder).items()
             for ext, count in non_video_exts_iter:
-                ctx.stats.analyse_ignores_extensions[ext] = int(
-                    ctx.stats.analyse_ignores_extensions.get(ext, 0)
-                ) + int(count)
+                ctx.stats.analyse_ignores_extensions[ext] = int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(
+                    count
+                )
             ctx.persist_folder_cache(
                 folder=folder,
                 folder_sig=folder_sig,
@@ -1230,13 +1224,9 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
     # affichaient systematiquement 0 alors que la raison etait bien tracee.
     raisons = dict(ctx.stats.analyse_ignores_par_raison or {})
     if hasattr(ctx.stats, "folders_rejected_underscore"):
-        ctx.stats.folders_rejected_underscore = int(
-            raisons.get("ignore_prefix_underscore", 0)
-        )
+        ctx.stats.folders_rejected_underscore = int(raisons.get("ignore_prefix_underscore", 0))
     if hasattr(ctx.stats, "folders_rejected_depth"):
-        ctx.stats.folders_rejected_depth = int(
-            raisons.get("ignore_profondeur_max", 0)
-        )
+        ctx.stats.folders_rejected_depth = int(raisons.get("ignore_profondeur_max", 0))
     ctx.log("INFO", f"Scan folders: done total={ctx.scanned_total}")
     ctx.log("INFO", f"Plan built: rows={ctx.stats.planned_rows}")
     _log.info("scan: termine %s -> %d rows", ctx.cfg.root, ctx.stats.planned_rows)

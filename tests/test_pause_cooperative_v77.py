@@ -14,11 +14,10 @@ Verifie que :
 from __future__ import annotations
 
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List
 
 from cinesort.app.job_runner import JobRunner
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir

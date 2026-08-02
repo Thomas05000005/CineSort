@@ -149,6 +149,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Modules de RE-EXPORT : ils importent des symboles (dont des helpers prives
+# consommes par les tests) pour les republier sous un chemin stable. Ces imports
+# sont volontairement "inutilises" dans le module lui-meme ; les supprimer casse
+# l API (mesure le 2026-08-02 : un ruff --fix a retire 37 re-exports de
+# plan_support.py, 2 fichiers de tests ne collectaient plus).
+"cinesort/app/plan_support.py" = ["F401"]
+"cinesort/domain/probe_models.py" = ["F401"]
+
 # Les tests E2E Playwright instancient des page objects en variables locales
 # que Python garde en vie par ref au frame ; l'analyse statique F841 ne voit
 # pas l'usage. On whitelist F841 pour ces fichiers.

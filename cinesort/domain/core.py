@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
-import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +33,6 @@ from cinesort.domain.scan_helpers import (
     iter_videos,
 )
 from cinesort.domain.title_helpers import (
-    ProviderTags,
     _expand_tmdb_queries,
     _extract_trailing_sequel_num,
     _norm_for_tokens,
@@ -107,7 +104,9 @@ VIDEO_EXTS_ALL = frozenset(
 )
 SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
 
-MIN_VIDEO_BYTES = 10 * 1024 * 1024  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
+MIN_VIDEO_BYTES = (
+    10 * 1024 * 1024
+)  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
 
 GENERIC_SIDE_FILES_DEFAULT = {
     "movie.nfo",
@@ -324,11 +323,7 @@ class Config:
             # ITER7 etape 3 : coerce-and-default identique a _save_section_naming
             # pour proteger les configs anciennes ou editees a la main contre une
             # valeur invalide qui sortirait du jeu {".", " ", "_", "-"}.
-            separator=(
-                str(self.separator)
-                if str(self.separator) in {".", " ", "_", "-"}
-                else " "
-            ),
+            separator=(str(self.separator) if str(self.separator) in {".", " ", "_", "-"} else " "),
         )
 
 
@@ -464,7 +459,6 @@ class PlanRow:
 # `core_mod._norm_win_path` sans aucune modification.
 from cinesort.domain.path_utils import (  # noqa: E402  (re-export volontaire)
     _norm_win_path,
-    norm_win_path,
     windows_safe,
 )
 
@@ -561,10 +555,7 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
     sibling_video_stems = [
         p.stem
         for p in entries
-        if p.is_file()
-        and p != video
-        and p.suffix.lower() in cfg.video_exts
-        and not IGNORE_VIDEO_NAME_RE.search(p.stem)
+        if p.is_file() and p != video and p.suffix.lower() in cfg.video_exts and not IGNORE_VIDEO_NAME_RE.search(p.stem)
     ]
     for p in entries:
         if not p.is_file() or p == video:
@@ -573,10 +564,7 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
             continue
         name_l = p.name.lower()
         if is_sidecar_for_video(stem, p.stem):
-            if any(
-                len(other) > len(stem) and is_sidecar_for_video(other, p.stem)
-                for other in sibling_video_stems
-            ):
+            if any(len(other) > len(stem) and is_sidecar_for_video(other, p.stem) for other in sibling_video_stems):
                 # Une autre video du dossier a un stem strictement plus specifique
                 # qui revendique aussi ce sidecar : il lui appartient.
                 continue

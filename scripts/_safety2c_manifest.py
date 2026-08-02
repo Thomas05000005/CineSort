@@ -1,4 +1,5 @@
 """Manifeste FS test_library/ pour non-regression iter3 etape 2c."""
+
 import hashlib
 import json
 import os

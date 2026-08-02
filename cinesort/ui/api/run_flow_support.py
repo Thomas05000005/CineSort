@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 _logger = logging.getLogger(__name__)
 
+import contextlib
+
 import cinesort.domain.core as core
 import cinesort.infra.state as state
 from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
@@ -575,9 +577,7 @@ def _build_plan_job_fn(
                             if str(getattr(r, "row_id", "") or "").strip()
                         ]
                         if row_ids:
-                            dlog(
-                                f"job_fn launching auto perceptual batch ({len(row_ids)} films)"
-                            )
+                            dlog(f"job_fn launching auto perceptual batch ({len(row_ids)} films)")
                             # R8-037 (F4) : câbler le cancel_event du run sur l'api
                             # AVANT le batch -> _resolve_cancel_event(api) le lit ->
                             # request_cancel (qui pose rt.cancel_event) arrête bien
@@ -594,10 +594,7 @@ def _build_plan_job_fn(
                                 if _perc_cancel is not None:
                                     api._perceptual_cancel_event = None
                             if isinstance(perc_result, dict) and perc_result.get("ok"):
-                                dlog(
-                                    "job_fn auto perceptual started success_count="
-                                    f"{perc_result.get('success_count')}"
-                                )
+                                dlog(f"job_fn auto perceptual started success_count={perc_result.get('success_count')}")
                             else:
                                 dlog(f"job_fn auto perceptual skipped: {perc_result}")
                         else:
@@ -619,9 +616,7 @@ def _build_plan_job_fn(
             try:
                 if to_bool(settings.get("tmdb_enabled"), False) and rows:
                     enrich_ids = [
-                        str(getattr(r, "row_id", "") or "")
-                        for r in rows
-                        if str(getattr(r, "row_id", "") or "").strip()
+                        str(getattr(r, "row_id", "") or "") for r in rows if str(getattr(r, "row_id", "") or "").strip()
                     ]
                     if enrich_ids:
                         import threading as _threading
@@ -636,9 +631,7 @@ def _build_plan_job_fn(
                             except Exception as _exc:  # noqa: BLE001 - daemon best-effort
                                 dlog(f"job_fn post-scan tmdb enrich warning: {_exc}")
 
-                        _threading.Thread(
-                            target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True
-                        ).start()
+                        _threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
                         dlog(f"job_fn post-scan tmdb enrich launched ({len(enrich_ids)} films)")
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")
@@ -717,9 +710,7 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
             "ok": False,
             "error": "start_plan_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de lancer le scan. Verifie les sources et reessaie."
-            ),
+            "user_message": ("Impossible de lancer le scan. Verifie les sources et reessaie."),
         }
 
 
@@ -805,8 +796,7 @@ def scrub_historical_run_configs(store: Any) -> Dict[str, int]:
     with store._managed_conn() as conn:  # type: ignore[attr-defined]
         try:
             rows = conn.execute(
-                "SELECT run_id, config_json FROM runs "
-                "WHERE config_json IS NOT NULL AND config_json != ''"
+                "SELECT run_id, config_json FROM runs WHERE config_json IS NOT NULL AND config_json != ''"
             ).fetchall()
         except sqlite3.OperationalError:
             return report
@@ -971,10 +961,7 @@ def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]
             "ok": False,
             "error": "run_status_unavailable",
             "message": str(exc),
-            "user_message": (
-                "Impossible de recuperer l'etat du run. Relance un scan ou "
-                "redemarre l'app."
-            ),
+            "user_message": ("Impossible de recuperer l'etat du run. Relance un scan ou redemarre l'app."),
         }
 
 
@@ -994,6 +981,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         compute_total_fallback,
         count_plan_rows,
     )
+
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -1131,10 +1119,8 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # une fois le scan done. Pendant le scan (running), on garde rs.total =
     # discover_total comme cible attendue de la barre de progression.
     if done and not running:
-        try:
+        with contextlib.suppress(OSError, AttributeError, KeyError, TypeError, ValueError):
             total = count_plan_rows(paths_snapshot, fallback=total)
-        except (OSError, AttributeError, KeyError, TypeError, ValueError):
-            pass
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 
@@ -1418,9 +1404,7 @@ def _mirror_decisions_to_sql(
                 reason=str(payload.get("reason") or ""),
             )
         except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
-            _logger.debug(
-                "save_validation: mirror SQL ignore pour row %s : %s", rid, exc
-            )
+            _logger.debug("save_validation: mirror SQL ignore pour row %s : %s", rid, exc)
             # On force malgre tout decision=DECISION_REJECTED pour eviter
             # le silence complet (ce code branch est defensif).
             _ = DECISION_REJECTED
@@ -1566,7 +1550,13 @@ def _enrich_one_group(group: Dict[str, Any], run_id: str, store: Any) -> None:
     except (OSError, KeyError, TypeError, ValueError):
         return
     group["comparison"] = _build_comparison_payload(
-        result, rows[0], rows[1], store, run_id, probes[0], probes[1]  # R8-059 : probes -> codec/résolution/audio
+        result,
+        rows[0],
+        rows[1],
+        store,
+        run_id,
+        probes[0],
+        probes[1],  # R8-059 : probes -> codec/résolution/audio
     )
 
 

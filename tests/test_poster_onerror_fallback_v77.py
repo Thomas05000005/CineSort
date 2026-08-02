@@ -29,8 +29,11 @@ class PosterOnErrorFallbackTests(unittest.TestCase):
         # LOTC-C1 : onerror inline remplacé par un listener 'error' délégué en
         # phase capture (CSP script-src 'self' bloque les handlers inline).
         js = _FILM.read_text(encoding="utf-8")
-        self.assertIn('addEventListener("error", _onPosterError, true)', js,
-                      "film-detail doit avoir le listener 'error' délégué (capture).")
+        self.assertIn(
+            'addEventListener("error", _onPosterError, true)',
+            js,
+            "film-detail doit avoir le listener 'error' délégué (capture).",
+        )
         self.assertNotIn("onerror=", js, "Plus d'onerror inline (bloqué par la CSP).")
         self.assertIn("film-detail-poster--placeholder", js)
 

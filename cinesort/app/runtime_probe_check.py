@@ -29,8 +29,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from cinesort.domain.path_utils import windows_safe
 from cinesort.domain.runtime_matching import (
-    WARN_RUNTIME_MISMATCH,
     _PENALTY_MISMATCH,
+    WARN_RUNTIME_MISMATCH,
     score_runtime_delta,
 )
 

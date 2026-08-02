@@ -218,9 +218,10 @@ class CallSiteContractTests(unittest.TestCase):
             "reasons": [],
             "metrics": {"detected": {"height": 1080, "bitrate_kbps": 1400, "video_codec": "h264"}},
         }
-        with patch.object(quality_report_support, "ProbeService") as mock_probe_cls, patch.object(
-            quality_report_support, "compute_quality_score", return_value=fake_report
-        ) as mock_score:
+        with (
+            patch.object(quality_report_support, "ProbeService") as mock_probe_cls,
+            patch.object(quality_report_support, "compute_quality_score", return_value=fake_report) as mock_score,
+        ):
             mock_probe = MagicMock()
             mock_probe.probe_file.return_value = probe_result
             mock_probe_cls.return_value = mock_probe

@@ -410,15 +410,9 @@ def build_subtitle_report(
     # liste `missing` quand il n'est pas resolvable (pour ne pas masquer une
     # saisie utilisateur erronee).
     expected_pairs = [
-        (raw, _normalize_iso639(raw))
-        for raw in (lang.strip() for lang in (expected_languages or []) if lang)
-        if raw
+        (raw, _normalize_iso639(raw)) for raw in (lang.strip() for lang in (expected_languages or []) if lang) if raw
     ]
-    missing = [
-        (norm or raw)
-        for raw, norm in expected_pairs
-        if (norm or raw.lower()) not in all_languages
-    ]
+    missing = [(norm or raw) for raw, norm in expected_pairs if (norm or raw.lower()) not in all_languages]
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).

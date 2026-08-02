@@ -608,11 +608,7 @@ def normalize_hierarchy_config(raw: Any) -> Dict[str, Any]:
             for k, v in raw_section.items():
                 canonical_tier = normalize_tier_string(v)
                 if canonical_tier:
-                    canonical_key = (
-                        str(k).strip().lower()
-                        if key == "group_floors"
-                        else str(k)
-                    )
+                    canonical_key = str(k).strip().lower() if key == "group_floors" else str(k)
                     out[key][canonical_key] = canonical_tier
 
     return out
@@ -635,10 +631,7 @@ def _floor_tier(current: str, floor: str) -> str:
     """
     canonical_cur = normalize_tier_string(current) or str(current or "")
     canonical_floor = normalize_tier_string(floor) or str(floor or "")
-    if (
-        canonical_cur not in TIER_ORDER_BEST_FIRST
-        or canonical_floor not in TIER_ORDER_BEST_FIRST
-    ):
+    if canonical_cur not in TIER_ORDER_BEST_FIRST or canonical_floor not in TIER_ORDER_BEST_FIRST:
         return canonical_cur
     cur_idx = TIER_ORDER_BEST_FIRST.index(canonical_cur)
     floor_idx = TIER_ORDER_BEST_FIRST.index(canonical_floor)
@@ -888,13 +881,15 @@ def apply_tier_hierarchy(
                     active_ceiling = ceil if active_ceiling is None else cap_tier(active_ceiling, ceil)
                     new_tier = cap_tier(current_tier, ceil)
                     if new_tier != current_tier:
-                        applied.append({
-                            "dimension": "resolution",
-                            "type": "ceiling",
-                            "value": res_label,
-                            "from": current_tier,
-                            "to": new_tier,
-                        })
+                        applied.append(
+                            {
+                                "dimension": "resolution",
+                                "type": "ceiling",
+                                "value": res_label,
+                                "from": current_tier,
+                                "to": new_tier,
+                            }
+                        )
                         current_tier = new_tier
 
         # === Codec ===

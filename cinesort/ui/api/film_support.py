@@ -278,8 +278,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
             "error": "film_load_failed",
             "message": str(exc),
             "user_message": (
-                "Impossible de charger ce film (run obsolete ou base inaccessible). "
-                "Relance un scan ou redemarre l'app."
+                "Impossible de charger ce film (run obsolete ou base inaccessible). Relance un scan ou redemarre l'app."
             ),
         }
 
@@ -450,8 +449,7 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
             new_candidates.append(new_cand)
         if multiple_match_count > 0:
             logger.warning(
-                "get_film_full: %d candidat(s) duplique(s) avec tmdb_id=%s "
-                "pour row_id=%s — un seul marque chosen=True",
+                "get_film_full: %d candidat(s) duplique(s) avec tmdb_id=%s pour row_id=%s — un seul marque chosen=True",
                 multiple_match_count,
                 chosen_tmdb_id,
                 row_id,

@@ -111,10 +111,12 @@ class AC1ToggleHasNoEffectWhenOffTests(unittest.TestCase):
         prof_explicit_off["tier_hierarchy"]["resolution_floors"]["2160p_probe"] = "Platinum"
 
         res_default = compute_quality_score(
-            normalized_probe=_probe_720p_modest_full(), profile=prof_default,
+            normalized_probe=_probe_720p_modest_full(),
+            profile=prof_default,
         )
         res_off = compute_quality_score(
-            normalized_probe=_probe_720p_modest_full(), profile=prof_explicit_off,
+            normalized_probe=_probe_720p_modest_full(),
+            profile=prof_explicit_off,
         )
         # Meme tier et meme score : OFF est strictement no-op.
         self.assertEqual(res_default["tier"], res_off["tier"])
@@ -205,8 +207,9 @@ class CanonicalLabelsForUiTests(unittest.TestCase):
                 _probe_failed(),
             ):
                 res = compute_quality_score(normalized_probe=probe, profile=prof_c)
-                self.assertIn(res["tier"], canonical_set,
-                    f"tier {res['tier']!r} non canonique (hierarchy_enabled={enabled})")
+                self.assertIn(
+                    res["tier"], canonical_set, f"tier {res['tier']!r} non canonique (hierarchy_enabled={enabled})"
+                )
 
 
 class AC3PerceptualUntouchedTests(unittest.TestCase):

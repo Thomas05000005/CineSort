@@ -49,6 +49,7 @@ class _CacheBase(unittest.TestCase):
         os.environ.pop("CINESORT_PROBE_DISK_CACHE", None)
         # Cleanup recursif.
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
 
@@ -59,9 +60,7 @@ class TestCacheHitSansBinaire(_CacheBase):
         key = dict(path="/fake/inception.mkv", size=1024, mtime=1234.5, tool="ffprobe")
         raw = {"streams": [{"codec_name": "hevc"}]}
         normalized = {"video": {"codec": "hevc"}, "probe_quality": "FULL"}
-        ok = upsert_disk_cache(
-            **key, raw_json=raw, normalized_json=normalized, ts=1700000000.0
-        )
+        ok = upsert_disk_cache(**key, raw_json=raw, normalized_json=normalized, ts=1700000000.0)
         self.assertTrue(ok, "Ecriture cache doit reussir")
 
         hit = get_disk_cache(**key)
@@ -82,8 +81,10 @@ class TestCacheHitSansBinaire(_CacheBase):
         key = dict(path="/fake/f.mkv", size=42, mtime=1.0, tool="mediainfo")
         upsert_disk_cache(**key, raw_json={"a": 1}, normalized_json={"b": 2})
 
-        with patch("subprocess.Popen", side_effect=AssertionError("Cache ne doit PAS spawn de subprocess")), \
-             patch("subprocess.run", side_effect=AssertionError("Cache ne doit PAS run de subprocess")):
+        with (
+            patch("subprocess.Popen", side_effect=AssertionError("Cache ne doit PAS spawn de subprocess")),
+            patch("subprocess.run", side_effect=AssertionError("Cache ne doit PAS run de subprocess")),
+        ):
             hit = get_disk_cache(**key)
         self.assertIsNotNone(hit)
 
@@ -93,33 +94,54 @@ class TestInvalidationParChangement(_CacheBase):
 
     def test_mtime_change_invalide(self) -> None:
         upsert_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
-            raw_json={"r": 1}, normalized_json={"n": 1},
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
+            raw_json={"r": 1},
+            normalized_json={"n": 1},
         )
         # mtime change : doit miss (hash key different).
         miss = get_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=2.0, tool="ffprobe",
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=2.0,
+            tool="ffprobe",
         )
         self.assertIsNone(miss, "Mtime change -> cache invalide")
 
     def test_size_change_invalide(self) -> None:
         upsert_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
-            raw_json={"r": 1}, normalized_json={"n": 1},
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
+            raw_json={"r": 1},
+            normalized_json={"n": 1},
         )
         miss = get_disk_cache(
-            path="/fake/f.mkv", size=2048, mtime=1.0, tool="ffprobe",
+            path="/fake/f.mkv",
+            size=2048,
+            mtime=1.0,
+            tool="ffprobe",
         )
         self.assertIsNone(miss, "Size change -> cache invalide")
 
     def test_tool_change_invalide(self) -> None:
         """Cache par tool : ffprobe et mediainfo ne partagent pas le hit."""
         upsert_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
-            raw_json={"r": 1}, normalized_json={"n": 1},
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
+            raw_json={"r": 1},
+            normalized_json={"n": 1},
         )
         miss = get_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="mediainfo",
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="mediainfo",
         )
         self.assertIsNone(miss, "Tool different -> cache miss")
 
@@ -157,19 +179,29 @@ class TestResilience(_CacheBase):
     def test_cache_desactive_via_env(self) -> None:
         os.environ["CINESORT_PROBE_DISK_CACHE"] = "0"
         ok = upsert_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
-            raw_json={"r": 1}, normalized_json={"n": 1},
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
+            raw_json={"r": 1},
+            normalized_json={"n": 1},
         )
         self.assertFalse(ok, "Cache desactive : upsert no-op")
         hit = get_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
         )
         self.assertIsNone(hit, "Cache desactive : get retourne None")
 
     def test_path_inexistant_dans_cache_dir_retourne_none(self) -> None:
         """get_disk_cache sur cle jamais ecrite -> None propre, pas d'exception."""
         result = get_disk_cache(
-            path="/fake/never-seen.mkv", size=1, mtime=1.0, tool="ffprobe",
+            path="/fake/never-seen.mkv",
+            size=1,
+            mtime=1.0,
+            tool="ffprobe",
         )
         self.assertIsNone(result)
 
@@ -179,8 +211,12 @@ class TestAtomicite(_CacheBase):
 
     def test_upsert_ecrit_un_seul_fichier_final(self) -> None:
         upsert_disk_cache(
-            path="/fake/f.mkv", size=1024, mtime=1.0, tool="ffprobe",
-            raw_json={"r": 1}, normalized_json={"n": 1},
+            path="/fake/f.mkv",
+            size=1024,
+            mtime=1.0,
+            tool="ffprobe",
+            raw_json={"r": 1},
+            normalized_json={"n": 1},
         )
         cache_dir = Path(self._tmpdir)
         # Apres ecriture reussie, AUCUN fichier .tmp ne doit subsister.
@@ -196,8 +232,12 @@ class TestPurge(_CacheBase):
     def test_clear_supprime_tout(self) -> None:
         for i in range(5):
             upsert_disk_cache(
-                path=f"/fake/f{i}.mkv", size=1024 + i, mtime=1.0, tool="ffprobe",
-                raw_json={"r": i}, normalized_json={"n": i},
+                path=f"/fake/f{i}.mkv",
+                size=1024 + i,
+                mtime=1.0,
+                tool="ffprobe",
+                raw_json={"r": i},
+                normalized_json={"n": i},
             )
         cache_dir = Path(self._tmpdir)
         self.assertEqual(len(list(cache_dir.glob("*.json"))), 5)
