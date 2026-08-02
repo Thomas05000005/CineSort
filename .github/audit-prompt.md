@@ -7,16 +7,18 @@ Ouverture de PRs avec fixes : <OPEN_PRS>.
 CONTEXTE PROJET (mai 2026 - a jour) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
   * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
-  * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
-  * app ne peut PAS importer ui (contract `app_no_ui`)
+  * infra ne peut PAS importer app, ui (contract `infra_bounded`)
+  * app ne peut PAS importer ui (contract `app_bounded`)
 - Cycle historique `domain -> app` BRISE en mai 2026 (issue #83 closed).
   Toute regression sur ce point est bloquee par CI - ne pas reintroduire.
 - Repository pattern installe sur SQLiteStore : store.probe, store.scan,
-  store.quality, store.run, store.apply, store.perceptual, store.anomaly.
-  Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
-- Strangler Fig + Facade pattern : CineSortApi expose 5 facades
-  (api.run, api.settings, api.quality, api.integrations, api.library)
-  avec 50 methodes publiques. Les anciennes methodes directes sont
+  store.quality, store.run, store.apply, store.perceptual, store.anomaly
+  (7 Repository agreges par composition, cf infra/db/repositories/).
+  Phase B8 CLOSE (2026-05, commit 482f3e6) : les `_XxxMixin` legacy et
+  l'heritage MRO ont ete SUPPRIMES. Ne pas reintroduire de mixin SQL.
+- Strangler Fig + Facade pattern : CineSortApi expose 6 facades
+  (api.run, api.settings, api.quality, api.integrations, api.library,
+  api.runtime). Les anciennes methodes directes sont
   privatisees en `_X_impl(...)`.
 - Lazy imports residuels acceptables : seulement dans cinesort/app/cleanup.py
   (cycle cleanup <-> apply_core, non lie a domain->app). Tout autre lazy
@@ -26,8 +28,10 @@ CONTEXTE PROJET (mai 2026 - a jour) :
 
 Analyse transverse (si target=transverse) :
 1) Liste les fonctions > 100L restantes par ROI de refactor (complexite vs gain).
-2) Liste les composants JS dupliques desktop/dashboard (web/dashboard/views/*.js
-   vs web/views/*.js post-V6 ESM migration) et propose strategie de mutualisation.
+2) [OBSOLETE — cf #484] La duplication desktop/dashboard n'existe plus : il ne
+   reste qu'un arbre JS unique sous web/dashboard/ (views/, components/, core/).
+   Pas de web/views/ ni web/components/ de premier niveau (migration V6 close,
+   cf #217). Ne PAS chercher de doublons desktop/dashboard : il n'y en a pas.
 3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
    depuis le dernier audit (cross-check avec `lint-imports`).
 4) Audit du Repository pattern : usages residuels de la couche mixin
@@ -1404,6 +1408,18 @@ REGLES :
 - Constante amelioration : meme sur des modules deja audites,
   cherche si quelque chose a evolue ou pourrait etre mieux.
 
-Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune. (si target=transverse)
+Pour la couche transverse (si target=transverse) — les 3 inventaires ci-dessous
+sont DEJA SUIVIS par des issues ouvertes : ENRICHIS-les (CAS A/B), ne recree PAS
+d'issue (cf incident #91->#217). Chiffres du prompt d'origine (49/22/161) PERIMES,
+cf #484.
+1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue OUVERTE #215
+   (~18 fonctions au dernier decompte, garde-fou CI #677). Reverifie et enrichis
+   #215 seulement si l'inventaire a change.
+2) Duplication JS desktop/dashboard -> INEXISTANTE (arbre unique web/dashboard/,
+   migration V6 close). Rien a faire, cf bullet (2) ci-dessus + #484.
+3) Imports lazy + decouplage -> issue OUVERTE #779. Le cycle domain<->app est BRISE
+   depuis mai 2026 (#83, verrouille import-linter) : 0 lazy domain->app. Le vrai
+   reliquat est ~89 imports lazy INTRA-ui/api (cycles entre modules *_support).
+   Enrichis #779, ne recree pas.
 
 ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.
