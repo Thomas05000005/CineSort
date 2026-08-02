@@ -56,7 +56,7 @@ dependencies = [
 # pytest (+ hypothesis + import-linter pour les contracts).
 dev = [
     "playwright>=1.60.0,<2",
-    "Pillow>=12.2",
+    "Pillow>=12.3",
     "ruff>=0.15.14,<0.16",
     "coverage>=7.14.0,<8",
     "pre-commit>=4.6.0,<5",
@@ -75,7 +75,7 @@ dev = [
 # build : pyinstaller + Pillow (alignement avec requirements-build.txt).
 build = [
     "pyinstaller>=6.20.0",
-    "pillow>=12.2",
+    "pillow>=12.3",
 ]
 
 [project.urls]
