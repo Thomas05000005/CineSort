@@ -7,6 +7,10 @@
  * ============================================================================
  */
 
+/* V1.4 — composants v5 wrappes dans @layer v5 (cf tokens.css pour ordre).
+   v5 > legacy : en cas de conflit, le design system gagne. */
+@layer v5 {
+
 /* ===========================================================
  * BUTTONS
  * =========================================================== */
@@ -408,6 +412,10 @@
 
 .v5-input {
   background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R6-E) : sans color-scheme, le popup natif d'un <select>
+     (filtre Doublons) est rendu en blanc par l'OS (Windows) -> illisible sur
+     fond sombre. dark force l'OS a peindre la liste deroulante en sombre. */
+  color-scheme: dark;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   padding: 0 var(--sp-3);
@@ -463,6 +471,8 @@
 /* Select */
 .v5-select {
   background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R7-9, complement R6-E) : popup natif sombre sur Windows. */
+  color-scheme: dark;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   padding: 0 var(--sp-3);
@@ -551,6 +561,16 @@
   border-radius: var(--radius-md);
   height: 16px;
   display: block;
+}
+
+/* ITER15 5.3 : ligne skeleton dediee (64px) — migration des styles inline
+ * encore presents dans bibliotheque.js. Dimensions FIGEES (cycle iter11 prouve
+ * present->remplace). Les hauteurs 60px (doublons) et 48px (traitement) restent
+ * en style inline car valeurs DIFFERENTES (perimetre strict, pas d'uniformisation).
+ */
+.v5-skeleton-row {
+  height: 64px;
+  margin: 8px 0;
 }
 
 /* ===========================================================
@@ -714,6 +734,32 @@
   opacity: 1;
 }
 
+/* Fix bug "compteurs sidebar 939/86 affiches en texte brut" :
+ * la classe .v5-sidebar-badge generee par sidebar-v5.js n'avait aucune regle CSS.
+ * Pastille discrete a droite, active (accent) si count > 0. */
+.v5-sidebar-badge {
+  display: none;
+  min-width: 18px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+.v5-sidebar-badge--active {
+  display: inline-flex;
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent, var(--text-1));
+}
+.v5-sidebar.is-collapsed .v5-sidebar-badge {
+  display: none;
+}
+
 .v5-sidebar-footer {
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border-1);
@@ -859,7 +905,9 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R7-9, complement R6-E) : fond opaque (le menu flottait
+     sur le contenu vivant de la page avec --surface-1 ~3.5%). */
+  background: var(--bg-raised);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-3);
@@ -3549,7 +3597,7 @@ body.v5-notif-lock {
   border-radius: var(--radius-sm, 6px);
 }
 .v5-notif-item--info .v5-notif-item-icon    { color: var(--accent-1, #60a5fa); background: color-mix(in srgb, var(--accent-1) 15%, transparent); }
-.v5-notif-item--success .v5-notif-item-icon { color: var(--tier-gold, #10b981); background: color-mix(in srgb, var(--tier-gold) 15%, transparent); }
+.v5-notif-item--success .v5-notif-item-icon { color: var(--sev-success-solid); background: color-mix(in srgb, var(--sev-success-solid) 15%, transparent); }
 .v5-notif-item--warning .v5-notif-item-icon { color: #f59e0b; background: rgba(245, 158, 11, 0.15); }
 .v5-notif-item--error .v5-notif-item-icon   { color: var(--tier-reject, #ef4444); background: color-mix(in srgb, var(--tier-reject) 15%, transparent); }
 
@@ -3996,10 +4044,12 @@ body.v5-notif-lock {
   transition: width var(--dur-base) var(--ease-out);
 }
 
+/* LOTC-M4 : replie, width:0 + header en display:none donnaient au toggle
+ * [data-v5-right-panel-toggle] un rect 0x0 -> impossible a re-deployer a la
+ * souris. On garde un rail de 28px ou seul le toggle reste visible. */
 .v5-right-panel.is-collapsed {
-  width: 0 !important;
-  min-width: 0;
-  border-left: none;
+  width: 28px !important;
+  min-width: 28px;
   overflow: hidden;
 }
 
@@ -4010,9 +4060,20 @@ body.v5-notif-lock {
 }
 
 .v5-right-panel.is-collapsed .v5-right-panel-handle,
-.v5-right-panel.is-collapsed .v5-right-panel-header,
-.v5-right-panel.is-collapsed .v5-right-panel-body {
+.v5-right-panel.is-collapsed .v5-right-panel-body,
+.v5-right-panel.is-collapsed .v5-right-panel-title {
   display: none;
+}
+
+.v5-right-panel.is-collapsed .v5-right-panel-header {
+  justify-content: center;
+  padding: var(--sp-2) 0;
+  border-bottom: none;
+}
+
+/* Chevron inverse en replie : il pointe vers l'ouverture, pas la fermeture. */
+.v5-right-panel.is-collapsed .v5-right-panel-toggle svg {
+  transform: rotate(180deg);
 }
 
 .v5-right-panel-handle {
@@ -4176,14 +4237,20 @@ body.v5-notif-lock {
   width: 100%;
 }
 
+/* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-002 : les sections
+   "Dernier run / Points a traiter / Sante / Activite" sont des balises H2
+   et doivent porter une taille de titre H2 standard (18px), pas une taille
+   eyebrow 11px en uppercase. On harmonise toutes les sections sur fs-lg
+   semibold, sans uppercase ni letter-spacing, et couleur text-1 (lisible).
+   Le H2 24px du CTA "Lancer un nouveau scan" reste accueil-cta-scan-title
+   (fs-xl) -> aucun doublon eyebrow+24px. */
 .accueil-section-title {
   font-family: var(--font-family-base);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  color: var(--text-1);
   margin: 0 0 var(--sp-4);
+  line-height: 1.3;
 }
 
 .accueil-empty-msg {
@@ -4372,7 +4439,7 @@ body.v5-notif-lock {
 }
 
 .accueil-health-fill--platinum { background: var(--tier-platinum-solid, #A78BFA); }
-.accueil-health-fill--gold { background: var(--tier-gold-solid, #FBBF24); }
+.accueil-health-fill--gold { background: var(--tier-gold-solid); }
 .accueil-health-fill--silver { background: var(--tier-silver-solid, #9CA3AF); }
 .accueil-health-fill--bronze { background: var(--tier-bronze-solid, #FB923C); }
 .accueil-health-fill--reject { background: var(--tier-reject-solid, #EF4444); }
@@ -4873,6 +4940,68 @@ body.v5-notif-lock {
   font-size: var(--fs-sm);
 }
 
+/* Update card (spec audit 2026-05-24 v1.5.2) -------------------------- */
+.accueil-update-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-3) 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--accent, #60A5FA);
+  border-radius: var(--radius-md);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+.accueil-update-card-msg {
+  flex: 1 1 auto;
+}
+
+.accueil-update-card-actions {
+  display: inline-flex;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+/* Setup banner (onboarding / TMDb manquant) --------------------------- */
+.accueil-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-3) 0;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+  border-left: 4px solid var(--text-3);
+  color: var(--text-1);
+}
+
+.accueil-setup-banner a {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: var(--fw-semibold);
+  flex-shrink: 0;
+}
+
+.accueil-setup-banner--alert {
+  background: rgba(245, 158, 11, 0.12);
+  border-left-color: var(--sev-warning-solid, #F59E0B);
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.accueil-setup-banner--info {
+  background: rgba(96, 165, 250, 0.10);
+  border-left-color: var(--accent, #60A5FA);
+  color: var(--text-2);
+}
+
 /* Sidebar Traitement dimmed (spec 05 §3) ------------------------------ */
 .v5-sidebar-item--dimmed {
   opacity: 0.5;
@@ -4883,6 +5012,22 @@ body.v5-notif-lock {
 .v5-sidebar-item--dimmed:hover {
   opacity: 0.9;
   filter: grayscale(0);
+}
+
+/* V1-13 : badge "MAJ disponible" sur item Parametres (puce accent positionnee). */
+.v5-sidebar-update-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--surface-1);
 }
 
 /* ===========================================================
@@ -5188,6 +5333,171 @@ body.v5-notif-lock {
   gap: var(--sp-3);
 }
 
+/* Outils externes (ffprobe / MediaInfo / fpcalc / LPIPS) ----------------- */
+/* Classes utilisees par parametres.js _renderProbeToolsTable + _renderProbeToolRow */
+.parametres-field--probe-tools {
+  width: 100%;
+}
+
+.parametres-tools-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.parametres-tools-loading {
+  padding: var(--sp-4);
+  text-align: center;
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.parametres-tools-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.parametres-tools-table thead th {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-1);
+  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+}
+
+.parametres-tools-row {
+  border-bottom: 1px solid var(--border-1);
+}
+
+.parametres-tools-row:last-child {
+  border-bottom: none;
+}
+
+.parametres-tools-cell {
+  padding: var(--sp-2) var(--sp-3);
+  vertical-align: middle;
+  color: var(--text-1);
+}
+
+.parametres-tools-cell--label {
+  font-weight: var(--fw-medium);
+}
+
+.parametres-tools-cell--actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Status par outil (Manquant / Trop ancien / Installe) */
+.parametres-tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+.parametres-tool-status--ok {
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tool-status--warn {
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.parametres-tool-status--ko {
+  color: var(--sev-danger-solid, #EF4444);
+  font-weight: 600;
+}
+
+/* Chemin du binaire detecte (monospace tronque) */
+.parametres-tool-path {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  padding: 2px 6px;
+  background: var(--surface-2, transparent);
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* Actions globales (Recheck / Installer auto / Update winget) */
+.parametres-tools-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+  align-items: center;
+}
+
+/* Message de retour (succes/erreur/info) sous la table */
+.parametres-tools-message {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: 0;
+  min-height: 1.2em;
+}
+
+.parametres-tools-message--ok {
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tools-message--error {
+  color: var(--sev-danger-solid, #EF4444);
+}
+
+.parametres-tools-message--info {
+  color: var(--text-2);
+}
+
+/* Badge de mode (hybride / degrade / desactive / aucun) */
+.parametres-tools-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  width: fit-content;
+}
+
+.parametres-tools-mode--ok {
+  background: var(--sev-success-bg, rgba(16, 185, 129, 0.1));
+  color: var(--sev-success-solid, #10B981);
+}
+
+.parametres-tools-mode--warn {
+  background: var(--sev-warning-bg, rgba(245, 158, 11, 0.1));
+  color: var(--sev-warning-solid, #F59E0B);
+}
+
+.parametres-tools-mode--ko {
+  background: var(--sev-danger-bg, rgba(239, 68, 68, 0.1));
+  color: var(--sev-danger-solid, #EF4444);
+}
+
+.parametres-tools-mode--muted {
+  background: var(--surface-2, rgba(127, 127, 127, 0.1));
+  color: var(--text-3);
+}
+
 .parametres-empty {
   padding: var(--sp-4);
   text-align: center;
@@ -5238,6 +5548,8 @@ body.v5-notif-lock {
 .parametres-select,
 .parametres-textarea {
   width: 100%;
+  /* AUDIT 2026-06-14 (R7-9) : popup natif des <select> en sombre (Windows). */
+  color-scheme: dark;
   max-width: 480px;
   padding: var(--sp-2) var(--sp-3);
   background: var(--bg-raised, var(--surface-2));
@@ -5448,7 +5760,7 @@ body.v5-notif-lock {
 }
 
 .parametres-tier-badge--platinum { background: rgba(229, 231, 235, 0.2); color: #E5E7EB; }
-.parametres-tier-badge--gold { background: rgba(251, 191, 36, 0.2); color: #FBBF24; }
+.parametres-tier-badge--gold { background: rgba(251,191,36,0.2); color: #FBBF24; }
 .parametres-tier-badge--silver { background: rgba(156, 163, 175, 0.2); color: #9CA3AF; }
 .parametres-tier-badge--bronze { background: rgba(180, 83, 9, 0.2); color: #B45309; }
 
@@ -5924,7 +6236,10 @@ body.v5-notif-lock {
 .aide-doc-drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* LOTC-Z3 : a 100, le drawer passait SOUS la topbar (--z-top-bar = 300)
+     -> croix Fermer recouverte par l'icone theme, incliquable. Aligne sur
+     la famille drawers de vue (1500, cf echelle documentee L7736+). */
+  z-index: 1500;
 }
 
 .aide-doc-drawer-backdrop {
@@ -6142,6 +6457,9 @@ body.v5-notif-lock {
 .historique-film-status.is-rejected { color: var(--danger, #b91c1c); background: rgba(185, 28, 28, 0.1); }
 .historique-film-status.is-duplicate { color: var(--warning, #d97706); background: rgba(217, 119, 6, 0.1); }
 .historique-film-status.is-deleted { color: var(--text-3); background: var(--surface-2); }
+/* Audit ultra 2026-07-13 (H8) : pastille "Reporte" (decision utilisateur
+   deferred) sur l'ecran Historique, teintee comme un statut d'attente. */
+.historique-film-status.is-deferred { color: var(--info, #2563eb); background: rgba(37, 99, 235, 0.1); }
 .historique-film-score { font-family: monospace; font-size: var(--fs-xs); color: var(--text-2); text-align: right; }
 .historique-film-link { text-decoration: none; color: var(--accent); font-weight: var(--fw-semibold); }
 .historique-film-link-dim { color: var(--text-3); }
@@ -6196,10 +6514,14 @@ body.v5-notif-lock {
 /* Audit C17 P1 : transition: width -> transform: scaleX (compositor only, no reflow).
  * width: 100% + transform-origin: left -> scaleX(0..1) via --progress. */
 .qualite-tier-fill { display: block; height: 100%; width: 100%; transform: scaleX(var(--progress, 0)); transform-origin: left center; transition: transform 0.3s; }
-.qualite-tier-fill--platinum { background: #8b5cf6; }
-.qualite-tier-fill--gold { background: #d4a017; }
-.qualite-tier-fill--silver { background: #94a3b8; }
-.qualite-tier-fill--bronze { background: #b45309; }
+/* INVARIANTES tier hex (charte) : Platinum #E5E4E2 / Gold #FFD700 /
+ * Silver #C0C0C0 / Bronze #CD7F32. Utilise les tokens --tier-X-solid
+ * (cf tokens.css) au lieu de hex en dur pour preserver les invariantes
+ * sur tous les themes. */
+.qualite-tier-fill--platinum { background: var(--tier-platinum-solid); }
+.qualite-tier-fill--gold { background: var(--tier-gold-solid); }
+.qualite-tier-fill--silver { background: var(--tier-silver-solid); }
+.qualite-tier-fill--bronze { background: var(--tier-bronze-solid); }
 .qualite-tier-fill--reject { background: #b91c1c; }
 .qualite-tier-fill--unknown { background: #6b7280; }
 .qualite-tier-count { text-align: right; font-weight: var(--fw-semibold); color: var(--text-1); }
@@ -6279,8 +6601,10 @@ body.v5-notif-lock {
 .qualite-evolution-axis-label { fill: var(--text-2); font-size: 2.4px; font-family: var(--font-family-base, system-ui, sans-serif); }
 .qualite-evolution-point { fill: var(--accent); cursor: pointer; transition: r 0.12s ease-out; }
 .qualite-evolution-point:hover { r: 1.6; fill: var(--accent-strong, var(--accent)); }
-.qualite-kpi-good { color: #16a34a; }
-.qualite-kpi-bad { color: #b91c1c; }
+/* VN-A.1 : tokens design system au lieu de hex hardcoded — fallback historique
+ * preserve pour les builds qui n'ont pas encore charge dashboard/styles.css. */
+.qualite-kpi-good { color: var(--success, #16a34a); }
+.qualite-kpi-bad { color: var(--danger, #b91c1c); }
 
 /* Inspector helpers (right panel) */
 .qualite-inspector-list { list-style: none; padding-left: 0; margin: var(--sp-1) 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--text-1); }
@@ -6297,7 +6621,9 @@ body.v5-notif-lock {
 /* Drawer filtres globaux */
 .qualite-drawer-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1000; }
 .qualite-drawer-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); }
-.qualite-drawer { position: absolute; top: 0; right: 0; height: 100vh; width: min(420px, 100vw); background: var(--surface-1); border-left: 1px solid var(--border-1); display: flex; flex-direction: column; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15); animation: qualite-drawer-slide 0.2s ease-out; }
+/* AUDIT 2026-06-14 (R7-9, complement R6-E) : --surface-1 (~3.5%) laissait voir
+   la page derriere le tiroir Filtres Qualite -> fond opaque --bg-raised. */
+.qualite-drawer { position: absolute; top: 0; right: 0; height: 100vh; width: min(420px, 100vw); background: var(--bg-raised); border-left: 1px solid var(--border-1); display: flex; flex-direction: column; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15); animation: qualite-drawer-slide 0.2s ease-out; }
 @keyframes qualite-drawer-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }
 .qualite-drawer-header { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border-1); }
 .qualite-drawer-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-1); margin: 0; }
@@ -6419,6 +6745,26 @@ body.v5-notif-lock {
   font-style: italic;
 }
 
+/* Fix iter13 POLLING_UI_BACKOFF (2026-06-10) : badge "Reconnexion dans Xs"
+   visible quand le polling est en mode degrade (backoff exponentiel actif).
+   Couleur warning pour signal clair, role=status pour AT (aria-live=polite). */
+.traitement-run-backoff {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warning, #f59e0b);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.traitement-run-backoff-dot { font-size: var(--fs-md); line-height: 1; }
+.traitement-run-backoff-label { font-weight: var(--fw-semibold); }
+.traitement-run-backoff-detail { color: var(--text-3); font-size: var(--fs-xs); }
+
 /* --- Scan drawer (etape Analyse) --- */
 .traitement-scan-drawer {
   background: var(--surface-2);
@@ -6523,6 +6869,27 @@ body.v5-notif-lock {
   word-break: break-all;
 }
 
+/* --- Apply progress (alias de scan progress, coloris vert) ---
+   Reutilise la structure de .traitement-scan-progress + barre + meta
+   en surchargeant uniquement le degrade de remplissage pour distinguer
+   visuellement la phase d'application (vert) du scan (bleu). */
+.traitement-apply-progress {
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.traitement-apply-progress .traitement-scan-progress-fill {
+  background: linear-gradient(90deg, var(--success, #16a34a), var(--accent));
+}
+.traitement-apply-phase {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* --- Tables denses verif + validation --- */
 .traitement-verif-table,
 .traitement-validation-table {
@@ -6588,6 +6955,64 @@ body.v5-notif-lock {
   padding: var(--sp-3);
   background: var(--surface-2);
   border-radius: var(--radius-md);
+}
+
+/* --- Tri colonnes validation --- */
+.traitement-validation-table thead th.is-sort {
+  cursor: pointer;
+  user-select: none;
+}
+.traitement-validation-table thead th.is-sort:hover {
+  color: var(--text-1);
+}
+.traitement-validation-table thead th.is-sort.is-active {
+  color: var(--accent);
+}
+.traitement-validation-table thead th.is-sort .sort-arrow::after {
+  content: "\2195";
+  opacity: 0.4;
+  margin-left: 4px;
+}
+.traitement-validation-table thead th.is-sort.is-asc .sort-arrow::after {
+  content: "\2191";
+  opacity: 1;
+}
+.traitement-validation-table thead th.is-sort.is-desc .sort-arrow::after {
+  content: "\2193";
+  opacity: 1;
+}
+
+/* --- Ligne d'expansion raisons validation --- */
+.traitement-validation-row-expand td {
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: none;
+}
+.traitement-validation-reasons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+}
+.traitement-validation-reasons h4 {
+  font-size: var(--fs-xs);
+  margin: 0 0 var(--sp-1);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.traitement-validation-reasons .candidate-row {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 2px 0;
+}
+
+/* --- Source proposee validation --- */
+.traitement-validation-source {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* --- Filtres verif --- */
@@ -6734,14 +7159,53 @@ body.v5-notif-lock {
 .bibliotheque-card-poster { position: relative; aspect-ratio: 2/3; background: var(--surface-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .bibliotheque-card-poster-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bibliotheque-card-poster-placeholder { font-size: 48px; color: var(--text-3); }
+/* Fix audit 2026-05-25 (v1.5.5) Vague J : la variante "non identifié" contenait
+ * un <span class="bibliotheque-card-unidentified-cta">Identifier</span> qui
+ * heritait du font-size: 48px de .bibliotheque-card-poster-placeholder. Combine
+ * a overflow:hidden du parent .bibliotheque-card-poster, le mot "Identifier"
+ * debordait et apparaissait tronque ("dentifie") par-dessus le clapper SVG.
+ * Fix : layout flex vertical, taille du clapper preservee a 48px, CTA en text
+ * de taille normale avec wrapping geree. */
+.bibliotheque-card-poster-placeholder--unidentified {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  padding: var(--sp-2);
+  box-sizing: border-box;
+  text-align: center;
+}
+.bibliotheque-card-poster-placeholder--unidentified > span[aria-hidden="true"] {
+  font-size: 48px;
+  line-height: 1;
+}
+.bibliotheque-card-unidentified-cta {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bibliotheque-card-poster-placeholder--unidentified:hover .bibliotheque-card-unidentified-cta {
+  background: rgba(99, 102, 241, 0.22);
+}
 .bibliotheque-card-check { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.5); border-radius: var(--radius-sm); padding: 2px 4px; }
 .bibliotheque-card-check input { cursor: pointer; }
 .bibliotheque-card-warn { position: absolute; top: 6px; right: 6px; background: var(--warning, #d97706); color: #fff; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 .bibliotheque-tier-badge { position: absolute; bottom: 6px; left: 6px; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: #fff; background: #6b7280; }
-.bibliotheque-tier-badge--platinum { background: #8b5cf6; }
-.bibliotheque-tier-badge--gold { background: #d4a017; }
-.bibliotheque-tier-badge--silver { background: #94a3b8; color: #0f172a; }
-.bibliotheque-tier-badge--bronze { background: #b45309; }
+.bibliotheque-tier-badge--platinum { background: var(--tier-platinum-solid); color: #111; }
+.bibliotheque-tier-badge--gold { background: var(--tier-gold-solid); color: #111; }
+.bibliotheque-tier-badge--silver { background: var(--tier-silver-solid); color: #111; }
+.bibliotheque-tier-badge--bronze { background: var(--tier-bronze-solid); color: #111; }
 .bibliotheque-tier-badge--reject { background: #b91c1c; }
 .bibliotheque-tier-badge--unknown { background: #6b7280; }
 .bibliotheque-card-info { padding: 0 var(--sp-2) var(--sp-2); }
@@ -6866,6 +7330,10 @@ body.v5-notif-lock {
 .bibliotheque-drawer-backdrop {
   position: absolute;
   inset: 0;
+  /* LOTC-Z2 : le backdrop est un FRERE rendu APRES l'aside (cf
+     library-advanced-drawer.js _buildHtml) ; sans z-index explicite il se
+     peignait au-dessus du panneau et interceptait tous ses clics. */
+  z-index: 0;
   background: rgba(0, 0, 0, 0.45);
   opacity: 0;
   transition: opacity 0.2s;
@@ -6880,9 +7348,14 @@ body.v5-notif-lock {
   top: 0;
   right: 0;
   bottom: 0;
+  /* LOTC-Z2 : au-dessus du backdrop (frere suivant dans le DOM). */
+  z-index: 1;
   width: 420px;
   max-width: 90vw;
-  background: var(--surface-1);
+  /* AUDIT 2026-06-14 (R6-E) : --surface-1 = 3,5% d'opacite -> panneau quasi
+     transparent (page visible derriere). On bascule sur --bg-raised (opaque,
+     defini dans les 5 themes) pour un vrai fond de tiroir. */
+  background: var(--bg-raised);
   border-left: 1px solid var(--border-1);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
   display: flex;
@@ -7002,6 +7475,12 @@ body.v5-notif-lock {
 .doublons-card-year { color: var(--text-2); font-weight: var(--fw-regular); font-size: var(--fs-md); }
 .doublons-card-meta { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); flex-wrap: wrap; }
 .doublons-card-alerts { color: var(--warning, #d97706); font-weight: var(--fw-semibold); }
+/* AUDIT 2026-06-14 (R6-A) : badge de portee du doublon (liste unique par
+   identite, le badge precise ou se trouvent les copies). */
+.doublons-card-scope { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); border: 1px solid var(--border-1); }
+.doublons-card-scope.is-cross { color: var(--accent, #8b5cf6); border-color: color-mix(in srgb, var(--accent, #8b5cf6) 45%, transparent); }
+.doublons-card-scope.is-same-root { color: var(--text-2); }
+.doublons-card-scope.is-same-folder { color: var(--text-3, var(--text-2)); }
 .doublons-card-versions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .doublons-version { background: var(--surface-2); border-radius: var(--radius-md); padding: var(--sp-3); border: 1px solid var(--border-1); }
 .doublons-version.is-winner { border-color: var(--success, #16a34a); background: rgba(22, 163, 74, 0.04); }
@@ -7057,9 +7536,10 @@ body.v5-notif-lock {
 .perceptual-section-title { font-size: var(--fs-md); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-3); color: var(--text-1); }
 .perceptual-score-grid { display: flex; align-items: center; gap: var(--sp-4); }
 .perceptual-score-circle { width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--surface-1); border: 3px solid var(--text-3); flex-shrink: 0; }
-.perceptual-score-circle--good { border-color: #16a34a; }
-.perceptual-score-circle--warning { border-color: #d97706; }
-.perceptual-score-circle--critical { border-color: #b91c1c; }
+/* VN-A.1 : tokens design system pour les bordures du cercle perceptuel. */
+.perceptual-score-circle--good { border-color: var(--success, #16a34a); }
+.perceptual-score-circle--warning { border-color: var(--warning, #d97706); }
+.perceptual-score-circle--critical { border-color: var(--danger, #b91c1c); }
 .perceptual-score-value { font-size: 28px; font-weight: var(--fw-bold); }
 .perceptual-score-total { font-size: var(--fs-xs); color: var(--text-2); }
 .perceptual-score-bars { flex: 1; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -7084,10 +7564,11 @@ body.v5-notif-lock {
 .perceptual-breakdown-points--total { font-size: var(--fs-md); color: var(--accent); }
 .perceptual-weight { color: var(--text-3); font-size: var(--fs-xs); }
 .perceptual-status { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill, 999px); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
-.perceptual-status--good, .perceptual-status--ok { background: rgba(22, 163, 74, 0.15); color: #16a34a; }
-.perceptual-status--warning { background: rgba(217, 119, 6, 0.15); color: #d97706; }
-.perceptual-status--critical, .perceptual-status--reject { background: rgba(185, 28, 28, 0.15); color: #b91c1c; }
-.perceptual-status--info { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+/* VN-A.1 : tokens couleur (bg garde sa transparence rgba — pas de token equivalent). */
+.perceptual-status--good, .perceptual-status--ok { background: rgba(22, 163, 74, 0.15); color: var(--success, #16a34a); }
+.perceptual-status--warning { background: rgba(217, 119, 6, 0.15); color: var(--warning, #d97706); }
+.perceptual-status--critical, .perceptual-status--reject { background: rgba(185, 28, 28, 0.15); color: var(--danger, #b91c1c); }
+.perceptual-status--info { background: rgba(59, 130, 246, 0.15); color: var(--info, #3b82f6); }
 .perceptual-verdicts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .perceptual-verdict-item { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); border-left: 3px solid #3b82f6; background: rgba(59, 130, 246, 0.08); font-size: var(--fs-sm); }
 .perceptual-verdict-item--warning { border-left-color: var(--warning, #d97706); background: rgba(217, 119, 6, 0.08); }
@@ -7133,10 +7614,10 @@ body.v5-notif-lock {
 .parametres-tier-row label { display: flex; align-items: center; gap: var(--sp-2); }
 .parametres-tier-row input { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-1); border-radius: var(--radius-sm); }
 .parametres-tier-badge { display: inline-block; padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: #fff; }
-.parametres-tier-badge--platinum { background: #8b5cf6; }
-.parametres-tier-badge--gold { background: #d4a017; }
-.parametres-tier-badge--silver { background: #94a3b8; color: #0f172a; }
-.parametres-tier-badge--bronze { background: #b45309; }
+.parametres-tier-badge--platinum { background: var(--tier-platinum-solid); color: #111; }
+.parametres-tier-badge--gold { background: var(--tier-gold-solid); color: #111; }
+.parametres-tier-badge--silver { background: var(--tier-silver-solid); color: #111; }
+.parametres-tier-badge--bronze { background: var(--tier-bronze-solid); color: #111; }
 .parametres-profils-message { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-1); font-size: var(--fs-sm); border-left: 3px solid var(--accent); }
 .parametres-profils-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
@@ -7145,58 +7626,11 @@ body.v5-notif-lock {
  * Utilise par settings.js (data-test-result-for="omdb_api_key")
  * et parametres.js (data-omdb-status).
  * =========================================================== */
-.omdb-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill, 999px);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium, 500);
-  line-height: 1.4;
-  border: 1px solid transparent;
-}
-.omdb-status__icon { display: inline-flex; align-items: center; }
-.omdb-status__label { display: inline-block; }
-.omdb-status__hint {
-  color: var(--text-2, #475569);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-normal, 400);
-  margin-left: var(--sp-1);
-}
-.omdb-status--ok {
-  background: rgba(22, 163, 74, 0.12);
-  color: #16a34a;
-  border-color: rgba(22, 163, 74, 0.30);
-}
-.omdb-status--warning {
-  background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.35);
-}
-.omdb-status--error {
-  background: rgba(185, 28, 28, 0.12);
-  color: #b91c1c;
-  border-color: rgba(185, 28, 28, 0.30);
-}
-.omdb-status--info {
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
-  border-color: rgba(59, 130, 246, 0.30);
-}
-.omdb-status--idle {
-  background: var(--surface-2, #f1f5f9);
-  color: var(--text-2, #475569);
-  border-color: var(--border-1, #e2e8f0);
-}
-.omdb-quota {
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--fw-semibold, 600);
-  padding-left: var(--sp-2);
-  border-left: 1px solid currentColor;
-  opacity: 0.9;
-}
+/* Purge verif totale 2026-07 (Phase 6) : bloc .omdb-status* / .omdb-quota
+   supprimé — composant omdb-status.js supprimé (mort). L'UI OMDb vivante
+   utilise .parametres-omdb-status--* (tokens --sev-*, ci-dessous). Ceci solde
+   aussi le finding a11y R8-076 sur .omdb-status--warning/--info (3,9:1 < AA) :
+   les classes sous le seuil étaient déjà mortes. */
 
 /* ===========================================================
  * PARAMETRES — Catégorie Intégrations / OMDb (spec 03)
@@ -7281,11 +7715,27 @@ body.v5-notif-lock {
  * Differente de .modal-overlay (legacy showModal) : ARIA alertdialog,
  * focus initial sur Annuler, bouton primary en variant --danger,
  * compteur anti-clic-reflexe optionnel.
+ *
+ * LOTC-Z1 — echelle des z-index overlays plein ecran (ce fichier) :
+ *     300  topbar (--z-top-bar, tokens.css)
+ *    1000  .qualite-drawer-overlay
+ *    1500  .bibliotheque-drawer-host / .aide-doc-drawer-overlay (drawers de vue)
+ *    1600  toasts (--z-toast, Z3-bis : au-dessus des drawers de vue)
+ *    1700  command palette (--z-palette, Z3-bis)
+ *    9000  .perceptual-modal-overlay / menus contextuels (9000-9100)
+ *    9999  .bibliotheque-drag-overlay
+ *   10001  .film-detail-modal-overlay (fiche film mode C)
+ *   10002  .tmdb-manual-search-overlay (ouverte DEPUIS la fiche film)
+ *   10100  .danger-modal-overlay — TOUJOURS au sommet : une confirmation
+ *          danger peut s'ouvrir depuis n'importe quel overlay (fiche film
+ *          incluse) et doit rester visible/cliquable (avant : 10000, rendue
+ *          SOUS la fiche film -> confirmation invisible).
+ *   99999  .skip-link (focus clavier uniquement)
  * =========================================================== */
 .danger-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: 10100;
   background: rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;
@@ -8065,7 +8515,13 @@ body.v5-notif-lock {
   padding: var(--sp-4);
 }
 .duplicate-modal {
-  background: var(--surface-1);
+  /* Fix bug "overlay transparent montre fond" : --surface-1 et --surface-2
+   * sont definis en rgba(...,0.035-0.12) sur tous les themes (themes.css),
+   * ce qui rend la modale quasi transparente malgre l'overlay 0.78.
+   * On force un fond opaque hex (avec fallback --bg-base si defini).
+   * Cf memoire project_cinesort_tier_duplication_historique : verifier
+   * en runtime via Playwright getComputedStyle. */
+  background: var(--bg-base, #1a1a1a);
   color: var(--text-1);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-1);
@@ -9568,7 +10024,114 @@ body.v5-notif-lock {
   color: var(--text-1);
 }
 .historique-films-history-tier--platinum { background: #b9f2ff; color: #003a4a; }
-.historique-films-history-tier--gold     { background: #ffd700; color: #4a3a00; }
+.historique-films-history-tier--gold     { background: var(--tier-gold-bg); color: var(--tier-gold-solid); }
 .historique-films-history-tier--silver   { background: #c0c0c0; color: #2a2a2a; }
 .historique-films-history-tier--bronze   { background: #cd7f32; color: #3a1a00; }
 .historique-films-history-tier--reject   { background: #f48fb1; color: #4a0010; }
+
+/* ============================================================
+ * VO-C-FRONTEND-LIB-VAL : waterfall inspecteur lib-validation
+ * ============================================================
+ * Breakdown du score affiche dans l'inspecteur de film. Style
+ * additif type Radarr : 1 ligne par categorie (video/audio/extras/
+ * custom_rules), contribution coloree (+vert/-rouge), total final.
+ * Classes specifiques (.score-waterfall-*) volontairement non
+ * partagees avec les badges audio/tier dont les couleurs sont
+ * invariantes (cf memoire user feedback_cinesort_v76_ui).
+ * ============================================================ */
+.score-waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--surface-2, var(--bg-raised, #1a1a1a));
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--surface-3, var(--border, #2a2a2a));
+  font-family: var(--font-family-base);
+}
+.score-waterfall-row {
+  display: grid;
+  grid-template-columns: 160px 80px 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px dashed var(--surface-3, var(--border, #2a2a2a));
+}
+.score-waterfall-row:last-child { border-bottom: 0; }
+.score-waterfall-row--baseline {
+  font-style: italic;
+  opacity: 0.85;
+}
+.score-waterfall-row--total {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 2px solid var(--surface-3, var(--border, #2a2a2a));
+  border-bottom: 0;
+  font-weight: var(--fw-semibold, 600);
+}
+.score-waterfall-row--next {
+  font-size: var(--fs-sm);
+  opacity: 0.85;
+}
+.score-waterfall-row--custom {
+  grid-template-columns: 160px 1fr;
+}
+.score-waterfall-row--empty {
+  grid-template-columns: 1fr;
+  font-style: italic;
+  opacity: 0.7;
+}
+.score-waterfall-label {
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-contribution {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-semibold, 600);
+  text-align: right;
+}
+.score-waterfall-contribution-positive { color: #4ade80; }
+.score-waterfall-contribution-negative { color: #f87171; }
+.score-waterfall-contribution-neutral { color: var(--text-2, var(--text-secondary, #aaa)); }
+.score-waterfall-contribution-total { color: var(--accent, #60a5fa); font-size: var(--fs-md, 1rem); }
+.score-waterfall-detail {
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-narrative {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--surface-2, var(--bg-raised, #1a1a1a));
+  border-left: 3px solid var(--accent, #60a5fa);
+  border-radius: var(--radius-sm, 3px);
+  font-size: var(--fs-sm);
+  color: var(--text-1, var(--text-primary, #eee));
+}
+.score-waterfall-suggestions {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-4);
+  color: var(--text-2, var(--text-secondary, #aaa));
+  font-size: var(--fs-sm);
+}
+.score-waterfall-suggestions li { margin-bottom: 2px; }
+.badge-custom-rule {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 2px;
+  border-radius: var(--radius-sm, 3px);
+  background: var(--surface-3, var(--border, #2a2a2a));
+  color: var(--text-1, var(--text-primary, #eee));
+  font-size: var(--fs-xs, 0.75rem);
+  font-weight: var(--fw-semibold, 600);
+}
+@media (max-width: 767px) {
+  .score-waterfall-row {
+    grid-template-columns: 1fr auto;
+    gap: var(--sp-1);
+  }
+  .score-waterfall-row--custom { grid-template-columns: 1fr; }
+  .score-waterfall-detail { grid-column: 1 / -1; }
+}
+
+} /* end @layer v5 */

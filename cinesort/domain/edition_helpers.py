@@ -6,6 +6,7 @@ Extrait l'edition d'un nom de fichier ou dossier et fournit un label canonique.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
 
 # --- Regex de detection (case-insensitive) ---
@@ -82,21 +83,35 @@ def _canonicalize(raw: str) -> str:
 
 
 def extract_edition(text: str) -> Optional[str]:
-    """Extrait l'edition d'un nom de fichier/dossier. Retourne le label canonique ou None."""
+    """Extrait l'edition d'un nom de fichier/dossier. Retourne le label canonique ou None.
+
+    VN-A.5 : normalise NFC en entree pour garantir un matching robuste entre
+    les noms de fichiers macOS (NFD : "Directoŕs" decompose) et Windows /
+    Linux (NFC : "Director's" precompose). Sans NFC, "Director's Cut" pose
+    par macOS pouvait echouer au regex sur Windows.
+    """
     if not text:
         return None
+    # NFC : compose les caracteres decomposes (accents, apostrophes typographiques)
+    text = unicodedata.normalize("NFC", text)
     # Remplacer les points/underscores par des espaces pour le matching
     cleaned = text.replace(".", " ").replace("_", " ")
     m = _EDITION_RE.search(cleaned)
     if not m:
         return None
-    return _canonicalize(m.group(1))
+    # Le label canonique est deja NFC (ASCII pur dans _CANONICAL_ORDERED)
+    return unicodedata.normalize("NFC", _canonicalize(m.group(1)))
 
 
 def strip_edition(text: str) -> str:
-    """Retire l'edition du texte pour le matching TMDb. Nettoie les separateurs orphelins."""
+    """Retire l'edition du texte pour le matching TMDb. Nettoie les separateurs orphelins.
+
+    VN-A.5 : normalise NFC en entree (cf extract_edition).
+    """
     if not text:
         return text
+    # NFC : harmonise les decompositions venues de macOS / clipboard
+    text = unicodedata.normalize("NFC", text)
     cleaned = text.replace(".", " ").replace("_", " ")
     result = _EDITION_RE.sub(" ", cleaned)
     result = _STRIP_CLEANUP_RE.sub(" ", result)

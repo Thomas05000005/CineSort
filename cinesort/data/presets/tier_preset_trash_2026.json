@@ -1,0 +1,93 @@
+{
+  "schema": "cinesort.tier_preset",
+  "schema_version": 1,
+  "preset_id": "trash_2026",
+  "label": "TRaSH 2026 - Quality Trumps All",
+  "description": "Preset inspire des Custom Format Groups TRaSH-Guides / Radarr 2026. Hierarchie multi-axes (Source > Codec > HDR > Audio > Group) avec planchers et plafonds stricts. DESACTIVE par defaut (fix #4 ROADMAP Vague P) : activer peut redistribuer 30-40% de la bibliotheque existante.",
+  "enabled_by_default": false,
+  "upgrade_until_score": 10000,
+  "tier_hierarchy": {
+    "enabled": false,
+    "order": ["resolution", "video_codec", "hdr", "audio", "release_group"],
+    "resolution_floors": {
+      "2160p_probe": "Gold"
+    },
+    "resolution_ceilings": {
+      "720p": "Silver",
+      "SD": "Bronze"
+    },
+    "codec_floors": {},
+    "hdr_floors": {
+      "dolby_vision": "Gold",
+      "hdr10_plus": "Silver"
+    },
+    "audio_floors": {
+      "truehd_atmos": "Gold"
+    },
+    "group_floors": {}
+  },
+  "trash_scoring": {
+    "source": {
+      "remux_2160p": 1950,
+      "remux_1080p": 1800,
+      "bluray_2160p": 1700,
+      "bluray_1080p": 1600,
+      "webdl_2160p": 1500,
+      "webdl_1080p": 1400
+    },
+    "audio": {
+      "truehd_atmos": 5000,
+      "dts_x": 4800,
+      "truehd": 3000,
+      "dts_hd_ma": 2800,
+      "atmos": 2500,
+      "dts": 1500,
+      "ac3": 1000,
+      "aac": 750
+    },
+    "hdr": {
+      "dolby_vision_p7": 1200,
+      "dolby_vision_p5": 1000,
+      "hdr10_plus": 900,
+      "hdr10": 700
+    },
+    "codec": {
+      "av1": 800,
+      "hevc": 500,
+      "avc": 0
+    }
+  },
+  "alternative_presets": {
+    "puriste_dv": {
+      "label": "Puriste Dolby Vision",
+      "description": "Privilegie Dolby Vision Profile 7 / Profile 5 et REMUX 2160p exclusivement.",
+      "tier_hierarchy": {
+        "enabled": false,
+        "order": ["hdr", "resolution", "audio", "video_codec", "release_group"],
+        "hdr_floors": {
+          "dolby_vision": "Platinum"
+        },
+        "resolution_ceilings": {
+          "1080p": "Gold"
+        }
+      }
+    },
+    "qualite_max_audio": {
+      "label": "Qualite max audio",
+      "description": "Privilegie TrueHD Atmos / DTS:X au-dessus de tout autre critere.",
+      "tier_hierarchy": {
+        "enabled": false,
+        "order": ["audio", "resolution", "hdr", "video_codec", "release_group"],
+        "audio_floors": {
+          "truehd_atmos": "Platinum",
+          "dts_x": "Gold"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "source": "TRaSH-Guides Radarr Custom Format Groups (community reference 2026)",
+    "embedded_at": "VP-F (Vague P batch 6)",
+    "ac_ref": "AC-3 : preset embarque mais DESACTIVE par defaut (fix #4)"
+  }
+}

@@ -1,0 +1,30 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\blanc\projects\CineSort\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: C:\Users\blanc\projects\CineSort
+configfile: pyproject.toml
+plugins: hypothesis-6.152.9, asyncio-1.3.0, base-url-2.1.0, playwright-0.8.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 14 items
+
+tests/test_lotd_chain_integrations.py::test_jellyfin_connection_ok_contre_mock_200 PASSED [  7%]
+tests/test_lotd_chain_integrations.py::test_radarr_connection_ok_contre_mock_200 PASSED [ 14%]
+tests/test_lotd_chain_integrations.py::test_jellyfin_connection_erreur_propre_port_ferme PASSED [ 21%]
+tests/test_lotd_chain_integrations.py::test_radarr_connection_erreur_propre_port_ferme PASSED [ 28%]
+tests/test_lotd_chain_integrations.py::test_jellyfin_libraries_non_configure_erreur_propre PASSED [ 35%]
+tests/test_lotd_chain_integrations.py::test_jellyfin_get_503_puis_200_retry_session_ok PASSED [ 42%]
+tests/test_lotd_chain_integrations.py::test_r8_080_flag_vu_mark_played_503_puis_200 XFAIL [ 50%]
+tests/test_lotd_chain_integrations.py::test_lotd_int_01_restore_watched_echec_transitoire_liste_films XFAIL [ 57%]
+tests/test_lotd_chain_integrations.py::test_timeout_jellyfin_respecte_pas_de_hang PASSED [ 64%]
+tests/test_lotd_chain_integrations.py::test_timeout_jellyfin_message_mentionne_le_timeout PASSED [ 71%]
+tests/test_lotd_chain_integrations.py::test_aucun_secret_en_clair_dans_les_logs PASSED [ 78%]
+tests/test_lotd_chain_integrations.py::test_lotd_int_03_message_erreur_tmdb_ne_leak_pas_la_cle XFAIL [ 85%]
+tests/test_lotd_chain_integrations.py::test_tmdb_cle_vide_erreur_validation_sans_reseau PASSED [ 92%]
+tests/test_lotd_chain_integrations.py::test_tmdb_posters_sans_cle_reason_tmdb_not_configured PASSED [100%]
+
+=========================== short test summary info ===========================
+XFAIL tests/test_lotd_chain_integrations.py::test_r8_080_flag_vu_mark_played_503_puis_200 - R8-080 CONFIRME : mark_played 503 -> compte en 'errors' et jamais re-tente (jellyfin_sync.py:225-246 retire le film de pending ; POST exclu du retry de session _http_utils.py:15) => flag 'vu' perdu sur hoquet transitoire.
+XFAIL tests/test_lotd_chain_integrations.py::test_lotd_int_01_restore_watched_echec_transitoire_liste_films - LOTD-INT-01 CONFIRME : JellyfinError s'echappe de la boucle retry de restore_watched (catch jellyfin_sync.py:205 trop etroit) — Erreur HTTP 404 sur /Users/u1/Items. La restauration des flags 'vu' est abandonnee au lieu d'etre re-tentee.
+XFAIL tests/test_lotd_chain_integrations.py::test_lotd_int_03_message_erreur_tmdb_ne_leak_pas_la_cle - LOTD-INT-03 CONFIRME : la cle TMDb apparait en clair dans le message d'erreur renvoye au frontend (tmdb_client.validate_key:407 'Erreur reseau: {e}' — l'exception requests embarque l'URL ?api_key=...).
+================== 11 passed, 3 xfailed in 63.95s (0:01:03) ===================

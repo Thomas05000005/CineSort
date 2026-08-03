@@ -120,6 +120,12 @@ class SettingsFacade(_BaseFacade):
         """
         return self._api._get_dashboard_qr_impl()
 
+    def reveal_rest_token(self) -> Dict[str, Any]:
+        """R7-10 : revele le Bearer REST en clair (LOCALHOST uniquement) pour les
+        boutons Afficher/Copier. Cf CineSortApi._reveal_rest_token_impl.
+        """
+        return self._api._reveal_rest_token_impl()
+
     # ---------- Naming presets & template preview (sprint C1 — refactor #84 suite) ----------
 
     def get_naming_presets(self) -> Dict[str, Any]:
@@ -135,3 +141,113 @@ class SettingsFacade(_BaseFacade):
         Cf CineSortApi._preview_naming_template_impl pour la doc complete.
         """
         return self._api._preview_naming_template_impl(template, sample_row_id)
+
+    # ---------- VO-A UI : Advanced PRAGMA settings (storage profile + EXCLUSIVE) ----------
+
+    def get_advanced_pragma_settings(self) -> Dict[str, Any]:
+        """VO-A : retourne l'etat des PRAGMA SQLite avances (profil + locking_mode).
+
+        Endpoint exposant le tri-etat storage_profile (auto/local_ssd/nas_smb)
+        et le flag locking_mode_exclusive. Le frontend l'utilise pour pre-remplir
+        la section "Avance > Stockage SQLite".
+
+        Cf CineSortApi._get_advanced_pragma_settings_impl pour la doc complete.
+
+        Returns:
+            {
+                "ok": True,
+                "profile_active": str,  # profil effectif
+                "profile_override": str,  # choix user
+                "available_profiles": [{"v": str, "l": str}, ...],
+                "storage_detected": str,
+                "locking_mode_exclusive": bool,
+            }
+        """
+        return self._api._get_advanced_pragma_settings_impl()
+
+    def set_advanced_pragma_settings(
+        self,
+        profile_name: str,
+        locking_mode_exclusive: bool = False,
+    ) -> Dict[str, Any]:
+        """VO-A : applique le profil PRAGMA et persiste dans settings.json.
+
+        IMPORTANT (memoire user actions dangereuses) : la bascule
+        locking_mode_exclusive=True est destructive (empeche toute lecture
+        concurrente). Le frontend DOIT afficher dangerConfirmModal avec
+        countdown 3s avant d'envoyer True ici.
+
+        Backward compat : `locking_mode_exclusive` est keyword-only par defaut
+        (False) - les anciens callers qui ne le passent pas continuent de
+        fonctionner et conservent l'etat actuel desactive.
+
+        Cf CineSortApi._set_advanced_pragma_settings_impl pour la doc complete.
+
+        Args:
+            profile_name: "auto" | "local_ssd" | "nas_smb"
+            locking_mode_exclusive: True = activer locking_mode=EXCLUSIVE (defaut False)
+        """
+        return self._api._set_advanced_pragma_settings_impl(
+            profile_name,
+            locking_mode_exclusive=locking_mode_exclusive,
+        )
+
+    # ---------- VO-B-CONFIG : scan_max_workers (tri-etat auto/manuel) ----------
+
+    def get_scan_max_workers(self) -> Dict[str, Any]:
+        """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+        Synergie VO-A : en mode "auto", le backend lit `_detect_storage_profile`
+        et mappe vers un nombre de workers (8 pour SSD local, 4 pour NAS SMB,
+        1 fallback). En mode "manual", l'utilisateur force une valeur [1..64].
+
+        Returns:
+            {
+                "ok": True,
+                "mode": "auto" | "manual",
+                "value": int,             # valeur manuelle saisie
+                "effective": int,         # valeur effectivement appliquee
+                "storage_detected": str,  # heuristique VO-A
+                "auto_suggestion": int,   # workers proposes en mode auto
+                "min": 1,
+                "max": 64,
+            }
+        """
+        return self._api._get_scan_max_workers_impl()
+
+    def set_scan_max_workers(
+        self,
+        mode: str,
+        value: Any = None,
+    ) -> Dict[str, Any]:
+        """VO-B-CONFIG : persiste le setting scan_max_workers + retourne l'etat.
+
+        Memoire user BACKWARD COMPAT : mode="manual" avec value=1 garde un
+        comportement strictement sequentiel (cf.
+        `resolve_scan_max_workers` qui plafonne a [1..32] et retombe sur 1).
+        Mode="auto" delegue a VO-A pour adapter selon le storage detecte.
+
+        Args:
+            mode: "auto" | "manual".
+            value: int [1..64], requis si mode="manual".
+
+        Returns:
+            Meme forme que `get_scan_max_workers` + `write_result`.
+            En cas d'erreur de validation : { "ok": False, "message": ... }.
+        """
+        return self._api._set_scan_max_workers_impl(mode, value)
+
+    # ---------- VN-C.1 (batch 2) : seuils confidence unifies ----------
+
+    def get_confidence_thresholds(self) -> Dict[str, Any]:
+        """Retourne les seuils HIGH/MEDIUM/LOW partages backend+frontend.
+
+        Source unique : cinesort/domain/confidence_thresholds.py
+            { "ok": true, "thresholds": { "high": 85, "medium": 60, "low": 0 } }
+
+        Le dashboard consomme cet endpoint au demarrage et cache la valeur
+        module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
+        """
+        from cinesort.ui.api.settings_support import get_confidence_thresholds_payload  # noqa: PLC0415
+
+        return get_confidence_thresholds_payload()
