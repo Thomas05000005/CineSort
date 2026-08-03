@@ -17,7 +17,7 @@ from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
-from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
+from cinesort.ui.api.perceptual_support import _build_tmdb_client, enrich_quality_report_with_perceptual
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
@@ -99,7 +99,18 @@ def _probe_and_score(
                 tmdb_id_lookup = int(c.tmdb_id)
                 break
         if tmdb_id_lookup > 0:
-            tmdb = api._tmdb_client() if hasattr(api, "_tmdb_client") else None
+            # Fix ultra-audit 2026-08-03 : `api._tmdb_client()` n'existe PAS sur
+            # CineSortApi (aucun `def _tmdb_client` ni `self._tmdb_client =` dans
+            # le depot). Le `hasattr` avalait l'absence en silence -> `tmdb` etait
+            # TOUJOURS None -> `tmdb_genres` toujours vide -> tout le scoring
+            # genre-aware P4.2 etait du code mort en production (bonus codec
+            # moderne / HDR contextuel / Atmos, malus grain, malus resolution,
+            # `adjust_bitrate_threshold` par genre, `metrics.primary_genre`, et
+            # tout facteur "Genre '...'" de l'explain-score). Le meme defaut avait
+            # ete corrige le 2026-06-10 (AUDIT REAL 2/2) sur perceptual_support et
+            # library_audit_support ; ce 3e call site avait ete oublie. On
+            # reutilise le meme constructeur que perceptual_support.
+            tmdb = _build_tmdb_client(api)
             if tmdb:
                 meta = tmdb.get_movie_metadata_for_perceptual(tmdb_id_lookup)
                 if meta and isinstance(meta.get("genres"), list):

@@ -628,6 +628,25 @@ def _resolution_rank(label: str) -> int:
     return 480
 
 
+def _effective_resolution_height(*, video: Dict[str, Any], vr: Dict[str, Any]) -> int:
+    """Hauteur CANONIQUE (celle de la classe de resolution), pas la hauteur brute.
+
+    Fix ultra-audit 2026-08-03. La hauteur ffprobe est celle du flux encode,
+    bandes noires deja retirees : un 1080p scope 2.35:1 mesure 1920x800 et un
+    2160p scope 3840x1600. Tout comparateur ecrit `height >= 1080` sur cette
+    valeur brute declasse les films cinemascope, qui sont la norme au catalogue
+    patrimoine. `_resolution_label` (:590) resout deja l'ambiguite en tranchant
+    sur la LARGEUR ; on rejoue simplement son verdict ici.
+
+    Retombe sur la hauteur brute uniquement si `vr` est tronque (contrat
+    defensif : `_score_video` remplit toujours `resolution_label`).
+    """
+    label = str(vr.get("resolution_label") or "")
+    if label:
+        return _resolution_rank(label)
+    return _to_int(video.get("height"), 0)
+
+
 def _extract_languages(audio_tracks: List[Dict[str, Any]]) -> List[str]:
     out: List[str] = []
     for track in audio_tracks:
@@ -645,11 +664,89 @@ def _has_vf(langs: List[str]) -> bool:
     return any(lang in {"fr", "fra", "fre", "french", "vf", "vff", "vfi"} for lang in langs)
 
 
+# Etiquettes canoniques composees -> cle de rang equivalente dans
+# `codec_ranks.AUDIO_CODEC_RANK` (lookup exact). Fix ultra-audit 2026-08-03 :
+# sans cette table, "truehd atmos" ou "dts:x" retomberaient a 0 (sous AAC).
+# Les alias preservent EXACTEMENT le rang d'avant pour les variantes lossy
+# (atmos JOC reste au rang de son porteur eac3/ac3, HRA reste au rang dts).
+_AUDIO_CANONICAL_RANK_ALIAS = {
+    "truehd atmos": "truehd",
+    "eac3 atmos": "eac3",
+    "e-ac-3 atmos": "eac3",
+    "ac3 atmos": "ac3",
+    "dts:x": "dts-hd ma",
+    "dts-hd hra": "dts",
+}
+
+
+def _canonical_audio_codec(track: Dict[str, Any]) -> str:
+    """Etiquette canonique d'une piste audio : codec de BASE + variante.
+
+    Fix ultra-audit 2026-08-03. ffprobe range le codec de base dans `codec`
+    ('dts', 'truehd', 'eac3') et la variante dans des champs SEPARES : `profile`
+    ('DTS-HD MA'), `is_atmos`, `is_dts_x` (cf. infra/probe/_normalize_ffprobe).
+    Or les consommateurs font tous du substring sur `codec` seul, donc un remux
+    BluRay DTS-HD MA etait lu 'dts' PARTOUT :
+
+    - `_audio_codec_bonus` : +6 « Audio DTS » au lieu de +10 « Audio DTS-HD MA »
+      (et en preset remux_strict, +5 alors que dts_hd_ma_bonus vaut 12 : le
+      profil « exigeant home-cinema » notait le DTS-HD MA moins bien que le
+      profil equilibre) ;
+    - `_hierarchy_audio_codec_token` : 'dts' au lieu de 'dts_hd_ma', et
+      'truehd' au lieu de 'truehd_atmos' -> planchers de tier inatteignables ;
+    - `_best_audio_track` : rang 2 (comme AC3) donc une piste FLAC secondaire
+      (rang 3) etait elue « meilleure piste » ;
+    - `metrics.detected.audio_best_codec`, qui alimente le bucket dashboard
+      « DTS-HD MA » (injoignable), les regles utilisateur (champ `audio_codec`)
+      et le comparateur de doublons (DTS-HD MA vs EAC3 -> egalite) ;
+    - inversion la plus visible : quand le probe ECHOUE, le fallback par le NOM
+      de release synthetise 'dts-hd ma' -> le fichier scorait MIEUX (59/Silver)
+      que le meme fichier avec un probe REUSSI (55/Silver).
+
+    Le codec de base est preserve tel quel quand aucune variante n'est detectee,
+    et une valeur deja canonique (fallback par le nom, ou couche probe corrigee
+    en amont) traverse la fonction inchangee : l'operation est idempotente.
+    """
+    if not isinstance(track, dict):
+        return ""
+    c = str(track.get("codec") or "").strip().lower()
+    if not c:
+        return ""
+    # Deja canonique (fallback par le nom de release, probe deja normalise).
+    if ("atmos" in c) or ("dts-hd" in c) or ("dtshd" in c) or ("dts:x" in c) or ("dts-x" in c):
+        return c
+    prof = str(track.get("profile") or "").strip().lower()
+    prof_tokens = set(prof.replace("-", " ").replace("/", " ").split())
+    if "truehd" in c:
+        return "truehd atmos" if (bool(track.get("is_atmos")) or "atmos" in prof) else "truehd"
+    if "ac3" in c or "ac-3" in c:
+        joc = bool(track.get("is_atmos")) or ("atmos" in prof) or ("joc" in prof)
+        return f"{c} atmos" if joc else c
+    if "dts" in c:
+        if bool(track.get("is_dts_x")):
+            return "dts:x"
+        if ("ma" in prof_tokens) or ("master" in prof_tokens):
+            return "dts-hd ma"
+        if ("hra" in prof_tokens) or ("high" in prof_tokens):
+            return "dts-hd hra"
+    return c
+
+
 def _audio_codec_rank(track: Dict[str, Any]) -> int:
     """R8-039 (F4) : rang codec audio (source de vérité `codec_ranks`, lookup exact),
-    aligné sur `duplicate_compare._audio_codec_rank_value`."""
-    codec = str(track.get("codec") or "").strip().lower()
-    return _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+    aligné sur `duplicate_compare._audio_codec_rank_value`.
+
+    Fix ultra-audit 2026-08-03 : le rang se lit sur l'etiquette CANONIQUE (donc
+    DTS-HD MA = 4 et non 2), via une table d'alias pour les etiquettes composees.
+    Aucune valeur ne peut baisser par rapport a l'ancien lookup.
+    """
+    canonical = _canonical_audio_codec(track)
+    if not canonical:
+        return 0
+    rank = _AUDIO_CODEC_RANK.get(canonical)
+    if rank is None:
+        rank = _AUDIO_CODEC_RANK.get(_AUDIO_CANONICAL_RANK_ALIAS.get(canonical, ""), 0)
+    return rank
 
 
 def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -686,7 +783,11 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
     """
     if not isinstance(best_audio, dict):
         return ""
-    c = str(best_audio.get("codec") or "").strip().lower()
+    # Fix ultra-audit 2026-08-03 : etiquette CANONIQUE (le probe ffprobe range
+    # 'DTS-HD MA' dans `profile` et l'Atmos dans `is_atmos`, pas dans `codec`),
+    # sinon les tokens 'dts_hd_ma' / 'truehd_atmos' / 'dts_x' sont inatteignables
+    # et les planchers de tier correspondants sont du code mort.
+    c = _canonical_audio_codec(best_audio)
     if not c:
         return ""
     if ("truehd" in c) and ("atmos" in c):
@@ -733,6 +834,12 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
         if lossy is None:
             lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
         return int(lossy), "Audio Atmos (lossy)"
+    # Fix ultra-audit 2026-08-03 : DTS:X est porte par un flux DTS-HD MA
+    # (lossless + objets). Il tombait sur la branche `dts` generique (bonus
+    # lossy) alors que `_hierarchy_audio_codec_token` lui donne deja son propre
+    # token 'dts_x'. Cle de profil dediee optionnelle, sinon parite DTS-HD MA.
+    if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c):
+        return int(bonuses.get("dts_x_bonus", bonuses["dts_hd_ma_bonus"])), "Audio DTS:X"
     if "hra" in c and "dts" in c:
         # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
         # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
@@ -983,7 +1090,9 @@ def _score_audio(
         audio_sub -= 25
         add_reason(-25, "Aucune piste audio exploitable")
     else:
-        a_codec = str(best_audio.get("codec") or "").lower()
+        # Fix ultra-audit 2026-08-03 : etiquette CANONIQUE (codec + profile +
+        # is_atmos/is_dts_x), sinon un remux DTS-HD MA est lu 'dts'.
+        a_codec = _canonical_audio_codec(best_audio)
         a_bonus, a_label = _audio_codec_bonus(a_codec, prof)
         audio_sub += a_bonus
         if a_bonus > 0:
@@ -1444,8 +1553,19 @@ def _apply_genre_adjustments_helper(
     extras_sub: float,
     factors: List[Dict[str, Any]],
     reasons: List[str],
+    effective_height: Optional[int] = None,
 ) -> Tuple[float, float, float, Optional[str]]:
     """Applique les ajustements genre-aware TMDb.
+
+    `effective_height` : hauteur CANONIQUE de la classe de resolution (cf.
+    `_effective_resolution_height`). Fix ultra-audit 2026-08-03 : `genre_rules`
+    ecrit `height < 1080` (:245, malus `low_resolution_malus`) sur la hauteur
+    recue ; en lui passant la hauteur BRUTE, tout 1080p scope (1920x800) prenait
+    un malus « resolution modeste » alors que `detected.resolution` affichait
+    '1080p'. Le defaut etait jusqu'ici invisible car le chemin genre etait mort
+    (client TMDb jamais construit, cf. quality_report_support). On le desamorce
+    AVANT de le rallumer. `None` = retombee sur la hauteur brute (appels directs
+    historiques, tests inclus).
 
     Modifie factors et reasons en place ; retourne (video_sub, audio_sub, extras_sub, primary_genre).
     """
@@ -1455,7 +1575,7 @@ def _apply_genre_adjustments_helper(
     primary_genre = _detect_pg(tmdb_genres)
     if not primary_genre:
         return video_sub, audio_sub, extras_sub, primary_genre
-    height_g = _to_int(video.get("height"), 0)
+    height_g = _to_int(effective_height, 0) if effective_height is not None else _to_int(video.get("height"), 0)
     codec_g = str(video.get("codec") or "")
     has_hdr_g = bool(video.get("hdr10") or video.get("hdr10_plus") or video.get("hdr_dolby_vision"))
     has_atmos_g = False
@@ -1531,7 +1651,10 @@ def _apply_custom_rules_helper(
         rule_context = {
             "detected": {
                 "video_codec": _vr("video_codec", "") or "",
-                "audio_best_codec": str(best_audio.get("codec") or ""),
+                # Fix ultra-audit 2026-08-03 : etiquette canonique (cf.
+                # `_canonical_audio_codec`) — une regle utilisateur
+                # `audio_codec = "dts-hd ma"` ne pouvait jamais matcher.
+                "audio_best_codec": _canonical_audio_codec(best_audio),
                 "resolution": _vr("resolution_label", "") or "",
                 "bitrate_kbps": _vr("bitrate_kbps"),
                 "audio_best_channels": _to_int(best_audio.get("channels"), 0),
@@ -1705,7 +1828,11 @@ def _build_quality_metrics_helper(
             "hdr10_plus": vr["has_hdr10p"],
             "hdr10": vr["has_hdr10"],
             "audio_tracks_count": len(audio_tracks),
-            "audio_best_codec": str(best_audio.get("codec") or ""),
+            # Fix ultra-audit 2026-08-03 : etiquette canonique (cf.
+            # `_canonical_audio_codec`). Alimente le bucket audio du dashboard
+            # (« DTS-HD MA » etait injoignable) et le pseudo-probe du
+            # comparateur de doublons.
+            "audio_best_codec": _canonical_audio_codec(best_audio),
             "audio_best_channels": _to_int(best_audio.get("channels"), 0),
             "languages": langs,
             "duration_s": float(normalized_probe.get("duration_s") or 0),
@@ -2135,13 +2262,24 @@ def compute_quality_score(
     # Fix audit 2026-05-25 (v1.5.5) Vague K : derive la hauteur effective depuis
     # la resolution label (qui integre deja le fallback nom) pour que les
     # bonus d'ere s'appliquent meme sans probe.
-    height = _to_int(video.get("height"), 0)
-    if height <= 0 and vr.get("resolution_label"):
-        height = _resolution_rank(vr["resolution_label"])
+    #
+    # Fix ultra-audit 2026-08-03 : la derivation est desormais INCONDITIONNELLE,
+    # plus seulement quand le probe n'a rien mesure. La hauteur ffprobe est
+    # BRUTE (bandes noires retirees a l'encodage) : un 1080p scope 2.35:1 porte
+    # height=800, donc `height >= 1080` etait faux et le film perdait le bonus
+    # patrimoine (+8) au profit du bonus classique (+4) -- soit un tier entier
+    # (Silver -> Bronze) sur toute la plage de debit realiste, uniquement a cause
+    # du ratio d'image. `_resolution_label` tranche deja sur la LARGEUR depuis le
+    # fix bug 178 (:590-608, 15/15 echantillons 1920x[784-818] = vrais 1080p) et
+    # tout le reste de `_score_video` raisonne sur `resolution_rank` (:854, :856,
+    # :874, :900, :921) : ce helper etait le dernier consommateur de la hauteur
+    # brute, et le payload etait auto-contradictoire (detected.resolution =
+    # '1080p' avec la raison « Film classique en HD »).
+    effective_height = _effective_resolution_height(video=video, vr=vr)
     video_codec_v4 = str(video.get("codec") or "").strip().lower()
     video_sub = _apply_era_bonuses_helper(
         film_year=film_year,
-        height=height,
+        height=effective_height,
         video_codec=video_codec_v4,
         video_sub=video_sub,
         factors=factors,
@@ -2164,6 +2302,7 @@ def compute_quality_score(
     video_sub, audio_sub, extras_sub, primary_genre = _apply_genre_adjustments_helper(
         tmdb_genres=tmdb_genres,
         video=video,
+        effective_height=effective_height,
         audio_analysis=audio_analysis,
         encode_warnings=encode_warnings,
         video_sub=video_sub,
