@@ -5,12 +5,12 @@ Migration #85 phase B1 : le code metier vit maintenant DANS ce Repository
 a `self.probe.X()` (instance de ProbeRepository creee dans `SQLiteStore.__init__`).
 
 Pourquoi cette structure transitoire :
-- SQLiteStore conserve son inheritance de _ProbeMixin -> backward-compat 100%
+- SQLiteStore expose store.probe (les mixins MRO ont ete supprimes en B8) -> backward-compat 100%
   pour les call sites `store.get_probe_cache(...)`.
 - ProbeRepository devient testable en isolation (mock FakeStore qui implemente
   _managed_conn / _ensure_schema_group / _decode_row_json).
-- Phase B8 future : SQLiteStore arretera d'heriter de _ProbeMixin, les
-  callers migreront vers `store.probe.get_probe_cache(...)`.
+- B8 CLOSE (2026-05, commit 482f3e6) : SQLiteStore n'herite plus des
+  mixins (heritage MRO supprime) ; les appels passent par store.<repo>.X().
 
 Methodes exposees :
     get_probe_cache, upsert_probe_cache, prune_probe_cache
@@ -108,6 +108,23 @@ class ProbeRepository(_BaseRepository):
             )
 
         self._with_schema_group("probe_cache", op)
+
+    def clear_probe_cache(self) -> int:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utilise par l'endpoint UI "Purger le cache probe" en cas de cache pollue
+        (paths obsoletes -> tous les films en FAILED). Apres purge, le prochain
+        scan relance les probes proprement (avec fallback PATH si necessaire).
+
+        Returns:
+            Nombre de lignes supprimees.
+        """
+
+        def op(conn: Any) -> int:
+            cur = conn.execute("DELETE FROM probe_cache")
+            return int(cur.rowcount or 0)
+
+        return self._with_schema_group("probe_cache", op)
 
     def prune_probe_cache(self, *, retention_days: int = 90) -> int:
         """DB2 audit : supprime les entrees probe_cache non-touchees depuis `retention_days`.

@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import secrets
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -13,19 +16,80 @@ import cinesort.infra.state as state
 from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.naming import PRESETS, validate_template
-from cinesort.infra.jellyfin_client import JellyfinClient
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError doit etre
+# importe pour etre catche dans test_jellyfin_connection (sinon l'exception
+# s'echappe et le caller voit un crash plutot qu'un message utilisateur).
+from cinesort.infra.jellyfin_client import JellyfinClient, JellyfinError
 from cinesort.infra.local_secret_store import (
     SECRET_PROTECTION_NONE,
     SECRET_PROTECTION_UNAVAILABLE,
     WINDOWS_DPAPI_CURRENT_USER,
     protect_secret,
-    unprotect_secret,
 )
 from cinesort.infra.log_context import is_remote_request, normalize_log_level_setting
+from cinesort.infra.security import secret_storage as _secret_storage
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err
 
 logger = logging.getLogger(__name__)
+
+# Hotfix sentinel : pattern `int(payload.get(k) or DEFAULT)` ecrase 0 (et "" ou None)
+# par DEFAULT. Or l'utilisateur peut legitimement vouloir 0 (ex: perceptual_skip_percent).
+# `_coerce_int_with_default(value, default)` distingue absence/erreur (-> default)
+# de valeur entiere convertible (y compris 0).
+_MISSING = object()
+
+
+# Fix lost-update : verrou par state_dir pour serialiser read-modify-write de
+# save_settings_payload. Deux appels paralleles (UI Parametres + endpoint REST
+# /api/save_settings) lisaient le meme existing_settings et le dernier write
+# ecrasait silencieusement les modifications du premier. Le dict est protege
+# par _SETTINGS_WRITE_LOCKS_GUARD pour eviter une race a la creation du Lock
+# lui-meme. Pattern aligne sur cinesort_api._state_dir_lock.
+_SETTINGS_WRITE_LOCKS: Dict[str, "threading.Lock"] = {}
+_SETTINGS_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _get_settings_write_lock(state_dir: Path) -> "threading.Lock":
+    """Retourne (et cree si necessaire) le Lock dedie a un state_dir donne."""
+    key = str(state_dir)
+    with _SETTINGS_WRITE_LOCKS_GUARD:
+        lock = _SETTINGS_WRITE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SETTINGS_WRITE_LOCKS[key] = lock
+        return lock
+
+
+def _coerce_int_with_default(value: Any, default: int) -> int:
+    """Convertit value en int en preservant la valeur 0 (vs `x or default` qui l'ecrase).
+
+    - None, "", _MISSING -> default
+    - "0", 0, 0.0 -> 0 (legitime)
+    - ValueError/TypeError -> default
+    """
+    if value is None or value is _MISSING:
+        return default
+    if isinstance(value, bool):
+        # bool est int : on rejette pour eviter True->1 / False->0 silencieux
+        return default
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return default
+        try:
+            return int(cleaned)
+        except (TypeError, ValueError):
+            try:
+                return int(float(cleaned))
+            except (TypeError, ValueError):
+                return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 
 TMDB_KEY_SECRET_FIELD = "tmdb_api_key_secret"
 TMDB_KEY_PROTECTION_LEGACY = "plaintext_legacy"
@@ -50,6 +114,15 @@ SMTP_PASSWORD_PURPOSE = "email_smtp_password"
 OMDB_KEY_SECRET_FIELD = "omdb_api_key_secret"
 OMDB_KEY_PURPOSE = "omdb_api_key"
 
+# [SEC-2] Bearer token de l'API REST locale. Auparavant stocke EN CLAIR dans
+# settings.json (seul secret non chiffre) : un settings.json exfiltre donnait
+# l'acces API LAN. Desormais chiffre au repos sous l'enveloppe {scheme, blob_b64}
+# comme les autres secrets. read_settings dechiffre -> `rest_api_token` clair en
+# memoire (consomme par le boot serveur REST, reveal_rest_token, hot-reload) ;
+# write_settings re-chiffre ; _mask_secrets masque au GET frontend.
+REST_TOKEN_SECRET_FIELD = "rest_api_token_secret"
+REST_TOKEN_PURPOSE = "rest_api_token"
+
 # Audit ID-J-001 : backup auto + rotation 5 sur settings.json (V1-M10).
 # Chaque write_settings cree un .bak.YYYYMMDD-HHMMSS prealable, puis purge
 # au-dela des 5 plus recents. Protection contre erreurs utilisateur (vidage
@@ -68,7 +141,9 @@ def _backup_settings_before_write(settings_path: Path) -> Optional[Path]:
         return None
     try:
         # Verifie que le settings actuel est lisible (evite cascade backup d'un fichier corrompu)
-        json.loads(settings_path.read_text(encoding="utf-8"))
+        # Hotfix BOM : utf-8-sig tolere un BOM en tete (sinon json.loads echoue silencieusement
+        # et l'on saute le backup d'un fichier pourtant valide, masquant une corruption ulterieure).
+        json.loads(settings_path.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return None
     # Microsecondes pour rester unique meme si plusieurs writes dans la meme
@@ -117,6 +192,46 @@ def _rotate_settings_backups(settings_path: Path, keep: int = DEFAULT_SETTINGS_B
     return deleted
 
 
+# [SEC-3] Migration DPAPI legacy -> DPAPI-NG. Les 5 secrets (TMDb, Jellyfin,
+# Plex, Radarr, SMTP) etaient chiffres via `protect_secret`/`unprotect_secret`
+# (DPAPI CurrentUser legacy). On route desormais par la couche NG
+# (`secret_storage`), qui : (1) chiffre TOUJOURS en NG a l'ecriture ; (2) lit
+# indifferemment un blob NG (magic) ou legacy (fallback transparent) a la
+# lecture. L'enveloppe de stockage {scheme, blob_b64} est INCHANGEE : le champ
+# `scheme` reste WINDOWS_DPAPI_CURRENT_USER (marqueur "protege DPAPI"), NG vs
+# legacy se distinguant par le magic du blob. Retro-compat totale : un
+# settings.json existant (blobs legacy) reste lisible ; la migration effective
+# se fait au prochain SAVE (chemin d'ecriture -> NG). Signatures identiques aux
+# helpers legacy pour un swap 1:1 des sites d'appel.
+
+
+def _protect_secret_ng(raw: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Chiffre `raw` en DPAPI-NG. Repli legacy si NG indisponible.
+
+    Retourne (ok, blob_b64, error), meme contrat que `protect_secret`.
+    """
+    try:
+        return True, _secret_storage.save_secret(purpose, raw), ""
+    except _secret_storage.SecretStorageError:
+        # NG indisponible (Windows tres ancien sans ncrypt) : on ne regresse pas
+        # la protection — repli sur DPAPI legacy (toujours present via crypt32).
+        return protect_secret(raw, purpose=purpose)
+
+
+def _unprotect_secret_ng(blob_b64: str, *, purpose: str) -> Tuple[bool, str, str]:
+    """Dechiffre un blob NG OU legacy (retro-compat). (ok, value, error).
+
+    `secret_storage.load_secret` gere le routage NG/legacy. La re-ecriture en NG
+    du blob (migration disque) intervient au prochain SAVE, pas ici (les
+    extracteurs de lecture ne mutent pas settings.json).
+    """
+    try:
+        result = _secret_storage.load_secret(purpose, blob_b64)
+        return True, result.value, ""
+    except _secret_storage.SecretStorageError as exc:
+        return False, "", str(exc)
+
+
 def _extract_protected_secret(
     data: Dict[str, Any],
     *,
@@ -135,7 +250,7 @@ def _extract_protected_secret(
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=purpose)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=purpose)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Secret protege illisible ({purpose}): {error}"
@@ -158,19 +273,31 @@ def _persist_protected_secret(
     Effet de bord sur `payload` : retire le champ legacy et installe le blob
     chiffre dans `secret_field` en cas de succes.
 
+    Hotfix DPAPI : si `_orig_<secret_field>` existe (blob chiffre legitime que
+    read_settings n'a pas pu dechiffrer), on le reinjecte au lieu d'ecraser
+    par une chaine vide. Ainsi un cycle read->save sans modification ne perd
+    pas le secret.
+
     Retourne (persisted, warning_message).
     """
     raw = str(payload.pop(legacy_field, "") or "").strip()
     payload.pop(secret_field, None)
+    orig_blob = payload.pop(f"_orig_{secret_field}", None)
     if not raw:
+        # Pas de nouvelle valeur claire : on preserve l'eventuel blob original
+        if isinstance(orig_blob, dict):
+            payload[secret_field] = orig_blob
         return False, ""
-    ok, blob_b64, error = protect_secret(raw, purpose=purpose)
+    ok, blob_b64, error = _protect_secret_ng(raw, purpose=purpose)
     if ok and blob_b64:
         payload[secret_field] = {
             "scheme": WINDOWS_DPAPI_CURRENT_USER,
             "blob_b64": blob_b64,
         }
         return True, ""
+    # Chiffrement KO : preserve l'original si on en avait un (sinon le secret est perdu)
+    if isinstance(orig_blob, dict):
+        payload[secret_field] = orig_blob
     return False, f"Protection indisponible ({purpose}): {error}" if error else f"Protection indisponible ({purpose})."
 
 
@@ -183,11 +310,16 @@ def _normalize_jellyfin_url(url: str) -> str:
 
 
 def _normalize_lang_list(raw: Any) -> List[str]:
-    """Normalise une liste de codes langue depuis le payload settings."""
+    """Normalise une liste de codes langue depuis le payload settings.
+
+    AUDIT 2026-06-11 (R4-P11) : le hint UI dit "Separees par ;" mais le split
+    n'acceptait que la virgule -> "fr;en" persistait ['fr;en'] (token poubelle,
+    warnings subtitle_missing faux). On accepte ';' ET ','.
+    """
     if isinstance(raw, list):
         return [str(l).strip().lower() for l in raw if str(l).strip()]
     if isinstance(raw, str) and raw.strip():
-        return [l.strip().lower() for l in raw.split(",") if l.strip()]
+        return [l.strip().lower() for l in re.split(r"[;,]", raw) if l.strip()]
     return ["fr"]
 
 
@@ -225,9 +357,15 @@ def normalize_probe_backend(value: Any, *, default_backend: str = "auto") -> str
 
 
 # V4-05 (Polish Total v7.7.0) : valeurs autorisees pour `composite_score_version`.
-# Tout autre input retombe sur 1 (V1 reste defaut, decision non negociable).
+# VN-B.1 (Vague N batch 2) : V2 devient la source de verite unique.
+# - Defaut bascule de 1 -> 2 : nouveau scoring expose le vocabulaire
+#   Platinum/Gold/Silver/Bronze/Reject de v7.5.0.
+# - V1 reste accepte uniquement comme kill-switch de rollback explicite
+#   (settings.composite_score_version=1) pour les utilisateurs qui voudraient
+#   l'ancien vocabulaire reference/excellent/bon/mediocre/degrade le temps
+#   d'un re-scan. Tout autre input invalide retombe sur le defaut (V2).
 COMPOSITE_SCORE_VERSIONS: Tuple[int, ...] = (1, 2)
-DEFAULT_COMPOSITE_SCORE_VERSION: int = 1
+DEFAULT_COMPOSITE_SCORE_VERSION: int = 2
 
 # V6-01 Polish Total v7.7.0 (R4-I18N-4) : locales supportees pour le setting
 # `locale`. Source unique de verite cote backend (la liste cote frontend est
@@ -257,11 +395,15 @@ def _normalize_locale(value: Any) -> str:
 
 
 def _normalize_composite_score_version(value: Any) -> int:
-    """Clamp `composite_score_version` a {1, 2}, fallback 1 si invalide.
+    """Clamp `composite_score_version` a {1, 2}, fallback V2 si invalide.
+
+    VN-B.1 : depuis Vague N batch 2, V2 est la source de verite par defaut.
+    V1 reste accepte comme kill-switch de rollback explicite (vocabulaire
+    legacy reference/excellent/bon/mediocre/degrade).
 
     Accepte int ou string ("1"/"2"/"v1"/"v2") pour tolerer les payloads UI
     et les anciennes configs deja persistees. Toute autre valeur (None, 3,
-    "abc", float NaN, ...) retombe sur le defaut 1.
+    "abc", float NaN, ...) retombe sur le defaut V2.
     """
     if value is None:
         return DEFAULT_COMPOSITE_SCORE_VERSION
@@ -293,7 +435,7 @@ def extract_tmdb_key_from_settings_payload(data: Dict[str, Any]) -> Tuple[str, s
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=TMDB_KEY_PURPOSE)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=TMDB_KEY_PURPOSE)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Cle TMDb protegee illisible pour cet utilisateur Windows: {error}"
@@ -315,7 +457,7 @@ def extract_jellyfin_key_from_settings_payload(data: Dict[str, Any]) -> Tuple[st
         scheme = str(secret_payload.get("scheme") or "").strip().lower()
         blob_b64 = str(secret_payload.get("blob_b64") or "").strip()
         if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-            ok, value, error = unprotect_secret(blob_b64, purpose=JELLYFIN_KEY_PURPOSE)
+            ok, value, error = _unprotect_secret_ng(blob_b64, purpose=JELLYFIN_KEY_PURPOSE)
             if ok:
                 return value, WINDOWS_DPAPI_CURRENT_USER, ""
             return "", WINDOWS_DPAPI_CURRENT_USER, f"Cle Jellyfin protegee illisible: {error}"
@@ -331,24 +473,38 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Hotfix BOM : utf-8-sig tolere un eventuel BOM (Notepad/PowerShell sous
+        # Windows en ajoutent souvent). utf-8 strict levait UnicodeDecodeError
+        # et toute la config etait perdue silencieusement.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(data, dict):
             return {}
+        # Hotfix DPAPI : on PRESERVE les blobs chiffres originaux dans des
+        # champs _orig_* si le dechiffrement echoue, pour permettre a
+        # write_settings de les reinjecter tels quels (sinon ecrasement
+        # destructif du blob legitime au prochain save).
+        orig_tmdb_blob = data.get(TMDB_KEY_SECRET_FIELD)
         secret_value, protection, warning = extract_tmdb_key_from_settings_payload(data)
         data.pop(TMDB_KEY_SECRET_FIELD, None)
         data["tmdb_api_key"] = secret_value
         data["tmdb_key_protection"] = protection
         if warning:
             data["tmdb_key_warning"] = warning
+            # DPAPI a echoue mais le blob etait valide : conserver pour write_settings
+            if isinstance(orig_tmdb_blob, dict):
+                data["_orig_tmdb_api_key_secret"] = orig_tmdb_blob
         else:
             data.pop("tmdb_key_warning", None)
 
+        orig_jf_blob = data.get(JELLYFIN_KEY_SECRET_FIELD)
         jf_value, jf_protection, jf_warning = extract_jellyfin_key_from_settings_payload(data)
         data.pop(JELLYFIN_KEY_SECRET_FIELD, None)
         data["jellyfin_api_key"] = jf_value
         data["jellyfin_key_protection"] = jf_protection
         if jf_warning:
             data["jellyfin_key_warning"] = jf_warning
+            if isinstance(orig_jf_blob, dict):
+                data["_orig_jellyfin_api_key_secret"] = orig_jf_blob
         else:
             data.pop("jellyfin_key_warning", None)
 
@@ -378,6 +534,7 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
                 "omdb_key_warning",
             ),
         ):
+            orig_blob = data.get(secret_field)
             value, scheme, warning = _extract_protected_secret(
                 data,
                 secret_field=secret_field,
@@ -389,8 +546,32 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
             data[protection_key] = scheme
             if warning:
                 data[warning_key] = warning
+                # Preserve blob chiffre si DPAPI a echoue
+                if isinstance(orig_blob, dict):
+                    data[f"_orig_{secret_field}"] = orig_blob
             else:
                 data.pop(warning_key, None)
+
+        # [SEC-2] rest_api_token : dechiffrer l'enveloppe -> valeur claire en
+        # memoire. Retro-compat : un settings.json d'avant SEC-2 porte un
+        # `rest_api_token` EN CLAIR sans enveloppe -> on le laisse tel quel (il
+        # sera migre, valeur INCHANGEE, au prochain write_settings).
+        rest_secret = data.get(REST_TOKEN_SECRET_FIELD)
+        if isinstance(rest_secret, dict):
+            data.pop(REST_TOKEN_SECRET_FIELD, None)
+            scheme = str(rest_secret.get("scheme") or "").strip().lower()
+            blob_b64 = str(rest_secret.get("blob_b64") or "").strip()
+            if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
+                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(blob_b64, purpose=REST_TOKEN_PURPOSE)
+                if ok_rt:
+                    data["rest_api_token"] = value_rt
+                else:
+                    # Blob illisible (reinstall Windows / changement de profil) :
+                    # ne pas ecraser par du vide -> preserver le blob pour un
+                    # futur re-essai ; token clair vide (auth distante a
+                    # re-generer). apply_settings_defaults en generera un neuf.
+                    data["rest_api_token"] = ""
+                    data["_orig_rest_api_token_secret"] = rest_secret
 
         _migrate_root_to_roots(data)
         return data
@@ -491,6 +672,10 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     payload.pop("tmdb_key_protection", None)
     payload.pop("tmdb_key_warning", None)
     payload.pop(TMDB_KEY_SECRET_FIELD, None)
+    # Hotfix DPAPI : si la lecture precedente a echoue a dechiffrer, on a un
+    # blob original preserve dans `_orig_*` qui doit etre reinjecte tel quel
+    # plutot que d'etre ecrase par une chaine vide (data-loss).
+    orig_tmdb_blob = payload.pop("_orig_tmdb_api_key_secret", None)
     remember_key = to_bool(payload.get("remember_key"), False)
 
     protection = SECRET_PROTECTION_NONE
@@ -498,7 +683,7 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     persisted = False
 
     if remember_key and secret_value:
-        ok, blob_b64, error = protect_secret(secret_value, purpose=TMDB_KEY_PURPOSE)
+        ok, blob_b64, error = _protect_secret_ng(secret_value, purpose=TMDB_KEY_PURPOSE)
         if ok and blob_b64:
             payload[TMDB_KEY_SECRET_FIELD] = {
                 "scheme": WINDOWS_DPAPI_CURRENT_USER,
@@ -514,19 +699,26 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 if not error
                 else f"Protection locale Windows indisponible: {error}"
             )
+            # Preserve blob legitime ininterpretable plutot que de l'effacer
+            if isinstance(orig_tmdb_blob, dict):
+                payload[TMDB_KEY_SECRET_FIELD] = orig_tmdb_blob
     else:
         payload["remember_key"] = False if not secret_value else remember_key
+        # Aucune cle clair fournie mais on avait un blob illisible : conserver
+        if not secret_value and isinstance(orig_tmdb_blob, dict):
+            payload[TMDB_KEY_SECRET_FIELD] = orig_tmdb_blob
 
     # --- Jellyfin API key (DPAPI) ---
     jf_secret = str(payload.pop("jellyfin_api_key", "") or "").strip()
     payload.pop("jellyfin_key_protection", None)
     payload.pop("jellyfin_key_warning", None)
     payload.pop(JELLYFIN_KEY_SECRET_FIELD, None)
+    orig_jf_blob = payload.pop("_orig_jellyfin_api_key_secret", None)
     jf_persisted = False
     jf_warning = ""
 
     if jf_secret:
-        ok_jf, blob_jf, err_jf = protect_secret(jf_secret, purpose=JELLYFIN_KEY_PURPOSE)
+        ok_jf, blob_jf, err_jf = _protect_secret_ng(jf_secret, purpose=JELLYFIN_KEY_PURPOSE)
         if ok_jf and blob_jf:
             payload[JELLYFIN_KEY_SECRET_FIELD] = {
                 "scheme": WINDOWS_DPAPI_CURRENT_USER,
@@ -537,6 +729,10 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             jf_warning = (
                 f"Protection Jellyfin indisponible: {err_jf}" if err_jf else "Protection Jellyfin indisponible."
             )
+            if isinstance(orig_jf_blob, dict):
+                payload[JELLYFIN_KEY_SECRET_FIELD] = orig_jf_blob
+    elif isinstance(orig_jf_blob, dict):
+        payload[JELLYFIN_KEY_SECRET_FIELD] = orig_jf_blob
 
     # --- S4 audit : Plex token / Radarr API key / SMTP password (DPAPI) ---
     # Pour chaque secret, on consomme la cle legacy en clair et on la remplace
@@ -578,6 +774,28 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     )
     payload.pop("omdb_key_protection", None)
     payload.pop("omdb_key_warning", None)
+
+    # [SEC-2] rest_api_token : chiffrer au repos (jamais ecrit en clair sur
+    # disque). La valeur claire vient de _save_section_rest_api (echo unmask).
+    # Repli sur stockage clair UNIQUEMENT si DPAPI est totalement indisponible
+    # (NG + legacy KO -> plateforme non-Windows) : la cible etant Windows, le
+    # token est toujours chiffre en prod ; on ne casse pas l'auth ailleurs.
+    rest_token = str(payload.pop("rest_api_token", "") or "").strip()
+    payload.pop(REST_TOKEN_SECRET_FIELD, None)
+    orig_rest_blob = payload.pop("_orig_rest_api_token_secret", None)
+    if rest_token:
+        ok_rt, blob_rt, _err_rt = _protect_secret_ng(rest_token, purpose=REST_TOKEN_PURPOSE)
+        if ok_rt and blob_rt:
+            payload[REST_TOKEN_SECRET_FIELD] = {
+                "scheme": WINDOWS_DPAPI_CURRENT_USER,
+                "blob_b64": blob_rt,
+            }
+        else:
+            payload["rest_api_token"] = rest_token  # repli clair (non-Windows)
+    elif isinstance(orig_rest_blob, dict):
+        # Aucune valeur claire (blob illisible a la lecture) : preserver le blob
+        # d'origine plutot que de perdre definitivement le secret.
+        payload[REST_TOKEN_SECRET_FIELD] = orig_rest_blob
 
     # Audit ID-J-001 (V1-M10) : backup auto + rotation avant ecriture.
     target_path = settings_path(state_dir)
@@ -635,6 +853,12 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-04 (R5-STRESS-1) probe parallelism : 0 = auto (min(cpu_count(), 8))
     ("probe_workers", 0),
     ("probe_parallelism_enabled", True),
+    # VO-B-CONFIG : scan_max_workers tri-etat auto/manuel. Default "auto" +
+    # value=1 garde la backward compat stricte si l'utilisateur n'a jamais
+    # touche au setting (la resolution effective passe par
+    # resolve_effective_scan_max_workers qui delegue a VO-A detect_storage).
+    ("scan_max_workers_mode", "auto"),
+    ("scan_max_workers_value", 1),
     ("incremental_scan_enabled", False),
     ("quarantine_unapproved", False),
     ("dry_run_apply", True),
@@ -706,6 +930,11 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # --- Subtitles ---
     ("subtitle_detection_enabled", True),
     ("subtitle_expected_languages", ["fr"]),
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 1 — declenche le calcul des
+    # scores qualite V1 (tier) automatiquement en background apres chaque scan.
+    # Sans ce flag les rows restent "Non identifie" tant que l'utilisateur ne
+    # clique pas sur "Re-calculer les scores" dans la page Qualite.
+    ("auto_recompute_quality_on_scan", True),
     # --- Naming ---
     ("naming_preset", "default"),
     ("naming_movie_template", "{title} ({year})"),
@@ -726,6 +955,10 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-02 (R5-STRESS-5) parallelisme batch inter-films
     ("perceptual_parallelism_enabled", True),
     ("perceptual_workers", 0),
+    # AUDIT 2026-06-11 (R4-P10) : lowercase_extensions est CONSOMME par
+    # build_cfg_from_settings (to_bool defaut True) mais etait absent du GET ->
+    # le toggle UI affichait OFF en permanence alors que l'effectif etait ON.
+    ("lowercase_extensions", True),
     ("perceptual_audio_fingerprint_enabled", True),
     ("perceptual_scene_detection_enabled", True),
     ("perceptual_audio_spectral_enabled", True),
@@ -806,14 +1039,15 @@ def apply_settings_defaults(
 
     # BUG 1 : generer un token REST aleatoire au premier lancement plutot que vide
     if not str(payload.get("rest_api_token") or "").strip():
-        import secrets as _secrets
-
-        payload["rest_api_token"] = _secrets.token_urlsafe(24)
+        payload["rest_api_token"] = secrets.token_urlsafe(24)
 
     # V6-01 (R4-I18N-4) : locale clamp via _normalize_locale a {"fr", "en"}, defaut "fr"
     payload["locale"] = _normalize_locale(payload.get("locale"))
 
-    # V4-05 (R4-PERC-7 / H16) : composite_score_version normalise (V1 par defaut)
+    # V4-05 (R4-PERC-7 / H16) : composite_score_version normalise.
+    # VN-B.1 (Vague N batch 2) : V2 par defaut. Les configs existantes sans
+    # champ explicite migrent silencieusement vers V2 (lecture unique de
+    # source de verite, plus de vocabulaire mixte reference/platinum cote UI).
     payload["composite_score_version"] = _normalize_composite_score_version(payload.get("composite_score_version"))
 
     # V3-04 (R4-LOG-3) : log_level normalise (DEBUG/INFO/WARNING/ERROR/CRITICAL)
@@ -839,6 +1073,7 @@ def build_cfg_from_settings(
     default_collection_folder_name: str,
     default_empty_folders_folder_name: str,
     default_residual_cleanup_folder_name: str,
+    state_dir: Optional[Path] = None,
 ) -> core.Config:
     collection_folder_name = (
         str(settings.get("collection_folder_name") or default_collection_folder_name).strip()
@@ -858,6 +1093,57 @@ def build_cfg_from_settings(
     residual_scope = str(settings.get("cleanup_residual_folders_scope") or "touched_only").strip().lower()
     if residual_scope not in {"touched_only", "root_all"}:
         residual_scope = "touched_only"
+    # SCAN-1 : injecter explicitement video_exts pour garantir la parite avec
+    # apply_core (qui faisait deja l'union avec VIDEO_EXTS_ALL). Sans cela, le
+    # Config par defaut utilisait uniquement VIDEO_EXTS_DEFAULT, ce qui pouvait
+    # diverger du set effectif utilise lors de l'apply (extensions rares non
+    # reconnues lors du scan/plan). On prend l'union du set settings (si fourni)
+    # ou du DEFAULT avec VIDEO_EXTS_ALL pour mirroir apply_core.py:187.
+    settings_video_exts = settings.get("video_exts")
+    if settings_video_exts:
+        base_video_exts = {str(x).lower() for x in settings_video_exts}
+    else:
+        base_video_exts = set(core.VIDEO_EXTS_DEFAULT)
+    video_exts = base_video_exts | set(core.VIDEO_EXTS_ALL)
+    # VO-B-CONFIG : determine scan_max_workers effectif depuis le payload.
+    # - mode="manual" -> on prend value clampe [1..64]
+    # - mode="auto"  + state_dir fourni -> resolution via
+    #     `_detect_storage_profile(state_dir)` + `_auto_scan_max_workers_for_storage`
+    #     pour que l'UI Settings (qui affiche `effective: 4|8`) corresponde au
+    #     reel des scans (PRAGMA-02 fix).
+    # - mode="auto" sans state_dir (code-path build depuis run_row, settings
+    #     absents...) -> retombe sur 1 (sequentiel strict) pour preserver la
+    #     backward compat.
+    cfg_mode = _normalize_scan_max_workers_mode(settings.get("scan_max_workers_mode"))
+    cfg_value = _normalize_scan_max_workers_value(settings.get("scan_max_workers_value"))
+    if cfg_mode == "manual":
+        cfg_scan_workers = cfg_value
+    elif state_dir is not None:
+        # Mode auto + contexte state_dir : aligne sur l'UI (auto_suggestion).
+        try:
+            detected = _detect_storage_profile(state_dir)
+            cfg_scan_workers = _auto_scan_max_workers_for_storage(detected)
+        except (OSError, ValueError, TypeError):
+            cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    else:
+        cfg_scan_workers = _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    # Cluster settings iter6 — naming_preset resync au call site :
+    # `_apply_naming_preset` (L1239-1261) reecrit `naming_movie_template` /
+    # `naming_tv_template` UNIQUEMENT au save. Si `settings.json` est edite
+    # hors UI ou via migration en ecrivant `naming_preset="plex"` sans
+    # resynchroniser les templates, `build_cfg_from_settings` lisait alors
+    # les anciens templates -> preset utilisateur silencieusement avale.
+    # Resync deterministe ici : preset != "custom" -> on prend les templates
+    # du preset (source de verite identique a `_apply_naming_preset`),
+    # preset == "custom" ou absent -> on garde les templates persistes.
+    cfg_naming_preset = str(settings.get("naming_preset") or "").strip().lower()
+    if cfg_naming_preset in _VALID_NAMING_PRESETS and cfg_naming_preset != "custom":
+        _preset_profile = PRESETS.get(cfg_naming_preset) or PRESETS["default"]
+        cfg_movie_template = _preset_profile.movie_template
+        cfg_tv_template = _preset_profile.tv_template
+    else:
+        cfg_movie_template = str(settings.get("naming_movie_template") or "{title} ({year})")
+        cfg_tv_template = str(settings.get("naming_tv_template") or "{series} ({year})")
     return core.Config(
         root=root,
         enable_collection_folder=to_bool(settings.get("collection_folder_enabled"), True),
@@ -872,11 +1158,23 @@ def build_cfg_from_settings(
         cleanup_residual_include_images=to_bool(settings.get("cleanup_residual_include_images"), True),
         cleanup_residual_include_subtitles=to_bool(settings.get("cleanup_residual_include_subtitles"), True),
         cleanup_residual_include_texts=to_bool(settings.get("cleanup_residual_include_texts"), True),
+        video_exts=video_exts,
         enable_tmdb=to_bool(settings.get("tmdb_enabled"), True),
         incremental_scan_enabled=to_bool(settings.get("incremental_scan_enabled"), False),
         enable_tv_detection=to_bool(settings.get("enable_tv_detection"), False),
-        naming_movie_template=str(settings.get("naming_movie_template") or "{title} ({year})"),
-        naming_tv_template=str(settings.get("naming_tv_template") or "{series} ({year})"),
+        scan_max_workers=cfg_scan_workers,
+        naming_movie_template=cfg_movie_template,
+        naming_tv_template=cfg_tv_template,
+        lowercase_extensions=to_bool(settings.get("lowercase_extensions"), True),
+        # ITER7 etape 3 : approvisionnement separator Domain (drop silencieux
+        # historique au save). Le coerce-and-default est aussi applique cote
+        # _save_section_naming (settings_support.py:1611-1613) mais on duplique
+        # la garde ici pour resister aux settings.json edites a la main.
+        separator=(
+            str(settings.get("separator") or " ")
+            if str(settings.get("separator") or " ") in {".", " ", "_", "-"}
+            else " "
+        ),
     )
 
 
@@ -976,9 +1274,13 @@ def resolve_roots_from_payload(
 
 
 # Champs secrets masques dans la reponse get_settings (jamais envoyes en clair au frontend).
-# BUG 1 : rest_api_token RETIRE de la liste — c'est le PROPRE token de l'utilisateur,
-# il doit pouvoir le voir pour le donner a ses autres appareils. Le masquer n'apporte
-# rien : le token est deja stocke en clair dans settings.json sur la meme machine.
+# SEC-H3 (fix) : rest_api_token EST de nouveau masque ci-dessous. Le commentaire
+# historique "BUG 1" justifiait son retrait au motif que l'utilisateur doit pouvoir
+# voir son propre token pour le partager a ses appareils. Probleme : un attaquant
+# avec acces transitoire (token LAN temporaire, XSS via CSP style-src 'unsafe-inline',
+# log accidentel) peut exfiltrer le Bearer en UN SEUL appel a /api/settings/get_settings,
+# contournant tout futur kill-switch. La revelation explicite doit passer par un endpoint
+# dedie (reveal_rest_token) avec confirmation UI et restriction localhost (is_remote_request).
 _SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"  # 8 bullets
 # SEC-H2 (Phase 1 remediation v7.8.0) : tmdb_api_key et jellyfin_api_key ajoutees
 # a la liste. Avant ce fix, POST /api/get_settings retournait ces 2 cles en clair,
@@ -993,6 +1295,10 @@ _SECRET_FIELDS = (
     "email_smtp_password",
     # Phase 6.2 : OMDb API key (cross-check IMDb)
     "omdb_api_key",
+    # SEC-H3 : Bearer token de l'API REST locale. Re-ajoute apres avoir ete
+    # retire par erreur (BUG 1). La revelation explicite doit passer par
+    # l'endpoint dedie POST /api/settings/reveal_rest_token (localhost only).
+    "rest_api_token",
 )
 
 
@@ -1003,6 +1309,12 @@ def _mask_secrets(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload[f"_has_{field}"] = bool(value)
         if value:
             payload[field] = _SECRET_MASK
+    # [SEC-2 FIX-3] Ne jamais exposer les blobs `_orig_*` (enveloppes chiffrees
+    # preservees par read_settings quand un dechiffrement echoue) sur la surface
+    # GET externe : internes de persistance, pas des champs UI. Machine-bound
+    # donc inutiles ailleurs, mais on n'expose aucun materiel secret au frontend.
+    for key in [k for k in payload if k.startswith("_orig_")]:
+        payload.pop(key, None)
     return payload
 
 
@@ -1013,6 +1325,21 @@ def _unmask_secrets_for_save(incoming: Dict[str, Any], existing: Dict[str, Any])
         if val == _SECRET_MASK:
             # L'utilisateur n'a pas modifie — conserver la valeur existante
             incoming[field] = str(existing.get(field) or "").strip()
+
+
+def get_confidence_thresholds_payload() -> Dict[str, Any]:
+    """VN-C.1 (batch 2) : seuils de confidence partages backend+frontend.
+
+    Source unique : cinesort/domain/confidence_thresholds.py. Le dashboard
+    consomme cet endpoint au demarrage et garde les valeurs en cache
+    module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
+    """
+    from cinesort.domain.confidence_thresholds import get_confidence_thresholds  # noqa: PLC0415
+
+    return {
+        "ok": True,
+        "thresholds": get_confidence_thresholds(),
+    }
 
 
 def get_settings_payload(
@@ -1102,10 +1429,19 @@ def _save_section_cleanup(
     default_empty_folders_folder_name: str,
     default_residual_cleanup_folder_name: str,
 ) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : alias UI collection_folder -> backend collection_folder_name.
+    # L'UI envoie historiquement la cle "collection_folder" mais le backend lit
+    # "collection_folder_name", donc le champ etait silencieusement ecrase par
+    # le defaut (_Collection) a chaque save.
+    collection_folder_value = payload.get("collection_folder")
+    if collection_folder_value is None:
+        collection_folder_value = payload.get("collection_folder_name")
+    collection_folder_name = (
+        str(collection_folder_value or default_collection_folder_name).strip() or default_collection_folder_name
+    )
     return {
         "collection_folder_enabled": to_bool(payload.get("collection_folder_enabled"), True),
-        "collection_folder_name": str(payload.get("collection_folder_name") or default_collection_folder_name).strip()
-        or default_collection_folder_name,
+        "collection_folder_name": collection_folder_name,
         "empty_folders_folder_name": str(
             payload.get("empty_folders_folder_name") or default_empty_folders_folder_name
         ).strip()
@@ -1142,13 +1478,32 @@ def _save_section_probe(payload: Dict[str, Any], *, default_probe_backend: str) 
     }
 
 
+def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """VO-B-CONFIG : persiste scan_max_workers_mode + scan_max_workers_value.
+
+    Si les cles sont absentes du payload, on ne les renvoie PAS (le dispatcher
+    fera un dict.update qui ne touchera pas l'existant ; les defaults seront
+    appliques au prochain `apply_settings_defaults`). Cela respecte la
+    memoire user "BACKWARD COMPAT" : un client qui ne connait pas le setting
+    ne doit pas le reinitialiser silencieusement.
+    """
+    out: Dict[str, Any] = {}
+    if "scan_max_workers_mode" in payload:
+        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(payload.get("scan_max_workers_mode"))
+    if "scan_max_workers_value" in payload:
+        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(payload.get("scan_max_workers_value"))
+    return out
+
+
 def _save_section_scan_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "incremental_scan_enabled": to_bool(payload.get("incremental_scan_enabled"), False),
         "quarantine_unapproved": to_bool(payload.get("quarantine_unapproved"), False),
         "dry_run_apply": to_bool(payload.get("dry_run_apply"), True),
         "auto_approve_enabled": to_bool(payload.get("auto_approve_enabled"), False),
-        "auto_approve_threshold": max(70, min(100, int(payload.get("auto_approve_threshold") or 85))),
+        "auto_approve_threshold": max(
+            70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))
+        ),
         # M-2 : auto-quarantine films corrompus (integrity warnings)
         "auto_quarantine_corrupted": to_bool(payload.get("auto_quarantine_corrupted"), False),
         "onboarding_completed": to_bool(payload.get("onboarding_completed"), False),
@@ -1233,14 +1588,16 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_watch(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "watch_enabled": to_bool(payload.get("watch_enabled"), False),
-        "watch_interval_minutes": max(1, min(60, int(payload.get("watch_interval_minutes") or 5))),
+        "watch_interval_minutes": max(
+            1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))
+        ),
     }
 
 
 def _save_section_plugins(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "plugins_enabled": to_bool(payload.get("plugins_enabled"), False),
-        "plugins_timeout_s": max(5, min(120, int(payload.get("plugins_timeout_s") or 30))),
+        "plugins_timeout_s": max(5, min(120, _coerce_int_with_default(payload.get("plugins_timeout_s", _MISSING), 30))),
     }
 
 
@@ -1248,7 +1605,7 @@ def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "email_enabled": to_bool(payload.get("email_enabled"), False),
         "email_smtp_host": str(payload.get("email_smtp_host") or "").strip(),
-        "email_smtp_port": max(1, min(65535, int(payload.get("email_smtp_port") or 587))),
+        "email_smtp_port": max(1, min(65535, _coerce_int_with_default(payload.get("email_smtp_port", _MISSING), 587))),
         "email_smtp_user": str(payload.get("email_smtp_user") or "").strip(),
         "email_smtp_password": str(payload.get("email_smtp_password") or ""),
         "email_smtp_tls": to_bool(payload.get("email_smtp_tls"), True),
@@ -1262,6 +1619,9 @@ def _save_section_subtitles(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "subtitle_detection_enabled": to_bool(payload.get("subtitle_detection_enabled"), True),
         "subtitle_expected_languages": _normalize_lang_list(payload.get("subtitle_expected_languages")),
+        # Fix audit 2026-05-25 (v1.5.4) Vague I : BUG 1 — declenche le calcul
+        # auto des scores qualite apres scan (default True).
+        "auto_recompute_quality_on_scan": to_bool(payload.get("auto_recompute_quality_on_scan"), True),
     }
 
 
@@ -1270,15 +1630,25 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         "perceptual_enabled": to_bool(payload.get("perceptual_enabled"), False),
         "perceptual_auto_on_scan": to_bool(payload.get("perceptual_auto_on_scan"), False),
         "perceptual_auto_on_quality": to_bool(payload.get("perceptual_auto_on_quality"), True),
-        "perceptual_timeout_per_film_s": max(30, min(600, int(payload.get("perceptual_timeout_per_film_s") or 120))),
-        "perceptual_frames_count": max(5, min(50, int(payload.get("perceptual_frames_count") or 10))),
-        "perceptual_skip_percent": max(0, min(20, int(payload.get("perceptual_skip_percent") or 5))),
+        "perceptual_timeout_per_film_s": max(
+            30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))
+        ),
+        "perceptual_frames_count": max(
+            5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))
+        ),
+        "perceptual_skip_percent": max(
+            0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))
+        ),
         "perceptual_dark_weight": max(1.0, min(3.0, to_float(payload.get("perceptual_dark_weight"), 1.5))),
         "perceptual_audio_deep": to_bool(payload.get("perceptual_audio_deep"), True),
-        "perceptual_audio_segment_s": max(10, min(120, int(payload.get("perceptual_audio_segment_s") or 30))),
-        "perceptual_comparison_frames": max(10, min(100, int(payload.get("perceptual_comparison_frames") or 20))),
+        "perceptual_audio_segment_s": max(
+            10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))
+        ),
+        "perceptual_comparison_frames": max(
+            10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))
+        ),
         "perceptual_comparison_timeout_s": max(
-            120, min(1800, int(payload.get("perceptual_comparison_timeout_s") or 600))
+            120, min(1800, _coerce_int_with_default(payload.get("perceptual_comparison_timeout_s", _MISSING), 600))
         ),
         "perceptual_parallelism_mode": _normalize_enum(
             payload.get("perceptual_parallelism_mode"), ("auto", "max", "safe", "serial"), "auto"
@@ -1287,7 +1657,17 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # `perceptual_workers` clampe a [0, 16] (0 = auto). `perceptual_parallelism_enabled`
         # est un bool (defaut True) qui agit comme kill-switch global du pool batch.
         "perceptual_parallelism_enabled": to_bool(payload.get("perceptual_parallelism_enabled"), True),
-        "perceptual_workers": max(0, min(16, _coerce_workers_int(payload.get("perceptual_workers")))),
+        # AUDIT 2026-06-11 (R4-P1, corrige R3/191b916) : la cle du champ UI est
+        # desormais la CANONIQUE perceptual_workers (parametres.js, section
+        # perceptual). Le fallback R3 sur l'alias perceptual_workers_count etait
+        # MORT dans le flux UI reel : l'UI POST l'objet settings ENTIER (echo du
+        # GET qui contient toujours perceptual_workers via _LITERAL_DEFAULTS),
+        # donc la canonique perimee primait sur la saisie alias. L'alias reste
+        # accepte en fallback pour les payloads partiels (REST legacy)
+        # UNIQUEMENT quand la canonique est absente. Clamp [0..16] (0=auto).
+        "perceptual_workers": max(
+            0, min(16, _coerce_workers_int(payload.get("perceptual_workers", payload.get("perceptual_workers_count"))))
+        ),
         "perceptual_audio_fingerprint_enabled": to_bool(payload.get("perceptual_audio_fingerprint_enabled"), True),
         "perceptual_scene_detection_enabled": to_bool(payload.get("perceptual_scene_detection_enabled"), True),
         "perceptual_audio_spectral_enabled": to_bool(payload.get("perceptual_audio_spectral_enabled"), True),
@@ -1356,14 +1736,14 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     la mecanique du preset selecteur ; ce helper gere les champs templates + regles.
     """
     out: Dict[str, Any] = {}
-    if "naming_template" in payload:
-        out["naming_template"] = str(payload.get("naming_template") or "").strip()
+    # R8-071 (F5) : "naming_template" (général) RETIRÉ — fantôme jamais lu par le pipeline
+    # de nommage (canoniques = naming_movie_template / naming_tv_template).
     if "naming_movie_template" in payload:
         out["naming_movie_template"] = str(payload.get("naming_movie_template") or "").strip()
     if "naming_tv_template" in payload:
         out["naming_tv_template"] = str(payload.get("naming_tv_template") or "").strip()
-    if "windows_safe" in payload:
-        out["windows_safe"] = to_bool(payload.get("windows_safe"), True)
+    # R8-101 (filet F5) : "windows_safe" RETIRÉ — fantôme. windows_safe() est appliquée
+    # inconditionnellement (aucun gate settings) -> échappement Windows toujours actif.
     if "lowercase_extensions" in payload:
         out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
     if "separator" in payload:
@@ -1385,10 +1765,20 @@ def _save_section_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
             out["excluded_patterns"] = [p.strip() for p in raw.split(",") if p.strip()]
     if "file_extensions" in payload:
         raw = payload.get("file_extensions")
+        # AUDIT 2026-06-11 (R4-P12) : split ';' ET ',' (le hint UI dit ';') —
+        # ".mkv;.xyz" persistait ['mkv;.xyz'] (token poubelle). Et la cle
+        # file_extensions n'avait AUCUN consommateur : le moteur lit video_exts
+        # (build_cfg_from_settings, union avec VIDEO_EXTS_ALL -> additif). On
+        # ecrit donc AUSSI video_exts (format '.ext') pour que le champ UI
+        # "Extensions video acceptees" ait enfin un effet sur le scan.
+        exts: List[str] = []
         if isinstance(raw, list):
-            out["file_extensions"] = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]
+            exts = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]
         elif isinstance(raw, str):
-            out["file_extensions"] = [e.strip().lower().lstrip(".") for e in raw.split(",") if e.strip()]
+            exts = [e.strip().lower().lstrip(".") for e in re.split(r"[;,]", raw) if e.strip()]
+        if isinstance(raw, (list, str)):
+            out["file_extensions"] = exts
+            out["video_exts"] = [f".{e}" for e in exts]
     return out
 
 
@@ -1401,6 +1791,11 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
     if "retention_days" in payload:
         out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    # VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review (defaut 30j, 0 = OFF).
+    # Bornage [0, 3650] aligne sur history_retention_days. Le cron tourne 24h via
+    # `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`, demarre depuis app.py.
+    if "quarantaine_ttl_days" in payload:
+        out["quarantaine_ttl_days"] = max(0, min(3650, to_int(payload.get("quarantaine_ttl_days"), 30)))
     if "auto_check_updates" in payload:
         out["auto_check_updates"] = to_bool(payload.get("auto_check_updates"), True)
     if "update_check_enabled" in payload:
@@ -1408,32 +1803,23 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "update_github_repo" in payload:
         repo = str(payload.get("update_github_repo") or "").strip()
         # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
-        import re as _re
-
-        if not repo or _re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+        if not repo or re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
             out["update_github_repo"] = repo
-    if "worker_count" in payload:
-        out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
-    if "perceptual_workers_count" in payload:
-        # Fix audit 2026-05-24 : mismatch nom UI (perceptual_workers_count) vs
-        # backend (perceptual_workers). On normalise vers le nom backend.
-        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers_count"), 4)))
-    if "perceptual_workers" in payload:
-        out["perceptual_workers"] = max(1, min(32, to_int(payload.get("perceptual_workers"), 4)))
+    # R8-068 (F5) : "worker_count" RETIRÉ — toggle inerte, aucune opération ne le lit
+    # (parallélisme réel piloté par perceptual_workers_count + le mode de scan).
+    # AUDIT 2026-06-11 (R3) : perceptual_workers(_count) est gere par
+    # _save_section_perceptual (clamp canonique [0..16], lit l'alias UI). On ne le
+    # traite plus ici (l'ancien clamp [1..32] etait incoherent ET ecrase ensuite).
     if "desktop_notifications_enabled" in payload:
         out["desktop_notifications_enabled"] = to_bool(payload.get("desktop_notifications_enabled"), False)
-    if "animations_enabled" in payload:
-        out["animations_enabled"] = to_bool(payload.get("animations_enabled"), True)
+    # R8-067 (F5) : "animations_enabled" RETIRÉ — fantôme cosmétique jamais consommé
+    # (intensité pilotée par animation_level).
     if "cleanup_orphans" in payload:
         out["cleanup_orphans"] = to_bool(payload.get("cleanup_orphans"), False)
     if "cleanup_empty_folders" in payload:
         out["cleanup_empty_folders"] = to_bool(payload.get("cleanup_empty_folders"), False)
-    if "subtitle_lang_priority" in payload:
-        raw = payload.get("subtitle_lang_priority")
-        if isinstance(raw, list):
-            out["subtitle_lang_priority"] = [str(c).strip().lower()[:3] for c in raw if str(c).strip()]
-        elif isinstance(raw, str):
-            out["subtitle_lang_priority"] = [c.strip().lower()[:3] for c in raw.split(",") if c.strip()]
+    # R8-065-lang (F5) : "subtitle_lang_priority" RETIRÉ — fantôme write-only jamais lu par
+    # le pipeline sous-titres (la clé consommée est subtitle_expected_languages).
     return out
 
 
@@ -1447,7 +1833,8 @@ def _save_section_appearance(payload: Dict[str, Any], *, debug_enabled: bool) ->
         "effect_speed": max(1, min(100, _coerce_appearance_int(payload, "effect_speed", 50))),
         "glow_intensity": max(0, min(100, _coerce_appearance_int(payload, "glow_intensity", 30))),
         "light_intensity": max(0, min(100, _coerce_appearance_int(payload, "light_intensity", 20))),
-        "effects_mode": _normalize_enum(payload.get("effects_mode"), ("restraint", "balanced", "intense"), "restraint"),
+        # R8-072 (F5) : "effects_mode" RETIRÉ — fantôme cosmétique sans contrôle UI ; app.js
+        # posait data-effects mais AUCUN CSS ne le consomme (0 effet visuel).
         "debug_enabled": to_bool(payload.get("debug_enabled"), debug_enabled),
         "log_level": normalize_log_level_setting(payload.get("log_level")),
         # V6-01 Polish Total v7.7.0 (R4-I18N-4) : locale persistee. Validation
@@ -1493,8 +1880,26 @@ def _apply_jellyfin_key_persistence(
         to_save["jellyfin_api_key"] = existing_jf_key
 
 
-def _build_save_result(state_dir: Path, write_meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Construit le dict resultat retourne au frontend apres write_settings."""
+def _build_save_result(
+    state_dir: Path,
+    write_meta: Dict[str, Any],
+    *,
+    rest_api_token_changed: bool = False,
+    rest_api_token_new: str = "",
+) -> Dict[str, Any]:
+    """Construit le dict resultat retourne au frontend apres write_settings.
+
+    B05-401-INCOHERENT (Fix A — couche persistence) : on remonte au caller
+    deux meta-infos qui lui permettent de hot-swap le token REST en place
+    sans relire `existing_settings` (la persistence connait deja l'ancien
+    et le nouveau, autant les exposer). Cf cinesort_api._save_settings_impl
+    qui consomme `rest_api_token_changed` pour appeler
+    `RestApiServer.update_auth_token(new_token)` apres save.
+
+    Backward compat absolue : ces deux cles sont OPTIONNELLES, le frontend
+    et les tests existants qui ne les connaissent pas continuent de fonctionner
+    inchanges (lecture via `.get()` cote callers).
+    """
     result: Dict[str, Any] = {
         "ok": True,
         "state_dir": str(state_dir),
@@ -1506,6 +1911,16 @@ def _build_save_result(state_dir: Path, write_meta: Dict[str, Any]) -> Dict[str,
         result["tmdb_key_warning"] = str(write_meta.get("tmdb_key_warning") or "")
     if write_meta.get("jellyfin_key_warning"):
         result["jellyfin_key_warning"] = str(write_meta.get("jellyfin_key_warning") or "")
+    # B05-401-INCOHERENT : signale au caller (cinesort_api._save_settings_impl)
+    # qu'il doit hot-swap le token Bearer sur le handler REST en memoire. Cle
+    # ajoutee inconditionnellement (False si pas de changement) pour rendre la
+    # detection explicite cote caller (pas de KeyError ni de defaut implicite).
+    result["rest_api_token_changed"] = bool(rest_api_token_changed)
+    if rest_api_token_changed:
+        # On expose la nouvelle valeur SEULEMENT en cas de changement, pour
+        # eviter de fuir le token dans tous les logs/traces de save. Le caller
+        # qui n'a pas besoin du changement ne voit jamais le token.
+        result["rest_api_token_new"] = str(rest_api_token_new or "")
     return result
 
 
@@ -1526,6 +1941,41 @@ def save_settings_payload(
         return current_state_dir, {"ok": False, "message": t("errors.payload_settings_invalid")}
 
     state_dir, state_dir_present = resolve_payload_state_dir(settings, default_state_dir=current_state_dir)
+    # Fix lost-update : serialise read_settings/normalize/write_settings par
+    # state_dir. Sans ce verrou, deux saves paralleles peuvent lire le meme
+    # snapshot et le dernier write ecrase silencieusement le premier. Le lock
+    # est resolu AVANT d'acquerir le verrou pour eviter de tenir le guard
+    # global pendant les IO.
+    _settings_write_lock = _get_settings_write_lock(state_dir)
+    with _settings_write_lock:
+        return _save_settings_payload_locked(
+            settings,
+            state_dir=state_dir,
+            state_dir_present=state_dir_present,
+            current_state_dir=current_state_dir,
+            default_root=default_root,
+            default_collection_folder_name=default_collection_folder_name,
+            default_empty_folders_folder_name=default_empty_folders_folder_name,
+            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+            default_probe_backend=default_probe_backend,
+            debug_enabled=debug_enabled,
+        )
+
+
+def _save_settings_payload_locked(
+    settings: Dict[str, Any],
+    *,
+    state_dir: Path,
+    state_dir_present: bool,
+    current_state_dir: Path,
+    default_root: str,
+    default_collection_folder_name: str,
+    default_empty_folders_folder_name: str,
+    default_residual_cleanup_folder_name: str,
+    default_probe_backend: str,
+    debug_enabled: bool,
+) -> Tuple[Path, Dict[str, Any]]:
+    """Section critique de save_settings_payload, executee sous _settings_write_lock."""
     existing_settings = read_settings(state_dir)
     # Restaurer les secrets masques par get_settings_payload (ne pas ecraser avec le masque)
     _unmask_secrets_for_save(settings, existing_settings)
@@ -1543,11 +1993,33 @@ def save_settings_payload(
     root_path = roots_paths[0] if roots_paths else Path(default_root)
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    to_save: Dict[str, Any] = {
-        "root": str(root_path),
-        "roots": [str(r) for r in roots_paths],
-        "state_dir": str(state_dir),
-    }
+    # Hotfix : on PART de l'existant (merge read-modify-write) puis on ecrase
+    # avec les sections normalisees. Sinon toute cle non couverte par un
+    # `_save_section_*` (preferences UI futures, settings annexes, blobs
+    # `_orig_*` injectes par read_settings) etait silencieusement effacee a
+    # chaque save (reconstruction from-scratch destructive).
+    # Note : on retire les champs derives masque (-> read_settings les
+    # reinjecte) et les protection/warning qui doivent etre re-derives par
+    # write_settings.
+    to_save: Dict[str, Any] = dict(existing_settings)
+    for derived in (
+        "tmdb_key_protection",
+        "tmdb_key_warning",
+        "jellyfin_key_protection",
+        "jellyfin_key_warning",
+        "plex_token_protection",
+        "plex_token_warning",
+        "radarr_key_protection",
+        "radarr_key_warning",
+        "email_smtp_password_protection",
+        "email_smtp_password_warning",
+        "omdb_key_protection",
+        "omdb_key_warning",
+    ):
+        to_save.pop(derived, None)
+    to_save["root"] = str(root_path)
+    to_save["roots"] = [str(r) for r in roots_paths]
+    to_save["state_dir"] = str(state_dir)
     to_save.update(_save_section_tmdb(settings))
     to_save.update(
         _save_section_cleanup(
@@ -1558,6 +2030,8 @@ def save_settings_payload(
         )
     )
     to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
+    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
+    to_save.update(_save_section_scan_max_workers(settings))
     to_save.update(_save_section_scan_flags(settings))
     to_save.update(_save_section_jellyfin(settings))
     to_save.update(_save_section_plex(settings))
@@ -1583,8 +2057,23 @@ def save_settings_payload(
     _apply_tmdb_key_persistence(to_save, settings, existing_settings)
     _apply_jellyfin_key_persistence(to_save, settings, existing_settings)
 
+    # B05-401-INCOHERENT (Fix A — couche persistence) : on compare l'ancien et le
+    # nouveau token REST APRES toute la normalisation (le helper _save_section_rest_api
+    # strip le token, donc on compare des valeurs deja normalisees pour eviter les
+    # faux positifs sur whitespace). La detection est exposee dans le result via
+    # `_build_save_result` pour que cinesort_api._save_settings_impl puisse appeler
+    # `RestApiServer.update_auth_token(new_token)` sans relire existing_settings.
+    old_token = str(existing_settings.get("rest_api_token") or "").strip()
+    new_token = str(to_save.get("rest_api_token") or "").strip()
+    rest_api_token_changed = old_token != new_token
+
     write_meta = write_settings(state_dir, to_save)
-    return state_dir, _build_save_result(state_dir, write_meta)
+    return state_dir, _build_save_result(
+        state_dir,
+        write_meta,
+        rest_api_token_changed=rest_api_token_changed,
+        rest_api_token_new=new_token if rest_api_token_changed else "",
+    )
 
 
 def test_tmdb_key(
@@ -1642,10 +2131,16 @@ def test_jellyfin_connection(
         libraries = []
         movies_count = 0
         if user_id:
+            # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError
+            # (levee par get_libraries/get_movies_count sur 401/403/5xx, cf
+            # jellyfin_client.py:109-112) n'etait pas catchee, donc une auth
+            # KO sur ces endpoints s'echappait jusqu'au caller. On l'ajoute au
+            # tuple pour degrader gracieusement (libraries=[], movies_count=0)
+            # et retourner ok=True avec les infos serveur deja recuperees.
             try:
                 libraries = client.get_libraries(user_id)
                 movies_count = client.get_movies_count(user_id)
-            except (ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+            except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
                 logger.debug("Jellyfin: erreur récupération bibliothèques: %s", exc)
 
         return {
@@ -1658,7 +2153,13 @@ def test_jellyfin_connection(
             "libraries": libraries,
             "movies_count": movies_count,
         }
-    except (ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — meme correction au
+    # niveau du bloc except principal. Si client.validate_connection() leve
+    # JellyfinError (cas typique : URL malformee qui passe la normalisation mais
+    # echoue cote serveur, ou erreur reseau bas niveau remontee comme
+    # JellyfinError), on retourne un err() proprement plutot que de laisser
+    # l'exception remonter au caller (qui afficherait une stacktrace dans l'UI).
+    except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
         return err(f"Jellyfin connection failed: {exc}", category="runtime", level="error")
 
 
@@ -1699,3 +2200,390 @@ def restore_settings_backup(state_dir: Path, backup_filename: str) -> bool:
         return True
     except OSError:
         return False
+
+
+# =============================================================================
+# VO-A UI : Advanced PRAGMA settings (storage profile tri-etat + locking_mode)
+# =============================================================================
+#
+# Phase VO-A (Vague O) expose un endpoint dedie aux PRAGMA SQLite avances qui
+# influencent les perfs DB selon le type de stockage :
+#   - "auto"      : detection automatique au boot (defaut, comportement v7.x)
+#   - "local_ssd" : profil tunne pour SSD local (WAL agressif, cache eleve)
+#   - "nas_smb"   : profil prudent pour stockage reseau (WAL conservateur,
+#                   synchronous=FULL pour eviter corruption sur deconnexion SMB)
+#
+# Le toggle "locking_mode_exclusive" est destructif (aucun autre processus ne
+# peut lire la DB en parallele) et doit donc passer par dangerConfirmModal
+# cote UI avec countdown 3s (memoire user actions dangereuses).
+#
+# Les valeurs sont stockees dans settings.json sous :
+#   - storage_profile_override : "auto" | "local_ssd" | "nas_smb"
+#   - sqlite_locking_mode_exclusive : bool
+#
+# Le profil "actif" est calcule depuis l'override (si != auto) ou la detection.
+
+# PRAGMA-04 fix : exposer les 4 profils backend (PROFILES dans
+# infra/db/pragma_profile.py) au lieu de seulement 2. Sans ca, les utilisateurs
+# sur HDD ou NAS lent ne peuvent pas choisir un profil dedie (override edit
+# manuel settings.json est silencieusement remappe sur "auto").
+_VALID_STORAGE_PROFILES: Tuple[str, ...] = (
+    "auto",
+    "local_ssd",
+    "local_hdd",
+    "nas_smb",
+    "nas_smb_slow",
+)
+_DEFAULT_STORAGE_PROFILE: str = "auto"
+
+
+def _detect_storage_profile(state_dir: Path) -> str:
+    """Detecte le type de stockage du state_dir (heuristique simple).
+
+    Retourne "local_ssd" ou "nas_smb". Sur Windows, on regarde le type de
+    drive via GetDriveType. Fallback "local_ssd" si la detection echoue
+    (pas grave : c'est juste pour pre-cocher le profil dans l'UI).
+    """
+    try:
+        path_str = str(state_dir).replace("\\", "/")
+        # Heuristique : UNC path ou lettre de drive distant
+        if path_str.startswith("//") or path_str.startswith("\\\\"):
+            return "nas_smb"
+        # Windows : interroger GetDriveTypeW si disponible
+        if os.name == "nt":
+            try:
+                import ctypes  # noqa: PLC0415
+
+                drive = str(state_dir.resolve()).split(":")[0] + ":\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                # 4 = DRIVE_REMOTE (SMB/CIFS)
+                if drive_type == 4:
+                    return "nas_smb"
+            except (OSError, AttributeError, ImportError):
+                pass
+    except (OSError, ValueError):
+        pass
+    return "local_ssd"
+
+
+def _normalize_storage_profile(value: Any) -> str:
+    """Clamp le profil de stockage a {"auto","local_ssd","nas_smb"}, defaut "auto"."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_STORAGE_PROFILE
+    try:
+        normalized = str(value).strip().lower()
+    except (TypeError, ValueError):
+        return _DEFAULT_STORAGE_PROFILE
+    if normalized in _VALID_STORAGE_PROFILES:
+        return normalized
+    return _DEFAULT_STORAGE_PROFILE
+
+
+# =============================================================================
+# VO-B Config : scan_max_workers (tri-etat auto / manuel N)
+# =============================================================================
+#
+# Phase VO-B-CONFIG : expose un setting `scan_max_workers` qui pilote la
+# parallelisation Phase 1 de `_filter_dossiers_phase`. Synergie avec VO-A :
+# en mode "auto", la detection storage (local_ssd / nas_smb) determine le
+# nombre de workers ; en mode manuel, l'utilisateur force une valeur N >= 1.
+#
+# Stockage settings.json :
+#   - scan_max_workers_mode : "auto" | "manual"  (default "auto")
+#   - scan_max_workers_value : int [1..64]       (default 1, utilise si mode=manual)
+#
+# Backward compat stricte (memoire user) : si la cle est absente OU mode="manual"
+# avec value=1, le comportement reste strictement sequentiel (cf.
+# `resolve_scan_max_workers` dans cinesort/app/_local_candidate.py qui plafonne
+# a 32 et retombe sur 1 si invalide).
+#
+# La memoire user impose une garantie supplementaire ici : la facade doit pouvoir
+# retourner la VALEUR EFFECTIVE (resolve_effective_scan_max_workers) pour que
+# `build_cfg_from_settings` injecte un entier coherent dans `Config.scan_max_workers`.
+
+_SCAN_MAX_WORKERS_MIN: int = 1
+_SCAN_MAX_WORKERS_MAX: int = 64
+_VALID_SCAN_MAX_WORKERS_MODES: Tuple[str, ...] = ("auto", "manual")
+_DEFAULT_SCAN_MAX_WORKERS_MODE: str = "auto"
+_DEFAULT_SCAN_MAX_WORKERS_VALUE: int = 1
+
+
+def _normalize_scan_max_workers_mode(value: Any) -> str:
+    """Clamp `scan_max_workers_mode` a {"auto","manual"}, defaut "auto"."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_SCAN_MAX_WORKERS_MODE
+    try:
+        normalized = str(value).strip().lower()
+    except (TypeError, ValueError):
+        return _DEFAULT_SCAN_MAX_WORKERS_MODE
+    if normalized in _VALID_SCAN_MAX_WORKERS_MODES:
+        return normalized
+    return _DEFAULT_SCAN_MAX_WORKERS_MODE
+
+
+def _normalize_scan_max_workers_value(value: Any) -> int:
+    """Clamp `scan_max_workers_value` a [1..64], defaut 1 si invalide."""
+    if value is None or isinstance(value, bool):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    if n < _SCAN_MAX_WORKERS_MIN:
+        return _SCAN_MAX_WORKERS_MIN
+    if n > _SCAN_MAX_WORKERS_MAX:
+        return _SCAN_MAX_WORKERS_MAX
+    return n
+
+
+def _auto_scan_max_workers_for_storage(storage_type: str) -> int:
+    """VO-B/VO-A synergie : choix workers selon le type de stockage detecte.
+
+    - local_ssd : 8 workers (I/O scandir/stat parallelisable sans saturer SSD).
+    - nas_smb   : 4 workers (latence reseau eleve, gain limite >4, on prefere
+                  prudence pour eviter de saturer le partage SMB).
+    - autre     : 1 worker (fallback prudent, comportement sequentiel).
+    """
+    s = str(storage_type or "").strip().lower()
+    if s == "local_ssd":
+        return 8
+    if s == "nas_smb":
+        return 4
+    return 1
+
+
+def resolve_effective_scan_max_workers(state_dir: Path) -> int:
+    """Resout la valeur effective de scan_max_workers a injecter dans Config.
+
+    - Si mode = "auto" : utilise `_detect_storage_profile(state_dir)` (VO-A
+      synergie) puis mappe vers un nombre de workers via
+      `_auto_scan_max_workers_for_storage`.
+    - Si mode = "manual" : retourne `scan_max_workers_value` clampe [1..64].
+    - Si settings absents / corrompus : retourne 1 (sequentiel strict).
+    """
+    try:
+        data = read_settings(state_dir)
+    except (OSError, ValueError, TypeError):
+        return _DEFAULT_SCAN_MAX_WORKERS_VALUE
+    mode = _normalize_scan_max_workers_mode(data.get("scan_max_workers_mode"))
+    if mode == "manual":
+        return _normalize_scan_max_workers_value(data.get("scan_max_workers_value"))
+    # mode = "auto" : delegation VO-A detect_storage_type via _detect_storage_profile.
+    detected = _detect_storage_profile(state_dir)
+    return _auto_scan_max_workers_for_storage(detected)
+
+
+def get_scan_max_workers_payload(state_dir: Path) -> Dict[str, Any]:
+    """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+    Returns:
+        {
+            "ok": True,
+            "mode": "auto" | "manual",
+            "value": int,                # valeur manuelle saisie (defaut 1)
+            "effective": int,            # valeur effectivement appliquee (mode resolu)
+            "storage_detected": str,     # auto-detection VO-A
+            "auto_suggestion": int,      # workers proposes si mode=auto
+            "min": 1,
+            "max": 64,
+        }
+    """
+    try:
+        data = read_settings(state_dir)
+    except (OSError, ValueError, TypeError):
+        data = {}
+    mode = _normalize_scan_max_workers_mode(data.get("scan_max_workers_mode"))
+    value = _normalize_scan_max_workers_value(data.get("scan_max_workers_value"))
+    detected = _detect_storage_profile(state_dir)
+    auto_suggestion = _auto_scan_max_workers_for_storage(detected)
+    effective = auto_suggestion if mode == "auto" else value
+    return {
+        "ok": True,
+        "mode": mode,
+        "value": value,
+        "effective": effective,
+        "storage_detected": detected,
+        "auto_suggestion": auto_suggestion,
+        "min": _SCAN_MAX_WORKERS_MIN,
+        "max": _SCAN_MAX_WORKERS_MAX,
+    }
+
+
+def set_scan_max_workers_payload(
+    state_dir: Path,
+    mode: str,
+    value: Any = None,
+) -> Dict[str, Any]:
+    """VO-B-CONFIG : persiste le setting scan_max_workers et retourne l'etat.
+
+    Args:
+        state_dir: dossier state.
+        mode: "auto" | "manual". Invalide -> erreur.
+        value: int [1..64], requis et utilise UNIQUEMENT si mode="manual".
+            Pour mode="auto", peut etre None (ignore).
+
+    Returns:
+        Meme forme que `get_scan_max_workers_payload` + `write_result`.
+        En cas d'erreur de validation : { "ok": False, "message": ... }.
+    """
+    raw_mode = str(mode or "").strip().lower()
+    if raw_mode not in _VALID_SCAN_MAX_WORKERS_MODES:
+        return err(
+            f"Mode scan_max_workers invalide : {mode!r}. "
+            f"Valeurs autorisees : {', '.join(_VALID_SCAN_MAX_WORKERS_MODES)}.",
+            category="validation",
+            level="info",
+        )
+
+    if raw_mode == "manual":
+        # En manuel, on exige une valeur explicite int. On rejette bool, None,
+        # strings non-numeriques pour eviter qu'un payload UI casse retombe
+        # silencieusement sur 1 (comportement non-evident pour le user).
+        if value is None or isinstance(value, bool):
+            return err(
+                "Mode manuel : la valeur scan_max_workers_value est requise (int 1..64).",
+                category="validation",
+                level="info",
+            )
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return err(
+                f"Mode manuel : valeur scan_max_workers_value invalide ({value!r}). "
+                f"Attendu : entier dans [{_SCAN_MAX_WORKERS_MIN}..{_SCAN_MAX_WORKERS_MAX}].",
+                category="validation",
+                level="info",
+            )
+        if n < _SCAN_MAX_WORKERS_MIN or n > _SCAN_MAX_WORKERS_MAX:
+            return err(
+                f"Mode manuel : valeur scan_max_workers_value hors plage "
+                f"({n}). Attendu : entier dans "
+                f"[{_SCAN_MAX_WORKERS_MIN}..{_SCAN_MAX_WORKERS_MAX}].",
+                category="validation",
+                level="info",
+            )
+        normalized_value = n
+    else:
+        # mode = auto : valeur conservee si presente et valide, sinon defaut 1.
+        normalized_value = _normalize_scan_max_workers_value(value)
+
+    # Lecture / merge / ecriture (read_settings retourne les secrets dechiffres,
+    # write_settings rechiffrera correctement les autres champs).
+    data = read_settings(state_dir)
+    data["scan_max_workers_mode"] = raw_mode
+    data["scan_max_workers_value"] = normalized_value
+    try:
+        write_result = write_settings(state_dir, data)
+    except (OSError, ValueError, TypeError) as exc:
+        return err(
+            f"Echec de la sauvegarde de scan_max_workers : {exc}",
+            category="runtime",
+            level="error",
+        )
+
+    detected = _detect_storage_profile(state_dir)
+    auto_suggestion = _auto_scan_max_workers_for_storage(detected)
+    effective = auto_suggestion if raw_mode == "auto" else normalized_value
+
+    return {
+        "ok": True,
+        "mode": raw_mode,
+        "value": normalized_value,
+        "effective": effective,
+        "storage_detected": detected,
+        "auto_suggestion": auto_suggestion,
+        "min": _SCAN_MAX_WORKERS_MIN,
+        "max": _SCAN_MAX_WORKERS_MAX,
+        "write_result": write_result,
+    }
+
+
+def get_advanced_pragma_settings_payload(state_dir: Path) -> Dict[str, Any]:
+    """VO-A : retourne l'etat des PRAGMA SQLite avances.
+
+    Returns:
+        {
+            "ok": True,
+            "profile_active": "auto" | "local_ssd" | "nas_smb",  # profil effectif
+            "profile_override": "auto" | "local_ssd" | "nas_smb",  # choix user
+            "available_profiles": [{"v": ..., "l": ...}, ...],
+            "storage_detected": "local_ssd" | "nas_smb",  # heuristique
+            "locking_mode_exclusive": bool,  # toggle EXCLUSIVE
+        }
+    """
+    data = read_settings(state_dir)
+    override = _normalize_storage_profile(data.get("storage_profile_override"))
+    detected = _detect_storage_profile(state_dir)
+    profile_active = detected if override == "auto" else override
+    locking_exclusive = to_bool(data.get("sqlite_locking_mode_exclusive"), False)
+    return {
+        "ok": True,
+        "profile_active": profile_active,
+        "profile_override": override,
+        "available_profiles": [
+            {"v": "auto", "l": "Auto (detection)"},
+            {"v": "local_ssd", "l": "SSD local (perf max)"},
+            {"v": "local_hdd", "l": "HDD local (mecanique)"},
+            {"v": "nas_smb", "l": "NAS / SMB (securise)"},
+            {"v": "nas_smb_slow", "l": "NAS lent (Wi-Fi / vieux SMB)"},
+        ],
+        "storage_detected": detected,
+        "locking_mode_exclusive": locking_exclusive,
+    }
+
+
+def set_advanced_pragma_settings_payload(
+    state_dir: Path,
+    profile_name: str,
+    locking_mode_exclusive: bool = False,
+) -> Dict[str, Any]:
+    """VO-A : applique les PRAGMA SQLite avances et persiste dans settings.json.
+
+    Args:
+        state_dir: dossier state
+        profile_name: "auto" | "local_ssd" | "nas_smb"
+        locking_mode_exclusive: True = activer locking_mode=EXCLUSIVE (dangereux,
+            empeche toute lecture concurrente). Defaut False.
+
+    Returns:
+        { "ok": bool, "profile_active": str, "locking_mode_exclusive": bool,
+          "message": str (si erreur) }
+    """
+    normalized_profile = _normalize_storage_profile(profile_name)
+    if str(profile_name or "").strip().lower() not in _VALID_STORAGE_PROFILES:
+        return err(
+            f"Profil de stockage invalide : {profile_name!r}. "
+            f"Valeurs autorisees : {', '.join(_VALID_STORAGE_PROFILES)}.",
+            category="validation",
+            level="info",
+        )
+
+    locking_bool = bool(locking_mode_exclusive)
+
+    # Lire / merger / ecrire (write_settings recommence le pipeline DPAPI sur
+    # les autres champs : on reinjecte tous les champs sensibles tels qu'ils
+    # etaient pour ne rien casser. read_settings retourne deja les secrets
+    # dechiffres, donc write_settings va les rechiffrer correctement).
+    data = read_settings(state_dir)
+    data["storage_profile_override"] = normalized_profile
+    data["sqlite_locking_mode_exclusive"] = locking_bool
+    try:
+        write_result = write_settings(state_dir, data)
+    except (OSError, ValueError, TypeError) as exc:
+        return err(
+            f"Echec de la sauvegarde des PRAGMA avances : {exc}",
+            category="runtime",
+            level="error",
+        )
+
+    detected = _detect_storage_profile(state_dir)
+    profile_active = detected if normalized_profile == "auto" else normalized_profile
+
+    return {
+        "ok": True,
+        "profile_active": profile_active,
+        "profile_override": normalized_profile,
+        "locking_mode_exclusive": locking_bool,
+        "storage_detected": detected,
+        "write_result": write_result,
+    }

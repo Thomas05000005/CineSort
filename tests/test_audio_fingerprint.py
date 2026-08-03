@@ -100,6 +100,104 @@ class TestComputeAudioFingerprintMocked(unittest.TestCase):
             i = args.index("-length")
             self.assertEqual(int(args[i + 1]), 120)
 
+    def test_long_file_without_ffmpeg_path_falls_back_to_direct_fpcalc(self):
+        """MEGA-HOTFIX audio_fingerprint_offset : si ffmpeg_path absent,
+        comportement retro-compat (fpcalc direct sans seek)."""
+        payload = {"duration": 120.0, "fingerprint": [10, 20, 30]}
+        with patch(
+            "cinesort.domain.perceptual.audio_fingerprint.tracked_run",
+            return_value=self._fake_completed(json.dumps(payload)),
+        ) as mock_run:
+            fp = compute_audio_fingerprint(
+                "x.mkv",
+                duration_s=7200.0,
+                fpcalc_path="/tmp/fpcalc",
+                ffmpeg_path=None,
+            )
+            self.assertIsNotNone(fp)
+            # tracked_run a bien ete appele (pas le pipe)
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            # Le cmd contient le media path direct, pas "-" (stdin)
+            self.assertEqual(args[-1], "x.mkv")
+
+    def test_long_file_with_ffmpeg_path_uses_seek_pipe(self):
+        """MEGA-HOTFIX audio_fingerprint_offset : si ffmpeg_path fourni
+        + offset > 0, on pipe ffmpeg -ss 60 -t 120 | fpcalc - pour
+        respecter strictement l'offset (eviter logos studios)."""
+        payload = {"duration": 120.0, "fingerprint": [42, 43, 44]}
+
+        # Fake context manager qui retourne un Popen mocke avec communicate().
+        from contextlib import contextmanager
+
+        ffmpeg_proc = MagicMock()
+        ffmpeg_proc.stdout = MagicMock()
+        ffmpeg_proc.communicate.return_value = (b"", b"")
+        ffmpeg_proc.returncode = 0
+
+        fpcalc_proc = MagicMock()
+        fpcalc_proc.communicate.return_value = (json.dumps(payload).encode("utf-8"), b"")
+        fpcalc_proc.returncode = 0
+
+        call_order = []
+
+        @contextmanager
+        def fake_tracked_popen(cmd, **kwargs):
+            call_order.append(cmd)
+            # 1er appel = ffmpeg, 2eme = fpcalc
+            if len(call_order) == 1:
+                yield ffmpeg_proc
+            else:
+                yield fpcalc_proc
+
+        with patch(
+            "cinesort.domain._runners.tracked_popen",
+            fake_tracked_popen,
+        ):
+            fp = compute_audio_fingerprint(
+                "movie.mkv",
+                duration_s=7200.0,
+                fpcalc_path="/tmp/fpcalc",
+                ffmpeg_path="/tmp/ffmpeg",
+            )
+
+        self.assertIsNotNone(fp)
+        # On a bien execute 2 process : ffmpeg puis fpcalc
+        self.assertEqual(len(call_order), 2)
+        ffmpeg_cmd = call_order[0]
+        fpcalc_cmd = call_order[1]
+        # ffmpeg cmd doit contenir -ss 60 -t 120 et le media path
+        self.assertEqual(ffmpeg_cmd[0], "/tmp/ffmpeg")
+        self.assertIn("-ss", ffmpeg_cmd)
+        ss_idx = ffmpeg_cmd.index("-ss")
+        self.assertEqual(int(ffmpeg_cmd[ss_idx + 1]), 60)
+        self.assertIn("-t", ffmpeg_cmd)
+        t_idx = ffmpeg_cmd.index("-t")
+        self.assertEqual(int(ffmpeg_cmd[t_idx + 1]), 120)
+        self.assertIn("movie.mkv", ffmpeg_cmd)
+        # fpcalc doit lire stdin (dernier arg = "-")
+        self.assertEqual(fpcalc_cmd[0], "/tmp/fpcalc")
+        self.assertEqual(fpcalc_cmd[-1], "-")
+
+    def test_short_file_with_ffmpeg_path_does_not_seek(self):
+        """Pour un fichier court (duration < 180s), offset = 0 donc
+        meme avec ffmpeg_path, on n'utilise pas le pipe (length = duration)."""
+        payload = {"duration": 60.0, "fingerprint": [1, 2, 3]}
+        with patch(
+            "cinesort.domain.perceptual.audio_fingerprint.tracked_run",
+            return_value=self._fake_completed(json.dumps(payload)),
+        ) as mock_run:
+            fp = compute_audio_fingerprint(
+                "x.mkv",
+                duration_s=60.0,
+                fpcalc_path="/tmp/fpcalc",
+                ffmpeg_path="/tmp/ffmpeg",  # fourni mais ignore (offset = 0)
+            )
+            self.assertIsNotNone(fp)
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            self.assertEqual(args[-1], "x.mkv")  # pas "-" stdin
+
     def test_returns_none_on_nonzero_returncode(self):
         with patch(
             "cinesort.domain.perceptual.audio_fingerprint.tracked_run",

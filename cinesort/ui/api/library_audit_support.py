@@ -13,9 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
-    try:
-        settings = api.settings.get_settings()
-        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        store, _ = api._get_or_create_infra(state_dir)
-        runs = store.run.list_runs(limit=1)
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("library_audit cannot resolve latest run: %s", exc)
-        return None
-    if not runs:
-        return None
-    return str(runs[0].get("run_id") or "") or None
+    # B1-bis (revue Lot C-fix) : jumeau de library_support._resolve_run_id —
+    # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
+    # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
+    # corrige (skip des runs utilitaires).
+    from cinesort.ui.api import library_support
+
+    return library_support._resolve_run_id(api, None)
 
 
 def _decade_from_year(year: int) -> Optional[str]:
@@ -94,6 +88,22 @@ def get_films_by_decade(api: Any, filters: Optional[Dict[str, Any]] = None) -> D
             "total": N,
         }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_films_by_decade_impl(api, filters)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_films_by_decade failed for filters=%s", filters)
+        return {
+            "ok": False,
+            "error": "films_by_decade_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger la distribution par decennie.",
+        }
+
+
+def _get_films_by_decade_impl(api: Any, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Implementation reelle de get_films_by_decade, sans wrap global (Vague G)."""
     resolved_rid = _resolve_latest_run_id(api)
     if not resolved_rid:
         return {"ok": True, "run_id": None, "by_decade": {}, "total": 0}
@@ -216,14 +226,31 @@ def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[
         # On reutilise le client TMDb existant sur api si dispo.
         client = getattr(api, "_tmdb_client", None)
         if client is None:
-            # Best-effort : instancier via settings
+            # AUDIT 2026-06-10 (REAL 2/2) : `getattr(api, "_tmdb_client")` est
+            # toujours None (attribut inexistant) et TmdbClient(api_key=api_key)
+            # OMETTAIT le parametre requis cache_path -> TypeError avale ->
+            # _fetch_collection_parts retournait toujours None ->
+            # get_incomplete_sagas retournait toujours sagas:[] (feature morte).
+            # On construit le client correctement, avec cle dé-masquee + cache_path.
+            import cinesort.infra.state as _state
             from cinesort.infra.tmdb_client import TmdbClient
+            from cinesort.ui.api.settings_support import normalize_user_path
 
-            settings = api.settings.get_settings()
+            settings = api._internal_settings()
             api_key = str(settings.get("tmdb_api_key") or "").strip()
             if not api_key:
                 return None
-            client = TmdbClient(api_key=api_key)
+            state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+            try:
+                cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+            except (TypeError, ValueError):
+                cache_ttl_days = 30
+            client = TmdbClient(
+                api_key=api_key,
+                cache_path=state_dir / "tmdb_cache.json",
+                timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+                cache_ttl_days=cache_ttl_days,
+            )
         # Appel direct collection/{id}
         url = f"https://api.themoviedb.org/3/collection/{int(collection_id)}"
         params = {"api_key": getattr(client, "api_key", None), "language": "fr-FR"}
