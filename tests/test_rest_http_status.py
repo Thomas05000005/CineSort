@@ -14,8 +14,8 @@ import json
 import os
 import time
 import unittest
-import urllib.request
 import urllib.error
+import urllib.request
 
 from cinesort.infra.rest_server import RestApiServer
 from tests._helpers import find_free_port as _find_free_port

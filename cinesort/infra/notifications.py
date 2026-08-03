@@ -58,9 +58,26 @@ _icon_added = False
 
 
 def _encode_wstr(text: str, max_chars: int) -> bytes:
-    """Encode text as null-terminated UTF-16LE, truncated to max_chars."""
-    truncated = text[: max_chars - 1]
-    encoded = truncated.encode("utf-16-le")
+    """Encode text as null-terminated UTF-16LE, truncated to max_chars
+    UTF-16 code units (not Python code points).
+
+    Slicing `text[: max_chars - 1]` by Python code points was unsafe : an
+    emoji or any non-BMP character is one Python code point but two UTF-16
+    code units, so after encoding the buffer could exceed `max_chars * 2`
+    bytes. `struct.pack("..s", ..)` then truncated mid-surrogate, leaving
+    an orphan high surrogate that Windows displays as a replacement glyph.
+    """
+    encoded = text.encode("utf-16-le")
+    # Reserve one code unit (2 bytes) for the null terminator.
+    max_bytes = max(0, (int(max_chars) - 1)) * 2
+    if len(encoded) > max_bytes:
+        encoded = encoded[:max_bytes]
+        # Avoid cutting a surrogate pair in half : if the final code unit
+        # is a high surrogate (0xD800..0xDBFF), strip it.
+        if len(encoded) >= 2:
+            last_cu = int.from_bytes(encoded[-2:], "little")
+            if 0xD800 <= last_cu <= 0xDBFF:
+                encoded = encoded[:-2]
     return encoded.ljust(max_chars * 2, b"\x00")
 
 

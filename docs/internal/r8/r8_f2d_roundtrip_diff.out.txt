@@ -1,0 +1,10 @@
+=== R8-027 (row_from_json) ===
+  champs perdus au reload : [] (AVANT contenait 'nfo_runtime' ; attendu sans)
+  nfo_runtime reload      : 4242 (attendu 4242)
+
+=== R8-090 (plan_row_from_jsonable, jumeau) ===
+  champs perdus au reload : [] (AVANT contenait 'source_root' ; attendu sans)
+  source_root reload      : mk_source_root (attendu 'mk_source_root')
+
+VERDICT : CORRIGE (les 2 deserialiseurs preservent nfo_runtime ET source_root)
+RESUME: {"R8027_row_from_json_nfo_runtime_preserve": true, "R8090_plan_row_from_jsonable_source_root_preserve": true}

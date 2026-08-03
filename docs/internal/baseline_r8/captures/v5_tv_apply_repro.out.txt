@@ -1,0 +1,18 @@
+=== FIXTURE TV — apply_tv_episode (mode reel, prod) ===
+AVANT: ['lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.mkv', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+APRES: ['lib\\Showname (2020)\\Saison 01\\S01E01 - Pilot.mkv', 'lib\\Showname (2020)\\Saison 01\\Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'lib\\Showname (2020)\\Saison 01\\Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+
+--- B1 (F-V4B-TV1) : alignement sidecars ---
+  stem video cible   : 'S01E01 - Pilot'
+  stems sidecars     : {'.nfo': 'Showname.S01E01.1080p.HDTV.x264-GRP', '.srt': 'Showname.S01E01.1080p.HDTV.x264-GRP'}
+  sidecars ORPHELINS (stem != video) : ['Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+  VERDICT B1 : CONFIRME (sidecars orphelins)
+
+--- B2 (F-V4B-TV2) : empreinte src_sha1/src_size dans les ops ---
+  nb ops capturees : 3
+    op: type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+    op: type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+    op: type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+  VERDICT B2 : CONFIRME (aucune empreinte -> garde-fou undo inerte sur TV)
+
+RESUME: {"B1_sidecars_orphelins": true, "B2_ops_sans_sha1": true, "res_moves": 1}

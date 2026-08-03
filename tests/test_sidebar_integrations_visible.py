@@ -1,6 +1,7 @@
 """V3-01 — Vérifie que la logique sidebar n'utilise plus setNavVisible pour intégrations."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

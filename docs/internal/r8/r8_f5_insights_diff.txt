@@ -1,0 +1,12 @@
+=== R8 F5 INSIGHTS + KPI — DIFFERENTIELS ===
+R8-049 emit_from_insights : AVANT ins.get('code')='' -> 0 notification (miroir mort) ; APRÈS ins.get('type') -> notifications créées.
+R8-050 qualite subs : AVANT .includes('subs_missing') ne matche pas l'id réel 'missing_subtitles' -> section '—' ; APRÈS matche subtitle/missing_subtitles.
+R8-051 route insights : AVANT 5/5 types réels (run_in_progress/new_rejects/duplicates_to_resolve/dnr_partial/new_platinum_month) -> défaut /bibliotheque ; APRÈS routés.
+R8-052 librarian route : AVANT 4/6 ids (missing_subtitles/unidentified/low_resolution/collections_info) -> défaut ; APRÈS cas ajoutés.
+R8-066 KPI : AVANT duplicates_groups absent des kpis -> stat 'Groupes de doublons' toujours 0 ; APRÈS = len(list_duplicate_decisions) (décidés, cohérent historique).
+
+FORK-DESIGN signalé : DOUBLE VOCABULAIRE insights — le front a 8 types 'métier'
+(duplicates_probable/films_not_identified/films_low_confidence/subs_missing_fr/omdb_disagreements/quality_reject/health_low/sagas_incomplete)
+que le producteur _compute_active_insights N'ÉMET PAS (il émet 5 types 'physiques').
+Décision produit : ENRICHIR le producteur pour émettre les 8 types métier (vraies features, routes vers
+filtres bibliothèque réels) OU accepter le set minimal (5). Front aligné sur les 5 réels + 8 conservés au cas où.

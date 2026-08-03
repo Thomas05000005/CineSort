@@ -4,6 +4,10 @@
    Additif : se superpose a styles.css sans le remplacer.
    ============================================================ */
 
+/* V1.4 — depth-effects fait partie du dashboard legacy, wrappe dans
+   @layer legacy (cf tokens.css pour ordre canonique). */
+@layer legacy {
+
 /* ============================================================
    BENTO GRID LAYOUT
    ============================================================ */
@@ -677,3 +681,5 @@
   .ring-label strong { font-size: 22px; }
   .topbar-search { max-width: 100%; }
 }
+
+} /* end @layer legacy */
