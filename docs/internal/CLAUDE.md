@@ -25,20 +25,50 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 ---
 
-## Etat actuel du projet (9 juillet 2026)
+## Etat actuel du projet (3 août 2026)
+
+### ⚠️ À lire en premier — état de la CI et du backlog
+- **La CI est VERTE sur `main`** depuis le 2026-08-03. Elle avait été rouge pendant des mois avec
+  **DEUX verrous empilés**, le second invisible tant que le premier tenait (le job s'arrêtait au lint,
+  donc l'étape de tests n'était jamais atteinte) :
+  1. `ruff check` + `ruff format` — 279 erreurs, 326 fichiers non formatés.
+  2. Les tests — **46 ERREURS de setup** (invisibles à un grep `FAILED` : ce sont des `ERROR at
+     setup`) parce que le job installait `pytest-playwright` sans les navigateurs, alors que 46 tests
+     `[chromium]` vivent dans `tests/` ; puis 25 échecs pré-existants.
+- **⚠️ PIÈGE : ne JAMAIS lancer `ruff --fix` en aveugle sur ce dépôt.** `cinesort/app/plan_support.py`
+  et `cinesort/domain/probe_models.py` sont des **modules de RE-EXPORT** : leurs symboles privés,
+  consommés par les tests, ne sont pas dans `__all__`, donc F401 les supprime. Mesure : 37 ré-exports
+  effacés, 2 fichiers de tests ne collectaient plus, et pytest s'arrêtait AVANT d'exécuter quoi que
+  ce soit — un « 0 échec » trompeur sur une batterie amputée. Les deux modules sont désormais en
+  `per-file-ignores` F401.
+- **ruff est ÉPINGLÉ EXACTEMENT** (`ruff==0.15.22`). Trois versions coexistaient — hook pre-commit
+  `0.15.6`, `uv.lock` `0.15.16`, CI `0.15.22` via une borne flottante : un développeur formatait avec
+  une version que la CI rejetait. La garde `test_ruff_version_is_identical_everywhere` échoue si le
+  hook et `requirements-dev.txt` divergent. Toute montée doit être **délibérée**, avec le
+  reformatage dans le même commit.
+- **Le bot d'audit quotidien est BORNÉ.** Il tourne en Opus 5 / `--effort max`, et son document
+  d'instructions (`.github/audit-prompt.md`) impose désormais un **budget d'ouverture** : au plus
+  3 PR et 5 issues par exécution, **zéro** tant que le total ouvert dépasse 150, et un ordre de
+  non-duplication (déjà corrigé sur main ? déjà décrit ? sinon seulement, ouvrir). Sans cela il
+  produisait ~4 éléments/jour sans jamais dédupliquer — d'où un backlog de 177 PR + 248 issues.
+- **Types de titre de PR autorisés** : `feat fix docs ci refactor test chore perf build style revert
+  deps sec rel`. `sec` et `rel` ont été ajoutés le 2026-08-03 : leur absence recalait 11 PR ouvertes,
+  dont 3 correctifs de sécurité, via un check OBLIGATOIRE.
 
 ### Version & branches
-- **Campagne « vérification totale » POUSSÉE + TAGUÉE** (2026-07-09) : `origin/main` = **`f486f98`**
-  (squash de `verif/totale-2026-07`, 75 commits, sans artefacts debug), tag annoté
-  **`verif-totale-2026-07`**. Base = R8 `650d162`. Lots A→D + vagues de fix + Phases 5/6/7.
-  Traçabilité : `docs/internal/verif_totale_2026_07/` (PLAN + SYNTHESE_LOT_A..E + LOT_C/D_FIX +
-  RAPPORT_VERIF_TOTALE + SECURITE_POUR_OPUS + PHASE5_ARBITRAGES).
-- **Sécurité TRAITÉE par Opus** (session 2026-07-10, branche `security/opus-2026-07`) : les 4 items de
-  `SECURITE_POUR_OPUS.md` sont résolus (SEC-1 drain DoS borné, SEC-2 token REST chiffré au repos,
-  SEC-3 DPAPI-NG, SEC-4 rate-limit tranché) + FIX-4 (boot headless `--api`). 2 passes de revue
-  adversaire (3 bugs réels attrapés avant tout tag). **Prête à merger (squash) ; push = décision
-  utilisateur.** ⚠️ La consigne « NE PAS corriger la sécu en session Fable » reste valable pour Fable ;
-  Opus peut la traiter.
+- `VERSION` = **1.5.2-beta** (inchangée ; les jalons se marquent par des tags `+build`).
+- Tags jalons récents : `v1.5.2-beta+ultra-audit-2026-07-13`,
+  `v1.5.2-beta+revue-post-merge-2026-08-02`.
+- **Campagne « revue post-merge » (2026-08-02)** : les 35 findings de la revue logique du 2026-07-18
+  (11 HIGH, 20 MEDIUM, 4 LOW) sont corrigés et poussés. Ils n'existaient que dans un journal de
+  workflow et n'avaient jamais été traités. Chaque correctif est prouvé par **mutation** (rouge sans
+  le fix / vert avec) ; une revue adversaire a ensuite trouvé **63 défauts DANS ces correctifs**,
+  tous traités ou réfutés preuve d'exécution à l'appui.
+- **Campagnes antérieures** : « vérification totale » (`f486f98`, tag `verif-totale-2026-07`),
+  sécurité Opus (`ecb99ea`), arbitrages produit (`cd10c58`), ultra-audit 41 findings (`529fcd0`).
+  Traçabilité : `docs/internal/verif_totale_2026_07/`.
+- ⚠️ La consigne « NE PAS corriger la sécu en session Fable » reste valable pour Fable ; Opus peut
+  la traiter.
 
 ### Ce que la campagne a livré (2026-07)
 - **8 matrices de câblage** rejouables (`matrices/mX_*.json`) + **5 tests de contrat CI**
@@ -162,6 +192,36 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 ---
 
 ## Sessions recentes
+
+### 2-3 août 2026 — Revue post-merge (35 findings) + déblocage de la CI + tri du backlog ✅
+
+**1. Les 35 findings de la revue du 2026-07-18.** Ils n'existaient que dans un journal de workflow.
+Extraits, puis corrigés par clusters de fichiers **disjoints** (aucun agent ne partage un fichier avec
+un autre — c'est ce qui permet de paralléliser sans conflit). Chacun prouvé par mutation.
+Marquants : `sqlite3.Error` n'hérite pas de `OSError` et traversait tout le journal des ops d'apply ;
+un plafond de résolution n'était pas verrouillant (un 720p pouvait finir Platinum) ; un sidecar était
+attribué par simple préfixe (le sous-titre d'un film partait avec un autre, voire au bucket de
+suppression) ; la pré-passe collection vivait hors du `try` per-row.
+
+**2. Une revue adversaire a trouvé 63 défauts DANS ces correctifs** (5 HIGH). Dont une erreur
+d'« alignement » qui élargissait la surface destructive : ajouter `sqlite3.Error` à l'except
+d'`insert_apply_batch` laissait un apply s'exécuter **sans aucun journal**, donc sans undo possible.
+Règle retenue : la tolérance à un échec de journal ne vaut QUE pour les opérations postérieures à un
+déplacement déjà fait.
+
+**3. La CI, rouge depuis des mois, est verte** (cf. section « à lire en premier »).
+
+**4. Le backlog trié** : 425 éléments (177 PR + 248 issues) relus **contre le code**, un par un.
+126 fermés avec motif nominatif. ⚠️ Piège évité : 4 paires de PR se déclaraient **mutuellement**
+doublons — les fermer toutes aurait supprimé le correctif avec elles, dont un contournement SSRF
+exploitable. ⚠️ Autre mécanisme à connaître : **une PR Dependabot ouverte bloque ses propres mises à
+jour** ; la fermer fait régénérer à la version courante.
+
+**5. Défauts produit corrigés au passage** : la garde d'`open_path` comparait des CHAÎNES
+(`str(resolve()) != str(absolute())`) et refusait un dossier légitime derrière une jonction NTFS ;
+la purge des runs en mémoire déclenchait un `get_status()` par entrée qui retombait en base
+(3 connexions SQLite chacune) à **chaque lecture d'état**, d'où des scans successifs en O(n²) ;
+`Ctrl+S` était annoncé « Enregistrer » et ne faisait rien tout en bloquant le raccourci natif.
 
 ### 7-9 juillet 2026 — Campagne « vérification totale » (Lots A→D + Phases 5/6/7) ✅
 
@@ -472,11 +532,14 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-07-10 (2026-07-09 : campagne vérif totale POUSSÉE sur origin/main = f486f98 + tag
-verif-totale-2026-07. 2026-07-10 : cycle SÉCURITÉ Opus sur security/opus-2026-07 — SEC-1/2/3/4 +
-FIX-4 résolus, 2 passes revue adversaire (3 bugs réels attrapés), 25 tests SEC + import-linter 3/3 ;
-prête à merger, push = décision utilisateur ; cf SECURITE_POUR_OPUS.md. Arbitrages produit→Thomas
-via PHASE5_ARBITRAGES.md).*
+*Last updated : 2026-08-03 — revue post-merge (35 findings corrigés, prouvés par mutation ; 63 défauts
+trouvés DANS ces correctifs par revue adversaire), CI rendue VERTE après des mois de rouge (deux
+verrous empilés : ruff, puis 46 erreurs de setup Playwright + 25 échecs pré-existants), ruff épinglé
+exactement (3 versions coexistaient), bot d'audit passé en Opus 5 + effort max ET borné par un budget
+d'ouverture, backlog trié contre le code (425 éléments relus, 126 fermés avec motif).
+Historique antérieur : 2026-07-09 campagne vérif totale (`f486f98`, tag verif-totale-2026-07) ;
+2026-07-10 cycle SÉCURITÉ Opus (SEC-1/2/3/4 + FIX-4) ; 2026-07-16 ultra-audit 41 findings
+(`529fcd0`). Arbitrages produit → `PHASE5_ARBITRAGES.md`.*
 
 ---
 
