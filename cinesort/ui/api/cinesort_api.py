@@ -1279,7 +1279,8 @@ class CineSortApi:
         url = str(data.get("jellyfin_url") or "").strip()
         api_key = str(data.get("jellyfin_api_key") or "").strip()
         user_id = str(data.get("jellyfin_user_id") or "").strip()
-        timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+        # Cf issue #434 : clamp_timeout coherent avec les endpoints de test ci-dessus.
+        timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
         if not url or not api_key:
             return _err_response("Jellyfin non configuré.", category="state", level="info", log_module=__name__)
 
@@ -1366,7 +1367,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("jellyfin_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("jellyfin_timeout_s"), default=10.0)
             # NB : module-style pour permettre patch("cinesort.infra.jellyfin_client.JellyfinClient").
             client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
@@ -1513,7 +1515,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("plex_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
             client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except _plex_mod.PlexError as exc:
@@ -1590,7 +1593,8 @@ class CineSortApi:
         local_rows = [r for r in local_rows if r is not None]
 
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
@@ -1621,7 +1625,8 @@ class CineSortApi:
         if mid <= 0:
             return _err_response("radarr_movie_id invalide.", category="validation", level="info", log_module=__name__)
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
