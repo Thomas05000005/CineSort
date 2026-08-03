@@ -60,6 +60,32 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE_ID = "CinemaLux_v1"
 DEFAULT_PROFILE_VERSION = 1
+
+# Version des REGLES de scoring, c'est-a-dire du CODE de ce module.
+#
+# Fix revue adversaire PR#854. Le gate de cache de `quality_report_support`
+# (:224) reutilisait un rapport existant des que `engine_version` +
+# `profile_id` + `profile_version` correspondaient. Or ces trois valeurs
+# viennent toutes du PROFIL, et le profil est PERSISTE dans la base
+# (`ensure_quality_profile` le sauvegarde au premier usage, puis
+# `validate_quality_profile` recopie son `engine_version` tel quel) : bumper
+# `default_quality_profile()["engine_version"]` est donc INERTE pour tout
+# utilisateur existant -- son profil stocke continue de dire "CinemaLux_v1" des
+# deux cotes de la comparaison, et le cache continue de matcher.
+#
+# Ce compteur-ci appartient au code et n'existe dans aucun profil. Les rapports
+# deja persistes ne le portent pas (chaine vide != "2"), donc ils sont tous
+# invalides au premier acces, y compris via l'analyse en masse dont l'option
+# `reuse_existing` vaut True par defaut (`quality_support._parse_options`:30).
+# Le re-scoring relit le probe depuis le cache de `ProbeService` quand le fichier
+# n'a pas bouge ; et si le media n'est plus atteignable du tout (run deja
+# applique), `get_quality_report` rend l'ancien score marque `scoring_rules_stale`
+# plutot qu'une erreur.
+#
+# A INCREMENTER a chaque changement de regle qui modifie un score ou un tier.
+# Historique : 1 (implicite, champ absent) = avant le lot « classe de resolution
+# et codec audio canoniques » ; 2 = ce lot.
+SCORING_RULES_VERSION = 2
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -638,13 +664,28 @@ def _effective_resolution_height(*, video: Dict[str, Any], vr: Dict[str, Any]) -
     patrimoine. `_resolution_label` (:590) resout deja l'ambiguite en tranchant
     sur la LARGEUR ; on rejoue simplement son verdict ici.
 
-    Retombe sur la hauteur brute uniquement si `vr` est tronque (contrat
-    defensif : `_score_video` remplit toujours `resolution_label`).
+    La MESURE prime sur le NOM (fix revue adversaire PR#854). `_resolution_label`
+    retombe sur le nom de release quand les dimensions mesurees sont sous les
+    seuils : un fichier reellement mesure 700x400 mais nomme `.1080p.` obtenait
+    sinon une hauteur effective de 1080, donc le bonus « patrimoine en HD »
+    (+8) et un ecart de 20 points face au meme fichier sans le tag dans son nom.
+    C'est exactement la garde que `tiers_helpers` (F01) applique deja en
+    ignorant la dimension resolution quand `resolution_source != "probe"`.
+
+    Ordre de decision :
+    1. pas d'etiquette du tout (`vr` tronque, contrat defensif) -> hauteur brute ;
+    2. une hauteur a ete MESUREE mais l'etiquette vient du nom -> hauteur mesuree ;
+    3. sinon -> classe canonique. Le cas « aucune mesure + etiquette deduite du
+       nom » passe donc toujours par la classe : c'est le fix Vague K
+       (2026-05-25) qui fait vivre les bonus d'ere quand le probe a echoue.
     """
     label = str(vr.get("resolution_label") or "")
-    if label:
-        return _resolution_rank(label)
-    return _to_int(video.get("height"), 0)
+    measured_height = _to_int(video.get("height"), 0)
+    if not label:
+        return measured_height
+    if measured_height > 0 and str(vr.get("resolution_source") or "") != "probe":
+        return measured_height
+    return _resolution_rank(label)
 
 
 def _extract_languages(audio_tracks: List[Dict[str, Any]]) -> List[str]:
@@ -677,6 +718,15 @@ _AUDIO_CANONICAL_RANK_ALIAS = {
     "eac3 atmos": "eac3",
     "e-ac-3 atmos": "eac3",
     "ac3 atmos": "ac3",
+    # Revue Sourcery PR#854 : la table couvrait 'e-ac-3 atmos' mais aucune des
+    # formes HYPHENEES, que produit pourtant le backend MediaInfo (son champ
+    # `Format` vaut 'AC-3' / 'E-AC-3', cf. infra/probe/_normalize_mediainfo:97).
+    # Elles retombaient a 0, soit SOUS l'AAC (1) : `_best_audio_track` pouvait
+    # elire une piste AAC secondaire face a la piste AC-3 principale. Aucun rang
+    # ne baisse -- ces trois cles n'en avaient aucun.
+    "ac-3": "ac3",
+    "ac-3 atmos": "ac3",
+    "e-ac-3": "eac3",
     "dts:x": "dts-hd ma",
     "dts-hd hra": "dts",
 }
@@ -810,6 +860,14 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
     # 'qualite_max_audio' (audio_floors.dts_x=Gold) etait dead code.
     if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c) or (" dts x" in (" " + c)):
         return "dts_x"
+    # Fix revue adversaire PR#854 : DTS-HD HRA est LOSSY. Depuis que ce helper
+    # lit l'etiquette canonique, `{"codec": "dts", "profile": "DTS-HD HRA"}`
+    # produit 'dts-hd hra', qui matche le substring 'dts-hd' ci-dessous et
+    # rendait un flux lossy eligible au plancher de tier du lossless (il valait
+    # 'dts' avant ce lot). `_audio_codec_bonus` (:851) et
+    # `_AUDIO_CANONICAL_RANK_ALIAS` traitent deja HRA au rang `dts` : on aligne.
+    if ("hra" in c) and ("dts" in c):
+        return "dts"
     if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
         return "dts_hd_ma"
     if "truehd" in c:
@@ -1447,6 +1505,12 @@ def _build_invalid_profile_result(
         "reasons": errs,
         "metrics": {
             "engine_version": "CinemaLux_v1",
+            # Meme estampille que `_build_quality_metrics_helper` : TOUT `metrics`
+            # produit par ce module porte la version du code qui l'a produit,
+            # sinon le gate de cache lit une version inconnue ("") et re-score ce
+            # rapport a CHAQUE ouverture de fiche, indefiniment. Chemin defensif :
+            # `ensure_quality_profile` repare un profil invalide en amont.
+            "scoring_rules_version": SCORING_RULES_VERSION,
             "profile_id": str(profile.get("id") if isinstance(profile, dict) else DEFAULT_PROFILE_ID),
             "profile_version": _to_int(
                 profile.get("version") if isinstance(profile, dict) else DEFAULT_PROFILE_VERSION,
@@ -1829,6 +1893,11 @@ def _build_quality_metrics_helper(
     vt = prof["video_thresholds"]
     return {
         "engine_version": str(prof.get("engine_version") or "CinemaLux_v1"),
+        # Fix revue adversaire PR#854 : estampille du CODE de scoring, distincte
+        # de `engine_version` qui appartient au profil utilisateur (et qui, etant
+        # persiste, ne bouge pas quand le code change). Lue par le gate de cache
+        # de `quality_report_support` pour invalider les rapports d'avant ce lot.
+        "scoring_rules_version": SCORING_RULES_VERSION,
         "profile_id": str(prof.get("id") or DEFAULT_PROFILE_ID),
         "profile_version": _to_int(prof.get("version"), DEFAULT_PROFILE_VERSION),
         "probe_quality": probe_quality,
