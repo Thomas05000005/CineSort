@@ -90,6 +90,7 @@ def _coerce_int_with_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
 TMDB_KEY_SECRET_FIELD = "tmdb_api_key_secret"
 TMDB_KEY_PROTECTION_LEGACY = "plaintext_legacy"
 TMDB_KEY_PURPOSE = "tmdb_api_key"
@@ -561,9 +562,7 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
             scheme = str(rest_secret.get("scheme") or "").strip().lower()
             blob_b64 = str(rest_secret.get("blob_b64") or "").strip()
             if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(
-                    blob_b64, purpose=REST_TOKEN_PURPOSE
-                )
+                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(blob_b64, purpose=REST_TOKEN_PURPOSE)
                 if ok_rt:
                     data["rest_api_token"] = value_rt
                 else:
@@ -1336,6 +1335,7 @@ def get_confidence_thresholds_payload() -> Dict[str, Any]:
     module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
     """
     from cinesort.domain.confidence_thresholds import get_confidence_thresholds  # noqa: PLC0415
+
     return {
         "ok": True,
         "thresholds": get_confidence_thresholds(),
@@ -1436,8 +1436,7 @@ def _save_section_cleanup(
     if collection_folder_value is None:
         collection_folder_value = payload.get("collection_folder_name")
     collection_folder_name = (
-        str(collection_folder_value or default_collection_folder_name).strip()
-        or default_collection_folder_name
+        str(collection_folder_value or default_collection_folder_name).strip() or default_collection_folder_name
     )
     return {
         "collection_folder_enabled": to_bool(payload.get("collection_folder_enabled"), True),
@@ -1489,13 +1488,9 @@ def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     out: Dict[str, Any] = {}
     if "scan_max_workers_mode" in payload:
-        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(
-            payload.get("scan_max_workers_mode")
-        )
+        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(payload.get("scan_max_workers_mode"))
     if "scan_max_workers_value" in payload:
-        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(
-            payload.get("scan_max_workers_value")
-        )
+        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(payload.get("scan_max_workers_value"))
     return out
 
 
@@ -1505,7 +1500,9 @@ def _save_section_scan_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
         "quarantine_unapproved": to_bool(payload.get("quarantine_unapproved"), False),
         "dry_run_apply": to_bool(payload.get("dry_run_apply"), True),
         "auto_approve_enabled": to_bool(payload.get("auto_approve_enabled"), False),
-        "auto_approve_threshold": max(70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))),
+        "auto_approve_threshold": max(
+            70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))
+        ),
         # M-2 : auto-quarantine films corrompus (integrity warnings)
         "auto_quarantine_corrupted": to_bool(payload.get("auto_quarantine_corrupted"), False),
         "onboarding_completed": to_bool(payload.get("onboarding_completed"), False),
@@ -1590,7 +1587,9 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_watch(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "watch_enabled": to_bool(payload.get("watch_enabled"), False),
-        "watch_interval_minutes": max(1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))),
+        "watch_interval_minutes": max(
+            1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))
+        ),
     }
 
 
@@ -1630,13 +1629,23 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         "perceptual_enabled": to_bool(payload.get("perceptual_enabled"), False),
         "perceptual_auto_on_scan": to_bool(payload.get("perceptual_auto_on_scan"), False),
         "perceptual_auto_on_quality": to_bool(payload.get("perceptual_auto_on_quality"), True),
-        "perceptual_timeout_per_film_s": max(30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))),
-        "perceptual_frames_count": max(5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))),
-        "perceptual_skip_percent": max(0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))),
+        "perceptual_timeout_per_film_s": max(
+            30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))
+        ),
+        "perceptual_frames_count": max(
+            5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))
+        ),
+        "perceptual_skip_percent": max(
+            0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))
+        ),
         "perceptual_dark_weight": max(1.0, min(3.0, to_float(payload.get("perceptual_dark_weight"), 1.5))),
         "perceptual_audio_deep": to_bool(payload.get("perceptual_audio_deep"), True),
-        "perceptual_audio_segment_s": max(10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))),
-        "perceptual_comparison_frames": max(10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))),
+        "perceptual_audio_segment_s": max(
+            10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))
+        ),
+        "perceptual_comparison_frames": max(
+            10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))
+        ),
         "perceptual_comparison_timeout_s": max(
             120, min(1800, _coerce_int_with_default(payload.get("perceptual_comparison_timeout_s", _MISSING), 600))
         ),
@@ -1655,9 +1664,9 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # donc la canonique perimee primait sur la saisie alias. L'alias reste
         # accepte en fallback pour les payloads partiels (REST legacy)
         # UNIQUEMENT quand la canonique est absente. Clamp [0..16] (0=auto).
-        "perceptual_workers": max(0, min(16, _coerce_workers_int(
-            payload.get("perceptual_workers", payload.get("perceptual_workers_count"))
-        ))),
+        "perceptual_workers": max(
+            0, min(16, _coerce_workers_int(payload.get("perceptual_workers", payload.get("perceptual_workers_count"))))
+        ),
         "perceptual_audio_fingerprint_enabled": to_bool(payload.get("perceptual_audio_fingerprint_enabled"), True),
         "perceptual_scene_detection_enabled": to_bool(payload.get("perceptual_scene_detection_enabled"), True),
         "perceptual_audio_spectral_enabled": to_bool(payload.get("perceptual_audio_spectral_enabled"), True),
@@ -2243,6 +2252,7 @@ def _detect_storage_profile(state_dir: Path) -> str:
         if os.name == "nt":
             try:
                 import ctypes  # noqa: PLC0415
+
                 drive = str(state_dir.resolve()).split(":")[0] + ":\\"
                 drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
                 # 4 = DRIVE_REMOTE (SMB/CIFS)

@@ -257,9 +257,7 @@ class RunFacade(_BaseFacade):
         return self._api._cleanup_old_runs_impl(retention_days)
 
     # VQ-2 QUARANTAINE-TTL : 3 endpoints filesystem `_review` ----------
-    def purge_quarantine_bucket(
-        self, ttl_days: int = 30, dry_run: bool = False
-    ) -> Dict[str, Any]:
+    def purge_quarantine_bucket(self, ttl_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
         """Purge les fichiers du bucket `_review` > `ttl_days` jours (defaut 30).
 
         Appele par le cron `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`
@@ -345,7 +343,10 @@ class RunFacade(_BaseFacade):
             from cinesort.ui.api.schemas import ApplyRequest, ApplyResponse  # type: ignore
         except ImportError:
             return self._api._apply_impl(
-                run_id, decisions, dry_run, quarantine_unapproved,
+                run_id,
+                decisions,
+                dry_run,
+                quarantine_unapproved,
                 apply_atomic=bool(apply_atomic),
             )
 
@@ -361,7 +362,10 @@ class RunFacade(_BaseFacade):
             endpoint="apply.request",
         )
         result = self._api._apply_impl(
-            run_id, decisions, dry_run, quarantine_unapproved,
+            run_id,
+            decisions,
+            dry_run,
+            quarantine_unapproved,
             apply_atomic=bool(apply_atomic),
         )
         _ = _validate_passive(ApplyResponse, result, endpoint="apply.response")

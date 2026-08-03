@@ -4,7 +4,9 @@ get_tmdb_posters renvoie ok:true + reason:"tmdb_not_configured" quand la cle
 manque ; _refreshPosterUnit ne testait que data.ok===false -> throw generique
 "Reessayer ?". Desormais message precis.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

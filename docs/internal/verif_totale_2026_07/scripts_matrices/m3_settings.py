@@ -25,6 +25,7 @@ Pipeline :
 Sortie : docs/internal/verif_totale_2026_07/matrices/m3_settings.json (UTF-8).
 Aucun fichier source n'est modifie. Aucune app/pytest lancee.
 """
+
 from __future__ import annotations
 
 import ast
@@ -47,26 +48,49 @@ OUT = REPO / "docs" / "internal" / "verif_totale_2026_07" / "matrices" / "m3_set
 # PERSISTANCE = read/write/defaults/mask/sections de save : une occurrence de la
 # cle ici ne prouve PAS un effet runtime (c'est le tuyau, pas le robinet).
 PERSISTENCE_FUNCS = {
-    "read_settings", "write_settings", "apply_settings_defaults",
-    "get_settings_payload", "save_settings_payload", "_save_settings_payload_locked",
-    "_apply_naming_preset", "_apply_tmdb_key_persistence", "_apply_jellyfin_key_persistence",
-    "_normalize_scopes", "_mask_secrets", "_unmask_secrets_for_save",
-    "_migrate_root_to_roots", "_extract_protected_secret", "_persist_protected_secret",
-    "extract_tmdb_key_from_settings_payload", "extract_jellyfin_key_from_settings_payload",
-    "_backup_settings_before_write", "_rotate_settings_backups", "_build_save_result",
-    "list_settings_backups", "restore_settings_backup", "settings_path",
-    "_get_settings_write_lock", "validate_roots",
-    "read_saved_root_candidates", "read_saved_roots_candidates",
-    "set_scan_max_workers_payload", "set_advanced_pragma_settings_payload",
+    "read_settings",
+    "write_settings",
+    "apply_settings_defaults",
+    "get_settings_payload",
+    "save_settings_payload",
+    "_save_settings_payload_locked",
+    "_apply_naming_preset",
+    "_apply_tmdb_key_persistence",
+    "_apply_jellyfin_key_persistence",
+    "_normalize_scopes",
+    "_mask_secrets",
+    "_unmask_secrets_for_save",
+    "_migrate_root_to_roots",
+    "_extract_protected_secret",
+    "_persist_protected_secret",
+    "extract_tmdb_key_from_settings_payload",
+    "extract_jellyfin_key_from_settings_payload",
+    "_backup_settings_before_write",
+    "_rotate_settings_backups",
+    "_build_save_result",
+    "list_settings_backups",
+    "restore_settings_backup",
+    "settings_path",
+    "_get_settings_write_lock",
+    "validate_roots",
+    "read_saved_root_candidates",
+    "read_saved_roots_candidates",
+    "set_scan_max_workers_payload",
+    "set_advanced_pragma_settings_payload",
 }
 # CONSOMMATEURS dans settings_support.py : lecture qui branche un comportement
 # (Config du scan/apply, resolution workers effectifs, etat PRAGMA actif...).
 CONSUMER_FUNCS = {
-    "build_cfg_from_settings", "build_cfg_from_run_row",
-    "resolve_effective_scan_max_workers", "get_scan_max_workers_payload",
+    "build_cfg_from_settings",
+    "build_cfg_from_run_row",
+    "resolve_effective_scan_max_workers",
+    "get_scan_max_workers_payload",
     "get_advanced_pragma_settings_payload",
-    "resolve_payload_state_dir", "resolve_root_from_payload", "resolve_roots_from_payload",
-    "test_tmdb_key", "test_jellyfin_connection",
+    "resolve_payload_state_dir",
+    "resolve_root_from_payload",
+    "resolve_roots_from_payload",
+    "test_tmdb_key",
+    "test_jellyfin_connection",
 }
 
 # Cas speciaux documentes : verdict force + preuve. Utilise UNIQUEMENT quand le
@@ -120,22 +144,27 @@ ALIAS_OF = {
 # notify_service._SETTING_KEYS (L25-31) mappe event -> cle settings, lue en
 # self._settings.get(key, True) (notify_service.py:84).
 INDIRECT_READS: Dict[str, List[Dict[str, Any]]] = {
-    k: [{
-        "site": "cinesort/app/notify_service.py:84",
-        "context": "read_get_indirect",
-        "layer": "backend",
-        "code": f"via _SETTING_KEYS (notify_service.py:25-31) -> self._settings.get('{k}', True)",
-    }]
+    k: [
+        {
+            "site": "cinesort/app/notify_service.py:84",
+            "context": "read_get_indirect",
+            "layer": "backend",
+            "code": f"via _SETTING_KEYS (notify_service.py:25-31) -> self._settings.get('{k}', True)",
+        }
+    ]
     for k in (
-        "notifications_scan_triggered", "notifications_scan_done",
-        "notifications_apply_done", "notifications_undo_done", "notifications_errors",
+        "notifications_scan_triggered",
+        "notifications_scan_done",
+        "notifications_apply_done",
+        "notifications_undo_done",
+        "notifications_errors",
     )
 }
 
 # Notes factuelles ajoutees au verdict mecanique (sans le changer).
 EXTRA_NOTES: Dict[str, str] = {
     "dry_run_apply": "effet client-side : status.js:248 pre-coche le toggle dry-run du "
-                     "prochain run (le backend lit le flag dry_run du payload run, pas ce setting)",
+    "prochain run (le backend lit le flag dry_run du payload run, pas ce setting)",
     "expert_mode": "effet client-side : parametres.js:3337 classList 'is-expert' (masque les sections avancees)",
     "theme": "effet client-side : app.js:899 document.body.dataset.theme",
     "animation_level": "effet client-side (app.js applique le niveau d'animation)",
@@ -144,15 +173,15 @@ EXTRA_NOTES: Dict[str, str] = {
     "light_intensity": "effet client-side (variables CSS)",
     "onboarding_completed": "expose en toggle parametres.js:328 mais AUCUN lecteur (ni wizard ni backend)",
     "notifications_enabled": "R8-069 : le gate desktop lit desormais desktop_notifications_enabled "
-                             "(notify_service.py:75) et le miroir centre est inconditionnel -> ce "
-                             "toggle 'notifications applicatives' n'a plus aucun lecteur",
+    "(notify_service.py:75) et le miroir centre est inconditionnel -> ce "
+    "toggle 'notifications applicatives' n'a plus aucun lecteur",
     "notifications_scan_triggered": "lu via mapping notify_service mais AUCUN champ UI (toggle #108 jamais expose)",
     "auto_approve_enabled": "toggle 'Approbation automatique' parametres.js:105 : aucune logique "
-                            "d'auto-approbation ne lit la cle dans cinesort/",
+    "d'auto-approbation ne lit la cle dans cinesort/",
     "auto_approve_threshold": "seuil parametres.js:106 : jamais lu (get_auto_approved_summary compte "
-                              "des decisions existantes, n'applique rien)",
+    "des decisions existantes, n'applique rien)",
     "auto_quarantine_corrupted": "default + save section + reset list + test de presence, mais aucun "
-                                 "consommateur ni champ UI (feature M-2 jamais cablee)",
+    "consommateur ni champ UI (feature M-2 jamais cablee)",
 }
 
 WORD_RE_TMpl = r"(?<![A-Za-z0-9_$-]){k}(?![A-Za-z0-9_$-])"
@@ -161,6 +190,7 @@ WORD_RE_TMpl = r"(?<![A-Za-z0-9_$-]){k}(?![A-Za-z0-9_$-])"
 # ---------------------------------------------------------------------------
 # 1. Extraction AST des cles canoniques
 # ---------------------------------------------------------------------------
+
 
 def _const_str(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -208,9 +238,14 @@ def extract_canonical_keys(src: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[st
                         if s:
                             secret_fields.append(s)
 
-    def scan_func(name: str, provenance: str, receivers: Tuple[str, ...],
-                  take_setdefault: bool = False, take_return_dict: bool = False,
-                  take_meta_strings: bool = False) -> None:
+    def scan_func(
+        name: str,
+        provenance: str,
+        receivers: Tuple[str, ...],
+        take_setdefault: bool = False,
+        take_return_dict: bool = False,
+        take_meta_strings: bool = False,
+    ) -> None:
         fn = funcs.get(name)
         if fn is None:
             return
@@ -225,8 +260,7 @@ def extract_canonical_keys(src: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[st
             # receiver["k"] = ...
             if isinstance(node, ast.Assign):
                 for tgt in node.targets:
-                    if (isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name)
-                            and tgt.value.id in receivers):
+                    if isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name) and tgt.value.id in receivers:
                         k = _const_str(tgt.slice)
                         if k:
                             add(k, provenance, node.lineno)
@@ -241,8 +275,7 @@ def extract_canonical_keys(src: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[st
                 if re.fullmatch(r"[a-z0-9_]+(_protection|_warning)", node.value):
                     add(node.value, provenance, node.lineno)
 
-    scan_func("apply_settings_defaults", "apply_settings_defaults",
-              ("payload",), take_setdefault=True)
+    scan_func("apply_settings_defaults", "apply_settings_defaults", ("payload",), take_setdefault=True)
     scan_func("read_settings", "read_settings_meta", ("data",), take_meta_strings=True)
     for fname in sorted(funcs):
         if fname.startswith("_save_section_"):
@@ -267,6 +300,7 @@ def extract_canonical_keys(src: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[st
 # ---------------------------------------------------------------------------
 # 2. Scan des occurrences (backend python + UI js/html)
 # ---------------------------------------------------------------------------
+
 
 def _strip_line_comment(line: str, comment_start: str) -> str:
     """Coupe le commentaire de fin de ligne en respectant les quotes simples/doubles."""
@@ -294,7 +328,7 @@ def _strip_line_comment(line: str, comment_start: str) -> str:
 def classify_py_context(line: str, m: re.Match) -> str:
     """Classifie l'occurrence quotee d'une cle dans une ligne python."""
     before = line[: m.start()]
-    after = line[m.end():]
+    after = line[m.end() :]
     if re.search(r"\.get\(\s*$", before):
         return "read_get"
     if re.search(r"\.pop\(\s*$", before):
@@ -318,7 +352,7 @@ def classify_py_context(line: str, m: re.Match) -> str:
 
 def classify_js_context(line: str, m: re.Match) -> str:
     before = line[: m.start()]
-    after = line[m.end():]
+    after = line[m.end() :]
     if re.search(r"key\s*:\s*[\"'`]$", before):
         return "field_registry"  # parametres.js { key: "..." }
     if re.match(r"\s*[\"'`]?\s*:", after):
@@ -333,8 +367,9 @@ def classify_js_context(line: str, m: re.Match) -> str:
 READ_CONTEXTS_PY = {"read_get", "read_subscript", "read_membership"}
 
 
-def scan_backend(repo: Path, all_keys: List[str],
-                 support_ranges: Dict[str, Tuple[int, int]]) -> Dict[str, List[Dict[str, Any]]]:
+def scan_backend(
+    repo: Path, all_keys: List[str], support_ranges: Dict[str, Tuple[int, int]]
+) -> Dict[str, List[Dict[str, Any]]]:
     quoted_re = re.compile(r"[\"'](" + "|".join(re.escape(k) for k in all_keys) + r")[\"']")
     hits: Dict[str, List[Dict[str, Any]]] = {k: [] for k in all_keys}
 
@@ -370,12 +405,14 @@ def scan_backend(repo: Path, all_keys: List[str],
                         layer = "persistence"
                     else:
                         layer = "persistence"  # defaut prudent dans settings_support.py
-                hits[key].append({
-                    "site": f"{rel}:{ln}",
-                    "context": ctx,
-                    "layer": layer,
-                    "code": raw.strip()[:140],
-                })
+                hits[key].append(
+                    {
+                        "site": f"{rel}:{ln}",
+                        "context": ctx,
+                        "layer": layer,
+                        "code": raw.strip()[:140],
+                    }
+                )
     return hits
 
 
@@ -383,9 +420,11 @@ def scan_ui(repo: Path, all_keys: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     word_re = re.compile(r"(?<![A-Za-z0-9_$-])(" + "|".join(re.escape(k) for k in all_keys) + r")(?![A-Za-z0-9_$-])")
     hits: Dict[str, List[Dict[str, Any]]] = {k: [] for k in all_keys}
     base = repo / "web" / "dashboard"
-    files = [p for p in sorted(base.rglob("*"))
-             if p.suffix in {".js", ".html"} and p.is_file()
-             and "tests" not in p.relative_to(base).parts]
+    files = [
+        p
+        for p in sorted(base.rglob("*"))
+        if p.suffix in {".js", ".html"} and p.is_file() and "tests" not in p.relative_to(base).parts
+    ]
     for path in files:
         rel = path.relative_to(repo).as_posix()
         text = path.read_text(encoding="utf-8-sig", errors="replace")
@@ -405,17 +444,20 @@ def scan_ui(repo: Path, all_keys: List[str]) -> Dict[str, List[Dict[str, Any]]]:
             line = _strip_line_comment(raw, "//")
             for m in word_re.finditer(line):
                 key = m.group(1)
-                hits[key].append({
-                    "site": f"{rel}:{ln}",
-                    "context": classify_js_context(line, m),
-                    "code": raw.strip()[:140],
-                })
+                hits[key].append(
+                    {
+                        "site": f"{rel}:{ln}",
+                        "context": classify_js_context(line, m),
+                        "code": raw.strip()[:140],
+                    }
+                )
     return hits
 
 
 # ---------------------------------------------------------------------------
 # 3. Verdicts
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     src = SUPPORT.read_text(encoding="utf-8-sig")
@@ -431,9 +473,9 @@ def main() -> int:
     for key in all_keys:
         bh = backend_hits[key]
         uh = ui_hits[key]
-        consumer_reads = [h for h in bh
-                          if h["layer"] in ("backend", "support_consumer")
-                          and h["context"] in READ_CONTEXTS_PY]
+        consumer_reads = [
+            h for h in bh if h["layer"] in ("backend", "support_consumer") and h["context"] in READ_CONTEXTS_PY
+        ]
         consumer_reads += INDIRECT_READS.get(key, [])
         backend_other = [h for h in bh if h not in consumer_reads and h["layer"] != "persistence"]
         persistence_count = sum(1 for h in bh if h["layer"] == "persistence")
@@ -452,9 +494,11 @@ def main() -> int:
                 verdict, note = "FANTOME", "meta GET (derivee backend) jamais affichee par l'UI"
         elif key in ALIAS_OF and not backend_reads:
             verdict = "ALIAS_MORT"
-            note = (f"alias de {ALIAS_OF[key]} (settings_support.py:945) ; aucune lecture "
-                    f"consommatrice de l'alias, et le save le persiste sans remap vers la canonique "
-                    f"(settings_support.py:1689-1692)")
+            note = (
+                f"alias de {ALIAS_OF[key]} (settings_support.py:945) ; aucune lecture "
+                f"consommatrice de l'alias, et le save le persiste sans remap vers la canonique "
+                f"(settings_support.py:1689-1692)"
+            )
         elif ui_exposed and backend_reads:
             verdict, note = "CABLEE", ""
         elif ui_exposed:

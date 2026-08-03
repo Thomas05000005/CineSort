@@ -13,7 +13,9 @@ Aucun effet de bord hors tempdir.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/v8_collmkdir_repro.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
@@ -48,17 +50,24 @@ def run():
     res = core.ApplyResult()
     logs, ops = [], []
 
-    def log(level, msg): logs.append((level, msg))
-    def record_op(op): ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
+    def log(level, msg):
+        logs.append((level, msg))
+
+    def record_op(op):
+        ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
 
     coll_dir = root / cfg.collection_root_name / saga
     target_len = len(str(coll_dir / "A Very Long Movie Title (2020)"))
     before = sorted(str(p.relative_to(tmp)) for p in root.rglob("*"))
 
     apply_single(
-        cfg, folder,
-        title="A Very Long Movie Title", year=2020,
-        dry_run=False, log=log, res=res,
+        cfg,
+        folder,
+        title="A Very Long Movie Title",
+        year=2020,
+        dry_run=False,
+        log=log,
+        res=res,
         conflicts_root=root / "_review" / "_conflicts",
         conflicts_sidecars_root=root / "_review" / "_conflicts_sidecars",
         duplicates_identical_root=root / "_review" / "_dups",
@@ -74,7 +83,7 @@ def run():
     mkdir_ops = [o for o in ops if (o.get("op_type") or o.get("type")) == "MKDIR"]
     skipped = res.skipped > 0 or any("PATH_TOO_LONG" in str(m) for m in res.error_messages)
 
-    print(f"=== F-V7-COLLMKDIR repro (apply_single, mode reel) ===")
+    print("=== F-V7-COLLMKDIR repro (apply_single, mode reel) ===")
     print(f"coll_dir len={len(str(coll_dir))}  target len={target_len} (killswitch a 259)")
     print(f"AVANT: {before}")
     print(f"APRES: {after}")
@@ -83,9 +92,20 @@ def run():
     print(f"  op MKDIR journalisee pour saga  : {len(mkdir_ops)} (attendu 0 = mkdir brut)")
     print(f"  film skippe (MAX_PATH)          : {skipped}")
     verdict = saga_dir_empty and movie_still_in_src and len(mkdir_ops) == 0
-    print(f"\nVERDICT : {'CONFIRME (dossier saga vide orphelin + non journalise + film non deplace)' if verdict else 'non reproduit'}")
-    print("RESUME:", json.dumps({"saga_dir_empty_orphan": saga_dir_empty, "no_mkdir_op": len(mkdir_ops) == 0,
-                                 "movie_skipped": movie_still_in_src}, ensure_ascii=False))
+    print(
+        f"\nVERDICT : {'CONFIRME (dossier saga vide orphelin + non journalise + film non deplace)' if verdict else 'non reproduit'}"
+    )
+    print(
+        "RESUME:",
+        json.dumps(
+            {
+                "saga_dir_empty_orphan": saga_dir_empty,
+                "no_mkdir_op": len(mkdir_ops) == 0,
+                "movie_skipped": movie_still_in_src,
+            },
+            ensure_ascii=False,
+        ),
+    )
 
 
 if __name__ == "__main__":

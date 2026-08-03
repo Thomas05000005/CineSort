@@ -6,7 +6,7 @@ import sqlite3
 import time
 from contextlib import closing, contextmanager, suppress
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
             if seg == mlow or (mlow.startswith("onedrive") and seg.startswith("onedrive")):
                 return marker
     return None
+
+
 # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
 # apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap
 # ordonne (toutes les migrations en mode CREATE TABLE IF NOT EXISTS),
@@ -111,6 +113,16 @@ REQUIRED_SCHEMA_TABLES = (
     "film_field_locks",
     "film_decisions_v2",
 )
+
+# AUDIT F29 (revue R1) : socle minimal exige d'un backup pour etre un candidat
+# de restore. `runs` est cree par la toute premiere migration
+# (001_init_runs_errors.sql) : tout backup issu d'une DB reellement initialisee
+# la porte. Son absence signe une base VIDE (ou etrangere), qu'il ne faut jamais
+# ecrire par-dessus la bibliotheque de l'utilisateur.
+_BACKUP_CORE_TABLES: tuple[str, ...] = ("runs",)
+# Taille d'une page SQLite par defaut : en dessous, le fichier ne peut pas
+# contenir de donnees (le cas nominal etant le .bak de 0 octet).
+_MIN_USABLE_BACKUP_BYTES = 4096
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
     "probe_cache": ("probe_cache",),
@@ -285,10 +297,7 @@ class _StoreBase:
         # migration_manager.py (BUG-014 hotfix1) pour coherence : sans ca, le
         # bootstrap differerait du chemin migration-par-migration et un faux
         # positif desactiverait silencieusement les FK pour TOUT le bootstrap.
-        needs_fk_disable = any(
-            line.strip().startswith("-- @manager: disable_fk")
-            for line in script.splitlines()
-        )
+        needs_fk_disable = any(line.strip().startswith("-- @manager: disable_fk") for line in script.splitlines())
         with self._managed_conn() as conn:
             if needs_fk_disable:
                 conn.execute("PRAGMA foreign_keys = OFF")
@@ -497,8 +506,7 @@ class _StoreBase:
                     conn.execute("PRAGMA wal_checkpoint(RESTART)")
                 except sqlite3.OperationalError as exc:
                     logger.warning(
-                        "wal_checkpoint failed before integrity_check (%s) — "
-                        "integrity check may use stale WAL pages",
+                        "wal_checkpoint failed before integrity_check (%s) — integrity check may use stale WAL pages",
                         exc,
                     )
                 row = conn.execute("PRAGMA integrity_check").fetchone()
@@ -523,13 +531,19 @@ class _StoreBase:
         return status
 
     def _attempt_auto_restore(self) -> None:
-        """V2-11 audit QA 20260504 : tente un restore auto depuis le backup
-        le plus recent quand l'integrity_check a echoue.
+        """V2-11 audit QA 20260504 : tente un restore auto depuis les backups
+        disponibles quand l'integrity_check a echoue.
+
+        AUDIT F29 : les backups sont parcourus du plus RECENT au plus ANCIEN et
+        chacun est pre-teste en lecture ; on s'arrete au premier qui restaure une
+        DB saine. Avant, seul backups[0] etait tente : un backup recent lui-meme
+        corrompu faisait abandonner alors qu'un backup sain existait derriere.
 
         Trois issues possibles, toutes encodees dans self._integrity_event :
         - "restored"        : backup restaure + integrity_check post = ok.
-        - "restore_failed"  : restore tente mais integrity_check post != ok
-                              (ou exception pendant le restore).
+        - "restore_failed"  : aucun candidat n'a rendu une DB saine (backups
+                              corrompus, exception pendant le restore, ou
+                              integrity_check post != ok).
         - "corrupt_no_backup" : pas de backup disponible, l'app continue en
                                 mode degrade (l'utilisateur sera prevenu).
 
@@ -560,53 +574,151 @@ class _StoreBase:
             }
             return
 
-        most_recent = backups[0]
-        logger.warning(
-            "DB corrompue, tentative auto-restore depuis %s",
-            most_recent,
-        )
-        try:
-            restore_backup(most_recent, self.db_path)
-        except (sqlite3.Error, OSError, FileNotFoundError) as exc:
-            logger.error(
-                "auto_restore: restore depuis %s a echoue: %s",
-                most_recent,
-                exc,
-            )
-            self._integrity_event = {
-                "status": "restore_failed",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
-            return
+        # AUDIT F29 : on ITERE du plus recent au plus ancien au lieu de ne tenter
+        # que backups[0]. Avant ce fix, un backup recent lui-meme corrompu faisait
+        # abandonner en "restore_failed" alors qu'un backup plus ancien et SAIN
+        # existait juste derriere (et se faisait ensuite evincer par la rotation).
+        # Chaque candidat est pre-teste EN LECTURE : on n'ecrase jamais la DB avec
+        # un backup dont on sait deja qu'il est inexploitable.
+        examined: List[Path] = []
+        rejected: List[Path] = []
+        restored_from: Optional[Path] = None
+        for candidate in backups[: DEFAULT_MAX_BACKUPS + 2]:
+            examined.append(candidate)
+            reject_reason = self._backup_rejection_reason(candidate)
+            if reject_reason is not None:
+                logger.warning(
+                    "auto_restore: backup %s ecarte (%s), essai du suivant",
+                    candidate.name,
+                    reject_reason,
+                )
+                rejected.append(candidate)
+                continue
 
-        # Re-check integrity apres restore
-        post_status = self._check_integrity()
-        if post_status == "ok":
-            logger.info(
-                "auto_restore: succes depuis %s. DB restauree.",
-                most_recent,
-            )
-            self._integrity_status = "ok"
-            self._integrity_event = {
-                "status": "restored",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
-        else:
+            logger.warning("DB corrompue, tentative auto-restore depuis %s", candidate)
+            try:
+                restore_backup(candidate, self.db_path)
+            except (sqlite3.Error, OSError, FileNotFoundError) as exc:
+                logger.error(
+                    "auto_restore: restore depuis %s a echoue: %s",
+                    candidate,
+                    exc,
+                )
+                continue
+            restored_from = candidate
+
+            # Re-check integrity apres restore (autorite finale)
+            post_status = self._check_integrity()
+            if post_status == "ok":
+                logger.info(
+                    "auto_restore: succes depuis %s. DB restauree.",
+                    candidate,
+                )
+                self._integrity_status = "ok"
+                self._integrity_event = {
+                    "status": "restored",
+                    "raw": raw_status,
+                    "backup_used": str(candidate),
+                    "backups_tried": len(examined),
+                    "backups_rejected": len(rejected),
+                    "ts": ts,
+                }
+                return
             logger.error(
-                "auto_restore: restore effectue mais integrity_check post = %s",
+                "auto_restore: restore effectue depuis %s mais integrity_check post = %s",
+                candidate,
                 post_status,
             )
             self._integrity_status = post_status
-            self._integrity_event = {
-                "status": "restore_failed",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
+
+        logger.error(
+            "auto_restore: aucun backup exploitable (%d examines, %d ecartes avant restore). Path: %s",
+            len(examined),
+            len(rejected),
+            self.db_path,
+        )
+        # AUDIT F29 (revue R1) : `backup_used` documente "le backup RESTAURE".
+        # L'ancienne valeur (dernier candidat EXAMINE) pouvait designer un fichier
+        # ecarte par le pre-ecran, donc jamais restaure -> contrat viole et
+        # diagnostic trompeur. On n'y met desormais que le dernier candidat
+        # reellement ecrit sur la DB (None si le pre-ecran les a tous ecartes).
+        self._integrity_event = {
+            "status": "restore_failed",
+            "raw": raw_status,
+            "backup_used": str(restored_from) if restored_from is not None else None,
+            "backups_tried": len(examined),
+            "backups_rejected": len(rejected),
+            "ts": ts,
+        }
+
+    def _integrity_of_file(self, path: Path) -> str:
+        """PRAGMA integrity_check sur un fichier de backup (jamais sur self.db_path).
+
+        Retourne "ok", "missing", le message brut de SQLite, ou "error: <exc>".
+        Ne leve jamais : c'est un pre-ecran de selection, pas une autorite.
+        NB : sqlite3.Error n'herite PAS de OSError, les deux classes sont
+        obligatoires dans le except.
+        """
+        if not path.is_file():
+            return "missing"
+        try:
+            with closing(sqlite3.connect(str(path))) as conn:
+                row = conn.execute("PRAGMA integrity_check").fetchone()
+                return str(row[0]) if row else "unknown"
+        except (sqlite3.Error, OSError) as exc:
+            return f"error: {exc}"
+
+    def _backup_rejection_reason(self, path: Path) -> Optional[str]:
+        """Pre-ecran de selection d'un backup : None = candidat acceptable.
+
+        AUDIT F29 (revue R1) : `PRAGMA integrity_check` NE SUFFIT PAS. Un fichier
+        de 0 octet est un SQLite parfaitement valide qui repond "ok" — et
+        `backup_db` en laissait justement un dans backups/ quand le backup d'une
+        DB corrompue echouait. Restaurer ce fichier remplace la bibliotheque par
+        une base VIDE, `_check_integrity()` post-restore confirme "ok", l'event
+        passe a "restored" et l'utilisateur recoit la notification rassurante
+        "Base de donnees restauree automatiquement" alors que TOUT a disparu (et
+        que le backup sain plus ancien n'a jamais ete essaye).
+
+        On exige donc d'un candidat, en LECTURE SEULE et sans jamais lever :
+          1. une taille >= 1 page SQLite (elimine le fichier de 0 octet) ;
+          2. `PRAGMA integrity_check` == "ok" ;
+          3. `PRAGMA page_count` > 0 ;
+          4. la presence des tables du socle (`_BACKUP_CORE_TABLES`), sans quoi
+             le backup ne porte aucune donnee de bibliotheque a restaurer.
+        On ne verifie PAS l'integralite de REQUIRED_SCHEMA_TABLES : un backup
+        anterieur a une migration recente est un candidat legitime (les
+        migrations le completeront), le rejeter reviendrait a jeter une
+        bibliotheque recuperable.
+        """
+        if not path.is_file():
+            return "missing"
+        try:
+            size = int(path.stat().st_size)
+        except OSError as exc:
+            return f"error: {exc}"
+        if size < _MIN_USABLE_BACKUP_BYTES:
+            return f"taille {size} octets < 1 page SQLite (base vide)"
+        status = self._integrity_of_file(path)
+        if status != "ok":
+            return f"integrity={status}"
+        try:
+            with closing(sqlite3.connect(str(path))) as conn:
+                row = conn.execute("PRAGMA page_count").fetchone()
+                if not row or int(row[0]) <= 0:
+                    return "page_count=0 (base vide)"
+                placeholders = ",".join("?" for _ in _BACKUP_CORE_TABLES)
+                cur = conn.execute(
+                    f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})",
+                    _BACKUP_CORE_TABLES,
+                )
+                found = {str(r[0]) for r in cur.fetchall() if r and r[0]}
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            return f"error: {exc}"
+        missing = [t for t in _BACKUP_CORE_TABLES if t not in found]
+        if missing:
+            return f"schema absent (tables manquantes: {', '.join(missing)})"
+        return None
 
     def _backup_dir(self) -> Path:
         """Dossier ou sont stockes les backups : <db_dir>/backups/."""
@@ -645,6 +757,8 @@ class _StoreBase:
         """
         if not self.db_path.is_file():
             return  # fresh install, rien a backupper
+        if self._backup_blocked_by_integrity("backup_before_migrations", "pre_migration"):
+            return
         try:
             backup_db_with_rotation(
                 self.db_path,
@@ -655,11 +769,41 @@ class _StoreBase:
         except Exception as exc:
             logger.warning("backup_before_migrations: ignore (%s)", exc)
 
+    def _backup_blocked_by_integrity(self, caller: str, trigger: str) -> bool:
+        """AUDIT F29 (anti-aggravation) : ne JAMAIS backupper une DB dont
+        l'integrity_check vient d'echouer.
+
+        Sinon chaque backup pousse une copie corrompue (voire un .bak de 0 octet,
+        cf backup_db) en tete de backups/ et la rotation (DEFAULT_MAX_BACKUPS)
+        evince les backups SAINS en quelques cycles -> perte definitive d'une
+        bibliotheque qui etait recuperable.
+
+        Revue R1 : la garde etait posee dans le seul `_backup_before_migrations`
+        alors que `backup_now()` tourne apres CHAQUE apply reel (trigger
+        "post_apply") et depuis l'UI Parametres — sur une DB corrompue en mode
+        degrade, ce chemin continuait donc a fabriquer le candidat n°1 du
+        prochain auto-restore. La garde est desormais partagee par les deux.
+
+        "unknown" = initialize() pas encore appele : on ne bloque pas (le backup
+        d'une DB non encore diagnostiquee reste utile).
+        """
+        if self._integrity_status in ("ok", "unknown"):
+            return False
+        logger.warning(
+            "%s: DB corrompue (%s) — backup %s saute (ne pas evincer les backups sains par rotation)",
+            caller,
+            self._integrity_status,
+            trigger,
+        )
+        return True
+
     def backup_now(self, *, trigger: str = "manual", max_count: int = DEFAULT_MAX_BACKUPS) -> Optional[Path]:
         """API publique : declenche un backup immediat. Retourne le chemin
         ou None si la DB n'existe pas encore. Utilise par apply_support
         apres apply reel et par UI Settings.
         """
+        if self._backup_blocked_by_integrity("backup_now", str(trigger or "manual")):
+            return None
         return backup_db_with_rotation(
             self.db_path,
             self._backup_dir(),

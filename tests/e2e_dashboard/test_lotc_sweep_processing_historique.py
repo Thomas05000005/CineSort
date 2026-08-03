@@ -111,6 +111,7 @@ _PROCESSING_SETTLED_JS = """() => {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _attach_watch(page):
     """Collecte console errors / pageerrors / requetes /api/ (horodatees)."""
     watch = {"console_errors": [], "console_all": [], "pageerrors": [], "api_requests": []}
@@ -137,12 +138,8 @@ def _api_calls(watch, endpoint: str):
 
 
 def _assert_console_clean(watch, view: str) -> None:
-    assert not watch["pageerrors"], (
-        f"[{view}] pageerror(s) JS pendant le sweep : {watch['pageerrors']}"
-    )
-    assert not watch["console_errors"], (
-        f"[{view}] erreur(s) console non whitelistees : {watch['console_errors']}"
-    )
+    assert not watch["pageerrors"], f"[{view}] pageerror(s) JS pendant le sweep : {watch['pageerrors']}"
+    assert not watch["console_errors"], f"[{view}] erreur(s) console non whitelistees : {watch['console_errors']}"
 
 
 def _screenshot(page, name: str) -> None:
@@ -208,6 +205,7 @@ def _historique_diag(page, watch) -> dict:
 # ---------------------------------------------------------------------------
 # 1. /processing — sweep actions sures + GATEs Lot E (E5, E6, E7/R8-083)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.runtime
 def test_lotc_processing_sweep_actions_sures(dashboard_page, e2e_server) -> None:
@@ -306,8 +304,7 @@ def test_lotc_processing_sweep_actions_sures(dashboard_page, e2e_server) -> None
             "0 film est approuve (la garde _approvedCount n'a pas bloque)"
         )
     assert len(_api_calls(watch, "run/apply")) == 0, (
-        f"GATE E5 : POST /api/run/apply emis malgre 0 film approuve : "
-        f"{_api_calls(watch, 'run/apply')}"
+        f"GATE E5 : POST /api/run/apply emis malgre 0 film approuve : {_api_calls(watch, 'run/apply')}"
     )
 
     # =======================================================================
@@ -348,15 +345,12 @@ def test_lotc_processing_sweep_actions_sures(dashboard_page, e2e_server) -> None
         page.click("#view-processing [data-action='cancel-run']")
         page.wait_for_selector("#dashDangerModal", timeout=5000)
         modal_title = page.text_content("#dashDangerModalTitle") or ""
-        assert "Annuler l'analyse" in modal_title, (
-            f"GATE E6 : titre de modale inattendu : {modal_title!r}"
-        )
+        assert "Annuler l'analyse" in modal_title, f"GATE E6 : titre de modale inattendu : {modal_title!r}"
         # ANNULER (jamais confirmer).
         page.click("#dashDangerModal [data-danger-cancel]")
         page.wait_for_selector("#dashDangerModal", state="detached", timeout=5000)
         assert len(_api_calls(watch, "run/cancel_run")) == 0, (
-            "GATE E6 : POST /api/run/cancel_run emis alors que la confirmation "
-            "a ete ANNULEE"
+            "GATE E6 : POST /api/run/cancel_run emis alors que la confirmation a ete ANNULEE"
         )
 
         # ===================================================================
@@ -389,6 +383,7 @@ def test_lotc_processing_sweep_actions_sures(dashboard_page, e2e_server) -> None
 # 2. /historique — sweep actions sures (navigation APRES boot settle)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.runtime
 def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None:
     page = dashboard_page
@@ -404,8 +399,7 @@ def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None
         page.screenshot(path=str(_CAPTURES_DIR / "historique_sweep_stuck.png"))
         pytest.fail(
             "/historique ne se stabilise pas MEME apres boot settle (etat plus "
-            "grave que LOTC-HISTO-01). Diagnostic :\n"
-            + json.dumps(diag, ensure_ascii=False, indent=2)
+            "grave que LOTC-HISTO-01). Diagnostic :\n" + json.dumps(diag, ensure_ascii=False, indent=2)
         )
 
     # --- Action sure : filtre Periode -> "Tout" (les runs E2E datent de 2024,
@@ -441,10 +435,7 @@ def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None
         # NB observe (hors perimetre du groupe, composant shell) : le panneau
         # replie a une largeur de 0 px, son toggle est donc insaisissable a la
         # souris (actionability Playwright echoue) -> clic JS assume ici.
-        page.evaluate(
-            "() => { const t = document.querySelector('[data-v5-right-panel-toggle]');"
-            " if (t) t.click(); }"
-        )
+        page.evaluate("() => { const t = document.querySelector('[data-v5-right-panel-toggle]'); if (t) t.click(); }")
         page.wait_for_function(
             "() => { const p = document.querySelector('[data-v5-right-panel]');"
             " return !!p && !p.classList.contains('is-collapsed'); }",
@@ -469,16 +460,12 @@ def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None
 
     # undo-apply : legitimement ABSENT (le dataset E2E n'a aucun apply,
     # applied_rows=0 -> le bouton n'est rendu que pour un run apply).
-    n_undo = page.evaluate(
-        "() => document.querySelectorAll(\"[data-historique-action='undo-apply']\").length"
-    )
+    n_undo = page.evaluate("() => document.querySelectorAll(\"[data-historique-action='undo-apply']\").length")
     assert n_undo == 0, "Bouton undo-apply rendu alors que le run n'a aucun apply"
 
     # --- Action sure : onglet Log + reload-log (reaction = refetch + rendu). ---
     page.click("[data-v5-right-panel-body] [data-historique-inspector-tab='log']")
-    page.wait_for_selector(
-        "[data-v5-right-panel-body] [data-historique-action='reload-log']", timeout=5000
-    )
+    page.wait_for_selector("[data-v5-right-panel-body] [data-historique-action='reload-log']", timeout=5000)
     n_stats_before = len(_api_calls(watch, "run/get_history_stats"))
     page.click("[data-v5-right-panel-body] [data-historique-action='reload-log']")
     deadline = time.monotonic() + 5
@@ -529,13 +516,9 @@ def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None
     page.wait_for_function(_HISTORIQUE_SETTLED_JS, timeout=10000)
 
     # --- Action sure : resume -> route /traitement (reaction = hash + vue). ---
-    page.wait_for_selector(
-        "[data-v5-right-panel-body] [data-historique-action='resume']", timeout=8000
-    )
+    page.wait_for_selector("[data-v5-right-panel-body] [data-historique-action='resume']", timeout=8000)
     page.click("[data-v5-right-panel-body] [data-historique-action='resume']")
-    page.wait_for_function(
-        "() => window.location.hash.startsWith('#/traitement')", timeout=8000
-    )
+    page.wait_for_function("() => window.location.hash.startsWith('#/traitement')", timeout=8000)
 
     _assert_console_clean(watch, "historique")
 
@@ -546,6 +529,7 @@ def test_lotc_historique_sweep_actions_sures(dashboard_page, e2e_server) -> None
 #    que la dedup in-flight de core/api.js sert au 2e appelant une promesse
 #    portant le signal de navigation (aborte) du 1er appelant.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.runtime
 def test_lotc_historique_navigation_immediate_charge(dashboard_page) -> None:
@@ -568,8 +552,7 @@ def test_lotc_historique_navigation_immediate_charge(dashboard_page) -> None:
             "cf docstring module ; preuve : la vue n'obtient JAMAIS de reponse "
             "run/get_dashboard — l'unique fetch, herite du boot accueil via la "
             "dedup, part avec un signal deja aborte — alors que le meme endpoint "
-            "repond 200 ok en direct). Diagnostic runtime :\n"
-            + json.dumps(diag, ensure_ascii=False, indent=2)
+            "repond 200 ok en direct). Diagnostic runtime :\n" + json.dumps(diag, ensure_ascii=False, indent=2)
         )
 
     # Bug corrige : la vue doit etre rendue proprement, sans erreur console.
@@ -579,6 +562,7 @@ def test_lotc_historique_navigation_immediate_charge(dashboard_page) -> None:
 # ---------------------------------------------------------------------------
 # 4. Aller-retour x3 processing <-> historique : ni erreur, ni empilement.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.runtime
 def test_lotc_aller_retour_x3_sans_empilement(dashboard_page) -> None:

@@ -262,8 +262,7 @@ def _revert_one_op(
                 _audit_log(
                     audit_fn,
                     "ERROR",
-                    f"rollback_forward: backup dup src FAILED op_id={op_id} "
-                    f"src={src_path}: {unlink_exc}",
+                    f"rollback_forward: backup dup src FAILED op_id={op_id} src={src_path}: {unlink_exc}",
                 )
                 return {
                     "id": op_id,
@@ -284,8 +283,7 @@ def _revert_one_op(
                         _audit_log(
                             audit_fn,
                             "WARN",
-                            f"rollback_forward: move FAILED, backup restored op_id={op_id} "
-                            f"src={src_path}: {move_exc}",
+                            f"rollback_forward: move FAILED, backup restored op_id={op_id} src={src_path}: {move_exc}",
                         )
                     else:
                         # src reapparu (course rare) : on preserve le backup
@@ -467,22 +465,15 @@ def rollback_forward(
     if failed == 0:
         final_status = ROLLBACK_DONE
         ok = True
-        message = (
-            f"rollback_forward: {done} revert / {skipped} skipped — batch={bid}"
-        )
+        message = f"rollback_forward: {done} revert / {skipped} skipped — batch={bid}"
     elif done == 0:
         final_status = ROLLBACK_FAILED
         ok = False
-        message = (
-            f"rollback_forward: {failed} echec(s), aucun revert reussi — batch={bid}"
-        )
+        message = f"rollback_forward: {failed} echec(s), aucun revert reussi — batch={bid}"
     else:
         final_status = ROLLBACK_PARTIAL
         ok = False
-        message = (
-            f"rollback_forward: PARTIEL — {done} revert, {failed} echec(s),"
-            f" {skipped} skipped — batch={bid}"
-        )
+        message = f"rollback_forward: PARTIEL — {done} revert, {failed} echec(s), {skipped} skipped — batch={bid}"
 
     # AC-3 : la mise a jour DB peut echouer, on log mais le FS est dans
     # l'etat post-revert. On retourne quand meme la synthese (ok reste true
@@ -492,9 +483,7 @@ def rollback_forward(
         # FS reverti, DB pas marque -> on degrade en ROLLBACK_PARTIAL pour
         # signaler au caller que la trace persistante est incomplete.
         final_status = ROLLBACK_PARTIAL
-        message = (
-            f"{message} (DB tracking failed, FS revert reussi)"
-        )
+        message = f"{message} (DB tracking failed, FS revert reussi)"
 
     return {
         "ok": ok,

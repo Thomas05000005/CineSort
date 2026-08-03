@@ -28,7 +28,6 @@ from unittest.mock import MagicMock, patch
 from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
 from cinesort.domain.runtime_matching import WARN_RUNTIME_MISMATCH
 
-
 # ---------------------------------------------------------------------------
 # Finding 1 : _resolve_file_runtime_min lit le cache probe AVANT le NFO
 # ---------------------------------------------------------------------------
