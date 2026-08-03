@@ -1,4 +1,5 @@
 """Analyse les rows du plan : detection unicode/emoji/brackets/long-path."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,7 @@ from pathlib import Path
 RUN_DIR = Path(sys.argv[1])
 plan = RUN_DIR / "plan.jsonl"
 rows = []
-with open(plan, "r", encoding="utf-8") as f:
+with open(plan, encoding="utf-8") as f:
     for line in f:
         line = line.strip()
         if line:
@@ -37,7 +38,7 @@ for r in rows:
     sources[r.get("proposed_source")] = sources.get(r.get("proposed_source"), 0) + 1
     c = r.get("confidence_label") or "other"
     confs[c if c in confs else "other"] = confs.get(c if c in confs else "other", 0) + 1
-    for fl in (r.get("warning_flags") or []):
+    for fl in r.get("warning_flags") or []:
         flags[fl] = flags.get(fl, 0) + 1
 print("Source distribution:", sources)
 print("Confidence distribution:", confs)

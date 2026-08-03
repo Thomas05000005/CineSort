@@ -86,9 +86,7 @@ class UndoDeadline24hEnforcementTests(unittest.TestCase):
         import time as _stdlib_time
 
         future = _stdlib_time.time() + 25 * 3600
-        with mock.patch(
-            "cinesort.ui.api.apply_support.time.time", return_value=future
-        ):
+        with mock.patch("cinesort.ui.api.apply_support.time.time", return_value=future):
             result = api._undo_last_apply_impl(run_id, dry_run=False)
 
         self.assertFalse(result.get("ok"), result)
@@ -122,9 +120,7 @@ class UndoDeadline24hEnforcementTests(unittest.TestCase):
         import time as _stdlib_time
 
         future = _stdlib_time.time() + 25 * 3600
-        with mock.patch(
-            "cinesort.ui.api.apply_support.time.time", return_value=future
-        ):
+        with mock.patch("cinesort.ui.api.apply_support.time.time", return_value=future):
             result = api._undo_last_apply_impl(run_id, dry_run=True)
 
         # dry_run=True doit retourner ok=True, status=PREVIEW_ONLY.
@@ -150,9 +146,7 @@ class UndoDeadline24hEnforcementTests(unittest.TestCase):
         import time as _stdlib_time
 
         future = _stdlib_time.time() + 25 * 3600
-        with mock.patch(
-            "cinesort.ui.api.apply_support.time.time", return_value=future
-        ):
+        with mock.patch("cinesort.ui.api.apply_support.time.time", return_value=future):
             preview_late = api._undo_last_apply_preview_impl(run_id)
 
         self.assertTrue(preview_late.get("ok"), preview_late)

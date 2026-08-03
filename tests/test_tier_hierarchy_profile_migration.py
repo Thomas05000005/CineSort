@@ -68,8 +68,7 @@ class LegacyProfileMigrationTests(unittest.TestCase):
         ok, errs, profile = validate_quality_profile(_LEGACY_PROFILE_V157)
         self.assertTrue(ok, f"errs={errs}")
         self.assertIn("tier_hierarchy", profile)
-        self.assertFalse(profile["tier_hierarchy"]["enabled"],
-                         "Default OFF requis pour backward compat ABSOLUE")
+        self.assertFalse(profile["tier_hierarchy"]["enabled"], "Default OFF requis pour backward compat ABSOLUE")
 
     def test_legacy_profile_gets_default_dimensions_order(self):
         _, _, profile = validate_quality_profile(_LEGACY_PROFILE_V157)
@@ -151,7 +150,8 @@ class InvalidHierarchyConfigTolerantTests(unittest.TestCase):
         _, _, profile = validate_quality_profile(prof_in)
         # Le tier inconnu doit etre drop -> revient au default TRaSH (Gold).
         self.assertEqual(
-            profile["tier_hierarchy"]["resolution_floors"]["2160p_probe"], "Gold",
+            profile["tier_hierarchy"]["resolution_floors"]["2160p_probe"],
+            "Gold",
         )
 
 
@@ -186,17 +186,21 @@ class NormalizeHierarchyConfigStandaloneTests(unittest.TestCase):
         self.assertEqual(cfg, default_hierarchy_config())
 
     def test_legacy_premium_tier_in_floor_normalized(self):
-        cfg = normalize_hierarchy_config({
-            "enabled": True,
-            "resolution_floors": {"2160p_probe": "Premium"},
-        })
+        cfg = normalize_hierarchy_config(
+            {
+                "enabled": True,
+                "resolution_floors": {"2160p_probe": "Premium"},
+            }
+        )
         self.assertEqual(cfg["resolution_floors"]["2160p_probe"], "Platinum")
 
     def test_fr_long_label_in_floor_normalized(self):
-        cfg = normalize_hierarchy_config({
-            "enabled": True,
-            "resolution_floors": {"2160p_probe": "Platine"},
-        })
+        cfg = normalize_hierarchy_config(
+            {
+                "enabled": True,
+                "resolution_floors": {"2160p_probe": "Platine"},
+            }
+        )
         self.assertEqual(cfg["resolution_floors"]["2160p_probe"], "Platinum")
 
 

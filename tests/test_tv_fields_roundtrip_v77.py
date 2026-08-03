@@ -16,13 +16,26 @@ from cinesort.ui.api.run_data_support import row_from_json
 
 def _tv_row() -> core.PlanRow:
     return core.PlanRow(
-        row_id="r1", kind="tv_episode", folder="C:/TV", video="ep.mkv",
-        proposed_title="Breaking Bad", proposed_year=2008, proposed_source="tmdb",
-        confidence=90, confidence_label="high", candidates=[],
-        tv_series_name="Breaking Bad", tv_season=2, tv_episode=7,
-        tv_episode_title="Negro y Azul", tv_tmdb_series_id=1396,
-        subtitle_count=2, subtitle_languages=["fr", "en"], subtitle_formats=["srt"],
-        subtitle_missing_langs=["de"], subtitle_orphans=1,
+        row_id="r1",
+        kind="tv_episode",
+        folder="C:/TV",
+        video="ep.mkv",
+        proposed_title="Breaking Bad",
+        proposed_year=2008,
+        proposed_source="tmdb",
+        confidence=90,
+        confidence_label="high",
+        candidates=[],
+        tv_series_name="Breaking Bad",
+        tv_season=2,
+        tv_episode=7,
+        tv_episode_title="Negro y Azul",
+        tv_tmdb_series_id=1396,
+        subtitle_count=2,
+        subtitle_languages=["fr", "en"],
+        subtitle_formats=["srt"],
+        subtitle_missing_langs=["de"],
+        subtitle_orphans=1,
     )
 
 

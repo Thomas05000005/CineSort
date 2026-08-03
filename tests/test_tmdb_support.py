@@ -104,7 +104,9 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_success_returns_posters_dict(self, mock_client_cls):
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = lambda mid, size: f"https://img/{mid}_{size}.jpg"
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
+            f"https://img/{mid}_{size}.jpg"
+        )
         mock_client_cls.return_value = client
 
         api = _make_api()
@@ -130,7 +132,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         api = _make_api()
         tmdb_support.get_tmdb_posters(api, tmdb_ids=[7], size="w185")
 
-        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w185")
+        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w185", force_refresh=False)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_empty_size_falls_back_to_w92(self, mock_client_cls):
@@ -141,7 +143,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         api = _make_api()
         tmdb_support.get_tmdb_posters(api, tmdb_ids=[7], size="")
 
-        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w92")
+        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w92", force_refresh=False)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_client_returns_no_url_omits_entry(self, mock_client_cls):
@@ -164,7 +166,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     def test_ids_deduplicated_and_sorted(self, mock_client_cls):
         captured_ids: list[int] = []
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = lambda mid, size: (
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
             captured_ids.append(mid) or f"https://img/{mid}.jpg"
         )
         mock_client_cls.return_value = client
