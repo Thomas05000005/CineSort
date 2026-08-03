@@ -145,11 +145,28 @@ class TestHelperCanonique(_AtomicAssertions):
                 seen.append(str(src))
             return real_replace(src, dst, *a, **kw)
 
+        # Une PermissionError apres epuisement des essais est un resultat
+        # DOCUMENTE de `_replace_with_retry` (5 essais, ~750 ms), pas un defaut :
+        # sous Windows, 16 threads qui promeuvent la MEME cible se disputent le
+        # verrou et la fonction re-leve volontairement apres la derniere
+        # tentative. Interdire ce cas revenait a tester une propriete que le code
+        # ne promet pas — d'ou un echec intermittent mesure a ~2,5 % sur 120
+        # executions, exactement le piege WinError 5/32 documente dans CLAUDE.md.
+        # On separe donc les deux : la contention est TOLEREE, l'invariant sous
+        # test (unicite du .tmp) reste STRICT.
+        contention: List[BaseException] = []
         errors: List[BaseException] = []
 
         def worker(i: int) -> None:
             try:
                 atomic_write_json(target, {"writer": i})
+            except AtomicWriteError as exc:
+                cause = exc.__cause__ if isinstance(exc.__cause__, BaseException) else exc
+                with lock:
+                    (contention if isinstance(cause, PermissionError) else errors).append(exc)
+            except PermissionError as exc:
+                with lock:
+                    contention.append(exc)
             except BaseException as exc:  # noqa: BLE001 — remonte au thread principal
                 with lock:
                     errors.append(exc)
@@ -161,7 +178,15 @@ class TestHelperCanonique(_AtomicAssertions):
             for t in threads:
                 t.join()
 
-        self.assertEqual(errors, [], "un ecrivain concurrent a echoue")
+        self.assertEqual(errors, [], "un ecrivain concurrent a echoue pour une raison INATTENDUE")
+        # La contention est toleree, mais pas au point de vider le test : si les
+        # 16 ecrivains echouaient, l'unicite des .tmp ne prouverait plus rien
+        # puisqu'aucune promotion n'aurait eu lieu.
+        self.assertLess(
+            len(contention),
+            16,
+            "les 16 ecrivains ont echoue sur os.replace : le test ne demontre plus rien",
+        )
         # `seen` peut contenir plus de 16 entrees : sous Windows os.replace est
         # retente quand un lecteur tient la cible (R8-026). Ce sont les memes
         # chemins, d'ou l'assertion sur le nombre de tmp DISTINCTS.
@@ -200,6 +225,37 @@ class TestHelperCanonique(_AtomicAssertions):
             target.read_text(encoding="utf-8"),
             "ANCIEN CONTENU VALIDE",
             "un tmp tronque a ete promu : l'utilisateur a PERDU son ancien fichier valide",
+        )
+        self.assertEqual([p.name for p in self.root.iterdir()], ["cible.txt"], "un .tmp orphelin subsiste")
+
+    def test_partially_truncated_tmp_is_never_promoted(self) -> None:
+        """Troncature PARTIELLE : le cas « NAS qui decroche a mi-chemin ».
+
+        Le controle de taille pose deux conditions, `written == 0` OU
+        `written != len(data)`. Le test ci-dessus ne fabrique qu'un tmp VIDE,
+        donc seule la premiere etait exercee : muter la garde en
+        `if written == 0:` laissait toute la batterie verte. Or c'est la
+        troncature partielle que la docstring du helper annonce couvrir, et
+        c'est la plus perfide — un JSON coupe en deux reste un fichier
+        d'apparence normale, alors qu'un fichier vide se remarque.
+        """
+        target = self.root / "cible.txt"
+        target.write_text("ANCIEN CONTENU VALIDE", encoding="utf-8")
+        real_fsync = os.fsync
+
+        def truncating_fsync(fd):
+            real_fsync(fd)
+            # 3 octets au lieu du contenu complet : non vide, mais incomplet.
+            os.ftruncate(fd, 3)
+
+        with mock.patch("os.fsync", truncating_fsync):
+            with self.assertRaises(AtomicWriteError):
+                atomic_write_text(target, "NOUVEAU CONTENU")
+
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            "ANCIEN CONTENU VALIDE",
+            "un tmp PARTIELLEMENT tronque a ete promu : le fichier de l'utilisateur est corrompu",
         )
         self.assertEqual([p.name for p in self.root.iterdir()], ["cible.txt"], "un .tmp orphelin subsiste")
 
