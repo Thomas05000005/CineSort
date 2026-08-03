@@ -21,7 +21,15 @@ from tests._helpers import wait_run_done as _wait_terminal
 
 class ApiBridgeLot3Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.mkdtemp(prefix="cinesort_lot3_")
+        # CI Windows : sur le runner GitHub, %TEMP% vaut C:\Users\RUNNER~1\...
+        # (nom court 8.3) et traverse des jonctions. open_path() compare
+        # Path.resolve() a Path.absolute() pour detecter un symlink parent :
+        # un chemin temporaire non canonique declenche donc un faux positif
+        # « Les liens symboliques ne sont pas autorises ». On canonise la
+        # racine temporaire pour fournir a l'API un chemin deja resolu, ce qui
+        # est le cas nominal cote produit ; le controle de securite n'est pas
+        # touche (les tests de refus vivent dans test_vague_h_security.py).
+        self._tmp = str(Path(tempfile.mkdtemp(prefix="cinesort_lot3_")).resolve())
         self.root = Path(self._tmp) / "root"
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True, exist_ok=True)

@@ -30,6 +30,7 @@ Execution : .venv/Scripts/python.exe -X utf8 -m pytest \
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import unittest
@@ -46,6 +47,9 @@ from tests._helpers import wait_run_done as _wait_done
 
 def _noop_log(_level: str, _msg: str) -> None:
     pass
+
+
+_TRAILING_YEAR_RE = re.compile(r"^(?P<head>.+?)[\s._-]+(?P<yr>19\d{2}|20\d{2})$")
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +257,24 @@ class UndoMkdirInterBatchE2ETests(unittest.TestCase):
         return {"ok": True, "title": row.get("proposed_title"), "year": row.get("proposed_year")}
 
     def _folder_name(self, row: Dict[str, Any]) -> str:
-        return f"{row.get('proposed_title')} ({row.get('proposed_year')})"
+        """Nom de dossier attendu par le template par defaut `{title} ({year})`.
+
+        Regle « fix double-annee disque » (cinesort/domain/naming.py::_apply_template,
+        commentaire L368-373) : quand le template contient `{year}`, le titre perd son
+        annee de QUEUE si elle egale l'annee du couple, pour ne pas produire
+        "Le Havre 2011 (2011)". Le `proposed_title` STOCKE reste intact (cle de
+        dedoublonnage / seed torrents, cf. core.py::build_candidates_from_name L874) :
+        la fixture "Saga.One.2019.1080p" donne proposed_title="Saga One 2019" et un
+        dossier disque "Saga One (2019)". Regle REIMPLEMENTEE ici volontairement (et
+        non importee de la prod) : le test doit rougir si le renommage disque
+        reintroduit "Saga One 2019 (2019)".
+        """
+        title = str(row.get("proposed_title") or "")
+        year = row.get("proposed_year")
+        match = _TRAILING_YEAR_RE.match(title.strip())
+        if match is not None and year is not None and int(match.group("yr")) == int(year):
+            title = match.group("head").strip(" -_.") or title
+        return f"{title} ({year})"
 
     def test_e2e_two_batches_same_saga_undo_leaves_no_orphan(self) -> None:
         src_a = self.root / "Saga.One.2019.1080p"

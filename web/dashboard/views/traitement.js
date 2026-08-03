@@ -1701,14 +1701,21 @@ function _renderStepPanel(stepId) {
     `;
   }
   if (!_runInfo) {
-    const step = STEPS.find((s) => s.id === stepId) || STEPS[0];
+    const stepIndex = Math.max(0, STEPS.findIndex((s) => s.id === stepId));
+    const step = STEPS[stepIndex];
+    // Le titre de panneau doit garder le MEME format que les cinq panneaux
+    // reels (« Étape 1 — Analyse ») : cet etat vide n'affichait que le libelle
+    // nu (« Analyse »), donc l'intitule changeait selon qu'un run existait ou
+    // non. C'est le seul chemin rendu quand aucun run n'est actif — le cas par
+    // defaut d'une installation neuve, et celui du runner CI.
+    const stepTitle = `Étape ${stepIndex + 1} — ${step.label}`;
     // Fix audit 2026-06-08 UX high : 1 seul CTA "Lancer un scan" (le header
     // empty-state n'en rend plus). Bouton avec data-traitement-action="start-scan"
     // pour rester dans la vue Traitement plutot que de rediriger vers
     // une vue tierce (#/processing) inexistante ou redondante.
     return `
       <section class="traitement-panel" aria-labelledby="traitement-panel-title">
-        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(step.label)}</h2>
+        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(stepTitle)}</h2>
         <p class="traitement-placeholder">
           Aucun run actif détecté. Lance un scan pour démarrer le workflow.
         </p>

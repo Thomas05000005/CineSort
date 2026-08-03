@@ -3518,6 +3518,34 @@ function _uninstallCtrlK() {
   }
 }
 
+/* Ctrl+S — la table de raccourcis de core/keyboard.js (ligne 44) annonce
+ * « Enregistrer » a l'utilisateur, et le handler global fait bien un
+ * preventDefault() puis emet `cinesort:save-request`. Mais AUCUNE vue n'ecoutait
+ * cet evenement : le raccourci bloquait le « Enregistrer » natif du navigateur
+ * et ne faisait rien — une promesse affichee mais jamais tenue.
+ *
+ * Les Parametres sont le seul ecran ou « Enregistrer » a un sens : on y branche
+ * le flush du debounce, exactement ce que fait deja la sortie de vue. Ailleurs
+ * l'evenement reste sans effet (comportement inchange). */
+let _saveRequestHandler = null;
+
+function _installSaveRequest() {
+  if (_saveRequestHandler || typeof window === "undefined") return;
+  _saveRequestHandler = () => {
+    // Pas de save en vol et rien en attente -> ne rien faire (pas de POST inutile).
+    if (!_state.saveTimer) return;
+    _flushPendingSave();
+  };
+  window.addEventListener("cinesort:save-request", _saveRequestHandler);
+}
+
+function _uninstallSaveRequest() {
+  if (_saveRequestHandler && typeof window !== "undefined") {
+    window.removeEventListener("cinesort:save-request", _saveRequestHandler);
+  }
+  _saveRequestHandler = null;
+}
+
 /* =============================================================
  * 15) ENTRY POINTS
  * ============================================================= */
@@ -3553,6 +3581,7 @@ export async function initParametres(container) {
   // dans le DOM), on re-affiche l'echec d'un flush parti au demontage.
   _surfacePendingFlushError();
   _installCtrlK();
+  _installSaveRequest();
   _flushPendingScroll();
 
   // Listener hashchange : si on est deja sur /parametres et que l'utilisateur
@@ -3579,6 +3608,7 @@ export function unmountParametres() {
   // et _loadSettings ecrasait l'edition au retour (perte silencieuse).
   _flushPendingSave();
   _uninstallCtrlK();
+  _uninstallSaveRequest();
   if (_state.hashChangeHandler && typeof window !== "undefined") {
     window.removeEventListener("hashchange", _state.hashChangeHandler);
     _state.hashChangeHandler = null;

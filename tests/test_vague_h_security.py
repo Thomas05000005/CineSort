@@ -48,9 +48,18 @@ class OpenPathSymlinkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name) / "allowed_root"
-        self.state_dir = Path(self.tmp.name) / "state"
-        self.outside = Path(self.tmp.name) / "outside"
+        # CI Windows : sur le runner GitHub, %TEMP% vaut C:\Users\RUNNER~1\...
+        # (nom court 8.3) et traverse des jonctions ; Path.resolve() reecrit
+        # alors la chaine sans qu'aucun lien ne soit implique. Comme open_path
+        # refuse tout chemin dont resolve() differe de absolute(), un chemin
+        # temporaire brut est vu a tort comme un symlink. On canonise la racine
+        # temporaire : les chemins fabriques ici sont ceux d'un utilisateur
+        # normal, les symlinks des tests de refus ci-dessous restent des vrais
+        # symlinks (crees APRES resolution, donc toujours detectes).
+        base = Path(self.tmp.name).resolve()
+        self.root = base / "allowed_root"
+        self.state_dir = base / "state"
+        self.outside = base / "outside"
         self.root.mkdir()
         self.state_dir.mkdir()
         self.outside.mkdir()
