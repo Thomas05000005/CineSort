@@ -253,7 +253,7 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
     # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides) sur
     # chaque row -> la biblio reflete le match choisi (tmdb_id/titre/annee) et ne
     # revient plus au match auto au reload. No-op si aucun override.
-    from cinesort.ui.api.film_support import overlay_tmdb_override
+    from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY, overlay_tmdb_override
 
     # PERF (audit 2026-08-02, HIGH library_support:231) : `api.run.get_plan`
     # ci-dessus a DEJA applique cet overlay sur chaque row
@@ -263,12 +263,19 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
     # `get_tmdb_override` ouvre DEUX connexions SQLite (`_ensure_tables` puis le
     # SELECT) qui commitent chacune une ligne dans `pragma_history` : la vue
     # Bibliotheque payait 4N connexions au lieu de 2N.
-    # On ne re-applique donc que sur les rows NON enrichies (get_plan stubbe,
-    # enrichissement tombe en erreur avant la boucle...) : `display_title` n'est
-    # pose que par `_enrich_plan_payload`, juste APRES l'overlay de la meme
-    # iteration — sa presence prouve que l'overlay a deja tourne pour cette row.
+    #
+    # Revue adversaire PR #849 : on ne saute le travail que sur presentation du
+    # marqueur EXPLICITE pose par l'overlay lui-meme, sur son seul chemin de
+    # succes (film_support.TMDB_OVERLAY_DONE_KEY). La version precedente
+    # inferait ce succes de la presence de `display_title`, que
+    # `_enrich_plan_payload` pose de toute facon (`row.setdefault`) meme quand
+    # l'overlay vient d'echouer sous son `contextlib.suppress(Exception)` :
+    # store indisponible ou base verrouillee -> le choix TMDb manuel de
+    # l'utilisateur disparaissait EN SILENCE de la Bibliotheque.
+    # Fail-closed : marqueur absent (ou falsy) => on relit. Le cout du cas
+    # nominal reste nul, seul le cas degrade repaye les 2N connexions.
     for _r in plan_rows:
-        if isinstance(_r, dict) and "display_title" in _r:
+        if isinstance(_r, dict) and _r.get(TMDB_OVERLAY_DONE_KEY):
             continue
         overlay_tmdb_override(store, run_id, _r)
 

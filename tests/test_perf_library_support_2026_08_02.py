@@ -18,11 +18,16 @@ Chaque test a ete vu ROUGE en cassant le correctif correspondant.
 
 from __future__ import annotations
 
+import shutil
+import sqlite3
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from cinesort.ui.api import library_support
+from cinesort.ui.api import history_support, library_support
+from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY
 
 # ---------------------------------------------------------------------------
 # Doubles de test (pas de MagicMock : on compte les appels exactement)
@@ -99,9 +104,14 @@ class _FakeApi:
 
 
 def _plan_row(row_id: str, *, tmdb_id: int = 0, enriched: bool = False) -> Dict[str, Any]:
-    """PlanRow serialisee. `enriched=True` simule le passage par get_plan reel
-    (history_support._enrich_plan_payload pose `display_title` juste APRES avoir
-    applique l'overlay TMDb sur la meme row)."""
+    """PlanRow serialisee. `enriched=True` simule le passage par get_plan reel :
+    `display_title` + `auto_approvable` poses par _enrich_plan_payload, ET le
+    marqueur d'overlay ABOUTI pose par overlay_tmdb_override lui-meme.
+
+    Revue adversaire PR #849 : c'est ce marqueur, et lui seul, qui autorise
+    _build_library_rows a sauter l'overlay. `display_title` est deliberement
+    conserve ici pour verrouiller le fait qu'il ne suffit PLUS
+    (cf. classe DisplayTitleIsNotAProofTests)."""
     row: Dict[str, Any] = {
         "row_id": row_id,
         "proposed_title": f"Film {row_id}",
@@ -115,6 +125,7 @@ def _plan_row(row_id: str, *, tmdb_id: int = 0, enriched: bool = False) -> Dict[
     if enriched:
         row["display_title"] = f"Film {row_id}"
         row["auto_approvable"] = True
+        row[TMDB_OVERLAY_DONE_KEY] = True
     return row
 
 
@@ -269,6 +280,290 @@ class DedupIdsTests(unittest.TestCase):
         library_support._build_library_rows(api, "run1")
 
         self.assertEqual(api.integrations.calls, [[42, 7]])
+
+
+# ---------------------------------------------------------------------------
+# 4. REVUE ADVERSAIRE PR #849 — le marqueur d'overlay ABOUTI
+#
+# Le guard perf de _build_library_rows inferait « l'overlay a reussi » de la
+# presence de `display_title`. Or _enrich_plan_payload pose `display_title`
+# INCONDITIONNELLEMENT (row.setdefault) APRES un `contextlib.suppress(Exception)`
+# autour de l'overlay : un store indisponible ou une base verrouillee laissaient
+# donc la Bibliotheque sauter le rattrapage et le choix TMDb manuel de
+# l'utilisateur DISPARAISSAIT en silence (bug R7-3 re-ouvert).
+# Le signal est desormais pose par l'overlay lui-meme, sur son seul chemin de
+# succes (film_support.TMDB_OVERLAY_DONE_KEY).
+# ---------------------------------------------------------------------------
+
+
+class _RaisingFilmModal:
+    """film_modal dont la lecture leve — base verrouillee, table absente..."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+        self.calls = 0
+
+    def get_tmdb_override(self, *, run_id: str, row_id: str):  # noqa: ANN201
+        self.calls += 1
+        raise self.exc
+
+
+class OverlayMarkerContractTests(unittest.TestCase):
+    """Contrat du marqueur : pose SEULEMENT si la table a ete lue avec succes."""
+
+    def test_marker_set_when_read_succeeds_without_override(self) -> None:
+        """Lecture aboutie mais aucun override : c'est un SUCCES (rien a
+        appliquer) -> marqueur pose, l'aval n'a pas a relire."""
+        from cinesort.ui.api.film_support import overlay_tmdb_override
+
+        store = _FakeStore(_CountingFilmModal({}))
+        row = {"row_id": "r0", "proposed_title": "Auto"}
+
+        self.assertFalse(overlay_tmdb_override(store, "R1", row))
+        self.assertTrue(row.get(TMDB_OVERLAY_DONE_KEY))
+
+    def test_no_marker_when_store_is_none(self) -> None:
+        """Chemin 1 du relecteur : _get_store a renvoye None -> no-op complet."""
+        from cinesort.ui.api.film_support import overlay_tmdb_override
+
+        row = {"row_id": "r0", "proposed_title": "Auto"}
+
+        self.assertFalse(overlay_tmdb_override(None, "R1", row))
+        self.assertNotIn(TMDB_OVERLAY_DONE_KEY, row)
+
+    def test_no_marker_when_row_id_missing(self) -> None:
+        from cinesort.ui.api.film_support import overlay_tmdb_override
+
+        store = _FakeStore(_CountingFilmModal({}))
+        row = {"proposed_title": "Auto"}
+
+        self.assertFalse(overlay_tmdb_override(store, "R1", row))
+        self.assertNotIn(TMDB_OVERLAY_DONE_KEY, row)
+
+    def test_no_marker_when_read_raises_sqlite_error(self) -> None:
+        """Chemin 2 du relecteur : base verrouillee -> aucun etat fiable."""
+        from cinesort.ui.api.film_support import overlay_tmdb_override
+
+        modal = _RaisingFilmModal(sqlite3.OperationalError("database is locked"))
+        store = _FakeStore(modal)  # type: ignore[arg-type]
+        row = {"row_id": "r0", "proposed_title": "Auto"}
+
+        self.assertFalse(overlay_tmdb_override(store, "R1", row))
+        self.assertNotIn(TMDB_OVERLAY_DONE_KEY, row)
+
+    def test_sqlite_error_is_caught_not_propagated(self) -> None:
+        """Objection 3 : sqlite3.Error n'herite PAS d'OSError (regle 4 du
+        CLAUDE.md). Sans lui dans le tuple, une base verrouillee remontait en
+        exception nue et faisait tomber TOUTE la vue Bibliotheque."""
+        from cinesort.ui.api.film_support import overlay_tmdb_override
+
+        for exc in (
+            sqlite3.OperationalError("database is locked"),
+            sqlite3.DatabaseError("file is not a database"),
+        ):
+            with self.subTest(exc=type(exc).__name__):
+                store = _FakeStore(_RaisingFilmModal(exc))  # type: ignore[arg-type]
+                row = {"row_id": "r0", "proposed_title": "Auto"}
+                self.assertFalse(overlay_tmdb_override(store, "R1", row))
+
+    def test_sqlite_error_does_not_break_the_library_view(self) -> None:
+        """Meme chose vue de la Bibliotheque : la vue se construit encore."""
+        rows = [_plan_row("r0", tmdb_id=111), _plan_row("r1", tmdb_id=222)]
+        api = _FakeApi(rows)
+        api.store.film_modal = _RaisingFilmModal(sqlite3.OperationalError("database is locked"))
+
+        out = library_support._build_library_rows(api, "run1")
+
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["tmdb_id"], 111)
+
+
+class DisplayTitleIsNotAProofTests(unittest.TestCase):
+    """`display_title` seul ne doit PLUS suffire a sauter l'overlay."""
+
+    def test_display_title_without_marker_is_still_overlaid(self) -> None:
+        """La row a traverse _enrich_plan_payload (display_title pose) mais son
+        overlay a echoue (pas de marqueur) : la Bibliotheque DOIT rattraper."""
+        row = _plan_row("r0", tmdb_id=111)
+        row["display_title"] = "Auto r0"  # pose par setdefault, overlay echoue
+        row["auto_approvable"] = True
+        api = _FakeApi(
+            [row],
+            overrides={
+                "r0": {
+                    "tmdb_id": 999,
+                    "proposed_title": "Choix Manuel",
+                    "proposed_year": 2021,
+                    "new_confidence": 88,
+                }
+            },
+        )
+
+        out = library_support._build_library_rows(api, "run1")
+
+        self.assertEqual(api.film_modal.calls, ["run1/r0"])
+        self.assertEqual(out[0]["tmdb_id"], 999)
+        self.assertEqual(out[0]["title"], "Choix Manuel")
+
+
+# ---------------------------------------------------------------------------
+# 4bis. Chaine REELLE : _enrich_plan_payload -> _build_library_rows
+#       Aucun stub de get_plan, aucun pre-tamponnage : c'est le vrai
+#       _enrich_plan_payload qui produit (ou non) le marqueur, sur un VRAI
+#       SQLiteStore.
+# ---------------------------------------------------------------------------
+
+
+class _FlakyFilmModal:
+    """Enveloppe le VRAI FilmModalRepository ; les `fail_first` premieres
+    lectures levent (verrou SQLite transitoire : contention avec un ecrivain,
+    resolue quelques ms plus tard)."""
+
+    def __init__(self, inner: Any, fail_first: int = 0) -> None:
+        self._inner = inner
+        self.fail_first = fail_first
+        self.calls: List[str] = []
+
+    def get_tmdb_override(self, *, run_id: str, row_id: str):  # noqa: ANN201
+        self.calls.append(f"{run_id}/{row_id}")
+        if len(self.calls) <= self.fail_first:
+            raise sqlite3.OperationalError("database is locked")
+        return self._inner.get_tmdb_override(run_id=run_id, row_id=row_id)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _RealChainApi:
+    """api cable sur la VRAIE chaine : run.get_plan appelle le vrai
+    history_support._enrich_plan_payload, qui appelle le vrai
+    overlay_tmdb_override sur un vrai SQLiteStore."""
+
+    class _Settings:
+        def __init__(self, state_dir: str) -> None:
+            self._state_dir = state_dir
+
+        def get_settings(self) -> Dict[str, Any]:
+            return {"state_dir": self._state_dir}
+
+    class _Run:
+        def __init__(self, outer: "_RealChainApi") -> None:
+            self._outer = outer
+
+        def get_plan(self, run_id: str) -> Dict[str, Any]:
+            # get_plan re-serialise les rows a chaque appel (_serialize_rows_for_payload)
+            rows = [dict(r) for r in self._outer.raw_rows]
+            enriched = history_support._enrich_plan_payload(self._outer, run_id, rows)
+            self._outer.calls_after_enrich = len(self._outer.film_modal.calls)
+            return {"ok": True, "rows": enriched}
+
+    def __init__(self, store: Any, state_dir: str, raw_rows: List[Dict[str, Any]]) -> None:
+        self.settings = self._Settings(state_dir)
+        self.run = self._Run(self)
+        self.store = store
+        self.raw_rows = raw_rows
+        self.integrations = _CountingIntegrations()
+        self.calls_after_enrich = 0
+
+    @property
+    def film_modal(self) -> Any:
+        return self.store.film_modal
+
+    def _get_or_create_infra(self, state_dir):  # noqa: ANN001, ANN202
+        return (self.store, None)
+
+    def _get_settings_impl(self) -> Dict[str, Any]:
+        return {"auto_approve_threshold": 85}
+
+
+class RealChainOverlayIntegrationTests(unittest.TestCase):
+    """Demande 2 du relecteur : un test sur la chaine REELLE, qui rougit quand
+    l'overlay de l'enrichissement echoue en silence."""
+
+    def setUp(self) -> None:
+        from cinesort.infra.db.sqlite_store import SQLiteStore
+
+        self._tmp = tempfile.mkdtemp(prefix="perf849_")
+        self.store = SQLiteStore(Path(self._tmp) / "t.sqlite")
+        self.store.initialize()
+        self.store.film_modal.upsert_tmdb_override(
+            run_id="run1",
+            row_id="r0",
+            tmdb_id=999,
+            new_confidence=88,
+            proposed_title="Choix Manuel",
+            proposed_year=2021,
+        )
+        self.raw_rows = [
+            {
+                "row_id": "r0",
+                "proposed_title": "Auto r0",
+                "proposed_year": 1999,
+                "confidence": 50,
+                "tmdb_id": 111,
+                "proposed_source": "nfo",
+                "candidates": [],
+            }
+        ]
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _api(self, fail_first: int = 0) -> _RealChainApi:
+        self.store.film_modal = _FlakyFilmModal(self.store.film_modal, fail_first=fail_first)
+        return _RealChainApi(self.store, self._tmp, self.raw_rows)
+
+    def test_manual_override_visible_and_read_once(self) -> None:
+        """Cas nominal : le choix manuel est affiche, et _build_library_rows
+        n'ajoute AUCUNE relecture par-dessus celle de l'enrichissement (c'est
+        tout le gain de perf de la PR, mesure ici sur la vraie chaine)."""
+        api = self._api()
+
+        out = library_support._build_library_rows(api, "run1")
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["title"], "Choix Manuel")
+        self.assertEqual(out[0]["tmdb_id"], 999)
+        self.assertEqual(out[0]["year"], 2021)
+        self.assertEqual(api.film_modal.calls, ["run1/r0"])
+        self.assertEqual(len(api.film_modal.calls) - api.calls_after_enrich, 0)
+
+    def test_manual_override_survives_a_failed_enrichment_overlay(self) -> None:
+        """LE test qui manquait. L'overlay de _enrich_plan_payload echoue (verrou
+        SQLite transitoire, avale par son contextlib.suppress) mais il pose quand
+        meme display_title. Sans marqueur explicite, la Bibliotheque sautait le
+        rattrapage et le choix manuel disparaissait -> 'Auto r0' / 111."""
+        api = self._api(fail_first=1)
+
+        out = library_support._build_library_rows(api, "run1")
+
+        # L'enrichissement a bien pose display_title malgre l'overlay echoue :
+        # c'est exactement ce qui rendait l'ancien guard faux.
+        self.assertEqual(api.calls_after_enrich, 1)
+        self.assertEqual(len(api.film_modal.calls), 2)
+        self.assertEqual(out[0]["title"], "Choix Manuel")
+        self.assertEqual(out[0]["tmdb_id"], 999)
+        self.assertEqual(out[0]["year"], 2021)
+
+    def test_enrichment_stamps_display_title_even_when_overlay_fails(self) -> None:
+        """Preuve directe de l'objection : `display_title` est pose meme quand
+        l'overlay vient d'echouer -> il ne prouve rien sur l'overlay."""
+        api = self._api(fail_first=1)
+
+        rows = api.run.get_plan("run1")["rows"]
+
+        self.assertEqual(rows[0]["display_title"], "Auto r0")
+        self.assertNotIn(TMDB_OVERLAY_DONE_KEY, rows[0])
+
+    def test_enrichment_stamps_marker_on_success(self) -> None:
+        """Non-regression du gain de perf : sur le chemin nominal le marqueur EST
+        pose par la vraie chaine (sinon la Bibliotheque relirait toujours)."""
+        api = self._api()
+
+        rows = api.run.get_plan("run1")["rows"]
+
+        self.assertTrue(rows[0][TMDB_OVERLAY_DONE_KEY])
+        self.assertEqual(rows[0]["proposed_title"], "Choix Manuel")
 
 
 if __name__ == "__main__":
