@@ -56,9 +56,7 @@ def test_sidebar_labels_utf8_strict(dashboard_page, description: str, selector: 
     capturera la divergence byte-pour-byte.
     """
     dashboard_page.wait_for_selector(selector, timeout=8000)
-    actual = dashboard_page.evaluate(
-        f"() => (document.querySelector({selector!r})?.textContent || '').trim()"
-    )
+    actual = dashboard_page.evaluate(f"() => (document.querySelector({selector!r})?.textContent || '').trim()")
     assert actual == expected, (
         f"[{description}] mojibake detecte : "
         f"attendu={expected!r} ({expected.encode('utf-8').hex()}), "
@@ -71,8 +69,15 @@ def test_traitement_etape1_label_utf8_strict(dashboard_page) -> None:
     """Vue Traitement etape 1 : h2 doit afficher "Étape 1 — Analyse" exact-match."""
     # Naviguer vers /traitement (etape 1 = Analyse par defaut au mount).
     dashboard_page.evaluate("window.location.hash = '#/traitement'")
-    dashboard_page.wait_for_timeout(800)
-    dashboard_page.wait_for_selector("#traitement-panel-title", timeout=8000)
+    # Verif totale 2026-07 : attendre le PANNEAU final (titre prefixe "Étape")
+    # plutot qu'un hard-wait 800ms fragile — le skeleton intermediaire affiche
+    # brievement le label de step seul ("Analyse") et le timing du mount a bouge
+    # avec la dedup api.js (LOTC-F1). L'exact-match anti-mojibake reste ci-dessous.
+    dashboard_page.wait_for_function(
+        "() => { const el = document.querySelector('#traitement-panel-title');"
+        " return el && el.textContent.trim().startsWith('\\u00c9tape'); }",
+        timeout=8000,
+    )
     actual = dashboard_page.evaluate(
         "() => (document.querySelector('#traitement-panel-title')?.textContent || '').trim()"
     )
@@ -111,9 +116,7 @@ def test_traitement_etape2_label_utf8_strict(dashboard_page) -> None:
     )
     # Strict : ne doit JAMAIS contenir les patterns mojibake double-encode.
     for bad in ("Ã©", "Ã¨", "Ã ", "Ã\xaa", "�"):
-        assert bad not in actual, (
-            f"[Etape 2] pattern mojibake {bad!r} detecte dans rendu DOM : {actual!r}"
-        )
+        assert bad not in actual, f"[Etape 2] pattern mojibake {bad!r} detecte dans rendu DOM : {actual!r}"
 
 
 @pytest.mark.runtime
@@ -160,6 +163,4 @@ def test_rest_api_token_masked_bullets_utf8(dashboard_page) -> None:
         )
         # Verifier qu'on n'a pas le mojibake `â€¢` (bullet UTF-8 decode-en-latin1).
         for bad in ("â€¢", "�"):
-            assert bad not in value, (
-                f"[rest_api_token] pattern mojibake {bad!r} dans mask : {value!r}"
-            )
+            assert bad not in value, f"[rest_api_token] pattern mojibake {bad!r} dans mask : {value!r}"

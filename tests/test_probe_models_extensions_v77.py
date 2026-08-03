@@ -14,8 +14,6 @@ from __future__ import annotations
 import unittest
 
 from cinesort.domain.probe_models import (
-    OP_TYPE_MOVE,
-    OP_TYPE_NOOP,
     OP_TYPE_RENAME,
     PROBE_QUALITY_FAILED,
     PROBE_QUALITY_FULL,
@@ -147,9 +145,7 @@ class RenameProposalTests(unittest.TestCase):
         self.assertEqual(p.op_type, "RENAME")
 
     def test_from_dict_uses_defaults_for_missing_fields(self) -> None:
-        p = RenameProposal.from_dict(
-            {"src_path": "/a", "target_path": "/a", "op_type": OpType.NOOP, "no_op": True}
-        )
+        p = RenameProposal.from_dict({"src_path": "/a", "target_path": "/a", "op_type": OpType.NOOP, "no_op": True})
         self.assertTrue(p.no_op)
         self.assertEqual(p.reasons, [])
         self.assertIsNone(p.confidence)
@@ -205,9 +201,7 @@ class ProbeResultTests(unittest.TestCase):
         src = ProbeSources(mediainfo=True, ffprobe=True)
         raw_mi = {"media": {"track": []}}
         raw_ff = {"streams": [], "format": {}}
-        result = ProbeResult(
-            normalized=nrm, sources=src, raw_mediainfo=raw_mi, raw_ffprobe=raw_ff
-        )
+        result = ProbeResult(normalized=nrm, sources=src, raw_mediainfo=raw_mi, raw_ffprobe=raw_ff)
         self.assertEqual(result.raw_mediainfo, raw_mi)
         self.assertEqual(result.raw_ffprobe, raw_ff)
 

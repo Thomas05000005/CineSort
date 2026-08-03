@@ -102,7 +102,7 @@ class JellyfinClient:
         """Ferme la session HTTP sous-jacente (idempotent)."""
         session = getattr(self, "_session", None)
         if session is not None:
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 session.close()
             except Exception:  # noqa: BLE001 — best-effort cleanup
                 pass
@@ -116,7 +116,7 @@ class JellyfinClient:
     def __del__(self) -> None:
         # __del__ peut etre appele pendant l'interpreter shutdown ou apres
         # une exception dans __init__ — on protege tout.
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             self.close()
         except Exception:  # noqa: BLE001
             pass

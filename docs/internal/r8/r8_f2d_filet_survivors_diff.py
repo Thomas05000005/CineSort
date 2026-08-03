@@ -9,7 +9,9 @@
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2d_filet_survivors_diff.py
 """
+
 from __future__ import annotations
+
 import dataclasses
 import json
 import sqlite3
@@ -17,7 +19,6 @@ import sqlite3
 from cinesort.domain import core
 from cinesort.infra.db.migration_manager import _is_idempotent_error
 from cinesort.ui.api.run_data_support import candidate_from_json
-
 
 # Sequence d'une migration de RECONSTRUCTION (cf 021/025) : rebuild via table _new.
 _REBUILD_STMTS = [
@@ -58,9 +59,7 @@ def _replay(conn, *, swallow_integrity: bool):
                 continue
             raise
         except sqlite3.IntegrityError as exc:
-            if swallow_integrity and any(
-                f in str(exc).lower() for f in ("unique constraint failed", "primary key")
-            ):
+            if swallow_integrity and any(f in str(exc).lower() for f in ("unique constraint failed", "primary key")):
                 # AVANT : la politique R8-021 skippait -> x_new reste VIDE.
                 conn.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                 conn.execute(f"RELEASE SAVEPOINT {sp}")

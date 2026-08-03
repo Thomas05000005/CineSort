@@ -100,7 +100,7 @@ class PaginationTests(unittest.TestCase):
         self.assertIn("data-bibliotheque-sentinel", self.js)
 
     def test_page_size_constant(self) -> None:
-        self.assertIn("PAGE_SIZE = 60", self.js)
+        self.assertIn("PAGE_SIZE = 200", self.js)
 
 
 class DataFetchTests(unittest.TestCase):
