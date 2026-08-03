@@ -20,6 +20,7 @@ from typing import Any, Dict
 sys.path.insert(0, ".")
 
 from cinesort.domain import default_quality_profile
+from cinesort.infra.db import db_path_for_state_dir
 from cinesort.ui.api import profiles_support, reset_support
 
 
@@ -329,9 +330,15 @@ class ResetSettingsTests(unittest.TestCase):
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["scope"], "apparence")
         self.assertIn("theme", out["reset_keys"])
-        # Verifie que la valeur a bien ete reset au default "studio"
+        # Le theme doit revenir au defaut CANONIQUE, lu depuis la table des
+        # defaults de settings_support (source unique) — le hardcoder ici a deja
+        # perime une fois (defaut passe de "studio" a "luxe" sans MAJ du test).
+        from cinesort.ui.api.settings_support import _LITERAL_DEFAULTS
+
+        expected_theme = dict(_LITERAL_DEFAULTS).get("theme")
+        self.assertTrue(expected_theme, "default 'theme' absent de _LITERAL_DEFAULTS")
         current = self.api.settings.get_settings()
-        self.assertEqual(current.get("theme"), "studio")
+        self.assertEqual(current.get("theme"), expected_theme)
 
     def test_scope_profils_qualite_clears_active_id(self) -> None:
         self.api.settings._payload = {
@@ -401,7 +408,8 @@ class ResetDatabaseTests(unittest.TestCase):
 
     def test_backup_created_before_wipe(self) -> None:
         # Cree une fausse DB
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"SQLite format 3\x00" + b"DUMMY DATABASE CONTENT")
 
         out = reset_support.reset_database(self.api)
@@ -417,7 +425,8 @@ class ResetDatabaseTests(unittest.TestCase):
         self.assertFalse(db_path.exists())
 
     def test_backup_contents_preserved(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         magic = b"SQLite format 3\x00CONTENU_MAGIQUE"
         db_path.write_bytes(magic)
         out = reset_support.reset_database(self.api)
@@ -426,18 +435,20 @@ class ResetDatabaseTests(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), magic)
 
     def test_wal_and_shm_files_deleted(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"db")
-        (self.state_dir / "cinesort.db-wal").write_bytes(b"wal")
-        (self.state_dir / "cinesort.db-shm").write_bytes(b"shm")
+        (db_path.with_name(db_path.name + "-wal")).write_bytes(b"wal")
+        (db_path.with_name(db_path.name + "-shm")).write_bytes(b"shm")
         out = reset_support.reset_database(self.api)
         self.assertTrue(out["ok"], out)
         self.assertFalse(db_path.exists())
-        self.assertFalse((self.state_dir / "cinesort.db-wal").exists())
-        self.assertFalse((self.state_dir / "cinesort.db-shm").exists())
+        self.assertFalse((db_path.with_name(db_path.name + "-wal")).exists())
+        self.assertFalse((db_path.with_name(db_path.name + "-shm")).exists())
 
     def test_close_infra_called(self) -> None:
-        db_path = self.state_dir / "cinesort.db"
+        db_path = db_path_for_state_dir(self.state_dir)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"db")
         reset_support.reset_database(self.api)
         self.assertTrue(self.api._close_infra_called)

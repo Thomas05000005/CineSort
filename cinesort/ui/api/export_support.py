@@ -35,6 +35,10 @@ _SECRET_KEYS = frozenset(
         "smtp_password",
         "ntfy_topic_secret",
         "rest_api_token",
+        # [SEC-2] l'enveloppe chiffree ne doit pas non plus rider dans un export
+        # (blob DPAPI machine-bound : inutile ailleurs, mais on n'exporte pas de
+        # materiel secret meme chiffre).
+        "rest_api_token_secret",
         "omdb_api_key",
         "osdb_api_key",
     }
@@ -197,7 +201,9 @@ def export_full_library(api: Any) -> Dict[str, Any]:
             "film_count": len(films),
         }
     except (AttributeError, OSError, TypeError) as exc:
-        logger.error("export_full_library failed: %s", exc)
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
+        # (l'export echoue, l'app continue, l'utilisateur reverra le bouton retry)
+        logger.warning("export_full_library failed: %s", exc)
         return _err_response(f"Export echoue : {exc}", category="runtime", level="error", log_module=__name__)
 
 

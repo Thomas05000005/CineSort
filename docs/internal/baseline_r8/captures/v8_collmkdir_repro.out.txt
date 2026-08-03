@@ -1,0 +1,11 @@
+=== F-V7-COLLMKDIR repro (apply_single, mode reel) ===
+coll_dir len=222  target len=253 (killswitch a 259)
+AVANT: ['lib\\MovieSrc', 'lib\\MovieSrc\\movie.mkv']
+APRES: ['lib\\MovieSrc', 'lib\\MovieSrc\\movie.mkv', 'lib\\_Collection', 'lib\\_Collection\\SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS']
+  dossier saga cree VIDE orphelin : True  (path=SSSSSSSSSSSSSSSSSSSS...)
+  film toujours en source (skip)  : True
+  op MKDIR journalisee pour saga  : 0 (attendu 0 = mkdir brut)
+  film skippe (MAX_PATH)          : True
+
+VERDICT : CONFIRME (dossier saga vide orphelin + non journalise + film non deplace)
+RESUME: {"saga_dir_empty_orphan": true, "no_mkdir_op": true, "movie_skipped": true}

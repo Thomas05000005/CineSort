@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -20,9 +21,34 @@ class DevToolingContractsTests(unittest.TestCase):
 
     def test_requirements_dev_pins_quality_toolchain(self) -> None:
         self.assertIn("-r requirements.txt", self.requirements_dev)
-        self.assertIn("ruff>=", self.requirements_dev)
+        # ruff est EPINGLE EXACTEMENT depuis le 2026-08-02 (plus fort qu'un
+        # plancher `>=`) : une borne flottante avait mis la CI au rouge sur main,
+        # trois versions differentes cohabitant entre le hook pre-commit,
+        # uv.lock et la resolution fraiche de la CI.
+        self.assertRegex(
+            self.requirements_dev,
+            r"ruff==\d+\.\d+\.\d+",
+            "ruff doit rester epingle exactement, pas ramene a une borne flottante",
+        )
         self.assertIn("coverage>=", self.requirements_dev)
         self.assertIn("pre-commit>=", self.requirements_dev)
+
+    def test_ruff_version_is_identical_everywhere(self) -> None:
+        """Le hook pre-commit et requirements-dev doivent viser LA MEME version.
+
+        Sans cette garde, un developpeur formate avec la version du hook et la
+        CI rejette avec la sienne — c'est exactement la situation trouvee le
+        2026-08-02 (hook 0.15.6, lock 0.15.16, CI 0.15.22).
+        """
+        attendue = re.search(r"ruff==(\d+\.\d+\.\d+)", self.requirements_dev)
+        self.assertIsNotNone(attendue, "ruff doit etre epingle dans requirements-dev.txt")
+        hook = re.search(r"ruff-pre-commit\s*\n(?:\s*#.*\n)*\s*rev:\s*v(\d+\.\d+\.\d+)", self.pre_commit)
+        self.assertIsNotNone(hook, "le hook ruff-pre-commit doit declarer une rev versionnee")
+        self.assertEqual(
+            hook.group(1),
+            attendue.group(1),
+            "le hook pre-commit et requirements-dev.txt doivent viser la meme version de ruff",
+        )
 
     def test_pyproject_declares_ruff_and_coverage_settings(self) -> None:
         self.assertIn("[tool.ruff]", self.pyproject)

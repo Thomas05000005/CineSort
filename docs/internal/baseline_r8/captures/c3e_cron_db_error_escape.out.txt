@@ -1,0 +1,21 @@
+purge_quarantine cron: appel echoue ttl=90j err='_FakeRun' object has no attribute 'purge_quarantine_bucket'
+cleanup_old_runs cron: appel echoue retention=90j err=disk glitch
+cleanup_old_runs cron: appel echoue retention=90j err=x
+{
+  "T1_retention_sqlite_lock": {
+    "comportement": "RE-LEVE OperationalError (thread cron MEURT)",
+    "VERDICT": "BUG CONFIRME (cron meurt sur verrou DB)"
+  },
+  "T1b_quarantine_sqlite_lock": {
+    "comportement": "SWALLOW (cron survit)"
+  },
+  "T2_controle_OSError": {
+    "comportement": "SWALLOW (cron survit)",
+    "VERDICT": "harnais DISCRIMINE (OSError swallow, sqlite re-leve)"
+  },
+  "T3_taxonomie": {
+    "OperationalError_est_OSError": false,
+    "OperationalError_est_RuntimeError": false,
+    "OperationalError_base": "DatabaseError"
+  }
+}

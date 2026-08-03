@@ -37,6 +37,43 @@ export function safeUrl(u) {
 }
 
 /**
+ * Iter12 ETAPE 2 : construit une URL relative vers le proxy poster TMDb
+ * cote serveur (`/api/poster?id=...&size=...`).
+ *
+ * Le proxy serveur valide strictement :
+ *  - `id` doit matcher `^[1-9]\d{0,9}$` (entier positif, max 10 chiffres)
+ *  - `size` doit etre dans la whitelist FIGE `{w92, w185, w342, w500}`
+ *
+ * Cette fonction respecte les memes invariants cote client : si `tmdbId`
+ * n'est pas un entier strictement positif, ou si `size` n'est pas dans la
+ * whitelist, on retourne `""` (le caller doit fallback sur `poster_url`
+ * direct ou afficher un placeholder).
+ *
+ * Backward compat : tant que la CSP autorise encore `image.tmdb.org`
+ * (acquis 242cf339, leve plus tard apres preuve POSTERS_OK), un fallback
+ * sur l'`poster_url` direct reste fonctionnel.
+ *
+ * @param {number|string} tmdbId - id TMDb du film
+ * @param {string} size - taille demandee ("w92"|"w185"|"w342"|"w500")
+ * @returns {string} URL relative `/api/poster?...` ou "" si invalide
+ */
+export function posterProxyUrl(tmdbId, size, bust) {
+  const allowed = new Set(["w92", "w185", "w342", "w500"]);
+  if (!allowed.has(String(size))) return "";
+  const idNum = Number(tmdbId);
+  if (!Number.isInteger(idNum) || idNum <= 0 || idNum > 9999999999) return "";
+  // Pas besoin d'escape : les valeurs sont sanitize en amont (whitelist + entier).
+  let url = `/api/poster?id=${idNum}&size=${size}`;
+  // AUDIT 2026-06-14 (R7-8) : `bust` (timestamp) apres un "Recuperer jaquettes"
+  // -> force=1 fait re-telecharger l'image cote proxy (cache disque immuable
+  // 30j sinon) et v=<bust> force le navigateur a re-requeter. Absent au rendu
+  // normal (URL stable -> cache HTTP efficace).
+  const b = Number(bust);
+  if (Number.isFinite(b) && b > 0) url += `&force=1&v=${b}`;
+  return url;
+}
+
+/**
  * V2-D (a11y) : bascule l'attribut aria-busy d'un conteneur ARIA-live.
  * Utilise en wrap des appels async (fetch / apiPost) sur les vues a polling
  * pour annoncer aux lecteurs d'ecran "chargement en cours" puis "termine".

@@ -19,6 +19,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     SPECTRAL_CUTOFF_LOSSLESS,
     SPECTRAL_CUTOFF_LOSSY_HIGH,
@@ -32,8 +34,6 @@ from .constants import (
     SPECTRAL_SEGMENT_OFFSET_S,
     SPECTRAL_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)
