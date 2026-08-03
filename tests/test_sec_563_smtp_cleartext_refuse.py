@@ -238,6 +238,90 @@ class Garde1ConfigurationTests(_SmtpServerCase):
 
 
 # ---------------------------------------------------------------------------
+# Le message de refus doit nommer une sortie qui MARCHE
+# ---------------------------------------------------------------------------
+
+
+class MessageDeRefusTests(_SmtpServerCase):
+    """Un refus qui ne dit pas quoi faire est une impasse, pas un garde-fou.
+
+    Le serveur de ces tests est exactement le relais que le refus casse : il
+    annonce `AUTH` mais **pas** `STARTTLS` (`advertise_starttls = False`), et
+    rien n'ecoute en TLS implicite. Les deux sorties historiquement annoncees y
+    echouent toutes les deux — c'est mesure ici sur la vraie socket, pas
+    suppose. La seule qui aboutit est de retirer les identifiants, puisque
+    c'est leur presence qui declenche le refus (garde 1). Le message doit donc
+    la nommer.
+    """
+
+    advertise_starttls = False
+
+    def test_le_message_nomme_les_trois_sorties(self) -> None:
+        """ROUGE avant correctif : le message ne proposait que STARTTLS et 465.
+
+        On n'assert pas la phrase entiere (elle doit pouvoir etre reformulee)
+        mais les trois issues actionnables et les libelles exacts du formulaire
+        Parametres > Notifications > Rapports email (SMTP).
+        """
+        msg = email_report.CLEARTEXT_REFUSAL_MESSAGE
+
+        self.assertIn("STARTTLS", msg)
+        self.assertIn("465", msg)
+        self.assertIn("Utilisateur", msg, "le libelle exact du champ doit figurer dans le message")
+        self.assertIn("Mot de passe", msg, "le libelle exact du champ doit figurer dans le message")
+        self.assertIn(
+            "videz",
+            msg.lower(),
+            "la seule sortie qui marche pour un relais AUTH-sans-TLS doit etre dite, pas sous-entendue",
+        )
+        self.assertIn("n'a pas ete transmis", msg, "l'utilisateur doit savoir que le secret est reste chez lui")
+
+    def test_sortie_1_activer_starttls_echoue_sur_ce_relais(self) -> None:
+        """`smtplib` leve SMTPNotSupportedError : le serveur n'annonce pas la capacite."""
+        sent = self._send(email_smtp_tls=True)
+        snap = self.server.snapshot()
+
+        self.assertFalse(sent, "la premiere sortie annoncee ne peut pas aboutir sur ce relais")
+        self.assertEqual(snap["connections"], 1)
+        self.assert_no_secret_on_the_wire(snap)
+
+    def test_sortie_2_passer_en_465_echoue_sur_ce_relais(self) -> None:
+        """Basculer en TLS implicite ne marche que si le relais parle TLS.
+
+        On redirige le port du TLS implicite vers le relais en clair du test :
+        `send_email_report` prend alors la branche `SMTP_SSL`, et le handshake
+        se casse sur la banniere `220 ...` lue comme un enregistrement TLS.
+        Aucun mock du code teste : c'est un vrai `ssl` sur une vraie socket.
+        """
+        with mock.patch.object(email_report, "SMTP_IMPLICIT_TLS_PORT", self.port):
+            sent = self._send(email_smtp_tls=False)
+        snap = self.server.snapshot()
+
+        self.assertFalse(sent, "la deuxieme sortie annoncee ne peut pas aboutir sur ce relais")
+        self.assert_no_secret_on_the_wire(snap)
+
+    def test_sortie_3_vider_les_identifiants_debloque_reellement_lenvoi(self) -> None:
+        """La sortie que le message ajoute doit etre appliquee LITTERALEMENT et marcher.
+
+        Meme relais, meme session de test : d'abord le refus, puis la consigne
+        du message (« videz les champs Utilisateur et Mot de passe »), et le
+        rapport part.
+        """
+        refuse = self._send(email_smtp_tls=False)
+        self.assertFalse(refuse)
+        self.assertEqual(self.server.snapshot()["connections"], 0, "la garde 1 doit refuser avant d'ouvrir la socket")
+
+        sent = self._send(email_smtp_user="", email_smtp_password="", email_smtp_tls=False)
+        snap = self.server.snapshot()
+
+        self.assertTrue(sent, "la sortie annoncee par le message doit reellement debloquer l'envoi")
+        self.assertEqual(snap["connections"], 1)
+        verbs = [c.split(" ", 1)[0].upper() for c in snap["commands"]]
+        self.assertIn("DATA", verbs, f"le rapport doit avoir ete remis ; commandes = {snap['commands']!r}")
+        self.assert_no_secret_on_the_wire(snap)
+
+
+# ---------------------------------------------------------------------------
 # GARDE 2 — refus sur le transport reellement negocie
 # ---------------------------------------------------------------------------
 
@@ -359,6 +443,11 @@ class TestEmailButtonReportsTheReasonTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("STARTTLS", result["message"])
         self.assertIn("465", result["message"])
+        # La sortie qui marche pour un relais AUTH-sans-TLS doit atteindre
+        # l'ECRAN, pas seulement le commentaire du code : c'est ici que
+        # l'utilisateur lit le motif.
+        self.assertIn("videz", result["message"].lower())
+        self.assertIn("Mot de passe", result["message"])
         envoi.assert_not_called()
 
     def test_configuration_saine_declenche_bien_lenvoi(self) -> None:

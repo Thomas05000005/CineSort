@@ -31,9 +31,20 @@ SMTP_IMPLICIT_TLS_PORT = 465
 
 # Message unique (log serveur + reponse du bouton "Tester l'envoi") pour que
 # l'utilisateur sache quoi corriger, et qu'il sache que rien n'a ete transmis.
+#
+# Les TROIS sorties sont nommees, pas deux. L'utilisateur que ce refus casse est
+# precisement celui pour qui les deux premieres echouent : un relais qui exige
+# AUTH sans offrir TLS (petit MTA de NAS, relais loopback). Chez lui, "activez
+# STARTTLS" leve SMTPNotSupportedError et rien n'ecoute en TLS implicite sur
+# 465 ; la seule issue est de retirer les identifiants — c'est leur presence qui
+# declenche le refus, cf. la garde 1. Un message qui ne la nomme pas transforme
+# le garde-fou en impasse. Les libelles cites ("Utilisateur", "Mot de passe")
+# sont ceux du formulaire Parametres > Notifications > Rapports email (SMTP).
 CLEARTEXT_REFUSAL_MESSAGE = (
     "Envoi refuse : un mot de passe SMTP est configure mais la session ne serait pas "
-    "chiffree. Activez STARTTLS, ou utilisez le port 465. Le mot de passe n'a pas ete transmis."
+    "chiffree. Activez STARTTLS, utilisez le port 465, ou — si votre relais n'exige pas "
+    "d'authentification — videz les champs Utilisateur et Mot de passe. "
+    "Le mot de passe n'a pas ete transmis."
 )
 
 
@@ -158,8 +169,9 @@ def send_email_report(
     # Cas legitime que ce refus casse, assume : un relais qui exige AUTH sans
     # offrir TLS (petit MTA de NAS, meme en loopback). Aucune exemption n'est
     # prevue — une branche permissive sur un chemin qui transporte un secret,
-    # c'est exactement le defaut qu'on corrige. La sortie est a un clic :
-    # activer STARTTLS, passer en 465, ou retirer les identifiants.
+    # c'est exactement le defaut qu'on corrige. Pour CE relais, activer STARTTLS
+    # et passer en 465 echouent tous les deux ; la sortie qui aboutit est de
+    # vider les identifiants, et CLEARTEXT_REFUSAL_MESSAGE la nomme.
     #
     # Le log ne reprend NI l'hote NI le port : le message dit deja quoi
     # corriger, la configuration est sous les yeux de l'utilisateur, et les

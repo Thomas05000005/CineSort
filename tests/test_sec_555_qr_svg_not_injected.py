@@ -24,11 +24,50 @@ chaine qu'on inspecte, pas une reimplementation.
 from __future__ import annotations
 
 import json
+import subprocess
 import unittest
 
-from tests._jsexec import ROOT, node_check, require_node, run_module_test
+from tests._jsexec import ROOT, require_node, run_module_test
 
 JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
+
+# Erreur de syntaxe deterministe, utilisee comme CANARI : elle sert a prouver
+# que le verificateur sait rougir avant qu'on accepte son verdict positif.
+SYNTAXE_CASSEE = "\nfunction ((( casse volontaire {{{\n"
+
+
+def verifier_syntaxe_module(source: str) -> subprocess.CompletedProcess:
+    """Analyse `source` en goal MODULE, le goal etant impose EXPLICITEMENT.
+
+    `node --check <chemin>` ne convient pas ici, et le mesurer coute une ligne :
+    sur Node v24.14.1, depot sans `package.json` declarant `"type": "module"`,
+
+        node --check web/dashboard/views/parametres.js   -> rc=0  (intact)
+        node --check web/dashboard/views/parametres.js   -> rc=0  (CASSE)
+
+    Le fichier est un module ESM ; la detection de syntaxe de module de Node
+    s'interpose et le processus sort en 0 sans jamais reverifier la source dans
+    le goal « module ». Une assertion `returncode == 0` batie dessus ne peut
+    pas echouer — c'est un test vacant, pas une non-regression. Le meme faux
+    vert touche 47 des 48 `.js` de `web/dashboard/` (cf. PR #886).
+
+    On passe donc le goal explicitement (`--input-type=module`) et la source
+    arrive sur stdin : le verdict ne depend ni de l'extension du fichier, ni de
+    la presence d'un `package.json`. C'est la technique que PR #886 cable a
+    l'echelle de l'arbre dans `scripts/check_js_syntax.mjs` (avec inventaire
+    des `<script src>` et canaris) ; une fois ce lot fusionne, cet appel pourra
+    lui deleguer sans changer une seule assertion.
+    """
+    return subprocess.run(
+        ["node", "--input-type=module", "--check"],
+        input=source,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
 
 STUBS = r"""
 globalThis.__qrPayload = { ok: true, svg: "", url: "http://192.168.1.20:8642/dashboard/" };
@@ -202,8 +241,37 @@ __emit({
         self.assertEqual(res["indef"], "")
         self.assertEqual(res["espaces"], "")
 
+    def test_le_verificateur_de_syntaxe_sait_rougir(self) -> None:
+        """CANARI — sans lui, le vert du test suivant ne prouverait rien.
+
+        On prend la VRAIE source du module, on y injecte une erreur de syntaxe
+        averee, et on exige que le verificateur la refuse. C'est exactement ce
+        qu'on ne pouvait PAS obtenir avec `node --check <chemin>` : il sortait
+        en 0 sur ce meme fichier casse. Le canari porte sur le fichier reel, pas
+        sur un extrait, donc il couvre aussi une eventuelle particularite de la
+        source (taille, caracteres accentues, top-level await...).
+
+        Rien n'est ecrit sur disque : le fichier du depot n'est jamais touche.
+        """
+        proc = verifier_syntaxe_module(JS.read_text(encoding="utf-8") + SYNTAXE_CASSEE)
+
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            "le verificateur accepte une source cassee : son verdict positif ne vaut rien",
+        )
+        self.assertIn("SyntaxError", proc.stderr, f"echec pour une autre raison que la syntaxe :\n{proc.stderr}")
+
     def test_nonreg_syntaxe_du_module(self) -> None:
-        node_check(self, JS)
+        """Le module de production doit rester analysable en goal MODULE.
+
+        Complementaire des tests ci-dessus : `run_module_test` neutralise les
+        `import` avant d'executer, donc une faute DANS une declaration d'import
+        lui echapperait. Ici la source est verifiee telle qu'elle est livree.
+        """
+        proc = verifier_syntaxe_module(JS.read_text(encoding="utf-8"))
+
+        self.assertEqual(proc.returncode, 0, f"syntaxe invalide dans {JS.name} :\n{proc.stderr}")
 
 
 class QrBackendPayloadTests(unittest.TestCase):
