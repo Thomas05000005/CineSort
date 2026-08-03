@@ -174,7 +174,7 @@ def _score_hdr(video: Any, normalized_probe: Optional[Dict[str, Any]]) -> Tuple[
 
     if has_dv and dv_profile == "5":
         flags.append("dv_profile_5")
-    if has_hdr10 and (max_cll is None or max_fall is None):
+    if has_hdr10 and (not max_cll or not max_fall):
         flags.append("hdr_metadata_missing")
 
     if has_dv and dv_profile in ("8.1", "8.2", "8.4"):
@@ -298,13 +298,13 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
         return 50.0, 0.0, "bronze"
     verdict = str(getattr(audio, "lossy_verdict", "unknown") or "unknown")
     conf = float(getattr(audio, "lossy_confidence", 0) or 0)
-    if verdict == "lossless":
+    if verdict in ("lossless", "lossless_native_nyquist", "lossless_vintage_master"):
         return 100.0, max(conf, 0.8), "platinum"
-    if verdict == "high_bitrate_lossy":
+    if verdict == "lossy_high":
         return 75.0, max(conf, 0.7), "gold"
-    if verdict == "medium_bitrate_lossy":
+    if verdict == "lossy_mid":
         return 55.0, max(conf, 0.7), "silver"
-    if verdict == "low_bitrate_lossy":
+    if verdict == "lossy_low":
         return 30.0, max(conf, 0.7), "bronze"
     return 60.0, 0.0, "bronze"
 
