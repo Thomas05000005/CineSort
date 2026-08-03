@@ -356,6 +356,23 @@ class CanonicalAudioCodecTests(unittest.TestCase):
         self.assertEqual(crit.winner, "a")
         self.assertEqual(compare_duplicates(remux, webdl).winner, "a")
 
+    def test_duplicate_comparator_reads_the_probe_profile_field(self) -> None:
+        """Le comparateur doit voir DTS-HD MA meme quand il recoit une piste
+        ffprobe brute (codec='dts' + profile='DTS-HD MA')."""
+        a = {"video": {"height": 1080, "codec": "h264"}, "audio_tracks": [dict(_DTS_HD_MA)]}
+        b = {"video": {"height": 1080, "codec": "h264"}, "audio_tracks": [{"codec": "eac3", "channels": 6}]}
+        crit = next(c for c in compare_by_criteria(a, b) if c.name == "audio_codec")
+        self.assertEqual((crit.value_a, crit.value_b, crit.winner), ("dts-hd ma", "ac3", "a"))
+
+    def test_composed_canonical_labels_keep_their_rank_in_the_comparator(self) -> None:
+        """Les etiquettes composees ('truehd atmos') ne sont pas des cles exactes
+        de AUDIO_CODEC_RANK : sans table d'alias elles tomberaient a 0, soit sous
+        l'AC3 du fichier concurrent."""
+        a = {"video": {"height": 1080, "codec": "h264"}, "audio_tracks": [{"codec": "truehd atmos", "channels": 8}]}
+        b = {"video": {"height": 1080, "codec": "h264"}, "audio_tracks": [{"codec": "ac3", "channels": 6}]}
+        crit = next(c for c in compare_by_criteria(a, b) if c.name == "audio_codec")
+        self.assertEqual(crit.winner, "a")
+
 
 if __name__ == "__main__":
     unittest.main()
