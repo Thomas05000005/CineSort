@@ -10,13 +10,15 @@ Fixture RÉELLE (PLAN A) : FLAC 6ch (lossless, rank 3, bitrate VBR N/A) + EAC3 6
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_codec_diff.py [ffprobe] [file.mkv]
 """
+
 from __future__ import annotations
+
 import json
 import subprocess
 import sys
 
-from cinesort.domain.quality_score import _best_audio_track, _to_int
 from cinesort.domain.duplicate_compare import _best_audio as _dup_best_audio
+from cinesort.domain.quality_score import _best_audio_track, _to_int
 
 
 def _avant_best(tracks):
@@ -28,19 +30,32 @@ def _avant_best(tracks):
 
 def _probe_tracks(ffprobe, path):
     out = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "a",
-         "-show_entries", "stream=codec_name,channels,bit_rate", "-of", "json", path],
-        capture_output=True, text=True,
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_name,channels,bit_rate",
+            "-of",
+            "json",
+            path,
+        ],
+        capture_output=True,
+        text=True,
     )
     streams = json.loads(out.stdout).get("streams", [])
     tracks = []
     for s in streams:
         br = s.get("bit_rate")
-        tracks.append({
-            "codec": s.get("codec_name"),
-            "channels": s.get("channels"),
-            "bitrate": int(br) if (br and str(br).isdigit()) else None,
-        })
+        tracks.append(
+            {
+                "codec": s.get("codec_name"),
+                "channels": s.get("channels"),
+                "bitrate": int(br) if (br and str(br).isdigit()) else None,
+            }
+        )
     return tracks
 
 
@@ -73,16 +88,19 @@ def run(ffprobe=None, path=None):
 
     # Le lossless attendu = la piste de plus haut rang codec.
     from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK
+
     expected = max(tracks, key=lambda t: AUDIO_CODEC_RANK.get(str(t.get("codec") or "").lower(), 0)).get("codec")
 
     results = {
-        "R8039_avant_picks_lossy": av_codec != expected,       # AVANT se trompe
-        "R8039_apres_picks_lossless": ap_codec == expected,    # APRÈS correct
-        "R8039_agrees_with_dup": ap_codec == dup_codec,        # plus de divergence
+        "R8039_avant_picks_lossy": av_codec != expected,  # AVANT se trompe
+        "R8039_apres_picks_lossless": ap_codec == expected,  # APRÈS correct
+        "R8039_agrees_with_dup": ap_codec == dup_codec,  # plus de divergence
     }
     print(f"  attendu (plus haut rang) = {expected}")
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (APRÈS = lossless = duplicate_compare ; AVANT prenait la lossy)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (APRÈS = lossless = duplicate_compare ; AVANT prenait la lossy)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

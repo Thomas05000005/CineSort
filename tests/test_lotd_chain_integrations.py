@@ -262,9 +262,7 @@ def test_jellyfin_connection_erreur_propre_port_ferme(tmp_path: Path) -> None:
 def test_radarr_connection_erreur_propre_port_ferme(tmp_path: Path) -> None:
     closed = find_free_port()
     api = _make_api(tmp_path)
-    res = api.integrations.test_radarr_connection(
-        url=f"http://127.0.0.1:{closed}", api_key="ra-mock-key", timeout_s=2
-    )
+    res = api.integrations.test_radarr_connection(url=f"http://127.0.0.1:{closed}", api_key="ra-mock-key", timeout_s=2)
     assert res["ok"] is False, res
     # RadarrClient.validate_connection renvoie {'ok': False, 'error': ...}
     assert str(res.get("error") or res.get("message") or "").strip(), f"erreur vide : {res}"
@@ -504,9 +502,7 @@ def test_aucun_secret_en_clair_dans_les_logs(
             assert "[REDACTED]" in line, f"api_key non caviarde : {line[:200]!r}"
 
 
-def test_lotd_int_03_message_erreur_tmdb_ne_leak_pas_la_cle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_lotd_int_03_message_erreur_tmdb_ne_leak_pas_la_cle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """LOTD-INT-03 : le message renvoye au FRONTEND par test_tmdb_key en echec
     reseau ('Erreur reseau: {exc}') ne doit pas contenir la cle API (politique
     repo : cf _safe_integration_error 'ne pas leak exc string'). L'exception

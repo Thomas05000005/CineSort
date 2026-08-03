@@ -8,6 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 APP_NAME = "CineSort"
 _DEBUG_ENV_VALUES = {"1", "true", "yes", "on", "debug"}

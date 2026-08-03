@@ -397,10 +397,7 @@ def get_probe(
             "ok": False,
             "error": "probe_unavailable",
             "message": str(exc),
-            "user_message": (
-                "Impossible de recuperer la probe du fichier. Le scan est "
-                "peut-etre obsolete."
-            ),
+            "user_message": ("Impossible de recuperer la probe du fichier. Le scan est peut-etre obsolete."),
         }
 
 

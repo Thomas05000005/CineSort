@@ -123,9 +123,7 @@ def chain() -> Dict[str, Any]:
         d = root / folder
         d.mkdir()
         (d / f"{folder}.mkv").write_bytes(b"\x1aE\xdf\xa3" + b"x" * 4096)
-        (d / f"{folder}.fr.srt").write_text(
-            "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8"
-        )
+        (d / f"{folder}.fr.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8")
 
     patcher = mock.patch.object(core, "MIN_VIDEO_BYTES", 1)
     patcher.start()
@@ -267,8 +265,7 @@ class TestScoringNameFallback:
             raw_tier = th.determine_tier(score)
             expected = th.cap_tier(raw_tier, "Silver") if rep.get("probe_quality") == "FAILED" else raw_tier
             assert rep.get("tier") == expected, (
-                f"[{key}] score={score} determine_tier={raw_tier} attendu={expected} "
-                f"obtenu={rep.get('tier')}"
+                f"[{key}] score={score} determine_tier={raw_tier} attendu={expected} obtenu={rep.get('tier')}"
             )
             assert rep.get("tier") in _CANONICAL_TIERS_V1, rep.get("tier")
 
@@ -418,9 +415,7 @@ class TestCustomRulesViaApi:
         before = int(chain["reports"]["uhd"]["score"])
         after_rep = chain["reports_after_rule"]["uhd"]
         after = int(after_rep["score"])
-        assert after == min(100, before + _RULE_DELTA), (
-            f"score_delta +{_RULE_DELTA} attendu: {before} -> {after}"
-        )
+        assert after == min(100, before + _RULE_DELTA), f"score_delta +{_RULE_DELTA} attendu: {before} -> {after}"
         metrics = after_rep.get("metrics") or {}
         assert metrics.get("applied_rule_ids") == [_RULE_ID], metrics.get("applied_rule_ids")
         assert any("Bonus UHD LotD" in r for r in (after_rep.get("reasons") or []))

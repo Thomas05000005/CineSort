@@ -80,6 +80,7 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
     coherent avec le reste de l'app).
     """
     import json  # noqa: PLC0415 — import local pour eviter pollution du module
+
     settings_file = state_dir / "settings.json"
     if not settings_file.exists():
         return ""
@@ -108,6 +109,7 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
                     SecretStorageError,
                     load_secret,
                 )
+
                 result = load_secret("tmdb_api_key", blob_b64)
                 return str(result.value or "").strip()
             except (ImportError, SecretStorageError, Exception) as exc:  # noqa: BLE001 — boundary
@@ -713,13 +715,9 @@ def serve_poster(
                 pass
 
         # 3. Orchestrer cache hit / fetch.
-        cache_file, content_type, error_code = get_or_fetch(
-            tmdb_client, cache_root, tmdb_id, size
-        )
+        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
         if error_code is not None:
-            status, category, message = _HTTP_ERROR_MAP.get(
-                error_code, (502, "runtime", "Upstream error")
-            )
+            status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
             _respond_error_json(handler, status, category, message)
             return
 
@@ -766,6 +764,7 @@ def _respond_error_json(
 ) -> None:
     """Reponse JSON d'erreur conforme au pattern `_err_response` de l'app."""
     import json  # noqa: PLC0415
+
     body = json.dumps(
         {"ok": False, "category": category, "message": message},
         ensure_ascii=False,

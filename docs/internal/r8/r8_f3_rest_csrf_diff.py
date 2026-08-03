@@ -15,7 +15,9 @@ Double diff : (1) attaque fermee ; (2) usage loopback legitime intact.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f3_rest_csrf_diff.py
 """
+
 from __future__ import annotations
+
 import contextlib
 import json
 import socket
@@ -41,6 +43,7 @@ def _avant_allowed_origin_localhost(origin: str, own_port: int) -> bool:
     """Replique le comportement AVANT R8-031 : tout host loopback autorise,
     PORT IGNORE. (Pour montrer le gap qui existait.)"""
     from urllib.parse import urlsplit
+
     host = (urlsplit(origin).hostname or "").lower()
     return host in {"127.0.0.1", "localhost", "::1"}  # any port -> allowed
 
@@ -92,16 +95,26 @@ def run():
         print("=== R8-030 : GET /api/poster?...&force=1 ===")
         # (1) ATTAQUE : <img> cross-site (Sec-Fetch-Site: cross-site, pas d'Origin).
         captured.clear()
-        _request(port, "GET", "/api/poster?id=550&size=w500&force=1",
-                 headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"})
+        _request(
+            port,
+            "GET",
+            "/api/poster?id=550&size=w500&force=1",
+            headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"},
+        )
         force_after_crosssite = "force" in captured.get("query", {})
         results["R8030_attaque_force_neutralise_crosssite"] = not force_after_crosssite
-        print(f"  (1) ATTAQUE cross-site : force recu par le proxy = {force_after_crosssite} (attendu False -> neutralise)")
+        print(
+            f"  (1) ATTAQUE cross-site : force recu par le proxy = {force_after_crosssite} (attendu False -> neutralise)"
+        )
 
         # (2a) LEGITIME : <img> same-origin (Sec-Fetch-Site: same-origin).
         captured.clear()
-        _request(port, "GET", "/api/poster?id=550&size=w500&force=1",
-                 headers={"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "image"})
+        _request(
+            port,
+            "GET",
+            "/api/poster?id=550&size=w500&force=1",
+            headers={"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "image"},
+        )
         force_same_origin = "force" in captured.get("query", {})
         results["R8030_legitime_force_conserve_sameorigin"] = force_same_origin
         print(f"  (2a) LEGITIME same-origin : force conserve = {force_same_origin} (attendu True)")
@@ -121,14 +134,16 @@ def run():
         print(f"  AVANT (replique) localhost:{other} autorise = {avant_allow} (gap CSRF)")
 
         # (1) ATTAQUE : POST avec Origin http://localhost:<autre_port> -> 403 (cross-site).
-        st_attack = _request(port, "POST", "/api/run/get_dashboard",
-                             headers={"Origin": f"http://localhost:{other}"}, body={})
+        st_attack = _request(
+            port, "POST", "/api/run/get_dashboard", headers={"Origin": f"http://localhost:{other}"}, body={}
+        )
         results["R8031_attaque_autre_port_403"] = st_attack == 403
         print(f"  (1) ATTAQUE Origin localhost:{other} -> HTTP {st_attack} (attendu 403)")
 
         # (2) LEGITIME : POST avec Origin du serveur (meme port) -> PAS 403.
-        st_same = _request(port, "POST", "/api/run/get_dashboard",
-                           headers={"Origin": f"http://127.0.0.1:{port}"}, body={})
+        st_same = _request(
+            port, "POST", "/api/run/get_dashboard", headers={"Origin": f"http://127.0.0.1:{port}"}, body={}
+        )
         results["R8031_legitime_meme_port_pas_403"] = st_same != 403
         print(f"  (2) LEGITIME Origin 127.0.0.1:{port} -> HTTP {st_same} (attendu != 403)")
 
@@ -146,7 +161,9 @@ def run():
         server.stop()
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (R8-030 + R8-031 : attaques fermees, loopback legitime intact)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (R8-030 + R8-031 : attaques fermees, loopback legitime intact)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 
