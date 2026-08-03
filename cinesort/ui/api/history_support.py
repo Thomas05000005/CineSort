@@ -81,11 +81,26 @@ def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[st
     return present
 
 
+def _full_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, Any]]) -> set:
+    """Langues avec une piste EMBARQUÉE complète (non forcée), pour une row de PAYLOAD.
+
+    F12 : réconcilie `subtitle_forced_only_<lang>` quand le film a en réalité une piste
+    complète MUXÉE que le scan n'a pas vue. On ne lit PAS `row["subtitle_languages"]` :
+    ce champ ne distingue pas une piste forcée d'une piste complète (cf. la garde de
+    `reconcile_subtitle_flags`)."""
+    from cinesort.ui.api.run_read_support import full_langs_from_embedded
+
+    qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
+    metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+    return full_langs_from_embedded(metrics.get("subtitles_embedded"))
+
+
 def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """[écran Traitement/Vérification] Enrichit chaque row du payload :
       - ``display_title`` : titre sans l'année dupliquée (colonne ANNÉE séparée),
       - ``warning_flags`` : réconciliés — retire les faux ``subtitle_missing_<lang>``
-        dont la langue est en fait présente (FR muxé ignoré au scan),
+        dont la langue est en fait présente (FR muxé ignoré au scan) et les faux
+        ``subtitle_forced_only_<lang>`` démentis par une piste muxée COMPLÈTE,
       - ``auto_approvable`` : bool (le frontend filtre « à examiner » sur NON auto_approvable
         et affiche « Cas à vérifier » = nombre de NON auto_approvable, cohérent backend).
     Best-effort : toute erreur (store/settings/quality indisponible) laisse le payload intact.
@@ -134,7 +149,9 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
                 flags = row.get("warning_flags")
                 if isinstance(flags, list) and qr_by_id:
                     present = _present_langs_from_payload(row, qr_by_id)
-                    row["warning_flags"] = reconcile_subtitle_flags(flags, present)
+                    row["warning_flags"] = reconcile_subtitle_flags(
+                        flags, present, _full_langs_from_payload(row, qr_by_id)
+                    )
                 # 3) auto_approvable (sur les flags réconciliés). to_int : robuste à un
                 #    proposed_year/confidence non numérique (n'abandonne pas la boucle).
                 cur = {str(f) for f in (row.get("warning_flags") or [])}

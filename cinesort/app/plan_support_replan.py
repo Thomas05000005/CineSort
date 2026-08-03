@@ -472,6 +472,16 @@ def _apply_subtitle_detection(
         flag = f"subtitle_missing_{missing_lang}"
         if flag not in result_row.warning_flags:
             result_row.warning_flags.append(flag)
+    # F12 / arbitrage produit tranche le 2026-08-03 : langue attendue couverte
+    # UNIQUEMENT par une piste forcee (= incrustations, pas de traduction des
+    # dialogues). Flag DISTINCT de `subtitle_missing_<lang>` : la langue est bel
+    # et bien detectee, donc un flag `missing` serait efface par les
+    # reconciliations de lecture (run_read_support / duplicate_support /
+    # library_support / dashboard_support). Voir subtitle_helpers.
+    for forced_lang in sub_report.forced_only_languages:
+        flag = f"subtitle_forced_only_{forced_lang}"
+        if flag not in result_row.warning_flags:
+            result_row.warning_flags.append(flag)
     if sub_report.orphans > 0 and "subtitle_orphan" not in result_row.warning_flags:
         result_row.warning_flags.append("subtitle_orphan")
     if sub_report.duplicate_languages and "subtitle_duplicate_lang" not in result_row.warning_flags:
@@ -497,9 +507,15 @@ _POST_SUBTITLE_FLAGS = ("not_a_movie", "integrity_header_invalid")
 
 
 def _is_subtitle_flag(flag: Any) -> bool:
-    """True pour les flags produits par `_apply_subtitle_detection`."""
+    """True pour les flags produits par `_apply_subtitle_detection`.
+
+    `subtitle_forced_only_*` (F12, 2026-08-03) DOIT y figurer : sans lui, un
+    flag perime resterait colle a une row servie par le cache row v2 exactement
+    comme le `subtitle_missing_*` de F09 (l'utilisateur remplace son
+    '.fr.forced.srt' par un '.fr.srt' complet, l'alerte ne part jamais).
+    """
     text = str(flag)
-    return text.startswith("subtitle_missing_") or text in _SUBTITLE_DERIVED_FLAGS
+    return text.startswith(("subtitle_missing_", "subtitle_forced_only_")) or text in _SUBTITLE_DERIVED_FLAGS
 
 
 def _refresh_subtitle_detection(
