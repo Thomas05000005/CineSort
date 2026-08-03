@@ -1,0 +1,10 @@
+=== F-V8-COLL-ATOMIC repro (apply_collection_item, move video echoue) ===
+  exception remontee (non geree intra-row) : '[simule] fichier verrouille: Film.2020.1080p.mkv'
+  VIDEO toujours en source (non deplacee)  : True
+  SIDECARS deja dans sub_dir/              : ['Film.2020.1080p.nfo', 'Film.2020.1080p.srt']
+  sidecars source restants                 : []
+  ledger dedup marque la video 'vue'       : True (=> retry skipperait la video)
+  op de ROLLBACK compensatoire emise       : 0 (attendu 0)
+
+VERDICT : CONFIRME (item collection a moitie applique: sidecars deplaces, video bloquee, aucun rollback)
+RESUME: {"half_applied": true, "sidecars_moved": true, "video_stuck": true, "no_rollback": true, "dedup_poisoned": true}

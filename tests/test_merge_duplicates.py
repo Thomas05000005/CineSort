@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import cinesort.app.plan_support as plan_support
 import cinesort.app.apply_core as apply_core
+import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 
 

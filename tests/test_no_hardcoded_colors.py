@@ -16,7 +16,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 # Hardcodes toleres : tier colors (invariantes), severities du design system v5,
 # couleurs de marque services tiers, contrastes purs.
 ALLOWED_HARDCODES = {

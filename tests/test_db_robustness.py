@@ -199,9 +199,12 @@ class DbLockingTests(unittest.TestCase):
             # synchronous = NORMAL : economise un fsync par commit en WAL
             sync = conn.execute("PRAGMA synchronous").fetchone()[0]
             self.assertEqual(int(sync), 1)  # 1 = NORMAL (0=OFF, 2=FULL, 3=EXTRA)
-            # cache_size = -65536 : 64 MB de cache page (negatif = KB)
+            # VO-A backend : cache_size = -20000 (~20 MB) sur profil local_*.
+            # Cf cinesort.infra.db.pragma_profile.PROFILES['local_ssd'].
+            # Ancien comportement (avant VO-A) : -65536. La refacto a centralise
+            # cette valeur dans le profil PRAGMA stockage-specifique.
             cache = conn.execute("PRAGMA cache_size").fetchone()[0]
-            self.assertEqual(int(cache), -65536)
+            self.assertEqual(int(cache), -20000)
             # temp_store = MEMORY : tables temp/index en RAM
             temp_store = conn.execute("PRAGMA temp_store").fetchone()[0]
             self.assertEqual(int(temp_store), 2)  # 2 = MEMORY (0=DEFAULT, 1=FILE)

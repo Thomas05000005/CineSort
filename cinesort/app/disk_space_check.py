@@ -72,10 +72,7 @@ def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     total = 0
     for row in rows or []:
         rid = str(getattr(row, "row_id", "") or "")
-        # Rows sans row_id ne peuvent pas etre dans approved_keys -> on les ignore
-        # plutot que de les inclure d'office (avant : `if rid and rid not in approved_keys: continue`
-        # comptait toujours les rows sans rid -> inflation et false positive "disk full").
-        if not rid or rid not in approved_keys:
+        if rid and rid not in approved_keys:
             continue
         total += _row_estimated_size(row)
     return total
