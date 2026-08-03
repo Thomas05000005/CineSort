@@ -31,8 +31,8 @@ from typing import Any, Dict
 from unittest import mock
 
 import cinesort.domain.core as core
-from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -148,10 +148,18 @@ class GoldenPathFlowTests(_GoldenFlowsBase):
         apply_batch_id = str(applied["apply_batch_id"])
 
         # 4) Verifier filesystem
-        expected_dir = self.root / core.windows_safe(f"{row['proposed_title']} ({row['proposed_year']})")
-        expected_video = expected_dir / source_video.name
         self.assertFalse(source_dir.exists(), source_dir)
-        self.assertTrue(expected_dir.exists(), expected_dir)
+        # Le nom du dossier cible vient du moteur de nommage (template par
+        # defaut "{title} ({year})"). On observe le dossier reellement cree au
+        # lieu de recopier la formule, puis on epingle le resultat metier :
+        # "Inception 2010" + 2010 -> "Inception (2010)", jamais
+        # "Inception 2010 (2010)" — l'annee de queue redondante du titre propose
+        # est retiree par naming._apply_template (fix double-annee disque).
+        applied_dirs = sorted(p.name for p in self.root.iterdir() if p.is_dir())
+        self.assertEqual(applied_dirs, ["Inception (2010)"], applied_dirs)
+        expected_dir = self.root / applied_dirs[0]
+        # Le fichier video n'est jamais renomme : seul le dossier parent change.
+        expected_video = expected_dir / source_video.name
         self.assertTrue(expected_video.exists(), expected_video)
 
         # 5) Verifier DB : run DONE + batch DONE + operations PENDING undo

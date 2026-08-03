@@ -1,0 +1,78 @@
+<!doctype html>
+<!-- R8-076 — fixture jetable : mesure du contraste WCAG de .omdb-status--error par thème.
+     Non commité dans le bundle ; sert au différentiel Playwright (getComputedStyle + compositing alpha). -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../../../web/shared/tokens.css">
+<link rel="stylesheet" href="../../../../web/shared/typography.css">
+<link rel="stylesheet" href="../../../../web/shared/themes.css">
+<link rel="stylesheet" href="../../../../web/shared/components.css?v=r8076b">
+<style>
+  .theme-wrap { background: var(--bg); padding: 24px; }
+  .card { background: var(--bg-raised); padding: 16px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const THEMES = ["studio", "cinema", "luxe", "neon", "aaa"];
+const root = document.getElementById("root");
+for (const t of THEMES) {
+  const w = document.createElement("div");
+  w.className = "theme-wrap"; w.setAttribute("data-theme", t); w.dataset.themeName = t;
+  w.innerHTML = `<div class="card">
+    <span class="omdb-status omdb-status--error" role="status" data-omdb="${t}">
+      <span class="omdb-status__icon" aria-hidden="true">X</span>
+      <span class="omdb-status__label">Cle invalide</span>
+      <span class="omdb-status__hint">Verifiez votre cle sur omdbapi.com</span>
+    </span></div>`;
+  root.appendChild(w);
+}
+
+// --- contraste WCAG avec compositing alpha sur la chaine de parents ---
+function srgbToLin(c) { c /= 255; return c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); }
+function lum(r,g,b) { return 0.2126*srgbToLin(r)+0.7152*srgbToLin(g)+0.0722*srgbToLin(b); }
+function parseRGBA(s) {
+  const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return null;
+  const p = m[1].split(",").map(x => parseFloat(x.trim()));
+  return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+}
+function over(fg, bg) { // fg (avec alpha) au-dessus de bg (opaque)
+  const a = fg.a;
+  return { r: fg.r*a + bg.r*(1-a), g: fg.g*a + bg.g*(1-a), b: fg.b*a + bg.b*(1-a), a: 1 };
+}
+function effectiveBg(el) {
+  // remonte la chaine, composite les backgrounds non transparents jusqu'a opaque
+  let stack = [];
+  let node = el;
+  while (node && node !== document.documentElement) {
+    const bg = parseRGBA(getComputedStyle(node).backgroundColor);
+    if (bg && bg.a > 0) stack.push(bg);
+    if (bg && bg.a === 1) break;
+    node = node.parentElement;
+  }
+  // base opaque par defaut : noir (pire cas si rien d'opaque trouve)
+  let acc = { r: 0, g: 0, b: 0, a: 1 };
+  for (let i = stack.length - 1; i >= 0; i--) acc = over(stack[i], acc);
+  return acc;
+}
+function contrast(el) {
+  const fg = parseRGBA(getComputedStyle(el).color);
+  const bg = effectiveBg(el);
+  const fgOnBg = fg.a < 1 ? over(fg, bg) : fg;
+  const l1 = lum(fgOnBg.r, fgOnBg.g, fgOnBg.b), l2 = lum(bg.r, bg.g, bg.b);
+  const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  return Math.round(ratio * 100) / 100;
+}
+window.__measure = function () {
+  const out = {};
+  for (const t of THEMES) {
+    const label = document.querySelector(`[data-omdb="${t}"] .omdb-status__label`);
+    out[t] = { label_color: getComputedStyle(label).color, ratio: contrast(label), passAA: contrast(label) >= 4.5 };
+  }
+  return out;
+};
+</script>
+</body>
+</html>

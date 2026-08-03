@@ -1,0 +1,605 @@
+==============================================================================
+F-V8-FILMVIEW-PROBE
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-FILMVIEW-PROBE",
+  "consumer_keys": [
+    "audio",
+    "container_format",
+    "duration_s",
+    "subtitles",
+    "video"
+  ],
+  "producer_keys": [
+    "applied_rule_ids",
+    "custom_warning_flags",
+    "detected",
+    "engine_version",
+    "flags",
+    "primary_genre",
+    "probe_quality",
+    "profile_id",
+    "profile_version",
+    "score_confidence",
+    "sources",
+    "subscores",
+    "thresholds_used",
+    "tmdb_genres",
+    "weights"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "audio",
+    "container_format",
+    "duration_s",
+    "subtitles",
+    "video"
+  ],
+  "broken_state": "film-detail.js lit probe.video/probe.audio/probe.subtitles/probe.duration_s au TOP-LEVEL, mais le producer expose ces donnees uniquement sous metrics['detected'].{width,height,video_codec,audio_tracks_count,duration_s,...} -> Video/Audio/Sous-titres/Duree affichent vide (—) / 0 pour tout film.",
+  "verify": [
+    "web/dashboard/views/film-detail.js:141 OK -> const video = probe.video || {};",
+    "web/dashboard/views/film-detail.js:142 OK -> const duration = _formatDuration(probe.duration_s);",
+    "web/dashboard/views/film-detail.js:262 OK -> const audioTracks = Array.isArray(probe.audio) ? probe.audio : [];",
+    "web/dashboard/views/film-detail.js:263 OK -> const subtitles = Array.isArray(probe.subtitles) ? probe.subtitles : [];",
+    "cinesort/ui/api/film_support.py:312 OK -> probe_dict = quality.get(\"metrics\")",
+    "cinesort/domain/quality_score.py:1632 OK -> \"detected\": {"
+  ],
+  "producer_detected_subkeys": [
+    "audio_best_channels",
+    "audio_best_codec",
+    "audio_tracks_count",
+    "bit_depth",
+    "bitrate_kbps",
+    "duration_s",
+    "file_size_bytes",
+    "hdr10",
+    "hdr10_plus",
+    "hdr_dolby_vision",
+    "height",
+    "languages",
+    "resolution",
+    "resolution_source",
+    "video_codec",
+    "width"
+  ]
+}
+
+==============================================================================
+F-V8-FILMVIEW-CAND
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-FILMVIEW-CAND",
+  "consumer_keys": [
+    "confidence_label",
+    "director",
+    "overview",
+    "tmdb_id"
+  ],
+  "producer_keys": [
+    "note",
+    "poster_url",
+    "score",
+    "source",
+    "title",
+    "tmdb_collection_id",
+    "tmdb_collection_name",
+    "tmdb_id",
+    "year"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "confidence_label",
+    "director",
+    "overview"
+  ],
+  "broken_state": "film-detail.js lit candidates[0].confidence_label / .overview / .director mais core.Candidate n'a que {title,year,source,tmdb_id,poster_url,score,note,tmdb_collection_id,tmdb_collection_name} -> bloc TMDb fiche film affiche Confiance='?', pas de Synopsis, pas de Realisateur dans le hero.",
+  "verify": [
+    "web/dashboard/views/film-detail.js:137 DRIFT -> reel web/dashboard/views/film-detail.js:139 -> const director = candidates[0]?.director || \"\";",
+    "web/dashboard/views/film-detail.js:333 OK -> <dt>Confiance</dt><dd>${escapeHtml(topCandidate.confidence_label || \"?\")}</dd>",
+    "web/dashboard/views/film-detail.js:334 OK -> ${topCandidate.overview ? `<dt>Synopsis</dt><dd class=\"v5-film-synopsis\">${escapeHtml(topC",
+    "cinesort/domain/core.py:379 OK -> class Candidate:"
+  ]
+}
+
+==============================================================================
+F-V8-FILMVIEW-DIR
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-FILMVIEW-DIR",
+  "consumer_keys": [
+    "director(candidates[0])"
+  ],
+  "producer_keys": [
+    "director(top-level)"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "candidates[0].director != data.director"
+  ],
+  "broken_state": "Hero fiche film lit candidates[0]?.director (L137) — toujours undefined car Candidate n'a pas de director. Le backend met le realisateur en TOP-LEVEL data.director (film_support.py:418, via _fetch_tmdb_extras). Le hero ignore data.director -> realisateur jamais affiche.",
+  "verify": [
+    "web/dashboard/views/film-detail.js:137 DRIFT -> reel web/dashboard/views/film-detail.js:139 -> const director = candidates[0]?.director || \"\";",
+    "cinesort/ui/api/film_support.py:418 OK -> \"director\": director,"
+  ]
+}
+
+==============================================================================
+F-V8-PERCEPT-DISPLAY
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-PERCEPT-DISPLAY",
+  "consumer_keys": [
+    "bit_depth",
+    "bitrate_kbps",
+    "breakdown",
+    "codec",
+    "grain_analysis",
+    "hdr_analysis",
+    "height",
+    "width"
+  ],
+  "producer_keys": [
+    "audio_fingerprint",
+    "audio_score",
+    "global_score",
+    "global_score_v2",
+    "global_score_v2_payload",
+    "global_tier",
+    "global_tier_v2",
+    "lossy_verdict",
+    "metrics",
+    "row_id",
+    "run_id",
+    "settings_used",
+    "spectral_cutoff_hz",
+    "ssim_self_ref",
+    "ts",
+    "upscale_verdict",
+    "visual_score"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "bit_depth",
+    "bitrate_kbps",
+    "breakdown",
+    "codec",
+    "grain_analysis",
+    "hdr_analysis",
+    "height",
+    "width"
+  ],
+  "broken_state": "perceptual-modal.js lit d.codec/d.width/d.height/d.grain_analysis/d.breakdown/d.hdr_analysis au TOP-LEVEL de `details`, mais get_perceptual_report (perceptual.py:357) ne renvoie que {visual_score,audio_score,global_score,metrics,settings_used,...} : grain_analysis est NICHE dans metrics (models.to_dict), codec/width/probe ne sont pas fournis -> Codec='—', Resolution=0x0, HDR='sdr', grain '—'.",
+  "verify": [
+    "web/dashboard/components/perceptual-modal.js:294 OK -> const codec = String(d.codec || \"—\").toUpperCase();",
+    "web/dashboard/components/perceptual-modal.js:290 OK -> const grain = (d.grain_analysis && humanize(d.grain_analysis.verdict_label)) ||",
+    "web/dashboard/components/perceptual-modal.js:292 OK -> const hdrFormat = d.hdr_analysis ? (d.hdr_analysis.hdr_format || (d.hdr_analysis.is_hdr ? ",
+    "web/dashboard/components/perceptual-modal.js:375 OK -> const breakdown = Array.isArray(d.breakdown) ? d.breakdown : null;",
+    "cinesort/ui/api/perceptual_support.py:123 OK -> return {\"ok\": True, \"details\": report}",
+    "cinesort/infra/db/repositories/perceptual.py:364 OK -> \"metrics\": metrics,"
+  ]
+}
+
+==============================================================================
+F-V8-PERCEPT-HDR
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-PERCEPT-HDR",
+  "consumer_keys": [
+    "hdr_analysis"
+  ],
+  "producer_keys": [
+    "analysis_duration_total_s",
+    "audio_perceptual",
+    "audio_score",
+    "cross_verdicts",
+    "global_score",
+    "global_tier",
+    "grain_analysis",
+    "settings_used",
+    "ts",
+    "version",
+    "video_perceptual",
+    "visual_score"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "hdr_analysis"
+  ],
+  "broken_state": "perceptual-modal.js:292 lit d.hdr_analysis mais le to_dict du score perceptuel composite (models.py:382) n'emet que video_perceptual / grain_analysis / audio_perceptual : aucune cle hdr_analysis -> la cellule HDR du modal retombe toujours sur 'sdr'.",
+  "verify": [
+    "web/dashboard/components/perceptual-modal.js:292 OK -> const hdrFormat = d.hdr_analysis ? (d.hdr_analysis.hdr_format || (d.hdr_analysis.is_hdr ? ",
+    "cinesort/domain/perceptual/models.py:389 OK -> \"grain_analysis\": self.grain.to_dict() if self.grain else None,"
+  ],
+  "note": "grain_analysis present mais niche sous metrics; hdr_analysis totalement absent"
+}
+
+==============================================================================
+F-V9-DUP-SCALE
+------------------------------------------------------------------------------
+{
+  "finding": "F-V9-DUP-SCALE",
+  "consumer_keys": [
+    "total_score_a",
+    "total_score_b"
+  ],
+  "producer_keys": [
+    "total_score_a",
+    "total_score_b"
+  ],
+  "mismatch_consumer_minus_producer": [],
+  "broken_state": "doublons.js:297 fait Math.round(Number(comparison.total_score_a)) en le traitant comme un score; or total_score_a = sum(max(0,points_delta)) sur les criteres (duplicate_compare.py:142) = total de POINTS tete-a-tete, borne par le nb de criteres (~7), PAS un score/100. Affichage 'X/100' trompeur : un gagnant net montre ~5-7 au lieu de ~95.",
+  "verify": [
+    "web/dashboard/views/doublons.js:297 OK -> const scoreA = Math.round(Number(comparison.total_score_a) || 0);",
+    "cinesort/domain/duplicate_compare.py:142 OK -> score_a = sum(max(0, c.points_delta) for c in criteria)",
+    "cinesort/domain/duplicate_compare.py:149 OK -> total_score_a=score_a,"
+  ],
+  "scale_kind": "consumer=score/100 attendu ; producer=somme points h2h (max ~ nb criteres)"
+}
+
+==============================================================================
+F-V9-DUP-DECISION
+------------------------------------------------------------------------------
+{
+  "finding": "F-V9-DUP-DECISION",
+  "consumer_keys": [
+    "winner_decided"
+  ],
+  "producer_keys": [],
+  "mismatch_consumer_minus_producer": [
+    "winner_decided"
+  ],
+  "broken_state": "doublons.js:194/196 filtre les groupes sur g.winner_decided (onglets 'En attente' / 'Decides'), mais AUCUN module cinesort/ n'emet jamais winner_decided -> tous les groupes restent 'pending', l'onglet 'Decides' est toujours vide meme apres avoir tranche.",
+  "verify": [
+    "web/dashboard/views/doublons.js:194 OK -> return all.filter((g) => !g.winner_decided);",
+    "web/dashboard/views/doublons.js:196 OK -> return all.filter((g) => g.winner_decided);",
+    "backend grep winner_decided -> 0 occurrence"
+  ],
+  "backend_files_with_winner_decided": []
+}
+
+==============================================================================
+F-V9-DUP-UNITS
+------------------------------------------------------------------------------
+{
+  "finding": "F-V9-DUP-UNITS",
+  "consumer_keys": [
+    "_fmtSize(comparator-modal)",
+    "_fmtSize(doublons)",
+    "_fmtSize(lib-duplicates)"
+  ],
+  "producer_keys": [
+    "taille en octets (bytes) — meme source"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "3 formatters incoherents pour la MEME valeur octets"
+  ],
+  "broken_state": "3 implementations independantes de _fmtSize : doublons.js:100 affiche 'Mo'/'Go' (label decimal mais division 1024^N), comparator-modal.js:57 affiche 'Mio'/'Gio' (base 1024 corrigee), lib-duplicates.js:215 delegue a fmtBytes (core/format.js, locale-aware) -> meme fichier affiche 3 tailles avec 3 unites differentes selon l'ecran.",
+  "verify": [
+    "web/dashboard/views/doublons.js:100 OK -> function _fmtSize(bytes) {",
+    "web/dashboard/components/duplicate-comparator-modal.js:57 OK -> function _fmtSize(bytes) {",
+    "web/dashboard/views/library/lib-duplicates.js:215 OK -> function _fmtSize(bytes) {"
+  ],
+  "formatters": [
+    {
+      "anchor": "web/dashboard/views/doublons.js:100",
+      "labels": [
+        "Go",
+        "Mo"
+      ],
+      "delegates_to_shared": false,
+      "snippet": "function _fmtSize(bytes) {"
+    },
+    {
+      "anchor": "web/dashboard/components/duplicate-comparator-modal.js:57",
+      "labels": [
+        "Go",
+        "Mo"
+      ],
+      "delegates_to_shared": false,
+      "snippet": "function _fmtSize(bytes) {"
+    },
+    {
+      "anchor": "web/dashboard/views/library/lib-duplicates.js:215",
+      "labels": [],
+      "delegates_to_shared": true,
+      "snippet": "function _fmtSize(bytes) {"
+    }
+  ]
+}
+
+==============================================================================
+F-V4B-DUP1
+------------------------------------------------------------------------------
+{
+  "finding": "F-V4B-DUP1",
+  "consumer_keys": [
+    "audio_codec",
+    "codec",
+    "resolution"
+  ],
+  "producer_keys": [
+    "score",
+    "tier"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "audio_codec",
+    "codec",
+    "resolution"
+  ],
+  "broken_state": "_quality_info_for_row (run_flow_support.py:1446) ne renvoie que {'score':int,'tier':str}. Tout champ de qualite detaille (codec, resolution, bitrate...) lu cote front sur quality_a/quality_b est absent -> colonnes de comparaison qualite vides hormis score/tier.",
+  "verify": [
+    "cinesort/ui/api/run_flow_support.py:1446 OK -> return {\"score\": int(qr.get(\"score\") or 0), \"tier\": str(qr.get(\"tier\") or \"\")}"
+  ],
+  "producer_keys_exhaustifs": [
+    "score",
+    "tier"
+  ]
+}
+
+==============================================================================
+F-V7-INSIGHT-ROUTE
+------------------------------------------------------------------------------
+{
+  "finding": "F-V7-INSIGHT-ROUTE",
+  "consumer_keys": [
+    "duplicates_probable",
+    "films_low_confidence",
+    "films_not_identified",
+    "health_low",
+    "omdb_disagreements",
+    "quality_reject",
+    "sagas_incomplete",
+    "subs_missing_fr"
+  ],
+  "producer_keys": [
+    "dnr_partial",
+    "duplicates_to_resolve",
+    "new_platinum_month",
+    "new_rejects",
+    "run_in_progress"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "duplicates_probable",
+    "films_low_confidence",
+    "films_not_identified",
+    "health_low",
+    "omdb_disagreements",
+    "quality_reject",
+    "sagas_incomplete",
+    "subs_missing_fr"
+  ],
+  "broken_state": "accueil.js:524 route via _INSIGHT_ROUTE_BY_TYPE[insight.type] avec les cles {duplicates_probable,films_not_identified,films_low_confidence,subs_missing_fr,omdb_disagreements,quality_reject,health_low,sagas_incomplete}, mais le backend emet type in {run_in_progress,new_rejects,duplicates_to_resolve,dnr_partial,new_platinum_month}. INTERSECTION = 0 -> tout insight retombe sur le fallback /bibliotheque, les routes specifiques sont mortes.",
+  "verify": [
+    "web/dashboard/views/accueil.js:507 OK -> const _INSIGHT_ROUTE_BY_TYPE = {",
+    "web/dashboard/views/accueil.js:524 OK -> return _INSIGHT_ROUTE_BY_TYPE[insight.type || insight.code] || \"/bibliotheque\";",
+    "cinesort/ui/api/dashboard_support.py:1493 OK -> \"type\": \"run_in_progress\","
+  ],
+  "intersection": []
+}
+
+==============================================================================
+F-V7-INSIGHT-SUBS
+------------------------------------------------------------------------------
+{
+  "finding": "F-V7-INSIGHT-SUBS",
+  "consumer_keys": [
+    "insight.type/code includes \"subs_missing\""
+  ],
+  "producer_keys": [
+    "dnr_partial",
+    "duplicates_to_resolve",
+    "new_platinum_month",
+    "new_rejects",
+    "run_in_progress"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "subs_missing"
+  ],
+  "broken_state": "qualite.js:333 cherche insights.find(i => (i.type||i.code).includes('subs_missing')) mais aucun type d'insight backend ne contient 'subs_missing' (types=['dnr_partial', 'duplicates_to_resolve', 'new_platinum_month', 'new_rejects', 'run_in_progress']) -> compteur 'Subs FR manquants' toujours '—'. Le fallback librarian suggestion (id includes 'subs_missing') echoue aussi : librarian emet l'id 'missing_subtitles' (cf F-V8-LIBRARIAN-ROUTE).",
+  "verify": [
+    "web/dashboard/views/qualite.js:333 OK -> const subsInsight = insights.find((i) => String(i.type || i.code || \"\").includes(\"subs_mis",
+    "web/dashboard/views/qualite.js:336 OK -> const subsLs = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || \"\").includes(\"subs_"
+  ],
+  "qualite_lines": [
+    "const subsInsight = insights.find((i) => String(i.type || i.code || \"\").includes(\"subs_mis",
+    "const subsLs = Array.isArray(lsugs) ? lsugs.find((s) => String(s.id || \"\").includes(\"subs_",
+    "<a href=\"#/bibliotheque?filter=subs_missing_fr\" class=\"v5-btn v5-btn--ghost\">→ Voir la lis"
+  ]
+}
+
+==============================================================================
+F-V8-LIBRARIAN-ROUTE
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-LIBRARIAN-ROUTE",
+  "consumer_keys": [
+    "duplicates_probable",
+    "films_low_confidence",
+    "films_not_identified",
+    "health_low",
+    "omdb_disagreements",
+    "quality_reject",
+    "sagas_incomplete",
+    "subs_missing_fr"
+  ],
+  "producer_keys": [
+    "codec_obsolete",
+    "collections_info",
+    "duplicates",
+    "low_resolution",
+    "missing_subtitles",
+    "unidentified"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "duplicates_probable",
+    "films_low_confidence",
+    "films_not_identified",
+    "health_low",
+    "omdb_disagreements",
+    "quality_reject",
+    "sagas_incomplete",
+    "subs_missing_fr"
+  ],
+  "broken_state": "librarian.generate_suggestions emet id in {codec_obsolete,duplicates,missing_subtitles,unidentified,low_resolution,collections_info}. Le front route map accueil (_INSIGHT_ROUTE_BY_TYPE) et qualite.js (id includes 'subs_missing') utilisent un vocabulaire DIFFERENT : 'duplicates_probable' vs 'duplicates', 'subs_missing' vs 'missing_subtitles', 'films_not_identified' vs 'unidentified' -> aucune suggestion ne route/matche correctement.",
+  "verify": [
+    "cinesort/domain/librarian.py:115 OK -> \"id\": \"duplicates\",",
+    "cinesort/domain/librarian.py:168 OK -> \"id\": \"missing_subtitles\",",
+    "cinesort/domain/librarian.py:189 OK -> \"id\": \"unidentified\","
+  ],
+  "librarian_ids": [
+    "codec_obsolete",
+    "collections_info",
+    "duplicates",
+    "low_resolution",
+    "missing_subtitles",
+    "unidentified"
+  ],
+  "front_route_keys": [
+    "duplicates_probable",
+    "films_low_confidence",
+    "films_not_identified",
+    "health_low",
+    "omdb_disagreements",
+    "quality_reject",
+    "sagas_incomplete",
+    "subs_missing_fr"
+  ],
+  "intersection": []
+}
+
+==============================================================================
+F-V8-INSIGHT-NOTIF
+------------------------------------------------------------------------------
+{
+  "finding": "F-V8-INSIGHT-NOTIF",
+  "consumer_keys": [
+    "ins['code'] (notifications_support)"
+  ],
+  "producer_keys": [
+    "type"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "code"
+  ],
+  "broken_state": "emit_from_insights (notifications_support.py:254) fait code=str(ins.get('code')).strip(); if not code: continue. Or _compute_active_insights (dashboard_support.py:1711) cree des dicts avec la cle 'type' (pas 'code') et emit_from_insights est appele dessus (dashboard_support.py:1726) -> tous les insights sont skippes, AUCUNE notification miroir n'est jamais creee (write-only mort).",
+  "verify": [
+    "cinesort/ui/api/notifications_support.py:254 OK -> code = str(ins.get(\"code\") or \"\").strip()",
+    "cinesort/ui/api/dashboard_support.py:1726 OK -> notifications_support.emit_from_insights(api, insights, source=\"dashboard\")",
+    "cinesort/ui/api/dashboard_support.py:1711 OK -> insights = _compute_active_insights(api, store, run_ids, settings)"
+  ],
+  "insights_emit_code_literal": false,
+  "insights_emit_type": [
+    "dnr_partial",
+    "duplicates_to_resolve",
+    "new_platinum_month",
+    "new_rejects",
+    "run_in_progress"
+  ]
+}
+
+==============================================================================
+F-V9-CACHE-STATS
+------------------------------------------------------------------------------
+{
+  "finding": "F-V9-CACHE-STATS",
+  "consumer_keys": [
+    "films_rejected_ext",
+    "films_rejected_name",
+    "films_rejected_size",
+    "folders_rejected_scandir_error",
+    "root_level_films_seen",
+    "tv_episodes_seen"
+  ],
+  "producer_keys": [
+    "analyse_ignores_extensions",
+    "analyse_ignores_par_raison",
+    "analyse_ignores_total",
+    "collection_rows_generated",
+    "collections_seen",
+    "errors",
+    "folders_scanned",
+    "incremental_cache_hits",
+    "incremental_cache_misses",
+    "incremental_cache_rows_reused",
+    "planned_rows",
+    "singles_seen",
+    "skipped_tv_like"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "films_rejected_ext",
+    "films_rejected_name",
+    "films_rejected_size",
+    "folders_rejected_scandir_error",
+    "root_level_films_seen",
+    "tv_episodes_seen"
+  ],
+  "broken_state": "stats_snapshot_for_cache (plan_support_core.py:168) ne capture pas films_rejected_ext/size/name, root_level_films_seen, tv_episodes_seen, folders_rejected_scandir_error — pourtant champs reels de core.Stats. Sur un replan CACHE-HIT, ces compteurs de diagnostic scan repartent a 0 (consommes par dashboard scan_diagnostic L354-369 et run_flow L74) -> le panneau 'pourquoi des films ont ete rejetes' ment apres un cache-hit.",
+  "verify": [
+    "cinesort/app/plan_support_core.py:168 DRIFT -> reel cinesort/app/plan_support_core.py:167 -> def stats_snapshot_for_cache(stats: \"Stats\") -> Dict[str, Any]:",
+    "cinesort/domain/core.py:353 OK -> films_rejected_ext: int = 0  # fichier video : extension hors VIDEO_EXTS",
+    "cinesort/domain/core.py:358 OK -> folders_rejected_scandir_error: int = 0  # echec os.scandir (PermissionError, OSError, tim",
+    "cinesort/ui/api/dashboard_support.py:359 OK -> \"folders_rejected_scandir_error\": int("
+  ],
+  "champs_omis_mais_reels_sur_dataclass": [
+    "films_rejected_ext",
+    "films_rejected_name",
+    "films_rejected_size",
+    "folders_rejected_scandir_error",
+    "root_level_films_seen",
+    "tv_episodes_seen"
+  ]
+}
+
+==============================================================================
+F-HIST-DUP-11
+------------------------------------------------------------------------------
+{
+  "finding": "F-HIST-DUP-11",
+  "consumer_keys": [
+    "size_savings",
+    "winner_label"
+  ],
+  "producer_keys": [
+    "title",
+    "winner",
+    "year"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "size_savings",
+    "winner_label"
+  ],
+  "broken_state": "historique.js:764 lit g.winner_label et :765 lit g.size_savings pour l'onglet Doublons de l'Inspecteur, mais duplicates_decided (history_support.py:337) n'emet que {title,year,winner(=row_id)} -> 'winner' tombe sur l'id brut, et 'Go recuperes' n'apparait jamais.",
+  "verify": [
+    "web/dashboard/views/historique.js:764 OK -> const winner = String(g.winner_label || g.winner || \"—\");",
+    "web/dashboard/views/historique.js:765 OK -> const savings = (g.size_savings != null) ? `· ${(Number(g.size_savings) / (1024 * 1024 * 1",
+    "cinesort/ui/api/history_support.py:341 OK -> \"winner\": str(dec.get(\"winner_row_id\") or \"\"),"
+  ]
+}
+
+==============================================================================
+F-HIST-FILM-12
+------------------------------------------------------------------------------
+{
+  "finding": "F-HIST-FILM-12",
+  "consumer_keys": [
+    "decision",
+    "is_duplicate",
+    "status"
+  ],
+  "producer_keys": [
+    "film_id",
+    "score",
+    "tier",
+    "title",
+    "year"
+  ],
+  "mismatch_consumer_minus_producer": [
+    "decision",
+    "is_duplicate",
+    "status"
+  ],
+  "broken_state": "historique.js:651 lit film.decision || film.status et :652 lit film.is_duplicate pour le badge de statut, mais le producer films (history_support.py:320) n'emet que {film_id,title,year,tier,score} -> le badge statut/doublon de l'onglet Films est toujours faux/vide.",
+  "verify": [
+    "web/dashboard/views/historique.js:651 OK -> const dec = String(film.decision || film.status || \"\").toLowerCase();",
+    "web/dashboard/views/historique.js:652 OK -> if (dec.includes(\"duplicate\") || dec === \"duplicate\" || film.is_duplicate) return { label:",
+    "cinesort/ui/api/history_support.py:322 OK -> \"film_id\": rid,"
+  ]
+}
+
+==============================================================================
+RESUME: {"findings": ["F-V8-FILMVIEW-PROBE", "F-V8-FILMVIEW-CAND", "F-V8-FILMVIEW-DIR", "F-V8-PERCEPT-DISPLAY", "F-V8-PERCEPT-HDR", "F-V9-DUP-SCALE", "F-V9-DUP-DECISION", "F-V9-DUP-UNITS", "F-V4B-DUP1", "F-V7-INSIGHT-ROUTE", "F-V7-INSIGHT-SUBS", "F-V8-LIBRARIAN-ROUTE", "F-V8-INSIGHT-NOTIF", "F-V9-CACHE-STATS", "F-HIST-DUP-11", "F-HIST-FILM-12"], "all_have_nonempty_mismatch": true, "per_finding_mismatch": {"F-V8-FILMVIEW-PROBE": {"mismatch": ["audio", "container_format", "duration_s", "subtitles", "video"]}, "F-V8-FILMVIEW-CAND": {"mismatch": ["confidence_label", "director", "overview"]}, "F-V8-FILMVIEW-DIR": {"mismatch": ["candidates[0].director != data.director"]}, "F-V8-PERCEPT-DISPLAY": {"mismatch": ["bit_depth", "bitrate_kbps", "breakdown", "codec", "grain_analysis", "hdr_analysis", "height", "width"]}, "F-V8-PERCEPT-HDR": {"mismatch": ["hdr_analysis"]}, "F-V9-DUP-SCALE": {"mismatch": []}, "F-V9-DUP-DECISION": {"mismatch": ["winner_decided"]}, "F-V9-DUP-UNITS": {"mismatch": ["3 formatters incoherents pour la MEME valeur octets"]}, "F-V4B-DUP1": {"mismatch": ["audio_codec", "codec", "resolution"]}, "F-V7-INSIGHT-ROUTE": {"mismatch": ["duplicates_probable", "films_low_confidence", "films_not_identified", "health_low", "omdb_disagreements", "quality_reject", "sagas_incomplete", "subs_missing_fr"]}, "F-V7-INSIGHT-SUBS": {"mismatch": ["subs_missing"]}, "F-V8-LIBRARIAN-ROUTE": {"mismatch": ["duplicates_probable", "films_low_confidence", "films_not_identified", "health_low", "omdb_disagreements", "quality_reject", "sagas_incomplete", "subs_missing_fr"]}, "F-V8-INSIGHT-NOTIF": {"mismatch": ["code"]}, "F-V9-CACHE-STATS": {"mismatch": ["films_rejected_ext", "films_rejected_name", "films_rejected_size", "folders_rejected_scandir_error", "root_level_films_seen", "tv_episodes_seen"]}, "F-HIST-DUP-11": {"mismatch": ["size_savings", "winner_label"]}, "F-HIST-FILM-12": {"mismatch": ["decision", "is_duplicate", "status"]}}}

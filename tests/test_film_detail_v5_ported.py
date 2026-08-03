@@ -1,8 +1,20 @@
 """V5bis-06 — Vérifie film-detail.js porté en ES module."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
+
+# R8-053/054/055 (F5, D1) : la vue standalone views/film-detail.js a été SUPPRIMÉE
+# (jumeau buggé). Le composant components/film-detail.js (API renderFilmDetail, modes
+# A/B/C) est désormais la fiche film canonique. Ce test vérifiait les exports SPÉCIFIQUES
+# du port ES de la vue (initFilmDetail / mountFilmDetailDrawer), absents du composant ->
+# on skippe (convention codebase : skip quand le fichier legacy est retiré).
+if not Path("web/dashboard/views/film-detail.js").exists():
+    raise unittest.SkipTest(
+        "views/film-detail.js supprimée (R8 D1) ; fiche film canonique = "
+        "components/film-detail.js (API renderFilmDetail différente)."
+    )
 
 
 class FilmDetailV5PortedTests(unittest.TestCase):

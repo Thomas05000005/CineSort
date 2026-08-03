@@ -19,7 +19,6 @@ import re
 import sys
 from pathlib import Path
 
-
 TARGETS = ("_wait_done", "_wait_terminal")
 
 

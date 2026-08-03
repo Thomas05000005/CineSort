@@ -1,0 +1,353 @@
+"""Tests pour la fixture mutualisee `existing_db_fixture` (item M-00 Vague M).
+
+Memoire `feedback_sqlite_migration_test_existing_db` : valider qu'on peut
+arreter le schema a une version donnee, puis enchainer une migration
+suivante sans casser l'ordre CREATE TABLE -> ALTER TABLE -> CREATE INDEX
+ni l'idempotence.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import unittest
+from pathlib import Path
+
+from tests._helpers import existing_db_fixture
+
+
+class ExistingDbFixtureTests(unittest.TestCase):
+    def test_target_version_5_apply_undo_journal_present(self):
+        """A v5, les tables `apply_batches` + `apply_operations` doivent exister."""
+        db_path, conn = existing_db_fixture(5)
+        try:
+            self.assertTrue(db_path.exists(), "DB sqlite doit etre cree sur disque")
+            cur = conn.execute("PRAGMA user_version")
+            user_version = int(cur.fetchone()[0])
+            self.assertEqual(user_version, 5, "user_version doit valoir 5 apres apply")
+
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            # Migration 005 cree apply_batches + apply_operations
+            self.assertIn("apply_batches", tables)
+            self.assertIn("apply_operations", tables)
+        finally:
+            conn.close()
+
+    def test_target_version_0_returns_empty_db(self):
+        """target=0 : DB vierge, aucune table applicative."""
+        db_path, conn = existing_db_fixture(0)
+        try:
+            self.assertTrue(db_path.exists())
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 0)
+            user_tables = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+            ]
+            self.assertEqual(user_tables, [], "DB v0 ne doit avoir aucune user-table")
+        finally:
+            conn.close()
+
+    def test_target_version_latest_applies_all_migrations(self):
+        """target=31 (latest reel post-v166 + VP-A/VP-C/VP-D) : toutes les
+        migrations appliquees, incl. apply_batch_modes / film_field_locks /
+        film_decisions_v2.
+
+        MEGA-HOTFIX bug (4) : etendre la couverture historique (27) a 31
+        pour acter que les migrations VP-A (029), VP-C (030), VP-D (031)
+        sont desormais le baseline post-Vague P.
+        """
+        db_path, conn = existing_db_fixture(31)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            user_version = int(cur.fetchone()[0])
+            self.assertEqual(user_version, 31)
+
+            # Migration 012 cree schema_migrations -> 12..31 enregistrees
+            rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+            versions = [int(r[0]) for r in rows]
+            # Au moins 12..31 doivent y etre (les < 12 sont retroactives, INSERT OR IGNORE)
+            self.assertIn(31, versions)
+            self.assertIn(30, versions)
+            self.assertIn(29, versions)
+            self.assertIn(12, versions)
+
+            # Les 3 nouvelles tables Vague P doivent etre presentes.
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn("apply_batch_modes", tables, "VP-A apply_batch_modes")
+            self.assertIn("film_field_locks", tables, "VP-C film_field_locks")
+            self.assertIn("film_decisions_v2", tables, "VP-D film_decisions_v2")
+        finally:
+            conn.close()
+
+    def test_apply_next_migration_on_existing_db(self):
+        """Cas d'usage cible : appliquer migration N+1 sur DB pre-existante.
+
+        On simule en applliquant manuellement une migration custom apres
+        avoir arrete a v5. C'est l'ordre que P-04/P-05/O-06/R-04 vont suivre.
+        """
+        db_path, conn = existing_db_fixture(5)
+        try:
+            # ALTER TABLE EXTEND (ce que fera la migration 029 P-04 sur apply_operations)
+            # Pour ce test on simule une simple colonne ajoutee.
+            conn.execute("ALTER TABLE apply_operations ADD COLUMN committed_at TIMESTAMP")
+            conn.execute("PRAGMA user_version = 29")
+            conn.commit()
+
+            cur = conn.execute("PRAGMA table_info(apply_operations)")
+            cols = {row[1] for row in cur.fetchall()}
+            self.assertIn("committed_at", cols)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 29)
+        finally:
+            conn.close()
+
+    def test_v28_to_v29_real_migration_029(self):
+        """VP-A AC-2 : fixture v28 reelle + apply migration 029 reelle.
+
+        Verifie l'enchainement exact que le code prod suit : DB pre-existante
+        v28 (post-VO-A pragma_history) puis CREATE TABLE apply_batch_modes
+        + 2 CREATE INDEX. Aucun ALTER TABLE.
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(28)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 28)
+
+            # Table absente avant 029
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("apply_batch_modes", tables_before)
+
+            # Appliquer la migration 029 reelle
+            sql_path = _project_migrations_dir() / "029_apply_atomic_mode.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 029 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            # AC-2 (existing_db_fixture) : ordre strict CREATE TABLE -> CREATE INDEX
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 029")
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 29")
+            conn.commit()
+
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn("apply_batch_modes", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 29)
+        finally:
+            conn.close()
+
+    def test_v29_to_v30_real_migration_030(self):
+        """VP-C AC-1 : fixture v29 reelle + apply migration 030 reelle.
+
+        Verifie l'enchainement exact que VP-C suit en prod : DB v29
+        (post-VP-A apply_atomic_mode) -> CREATE TABLE film_field_locks
+        + 3 CREATE INDEX (incl. idx_film_id pour migrate_locks fix #5).
+        AUCUN ALTER TABLE.
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(29)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 29)
+
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("film_field_locks", tables_before)
+            # AC-4 : film_tmdb_overrides coexiste (zero regression)
+            self.assertIn("film_tmdb_overrides", tables_before)
+            # AC-1 (VP-A) : apply_batch_modes deja la (chainage 029 -> 030 OK)
+            self.assertIn("apply_batch_modes", tables_before)
+
+            sql_path = _project_migrations_dir() / "030_field_locks.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 030 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 030")
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 30")
+            conn.commit()
+
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn("film_field_locks", tables_after)
+            # film_tmdb_overrides toujours la (coexistence)
+            self.assertIn("film_tmdb_overrides", tables_after)
+            # apply_batch_modes toujours la (VP-A)
+            self.assertIn("apply_batch_modes", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 30)
+
+            # AC-3 : idx_film_id present (dedie a migrate_locks)
+            indexes = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_field_locks'"
+                )
+            }
+            self.assertIn("idx_film_field_locks_film_id", indexes, "Index dedie a migrate_locks (fix #5)")
+        finally:
+            conn.close()
+
+    def test_v30_to_v31_real_migration_031(self):
+        """VP-D AC-1 : fixture v30 reelle + apply migration 031 reelle.
+
+        Verifie l'enchainement exact que VP-D suit en prod : DB v30
+        (post-VP-C field_locks) -> CREATE TABLE film_decisions_v2
+        + 2 CREATE INDEX. AUCUN ALTER TABLE.
+        Memo `feedback_sqlite_migration_test_existing_db` : migration
+        SQLite testee sur DB PRE-EXISTANTE (pas seulement fresh DB).
+        """
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(30)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 30, "Fixture doit etre v30")
+
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("film_decisions_v2", tables_before)
+            # AC-1 (VP-C) : film_field_locks deja la (chainage 030 -> 031 OK)
+            self.assertIn("film_field_locks", tables_before)
+            # AC-1 (VP-A) : apply_batch_modes deja la (chainage 029 -> 031 OK)
+            self.assertIn("apply_batch_modes", tables_before)
+            # Coexistence : film_tmdb_overrides toujours present
+            self.assertIn("film_tmdb_overrides", tables_before)
+
+            sql_path = _project_migrations_dir() / "031_tri_etat_decisions.sql"
+            self.assertTrue(sql_path.is_file(), "Migration 031 doit exister")
+            sql = sql_path.read_text(encoding="utf-8")
+
+            # Ordre strict CREATE TABLE -> CREATE INDEX, pas d'ALTER
+            upper = sql.upper()
+            self.assertLess(
+                upper.find("CREATE TABLE"),
+                upper.find("CREATE INDEX"),
+                "Ordre CREATE TABLE -> CREATE INDEX strict",
+            )
+            self.assertNotIn("ALTER TABLE", upper, "Pas d'ALTER TABLE en 031")
+
+            # Tous les CREATE doivent etre IF NOT EXISTS (idempotence)
+            cleaned_lines = []
+            for line in sql.splitlines():
+                idx = line.find("--")
+                if idx >= 0:
+                    line = line[:idx]
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).upper()
+            create_count = cleaned.count("CREATE TABLE") + cleaned.count("CREATE INDEX")
+            if_not_exists_count = cleaned.count("IF NOT EXISTS")
+            self.assertEqual(
+                create_count,
+                if_not_exists_count,
+                "Tous les CREATE doivent etre IF NOT EXISTS (idempotence)",
+            )
+
+            for stmt in _split_sql_statements(sql):
+                conn.execute(stmt)
+            conn.execute("PRAGMA user_version = 31")
+            conn.commit()
+
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn("film_decisions_v2", tables_after)
+            # Coexistence VP-A + VP-C + VP-D : toutes les tables presentes.
+            self.assertIn("film_field_locks", tables_after)
+            self.assertIn("apply_batch_modes", tables_after)
+            self.assertIn("film_tmdb_overrides", tables_after)
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 31)
+
+            # Verifier les 2 index (idx_film_decision, idx_run_decision)
+            indexes = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_decisions_v2'"
+                )
+            }
+            self.assertIn("idx_film_decisions_v2_film_decision", indexes)
+            self.assertIn("idx_film_decisions_v2_run_decision", indexes)
+
+            # CHECK contraint : seules 3 valeurs autorisees pour decision.
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """
+                    INSERT INTO film_decisions_v2(film_id, run_id, decision, decided_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    ("tmdb:1", "run-1", "garbage", 0.0),
+                )
+        finally:
+            conn.close()
+
+    def test_migration_031_idempotent(self):
+        """Rejouer 031 deux fois doit etre safe (IF NOT EXISTS)."""
+        from cinesort.infra.db.migration_manager import _split_sql_statements
+        from tests._helpers import _project_migrations_dir
+
+        db_path, conn = existing_db_fixture(30)
+        try:
+            sql = (_project_migrations_dir() / "031_tri_etat_decisions.sql").read_text(encoding="utf-8")
+            for _round in range(2):
+                for stmt in _split_sql_statements(sql):
+                    conn.execute(stmt)
+                conn.execute("PRAGMA user_version = 31")
+                conn.commit()
+
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 31)
+        finally:
+            conn.close()
+
+    def test_migrations_dir_override(self):
+        """On peut passer un dossier de migrations custom (tests isoles)."""
+
+        # Dossier de migrations standard valide via repo
+        from tests._helpers import _project_migrations_dir
+
+        src = _project_migrations_dir()
+        self.assertTrue(src.is_dir(), "Repo doit contenir cinesort/infra/db/migrations/")
+
+        # Verifier nb de fichiers SQL (sanity check)
+        # MEGA-HOTFIX bug (4) : seuil bumpe a 31 (post VP-A/VP-C/VP-D Vague P).
+        sql_files = list(src.glob("*.sql"))
+        self.assertGreaterEqual(len(sql_files), 31, "Au moins 31 migrations attendues post-Vague P")
+
+        db_path, conn = existing_db_fixture(3, migrations_dir=src)
+        try:
+            cur = conn.execute("PRAGMA user_version")
+            self.assertEqual(int(cur.fetchone()[0]), 3)
+        finally:
+            conn.close()
+
+    def test_invalid_migrations_dir_raises(self):
+        """migrations_dir inexistant -> FileNotFoundError clair."""
+        with self.assertRaises(FileNotFoundError):
+            existing_db_fixture(5, migrations_dir=Path("/no/such/dir/cinesort_xxx"))
+
+
+if __name__ == "__main__":
+    unittest.main()

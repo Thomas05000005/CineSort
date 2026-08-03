@@ -16,6 +16,8 @@ import re
 import unittest
 from pathlib import Path
 
+from tests._jsexec import require_node, run_module_test
+
 _ROOT = Path(__file__).resolve().parents[1]
 _TRAITEMENT_JS = _ROOT / "web" / "dashboard" / "views" / "traitement.js"
 _COMPONENTS_CSS = _ROOT / "web" / "shared" / "components.css"
@@ -141,11 +143,169 @@ class ValidationStepTests(unittest.TestCase):
         self.assertIn("traitement-validation-year-input", self.js)
         self.assertIn('type="number"', self.js)
 
-    def test_bulk_approve_shows_toast_5s(self) -> None:
-        # Toast 5s avec snapshot pour undo
+    def test_bulk_approve_offers_an_undo(self) -> None:
+        # Historique : ce test exigeait "duration: 5000" + la variable globale
+        # "_traitementLastBulkSnapshot". Les deux ancrages sont morts :
+        #  - le fix TOAST-1 (2026-05-30) a porte le toast a 10s pour laisser le
+        #    temps de cliquer "Annuler" (UX type Gmail Undo Send) ;
+        #  - le fix VN-C.2 a remplace la globale par un snapshot de closure
+        #    couvrant TOUTES les rows du plan, pas seulement les visibles.
+        # Pire, "duration: 5000" continuait de matcher... le toast du dry-run,
+        # a l'autre bout du fichier : un vert qui ne prouvait rien.
+        # Le comportement reel (toast + undo qui restaure les decisions) est
+        # verifie par execution dans BulkApproveUndoRuntimeTests ci-dessous ;
+        # on ne garde ici que l'ancrage structurel de l'action de masse.
         self.assertIn("showToast", self.js)
-        self.assertIn("duration: 5000", self.js)
-        self.assertIn("_traitementLastBulkSnapshot", self.js)
+        self.assertIn("_applyBulkApprove", self.js)
+
+
+# --- Approbation en masse + undo : verifies au RUNTIME --------------------
+#
+# On execute le vrai _applyBulkApprove sous Node (harnais tests/_jsexec.py) :
+# showToast et apiPost sont espionnes, le state de decisions est reel. On
+# verifie la sequence complete (mutation -> persistance -> toast -> undo), y
+# compris le rollback sur echec API et la preservation des decisions prises
+# PENDANT l'await (fix race condition 2026-06-05).
+
+_BULK_STUBS = """
+const escapeHtml = (s) => String(s == null ? "" : s);
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = true;
+const apiPost = async (ep, params) => {
+  globalThis.__spy.api.push({ ep, params });
+  if (!globalThis.__apiOk && ep === "run/save_validation") return { data: { ok: false } };
+  return { data: { ok: true } };
+};
+const fetchConfidenceThresholds = async () => ({});
+const getConfidenceThresholdsSync = () => ({ CONF_HIGH: 85, CONF_MID: 60 });
+const navigateTo = () => {};
+const dangerConfirmModal = () => {};
+const showModal = () => {};
+const closeModal = () => {};
+const showToast = (t) => { globalThis.__spy.toasts.push(t); };
+const formatRelative = () => "";
+const formatDuration = () => "";
+const initDoublons = () => {};
+const unmountDoublons = () => {};
+const renderFilmDetail = () => {};
+"""
+
+# `_loadRunInfo` et `_renderInPlace` sont neutralises : ce sont des dependances
+# de rafraichissement (reseau + DOM), pas la fonction sous test. Le corps de
+# _applyBulkApprove, lui, tourne tel quel.
+_BULK_EXTRA = """
+export function __setup(rowIds) {
+  _loadRunInfo = async () => {};
+  _renderInPlace = () => {};
+  _runInfo = { runId: "RUN-TEST" };
+  _activeContainer = { querySelectorAll: () => [], querySelector: () => null, innerHTML: "" };
+  _validationPlan = { rows: rowIds.map((id) => ({ row_id: id, decision: "PENDING" })) };
+  _decisionsState = new Map(rowIds.map((id) => [id, { ok: false, year: null, decided_at: 0 }]));
+}
+export function __decisions() {
+  return Object.fromEntries([..._decisionsState.entries()].map(([k, v]) => [k, !!v.ok]));
+}
+export function __planDecisions() {
+  return Object.fromEntries(_validationPlan.rows.map((r) => [String(r.row_id), r.decision]));
+}
+export { _applyBulkApprove as __applyBulkApprove };
+"""
+
+_BULK_DRIVER = """
+const ids = ["r1", "r2", "r3"];
+
+// --- Scenario nominal : approbation + undo -----------------------------
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = true;
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+const afterApprove = M.__decisions();
+const planAfterApprove = M.__planDecisions();
+const toast = globalThis.__spy.toasts[globalThis.__spy.toasts.length - 1] || null;
+const savedBeforeToast = globalThis.__spy.api.filter((c) => c.ep === "run/save_validation").length;
+let afterUndo = null;
+if (toast && toast.action && typeof toast.action.onClick === "function") {
+  await toast.action.onClick();
+  afterUndo = M.__decisions();
+}
+
+// --- Scenario echec API : rollback, pas de faux succes ------------------
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = false;
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+const afterFailure = M.__decisions();
+const failToasts = globalThis.__spy.toasts.map((t) => t.type);
+
+__emit({
+  afterApprove, planAfterApprove, afterUndo, afterFailure, failToasts, savedBeforeToast,
+  toast: toast && {
+    type: toast.type, text: String(toast.text || ""), duration: toast.duration,
+    actionLabel: toast.action ? String(toast.action.label || "") : null,
+  },
+});
+"""
+
+
+class BulkApproveUndoRuntimeTests(unittest.TestCase):
+    """Spec §3.3 : approuver en masse doit rester annulable."""
+
+    _res: dict | None = None
+
+    def _run_or_skip(self) -> dict:
+        require_node(self)
+        if BulkApproveUndoRuntimeTests._res is None:
+            BulkApproveUndoRuntimeTests._res = run_module_test(
+                _TRAITEMENT_JS,
+                stubs=_BULK_STUBS,
+                extra=_BULK_EXTRA,
+                driver=_BULK_DRIVER,
+            )
+        return BulkApproveUndoRuntimeTests._res
+
+    def test_bulk_approve_marks_every_target_and_persists_it(self) -> None:
+        res = self._run_or_skip()
+        self.assertEqual(res["afterApprove"], {"r1": True, "r2": True, "r3": True})
+        self.assertEqual(
+            res["planAfterApprove"],
+            {"r1": "APPROVED", "r2": "APPROVED", "r3": "APPROVED"},
+            "le plan local doit refleter l'approbation (sinon fausse modale 'decisions non enregistrees')",
+        )
+        self.assertGreaterEqual(res["savedBeforeToast"], 1, "run/save_validation doit etre appele")
+
+    def test_success_toast_stays_long_enough_to_click_undo(self) -> None:
+        # Le toast doit annoncer le succes ET rester assez longtemps pour que
+        # "Annuler" soit cliquable. Borne par le BAS (>= 5s) : le passage a 10s
+        # (fix TOAST-1) est un renforcement, pas une regression.
+        res = self._run_or_skip()
+        toast = res["toast"]
+        self.assertIsNotNone(toast, "aucun toast apres approbation en masse")
+        self.assertEqual(toast["type"], "success")
+        self.assertIn("3", toast["text"], "le toast doit annoncer le nombre de films approuves")
+        self.assertIsNotNone(toast["duration"], "toast persistant interdit (accumulation, cf TOAST-1)")
+        self.assertGreaterEqual(toast["duration"], 5000, "trop court pour cliquer Annuler")
+        self.assertEqual(toast["actionLabel"], "Annuler")
+
+    def test_undo_restores_the_previous_decisions(self) -> None:
+        # Le coeur du contrat : c'est l'undo qui doit VRAIMENT rendre la main,
+        # pas la simple presence d'un bouton.
+        res = self._run_or_skip()
+        self.assertIsNotNone(res["afterUndo"], "le toast n'expose pas d'action Annuler cliquable")
+        self.assertEqual(
+            res["afterUndo"],
+            {"r1": False, "r2": False, "r3": False},
+            "apres Annuler, les decisions doivent revenir a leur valeur d'avant le bulk",
+        )
+
+    def test_api_failure_rolls_back_and_does_not_claim_success(self) -> None:
+        res = self._run_or_skip()
+        self.assertEqual(
+            res["afterFailure"],
+            {"r1": False, "r2": False, "r3": False},
+            "echec de save_validation : le state doit etre rollback",
+        )
+        self.assertIn("error", res["failToasts"], "echec silencieux interdit")
+        self.assertNotIn("success", res["failToasts"], "pas de toast de succes sur echec API")
 
 
 class DoublonsStepTests(unittest.TestCase):
@@ -309,17 +469,37 @@ class LifecycleTests(unittest.TestCase):
     def test_unmount_exports(self) -> None:
         self.assertIn("export function unmountTraitement(", self.js)
 
+    def _extract_unmount_traitement_body(self) -> str:
+        # Fix oracle iter10 (2026-06-09) : l'ancien regex non-greedy
+        # r'export function unmountTraitement\(.*?\}\s*$' s'arretait au PREMIER
+        # } rencontre (celui du if _hasUnsavedValidationDecisions L2537-2539)
+        # avant _stopPolling/unmountDoublons -> faux negatifs.
+        # On parse maintenant la balance d'accolades pour extraire le vrai
+        # corps complet de la fonction.
+        m = re.search(r"export\s+function\s+unmountTraitement\s*\([^)]*\)\s*\{", self.js)
+        assert m is not None, "declaration unmountTraitement introuvable"
+        start = m.end() - 1  # index du { ouvrant
+        depth = 0
+        i = start
+        n = len(self.js)
+        while i < n:
+            ch = self.js[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.js[m.start() : i + 1]
+            i += 1
+        raise AssertionError("Accolade fermante non trouvee pour unmountTraitement")
+
     def test_unmount_cleans_polling(self) -> None:
         # unmountTraitement doit appeler _stopPolling
-        m = re.search(r"export function unmountTraitement\(.*?\}\s*$", self.js, re.DOTALL | re.MULTILINE)
-        self.assertIsNotNone(m)
-        block = m.group(0)
+        block = self._extract_unmount_traitement_body()
         self.assertIn("_stopPolling", block)
 
     def test_unmount_cleans_doublons(self) -> None:
-        m = re.search(r"export function unmountTraitement\(.*?\}\s*$", self.js, re.DOTALL | re.MULTILINE)
-        self.assertIsNotNone(m)
-        block = m.group(0)
+        block = self._extract_unmount_traitement_body()
         self.assertIn("unmountDoublons", block)
 
 
