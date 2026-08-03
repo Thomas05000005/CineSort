@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sqlite3
 import threading
 from typing import Any, Optional
 
@@ -45,7 +46,10 @@ def _run_cleanup_once(api: Any, retention_days: int) -> None:
     """
     try:
         result = api.run.cleanup_old_runs(retention_days)
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+    # R8-024 (F2-d) : +sqlite3.Error. Un verrou DB transitoire (« database is locked »,
+    # une OperationalError = DatabaseError, PAS un OSError) echappait au tuple, sortait de
+    # _run_cleanup_once vers _worker -> le thread cron MOURAIT (retention definitivement morte).
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
         _log.warning("cleanup_old_runs cron: appel echoue retention=%dj err=%s", retention_days, exc)
         return
     if not isinstance(result, dict) or not result.get("ok"):

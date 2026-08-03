@@ -26,7 +26,6 @@ from cinesort.domain.perceptual.frame_extraction import (
     parse_raw_frame,
 )
 
-
 # ---------------------------------------------------------------------------
 # compute_timestamps (7 tests)
 # ---------------------------------------------------------------------------

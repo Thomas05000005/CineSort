@@ -133,10 +133,26 @@ class InstanceLock:
                 return False
 
     def release(self) -> None:
-        """Libere le lock. Idempotent."""
+        """Libere le lock. Idempotent.
+
+        IMPORTANT (R5-finding-0) : on ne fait PAS unlink() du fichier de lock.
+        Le pattern unlink-after-close cree une TOCTOU race sur POSIX :
+        - Instance A release() -> os.close() libere le lock fcntl par-inode
+        - Instance B os.open() recupere le meme inode + fcntl.lockf() reussit
+        - Instance A unlink() supprime l'entree de directoire
+        - Instance C os.open(O_CREAT) cree un NOUVEAU inode au meme path
+          + fcntl.lockf() reussit (lock POSIX par-inode)
+        - Resultat : B et C tournent simultanement, croient detenir le lock.
+        Pattern standard Unix (cf fasteners, filelock, py-filelock) : laisser
+        le fichier .cinesort.lock vivre indefiniment ; l'OS libere le lock via
+        close()/exit/kill. Pour eviter un PID stale, on ftruncate SOUS le lock.
+        """
         if not self._acquired or self._fd is None:
             return
         try:
+            # Effacer le PID SOUS le lock pour eviter lectures stale apres release.
+            with contextlib.suppress(OSError):
+                os.ftruncate(self._fd, 0)
             if os.name == "nt":
                 import msvcrt
 
@@ -153,8 +169,8 @@ class InstanceLock:
                 os.close(self._fd)
             self._fd = None
             self._acquired = False
-            with contextlib.suppress(OSError):
-                self.lock_path.unlink(missing_ok=True)
+            # PAS de unlink : cf docstring. Le fichier .cinesort.lock reste
+            # mais c'est sans danger (lock OS attache au fd, pas au nom).
 
     def __enter__(self) -> "InstanceLock":
         self.acquire()

@@ -106,12 +106,19 @@ const _SKELETON_TEMPLATES = {
 };
 
 /** Affiche un skeleton generique pendant le chargement.
+ *
+ * ITER11 fix(ui): skeleton feedback — pose `aria-busy="true"` sur le container
+ * pour annoncer l'etat de chargement aux lecteurs d'ecran (cycle de vie
+ * appear -> remplace par contenu via render*. Si fetch echoue, renderError
+ * retire aria-busy et bascule en role=alert : jamais skeleton infini).
+ *
  * @param {HTMLElement} container - cible
  * @param {"default"|"table"|"grid"|"form"} [type="default"]
  */
 export function renderSkeleton(container, type) {
   if (!container) return;
   const t = type || "default";
+  container.setAttribute("aria-busy", "true");
   container.innerHTML = _SKELETON_TEMPLATES[t] || _SKELETON_TEMPLATES.default;
 }
 
@@ -123,6 +130,10 @@ export function renderSkeleton(container, type) {
 export function renderError(container, error, retryFn) {
   if (!container) return;
   const msg = error?.message || error?.error || error || "Erreur inconnue";
+  // ITER11 fix(ui): skeleton -> erreur termine le cycle de vie chargement.
+  // Retire aria-busy pour que les lecteurs d'ecran annoncent l'alert au lieu
+  // de rester sur "chargement en cours" (eviter skeleton infini perçu).
+  container.setAttribute("aria-busy", "false");
   container.innerHTML = `
     <div class="v5-error-state" role="alert">
       <h3>Une erreur est survenue</h3>
@@ -149,6 +160,10 @@ export async function initView(container, loader, renderer, opts) {
   try {
     const data = await loader();
     renderer(container, data);
+    // ITER11 fix(ui): skeleton -> contenu charge termine le cycle de vie.
+    // Retire aria-busy apres render reussi (lifecycle: appear -> remplace
+    // par contenu une fois charge).
+    container.setAttribute("aria-busy", "false");
   } catch (e) {
     renderError(container, e, () => initView(container, loader, renderer, opts));
   }

@@ -1,0 +1,112 @@
+{
+  "test_library/README.md": {
+    "mtime": 1780936829,
+    "sha1": "c01f5bcee489b4b063413b761456b20070a621f3",
+    "size": 5046
+  },
+  "test_library/RootA/Movies/Big Buck Bunny (2008)/Big Buck Bunny (2008).mp4": {
+    "mtime": 1780944419,
+    "sha1": "e8abcf1ca147e14de44a28a0b73e30d3994dd227",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Dune (2021)/Dune (2021).mkv": {
+    "mtime": 1780944420,
+    "sha1": "122c468b9faa0f8d28fcb04303d2fc5893df28e2",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Dune Part Two (2024)/Dune Part Two (2024).mkv": {
+    "mtime": 1780944420,
+    "sha1": "e0848a6210c0dc8fd7ec0c8efb4aed7bb1361a6f",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Inception (2010)/Inception (2010).mkv": {
+    "mtime": 1780944420,
+    "sha1": "3dccc52abf6e69736533f8dc417a4601f40fca42",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Le Fabuleux Destin d Amelie Poulain (2001)/Le Fabuleux Destin d Amelie Poulain (2001).mkv": {
+    "mtime": 1780944420,
+    "sha1": "f3a92d44a19e0d4634df591712d3ea85700fb0fa",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Parasite/Parasite.mkv": {
+    "mtime": 1780944420,
+    "sha1": "77063bd4802b71357eac21f99492f5f1541ad084",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Sen to Chihiro no Kamikakushi (2001)/Sen to Chihiro no Kamikakushi (2001).mkv": {
+    "mtime": 1780944420,
+    "sha1": "8b119a8e72ea82597ab5ade98b6e58b913b17941",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/Sintel (2010)/Sintel (2010).mp4": {
+    "mtime": 1780944420,
+    "sha1": "e8abcf1ca147e14de44a28a0b73e30d3994dd227",
+    "size": 11734336
+  },
+  "test_library/RootA/Movies/the.matrix.1999.brrip/the matrix.avi": {
+    "mtime": 1780944420,
+    "sha1": "48716b42c4be0d5aa7c271d7d44dffd6936bbbc0",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/BadReencode (2019)/BadReencode (2019).mp4": {
+    "mtime": 1780944420,
+    "sha1": "e8abcf1ca147e14de44a28a0b73e30d3994dd227",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/FakeUpscale (2020)/FakeUpscale (2020) 2160p.mp4": {
+    "mtime": 1780944420,
+    "sha1": "e8abcf1ca147e14de44a28a0b73e30d3994dd227",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/Night of the Living Dead (1968)/Night of the Living Dead (1968).mkv": {
+    "mtime": 1780944420,
+    "sha1": "64f16161e66c50c26828d047b6df3a02f8f23909",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/Night of the Living Dead (1968)/movie.nfo": {
+    "mtime": 1780936820,
+    "sha1": "7bf0b1cec7e4f031bf70a468daf39f95c4e46f85",
+    "size": 231
+  },
+  "test_library/RootB/Movies/Nosferatu (1922)/Nosferatu (1922).mkv": {
+    "mtime": 1780944420,
+    "sha1": "a75261f0de554ab8793639e3222a26f974ac5bd3",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/_Collection/Tears of Steel (2012)/Tears of Steel (2012) 1080p.mkv": {
+    "mtime": 1780944420,
+    "sha1": "8f5f6cae37d1ca12eac120f3624e2e5e08acc1c5",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/_Collection/Tears of Steel (2012)/Tears of Steel (2012) 720p.mkv": {
+    "mtime": 1780944421,
+    "sha1": "6b5cf9b35dc87f42b9ddfa91453ed4f0a819d809",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/_Collection/The Matrix (1999)/The Matrix (1999) 1080p.mkv": {
+    "mtime": 1780944421,
+    "sha1": "dea0896c230fa96496acba913c5fd443d59cc1d0",
+    "size": 11734336
+  },
+  "test_library/RootB/Movies/_Collection/The Matrix (1999)/The Matrix (1999) 720p.mkv": {
+    "mtime": 1780944421,
+    "sha1": "256def5d77261cb4439d3402c882274ec397a6b0",
+    "size": 11734336
+  },
+  "test_library/RootB/Shows/Breaking Bad/Saison 1/Breaking Bad Saison 1 Episode 3.mkv": {
+    "mtime": 1780944421,
+    "sha1": "c4a5dedd7b4ea6e9f8c241e2ac1136ea468c57fd",
+    "size": 11734336
+  },
+  "test_library/RootB/Shows/Breaking Bad/Season 01/Breaking Bad S01E01.mkv": {
+    "mtime": 1780944421,
+    "sha1": "31369b629e3aee6a1e91729b9323790ebadf03f9",
+    "size": 11734336
+  },
+  "test_library/RootB/Shows/Breaking Bad/Season 01/Breaking Bad S01x02.mkv": {
+    "mtime": 1780944421,
+    "sha1": "f22159215f5184d9144805aa5fe5959e40f0c747",
+    "size": 11734336
+  }
+}

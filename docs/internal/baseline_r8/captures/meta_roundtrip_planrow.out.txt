@@ -1,0 +1,2 @@
+champs perdus au reload: ['nfo_runtime']
+CONFIRME

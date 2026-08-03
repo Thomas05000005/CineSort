@@ -5,7 +5,6 @@ Lancer : pytest tests/e2e_dashboard/test_dash_04_themes.py -v
 
 from __future__ import annotations
 
-
 try:
     import allure
 except ImportError:
