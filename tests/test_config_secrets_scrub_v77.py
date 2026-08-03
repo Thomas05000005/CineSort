@@ -19,10 +19,14 @@ from cinesort.ui.api.settings_support import _SECRET_FIELDS, _SECRET_MASK
 class ScrubSecretsForPersistTests(unittest.TestCase):
     def test_real_secrets_masked(self) -> None:
         settings = {
-            "tmdb_api_key": "REAL_tmdb", "omdb_api_key": "REAL_omdb",
-            "jellyfin_api_key": "REAL_jf", "plex_token": "REAL_plex",
-            "radarr_api_key": "REAL_radarr", "email_smtp_password": "REAL_pwd",
-            "rest_api_token": "REAL_rest", "library_path": "C:/Films",
+            "tmdb_api_key": "REAL_tmdb",
+            "omdb_api_key": "REAL_omdb",
+            "jellyfin_api_key": "REAL_jf",
+            "plex_token": "REAL_plex",
+            "radarr_api_key": "REAL_radarr",
+            "email_smtp_password": "REAL_pwd",
+            "rest_api_token": "REAL_rest",
+            "library_path": "C:/Films",
         }
         out = _scrub_secrets_for_persist(settings)
         for f in _SECRET_FIELDS:
@@ -48,10 +52,10 @@ class ScrubSecretsForPersistTests(unittest.TestCase):
     def test_call_site_uses_scrub(self) -> None:
         # Garde-fou de cablage : _start_plan_impl doit scrubber le config persiste.
         src = inspect.getsource(run_flow_support._start_plan_impl)
-        self.assertIn("_scrub_secrets_for_persist", src,
-                      "le config de start_job doit passer par _scrub_secrets_for_persist")
-        self.assertNotIn("config=dict(settings or {})", src,
-                         "l'ancien config en clair ne doit plus exister")
+        self.assertIn(
+            "_scrub_secrets_for_persist", src, "le config de start_job doit passer par _scrub_secrets_for_persist"
+        )
+        self.assertNotIn("config=dict(settings or {})", src, "l'ancien config en clair ne doit plus exister")
 
 
 if __name__ == "__main__":

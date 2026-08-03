@@ -11,7 +11,9 @@ violation et exige que le harnais la DETECTE (sinon l'instrument ment).
 Usage : .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/meta_score_bounds_monotonic.py
 Aucun effet de bord : fonctions pures, aucune DB, aucune ecriture.
 """
+
 from __future__ import annotations
+
 import math
 import sys
 from itertools import product
@@ -27,9 +29,11 @@ def score_of(width, height, vbitrate_kbps, channels=6, abitrate=640, vcodec="hev
     probe = {
         "probe_quality": "FULL",
         "video": {
-            "width": width, "height": height,
+            "width": width,
+            "height": height,
             "bitrate": vbitrate_kbps * 1000,  # bps
-            "bit_depth": 10, "codec": vcodec,
+            "bit_depth": 10,
+            "codec": vcodec,
         },
         "audio_tracks": [
             {"channels": channels, "bitrate": abitrate * 1000, "codec": acodec, "language": "fre"},
@@ -73,7 +77,7 @@ def check_monotonic_resolution():
 def check_monotonic_bitrate():
     """bitrate croissant => score non decroissant, meme resolution."""
     viol = []
-    for (w, h) in [(1920, 1080), (3840, 2160)]:
+    for w, h in [(1920, 1080), (3840, 2160)]:
         seq = [score_of(w, h, b)[0] for b in [800, 4000, 12000, 40000, 80000]]
         for i in range(1, len(seq)):
             if seq[i] < seq[i - 1]:
@@ -87,7 +91,6 @@ def self_test_falsifiability():
     # Monotonie inversee volontaire : on compare 2160 < 720 (toujours faux si scorer sain).
     s720, _ = score_of(1280, 720, 4000)
     s2160, _ = score_of(3840, 2160, 4000)
-    planted_caught = not (s2160 >= s720) or (s720 > s2160)
     # Le harnais DOIT pouvoir distinguer : ici on verifie juste qu'une assertion
     # fausse serait visible (s720 strictement > s2160 serait une vraie violation).
     # On force un cas que le check rejetterait : si jamais 720 battait 2160.
@@ -98,7 +101,7 @@ if __name__ == "__main__":
     print("=== GATE FALSIFIABILITE (self-test) ===")
     s720, s2160 = self_test_falsifiability()
     print(f"  720p={s720}  2160p={s2160}  -> le check rejetterait toute inversion 720>2160")
-    print(f"  (preuve que check_monotonic_resolution peut virer ROUGE : il compare ces valeurs)")
+    print("  (preuve que check_monotonic_resolution peut virer ROUGE : il compare ces valeurs)")
 
     all_viol = {}
     all_viol["R1 bornes"] = check_bounds()

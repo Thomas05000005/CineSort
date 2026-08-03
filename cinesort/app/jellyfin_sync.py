@@ -13,6 +13,10 @@ from typing import Any, Dict, List
 
 from cinesort.app._path_utils import normalize_path as _normalize_path
 
+# LOTD-INT-01 : JellyfinError (herite IntegrationError) doit etre catchee par
+# la boucle retry, sinon un 404/5xx transitoire abandonne toute la restauration.
+from cinesort.infra.jellyfin_client import JellyfinError
+
 _log = logging.getLogger(__name__)
 
 # -- Constantes --------------------------------------------------------
@@ -183,6 +187,9 @@ def restore_watched(
 
     result = RestoreResult()
     pending = dict(watched_moves)  # new_path -> old_path
+    # R8-080 : new_path -> item_id du dernier mark_played en echec (503/timeout).
+    # Permet de compter en 'errors' (et non 'not_found') apres epuisement.
+    mark_failed: Dict[str, str] = {}
 
     for attempt in range(1, max_retries + 1):
         # H-11 audit QA 20260429 : backoff exponentiel sur les retries
@@ -202,7 +209,8 @@ def restore_watched(
         # Recuperer la liste Jellyfin actuelle (multi-library pour BUG 2)
         try:
             current_movies = client.get_all_movies_from_all_libraries(user_id)
-        except (ConnectionError, OSError, TimeoutError, ValueError) as exc:
+        # LOTD-INT-01 : JellyfinError inclus, sinon l'exception s'echappe.
+        except (ConnectionError, OSError, TimeoutError, ValueError, JellyfinError) as exc:
             _log.warning("Jellyfin sync : echec recuperation films (tentative %d) — %s", attempt, exc)
             continue
 
@@ -218,6 +226,14 @@ def restore_watched(
         for new_norm, old_norm in pending.items():
             item_id = jellyfin_by_path.get(new_norm, "")
             if not item_id:
+                # FIX #15 : le film a DISPARU de l'index a cette tentative. Si une
+                # tentative anterieure avait laisse un mark_played en echec dans
+                # mark_failed, cet item_id est desormais perime : on le purge pour
+                # que l'etat le plus recent (absent) prime. Sinon le film serait
+                # compte en 'errors' (mark_played failed) alors qu'il n'existe plus,
+                # au lieu de not_found. Cas nominal R8-080 (film present a chaque
+                # tentative) inchange : pop no-op quand la cle est absente.
+                mark_failed.pop(new_norm, None)
                 still_pending[new_norm] = old_norm
                 continue
 
@@ -234,39 +250,50 @@ def restore_watched(
                     }
                 )
             else:
-                result.errors += 1
-                result.details.append(
-                    {
-                        "action": "error",
-                        "old_path": old_norm,
-                        "new_path": new_norm,
-                        "item_id": item_id,
-                        "reason": "mark_played failed",
-                    }
-                )
+                # R8-080 : echec possiblement transitoire (503/timeout). Le POST
+                # est exclu du retry de session par design anti-double-effet,
+                # donc on re-tente ICI a la tentative suivante (mark_played est
+                # idempotent cote Jellyfin). Erreur definitive seulement apres
+                # epuisement des tentatives (comptage en fin de fonction).
+                still_pending[new_norm] = old_norm
+                mark_failed[new_norm] = item_id
 
         pending = still_pending
         if not pending:
             break
 
         _log.info(
-            "Jellyfin sync : tentative %d/%d — %d films non encore indexes",
+            "Jellyfin sync : tentative %d/%d — %d films en attente (non indexes ou mark_played a re-tenter)",
             attempt,
             max_retries,
             len(pending),
         )
 
-    # Films non retrouves apres toutes les tentatives
+    # Films non restaures apres toutes les tentatives : distinguer echec
+    # mark_played persistant (R8-080 : errors) et film jamais re-indexe (not_found).
     for new_norm, old_norm in pending.items():
-        result.not_found += 1
-        result.details.append(
-            {
-                "action": "not_found",
-                "old_path": old_norm,
-                "new_path": new_norm,
-                "reason": "film non retrouve dans Jellyfin apres re-indexation",
-            }
-        )
+        failed_item_id = mark_failed.get(new_norm, "")
+        if failed_item_id:
+            result.errors += 1
+            result.details.append(
+                {
+                    "action": "error",
+                    "old_path": old_norm,
+                    "new_path": new_norm,
+                    "item_id": failed_item_id,
+                    "reason": "mark_played failed",
+                }
+            )
+        else:
+            result.not_found += 1
+            result.details.append(
+                {
+                    "action": "not_found",
+                    "old_path": old_norm,
+                    "new_path": new_norm,
+                    "reason": "film non retrouve dans Jellyfin apres re-indexation",
+                }
+            )
 
     _log.info(
         "Jellyfin sync : restore termine — %d restaures, %d non trouves, %d erreurs",

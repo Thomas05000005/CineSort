@@ -47,11 +47,13 @@ class TestProbeQualityExposeParUI(unittest.TestCase):
         self.assertTrue(_LIBRARY_SUPPORT.is_file())
         src = _LIBRARY_SUPPORT.read_text(encoding="utf-8")
         self.assertIn(
-            '"probe_quality"', src,
+            '"probe_quality"',
+            src,
             "library_support doit exposer 'probe_quality' dans la row",
         )
         self.assertIn(
-            '"quality_unavailable"', src,
+            '"quality_unavailable"',
+            src,
             "library_support doit exposer 'quality_unavailable' dans la row",
         )
 
@@ -133,7 +135,8 @@ class TestApplyDecouvert(unittest.TestCase):
         # comme cle de dict.
         bad = re.findall(r'\.get\(\s*["\']probe_quality["\']', self.src)
         self.assertEqual(
-            bad, [],
+            bad,
+            [],
             "apply_core lit probe_quality - apply ne doit PAS dependre du probe",
         )
 
@@ -141,7 +144,8 @@ class TestApplyDecouvert(unittest.TestCase):
         """apply_core.py ne doit JAMAIS lire 'score_v2'."""
         bad = re.findall(r'\.get\(\s*["\']score_v2["\']', self.src)
         self.assertEqual(
-            bad, [],
+            bad,
+            [],
             "apply_core lit score_v2 - apply ne doit PAS dependre du score",
         )
 
@@ -149,7 +153,8 @@ class TestApplyDecouvert(unittest.TestCase):
         """apply_core.py ne doit JAMAIS lire 'tier_v2'."""
         bad = re.findall(r'\.get\(\s*["\']tier_v2["\']', self.src)
         self.assertEqual(
-            bad, [],
+            bad,
+            [],
             "apply_core lit tier_v2 - apply ne doit PAS dependre du tier",
         )
 
@@ -176,7 +181,8 @@ class TestIdentificationDecoupleePreservee(unittest.TestCase):
         """library_support doit propager tmdb_id (identification)."""
         src = _LIBRARY_SUPPORT.read_text(encoding="utf-8")
         self.assertIn(
-            "tmdb_id", src,
+            "tmdb_id",
+            src,
             "library_support doit propager tmdb_id (identification decouplee)",
         )
 
@@ -214,11 +220,13 @@ class TestDegradedSourceCircuitBreaker(unittest.TestCase):
         body = match.group(0)
         # Le payload ne doit pas tenter d'inventer un score numerique.
         self.assertNotIn(
-            '"score":', body,
+            '"score":',
+            body,
             "Payload DEGRADED ne doit PAS inventer un score numerique",
         )
         self.assertNotIn(
-            '"score_v2":', body,
+            '"score_v2":',
+            body,
             "Payload DEGRADED ne doit PAS inventer un score_v2",
         )
 

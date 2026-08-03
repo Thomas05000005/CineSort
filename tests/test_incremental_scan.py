@@ -105,6 +105,29 @@ class IncrementalScanTests(unittest.TestCase):
         self.assertGreaterEqual(int(stats_2.incremental_cache_misses), 1)
         self.assertGreaterEqual(int(stats_2.incremental_cache_hits), 1)
 
+    def test_lotd_41_01_full_cache_rescan_reports_zero_misses(self) -> None:
+        """LOTD-41-01 : le delta par-dossier persiste ne doit PAS contenir le
+        miss du run 1 (stats_before etait snapshotte AVANT _try_apply_folder_cache,
+        donc chaque HIT rejouait un miss fantome : re-scan 100% cache affichait
+        hits == misses, cache faussement inefficace a 50%)."""
+        self._create_video(self.root / "Movie.A.2010", "Movie.A.2010.mkv", b"a" * 4096)
+        self._create_video(self.root / "Movie.B.2011", "Movie.B.2011.mkv", b"b" * 4096)
+
+        _rows_1, stats_1, _ = self._run_plan(incremental=True, run_id="lotd4101_1")
+        # Run 1 : cache froid, les misses live restent comptes normalement.
+        self.assertGreaterEqual(int(stats_1.incremental_cache_misses), 1)
+        self.assertEqual(int(stats_1.incremental_cache_hits), 0)
+
+        _rows_2, stats_2, _ = self._run_plan(incremental=True, run_id="lotd4101_2")
+        hits_2 = int(stats_2.incremental_cache_hits)
+        misses_2 = int(stats_2.incremental_cache_misses)
+        self.assertGreaterEqual(hits_2, 1)
+        self.assertEqual(
+            misses_2,
+            0,
+            f"misses fantomes rejoues par les deltas caches : hits={hits_2} misses={misses_2}",
+        )
+
     def test_incremental_second_pass_has_better_or_similar_runtime(self) -> None:
         for i in range(25):
             self._create_video(

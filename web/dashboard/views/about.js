@@ -56,12 +56,15 @@ async function _readAppInfo() {
   // si l'API echoue (offline, backend down, route absente sur ancienne version).
   try {
     const res = await apiPost("runtime/get_app_version", {});
-    if (res && typeof res === "object" && res.ok !== false) {
+    // LOTC-M1 : apiPost renvoie l'enveloppe REST {status, data} — le payload
+    // facade vit dans res.data (fallback res a plat pour compat bridge natif).
+    const info = res && typeof res === "object" && res.data && typeof res.data === "object" ? res.data : res;
+    if (info && typeof info === "object" && info.ok !== false) {
       return {
-        version: typeof res.version === "string" && res.version.trim() ? res.version.trim() : "",
-        build_date: typeof res.build_date === "string" ? res.build_date.trim() : "",
-        git_sha: typeof res.git_sha === "string" ? res.git_sha.trim() : "",
-        python_version: typeof res.python_version === "string" ? res.python_version.trim() : "",
+        version: typeof info.version === "string" && info.version.trim() ? info.version.trim() : "",
+        build_date: typeof info.build_date === "string" ? info.build_date.trim() : "",
+        git_sha: typeof info.git_sha === "string" ? info.git_sha.trim() : "",
+        python_version: typeof info.python_version === "string" ? info.python_version.trim() : "",
       };
     }
   } catch (err) {

@@ -1,0 +1,1724 @@
+{
+  "matrice": "M7 - DB table -> repo -> UI",
+  "generated_at": "2026-07-08T10:32:38.843340+00:00",
+  "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m7_db.py",
+  "regles": {
+    "sites": "scan cinesort/**/*.py (hors __pycache__), regex SQL ancree (INSERT [OR ...] INTO | REPLACE INTO | UPDATE | DELETE FROM = write ; FROM | JOIN = read), frontiere de mot sur le nom de table",
+    "ddl_exclue": "les .sql de migrations ne comptent ni en read ni en write",
+    "verdicts": "CABLEE=write+read ; WRITE_ONLY=write sans read ; READ_NEVER=read sans write ; MORTE=aucun site",
+    "ui": "fichier cinesort/ui/** avec SQL direct OU appel .methode_repo( ; facade = facades/*.py ou cinesort_api.py referencant le module _support"
+  },
+  "table_count": 24,
+  "stats_verdicts": {
+    "READ_NEVER": 1,
+    "CABLEE": 21,
+    "WRITE_ONLY": 1,
+    "MORTE": 1
+  },
+  "note_a_part_032": [
+    "032-vector-search-tables.sql: nom en TIRETS -> ne matche pas _MIGRATION_FILE_RE (migration_manager.py:15), JAMAIS appliquee par le manager. Decision produit D3 (vector search V3.3 differee, feature flag similar_films OFF). PAS un bug."
+  ],
+  "check_perceptual_vs_quality_reports": {
+    "both_tables_exist": true,
+    "perceptual_reports_repos": [
+      "cinesort/infra/db/repositories/perceptual.py",
+      "cinesort/infra/db/repositories/quality.py",
+      "cinesort/infra/db/repositories/run.py"
+    ],
+    "quality_reports_repos": [
+      "cinesort/infra/db/repositories/quality.py",
+      "cinesort/infra/db/repositories/run.py"
+    ],
+    "repos_overlap": [
+      "cinesort/infra/db/repositories/quality.py",
+      "cinesort/infra/db/repositories/run.py"
+    ],
+    "distinct": true
+  },
+  "tables": {
+    "anomalies": {
+      "origin_migration": "004_anomalies_table.sql",
+      "migrations": [
+        "004_anomalies_table.sql",
+        "021_fk_cascade.sql"
+      ],
+      "rebuilds": [
+        "021_fk_cascade.sql"
+      ],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/anomaly.py": "anomaly",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "delete_run",
+          "get_anomaly_counts_for_runs",
+          "get_anomaly_stats",
+          "get_top_anomaly_codes",
+          "list_anomalies_for_run"
+        ],
+        "write": []
+      },
+      "write_sites_count": 0,
+      "read_sites_count": 5,
+      "write_sites": [],
+      "read_sites": [
+        "cinesort/infra/db/repositories/anomaly.py:37 [FROM]",
+        "cinesort/infra/db/repositories/anomaly.py:52 [FROM]",
+        "cinesort/infra/db/repositories/anomaly.py:72 [FROM]",
+        "cinesort/infra/db/repositories/anomaly.py:95 [FROM]",
+        "cinesort/infra/db/repositories/run.py:423 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_cache_support.py": {
+          "via": [
+            "repo:get_anomaly_stats"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:get_anomaly_counts_for_runs",
+            "repo:get_top_anomaly_codes",
+            "repo:list_anomalies_for_run"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "READ_NEVER",
+      "annotation": "READ_NEVER confirme : AnomalyRepository (anomaly.py) = 4 SELECT purs, AUCUN INSERT dans tout cinesort/ (verifie : 0 executemany, pas de nom de table dynamique). Le dashboard lit une table structurellement vide (dashboard_support.py:511 list_anomalies_for_run avec fallback anomalies_light, dashboard_cache_support.py:40 get_anomaly_stats, dashboard_support.py:1703 get_top_anomaly_codes). Les rows ne peuvent sortir que par FK CASCADE (delete_run) mais n'entrent jamais."
+    },
+    "apply_batch_modes": {
+      "origin_migration": "029_apply_atomic_mode.sql",
+      "migrations": [
+        "029_apply_atomic_mode.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/apply.py": "apply"
+      },
+      "repo_methods": {
+        "read": [
+          "get_atomic_mode",
+          "list_atomic_modes_for_run"
+        ],
+        "write": [
+          "mark_rollback_status",
+          "upsert_atomic_mode"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 3,
+      "write_sites": [
+        "cinesort/infra/db/repositories/apply.py:599 [INSERT INTO]",
+        "cinesort/infra/db/repositories/apply.py:631 [INSERT INTO]"
+      ],
+      "read_sites": [
+        "cinesort/app/apply_batches_reconciliation.py:112 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:649 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:676 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:list_atomic_modes_for_run",
+            "repo:upsert_atomic_mode"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/apply_rollback.py -> .mark_rollback_status()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "apply_batches": {
+      "origin_migration": "005_apply_undo_journal.sql",
+      "migrations": [
+        "005_apply_undo_journal.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/apply.py": "apply",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "close_apply_batch",
+          "delete_run",
+          "get_last_reversible_apply_batch",
+          "list_apply_batches_for_run",
+          "list_atomic_modes_for_run"
+        ],
+        "write": [
+          "close_apply_batch",
+          "delete_run",
+          "insert_apply_batch"
+        ]
+      },
+      "write_sites_count": 4,
+      "read_sites_count": 8,
+      "write_sites": [
+        "cinesort/app/apply_batches_reconciliation.py:238 [UPDATE]",
+        "cinesort/infra/db/repositories/apply.py:109 [INSERT INTO]",
+        "cinesort/infra/db/repositories/apply.py:223 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:447 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/app/apply_batches_reconciliation.py:76 [FROM]",
+        "cinesort/app/apply_batches_reconciliation.py:212 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:210 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:234 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:252 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:355 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:677 [JOIN]",
+        "cinesort/infra/db/repositories/run.py:434 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:close_apply_batch",
+            "repo:get_last_reversible_apply_batch",
+            "repo:insert_apply_batch",
+            "repo:list_apply_batches_for_run",
+            "repo:list_atomic_modes_for_run"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:get_last_reversible_apply_batch"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:get_last_reversible_apply_batch"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/apply_batches_reconciliation.py -> .close_apply_batch()",
+        "cinesort/domain/film_history.py -> .list_apply_batches_for_run()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "apply_operations": {
+      "origin_migration": "005_apply_undo_journal.sql",
+      "migrations": [
+        "005_apply_undo_journal.sql",
+        "021_fk_cascade.sql"
+      ],
+      "rebuilds": [
+        "021_fk_cascade.sql"
+      ],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/apply.py": "apply",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "delete_run",
+          "get_batch_rows_summary",
+          "list_apply_operations",
+          "list_apply_operations_by_row"
+        ],
+        "write": [
+          "append_apply_operation",
+          "mark_apply_operation_undo_status"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 6,
+      "write_sites": [
+        "cinesort/infra/db/repositories/apply.py:154 [INSERT INTO]",
+        "cinesort/infra/db/repositories/apply.py:321 [UPDATE]"
+      ],
+      "read_sites": [
+        "cinesort/app/apply_batches_reconciliation.py:172 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:283 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:395 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:426 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:438 [FROM]",
+        "cinesort/infra/db/repositories/run.py:442 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:append_apply_operation",
+            "repo:get_batch_rows_summary",
+            "repo:list_apply_operations",
+            "repo:list_apply_operations_by_row",
+            "repo:mark_apply_operation_undo_status"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:list_apply_operations"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:list_apply_operations"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/apply_rollback.py -> .list_apply_operations()",
+        "cinesort/app/apply_rollback.py -> .mark_apply_operation_undo_status()",
+        "cinesort/domain/film_history.py -> .list_apply_operations_by_row()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "apply_pending_moves": {
+      "origin_migration": "019_apply_pending_moves.sql",
+      "migrations": [
+        "019_apply_pending_moves.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/apply.py": "apply"
+      },
+      "repo_methods": {
+        "read": [
+          "count_pending_moves",
+          "list_pending_moves"
+        ],
+        "write": [
+          "delete_pending_move",
+          "insert_pending_move"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 3,
+      "write_sites": [
+        "cinesort/infra/db/repositories/apply.py:492 [INSERT INTO]",
+        "cinesort/infra/db/repositories/apply.py:516 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/apply.py:534 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:543 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:569 [FROM]"
+      ],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [
+        "cinesort/app/move_journal.py -> .delete_pending_move()",
+        "cinesort/app/move_journal.py -> .insert_pending_move()",
+        "cinesort/app/move_reconciliation.py -> .delete_pending_move()",
+        "cinesort/app/move_reconciliation.py -> .list_pending_moves()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": "Pas de remontee UI directe by design : journal crash-recovery consomme par cinesort/app/move_journal.py et cinesort/app/move_reconciliation.py."
+    },
+    "duplicate_decisions": {
+      "origin_migration": "024_duplicate_decisions.sql",
+      "migrations": [
+        "024_duplicate_decisions.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/apply.py": "apply"
+      },
+      "repo_methods": {
+        "read": [
+          "get_duplicate_decision",
+          "list_duplicate_decisions"
+        ],
+        "write": [
+          "upsert_duplicate_decision"
+        ]
+      },
+      "write_sites_count": 1,
+      "read_sites_count": 2,
+      "write_sites": [
+        "cinesort/infra/db/repositories/apply.py:725 [INSERT INTO]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/apply.py:760 [FROM]",
+        "cinesort/infra/db/repositories/apply.py:790 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:list_duplicate_decisions"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:list_duplicate_decisions"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:list_duplicate_decisions"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:upsert_duplicate_decision"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "errors": {
+      "origin_migration": "001_init_runs_errors.sql",
+      "migrations": [
+        "001_init_runs_errors.sql",
+        "021_fk_cascade.sql"
+      ],
+      "rebuilds": [
+        "021_fk_cascade.sql"
+      ],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "delete_run",
+          "get_error_counts_for_runs",
+          "list_errors"
+        ],
+        "write": [
+          "insert_error"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 3,
+      "write_sites": [
+        "cinesort/infra/db/repositories/run.py:277 [INSERT INTO]",
+        "cinesort/ui/api/demo_support.py:408 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/run.py:299 [FROM]",
+        "cinesort/infra/db/repositories/run.py:382 [FROM]",
+        "cinesort/infra/db/repositories/run.py:419 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:insert_error"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:get_error_counts_for_runs"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/demo_support.py": {
+          "via": [
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:list_errors"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:insert_error"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/job_runner.py -> .insert_error()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "film_decisions_v2": {
+      "origin_migration": "031_tri_etat_decisions.sql",
+      "migrations": [
+        "031_tri_etat_decisions.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/decisions.py": "decisions"
+      },
+      "repo_methods": {
+        "read": [
+          "get_decision",
+          "list_decisions_for_film",
+          "list_decisions_for_run"
+        ],
+        "write": [
+          "clear_decision",
+          "set_decision"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 3,
+      "write_sites": [
+        "cinesort/infra/db/repositories/decisions.py:154 [INSERT INTO]",
+        "cinesort/infra/db/repositories/decisions.py:211 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/decisions.py:190 [FROM]",
+        "cinesort/infra/db/repositories/decisions.py:252 [FROM]",
+        "cinesort/infra/db/repositories/decisions.py:276 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:set_decision"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "film_field_locks": {
+      "origin_migration": "030_field_locks.sql",
+      "migrations": [
+        "030_field_locks.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/field_locks.py": "field_locks"
+      },
+      "repo_methods": {
+        "read": [
+          "get_lock",
+          "is_locked",
+          "list_locks",
+          "migrate_locks"
+        ],
+        "write": [
+          "clear_lock",
+          "migrate_locks",
+          "set_lock"
+        ]
+      },
+      "write_sites_count": 4,
+      "read_sites_count": 4,
+      "write_sites": [
+        "cinesort/infra/db/repositories/field_locks.py:90 [INSERT INTO]",
+        "cinesort/infra/db/repositories/field_locks.py:124 [DELETE FROM]",
+        "cinesort/infra/db/repositories/field_locks.py:243 [INSERT INTO]",
+        "cinesort/infra/db/repositories/field_locks.py:268 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/field_locks.py:143 [FROM]",
+        "cinesort/infra/db/repositories/field_locks.py:163 [FROM]",
+        "cinesort/infra/db/repositories/field_locks.py:178 [FROM]",
+        "cinesort/infra/db/repositories/field_locks.py:230 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/library_actions_support.py": {
+          "via": [
+            "repo:list_locks",
+            "repo:migrate_locks"
+          ],
+          "facades": [
+            "library_facade.py",
+            "run_facade.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:clear_lock",
+            "repo:list_locks",
+            "repo:migrate_locks",
+            "repo:set_lock"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/merge_metadata.py -> .list_locks()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "film_marked_for_deletion": {
+      "origin_migration": "023_film_modal_state.sql",
+      "migrations": [
+        "023_film_modal_state.sql",
+        "026_self_healing_023.sql",
+        "027_self_healing_023_v2.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/film_modal.py": "film_modal"
+      },
+      "repo_methods": {
+        "read": [
+          "is_marked_for_deletion",
+          "list_marked_for_deletion"
+        ],
+        "write": [
+          "mark_for_deletion",
+          "unmark_for_deletion"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 2,
+      "write_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:94 [INSERT INTO]",
+        "cinesort/infra/db/repositories/film_modal.py:109 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:119 [FROM]",
+        "cinesort/infra/db/repositories/film_modal.py:130 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:list_marked_for_deletion"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:mark_for_deletion",
+            "repo:unmark_for_deletion"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:is_marked_for_deletion"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_actions_support.py": {
+          "via": [
+            "repo:mark_for_deletion"
+          ],
+          "facades": [
+            "library_facade.py",
+            "run_facade.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:mark_for_deletion",
+            "repo:unmark_for_deletion"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "film_tmdb_overrides": {
+      "origin_migration": "023_film_modal_state.sql",
+      "migrations": [
+        "023_film_modal_state.sql",
+        "026_self_healing_023.sql",
+        "027_self_healing_023_v2.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/film_modal.py": "film_modal"
+      },
+      "repo_methods": {
+        "read": [
+          "get_tmdb_override"
+        ],
+        "write": [
+          "clear_tmdb_override",
+          "upsert_tmdb_override"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:165 [INSERT INTO]",
+        "cinesort/infra/db/repositories/film_modal.py:217 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:195 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/apply_support.py": {
+          "via": [
+            "repo:get_tmdb_override"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:clear_tmdb_override"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:get_tmdb_override"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:clear_tmdb_override",
+            "repo:upsert_tmdb_override"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "ignored_alerts": {
+      "origin_migration": "023_film_modal_state.sql",
+      "migrations": [
+        "023_film_modal_state.sql",
+        "026_self_healing_023.sql",
+        "027_self_healing_023_v2.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/film_modal.py": "film_modal"
+      },
+      "repo_methods": {
+        "read": [
+          "is_alert_ignored",
+          "list_ignored_alerts"
+        ],
+        "write": [
+          "insert_ignored_alert"
+        ]
+      },
+      "write_sites_count": 1,
+      "read_sites_count": 2,
+      "write_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:43 [INSERT OR IGNORE INTO]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/film_modal.py:59 [FROM]",
+        "cinesort/infra/db/repositories/film_modal.py:72 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:list_ignored_alerts"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:insert_ignored_alert"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "incremental_file_hashes": {
+      "origin_migration": "006_incremental_scan_cache.sql",
+      "migrations": [
+        "006_incremental_scan_cache.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/scan.py": "scan"
+      },
+      "repo_methods": {
+        "read": [
+          "get_incremental_file_hash"
+        ],
+        "write": [
+          "upsert_incremental_file_hash"
+        ]
+      },
+      "write_sites_count": 1,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/scan.py:109 [INSERT INTO]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/scan.py:82 [FROM]"
+      ],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [
+        "cinesort/app/plan_support_core.py -> .get_incremental_file_hash()",
+        "cinesort/app/plan_support_core.py -> .upsert_incremental_file_hash()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": "Cache interne du scan incremental (scan.py), pas d'UI attendue."
+    },
+    "incremental_row_cache": {
+      "origin_migration": "008_incr_row_cache.sql",
+      "migrations": [
+        "008_incr_row_cache.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/scan.py": "scan"
+      },
+      "repo_methods": {
+        "read": [
+          "get_incremental_row_cache"
+        ],
+        "write": [
+          "prune_incremental_row_cache",
+          "upsert_incremental_row_cache"
+        ]
+      },
+      "write_sites_count": 3,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/scan.py:301 [INSERT INTO]",
+        "cinesort/infra/db/repositories/scan.py:345 [DELETE FROM]",
+        "cinesort/infra/db/repositories/scan.py:355 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/scan.py:252 [FROM]"
+      ],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [
+        "cinesort/app/plan_support_core.py -> .prune_incremental_row_cache()",
+        "cinesort/app/plan_support_replan.py -> .get_incremental_row_cache()",
+        "cinesort/app/plan_support_replan.py -> .upsert_incremental_row_cache()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": "Cache interne du scan incremental (scan.py), pas d'UI attendue."
+    },
+    "incremental_scan_cache": {
+      "origin_migration": "006_incremental_scan_cache.sql",
+      "migrations": [
+        "006_incremental_scan_cache.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/scan.py": "scan"
+      },
+      "repo_methods": {
+        "read": [
+          "get_incremental_folder_cache"
+        ],
+        "write": [
+          "prune_incremental_scan_cache",
+          "upsert_incremental_folder_cache"
+        ]
+      },
+      "write_sites_count": 3,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/scan.py:181 [INSERT INTO]",
+        "cinesort/infra/db/repositories/scan.py:216 [DELETE FROM]",
+        "cinesort/infra/db/repositories/scan.py:226 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/scan.py:140 [FROM]"
+      ],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [
+        "cinesort/app/plan_support_core.py -> .get_incremental_folder_cache()",
+        "cinesort/app/plan_support_core.py -> .prune_incremental_scan_cache()",
+        "cinesort/app/plan_support_core.py -> .upsert_incremental_folder_cache()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": "Cache interne du scan incremental (scan.py), pas d'UI attendue."
+    },
+    "perceptual_reports": {
+      "origin_migration": "009_perceptual_reports.sql",
+      "migrations": [
+        "009_perceptual_reports.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/perceptual.py": "perceptual",
+        "cinesort/infra/db/repositories/quality.py": "quality",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "count_v2_tier_since",
+          "count_v2_warnings_flag",
+          "get_global_score_v2_trend",
+          "get_global_tier_distribution",
+          "get_global_tier_v2_distribution",
+          "get_perceptual_report",
+          "get_perceptual_report_stats",
+          "list_perceptual_reports"
+        ],
+        "write": [
+          "delete_run",
+          "upsert_perceptual_report"
+        ]
+      },
+      "write_sites_count": 3,
+      "read_sites_count": 8,
+      "write_sites": [
+        "cinesort/infra/db/repositories/perceptual.py:79 [INSERT INTO]",
+        "cinesort/infra/db/repositories/run.py:427 [DELETE FROM]",
+        "cinesort/ui/api/run_flow_support.py:1723 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/perceptual.py:140 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:161 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:193 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:226 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:259 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:280 [FROM]",
+        "cinesort/infra/db/repositories/perceptual.py:301 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:353 [JOIN]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:get_perceptual_report"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_cache_support.py": {
+          "via": [
+            "repo:get_perceptual_report_stats"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:count_v2_tier_since",
+            "repo:count_v2_warnings_flag",
+            "repo:get_global_score_v2_trend",
+            "repo:get_global_tier_distribution",
+            "repo:get_global_tier_v2_distribution",
+            "repo:list_perceptual_reports"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:get_perceptual_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:list_perceptual_reports"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/perceptual_support.py": {
+          "via": [
+            "repo:get_perceptual_report",
+            "repo:upsert_perceptual_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/quality_audit_support.py": {
+          "via": [
+            "repo:count_v2_tier_since",
+            "repo:get_global_score_v2_trend"
+          ],
+          "facades": [
+            "quality_facade.py"
+          ]
+        },
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:get_perceptual_report",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "pragma_history": {
+      "origin_migration": "028_pragma_history.sql",
+      "migrations": [
+        "028_pragma_history.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {},
+      "repo_methods": {
+        "read": [],
+        "write": []
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/pragma_profile.py:230 [INSERT INTO]",
+        "cinesort/infra/db/pragma_profile.py:253 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/pragma_profile.py:249 [FROM]"
+      ],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": "Table interne infra (pragma_profile.py:230 INSERT / :249 SELECT / :253 DELETE), pas de repository ni de remontee UI attendus."
+    },
+    "probe_cache": {
+      "origin_migration": "002_probe_cache.sql",
+      "migrations": [
+        "002_probe_cache.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/probe.py": "probe"
+      },
+      "repo_methods": {
+        "read": [
+          "get_probe_cache"
+        ],
+        "write": [
+          "clear_probe_cache",
+          "prune_probe_cache",
+          "upsert_probe_cache"
+        ]
+      },
+      "write_sites_count": 3,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/probe.py:91 [INSERT INTO]",
+        "cinesort/infra/db/repositories/probe.py:124 [DELETE FROM]",
+        "cinesort/infra/db/repositories/probe.py:141 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/probe.py:46 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:clear_probe_cache",
+            "repo:get_probe_cache"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/plan_support_dedup.py -> .get_probe_cache()",
+        "cinesort/infra/probe/service.py -> .get_probe_cache()",
+        "cinesort/infra/probe/service.py -> .upsert_probe_cache()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "quality_profiles": {
+      "origin_migration": "003_quality_score_tables.sql",
+      "migrations": [
+        "003_quality_score_tables.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/quality.py": "quality"
+      },
+      "repo_methods": {
+        "read": [
+          "get_active_quality_profile"
+        ],
+        "write": [
+          "save_quality_profile"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/quality.py:77 [UPDATE]",
+        "cinesort/infra/db/repositories/quality.py:80 [INSERT INTO]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/quality.py:39 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:get_active_quality_profile",
+            "repo:save_quality_profile"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/quality_internal_support.py": {
+          "via": [
+            "repo:get_active_quality_profile",
+            "repo:save_quality_profile"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "quality_reports": {
+      "origin_migration": "003_quality_score_tables.sql",
+      "migrations": [
+        "003_quality_score_tables.sql",
+        "021_fk_cascade.sql"
+      ],
+      "rebuilds": [
+        "021_fk_cascade.sql"
+      ],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/quality.py": "quality",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "delete_run",
+          "get_global_tier_distribution",
+          "get_quality_counts_for_runs",
+          "get_quality_report",
+          "get_quality_report_stats",
+          "get_unscored_film_count",
+          "list_quality_reports"
+        ],
+        "write": [
+          "upsert_quality_report"
+        ]
+      },
+      "write_sites_count": 3,
+      "read_sites_count": 9,
+      "write_sites": [
+        "cinesort/infra/db/repositories/quality.py:151 [INSERT INTO]",
+        "cinesort/ui/api/demo_support.py:407 [DELETE FROM]",
+        "cinesort/ui/api/run_flow_support.py:1719 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/quality.py:108 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:187 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:318 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:352 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:371 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:398 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:423 [FROM]",
+        "cinesort/infra/db/repositories/run.py:421 [FROM]",
+        "cinesort/ui/api/runtime_support.py:645 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:get_quality_report"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_cache_support.py": {
+          "via": [
+            "repo:get_quality_report_stats"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:get_global_tier_distribution",
+            "repo:get_quality_counts_for_runs",
+            "repo:list_quality_reports"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/demo_support.py": {
+          "via": [
+            "repo:upsert_quality_report",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/export_support.py": {
+          "via": [
+            "repo:get_quality_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:get_quality_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:list_quality_reports"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:list_quality_reports"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/quality_audit_support.py": {
+          "via": [
+            "repo:get_quality_report"
+          ],
+          "facades": [
+            "quality_facade.py"
+          ]
+        },
+        "cinesort/ui/api/quality_report_support.py": {
+          "via": [
+            "repo:get_quality_report",
+            "repo:upsert_quality_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/quality_simulator_support.py": {
+          "via": [
+            "repo:list_quality_reports"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/quality_support.py": {
+          "via": [
+            "repo:get_quality_report"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:get_quality_report",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/runtime_support.py": {
+          "via": [
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/domain/film_history.py -> .get_quality_report()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "runs": {
+      "origin_migration": "001_init_runs_errors.sql",
+      "migrations": [
+        "001_init_runs_errors.sql",
+        "025_run_pause_status.sql"
+      ],
+      "rebuilds": [
+        "025_run_pause_status.sql"
+      ],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/anomaly.py": "anomaly",
+        "cinesort/infra/db/repositories/decisions.py": "decisions",
+        "cinesort/infra/db/repositories/quality.py": "quality",
+        "cinesort/infra/db/repositories/run.py": "run"
+      },
+      "repo_methods": {
+        "read": [
+          "get_global_tier_distribution",
+          "get_latest_run",
+          "get_run",
+          "get_runs_summary",
+          "get_top_anomaly_codes",
+          "list_pending_runs",
+          "list_runs",
+          "list_runs_older_than"
+        ],
+        "write": [
+          "delete_run",
+          "mark_cancel_requested",
+          "mark_run_cancelled",
+          "mark_run_done",
+          "mark_run_failed",
+          "mark_run_paused",
+          "mark_run_resumed",
+          "mark_run_running",
+          "update_run_progress"
+        ]
+      },
+      "write_sites_count": 13,
+      "read_sites_count": 11,
+      "write_sites": [
+        "cinesort/infra/db/repositories/run.py:44 [INSERT INTO]",
+        "cinesort/infra/db/repositories/run.py:102 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:114 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:125 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:138 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:154 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:174 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:193 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:253 [UPDATE]",
+        "cinesort/infra/db/repositories/run.py:452 [DELETE FROM]",
+        "cinesort/ui/api/demo_support.py:409 [DELETE FROM]",
+        "cinesort/ui/api/run_flow_support.py:826 [UPDATE]",
+        "cinesort/ui/api/runtime_support.py:398 [UPDATE]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/anomaly.py:74 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:356 [FROM]",
+        "cinesort/infra/db/repositories/quality.py:373 [FROM]",
+        "cinesort/infra/db/repositories/run.py:220 [FROM]",
+        "cinesort/infra/db/repositories/run.py:287 [FROM]",
+        "cinesort/infra/db/repositories/run.py:311 [FROM]",
+        "cinesort/infra/db/repositories/run.py:329 [FROM]",
+        "cinesort/infra/db/repositories/run.py:346 [FROM]",
+        "cinesort/infra/db/repositories/run.py:475 [FROM]",
+        "cinesort/ui/api/run_flow_support.py:800 [FROM]",
+        "cinesort/ui/api/runtime_support.py:392 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:get_run",
+            "repo:get_runs_summary",
+            "repo:list_pending_runs"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        },
+        "cinesort/ui/api/dashboard_support.py": {
+          "via": [
+            "repo:get_global_tier_distribution",
+            "repo:get_latest_run",
+            "repo:get_run",
+            "repo:get_runs_summary",
+            "repo:get_top_anomaly_codes",
+            "repo:list_runs"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/demo_support.py": {
+          "via": [
+            "repo:list_runs",
+            "repo:mark_run_done",
+            "repo:mark_run_running",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/export_support.py": {
+          "via": [
+            "repo:get_runs_summary"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/film_support.py": {
+          "via": [
+            "repo:list_runs"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/history_support.py": {
+          "via": [
+            "repo:delete_run",
+            "repo:list_runs_older_than"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/library_audit_support.py": {
+          "via": [
+            "repo:list_runs"
+          ],
+          "facades": [
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/library_podiums_support.py": {
+          "via": [
+            "repo:get_runs_summary"
+          ],
+          "facades": [
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/library_support.py": {
+          "via": [
+            "repo:list_runs"
+          ],
+          "facades": [
+            "cinesort_api.py",
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/library_timeline_support.py": {
+          "via": [
+            "repo:get_runs_summary"
+          ],
+          "facades": [
+            "library_facade.py"
+          ]
+        },
+        "cinesort/ui/api/quality_audit_support.py": {
+          "via": [
+            "repo:list_runs"
+          ],
+          "facades": [
+            "quality_facade.py"
+          ]
+        },
+        "cinesort/ui/api/quality_simulator_support.py": {
+          "via": [
+            "repo:get_latest_run",
+            "repo:list_runs"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/run_control_support.py": {
+          "via": [
+            "repo:list_pending_runs",
+            "repo:mark_run_paused",
+            "repo:mark_run_resumed"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/run_flow_support.py": {
+          "via": [
+            "repo:update_run_progress",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        },
+        "cinesort/ui/api/runtime_support.py": {
+          "via": [
+            "repo:get_run",
+            "repo:list_runs",
+            "sql_direct"
+          ],
+          "facades": [
+            "cinesort_api.py"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [
+        "cinesort/app/job_runner.py -> .get_run()",
+        "cinesort/app/job_runner.py -> .mark_cancel_requested()",
+        "cinesort/app/job_runner.py -> .mark_run_cancelled()",
+        "cinesort/app/job_runner.py -> .mark_run_done()",
+        "cinesort/app/job_runner.py -> .mark_run_failed()",
+        "cinesort/app/job_runner.py -> .mark_run_running()",
+        "cinesort/domain/film_history.py -> .get_runs_summary()"
+      ],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "schema_migrations": {
+      "origin_migration": "012_schema_history.sql",
+      "migrations": [
+        "012_schema_history.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {},
+      "repo_methods": {
+        "read": [],
+        "write": []
+      },
+      "write_sites_count": 1,
+      "read_sites_count": 0,
+      "write_sites": [
+        "cinesort/infra/db/migration_manager.py:321 [INSERT OR IGNORE INTO]"
+      ],
+      "read_sites": [],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [],
+      "verdict": "WRITE_ONLY",
+      "annotation": "WRITE_ONLY by design : journal d'audit DB3 (INSERT OR IGNORE, migration_manager.py:321 + backfill sqlite_store.py:333). Jamais lu par le code — trace pour lecture humaine/diagnostic. Pas un bug."
+    },
+    "user_quality_feedback": {
+      "origin_migration": "014_user_quality_feedback.sql",
+      "migrations": [
+        "014_user_quality_feedback.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": true,
+      "repositories": {
+        "cinesort/infra/db/repositories/quality.py": "quality"
+      },
+      "repo_methods": {
+        "read": [
+          "list_user_quality_feedback"
+        ],
+        "write": [
+          "delete_user_quality_feedback",
+          "insert_user_quality_feedback"
+        ]
+      },
+      "write_sites_count": 2,
+      "read_sites_count": 1,
+      "write_sites": [
+        "cinesort/infra/db/repositories/quality.py:236 [INSERT INTO]",
+        "cinesort/infra/db/repositories/quality.py:308 [DELETE FROM]"
+      ],
+      "read_sites": [
+        "cinesort/infra/db/repositories/quality.py:280 [FROM]"
+      ],
+      "ui": {
+        "cinesort/ui/api/cinesort_api.py": {
+          "via": [
+            "repo:delete_user_quality_feedback",
+            "repo:insert_user_quality_feedback",
+            "repo:list_user_quality_feedback"
+          ],
+          "facades": [
+            "(est lui-meme l'API/facade)"
+          ]
+        }
+      },
+      "ui_reachable": true,
+      "non_ui_callers": [],
+      "verdict": "CABLEE",
+      "annotation": ""
+    },
+    "vec_films_hash": {
+      "origin_migration": "032-vector-search-tables.sql",
+      "migrations": [
+        "032-vector-search-tables.sql"
+      ],
+      "rebuilds": [],
+      "applied_by_manager": false,
+      "repositories": {},
+      "repo_methods": {
+        "read": [],
+        "write": []
+      },
+      "write_sites_count": 0,
+      "read_sites_count": 0,
+      "write_sites": [],
+      "read_sites": [],
+      "ui": {},
+      "ui_reachable": false,
+      "non_ui_callers": [],
+      "verdict": "MORTE",
+      "annotation": "Decision produit D3 (voir note_a_part_032) : migration jamais appliquee (nom en tirets) ET SqliteVecAdapter.add_embedding non implemente (sqlite_vec_adapter.py:166 'a implementer en V3.3 runtime'). Scaffold V3.3 differe, feature flag similar_films OFF. PAS un finding."
+    }
+  }
+}

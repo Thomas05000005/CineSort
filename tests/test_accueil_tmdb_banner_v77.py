@@ -26,8 +26,7 @@ class AccueilTmdbBannerTests(unittest.TestCase):
         m = re.search(r"function _renderSetupBanner\(settings\)\s*\{(.+?)\n\}", self.src, re.DOTALL)
         self.assertIsNotNone(m, "_renderSetupBanner introuvable")
         body = m.group(1)
-        self.assertIn("_has_tmdb_api_key", body,
-                      "La bannière doit lire _has_tmdb_api_key (flag de présence réelle).")
+        self.assertIn("_has_tmdb_api_key", body, "La bannière doit lire _has_tmdb_api_key (flag de présence réelle).")
 
     def test_no_longer_keys_solely_on_masked_value(self) -> None:
         # tmdbMissing ne doit plus être '!tmdbKey || ...' seul.
