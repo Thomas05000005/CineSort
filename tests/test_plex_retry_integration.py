@@ -48,17 +48,13 @@ class PlexBodySizeGuardTests(unittest.TestCase):
 
     def test_oversized_body_raises_plexerror(self) -> None:
         client = PlexClient(base_url="http://test:32400", token="tok")
-        with mock.patch.object(
-            client._session, "get", return_value=self._fake_resp(10_000_001)
-        ):
+        with mock.patch.object(client._session, "get", return_value=self._fake_resp(10_000_001)):
             with self.assertRaises(PlexError):
                 client._get("/identity")
 
     def test_normal_body_passes(self) -> None:
         client = PlexClient(base_url="http://test:32400", token="tok")
-        with mock.patch.object(
-            client._session, "get", return_value=self._fake_resp(1024)
-        ):
+        with mock.patch.object(client._session, "get", return_value=self._fake_resp(1024)):
             resp = client._get("/identity")
             self.assertEqual(resp.status_code, 200)
 
