@@ -25,11 +25,13 @@ eu. Les deux verrous ci-dessous suppriment cette echappatoire :
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 import tempfile
 import unittest
 from dataclasses import asdict, fields
 from typing import Any, Dict, List, Set, Tuple
+from unittest import mock
 
 from cinesort.domain.core import PlanRow
 from cinesort.ui.api import library_support
@@ -245,6 +247,80 @@ class PlanRowKeyContractTests(unittest.TestCase):
     def test_media_path_falls_back_to_folder_when_video_unknown(self):
         self.assertEqual(library_support.plan_row_media_path({"folder": "/a/b", "video": ""}), "/a/b")
         self.assertEqual(library_support.plan_row_media_path({"folder": "", "video": ""}), "")
+
+    def test_fs_facts_on_folder_only_row(self):
+        """PlanRow "single" dont le fichier n'a pas ete resolu : on stat le dossier.
+
+        Couvre la branche `os.stat` de `plan_row_fs_facts` et l'appel sans
+        cache explicite (le defaut `None` doit s'auto-initialiser).
+        """
+        with tempfile.TemporaryDirectory() as td:
+            folder = pathlib.Path(td) / "Film sans video"
+            folder.mkdir()
+            mtime, size = library_support.plan_row_fs_facts({"folder": str(folder), "video": ""})
+            expected_mtime = folder.stat().st_mtime
+        self.assertAlmostEqual(mtime, expected_mtime, places=3)
+        self.assertGreaterEqual(size, 0)
+
+    def test_fs_facts_on_empty_row(self):
+        """Ni folder ni video : (0.0, 0), sans toucher au disque."""
+        self.assertEqual(library_support.plan_row_fs_facts({}), (0.0, 0))
+        self.assertEqual(library_support.plan_row_fs_facts({"folder": "  ", "video": ""}), (0.0, 0))
+
+    def test_fs_facts_on_missing_folder_only_row(self):
+        """Dossier absent et pas de video : (0.0, 0), pas d'exception."""
+        self.assertEqual(library_support.plan_row_fs_facts({"folder": r"Z:\introuvable", "video": ""}), (0.0, 0))
+
+    def test_one_unreadable_entry_does_not_kill_the_whole_folder(self):
+        """Un fichier illisible ne doit pas priver les AUTRES films du dossier.
+
+        Sans le `except OSError: continue` par entree, un seul fichier
+        verrouille (antivirus, WinError 32) rendrait `added_ts`/`size_bytes`
+        morts pour tous les films du meme dossier — la regression exacte
+        qu'on vient de corriger, en plus discret.
+        """
+
+        class _Boom:
+            name = "verrouille.mkv"
+
+            def stat(self, **kwargs):
+                raise PermissionError("verrouille")
+
+        class _Ok:
+            name = "lisible.mkv"
+
+            def stat(self, **kwargs):
+                return os.stat_result((0o100644, 0, 0, 1, 0, 0, 4096, 0, 1234.5, 0))
+
+        class _FakeScandir:
+            def __enter__(self):
+                return iter([_Boom(), _Ok()])
+
+            def __exit__(self, *exc):
+                return False
+
+        with mock.patch.object(library_support.os, "scandir", return_value=_FakeScandir()):
+            facts = library_support._folder_fs_facts("peu importe", {})
+
+        self.assertNotIn("verrouille.mkv", facts)
+        self.assertEqual(facts["lisible.mkv"], (1234.5, 4096))
+
+    def test_fs_facts_reuses_one_scandir_per_folder(self):
+        """Les K rows d'un dossier partage (collection/extra) coutent 1 scandir."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = pathlib.Path(td) / "Trilogie"
+            folder.mkdir()
+            names = []
+            for i in range(3):
+                video = folder / f"Volet {i}.mkv"
+                video.write_bytes(b"y" * (10 + i))
+                names.append(video.name)
+
+            cache: dict = {}
+            sizes = [library_support.plan_row_fs_facts({"folder": str(folder), "video": n}, cache)[1] for n in names]
+
+        self.assertEqual(sizes, [10, 11, 12])
+        self.assertEqual(list(cache), [str(folder)])
 
 
 # ---------------------------------------------------------------------------
