@@ -17,9 +17,28 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 SUBTITLE_EXTS = frozenset({".srt", ".ass", ".sub", ".sup", ".idx"})
 
-# -- Mapping langues (ISO 639-1 ← ISO 639-2, noms courants, tags) ----
+# -- Vocabulaire des langues -------------------------------------------
+#
+# Une table UNIQUE servait deux vocabulaires incompatibles : les codes ISO des
+# pistes EMBARQUEES (ffprobe/MediaInfo, via `_normalize_iso639`) et les tags de
+# NOM DE FICHIER (`forced`/`sdh`/`vostfr`..., via `detect_language_from_suffix`).
+# Les deux collisions que ce partage produisait :
+#
+#   * `hi` y etait declare tag « hearing impaired », donc le code ISO 639-1 du
+#     HINDI etait efface de toute piste embarquee (et `hin` etait absent de la
+#     table) : les pistes hindi disparaissaient de `SubtitleReport.languages`,
+#     ce qui levait en prime un faux `subtitle_missing_*`. (#679)
+#   * `vo` (« version originale », convention FR de nom de fichier) y etait
+#     declare langue ANGLAISE : un `Film.vo.srt` sur un film japonais ou coreen
+#     eteignait le signal « sous-titre EN manquant ». (#610)
+#
+# Les deux vocabulaires sont donc separes. `_ISO639_MAP` ne contient QUE des
+# codes de langue reels et est la seule table lue par `_normalize_iso639` ; les
+# conventions de nom de fichier vivent dans `_FILENAME_LANG_ALIASES` et
+# `_SUBTITLE_FLAG_TOKENS`. Ne JAMAIS reintroduire un tag de nom de fichier dans
+# `_ISO639_MAP` : c'est exactement le partage qui a produit ces deux defauts.
 
-_LANG_MAP: Dict[str, str] = {
+_ISO639_MAP: Dict[str, str] = {
     # ISO 639-1
     "fr": "fr",
     "en": "en",
@@ -44,6 +63,7 @@ _LANG_MAP: Dict[str, str] = {
     "tr": "tr",
     "el": "el",
     "he": "he",
+    "hi": "hi",  # HINDI (#679) — le tag « hearing impaired » est `sdh`, pas `hi`
     "th": "th",
     "vi": "vi",
     # ISO 639-2 / bibliographic
@@ -77,6 +97,7 @@ _LANG_MAP: Dict[str, str] = {
     "gre": "el",
     "ell": "el",
     "heb": "he",
+    "hin": "hi",  # #679 : absent de la table, donc hindi non resolvable
     "tha": "th",
     "vie": "vi",
     # Noms courants
@@ -103,21 +124,38 @@ _LANG_MAP: Dict[str, str] = {
     "turkish": "tr",
     "greek": "el",
     "hebrew": "he",
+    "hindi": "hi",
     "thai": "th",
     "vietnamese": "vi",
-    # Tags speciaux (pas des langues → "")
-    "forced": "",
-    "sdh": "",
-    "hi": "",
-    "cc": "",
-    "commentary": "",
-    "multi": "",
+    # Codes ISO 639-2 qui existent mais ne designent aucune langue identifiable.
     "und": "",
-    # Tags FR courants
-    "vostfr": "fr",
-    "vf": "fr",
-    "vo": "en",
 }
+
+# Conventions de NOM DE FICHIER qui portent malgre tout une langue. Elles ne
+# sont PAS des codes ISO : ffprobe ne les emet jamais, et `_normalize_iso639`
+# ne doit donc pas les connaitre.
+_FILENAME_LANG_ALIASES: Dict[str, str] = {
+    "vostfr": "fr",  # VO sous-titree francais : le SOUS-TITRE, lui, est francais
+    "vf": "fr",
+}
+
+# Tokens de nom de fichier qui ne designent AUCUNE langue. `vo` en fait partie
+# (#610) : « version originale » ne dit rien de la langue — l'assimiler a
+# l'anglais inventait une langue sur tout film non anglophone et eteignait le
+# signal `subtitle_missing_en`. `multi` non plus : il annonce une pluralite,
+# jamais une langue precise.
+_NON_LANGUAGE_TOKENS = frozenset({"forced", "sdh", "cc", "commentary", "multi", "und", "vo", "default", "foreign"})
+
+# Table de lecture des SUFFIXES de nom de fichier = codes ISO + alias FR.
+_FILENAME_LANG_MAP: Dict[str, str] = {**_ISO639_MAP, **_FILENAME_LANG_ALIASES}
+
+
+def _lang_from_filename_token(token: str) -> str:
+    """Langue ISO 639-1 portee par un token de nom de fichier, "" sinon."""
+    if token in _NON_LANGUAGE_TOKENS:
+        return ""
+    return _FILENAME_LANG_MAP.get(token, "")
+
 
 # F12 (revue post-merge 2026-07-18) — tags de VARIANTE places APRES le code
 # langue par les conventions Plex (`.fr.forced`, `.en.sdh`) et Jellyfin
@@ -127,6 +165,10 @@ _LANG_MAP: Dict[str, str] = {
 # arriere — c'est cette borne qui interdit de lire un mot du titre comme une
 # langue, elle ne doit jamais etre relachee en "scanner tous les tokens".
 _SUBTITLE_FLAG_TOKENS = frozenset({"forced", "sdh", "cc", "hi", "default", "foreign", "commentary"})
+
+# `hi` est le seul token a la fois code ISO (hindi) et tag de variante
+# (« hearing impaired » chez Jellyfin) — cf. `_classify_subtitle_suffix`.
+_HI_TOKEN = "hi"
 
 
 def _subtitle_suffix_tokens(filename: str, video_stem: Optional[str] = None) -> Tuple[List[str], bool]:
@@ -167,6 +209,78 @@ def _subtitle_suffix_tokens(filename: str, video_stem: Optional[str] = None) -> 
     return parts[1:], False
 
 
+def _classify_subtitle_suffix(filename: str, video_stem: Optional[str] = None) -> Tuple[str, Set[str]]:
+    """Lit UNE fois le suffixe d'un sous-titre : `(langue, tags de variante)`.
+
+    Point d'entree unique de `detect_language_from_suffix` et de
+    `_subtitle_flag_tokens`. Les deux parcouraient les memes tokens avec deux
+    logiques d'arret ecrites separement : rien ne garantissait qu'elles restent
+    d'accord sur le role d'un token, et c'est precisement ce desaccord qui a
+    permis a `hi` d'etre une langue pour l'une et un tag pour l'autre.
+
+    Arbitrage `hi` (#679) : `hi` est a la fois le code ISO 639-1 du HINDI et
+    l'abreviation Jellyfin de « hearing impaired ». La convention du projet est
+    d'ecrire `sdh` pour le malentendant, donc :
+
+      * `hi` precede d'un autre code langue est une VARIANTE de cette langue —
+        'Film.en.hi.srt' -> ('en', {'hi'}) ;
+      * `hi` SEUL est la langue hindi — 'Film.hi.srt' -> ('hi', set()).
+
+    Corollaire indispensable : le token qui PORTE la langue ne peut pas etre en
+    meme temps un tag de variante, sinon un sous-titre hindi serait exclu du
+    decompte des doublons comme s'il etait une piste malentendant.
+    """
+    tokens, bounded = _subtitle_suffix_tokens(filename, video_stem)
+    if not tokens:
+        return "", set()
+
+    # 1. Tags de variante : uniquement les tokens CONNUS et CONTIGUS en fin de
+    #    nom (borne F12). Un mot de titre homonyme d'un tag
+    #    ('The.Foreign.Exchange.fr.srt') ne doit pas faire sauter le sous-titre
+    #    du comptage `lang_counts`, donc perdre un VRAI doublon de langue.
+    tags: Set[str] = set()
+    for raw in reversed(tokens):
+        token = raw.strip().lower()
+        if not token:
+            continue
+        if token not in _SUBTITLE_FLAG_TOKENS:
+            break
+        tags.add(token)
+
+    # 2. Langue. Sans le stem de la video la borne est inexacte : on ne traverse
+    #    RIEN et on lit le dernier token seul (semantique d'avant F12).
+    language = ""
+    hi_is_the_language = False
+    if not bounded:
+        last = tokens[-1].strip().lower()
+        language = _lang_from_filename_token(last)
+        hi_is_the_language = last == _HI_TOKEN and bool(language)
+    else:
+        for raw in reversed(tokens):
+            token = raw.strip().lower()
+            if not token:
+                continue
+            if token == _HI_TOKEN:
+                # Ambigu : arbitre apres la marche arriere, quand on sait si un
+                # autre code langue le precedait.
+                continue
+            lang = _lang_from_filename_token(token)
+            if lang:
+                language = lang
+                break
+            if token in _SUBTITLE_FLAG_TOKENS:
+                continue
+            # Token inconnu (mot du titre, resolution, groupe...) : on s'arrete.
+            break
+        if not language and _HI_TOKEN in tags:
+            language = _ISO639_MAP[_HI_TOKEN]
+            hi_is_the_language = True
+
+    if hi_is_the_language:
+        tags.discard(_HI_TOKEN)
+    return language, tags
+
+
 def _subtitle_flag_tokens(filename: str, *, video_stem: Optional[str] = None) -> Set[str]:
     """Tags de variante (forced/sdh/cc/...) portes par un nom de sous-titre.
 
@@ -177,16 +291,7 @@ def _subtitle_flag_tokens(filename: str, *, video_stem: Optional[str] = None) ->
     perdre un VRAI doublon de langue. On ne collecte donc que les tags
     CONTIGUS en fin de nom, avec la meme borne d'arret.
     """
-    tokens, _bounded = _subtitle_suffix_tokens(filename, video_stem)
-    found: Set[str] = set()
-    for raw in reversed(tokens):
-        token = raw.strip().lower()
-        if not token:
-            continue
-        if token not in _SUBTITLE_FLAG_TOKENS:
-            break
-        found.add(token)
-    return found
+    return _classify_subtitle_suffix(filename, video_stem)[1]
 
 
 # -- Dataclasses -------------------------------------------------------
@@ -216,6 +321,30 @@ class SubtitleReport:
     details: List[SubtitleInfo]  # liste complete
 
 
+# -- Paires VobSub -----------------------------------------------------
+
+_VOBSUB_INDEX_EXT = ".idx"
+_VOBSUB_DATA_EXT = ".sub"
+
+
+def _vobsub_index_companions(subtitles: List[SubtitleInfo]) -> Set[str]:
+    """Noms des `.idx` qui ne sont que l'INDEX d'un `.sub` VobSub voisin.
+
+    Un sous-titre VobSub (DVD, remux) est TOUJOURS une paire `<nom>.idx`
+    (index temporel) + `<nom>.sub` (bitmaps) : deux fichiers pour UN seul
+    sous-titre. Le decompte des doublons les comptait comme deux pistes de la
+    meme langue et levait `subtitle_duplicate_lang` sur toute bibliotheque de
+    DVD remuxes (#749).
+
+    Le correctif F12 des tags de variante ne couvre PAS ce cas : la paire ne
+    porte aucun tag (`Film.fr.idx` / `Film.fr.sub`), donc rien ne l'excluait —
+    verifie sur main avant correctif. Un `.idx` SANS `.sub` frere reste compte :
+    il est alors le seul fichier qui represente ce sous-titre.
+    """
+    data_stems = {Path(s.filename).stem.lower() for s in subtitles if s.ext == _VOBSUB_DATA_EXT}
+    return {s.filename for s in subtitles if s.ext == _VOBSUB_INDEX_EXT and Path(s.filename).stem.lower() in data_stems}
+
+
 # -- Fonctions publiques -----------------------------------------------
 
 
@@ -241,24 +370,12 @@ def detect_language_from_suffix(filename: str, *, video_stem: Optional[str] = No
     exactement ce que rendait la version d'avant F12 (dernier token seul). Le
     chemin de production (`build_subtitle_report` -> `match_subtitles_to_video`)
     fournit toujours `video_stem` et beneficie, lui, du support Plex/Jellyfin.
+
+    `hi` : 'Film.hi.srt' rend 'hi' (HINDI) et 'Film.en.hi.srt' rend 'en' — voir
+    l'arbitrage complet dans `_classify_subtitle_suffix`. `vo` ne rend plus 'en'
+    (#610) : « version originale » n'est pas une langue.
     """
-    tokens, bounded = _subtitle_suffix_tokens(filename, video_stem)
-    if not tokens:
-        return ""
-    if not bounded:
-        return _LANG_MAP.get(tokens[-1].strip().lower(), "")
-    for raw in reversed(tokens):
-        token = raw.strip().lower()
-        if not token:
-            continue
-        lang = _LANG_MAP.get(token, "")
-        if lang:
-            return lang
-        if token in _SUBTITLE_FLAG_TOKENS:
-            continue
-        # Token inconnu (mot du titre, resolution, groupe...) : on s'arrete.
-        return ""
-    return ""
+    return _classify_subtitle_suffix(filename, video_stem)[0]
 
 
 def find_subtitles_in_folder(folder: Path) -> List[SubtitleInfo]:
@@ -328,11 +445,16 @@ def match_subtitles_to_video(
 def _normalize_iso639(raw: str) -> str:
     """Normalise un tag de langue ISO 639-1/-2/-3 vers ISO 639-1.
 
-    Vague F 2026-05-25 (v1.5.3) : utilise _LANG_MAP pour aligner la detection
-    des pistes embarquees (ex: ffprobe expose `fra`, `fre`, MediaInfo `fr`).
-    Renvoie "" si non resolvable ou tag special (forced/sdh/...).
+    Vague F 2026-05-25 (v1.5.3) : aligne la detection des pistes embarquees
+    (ex: ffprobe expose `fra`, `fre`, MediaInfo `fr`). Renvoie "" si non
+    resolvable ou si le code ne designe aucune langue (`und`).
+
+    Lit `_ISO639_MAP` et RIEN d'autre : les tags de nom de fichier
+    (`forced`/`sdh`/`vostfr`/`vo`) n'ont aucun sens pour une piste embarquee et
+    les melanger a cette table est ce qui a efface le hindi (#679) et fabrique
+    un faux anglais (#610).
     """
-    return _LANG_MAP.get((raw or "").strip().lower(), "")
+    return _ISO639_MAP.get((raw or "").strip().lower(), "")
 
 
 def build_subtitle_report(
@@ -422,9 +544,16 @@ def build_subtitle_report(
     # `subtitle_duplicate_lang` a tort. On ne compte donc que les sous-titres
     # SANS tag de variante : deux `.fr.srt` restent impossibles (meme nom), deux
     # variantes taguees ne sont pas un doublon utilisateur.
+    # #749 : la paire VobSub `Film.fr.idx` + `Film.fr.sub` ne porte AUCUN tag,
+    # elle passait donc entiere dans le comptage et levait un faux doublon. On
+    # ecarte l'index de la paire (`count` et `formats` restent, eux, des mesures
+    # de FICHIERS et ne bougent pas).
+    vobsub_index_files = _vobsub_index_companions(matched)
     lang_counts: Dict[str, int] = {}
     for s in matched:
         if not s.language:
+            continue
+        if s.filename in vobsub_index_files:
             continue
         if _subtitle_flag_tokens(s.filename, video_stem=video_stem):
             continue
