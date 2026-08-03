@@ -46,15 +46,15 @@ class BugfixV166RegressionTests(unittest.TestCase):
         """VAL-1 : compteurs Valides/Rejetes doivent apparaitre dans kpis."""
         src = _read(Path(dashboard_support.__file__))
         # Source de verite : le code initialise et expose les 2 cles dans kpis.
-        self.assertIn("validated_count", src,
-                      "VAL-1 regression : 'validated_count' absent de dashboard_support.py")
-        self.assertIn("rejected_count", src,
-                      "VAL-1 regression : 'rejected_count' absent de dashboard_support.py")
+        self.assertIn("validated_count", src, "VAL-1 regression : 'validated_count' absent de dashboard_support.py")
+        self.assertIn("rejected_count", src, "VAL-1 regression : 'rejected_count' absent de dashboard_support.py")
         # On verifie que les cles sont bien dans le payload kpis (pas juste un commentaire).
-        self.assertRegex(src, r'"validated_count"\s*:\s*int\(',
-                         "VAL-1 : validated_count doit etre castee en int dans le dict kpis")
-        self.assertRegex(src, r'"rejected_count"\s*:\s*int\(',
-                         "VAL-1 : rejected_count doit etre castee en int dans le dict kpis")
+        self.assertRegex(
+            src, r'"validated_count"\s*:\s*int\(', "VAL-1 : validated_count doit etre castee en int dans le dict kpis"
+        )
+        self.assertRegex(
+            src, r'"rejected_count"\s*:\s*int\(', "VAL-1 : rejected_count doit etre castee en int dans le dict kpis"
+        )
 
     # ---------------------------------------------------------------- VAL-2
     def test_val2_validation_step_no_slice_100(self):
@@ -69,8 +69,7 @@ class BugfixV166RegressionTests(unittest.TestCase):
                 continue
             if re.search(r"\.slice\(\s*0\s*,\s*100\s*\)", line):
                 active_slices_100.append((i, line.strip()))
-        self.assertEqual(active_slices_100, [],
-                         f"VAL-2 regression : slice(0, 100) reapparu : {active_slices_100}")
+        self.assertEqual(active_slices_100, [], f"VAL-2 regression : slice(0, 100) reapparu : {active_slices_100}")
         # Aussi : pas de slice(0, 50) sur Verification step.
         active_slices_50 = []
         for i, line in enumerate(src.splitlines(), start=1):
@@ -79,51 +78,47 @@ class BugfixV166RegressionTests(unittest.TestCase):
                 continue
             if re.search(r"\.slice\(\s*0\s*,\s*50\s*\)", line):
                 active_slices_50.append((i, line.strip()))
-        self.assertEqual(active_slices_50, [],
-                         f"VAL-2 regression : slice(0, 50) reapparu : {active_slices_50}")
+        self.assertEqual(active_slices_50, [], f"VAL-2 regression : slice(0, 50) reapparu : {active_slices_50}")
 
     # ---------------------------------------------------------------- VAL-3
     def test_val3_validation_filters_and_toggle_reasons_present(self):
         """VAL-3 : filtre confiance + toggle-reasons doivent etre presents."""
         src = _read(WEB_DIR / "views" / "traitement.js")
         # Filtre par bucket de confiance.
-        self.assertIn("_validationFilter", src,
-                      "VAL-3 regression : variable _validationFilter absente")
-        self.assertIn('data-traitement-validation-filter="all"', src,
-                      "VAL-3 regression : chip filter 'all' absent")
-        self.assertIn('data-traitement-validation-filter="high"', src,
-                      "VAL-3 regression : chip filter 'high' absent")
-        self.assertIn('data-traitement-validation-filter="low"', src,
-                      "VAL-3 regression : chip filter 'low' absent")
+        self.assertIn("_validationFilter", src, "VAL-3 regression : variable _validationFilter absente")
+        self.assertIn('data-traitement-validation-filter="all"', src, "VAL-3 regression : chip filter 'all' absent")
+        self.assertIn('data-traitement-validation-filter="high"', src, "VAL-3 regression : chip filter 'high' absent")
+        self.assertIn('data-traitement-validation-filter="low"', src, "VAL-3 regression : chip filter 'low' absent")
         # Toggle reasons (depliant warning_flags + detected_year_reason).
-        self.assertIn('data-traitement-validation-action="toggle-reasons"', src,
-                      "VAL-3 regression : action toggle-reasons absente")
+        self.assertIn(
+            'data-traitement-validation-action="toggle-reasons"',
+            src,
+            "VAL-3 regression : action toggle-reasons absente",
+        )
         # aria-sort pour les entetes triables.
-        self.assertIn("aria-sort", src,
-                      "VAL-3 regression : aria-sort sur les entetes triables absent")
+        self.assertIn("aria-sort", src, "VAL-3 regression : aria-sort sur les entetes triables absent")
 
     # --------------------------------------------------------------- APPLY-1
     def test_apply1_norm_compare_uses_nfc_casefold(self):
         """APPLY-1 : _norm_compare doit utiliser NFC + casefold pour equivalence FS."""
         # Lookup direct sur le module (assert que la fonction existe).
-        self.assertTrue(hasattr(naming_mod, "_norm_compare"),
-                        "APPLY-1 regression : _norm_compare absent de naming.py")
+        self.assertTrue(hasattr(naming_mod, "_norm_compare"), "APPLY-1 regression : _norm_compare absent de naming.py")
         src = _read(Path(naming_mod.__file__))
         # Doit utiliser unicodedata.normalize("NFC", ...) et casefold().
-        self.assertRegex(src, r'unicodedata\.normalize\(\s*"NFC"',
-                         "APPLY-1 regression : _norm_compare doit normaliser NFC")
-        self.assertIn("casefold()", src,
-                      "APPLY-1 regression : _norm_compare doit utiliser casefold()")
+        self.assertRegex(
+            src, r'unicodedata\.normalize\(\s*"NFC"', "APPLY-1 regression : _norm_compare doit normaliser NFC"
+        )
+        self.assertIn("casefold()", src, "APPLY-1 regression : _norm_compare doit utiliser casefold()")
         # Smoke : equivalences Windows/SMB attendues.
         # NFC/NFD construites via unicodedata pour eviter les soucis d'encodage
         # du source file (un literal NFD/NFC saisi a la main peut etre normalise
         # a la sauvegarde par l'editeur/Git => les 2 formes deviennent egales).
         import unicodedata
+
         base = "12 Hommes en colère (1957)"  # è = e accent grave precompose
         nfc_form = unicodedata.normalize("NFC", base)
         nfd_form = unicodedata.normalize("NFD", base)
-        self.assertNotEqual(nfc_form, nfd_form,
-                            "Sanity : NFC et NFD doivent differer au niveau code points")
+        self.assertNotEqual(nfc_form, nfd_form, "Sanity : NFC et NFD doivent differer au niveau code points")
         self.assertEqual(
             naming_mod._norm_compare(nfd_form.upper()),
             naming_mod._norm_compare(nfc_form.lower()),
@@ -151,9 +146,9 @@ class BugfixV166RegressionTests(unittest.TestCase):
         apply_keywords = ["apply_running", "apply_total", "apply_done", '"apply"']
         found = [kw for kw in apply_keywords if kw in src]
         self.assertGreaterEqual(
-            len(found), 1,
-            f"APPLY-2 regression : aucune des cles {apply_keywords} dans "
-            f"cinesort_api.py ni _run_state.py"
+            len(found),
+            1,
+            f"APPLY-2 regression : aucune des cles {apply_keywords} dans cinesort_api.py ni _run_state.py",
         )
 
     # ----------------------------------------------------------------- DUP-1
@@ -169,9 +164,9 @@ class BugfixV166RegressionTests(unittest.TestCase):
         ]
         found = [m for m in markers if m in src]
         self.assertGreaterEqual(
-            len(found), 1,
-            f"DUP-1 regression : aucun indicateur d'avancement bulk dans doublons.js "
-            f"(cherche : {markers})"
+            len(found),
+            1,
+            f"DUP-1 regression : aucun indicateur d'avancement bulk dans doublons.js (cherche : {markers})",
         )
 
     # ----------------------------------------------------------------- DUP-2
@@ -190,9 +185,10 @@ class BugfixV166RegressionTests(unittest.TestCase):
         ]
         found = [m for m in markers if m in src]
         self.assertGreaterEqual(
-            len(found), 1,
+            len(found),
+            1,
             f"DUP-2 regression : check_duplicates ne semble plus fusionner les "
-            f"decisions persistees (markers cherches : {markers})"
+            f"decisions persistees (markers cherches : {markers})",
         )
 
     # ---------------------------------------------------------------- SCAN-1
@@ -204,13 +200,14 @@ class BugfixV166RegressionTests(unittest.TestCase):
         required = {".m4v", ".mov", ".wmv", ".flv", ".ts", ".webm"}
         missing = required - set(exts)
         self.assertSetEqual(
-            missing, set(),
-            f"SCAN-1 regression : VIDEO_EXTS_DEFAULT a perdu : {missing}. "
-            f"Actuel : {sorted(exts)}",
+            missing,
+            set(),
+            f"SCAN-1 regression : VIDEO_EXTS_DEFAULT a perdu : {missing}. Actuel : {sorted(exts)}",
         )
         # Sanity : taille minimale (10+ apres fix).
         self.assertGreaterEqual(
-            len(exts), 10,
+            len(exts),
+            10,
             f"SCAN-1 regression : VIDEO_EXTS_DEFAULT a {len(exts)} elements "
             f"(<10, suspect d'un revert vers les 4 d'origine)",
         )
@@ -220,19 +217,14 @@ class BugfixV166RegressionTests(unittest.TestCase):
         """TOAST-1 : toast.js doit utiliser _activeToasts Map + max stack + dedup."""
         src = _read(WEB_DIR / "components" / "toast.js")
         # Defense en profondeur : 3 garde-fous documentes dans le commit.
-        self.assertIn("_activeToasts", src,
-                      "TOAST-1 regression : registre _activeToasts absent")
-        self.assertIn("new Map()", src,
-                      "TOAST-1 regression : _activeToasts doit etre un Map")
+        self.assertIn("_activeToasts", src, "TOAST-1 regression : registre _activeToasts absent")
+        self.assertIn("new Map()", src, "TOAST-1 regression : _activeToasts doit etre un Map")
         # Garde-fou (a) : dedup window.
-        self.assertIn("_DEDUP_WINDOW_MS", src,
-                      "TOAST-1 regression : _DEDUP_WINDOW_MS absent (dedup window)")
+        self.assertIn("_DEDUP_WINDOW_MS", src, "TOAST-1 regression : _DEDUP_WINDOW_MS absent (dedup window)")
         # Garde-fou (b) : max stack.
-        self.assertIn("_MAX_STACK", src,
-                      "TOAST-1 regression : _MAX_STACK absent (limite empilement)")
+        self.assertIn("_MAX_STACK", src, "TOAST-1 regression : _MAX_STACK absent (limite empilement)")
         # Garde-fou (c) : safety net persistent.
-        self.assertIn("_PERSISTENT_MAX_MS", src,
-                      "TOAST-1 regression : _PERSISTENT_MAX_MS absent (safety net)")
+        self.assertIn("_PERSISTENT_MAX_MS", src, "TOAST-1 regression : _PERSISTENT_MAX_MS absent (safety net)")
 
 
 class BugfixV166SmokeImportTests(unittest.TestCase):

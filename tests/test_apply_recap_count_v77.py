@@ -4,7 +4,9 @@ run/apply renvoie {ok, result: ApplyResult.__dict__, apply_batch_id} ; le front
 lisait res.data.done (inexistant) -> "0 operation" systematique. Il somme
 desormais renames+moves+collection_moves.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

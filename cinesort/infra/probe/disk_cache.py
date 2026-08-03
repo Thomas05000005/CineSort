@@ -105,7 +105,7 @@ def get_disk_cache(
                 entry,
             )
             return None
-        with open(entry, "r", encoding="utf-8") as f:
+        with open(entry, encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             return None

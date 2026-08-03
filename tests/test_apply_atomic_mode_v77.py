@@ -114,12 +114,7 @@ class Migration029FreshDbTests(unittest.TestCase):
 
         conn = sqlite3.connect(str(self.db_path))
         try:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("apply_batch_modes", tables)
 
             cur = conn.execute("PRAGMA table_info(apply_batch_modes)")
@@ -135,8 +130,7 @@ class Migration029FreshDbTests(unittest.TestCase):
             indexes = {
                 row[0]
                 for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' "
-                    "AND tbl_name='apply_batch_modes'"
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='apply_batch_modes'"
                 )
             }
             self.assertIn("idx_apply_batch_modes_status", indexes)
@@ -154,12 +148,7 @@ class Migration029ExistingDbV28Tests(unittest.TestCase):
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 28, "Pre-cond : DB doit etre v28")
 
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn(
                 "apply_batch_modes",
                 tables,
@@ -168,12 +157,7 @@ class Migration029ExistingDbV28Tests(unittest.TestCase):
 
             _exec_migration_029(conn)
 
-            tables_after = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables_after = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("apply_batch_modes", tables_after)
 
             cur = conn.execute("PRAGMA user_version")
@@ -186,16 +170,12 @@ class Migration029ExistingDbV28Tests(unittest.TestCase):
         db_path, conn = existing_db_fixture(28)
         try:
             _exec_migration_029(conn)
-            count_first = conn.execute(
-                "SELECT COUNT(*) FROM apply_batch_modes"
-            ).fetchone()[0]
+            count_first = conn.execute("SELECT COUNT(*) FROM apply_batch_modes").fetchone()[0]
             self.assertEqual(count_first, 0)
 
             # Re-apply : ne doit pas lever, ne doit pas reinitialiser
             _exec_migration_029(conn)
-            count_second = conn.execute(
-                "SELECT COUNT(*) FROM apply_batch_modes"
-            ).fetchone()[0]
+            count_second = conn.execute("SELECT COUNT(*) FROM apply_batch_modes").fetchone()[0]
             self.assertEqual(count_second, 0)
         finally:
             conn.close()
@@ -271,13 +251,19 @@ class ApplyRepositoryAtomicModeTests(unittest.TestCase):
         """Annoter les batches d'un run avec leur mode atomique."""
         # On insere d'abord des batches pour ce run
         bid_a = self.store.apply.insert_apply_batch(
-            run_id="run-1", dry_run=False, quarantine_unapproved=False,
+            run_id="run-1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         bid_b = self.store.apply.insert_apply_batch(
-            run_id="run-1", dry_run=False, quarantine_unapproved=False,
+            run_id="run-1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         bid_c = self.store.apply.insert_apply_batch(
-            run_id="run-2", dry_run=False, quarantine_unapproved=False,
+            run_id="run-2",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         self.store.apply.upsert_atomic_mode(bid_a, True)
         self.store.apply.upsert_atomic_mode(bid_b, False)

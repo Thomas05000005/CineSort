@@ -63,7 +63,7 @@ def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[st
     from cinesort.domain.subtitle_helpers import _normalize_iso639
 
     present: set = set()
-    for lang in (row.get("subtitle_languages") or []):
+    for lang in row.get("subtitle_languages") or []:
         norm = _normalize_iso639(lang) or str(lang).strip().lower()
         if norm:
             present.add(norm)
@@ -141,10 +141,7 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
                 has_title = bool(str(row.get("proposed_title") or "").strip())
                 has_year = to_int(row.get("proposed_year"), 0) >= 1900
                 row["auto_approvable"] = bool(
-                    to_int(row.get("confidence"), 0) >= threshold
-                    and not (cur & blocking)
-                    and has_title
-                    and has_year
+                    to_int(row.get("confidence"), 0) >= threshold and not (cur & blocking) and has_title and has_year
                 )
             except Exception as row_exc:  # noqa: BLE001 — best-effort PAR ROW
                 logger.debug("enrich_plan_payload row error: %s", row_exc)
@@ -166,9 +163,7 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
             "ok": False,
             "error": "plan_load_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de charger le plan du run. Le fichier est peut-etre corrompu."
-            ),
+            "user_message": ("Impossible de charger le plan du run. Le fichier est peut-etre corrompu."),
         }
 
 
@@ -311,9 +306,7 @@ def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
             "ok": False,
             "error": "cancel_run_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible d'annuler le run. Il continuera en arriere-plan."
-            ),
+            "user_message": ("Impossible d'annuler le run. Il continuera en arriere-plan."),
         }
 
 
@@ -380,10 +373,7 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
             "ok": False,
             "error": "history_stats_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de charger les details du run. Verifie l'historique "
-                "ou redemarre l'app."
-            ),
+            "user_message": ("Impossible de charger les details du run. Verifie l'historique ou redemarre l'app."),
         }
 
 
@@ -448,9 +438,7 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: last apply batch err run_id=%s err=%s", run_id, exc)
     applied_rows = int(
-        ((_last_batch or {}).get("summary") or {}).get("applied_count")
-        or stats_obj.get("applied_count")
-        or 0
+        ((_last_batch or {}).get("summary") or {}).get("applied_count") or stats_obj.get("applied_count") or 0
     )
 
     # Quality reports : count + tier distribution + score moyen.
@@ -547,7 +535,7 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
             wr = str(_d.get("winner_row_id") or "")
             if wr:
                 dup_row_ids.add(wr)
-            for _lr in (_d.get("loser_row_ids") or []):
+            for _lr in _d.get("loser_row_ids") or []:
                 dup_row_ids.add(str(_lr))
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: dup decisions err run_id=%s err=%s", run_id, exc)

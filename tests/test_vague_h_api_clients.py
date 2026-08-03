@@ -22,7 +22,6 @@ Fix audit 2026-05-25 (v1.5.3) Vague H.
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -53,14 +52,14 @@ class JellyfinValidateTimeoutTests(unittest.TestCase):
             resp = MagicMock()
             resp.status_code = 200
             resp.content = b'[{"Id":"u1","Name":"admin","Policy":{"IsAdministrator":true}}]'
-            resp.json.return_value = [
-                {"Id": "u1", "Name": "admin", "Policy": {"IsAdministrator": True}}
-            ]
+            resp.json.return_value = [{"Id": "u1", "Name": "admin", "Policy": {"IsAdministrator": True}}]
             resp.raise_for_status.return_value = None
             return resp
 
         # Premier appel /System/Info/Public, second /Users
-        with patch.object(client._session, "get", side_effect=[fake_get("u", **{}), fake_get_users("u", **{})]) as mock_get:
+        with patch.object(
+            client._session, "get", side_effect=[fake_get("u", **{}), fake_get_users("u", **{})]
+        ) as mock_get:
             res = client.validate_connection()
 
         self.assertTrue(res.get("ok"), f"validate_connection echoue: {res}")

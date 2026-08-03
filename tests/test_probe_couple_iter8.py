@@ -141,9 +141,7 @@ class PrewarmProbeCacheCoupleTests(unittest.TestCase):
             row_ids = [str(r.row_id) for r in rs.rows]
         else:
             row_ids = []
-        self.assertGreaterEqual(
-            len(row_ids), 2, f"Plan doit avoir >=2 rows, status={status}, rs={rs}"
-        )
+        self.assertGreaterEqual(len(row_ids), 2, f"Plan doit avoir >=2 rows, status={status}, rs={rs}")
         return run_id, row_ids
 
     def test_off_returns_zero_and_probe_files_not_called(self) -> None:
@@ -165,9 +163,7 @@ class PrewarmProbeCacheCoupleTests(unittest.TestCase):
         run_id, row_ids = self._make_run(api, settings)
 
         # Mock probe_files au niveau ProbeService (le call site reel L187).
-        with mock.patch(
-            "cinesort.ui.api.quality_support.ProbeService"
-        ) as mock_service_cls:
+        with mock.patch("cinesort.ui.api.quality_support.ProbeService") as mock_service_cls:
             mock_probe = mock_service_cls.return_value
             mock_probe.probe_files.return_value = {}
             returned = quality_support._prewarm_probe_cache(api, run_id, row_ids)
@@ -197,9 +193,7 @@ class PrewarmProbeCacheCoupleTests(unittest.TestCase):
 
         run_id, row_ids = self._make_run(api, settings)
 
-        with mock.patch(
-            "cinesort.ui.api.quality_support.ProbeService"
-        ) as mock_service_cls:
+        with mock.patch("cinesort.ui.api.quality_support.ProbeService") as mock_service_cls:
             mock_probe = mock_service_cls.return_value
             # Simule succes probe sur 2 films.
             mock_probe.probe_files.return_value = {

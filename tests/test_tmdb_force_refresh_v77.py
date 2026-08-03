@@ -66,9 +66,7 @@ class ForceRefreshBypassTests(unittest.TestCase):
             tmdb = self._client(tmp)
             tmdb._cache_set("movie|42", {"poster_path": "/old.jpg"})
             with patch.object(tmdb, "_http_get", side_effect=requests.ConnectionError("down")):
-                self.assertEqual(
-                    tmdb.get_movie_poster_path(42, force_refresh=True), "/old.jpg"
-                )
+                self.assertEqual(tmdb.get_movie_poster_path(42, force_refresh=True), "/old.jpg")
 
     def test_thumb_url_propagates_force_refresh(self):
         with tempfile.TemporaryDirectory() as tmp:
