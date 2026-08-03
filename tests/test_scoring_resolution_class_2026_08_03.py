@@ -40,6 +40,11 @@ from cinesort.domain.quality_score import (
 )
 from cinesort.ui.api import quality_report_support
 
+# Racine bidon : aucune I/O n'a lieu (ProbeService et le store sont mockes).
+# On evite volontairement `/tmp` (Bandit B108) alors qu'aucun fichier temporaire
+# n'est cree ici.
+_FAKE_ROOT = "Z:/films-de-test"
+
 
 def _probe(
     *,
@@ -193,7 +198,7 @@ class GenreScoringIsReachableTests(unittest.TestCase):
     @staticmethod
     def _row(tmdb_id: int):
         row = MagicMock()
-        row.folder = "/tmp/Movie (2015)"
+        row.folder = f"{_FAKE_ROOT}/Movie (2015)"
         row.proposed_title = "Movie"
         row.proposed_year = 2015
         row.video = "Movie.1080p.mkv"
@@ -218,11 +223,11 @@ class GenreScoringIsReachableTests(unittest.TestCase):
             quality_report_support._probe_and_score(
                 api,
                 store,
-                {"state_dir": "/tmp"},
+                {"state_dir": _FAKE_ROOT},
                 "run_test",
                 "row_1",
                 self._row(tmdb_id),
-                "/tmp/Movie/Movie.mkv",
+                f"{_FAKE_ROOT}/Movie/Movie.mkv",
                 profile_json={"id": "default", "version": 1},
                 active_profile_id="default",
                 active_profile_version=1,
