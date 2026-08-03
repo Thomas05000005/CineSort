@@ -197,9 +197,7 @@ def _act_force_score(result, value, reason):
     # forcer le score a 0 (ce qui ferait tomber tout film en Reject sans
     # avertissement). On preserve le score existant et on logge un warning.
     if _num_strict(value) is _MISSING:
-        logger.warning(
-            "custom_rules: force_score ignored, non-numeric value=%r", value
-        )
+        logger.warning("custom_rules: force_score ignored, non-numeric value=%r", value)
         return
     new = _clamp(value)
     result["score"] = new
@@ -318,6 +316,7 @@ def apply_custom_rules(
     if not rules or not isinstance(rules, list):
         return result
     active = [r for r in rules if isinstance(r, dict) and r.get("enabled", True)]
+
     # Tri stable: priorite numerique en cle primaire, ordre d'apparition en cle
     # secondaire. _num_strict retourne _MISSING pour non-numerique (ex: "abc")
     # -> on tombe alors sur une priorite tres grande pour deprioriser ces
@@ -326,6 +325,7 @@ def apply_custom_rules(
     def _priority_key(r):
         p = _num_strict(r.get("priority"))
         return float("inf") if p is _MISSING else p
+
     active.sort(key=_priority_key)
     for rule in active:
         try:
@@ -392,8 +392,7 @@ def _validate_action(action: Any, rule_idx: int) -> Tuple[bool, List[str], Dict[
         canonical = normalize_tier_string(value)
         if not canonical:
             errs.append(
-                f"Regle {rule_idx + 1}: force_tier value '{value}' inconnu "
-                f"(attendu Platinum/Gold/Silver/Bronze/Reject)"
+                f"Regle {rule_idx + 1}: force_tier value '{value}' inconnu (attendu Platinum/Gold/Silver/Bronze/Reject)"
             )
             return False, errs, {}
         # Stocke la forme canonique uniquement
@@ -432,9 +431,7 @@ def _validate_single_rule(rule: Any, idx: int) -> Tuple[bool, List[str], Dict[st
     else:
         p_num = _num_strict(raw_priority)
         if p_num is _MISSING:
-            errs.append(
-                f"Regle {idx + 1}: priority doit etre numerique (recu {raw_priority!r})"
-            )
+            errs.append(f"Regle {idx + 1}: priority doit etre numerique (recu {raw_priority!r})")
             priority_val = 0
         else:
             priority_val = int(round(p_num))

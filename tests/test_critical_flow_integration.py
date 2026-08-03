@@ -169,8 +169,6 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
             }
         }
 
-        expected_dir = self.root / core.windows_safe(f"{row['proposed_title']} ({row['proposed_year']})")
-        expected_video = expected_dir / source_video.name
         run_dir = self._run_dir(run_id)
         ui_log = run_dir / "ui_log.txt"
         summary_txt = run_dir / "summary.txt"
@@ -187,7 +185,18 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         apply_batch_id = str(applied["apply_batch_id"])
 
         self.assertFalse(source_dir.exists(), source_dir)
-        self.assertTrue(expected_dir.exists(), expected_dir)
+        # Le nom du dossier cible est produit par le moteur de nommage (template
+        # par defaut "{title} ({year})"). Le test ne recopie PAS cette formule :
+        # il observe ce qui a ete cree, puis epingle le resultat metier attendu.
+        # "Old Name 2010" + 2010 doit donner "Old Name (2010)", jamais
+        # "Old Name 2010 (2010)" : l'annee de queue redondante du titre propose
+        # est retiree par naming._apply_template (fix double-annee disque).
+        applied_dirs = sorted(p.name for p in self.root.iterdir() if p.is_dir())
+        self.assertEqual(applied_dirs, ["Old Name (2010)"], applied_dirs)
+        expected_dir = self.root / applied_dirs[0]
+        # Le fichier video ne doit JAMAIS etre renomme (seeding torrent) :
+        # seul le dossier parent change de nom.
+        expected_video = expected_dir / source_video.name
         self.assertTrue(expected_video.exists(), expected_video)
 
         self.assertTrue(ui_log.exists(), ui_log)

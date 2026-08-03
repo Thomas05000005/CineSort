@@ -159,12 +159,11 @@ class EndpointAndUiTests(unittest.TestCase):
         api = backend.CineSortApi()
         self.assertTrue(hasattr(api.integrations, "get_jellyfin_sync_report"))
 
-    def test_ui_sync_button(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        jf_js = (root / "web" / "dashboard" / "views" / "jellyfin.js").read_text(encoding="utf-8")
-        self.assertIn("btnJellyfinSync", jf_js)
-        self.assertIn("jellyfinSyncResults", jf_js)
-        self.assertIn("get_jellyfin_sync_report", jf_js)
+    # Phase 5 (purge verif totale) : test_ui_sync_button RETIRÉ — views/jellyfin.js
+    # supprimé (vue morte jamais routée). Le rapport de sync (get_jellyfin_sync_report)
+    # est désormais une méthode façade orpheline (KNOWN_ORPHAN_METHODS, à câbler
+    # dans parametres.js ou élaguer = décision produit). Le contrat backend du
+    # sync watched reste couvert par test_lotd_chain_integrations + jellyfin_sync tests.
 
     def test_css_sync_classes(self) -> None:
         root = Path(__file__).resolve().parents[1]

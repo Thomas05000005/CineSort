@@ -31,17 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
-    try:
-        settings = api.settings.get_settings()
-        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        store, _ = api._get_or_create_infra(state_dir)
-        runs = store.run.list_runs(limit=1)
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("quality_audit cannot resolve latest run: %s", exc)
-        return None
-    if not runs:
-        return None
-    return str(runs[0].get("run_id") or "") or None
+    # B1-bis (revue Lot C-fix) : jumeau de library_support._resolve_run_id —
+    # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
+    # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
+    # corrige (skip des runs utilitaires).
+    from cinesort.ui.api import library_support
+
+    return library_support._resolve_run_id(api, None)
 
 
 def _extract_warnings_from_payload(payload: Optional[Dict[str, Any]]) -> List[str]:
@@ -376,9 +372,7 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
                         "recompute_worker launching auto perceptual batch (%d films)",
                         len(row_ids),
                     )
-                    perc_result = perceptual_support.analyze_perceptual_batch(
-                        api, run_id, row_ids, options=None
-                    )
+                    perc_result = perceptual_support.analyze_perceptual_batch(api, run_id, row_ids, options=None)
                     if isinstance(perc_result, dict) and perc_result.get("ok"):
                         logger.info(
                             "recompute_worker auto perceptual started success_count=%s",
@@ -426,9 +420,7 @@ def recompute_all_scores(api: Any) -> Dict[str, Any]:
             "ok": False,
             "error": "recompute_scores_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de recalculer les scores. Reessaie ou redemarre."
-            ),
+            "user_message": ("Impossible de recalculer les scores. Reessaie ou redemarre."),
         }
 
 

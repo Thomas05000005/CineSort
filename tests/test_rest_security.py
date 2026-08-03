@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -15,10 +16,38 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any, Dict
+from unittest import mock
 
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer, _RateLimiter
 from tests._helpers import find_free_port as _find_free_port
+
+# Endpoint VIVANT (format facade) utilise par les tests d'auth.
+# Ne PAS revenir a "/api/get_settings" : depuis la desactivation par defaut de
+# Pass 1 (P0 #233), cette route legacy repond 410 Gone. Un test d'auth qui vise
+# une route morte peut devenir vert/rouge pour une raison etrangere a l'auth.
+_AUTH_ENDPOINT = "/api/settings/get_settings"
+
+
+@contextlib.contextmanager
+def _auth_really_enforced():
+    """Desactive le bypass « localhost desktop trusted » le temps du bloc.
+
+    Depuis le 2026-06-08, `RestRequestHandler._check_auth` accorde un bypass
+    TOTAL de l'auth quand les 3 conditions sont reunies : client loopback,
+    serveur bind sur 127.0.0.1, et kill-switch `CINESORT_DISABLE_LOCAL_AUTH`
+    inactif (mode bureau pywebview : un attaquant local a deja le shell).
+
+    Consequence : un test d'auth qui tape 127.0.0.1 SANS ce kill-switch ne
+    teste plus rien — la requete sans token traverse le handler et repond 200.
+    Les assertions 401 ci-dessous epinglaient donc un comportement
+    VOLONTAIREMENT change ; on les rebranche sur la configuration ou l'auth
+    Bearer est reellement exigee (kill-switch documente = mode expose/LAN),
+    pour qu'elles restent capables de rougir si l'auth casse.
+    """
+    with mock.patch.dict(os.environ, {"CINESORT_DISABLE_LOCAL_AUTH": "1"}):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Tests unitaires du rate limiter (pas besoin de serveur)
@@ -126,7 +155,11 @@ class RestSecurityHttpTests(unittest.TestCase):
         raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
     def _request_with_origin(
-        self, method: str, path: str, body: Any = None, token: str | None = None,
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        token: str | None = None,
         origin: str | None = None,
     ) -> tuple:
         """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS).
@@ -165,20 +198,30 @@ class RestSecurityHttpTests(unittest.TestCase):
             return status, data, headers_out
         raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
+    def _assert_401_when_auth_enforced(self, token: str | None) -> None:
+        """Verifie qu'un *token* invalide donne 401 sur un endpoint VIVANT.
+
+        Le controle positif (meme requete + bon token -> 200) est obligatoire :
+        sans lui, un endpoint mort ou un serveur casse produirait un 4xx et le
+        test serait vert sans rien prouver sur l'authentification.
+        """
+        with _auth_really_enforced():
+            status, _, _ = self._request("POST", _AUTH_ENDPOINT, body={}, token=token)
+            control, _, _ = self._request("POST", _AUTH_ENDPOINT, body={}, token=self.token)
+        self.assertEqual(control, 200, f"controle positif KO ({control}) : le 401 ne prouverait rien")
+        self.assertEqual(status, 401)
+
     # 26
     def test_request_without_auth_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token=None)
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced(None)
 
     # 27
     def test_request_invalid_token_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token="wrong-token")
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced("wrong-token")
 
     # 28
     def test_request_empty_token_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token="")
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced("")
 
     # 32
     def test_404_no_path_reflection(self) -> None:
@@ -270,8 +313,11 @@ class RestSecurityHttpTests(unittest.TestCase):
         externe est rejete 403 AVANT toute action, meme avec un token valide —
         ferme la CSRF possible via le bypass auth loopback."""
         status, data, _ = self._request_with_origin(
-            "POST", "/api/run/start_plan", body={"settings": {"library_path": str(self.root)}},
-            token=self.token, origin="https://evil.example.com",
+            "POST",
+            "/api/run/start_plan",
+            body={"settings": {"library_path": str(self.root)}},
+            token=self.token,
+            origin="https://evil.example.com",
         )
         self.assertEqual(status, 403)
         self.assertNotIn("run_id", data)
@@ -280,7 +326,10 @@ class RestSecurityHttpTests(unittest.TestCase):
         """Un POST same-origin (Origin localhost, le dashboard) n'est PAS bloque
         par le garde CSRF (il passe au flux normal auth/dispatch)."""
         status, _, _ = self._request_with_origin(
-            "POST", "/api/get_settings", body={}, token=self.token,
+            "POST",
+            "/api/get_settings",
+            body={},
+            token=self.token,
             origin=f"http://127.0.0.1:{self.port}",
         )
         self.assertNotEqual(status, 403, "le dashboard same-origin ne doit pas etre bloque")
@@ -351,29 +400,15 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
         self.server.stop()
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_rate_limiter_returns_429_after_5_failures(self) -> None:
-        """FIX DEFINITIF 2026-06-07 : 127.0.0.1 est desormais exempte du
-        rate-limiter (saturation par 401 silents du _safeBearer cote front
-        quand le token contient un codepoint non-ASCII). Le scenario fonctionnel
-        ("apres N echecs -> bloque") reste couvert par les tests unitaires
-        `RateLimiterUnitTests` (qui utilisent une IP non-locale "10.0.0.1").
-        Ici on verifie le NOUVEAU contrat : meme avec le compteur sature,
-        127.0.0.1 (loopback desktop pywebview) re;coit 401 et JAMAIS 429.
-        """
-        # 1. Pre-remplit le rate limiter pour 127.0.0.1 (defensif : le filtre
-        # cote handler doit court-circuiter is_blocked avant meme de regarder).
-        for _ in range(6):
-            self.server._rate_limiter.record_failure("127.0.0.1")
-        self.assertTrue(self.server._rate_limiter.is_blocked("127.0.0.1"))
-
-        # 2. Une requete HTTP depuis 127.0.0.1 -> doit retourner 401, pas 429
+    def _post_status(self, bearer: str) -> int:
+        """POST sur l'endpoint d'auth vivant, retourne le code HTTP."""
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
             conn.request(
                 "POST",
-                "/api/get_settings",
+                _AUTH_ENDPOINT,
                 body=b"{}",
-                headers={"Content-Type": "application/json", "Authorization": "Bearer wrong"},
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {bearer}"},
             )
             resp = conn.getresponse()
             status = resp.status
@@ -382,6 +417,39 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
             self.fail("Le serveur a coupe la connexion : localhost ne doit pas etre rate-limite")
         finally:
             conn.close()
+        return status
+
+    def test_rate_limiter_returns_429_after_5_failures(self) -> None:
+        """FIX DEFINITIF 2026-06-07 : 127.0.0.1 est desormais exempte du
+        rate-limiter (saturation par 401 silents du _safeBearer cote front
+        quand le token contient un codepoint non-ASCII). Le scenario fonctionnel
+        ("apres N echecs -> bloque") reste couvert par les tests unitaires
+        `RateLimiterUnitTests` (qui utilisent une IP non-locale "10.0.0.1").
+        Ici on verifie le NOUVEAU contrat : meme avec le compteur sature,
+        127.0.0.1 (loopback desktop pywebview) recoit 401 et JAMAIS 429.
+
+        2026-08-03 : le test visait "/api/get_settings" (route legacy morte ->
+        410) et ne desactivait pas le bypass auth loopback ; il ne pouvait donc
+        plus observer le 401 qu'il asserte. On vise l'endpoint facade vivant et
+        on force le kill-switch d'auth (cf _auth_really_enforced) : l'exemption
+        rate-limit testee ici, elle, reste inconditionnelle cote serveur
+        (_is_rate_limited exempte les IP locales quel que soit l'etat du
+        kill-switch), donc l'invariant "jamais 429 en loopback" est bien celui
+        qui est mis a l'epreuve.
+        """
+        # 1. Pre-remplit le rate limiter pour 127.0.0.1 (defensif : le filtre
+        # cote handler doit court-circuiter is_blocked avant meme de regarder).
+        for _ in range(6):
+            self.server._rate_limiter.record_failure("127.0.0.1")
+        self.assertTrue(self.server._rate_limiter.is_blocked("127.0.0.1"))
+
+        # 2. Une requete HTTP depuis 127.0.0.1 -> doit retourner 401, pas 429
+        with _auth_really_enforced():
+            status = self._post_status("wrong")
+            # Controle : avec le BON token, le compteur sature ne doit pas non
+            # plus bloquer le loopback (sinon on lirait 429 ici).
+            control = self._post_status("good-token")
+        self.assertEqual(control, 200, f"loopback avec bon token bloque ({control}) malgre l'exemption")
         self.assertEqual(
             status,
             401,

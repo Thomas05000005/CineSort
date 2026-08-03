@@ -244,13 +244,9 @@ class StateDirHelperTests(unittest.TestCase):
                     if sig and not mutation_in_progress["flag"]:
                         # Mutation marquee terminee : on doit voir la cible.
                         if sig == "A" and p not in (path_a, initial, path_b):
-                            coherence_violations.append(
-                                f"after A-set, observed unexpected: {p}"
-                            )
+                            coherence_violations.append(f"after A-set, observed unexpected: {p}")
                         if sig == "B" and p not in (path_a, initial, path_b):
-                            coherence_violations.append(
-                                f"after B-set, observed unexpected: {p}"
-                            )
+                            coherence_violations.append(f"after B-set, observed unexpected: {p}")
             except Exception as exc:
                 errors.append(exc)
 
@@ -370,9 +366,7 @@ class GetOrCreateInfraConcurrencyTests(unittest.TestCase):
 
             def caller():
                 try:
-                    res = runtime_support.get_or_create_infra(
-                        api, state_dir, env_truthy_fn=lambda _name: False
-                    )
+                    res = runtime_support.get_or_create_infra(api, state_dir, env_truthy_fn=lambda _name: False)
                     results.append(res)
                 except Exception as exc:
                     errors.append(exc)
@@ -481,12 +475,7 @@ class MigrationSelfHealingTests(unittest.TestCase):
 
         conn = _sqlite3.connect(str(db_path))
         try:
-            tables = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         finally:
             conn.close()
         self.assertIn("ignored_alerts", tables, f"tables : {sorted(tables)}")
@@ -533,12 +522,7 @@ class MigrationSelfHealingTests(unittest.TestCase):
 
         conn = _sqlite3.connect(str(db_path))
         try:
-            tables = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         finally:
             conn.close()
         self.assertIn(

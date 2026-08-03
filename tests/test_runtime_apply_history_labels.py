@@ -100,10 +100,7 @@ def test_apply_history_run_labels_are_french(dashboard_page) -> None:
         )
 
     # Verif : chaque label appartient au set autorise FR.
-    invalid_labels = [
-        lbl for lbl in labels
-        if lbl not in _VALID_RUN_TYPE_LABELS_FR
-    ]
+    invalid_labels = [lbl for lbl in labels if lbl not in _VALID_RUN_TYPE_LABELS_FR]
     assert len(invalid_labels) == 0, (
         f"Labels run NON FR detectes : {invalid_labels}. "
         f"Autorise : {sorted(_VALID_RUN_TYPE_LABELS_FR)}. "
@@ -155,9 +152,7 @@ def test_apply_history_op_counters_are_french(dashboard_page) -> None:
     )
 
     if not clicked:
-        pytest.skip(
-            "Aucune entree historique cliquable trouvee (timeline vide / empty)."
-        )
+        pytest.skip("Aucune entree historique cliquable trouvee (timeline vide / empty).")
 
     # Laisser l'inspector se rendre (fetch detail eventuel).
     dashboard_page.wait_for_timeout(800)
@@ -188,8 +183,7 @@ def test_apply_history_op_counters_are_french(dashboard_page) -> None:
 
     # Verif positive : au moins un counter doit contenir un libelle FR connu.
     has_french_label = any(
-        any(fr_lbl in txt for fr_lbl in _VALID_OP_TYPE_LABELS_FR_SUBSTRINGS)
-        for txt in counters_data
+        any(fr_lbl in txt for fr_lbl in _VALID_OP_TYPE_LABELS_FR_SUBSTRINGS) for txt in counters_data
     )
     assert has_french_label is True, (
         f"Aucun libelle FR detecte dans les counters historique. "
