@@ -181,11 +181,19 @@ def upsert_disk_cache(
             "normalized_json": normalized_json,
             "ts": float(ts if ts is not None else time.time()),
         }
-        # Fix #692 : l'ecriture etait atomique (tmp + os.replace) mais PAS
-        # durable — aucun fsync avant le rename. Un crash systeme entre le
-        # `json.dump` et le `os.replace` promouvait une entree vide ou tronquee
-        # que `get_disk_cache` relisait ensuite en boucle. `atomic_write_json`
-        # porte les deux moities (nom unique + fsync + controle de taille).
+        # Fix #692 (et #694, fusionne en premier sur main le 2026-08-03) :
+        # l'ecriture etait atomique (tmp + os.replace) mais PAS durable — aucun
+        # fsync avant le rename. Un crash systeme entre le `json.dump` et le
+        # `os.replace` promouvait une entree vide ou tronquee que
+        # `get_disk_cache` relisait ensuite en boucle.
+        #
+        # #694 avait deja apporte le fsync, en ligne. On passe ici par le helper
+        # partage, qui ajoute deux choses que la version en ligne n'avait pas :
+        #   - le CONTROLE DE TAILLE apres fsync (un fichier ecrit court mais
+        #     correctement fsync'e etait quand meme promu) ;
+        #   - un nom de .tmp unique par (pid, THREAD, nanoseconde, uuid) : la
+        #     version en ligne n'avait que pid + time_ns, insuffisant sous le
+        #     ThreadingHTTPServer ou deux threads du meme processus ecrivent.
         atomic_write_json(entry, payload, indent=None)
         return True
     except (OSError, TypeError, ValueError) as exc:

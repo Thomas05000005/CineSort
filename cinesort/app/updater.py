@@ -117,7 +117,16 @@ def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
         return None
     if not isinstance(data, dict):
         return None
-    if time.time() - float(data.get("ts", 0)) >= cache_ttl_s:
+    # `ts` peut etre absent, null ou non-numerique si le fichier a ete tronque
+    # (ecriture partielle) ou edite a la main : float() leverait ValueError/
+    # TypeError hors du except ci-dessus. On traite ce cas comme un cache
+    # illisible (return None) plutot que de laisser remonter l'exception, fidele
+    # a la philosophie du module ("cache illisible -> refetch, jamais crash").
+    try:
+        ts = float(data.get("ts") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if time.time() - ts >= cache_ttl_s:
         return None
     payload = data.get("payload")
     return payload if isinstance(payload, dict) else None
