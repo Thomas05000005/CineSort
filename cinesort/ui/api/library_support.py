@@ -163,8 +163,36 @@ def _build_display_tier_fields(
 # ---------------------------------------------------------------------------
 
 
-def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
-    """Construit la liste des rows Library enrichies (probe + perceptual V2)."""
+def _dedup_ids_preserving_order(ids: List[int]) -> List[int]:
+    """Deduplique une liste d'ids en O(n) (set) en gardant l'ordre d'apparition.
+
+    PERF (audit 2026-08-02, LOW confirmee) : la collecte des tmdb_id du batch
+    jaquettes testait l'appartenance sur la LISTE en construction
+    (`if tid not in tmdb_ids`), soit O(n^2). Mesure sur cette machine :
+    239 ms a 10 000 ids, 983 ms a 20 000, 2 470 ms a 30 000, contre
+    0,7 / 1,8 / 3,0 ms avec un set. Le resultat est strictement identique
+    (memes ids, meme ordre de premiere apparition).
+    """
+    seen: set[int] = set()
+    out: List[int] = []
+    for value in ids:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> List[Dict[str, Any]]:
+    """Construit la liste des rows Library enrichies (probe + perceptual V2).
+
+    Args:
+        with_posters: si False, on saute le batch `get_tmdb_posters` (les rows
+            gardent `poster_url=None` sauf fallback candidat, deja gratuit).
+            Reserve aux appelants qui n'exposent AUCUNE jaquette au frontend
+            (compteurs de chips, rollup scoring) : ce batch reconstruit un
+            TmdbClient et rejoue tout `tmdb_cache.json` a chaque appel, et
+            frappe TMDb en HTTP pour les ids pas encore en cache.
+    """
     # Charger le plan
     try:
         settings = api.settings.get_settings()
@@ -227,7 +255,21 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     # revient plus au match auto au reload. No-op si aucun override.
     from cinesort.ui.api.film_support import overlay_tmdb_override
 
+    # PERF (audit 2026-08-02, HIGH library_support:231) : `api.run.get_plan`
+    # ci-dessus a DEJA applique cet overlay sur chaque row
+    # (history_support._enrich_plan_payload:125), avec le MEME store
+    # (`_get_store(api)` == `api._get_or_create_infra(state_dir)`). Le refaire
+    # ici relisait `film_tmdb_overrides` une 2e fois par film, or chaque
+    # `get_tmdb_override` ouvre DEUX connexions SQLite (`_ensure_tables` puis le
+    # SELECT) qui commitent chacune une ligne dans `pragma_history` : la vue
+    # Bibliotheque payait 4N connexions au lieu de 2N.
+    # On ne re-applique donc que sur les rows NON enrichies (get_plan stubbe,
+    # enrichissement tombe en erreur avant la boucle...) : `display_title` n'est
+    # pose que par `_enrich_plan_payload`, juste APRES l'overlay de la meme
+    # iteration — sa presence prouve que l'overlay a deja tourne pour cette row.
     for _r in plan_rows:
+        if isinstance(_r, dict) and "display_title" in _r:
+            continue
         overlay_tmdb_override(store, run_id, _r)
 
     # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
@@ -291,10 +333,12 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         tid = _resolve_tmdb_id(r)
         if tid and tid > 0:
             resolved_tmdb_by_row[rid] = tid
-            if tid not in tmdb_ids:
-                tmdb_ids.append(tid)
+            tmdb_ids.append(tid)
+    # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
+    # `if tid not in tmdb_ids` etait quadratique.
+    tmdb_ids = _dedup_ids_preserving_order(tmdb_ids)
     posters_by_tmdb: Dict[str, str] = {}
-    if tmdb_ids:
+    if with_posters and tmdb_ids:
         try:
             poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
             if poster_res and poster_res.get("ok"):
@@ -1149,7 +1193,10 @@ def get_scoring_rollup(
     if not resolved_rid:
         return {"ok": True, "by": dim, "groups": []}
 
-    rows = _build_library_rows(api, resolved_rid)
+    # PERF (audit 2026-08-02) : la reponse n'expose que group_name/count/scores/
+    # top_film_ids — AUCUNE jaquette. On evite donc le batch TMDb (reconstruction
+    # de TmdbClient + relecture integrale de tmdb_cache.json a chaque appel).
+    rows = _build_library_rows(api, resolved_rid, with_posters=False)
     if not rows:
         return {"ok": True, "by": dim, "groups": []}
 
@@ -1322,7 +1369,12 @@ def get_library_counters_by_chip(
             },
         }
 
-    all_rows = _build_library_rows(api, resolved_rid)
+    # PERF (audit 2026-08-02, HIGH library_support:1325) : cet endpoint ne
+    # renvoie QUE des compteurs (aucun `poster_url` dans la reponse) et aucun
+    # predicat de comptage ne lit `poster_url` — il payait pourtant le batch
+    # jaquettes complet a chaque clic de chip / tri / filtre, en doublon de
+    # get_library_filtered appele juste avant par bibliotheque.js.
+    all_rows = _build_library_rows(api, resolved_rid, with_posters=False)
     # Appliquer filters EN AMONT pour scoper les counters (utile si search actif).
     scoped_rows = [r for r in all_rows if _row_matches(r, filters)]
 
