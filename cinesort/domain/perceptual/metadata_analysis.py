@@ -18,6 +18,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     CROPDETECT_LIMIT,
     CROPDETECT_ROUND,
@@ -36,8 +38,6 @@ from .constants import (
     MPDECIMATE_JUDDER_PULLDOWN,
     MPDECIMATE_SEGMENT_DURATION_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 from .parallelism import resolve_max_workers, run_parallel_tasks
 

@@ -68,12 +68,20 @@ export function showModal(opts) {
   overlay.className = "modal-overlay";
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
+  // VN-A.3 (WCAG 4.1.2) : aria-labelledby pointe vers le H3 du titre pour que
+  // les lecteurs d'ecran (NVDA, JAWS, VoiceOver) annoncent le titre a l'ouverture
+  // au lieu de simplement "dialogue".
+  overlay.setAttribute("aria-labelledby", "dashModalTitle");
 
   let actionsHtml = "";
   if (actions.length > 0) {
     actionsHtml = '<div class="modal-actions">';
     actions.forEach((a, i) => {
-      actionsHtml += `<button class="btn ${a.cls || ""}" data-modal-action="${i}">${escapeHtml(a.label)}</button>`;
+      // VN-A.3 : escape la classe cote callsite aussi (defense en profondeur
+      // au cas ou un caller passe une cls construite a partir de donnees
+      // externes : evite injection via attribut class="...").
+      const safeCls = escapeHtml(a.cls || "");
+      actionsHtml += `<button class="btn ${safeCls}" data-modal-action="${i}">${escapeHtml(a.label)}</button>`;
     });
     actionsHtml += "</div>";
   } else {
@@ -83,7 +91,7 @@ export function showModal(opts) {
   overlay.innerHTML = `
     <div class="modal-card card">
       <div class="modal-header">
-        <h3>${escapeHtml(title)}</h3>
+        <h3 id="dashModalTitle">${escapeHtml(title)}</h3>
         <button class="modal-close-btn" data-modal-close aria-label="Fermer">&times;</button>
       </div>
       <!-- body is pre-escaped HTML built by callers with escapeHtml() on each field -->
@@ -143,7 +151,11 @@ export function closeModal() {
   // V2-D (a11y) : restaurer le focus precedent (avant ouverture de la modale).
   const previous = overlay._previouslyFocused;
   overlay.remove();
-  if (previous && typeof previous.focus === "function") {
+  // VN-A.3 : ne restaurer le focus que si l'element est TOUJOURS dans le DOM
+  // (sinon focus tombe sur <body>, ce qui est pire que de laisser le navigateur
+  // gerer le defaut). isConnected couvre les cas ou le previous a ete supprime
+  // pendant l'ouverture de la modale (re-render react-like).
+  if (previous && typeof previous.focus === "function" && previous.isConnected) {
     try { previous.focus(); } catch (e) { /* noop */ }
   }
 }
@@ -211,6 +223,11 @@ export function dangerConfirmModal(opts) {
     confirmLabel = "Confirmer",
     cancelLabel = "Annuler",
     onConfirm = () => {},
+    // Fix audit 2026-06-07 UX high : onCancel optionnel, appele quand l'utilisateur
+    // annule (clic Annuler, Esc, clic backdrop). Resout le deadlock UX ou la
+    // bibliotheque laissait _state.bulkInFlight=true apres une annulation (boutons
+    // bulk disabled jusqu'au reload). N'est jamais appele apres onConfirm.
+    onCancel = null,
   } = opts || {};
 
   const overlay = document.createElement("div");
@@ -265,6 +282,11 @@ export function dangerConfirmModal(opts) {
   const cancelBtn = overlay.querySelector("[data-danger-cancel]");
   const confirmBtn = overlay.querySelector("[data-danger-confirm]");
 
+  // Fix audit 2026-06-07 UX high : drapeau pour distinguer fermeture-apres-confirm
+  // de fermeture-via-cancel (clic Annuler, Esc, backdrop). onCancel n'est appele
+  // QUE dans le cas annulation.
+  overlay._confirmed = false;
+
   // Fermeture / annulation centralisee
   const close = () => {
     if (overlay._countdownTimer) {
@@ -275,9 +297,18 @@ export function dangerConfirmModal(opts) {
       document.removeEventListener("keydown", overlay._escHandler);
     }
     const prev = overlay._previouslyFocused;
+    const wasCancel = !overlay._confirmed;
     overlay.remove();
-    if (prev && typeof prev.focus === "function") {
+    // VN-A.3 : verifier isConnected avant de restaurer le focus precedent
+    // (l'element a pu etre supprime pendant que la modale etait ouverte,
+    //  ex. re-render apres l'action confirmee).
+    if (prev && typeof prev.focus === "function" && prev.isConnected) {
       try { prev.focus(); } catch (e) { /* noop */ }
+    }
+    // onCancel apres remove() pour eviter qu'un re-render synchrone du caller
+    // n'interagisse avec une modale en cours de demontage.
+    if (wasCancel && typeof onCancel === "function") {
+      try { onCancel(); } catch (e) { console.error("[dangerConfirmModal] onCancel failed", e); }
     }
   };
 
@@ -307,6 +338,9 @@ export function dangerConfirmModal(opts) {
       if (confirmBtn.disabled) return;
       // Eviter double-clic pendant l'execution
       confirmBtn.disabled = true;
+      // Fix audit 2026-06-07 UX high : marquer _confirmed avant close() pour
+      // que onCancel ne soit PAS appele dans ce cas (cf close()).
+      overlay._confirmed = true;
       try {
         await Promise.resolve(onConfirm());
       } finally {

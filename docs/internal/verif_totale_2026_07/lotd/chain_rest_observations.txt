@@ -1,0 +1,109 @@
+LOT D — CHAINE 4.7 REST PUR — OBSERVATIONS RUNTIME (2026-07-08)
+Test permanent : tests/test_lotd_chain_rest.py
+Conditions : RestApiServer ephemere (port libre, jamais 8642), bibliotheque
+virtuelle jetable (tempdir, .mkv factices 2 Ko + .srt + .nfo), probe_backend
+"none" (aucun binaire externe), CINESORT_E2E=1 + CINESORT_DISABLE_LOCAL_AUTH=1
+poses AVANT le start, token 38 chars, venv python -X utf8.
+
+================================================================================
+1. AUTH (CINESORT_DISABLE_LOCAL_AUTH=1)
+--------------------------------------------------------------------------------
+POST /api/settings/get_settings sans token   -> 401 {"ok":false,"message":"Cle d'acces invalide ou manquante."}
+POST /api/settings/get_settings token faux   -> 401 idem
+POST /api/settings/get_settings token OK     -> 200 payload settings canonique
+GET  /api/health et /api/spec                -> 200 SANS token (publics, by design)
+X-Request-ID present sur 200 et 401.
+
+2. RATE-LIMIT — SEUILS REELS COMPTES
+--------------------------------------------------------------------------------
+Constantes reelles : _RATE_LIMIT_MAX_FAILURES=5, _RATE_LIMIT_WINDOW_S=60.0,
+cap global = 20 (4x per-IP, S6 audit).
+Sequence observee (bearer faux, pile HTTP complete) :
+  [401, 401, 401, 401, 401, 429]  -> 429 a la 6e tentative, Retry-After: 60
+  429 persistant tant que la fenetre n'est pas expiree
+  apres expiration de la fenetre (time-travel des timestamps de +61 s) -> 401
+  auth reussie -> 200 et record_success purge le compteur de l'IP ({} verifie)
+LIMITE : en loopback reel, _is_rate_limited EXEMPTE totalement les IPs locales
+(_LOCAL_CLIENT_IPS, fix definitif 2026-06-07) : un client 127.0.0.1 ne peut
+JAMAIS voir un 429. Le test patch rest_server._LOCAL_CLIENT_IPS=frozenset()
+(restaure en finally) pour etre traite en client distant sur la vraie pile.
+
+3. LEGACY POST /api/<methode> (Pass 1 desactivee par defaut, P0 #233)
+--------------------------------------------------------------------------------
+POST /api/get_settings  token OK -> 410 {"ok":false,"message":"Use /api/<facade>/<method> instead"}
+POST /api/start_plan    token OK -> 410 idem
+POST /api/<inconnu>     token OK -> 410 idem (pas de fuite d'existence)
+POST /api/get_settings  SANS token -> 401 (l'auth passe AVANT le dispatch)
+POST /api/run/methode_inconnue token OK -> 404 "Methode inconnue"
+
+4. HEALTH + SPEC
+--------------------------------------------------------------------------------
+GET /api/health au repos : {"ok":true,"version":"1.5.2-beta","ts":...,
+  "last_event_ts":...,"last_settings_ts":...} — active_run_id ABSENT.
+GET /api/health pendant un run : active_run_id = <run_id du run en cours>.
+GET /api/health apres la fin  : active_run_id de nouveau absent.
+GET /api/spec : JSON OpenAPI 3.0.3 parseable, 172 paths, bearerAuth,
+  facades presentes : integrations=16, library=25, quality=41, run=37,
+  runtime=32, settings=21 (les 6 attendues, 0 path legacy direct).
+
+5. CONVENTION http_status OPT-IN (endpoint METIER reel)
+--------------------------------------------------------------------------------
+POST /api/run/start_plan pendant qu'un run tourne :
+  -> HTTP 409 {"ok":false,"message":"Un run est deja en cours",...}
+  (run_flow_support.start_plan renvoie http_status=409 ; le dispatch consomme
+  le champ : "http_status" ABSENT du payload recu par le client.)
+Run reel observe : 250 dossiers ~6.9 s, 150 dossiers ~4 s, 30 dossiers ~2 s ;
+statut final {"ok":true,"running":false,"done":true,"status":"DONE"}.
+
+6. _MAX_BODY_SIZE (16 Mo reels) — BODY 17 Mo
+--------------------------------------------------------------------------------
+Content-Length 17825792 annonce, 0 octet de body envoye :
+  -> HTTP/1.0 413 Content Too Large + JSON {"ok": false, ...} lisible.
+Envoi REEL de 17 Mo : le serveur repond 413 sans lire puis ferme ->
+  ConnectionAbortedError cote client pendant l'envoi (~1 Mo transmis) = rejet
+  propre anti-DoS. GET /api/health et POST metier authentifie -> 200 apres
+  les 2 variantes : AUCUN crash serveur.
+
+================================================================================
+BUGS APP TROUVES (REPORTES, non corriges — gardes xfail dans le test)
+--------------------------------------------------------------------------------
+[BUG-LOTD-ITERVIDEOS-KWARG]  (garde : test_06, xfail dynamique)
+  cinesort/ui/api/run_read_support.py:100 :
+      videos = core.iter_videos(cfg, folder)
+  alors que la signature (cinesort/domain/scan_helpers.py:80) exige le kwarg
+  keyword-only OBLIGATOIRE min_video_bytes. Le TypeError n'est pas attrape par
+  le `except (OSError, PermissionError)` local -> remonte au boundary de
+  get_quality_report qui repond :
+      200 {"ok":false,"error":"quality_report_failed",
+           "message":"iter_videos() missing 1 required keyword-only argument:
+           'min_video_bytes'", ...}
+  Reproduction deterministe : run plan OK puis suppression du fichier video
+  d'une row -> POST /api/quality/get_quality_report {run_id,row_id}.
+  AGGRAVANT : le crash se declenche AUSSI spontanement pendant l'auto-scoring
+  qualite d'un run nominal (observe sur 2/2 runs d'exploration, rows
+  S|e6fc174f et S|363c0f92, traceback "get_quality_report failed" en log) ->
+  rapports qualite silencieusement absents pour les rows touchees.
+
+[BUG-LOTD-401-RST-BODY]  (garde : test_03b, xfail probabiliste nominative)
+  Les reponses emises AVANT lecture du body (401 auth, 410 legacy, 404
+  methode inconnue, 413) ne drainent pas le body de la requete. Le serveur
+  (HTTP/1.0, close apres reponse) ferme avec des octets non lus dans son
+  buffer de reception -> TCP RST au lieu de FIN -> sous Windows le client
+  peut perdre la reponse d'erreur deja emise :
+      ConnectionAbortedError [WinError 10053] au lieu du JSON 401
+  Observe en intermittent (1 run sur 3) sur un POST body 2 octets + mauvais
+  token. Impact : un client REST reel (fetch dashboard, curl) peut voir
+  "erreur reseau" au lieu de "Cle d'acces invalide ou manquante.".
+
+================================================================================
+STABILITE
+--------------------------------------------------------------------------------
+2 runs consecutifs de la version finale :
+  run A : 8 passed, 1 xfailed in 6.31s
+  run B : 8 passed, 1 xfailed in 5.75s
+(test_03b : PASSED quand la course RST ne se declenche pas, XFAIL nominatif
+sinon — les deux issues laissent la suite verte.)
+
+Rejouer :
+  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+      tests/test_lotd_chain_rest.py -v

@@ -17,35 +17,34 @@ from pathlib import Path
 from unittest import mock
 
 from cinesort.domain.perceptual.constants import (
+    AUDIO_WEIGHT_CLIPPING,
+    AUDIO_WEIGHT_CREST,
+    AUDIO_WEIGHT_DYNAMIC_RANGE,
+    AUDIO_WEIGHT_LRA,
+    AUDIO_WEIGHT_MEL,
+    AUDIO_WEIGHT_NOISE_FLOOR,
     GLOBAL_WEIGHT_AUDIO,
     GLOBAL_WEIGHT_VIDEO,
     MAJOR_STUDIOS,
     PERCEPTUAL_ENGINE_VERSION,
-    TIER_REFERENCE,
     TIER_EXCELLENT,
     TIER_GOOD,
     TIER_MEDIOCRE,
-    VISUAL_WEIGHT_BLOCKINESS,
-    VISUAL_WEIGHT_BLUR,
+    TIER_REFERENCE,
     VISUAL_WEIGHT_BANDING,
     VISUAL_WEIGHT_BIT_DEPTH,
+    VISUAL_WEIGHT_BLOCKINESS,
+    VISUAL_WEIGHT_BLUR,
     VISUAL_WEIGHT_GRAIN_VERDICT,
     VISUAL_WEIGHT_TEMPORAL,
-    AUDIO_WEIGHT_LRA,
-    AUDIO_WEIGHT_NOISE_FLOOR,
-    AUDIO_WEIGHT_CLIPPING,
-    AUDIO_WEIGHT_DYNAMIC_RANGE,
-    AUDIO_WEIGHT_CREST,
-    AUDIO_WEIGHT_MEL,
 )
+from cinesort.domain.perceptual.ffmpeg_runner import resolve_ffmpeg_path
 from cinesort.domain.perceptual.models import (
     AudioPerceptual,
     GrainAnalysis,
     PerceptualResult,
     VideoPerceptual,
 )
-from cinesort.domain.perceptual.ffmpeg_runner import resolve_ffmpeg_path
-
 
 # ---------------------------------------------------------------------------
 # ffmpeg_runner (5 tests)
