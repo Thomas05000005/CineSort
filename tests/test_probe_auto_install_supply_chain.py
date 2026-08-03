@@ -72,6 +72,50 @@ def _fake_transport(payload: bytes) -> Callable[..., None]:
     return _download
 
 
+def _write_bomb_zip(path: Path, entry: str, uncompressed_bytes: int) -> str:
+    """Ecrit sur disque un ZIP dont `entry` decompresse `uncompressed_bytes`, et retourne son SHA256.
+
+    Ecrit et relit en streaming : le test ne doit pas lui-meme tenir des
+    centaines de Mio en memoire, sinon il fragilise les tests voisins du meme
+    processus pytest.
+    """
+    chunk = b"\0" * (1024 * 1024)
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zf.open(entry, "w") as member:
+            remaining = uncompressed_bytes
+            while remaining > 0:
+                take = min(len(chunk), remaining)
+                member.write(chunk[:take])
+                remaining -= take
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _file_transport(source: Path) -> Callable[..., None]:
+    """Remplace urlretrieve : recopie `source` par blocs, sans charger le fichier en memoire."""
+
+    def _download(url: str, dest: str, reporthook: Optional[Callable[[int, int, int], None]] = None) -> None:
+        block = 65536
+        total = source.stat().st_size
+        if reporthook is not None:
+            reporthook(0, block, total)
+        with open(source, "rb") as src, open(dest, "wb") as out:
+            blocknum = 0
+            while True:
+                data = src.read(block)
+                if not data:
+                    break
+                out.write(data)
+                blocknum += 1
+                if reporthook is not None:
+                    reporthook(blocknum, block, total)
+
+    return _download
+
+
 class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
     """Le binaire non verifiable ne doit JAMAIS atterrir dans tools/."""
 
@@ -161,12 +205,12 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
         modele checksum, ex. un amont compromis ou un pin errone).
         """
         oversize = 260 * 1024 * 1024  # > _MAX_MEMBER_UNCOMPRESSED_BYTES (256 Mio)
-        bomb = _zip_bytes({"bin/ffprobe.exe": b"\0" * oversize})
-        digest = hashlib.sha256(bomb).hexdigest()
+        bomb_path = Path(self._tmp) / "bomb.zip"
+        digest = _write_bomb_zip(bomb_path, "bin/ffprobe.exe", oversize)
 
         with (
             mock.patch.dict(os.environ, {auto_install._ENV_SHA256_FFMPEG: digest}),
-            mock.patch.object(auto_install, "urlretrieve", side_effect=_fake_transport(bomb)),
+            mock.patch.object(auto_install, "urlretrieve", side_effect=_file_transport(bomb_path)),
         ):
             payload = self.api.runtime.auto_install_probe_tools()
 
