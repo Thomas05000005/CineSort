@@ -50,18 +50,14 @@ RUN_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}(?:_\d{3})?$")
 
 # Largeur du compteur intra-milliseconde. 3 chiffres = 1000 run_id par
 # milliseconde, soit un million par seconde : tres au-dela de ce qu'un scan
-# CineSort peut demarrer. La saturation reste neanmoins geree (cf `_next_slot`)
+# CineSort peut demarrer. La saturation reste neanmoins geree (cf `_MonotonicSlots`)
 # pour que l'unicite soit une GARANTIE et non une probabilite.
 _COUNTER_WIDTH = 3
 _COUNTER_MODULO = 10**_COUNTER_WIDTH
 
-_SLOT_LOCK = threading.Lock()
-_last_epoch_ms = -1
-_last_counter = -1
 
-
-def _next_slot() -> Tuple[int, int]:
-    """Renvoie un couple (epoch_ms, compteur) STRICTEMENT croissant.
+class _MonotonicSlots:
+    """Source de couples (epoch_ms, compteur) STRICTEMENT croissants.
 
     Trois cas, tous sous verrou :
 
@@ -76,18 +72,27 @@ def _next_slot() -> Tuple[int, int]:
     l'unicite et l'ordre lexicographique) est preservee, au prix d'un
     horodatage en avance d'au plus 1 ms par tranche de 1000 identifiants.
     """
-    global _last_epoch_ms, _last_counter
-    with _SLOT_LOCK:
-        now_ms = time.time_ns() // 1_000_000
-        if now_ms > _last_epoch_ms:
-            _last_epoch_ms = now_ms
-            _last_counter = 0
-        else:
-            _last_counter += 1
-            if _last_counter >= _COUNTER_MODULO:
-                _last_epoch_ms += 1
-                _last_counter = 0
-        return _last_epoch_ms, _last_counter
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._epoch_ms = -1
+        self._counter = -1
+
+    def next_slot(self) -> Tuple[int, int]:
+        with self._lock:
+            now_ms = time.time_ns() // 1_000_000
+            if now_ms > self._epoch_ms:
+                self._epoch_ms = now_ms
+                self._counter = 0
+            else:
+                self._counter += 1
+                if self._counter >= _COUNTER_MODULO:
+                    self._epoch_ms += 1
+                    self._counter = 0
+            return self._epoch_ms, self._counter
+
+
+_SLOTS = _MonotonicSlots()
 
 
 def _format_run_id(epoch_ms: int, counter: int) -> str:
@@ -106,7 +111,7 @@ def generate_run_id() -> str:
     profondeur par la PRIMARY KEY de `runs` et par la reservation atomique du
     dossier de run (`infra/state.py:create_run_dir(exclusive=True)`).
     """
-    epoch_ms, counter = _next_slot()
+    epoch_ms, counter = _SLOTS.next_slot()
     return _format_run_id(epoch_ms, counter)
 
 
