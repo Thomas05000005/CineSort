@@ -15,7 +15,6 @@ from cinesort.domain.subtitle_helpers import (
     match_subtitles_to_video,
 )
 
-
 # ── detect_language_from_suffix ──────────────────────────────────────
 
 

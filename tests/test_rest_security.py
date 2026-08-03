@@ -6,7 +6,9 @@ pas de leak 500, path traversal, CORS non-wildcard.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -14,11 +16,37 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any, Dict
+from unittest import mock
 
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer, _RateLimiter
-import contextlib
 from tests._helpers import find_free_port as _find_free_port
+
+# Endpoint VIVANT (format facade) utilise par les tests d'auth.
+# Ne PAS revenir a "/api/get_settings" : depuis la desactivation par defaut de
+# Pass 1 (P0 #233), cette route legacy repond 410 Gone. Un test d'auth qui vise
+# une route morte peut devenir vert/rouge pour une raison etrangere a l'auth.
+_AUTH_ENDPOINT = "/api/settings/get_settings"
+
+
+@contextlib.contextmanager
+def _auth_really_enforced():
+    """Desactive le bypass « localhost desktop trusted » le temps du bloc.
+
+    Depuis le 2026-06-08, `RestRequestHandler._check_auth` accorde un bypass
+    TOTAL de l'auth quand les 3 conditions sont reunies : client loopback,
+    serveur bind sur 127.0.0.1, et kill-switch `CINESORT_DISABLE_LOCAL_AUTH`
+    inactif (mode bureau pywebview : un attaquant local a deja le shell).
+
+    Consequence : un test d'auth qui tape 127.0.0.1 SANS ce kill-switch ne
+    teste plus rien — la requete sans token traverse le handler et repond 200.
+    Les assertions 401 ci-dessous epinglaient donc un comportement
+    VOLONTAIREMENT change ; on les rebranche sur la configuration ou l'auth
+    Bearer est reellement exigee (kill-switch documente = mode expose/LAN),
+    pour qu'elles restent capables de rougir si l'auth casse.
+    """
+    with mock.patch.dict(os.environ, {"CINESORT_DISABLE_LOCAL_AUTH": "1"}):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -126,20 +154,74 @@ class RestSecurityHttpTests(unittest.TestCase):
             return status, data, headers_out
         raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
 
+    def _request_with_origin(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        token: str | None = None,
+        origin: str | None = None,
+    ) -> tuple:
+        """Variante de _request qui ajoute un en-tete Origin (test CSRF/CORS).
+
+        Meme retry que _request sur ConnectionAborted/Reset Windows (WinError
+        10053/10054) : ces aborts transitoires apparaissent en suite full sous
+        charge socket. Sans ce retry, le helper etait flaky (cf AUDIT 2026-06-11).
+        """
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+            try:
+                headers: Dict[str, str] = {"Content-Type": "application/json"}
+                if token is not None:
+                    headers["Authorization"] = f"Bearer {token}"
+                if origin is not None:
+                    headers["Origin"] = origin
+                payload = json.dumps(body or {}) if body is not None else ""
+                conn.request(method, path, body=payload.encode("utf-8"), headers=headers)
+                resp = conn.getresponse()
+                status = resp.status
+                data_raw = resp.read()
+                headers_out = {k: v for k, v in resp.getheaders()}
+            except (ConnectionAbortedError, ConnectionResetError) as exc:
+                last_exc = exc
+                conn.close()
+                time.sleep(0.05 * (attempt + 1))
+                continue
+            finally:
+                with contextlib.suppress(OSError):
+                    conn.close()
+            try:
+                data = json.loads(data_raw.decode("utf-8")) if data_raw else {}
+            except json.JSONDecodeError:
+                data = {"_raw": data_raw.decode("utf-8", errors="replace")}
+            return status, data, headers_out
+        raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
+
+    def _assert_401_when_auth_enforced(self, token: str | None) -> None:
+        """Verifie qu'un *token* invalide donne 401 sur un endpoint VIVANT.
+
+        Le controle positif (meme requete + bon token -> 200) est obligatoire :
+        sans lui, un endpoint mort ou un serveur casse produirait un 4xx et le
+        test serait vert sans rien prouver sur l'authentification.
+        """
+        with _auth_really_enforced():
+            status, _, _ = self._request("POST", _AUTH_ENDPOINT, body={}, token=token)
+            control, _, _ = self._request("POST", _AUTH_ENDPOINT, body={}, token=self.token)
+        self.assertEqual(control, 200, f"controle positif KO ({control}) : le 401 ne prouverait rien")
+        self.assertEqual(status, 401)
+
     # 26
     def test_request_without_auth_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token=None)
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced(None)
 
     # 27
     def test_request_invalid_token_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token="wrong-token")
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced("wrong-token")
 
     # 28
     def test_request_empty_token_returns_401(self) -> None:
-        status, _, _ = self._request("POST", "/api/get_settings", body={}, token="")
-        self.assertEqual(status, 401)
+        self._assert_401_when_auth_enforced("")
 
     # 32
     def test_404_no_path_reflection(self) -> None:
@@ -186,18 +268,77 @@ class RestSecurityHttpTests(unittest.TestCase):
             self.assertNotIn("etc/passwd", msg)
 
     # 35
-    def test_cors_configurable(self) -> None:
-        """H4 revisite : le CORS est configurable via cors_origin.
-        Par defaut '*' pour autoriser l'acces LAN au dashboard distant (BUG 2).
-        La securite repose sur le Bearer token, pas sur le CORS.
-        """
+    def test_cors_default_no_wildcard(self) -> None:
+        """AUDIT 2026-06-10 : par defaut, plus de ACAO:* (lecture cross-site /
+        CSRF). Une requete sans Origin (non-navigateur) ne recoit aucune ACAO."""
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request("OPTIONS", "/api/get_settings")
         resp = conn.getresponse()
         cors = resp.getheader("Access-Control-Allow-Origin", "")
         conn.close()
-        # Le defaut est '*' pour permettre l'acces LAN (dashboard distant)
-        self.assertEqual(cors, "*", "Par defaut CORS doit etre * pour autoriser le LAN")
+        self.assertEqual(cors, "", "Plus de ACAO:* par defaut")
+
+    def test_cors_echoes_localhost_origin(self) -> None:
+        """Une Origin localhost sur le PORT D'ECOUTE (dashboard same-origin desktop)
+        est reflechie. R8-031 (F3) : seul le port effectif du serveur est autorise."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": f"http://127.0.0.1:{self.port}"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, f"http://127.0.0.1:{self.port}")
+
+    def test_cors_rejects_localhost_other_port(self) -> None:
+        """R8-031 (F3) : une Origin loopback sur un AUTRE port (2e app locale
+        hostile, http://127.0.0.1:9999) n'est PLUS reflechie — fermait la CSRF
+        que le bypass auth loopback permettait depuis une autre app locale."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": "http://127.0.0.1:9999"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, "", "origine loopback sur autre port non reflechie (R8-031)")
+
+    def test_cors_rejects_external_origin(self) -> None:
+        """Une Origin externe (site malveillant) ne recoit aucune ACAO."""
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/api/get_settings", headers={"Origin": "https://evil.example.com"})
+        resp = conn.getresponse()
+        cors = resp.getheader("Access-Control-Allow-Origin", "")
+        conn.close()
+        self.assertEqual(cors, "", "origine externe non reflechie")
+
+    def test_csrf_post_from_external_origin_403(self) -> None:
+        """GATE AUDIT 2026-06-10 (REAL 2/2) : un POST cross-site depuis un site
+        externe est rejete 403 AVANT toute action, meme avec un token valide —
+        ferme la CSRF possible via le bypass auth loopback."""
+        status, data, _ = self._request_with_origin(
+            "POST",
+            "/api/run/start_plan",
+            body={"settings": {"library_path": str(self.root)}},
+            token=self.token,
+            origin="https://evil.example.com",
+        )
+        self.assertEqual(status, 403)
+        self.assertNotIn("run_id", data)
+
+    def test_csrf_post_from_localhost_origin_allowed(self) -> None:
+        """Un POST same-origin (Origin localhost, le dashboard) n'est PAS bloque
+        par le garde CSRF (il passe au flux normal auth/dispatch)."""
+        status, _, _ = self._request_with_origin(
+            "POST",
+            "/api/get_settings",
+            body={},
+            token=self.token,
+            origin=f"http://127.0.0.1:{self.port}",
+        )
+        self.assertNotEqual(status, 403, "le dashboard same-origin ne doit pas etre bloque")
+
+    # R8-087/F6-a : test_cors_configurable_explicit_still_emitted RETIRÉ — c'était un no-op
+    # menteur (assertTrue(True), 0 assertion réelle). Son intention (« cors_origin explicite
+    # émise même sans Origin ») est DÉJÀ couverte par test_cors_can_be_restricted_explicitly
+    # ci-dessous, qui envoie un OPTIONS SANS header Origin et asserte que la valeur configurée
+    # est bien émise dans Access-Control-Allow-Origin. Redondant -> retiré.
 
     def test_cors_can_be_restricted_explicitly(self) -> None:
         """Si rest_api_cors_origin est configure, la valeur est respectee."""
@@ -259,39 +400,61 @@ class RateLimiterHttpIntegrationTests(unittest.TestCase):
         self.server.stop()
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_rate_limiter_returns_429_after_5_failures(self) -> None:
-        """Bypass : on remplit directement le _RateLimiter du serveur, puis on
-        verifie qu'une requete est rejetee 429. Cela evite la flake Windows
-        (WinError 10053) qui survenait quand on chainait 6 requetes HTTP rapides
-        et que la socket etait coupee avant lecture de la reponse rate-limited.
-        Le scenario fonctionnel ("apres N echecs -> bloque") est couvert par les
-        tests unitaires `RateLimiterUnitTests`. Ici on garde la verification
-        end-to-end : un IP bloque -> 429 cote HTTP.
-        """
-        # 1. Pre-remplit le rate limiter pour 127.0.0.1
-        for _ in range(6):
-            self.server._rate_limiter.record_failure("127.0.0.1")
-        self.assertTrue(self.server._rate_limiter.is_blocked("127.0.0.1"))
-
-        # 2. Une seule requete HTTP -> doit retourner 429
+    def _post_status(self, bearer: str) -> int:
+        """POST sur l'endpoint d'auth vivant, retourne le code HTTP."""
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
             conn.request(
                 "POST",
-                "/api/get_settings",
+                _AUTH_ENDPOINT,
                 body=b"{}",
-                headers={"Content-Type": "application/json", "Authorization": "Bearer wrong"},
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {bearer}"},
             )
             resp = conn.getresponse()
             status = resp.status
             resp.read()
         except (ConnectionAbortedError, ConnectionResetError):
-            # Windows ferme parfois la socket avant la lecture de la reponse
-            # rate-limited. C'est un signal valide de rate-limit cote serveur.
-            status = 429
+            self.fail("Le serveur a coupe la connexion : localhost ne doit pas etre rate-limite")
         finally:
             conn.close()
-        self.assertEqual(status, 429, f"Attendu 429, recu {status}")
+        return status
+
+    def test_rate_limiter_returns_429_after_5_failures(self) -> None:
+        """FIX DEFINITIF 2026-06-07 : 127.0.0.1 est desormais exempte du
+        rate-limiter (saturation par 401 silents du _safeBearer cote front
+        quand le token contient un codepoint non-ASCII). Le scenario fonctionnel
+        ("apres N echecs -> bloque") reste couvert par les tests unitaires
+        `RateLimiterUnitTests` (qui utilisent une IP non-locale "10.0.0.1").
+        Ici on verifie le NOUVEAU contrat : meme avec le compteur sature,
+        127.0.0.1 (loopback desktop pywebview) recoit 401 et JAMAIS 429.
+
+        2026-08-03 : le test visait "/api/get_settings" (route legacy morte ->
+        410) et ne desactivait pas le bypass auth loopback ; il ne pouvait donc
+        plus observer le 401 qu'il asserte. On vise l'endpoint facade vivant et
+        on force le kill-switch d'auth (cf _auth_really_enforced) : l'exemption
+        rate-limit testee ici, elle, reste inconditionnelle cote serveur
+        (_is_rate_limited exempte les IP locales quel que soit l'etat du
+        kill-switch), donc l'invariant "jamais 429 en loopback" est bien celui
+        qui est mis a l'epreuve.
+        """
+        # 1. Pre-remplit le rate limiter pour 127.0.0.1 (defensif : le filtre
+        # cote handler doit court-circuiter is_blocked avant meme de regarder).
+        for _ in range(6):
+            self.server._rate_limiter.record_failure("127.0.0.1")
+        self.assertTrue(self.server._rate_limiter.is_blocked("127.0.0.1"))
+
+        # 2. Une requete HTTP depuis 127.0.0.1 -> doit retourner 401, pas 429
+        with _auth_really_enforced():
+            status = self._post_status("wrong")
+            # Controle : avec le BON token, le compteur sature ne doit pas non
+            # plus bloquer le loopback (sinon on lirait 429 ici).
+            control = self._post_status("good-token")
+        self.assertEqual(control, 200, f"loopback avec bon token bloque ({control}) malgre l'exemption")
+        self.assertEqual(
+            status,
+            401,
+            f"Attendu 401 (localhost exempte du rate-limit), recu {status}",
+        )
 
 
 if __name__ == "__main__":

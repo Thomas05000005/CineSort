@@ -26,7 +26,6 @@ from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.facades import runtime_facade
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -52,13 +51,12 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "traitement.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'traitement.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_run_id_param_in_doublons_js(self):
@@ -68,31 +66,27 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "doublons.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'doublons.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_film_detail_uses_perceptual_batch(self):
-        path = _ROOT / "web" / "dashboard" / "views" / "film-detail.js"
+        # R8-053/054/055 (F5, D1) : la vue standalone web/dashboard/views/film-detail.js
+        # a été SUPPRIMÉE ; le composant components/film-detail.js est désormais la fiche
+        # film canonique. Il délègue le perceptuel à la modale (get_perceptual_details) et
+        # ne doit PAS appeler l'endpoint inexistant analyze_perceptual_single comme apiPost.
+        # L'ancienne assertion "analyze_perceptual_batch" était propre à l'implémentation
+        # de la vue supprimée (design différent du composant) -> retirée.
+        path = _ROOT / "web" / "dashboard" / "components" / "film-detail.js"
         content = path.read_text(encoding="utf-8")
-        # Le mot "analyze_perceptual_single" peut apparaitre dans un commentaire
-        # explicatif (fix audit), donc on cherche uniquement l'usage comme
-        # endpoint : entre guillemets avec slash prefix typique apiPost.
         self.assertNotIn(
             '"quality/analyze_perceptual_single"',
             content,
-            "film-detail.js ne doit plus appeler l'endpoint inexistant "
-            "`quality/analyze_perceptual_single`.",
-        )
-        self.assertIn(
-            "quality/analyze_perceptual_batch",
-            content,
-            "film-detail.js doit utiliser `quality/analyze_perceptual_batch`.",
+            "film-detail.js ne doit pas appeler l'endpoint inexistant `quality/analyze_perceptual_single`.",
         )
 
 
@@ -103,7 +97,16 @@ class SettingsDispatcherSectionsTests(unittest.TestCase):
 
     def _dispatcher_source(self) -> str:
         # Source du dispatcher central qui agrege toutes les sections.
-        return inspect.getsource(settings_support.save_settings_payload)
+        # Fix lost-update : save_settings_payload est devenu un wrapper qui
+        # prend le verrou par state_dir puis delegue a
+        # _save_settings_payload_locked (ou vivent les appels _save_section_*).
+        # On concatene les deux sources pour que le contrat « la section est
+        # appelee dans le flux de save » survive aux refactors wrapper/helper.
+        src = inspect.getsource(settings_support.save_settings_payload)
+        locked = getattr(settings_support, "_save_settings_payload_locked", None)
+        if locked is not None:
+            src += inspect.getsource(locked)
+        return src
 
     def test_save_section_omdb_exists(self):
         self.assertTrue(

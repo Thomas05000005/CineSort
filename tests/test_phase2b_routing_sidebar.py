@@ -223,7 +223,8 @@ class I18nTranslationsTests(unittest.TestCase):
         cls.en = json.loads(_EN_JSON.read_text(encoding="utf-8"))
 
     def test_fr_quality_label(self) -> None:
-        self.assertEqual(self.fr["sidebar"]["nav"]["quality"], "Qualite")
+        # Spec drift typo : fr.json a corrige "Qualite" -> "Qualité" (orthographe FR correcte).
+        self.assertEqual(self.fr["sidebar"]["nav"]["quality"], "Qualité")
 
     def test_fr_history_label(self) -> None:
         self.assertEqual(self.fr["sidebar"]["nav"]["history"], "Historique")

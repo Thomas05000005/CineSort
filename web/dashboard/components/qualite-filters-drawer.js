@@ -2,9 +2,8 @@
  *
  * Drawer global de filtres pour la vue Qualité.
  *
- * Filtres exposés (spec §3) :
+ * Filtres exposés (spec §3, moins Genre — cf. note R4-P7 plus bas) :
  *   - Décennie  (multi-select 1930s → 2020s)
- *   - Genre TMDb (multi-select : Action, Comédie, Drame, ...)
  *   - Source    (BluRay / WEB-DL / DVD / Autre)
  *   - Audio language (FR / EN / multi)
  *   - Période (Aujourd'hui / 7j / 30j / 90j / Tout) — utilisé par section Évolution
@@ -18,15 +17,18 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 const DRAWER_ID = "qualiteFiltersDrawer";
 
 const DECADES = ["1930", "1940", "1950", "1960", "1970", "1980", "1990", "2000", "2010", "2020"];
-const GENRES = [
-  "Action", "Aventure", "Animation", "Comédie", "Crime", "Documentaire",
-  "Drame", "Familial", "Fantastique", "Histoire", "Horreur", "Musique",
-  "Mystère", "Romance", "Science-Fiction", "Téléfilm", "Thriller", "Guerre", "Western",
-];
+// AUDIT 2026-06-11 (R4-P7) : la section "Genres TMDb" (19 checkboxes) est
+// RETIRÉE du drawer — les rows bibliothèque n'embarquent pas les genres TMDb,
+// donc le backend (_row_matches) ne peut pas filtrer dessus : cocher un genre
+// affichait un badge actif et un toast "Filtres appliqués" sans AUCUN effet
+// sur les données (contrôle mort, mensonger pour l'utilisateur). La clé
+// `genres: []` reste dans l'état/payload pour compat. À réintroduire le jour
+// où les rows porteront les genres (enrichissement TMDb au scan).
 const SOURCES = ["BluRay", "WEB-DL", "WEB-Rip", "DVD", "HDTV", "Autre"];
 const AUDIO_LANGS = ["FR", "EN", "Multi", "Autre"];
 const PERIODS = [
@@ -97,10 +99,6 @@ function _buildHtml(state) {
           <div class="qualite-drawer-checks">${_renderCheckList("decades", DECADES, state.decades)}</div>
         </fieldset>
         <fieldset class="qualite-drawer-group">
-          <legend>Genres TMDb</legend>
-          <div class="qualite-drawer-checks">${_renderCheckList("genres", GENRES, state.genres)}</div>
-        </fieldset>
-        <fieldset class="qualite-drawer-group">
           <legend>Source</legend>
           <div class="qualite-drawer-checks">${_renderCheckList("sources", SOURCES, state.sources)}</div>
         </fieldset>
@@ -139,6 +137,7 @@ export function openQualiteFiltersDrawer(opts) {
   container.className = "qualite-drawer-overlay";
   container.innerHTML = _buildHtml(state);
   document.body.appendChild(container);
+  trapFocus(container); // R8-078b : Tab/Shift+Tab piégés dans le drawer filtres qualité (aria-modal)
 
   const previouslyFocused = document.activeElement;
   container._previouslyFocused = previouslyFocused;

@@ -5,13 +5,13 @@ Thread-safe: background threads enqueue, main thread drains.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
 from typing import Any, Dict
 
-from cinesort.infra.notifications import show_balloon, cleanup
-import contextlib
+from cinesort.infra.notifications import cleanup, show_balloon
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,16 @@ class NotifyService:
 
     @property
     def enabled(self) -> bool:
-        """Check if notifications are globally enabled."""
-        return bool(self._settings.get("notifications_enabled", False))
+        """Check if DESKTOP toasts are globally enabled.
+
+        R8-069 (F5) : le toast desktop (show_balloon) est gardé par le toggle UI
+        "Activer les notifications desktop" (desktop_notifications_enabled). AVANT, il
+        lisait notifications_enabled (toggle "notifications applicatives") -> le toggle
+        desktop était un FANTÔME et le mauvais réglage gardait les toasts. Le miroir vers
+        le centre de notifications reste inconditionnel (cf notify()), donc les
+        notifications applicatives ne dépendent pas de ce gate.
+        """
+        return bool(self._settings.get("desktop_notifications_enabled", False))
 
     def _is_event_enabled(self, event_type: str) -> bool:
         """Check if a specific event type is enabled."""

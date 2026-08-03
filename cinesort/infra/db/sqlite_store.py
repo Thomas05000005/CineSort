@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from contextlib import closing, contextmanager, suppress
 import json
 import logging
 import sqlite3
 import time
+from contextlib import closing, contextmanager, suppress
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
 from .backup import DEFAULT_MAX_BACKUPS, backup_db_with_rotation, list_backups, restore_backup
 from .connection import connect_sqlite
-from .migration_manager import MigrationManager, _split_sql_statements
+from .migration_manager import MigrationManager, _is_idempotent_error, _split_sql_statements
 from .repositories import (
     AnomalyRepository,
     ApplyRepository,
@@ -23,8 +23,64 @@ from .repositories import (
     RunRepository,
     ScanRepository,
 )
+from .repositories.decisions import DecisionsRepository
+from .repositories.field_locks import FieldLocksRepository
 
 DEFAULT_DB_FILENAME = "cinesort.sqlite"
+
+# v1.3 SQLite cloud-sync warning : dossiers synchronises (OneDrive, Dropbox,
+# Google Drive, iCloud, Box, pCloud, Mega) sont incompatibles avec SQLite WAL.
+# Le moteur de sync peut copier le fichier .sqlite alors que des pages sont
+# encore dans le -wal ou -shm, ce qui produit une corruption silencieuse
+# (PRAGMA integrity_check FAILED au prochain boot). On detecte ces chemins
+# au demarrage et on logue un WARNING explicite. Detection case-insensitive
+# pour matcher OneDrive, OneDrive - Personal, OneDriveCommercial, etc.
+_CLOUD_SYNC_MARKERS: tuple[str, ...] = (
+    "OneDrive",
+    "Dropbox",
+    "GoogleDrive",
+    "Google Drive",
+    "iCloudDrive",
+    "iCloud Drive",
+    "Box",
+    "pCloud",
+    "Mega",
+)
+
+
+def _detect_cloud_sync_folder(db_path: Path) -> Optional[str]:
+    """Retourne le nom du provider cloud detecte dans le chemin DB, ou None.
+
+    Detection case-insensitive sur les segments du chemin pour eviter les
+    faux positifs (e.g., un fichier nomme `box.sqlite` dans un dossier
+    normal). On compare segment par segment au lieu de chercher la sous-chaine
+    dans tout le chemin.
+    """
+    # Verif totale 2026-07 : l'ancien `marker.lower() in path_str` cherchait la
+    # sous-chaine dans TOUT le chemin -> faux positifs (D:\xbox\ matchait "Box",
+    # D:\mega games\ matchait "Mega"). On compare desormais segment par segment :
+    # match EXACT du nom de dossier, SAUF la famille OneDrive qui s'accole des
+    # suffixes sans separateur ("OneDrive - Personal", "OneDriveCommercial").
+    try:
+        segments = [p.lower() for p in Path(db_path).parts]
+    except (TypeError, ValueError):
+        return None
+    markers_low = [(m, m.lower()) for m in _CLOUD_SYNC_MARKERS]
+    for seg in segments:
+        for marker, mlow in markers_low:
+            if seg == mlow or (mlow.startswith("onedrive") and seg.startswith("onedrive")):
+                return marker
+    return None
+
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables critiques verifiees
+# apres migrations. Si manquantes, _ensure_required_schema rejoue le bootstrap
+# ordonne (toutes les migrations en mode CREATE TABLE IF NOT EXISTS),
+# independamment de PRAGMA user_version. C'est le filet de securite
+# self-healing pour le bug ou une migration etait marquee appliquee mais
+# n'avait pas cree ses tables (cas observe sur 023). Ajout des 3 tables de
+# 023 (ignored_alerts, film_marked_for_deletion, film_tmdb_overrides) ici
+# pour que la detection soit independante de uv.
 REQUIRED_SCHEMA_TABLES = (
     "runs",
     "errors",
@@ -37,9 +93,36 @@ REQUIRED_SCHEMA_TABLES = (
     "apply_pending_moves",
     "incremental_file_hashes",
     "incremental_scan_cache",
+    # R8-022 (F2-d) : incremental_row_cache (migration 008, scan incremental v2) etait
+    # absente du filet self-heal -> si droppee/manquante, ni _ensure_required_schema ni
+    # _with_schema_group('incremental') ne la recreaient -> Operationalable 'no such table'
+    # au scan. 008 est IF NOT EXISTS + deja dans le bootstrap : on n'ajoute que la detection.
+    "incremental_row_cache",
     "perceptual_reports",
     "duplicate_decisions",
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : tables 023 (Modal Film)
+    # ajoutees ici pour detection self-healing independante de user_version.
+    "ignored_alerts",
+    "film_marked_for_deletion",
+    "film_tmdb_overrides",
+    # Fix BUG-002 (hotfix1) : tables des migrations 029/030/031 (Vague P).
+    # Sans elles, _ensure_required_schema ne detectait pas leur absence et
+    # le filet de securite self-healing ne se declenchait jamais pour les
+    # features apply atomique / field locks / decisions tri-etat.
+    "apply_batch_modes",
+    "film_field_locks",
+    "film_decisions_v2",
 )
+
+# AUDIT F29 (revue R1) : socle minimal exige d'un backup pour etre un candidat
+# de restore. `runs` est cree par la toute premiere migration
+# (001_init_runs_errors.sql) : tout backup issu d'une DB reellement initialisee
+# la porte. Son absence signe une base VIDE (ou etrangere), qu'il ne faut jamais
+# ecrire par-dessus la bibliotheque de l'utilisateur.
+_BACKUP_CORE_TABLES: tuple[str, ...] = ("runs",)
+# Taille d'une page SQLite par defaut : en dessous, le fichier ne peut pas
+# contenir de donnees (le cas nominal etant le .bak de 0 octet).
+_MIN_USABLE_BACKUP_BYTES = 4096
 SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "runs": ("runs",),
     "probe_cache": ("probe_cache",),
@@ -48,7 +131,7 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     "apply_journal": ("apply_batches", "apply_operations"),
     # CR-1 audit QA 20260429 : journal write-ahead pour atomicite shutil.move.
     "apply_pending": ("apply_pending_moves",),
-    "incremental": ("incremental_file_hashes", "incremental_scan_cache"),
+    "incremental": ("incremental_file_hashes", "incremental_scan_cache", "incremental_row_cache"),
     "perceptual": ("perceptual_reports",),
     # P4.1 : table calibration feedback utilisateur (migration 014).
     "user_feedback": ("user_quality_feedback",),
@@ -62,6 +145,14 @@ SCHEMA_GROUPS: Dict[str, tuple[str, ...]] = {
     ),
     # Phase 4 doublons (migration 024, spec docs/internal/design/refonte_2026_05_17/screens/01-doublons.md).
     "duplicate_decisions": ("duplicate_decisions",),
+    # Vague P / VP-A (migration 029) : apply atomique forward rollback (opt-in).
+    "apply_atomic": ("apply_batch_modes",),
+    # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin-style.
+    "field_locks": ("film_field_locks",),
+    # Vague P / VP-D (migration 031) : decisions tri-etat
+    # (accepted/rejected/deferred). Backward compat ABSOLUE preservee via
+    # helper `to_legacy_ok_bool` (cf cinesort/infra/db/repositories/decisions.py).
+    "tri_etat_decisions": ("film_decisions_v2",),
 }
 
 
@@ -83,10 +174,14 @@ class _StoreBase:
         migrations_dir: Optional[Path] = None,
         busy_timeout_ms: int = 5000,
         debug_logger: Optional[Callable[[str], None]] = None,
+        pragma_profile_name: Optional[str] = None,
     ):
         self.db_path = Path(db_path)
         self.busy_timeout_ms = int(max(1, busy_timeout_ms))
         self._debug_logger = debug_logger
+        # VO-A backend : override explicite du profil PRAGMA (None = autodetect
+        # via pragma_profile.detect_storage_type a chaque connexion).
+        self.pragma_profile_name: Optional[str] = pragma_profile_name
         # V1-09 audit ID-Y-001 : flag rempli par initialize(). "unknown" tant
         # que initialize() n'a pas tourne, "ok" sinon, ou message d'erreur.
         self._integrity_status: str = "unknown"
@@ -97,12 +192,39 @@ class _StoreBase:
         #          "raw": str, "backup_used": Optional[str], "ts": float}
         self._integrity_event: Optional[Dict[str, Any]] = None
 
+        # v1.3 SQLite cloud-sync warning : on detecte au plus tot (avant meme
+        # toute connexion SQLite) si la DB est posee dans un dossier de
+        # synchronisation cloud, et on logue un WARNING explicite. La detection
+        # est best-effort et ne bloque PAS le demarrage : l'utilisateur peut
+        # choisir d'ignorer (auquel cas integrity_check finira par signaler
+        # une corruption lors d'un futur boot).
+        self._cloud_sync_provider: Optional[str] = _detect_cloud_sync_folder(self.db_path)
+        if self._cloud_sync_provider:
+            logger.warning(
+                "DB SQLite detectee dans un dossier de synchronisation cloud (%s). "
+                "Chemin: %s. Risque de corruption silencieuse: le moteur de sync "
+                "peut copier le fichier .sqlite alors que des pages sont encore "
+                "dans le -wal ou -shm. Recommandation forte: deplacer la DB hors "
+                "du dossier %s, ou exclure les fichiers .sqlite/.sqlite-wal/"
+                ".sqlite-shm de la synchronisation. Voir docs/TROUBLESHOOTING.md "
+                "section 'Stockage DB'.",
+                self._cloud_sync_provider,
+                self.db_path,
+                self._cloud_sync_provider,
+            )
+
         default_migrations_dir = Path(__file__).resolve().parent / "migrations"
         self.migrations_dir = Path(migrations_dir) if migrations_dir else default_migrations_dir
         self.migrations = MigrationManager(
             db_path=self.db_path,
             migrations_dir=self.migrations_dir,
             busy_timeout_ms=self.busy_timeout_ms,
+            # Fix PRAGMA-05 : propager l'override explicite du profil PRAGMA
+            # afin que les connexions ouvertes pendant apply_migrations()
+            # utilisent le meme profil que celui du store (e.g., 'nas_smb'
+            # pour forcer synchronous=FULL pendant les ALTER TABLE /
+            # CREATE INDEX critiques). Sans ca, autodetect uniquement.
+            pragma_profile_name=self.pragma_profile_name,
         )
 
     def _debug(self, message: str) -> None:
@@ -112,7 +234,11 @@ class _StoreBase:
             self._debug_logger(message)
 
     def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(str(self.db_path), busy_timeout_ms=self.busy_timeout_ms)
+        return connect_sqlite(
+            str(self.db_path),
+            busy_timeout_ms=self.busy_timeout_ms,
+            profile=self.pragma_profile_name,
+        )
 
     @contextmanager
     def _managed_conn(self) -> Iterator[sqlite3.Connection]:
@@ -131,22 +257,100 @@ class _StoreBase:
         BEGIN/COMMIT — meme pattern que migration_manager.apply_migrations().
         SQLite supporte le rollback DDL (contrairement a MySQL), donc
         le schema bootstrap devient "tout ou rien".
+
+        Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) : ce bootstrap est
+        invoque en filet de securite quand des tables critiques manquent
+        APRES migrations (peut arriver suite a un bug historique du migration
+        manager, ou DB clonee partiellement). Or les migrations contiennent
+        des ALTER TABLE ADD COLUMN qui ne sont pas IF NOT EXISTS-able : sur
+        une DB partiellement existante, ces statements echouent avec
+        "duplicate column name" et plantent tout le bootstrap. On adopte
+        donc ici le meme mecanisme savepoint+_is_idempotent_error que dans
+        MigrationManager.apply pour rester self-healing.
+
+        Fix BUG-001 (hotfix1) : le script bootstrap concatene TOUTES les
+        migrations, y compris celles porteuses du marker `@manager: disable_fk`
+        (ex: migration 025 qui DROP/RECREATE `runs`). Sans cette desactivation,
+        le DROP TABLE runs declenche ON DELETE CASCADE et supprime
+        silencieusement errors/quality_reports/anomalies dont les rows ne
+        seront jamais reinjectes. On replique donc ici la meme logique que
+        MigrationManager.apply : detection du marker dans le script global,
+        PRAGMA foreign_keys=OFF avant BEGIN, restauration ON apres COMMIT.
+        PRAGMA foreign_keys ne fonctionne PAS dans une transaction, on le
+        pose donc avant BEGIN et on le restaure dans un finally.
         """
         script, version = self.migrations.build_bootstrap_script()
         if not script or version <= 0:
             raise RuntimeError("Aucune migration SQL disponible pour initialiser le schema SQLite.")
 
         statements = _split_sql_statements(script)
+        # Fix BUG-001 : detection du marker disable_fk au niveau global du
+        # script bootstrap. Si au moins une migration concatenee le porte,
+        # on desactive les FK pour TOUT le bootstrap (les DROP TABLE des
+        # migrations FK-sensitives sinon CASCADE-supprimeraient les rows
+        # enfants des migrations posterieures, alors meme qu'on est en mode
+        # self-healing sur une DB partielle).
+        # Fix BUG-001/014 (hotfix2) : matcher STRICT ligne commencant par
+        # `-- @manager: disable_fk` apres trim, pour eviter qu'un commentaire
+        # descriptif (ex: "ne PAS utiliser @manager: disable_fk ici") n'active
+        # le PRAGMA a tort. Replique le pattern strict line-match adopte dans
+        # migration_manager.py (BUG-014 hotfix1) pour coherence : sans ca, le
+        # bootstrap differerait du chemin migration-par-migration et un faux
+        # positif desactiverait silencieusement les FK pour TOUT le bootstrap.
+        needs_fk_disable = any(line.strip().startswith("-- @manager: disable_fk") for line in script.splitlines())
         with self._managed_conn() as conn:
-            conn.execute("BEGIN")
+            if needs_fk_disable:
+                conn.execute("PRAGMA foreign_keys = OFF")
             try:
-                for stmt in statements:
-                    conn.execute(stmt)
-                conn.execute(f"PRAGMA user_version = {int(version)}")
-                conn.commit()
-            except sqlite3.DatabaseError:
-                conn.rollback()
-                raise
+                conn.execute("BEGIN")
+                try:
+                    for idx, stmt in enumerate(statements):
+                        sp_name = f"bootstrap_{idx}"
+                        conn.execute(f"SAVEPOINT {sp_name}")
+                        try:
+                            conn.execute(stmt)
+                            conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        except sqlite3.OperationalError as stmt_exc:
+                            # R8-021 RETRACTE (filet F2-d) : NE PAS attraper IntegrityError ici.
+                            # Sur une source corrompue (PK dupliquee), skipper l'INSERT...SELECT
+                            # de rebuild laisserait X_new VIDE -> DROP+RENAME = wipe silencieux.
+                            # Bloquer le boot (re-lever) est le comportement SUR (recuperable).
+                            # Fix audit 2026-05-26 (v1.5.6) Vague L (mig-2) :
+                            # tolere les erreurs idempotentes (duplicate column,
+                            # already exists) pour rester self-healing sur DB
+                            # partielle.
+                            if _is_idempotent_error(stmt_exc):
+                                conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                                conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                                logger.warning(
+                                    "bootstrap_schema: statement %d ignore (idempotence): %s",
+                                    idx,
+                                    stmt_exc,
+                                )
+                                continue
+                            raise
+                    conn.execute(f"PRAGMA user_version = {int(version)}")
+                    conn.commit()
+                except sqlite3.DatabaseError:
+                    conn.rollback()
+                    raise
+            finally:
+                if needs_fk_disable:
+                    # Best effort : restaurer le PRAGMA quoi qu'il arrive.
+                    with suppress(sqlite3.Error):
+                        conn.execute("PRAGMA foreign_keys = ON")
+        # R8-020 (F2-d) : backfiller schema_migrations apres un self-heal bootstrap.
+        # Le bootstrap pose user_version mais n'insere RIEN dans schema_migrations ->
+        # historique desync (diagnostic d'incident 023 impossible). On enregistre chaque
+        # migration <= version (INSERT OR IGNORE, idempotent) maintenant que la table
+        # schema_migrations existe (creee par la migration 012 dans le script bootstrap).
+        try:
+            with self._managed_conn() as conn:
+                for mig_version, mig_path in self.migrations.list_migrations():
+                    if int(mig_version) <= int(version):
+                        MigrationManager._record_migration(conn, int(mig_version), mig_path.name)
+        except sqlite3.Error as backfill_exc:
+            self._debug(f"_bootstrap_schema_latest: schema_migrations backfill ignore: {backfill_exc}")
         return int(version)
 
     def _prepare_db_directory(self) -> None:
@@ -236,6 +440,19 @@ class _StoreBase:
         return version
 
     @property
+    def cloud_sync_provider(self) -> Optional[str]:
+        """v1.3 : nom du provider cloud detecte dans le chemin DB, ou None.
+
+        Valeurs possibles : "OneDrive", "Dropbox", "GoogleDrive",
+        "Google Drive", "iCloudDrive", "iCloud Drive", "Box", "pCloud",
+        "Mega", ou None si la DB n'est pas dans un dossier synchronise.
+
+        Consomme par la couche UI (runtime_support) pour afficher un dialog
+        non-bloquant au premier boot et inciter l'utilisateur a deplacer la DB.
+        """
+        return self._cloud_sync_provider
+
+    @property
     def integrity_status(self) -> str:
         """Statut PRAGMA integrity_check apres initialize().
 
@@ -277,6 +494,21 @@ class _StoreBase:
             return "ok"
         try:
             with closing(self._connect()) as conn:
+                # Fix audit 2026-05-25 (v1.5.3) Vague H : flush WAL avant
+                # integrity_check. Sans checkpoint, des pages encore dans le
+                # WAL pouvaient masquer une corruption (ou en signaler une
+                # fantome) selon l'etat du -wal/-shm. RESTART force le merge
+                # complet vers le main file et reinitialise le WAL, donnant
+                # un check fiable et reproductible. Best-effort : si le
+                # checkpoint echoue (DB read-only, lock concurrent), on
+                # continue avec un warning plutot que de skip l'integrity.
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(RESTART)")
+                except sqlite3.OperationalError as exc:
+                    logger.warning(
+                        "wal_checkpoint failed before integrity_check (%s) — integrity check may use stale WAL pages",
+                        exc,
+                    )
                 row = conn.execute("PRAGMA integrity_check").fetchone()
                 status = str(row[0]) if row else "unknown"
         except sqlite3.DatabaseError as exc:
@@ -299,13 +531,19 @@ class _StoreBase:
         return status
 
     def _attempt_auto_restore(self) -> None:
-        """V2-11 audit QA 20260504 : tente un restore auto depuis le backup
-        le plus recent quand l'integrity_check a echoue.
+        """V2-11 audit QA 20260504 : tente un restore auto depuis les backups
+        disponibles quand l'integrity_check a echoue.
+
+        AUDIT F29 : les backups sont parcourus du plus RECENT au plus ANCIEN et
+        chacun est pre-teste en lecture ; on s'arrete au premier qui restaure une
+        DB saine. Avant, seul backups[0] etait tente : un backup recent lui-meme
+        corrompu faisait abandonner alors qu'un backup sain existait derriere.
 
         Trois issues possibles, toutes encodees dans self._integrity_event :
         - "restored"        : backup restaure + integrity_check post = ok.
-        - "restore_failed"  : restore tente mais integrity_check post != ok
-                              (ou exception pendant le restore).
+        - "restore_failed"  : aucun candidat n'a rendu une DB saine (backups
+                              corrompus, exception pendant le restore, ou
+                              integrity_check post != ok).
         - "corrupt_no_backup" : pas de backup disponible, l'app continue en
                                 mode degrade (l'utilisateur sera prevenu).
 
@@ -336,53 +574,151 @@ class _StoreBase:
             }
             return
 
-        most_recent = backups[0]
-        logger.warning(
-            "DB corrompue, tentative auto-restore depuis %s",
-            most_recent,
-        )
-        try:
-            restore_backup(most_recent, self.db_path)
-        except (sqlite3.Error, OSError, FileNotFoundError) as exc:
-            logger.error(
-                "auto_restore: restore depuis %s a echoue: %s",
-                most_recent,
-                exc,
-            )
-            self._integrity_event = {
-                "status": "restore_failed",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
-            return
+        # AUDIT F29 : on ITERE du plus recent au plus ancien au lieu de ne tenter
+        # que backups[0]. Avant ce fix, un backup recent lui-meme corrompu faisait
+        # abandonner en "restore_failed" alors qu'un backup plus ancien et SAIN
+        # existait juste derriere (et se faisait ensuite evincer par la rotation).
+        # Chaque candidat est pre-teste EN LECTURE : on n'ecrase jamais la DB avec
+        # un backup dont on sait deja qu'il est inexploitable.
+        examined: List[Path] = []
+        rejected: List[Path] = []
+        restored_from: Optional[Path] = None
+        for candidate in backups[: DEFAULT_MAX_BACKUPS + 2]:
+            examined.append(candidate)
+            reject_reason = self._backup_rejection_reason(candidate)
+            if reject_reason is not None:
+                logger.warning(
+                    "auto_restore: backup %s ecarte (%s), essai du suivant",
+                    candidate.name,
+                    reject_reason,
+                )
+                rejected.append(candidate)
+                continue
 
-        # Re-check integrity apres restore
-        post_status = self._check_integrity()
-        if post_status == "ok":
-            logger.info(
-                "auto_restore: succes depuis %s. DB restauree.",
-                most_recent,
-            )
-            self._integrity_status = "ok"
-            self._integrity_event = {
-                "status": "restored",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
-        else:
+            logger.warning("DB corrompue, tentative auto-restore depuis %s", candidate)
+            try:
+                restore_backup(candidate, self.db_path)
+            except (sqlite3.Error, OSError, FileNotFoundError) as exc:
+                logger.error(
+                    "auto_restore: restore depuis %s a echoue: %s",
+                    candidate,
+                    exc,
+                )
+                continue
+            restored_from = candidate
+
+            # Re-check integrity apres restore (autorite finale)
+            post_status = self._check_integrity()
+            if post_status == "ok":
+                logger.info(
+                    "auto_restore: succes depuis %s. DB restauree.",
+                    candidate,
+                )
+                self._integrity_status = "ok"
+                self._integrity_event = {
+                    "status": "restored",
+                    "raw": raw_status,
+                    "backup_used": str(candidate),
+                    "backups_tried": len(examined),
+                    "backups_rejected": len(rejected),
+                    "ts": ts,
+                }
+                return
             logger.error(
-                "auto_restore: restore effectue mais integrity_check post = %s",
+                "auto_restore: restore effectue depuis %s mais integrity_check post = %s",
+                candidate,
                 post_status,
             )
             self._integrity_status = post_status
-            self._integrity_event = {
-                "status": "restore_failed",
-                "raw": raw_status,
-                "backup_used": str(most_recent),
-                "ts": ts,
-            }
+
+        logger.error(
+            "auto_restore: aucun backup exploitable (%d examines, %d ecartes avant restore). Path: %s",
+            len(examined),
+            len(rejected),
+            self.db_path,
+        )
+        # AUDIT F29 (revue R1) : `backup_used` documente "le backup RESTAURE".
+        # L'ancienne valeur (dernier candidat EXAMINE) pouvait designer un fichier
+        # ecarte par le pre-ecran, donc jamais restaure -> contrat viole et
+        # diagnostic trompeur. On n'y met desormais que le dernier candidat
+        # reellement ecrit sur la DB (None si le pre-ecran les a tous ecartes).
+        self._integrity_event = {
+            "status": "restore_failed",
+            "raw": raw_status,
+            "backup_used": str(restored_from) if restored_from is not None else None,
+            "backups_tried": len(examined),
+            "backups_rejected": len(rejected),
+            "ts": ts,
+        }
+
+    def _integrity_of_file(self, path: Path) -> str:
+        """PRAGMA integrity_check sur un fichier de backup (jamais sur self.db_path).
+
+        Retourne "ok", "missing", le message brut de SQLite, ou "error: <exc>".
+        Ne leve jamais : c'est un pre-ecran de selection, pas une autorite.
+        NB : sqlite3.Error n'herite PAS de OSError, les deux classes sont
+        obligatoires dans le except.
+        """
+        if not path.is_file():
+            return "missing"
+        try:
+            with closing(sqlite3.connect(str(path))) as conn:
+                row = conn.execute("PRAGMA integrity_check").fetchone()
+                return str(row[0]) if row else "unknown"
+        except (sqlite3.Error, OSError) as exc:
+            return f"error: {exc}"
+
+    def _backup_rejection_reason(self, path: Path) -> Optional[str]:
+        """Pre-ecran de selection d'un backup : None = candidat acceptable.
+
+        AUDIT F29 (revue R1) : `PRAGMA integrity_check` NE SUFFIT PAS. Un fichier
+        de 0 octet est un SQLite parfaitement valide qui repond "ok" — et
+        `backup_db` en laissait justement un dans backups/ quand le backup d'une
+        DB corrompue echouait. Restaurer ce fichier remplace la bibliotheque par
+        une base VIDE, `_check_integrity()` post-restore confirme "ok", l'event
+        passe a "restored" et l'utilisateur recoit la notification rassurante
+        "Base de donnees restauree automatiquement" alors que TOUT a disparu (et
+        que le backup sain plus ancien n'a jamais ete essaye).
+
+        On exige donc d'un candidat, en LECTURE SEULE et sans jamais lever :
+          1. une taille >= 1 page SQLite (elimine le fichier de 0 octet) ;
+          2. `PRAGMA integrity_check` == "ok" ;
+          3. `PRAGMA page_count` > 0 ;
+          4. la presence des tables du socle (`_BACKUP_CORE_TABLES`), sans quoi
+             le backup ne porte aucune donnee de bibliotheque a restaurer.
+        On ne verifie PAS l'integralite de REQUIRED_SCHEMA_TABLES : un backup
+        anterieur a une migration recente est un candidat legitime (les
+        migrations le completeront), le rejeter reviendrait a jeter une
+        bibliotheque recuperable.
+        """
+        if not path.is_file():
+            return "missing"
+        try:
+            size = int(path.stat().st_size)
+        except OSError as exc:
+            return f"error: {exc}"
+        if size < _MIN_USABLE_BACKUP_BYTES:
+            return f"taille {size} octets < 1 page SQLite (base vide)"
+        status = self._integrity_of_file(path)
+        if status != "ok":
+            return f"integrity={status}"
+        try:
+            with closing(sqlite3.connect(str(path))) as conn:
+                row = conn.execute("PRAGMA page_count").fetchone()
+                if not row or int(row[0]) <= 0:
+                    return "page_count=0 (base vide)"
+                placeholders = ",".join("?" for _ in _BACKUP_CORE_TABLES)
+                cur = conn.execute(
+                    f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})",
+                    _BACKUP_CORE_TABLES,
+                )
+                found = {str(r[0]) for r in cur.fetchall() if r and r[0]}
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            return f"error: {exc}"
+        missing = [t for t in _BACKUP_CORE_TABLES if t not in found]
+        if missing:
+            return f"schema absent (tables manquantes: {', '.join(missing)})"
+        return None
 
     def _backup_dir(self) -> Path:
         """Dossier ou sont stockes les backups : <db_dir>/backups/."""
@@ -421,6 +757,8 @@ class _StoreBase:
         """
         if not self.db_path.is_file():
             return  # fresh install, rien a backupper
+        if self._backup_blocked_by_integrity("backup_before_migrations", "pre_migration"):
+            return
         try:
             backup_db_with_rotation(
                 self.db_path,
@@ -431,11 +769,41 @@ class _StoreBase:
         except Exception as exc:
             logger.warning("backup_before_migrations: ignore (%s)", exc)
 
+    def _backup_blocked_by_integrity(self, caller: str, trigger: str) -> bool:
+        """AUDIT F29 (anti-aggravation) : ne JAMAIS backupper une DB dont
+        l'integrity_check vient d'echouer.
+
+        Sinon chaque backup pousse une copie corrompue (voire un .bak de 0 octet,
+        cf backup_db) en tete de backups/ et la rotation (DEFAULT_MAX_BACKUPS)
+        evince les backups SAINS en quelques cycles -> perte definitive d'une
+        bibliotheque qui etait recuperable.
+
+        Revue R1 : la garde etait posee dans le seul `_backup_before_migrations`
+        alors que `backup_now()` tourne apres CHAQUE apply reel (trigger
+        "post_apply") et depuis l'UI Parametres — sur une DB corrompue en mode
+        degrade, ce chemin continuait donc a fabriquer le candidat n°1 du
+        prochain auto-restore. La garde est desormais partagee par les deux.
+
+        "unknown" = initialize() pas encore appele : on ne bloque pas (le backup
+        d'une DB non encore diagnostiquee reste utile).
+        """
+        if self._integrity_status in ("ok", "unknown"):
+            return False
+        logger.warning(
+            "%s: DB corrompue (%s) — backup %s saute (ne pas evincer les backups sains par rotation)",
+            caller,
+            self._integrity_status,
+            trigger,
+        )
+        return True
+
     def backup_now(self, *, trigger: str = "manual", max_count: int = DEFAULT_MAX_BACKUPS) -> Optional[Path]:
         """API publique : declenche un backup immediat. Retourne le chemin
         ou None si la DB n'existe pas encore. Utilise par apply_support
         apres apply reel et par UI Settings.
         """
+        if self._backup_blocked_by_integrity("backup_now", str(trigger or "manual")):
+            return None
         return backup_db_with_rotation(
             self.db_path,
             self._backup_dir(),
@@ -599,3 +967,8 @@ class SQLiteStore(_StoreBase):
         self.scan = ScanRepository(self)
         # Spec 06 Modal Film (migration 023) : etat utilisateur sur les films.
         self.film_modal = FilmModalRepository(self)
+        # Vague P / VP-C (migration 030) : verrous champ-par-champ Jellyfin.
+        self.field_locks = FieldLocksRepository(self)
+        # Vague P / VP-D (migration 031) : decisions tri-etat
+        # (accepted/rejected/deferred). Backward compat ABSOLUE.
+        self.decisions = DecisionsRepository(self)

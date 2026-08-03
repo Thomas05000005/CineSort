@@ -12,7 +12,8 @@ from __future__ import annotations
 import unittest
 
 try:
-    from hypothesis import HealthCheck, given, settings, strategies as st
+    from hypothesis import HealthCheck, given, settings
+    from hypothesis import strategies as st
 
     HYPOTHESIS_AVAILABLE = True
 except ImportError:  # pragma: no cover — local minimal env

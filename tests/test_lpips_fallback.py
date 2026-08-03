@@ -32,7 +32,6 @@ from cinesort.domain.perceptual.lpips_compare import (
     reset_session_cache,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fallback gracieux dans l'orchestrateur compute_lpips_comparison
 # ---------------------------------------------------------------------------

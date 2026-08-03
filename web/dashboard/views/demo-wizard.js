@@ -7,6 +7,10 @@
 
 import { apiPost } from "../core/api.js";
 import { navigateTo } from "../core/router.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer alert()/confirm()
+// natifs par dangerConfirmModal (destructif) ou showToast (informatif).
+import { dangerConfirmModal, trapFocus } from "../components/modal.js"; // R8-078b : trapFocus partagé
+import { showToast } from "../components/toast.js";
 
 const OVERLAY_ID = "demoWizardOverlay";
 const BANNER_ID = "demoBanner";
@@ -51,6 +55,7 @@ function _renderWizardOverlay() {
     </div>
   `;
   document.body.appendChild(overlay);
+  trapFocus(overlay); // R8-078b (filet F6-a) : Tab/Shift+Tab piégés (aria-modal)
 
   const btnStart = overlay.querySelector("#btnStartDemo");
   const btnSkip = overlay.querySelector("#btnSkipDemo");
@@ -69,13 +74,15 @@ function _renderWizardOverlay() {
         btnStart.disabled = false;
         btnStart.textContent = "Tester avec 15 films démo";
         const msg = payload.error || payload.message || "Erreur inconnue";
-        alert("Création du mode démo échouée : " + msg);
+        // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+        showToast({ type: "error", text: "Création du mode démo échouée : " + msg });
       }
     } catch (err) {
       btnStart.disabled = false;
       btnStart.textContent = "Tester avec 15 films démo";
       console.error("[demo-wizard] start_demo_mode", err);
-      alert("Erreur réseau lors de la création du mode démo.");
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+      showToast({ type: "error", text: "Erreur réseau lors de la création du mode démo." });
     }
   });
 
@@ -150,26 +157,37 @@ export async function renderDemoBanner() {
   });
 
   const btnStop = banner.querySelector("#btnStopDemo");
-  btnStop?.addEventListener("click", async () => {
-    if (!confirm("Supprimer toutes les données démo ?")) return;
-    btnStop.disabled = true;
-    btnStop.textContent = "Suppression...";
-    try {
-      const res = await apiPost("runtime/stop_demo_mode");
-      if (res?.data?.ok) {
-        banner.remove();
-        document.body.classList.remove("demo-mode-active");
-        navigateTo("/status");
-      } else {
-        btnStop.disabled = false;
-        btnStop.textContent = "Sortir du mode démo";
-        alert("Suppression échouée : " + (res?.data?.error || "inconnue"));
-      }
-    } catch (err) {
-      btnStop.disabled = false;
-      btnStop.textContent = "Sortir du mode démo";
-      console.error("[demo-wizard] stop_demo_mode", err);
-      alert("Erreur réseau lors de la sortie du mode démo.");
-    }
+  btnStop?.addEventListener("click", () => {
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 action destructive
+    // (suppression de toutes les donnees demo) => dangerConfirmModal au lieu de confirm() natif.
+    dangerConfirmModal({
+      title: "Supprimer toutes les données démo ?",
+      consequence: "Les 15 films fictifs et tous les runs associés seront supprimés. Action irréversible.",
+      confirmLabel: "Supprimer les données démo",
+      cancelLabel: "Annuler",
+      onConfirm: async () => {
+        btnStop.disabled = true;
+        btnStop.textContent = "Suppression...";
+        try {
+          const res = await apiPost("runtime/stop_demo_mode");
+          if (res?.data?.ok) {
+            banner.remove();
+            document.body.classList.remove("demo-mode-active");
+            navigateTo("/status");
+          } else {
+            btnStop.disabled = false;
+            btnStop.textContent = "Sortir du mode démo";
+            // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+            showToast({ type: "error", text: "Suppression échouée : " + (res?.data?.error || "inconnue") });
+          }
+        } catch (err) {
+          btnStop.disabled = false;
+          btnStop.textContent = "Sortir du mode démo";
+          console.error("[demo-wizard] stop_demo_mode", err);
+          // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+          showToast({ type: "error", text: "Erreur réseau lors de la sortie du mode démo." });
+        }
+      },
+    });
   });
 }
