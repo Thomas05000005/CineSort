@@ -102,8 +102,14 @@ def write_text_safe(p: Path, text: str) -> None:
 # il faut donc pouvoir l'identifier.
 ATOMIC_TMP_INFIX = ".tmp."
 
-# Nombre de tentatives d'os.replace (cf. R8-026 plus bas).
-_ATOMIC_REPLACE_RETRIES = 5
+# Politique de retentative d'`os.replace`, MESUREE par PR#718 sur 32 threads
+# concurrents (`poster_proxy` sous ThreadingHTTPServer) : 19/32 echecs sans
+# retentative, 0/32 avec ce backoff, pire cas 6 tentatives. Budget total
+# ~0,41 s, soit MOINS que les 0,75 s de l'ancienne politique (5 x 50 ms
+# lineaire) tout en persistant deux fois plus longtemps.
+_ATOMIC_REPLACE_MAX_ATTEMPTS = 12
+_ATOMIC_REPLACE_BACKOFF_BASE_S = 0.002
+_ATOMIC_REPLACE_BACKOFF_CAP_S = 0.05
 
 
 class AtomicWriteError(OSError):
@@ -132,19 +138,46 @@ def is_atomic_tmp_name(name: str) -> bool:
 
 
 def _replace_with_retry(tmp: Path, target: Path) -> None:
-    # R8-026 (F2-d) : retry court sur os.replace. Sur Windows, os.replace leve
-    # PermissionError (WinError 5/32) quand un lecteur concurrent (poller UI, 2e onglet)
-    # tient le fichier destination ouvert -> le write etait PERDU (l'ancienne valeur restait).
-    # Boucle bornee (5x, backoff ~50ms) ; l'atomicite n'est PAS affectee (os.replace reste
-    # atomique, jamais de contenu corrompu). On re-leve apres epuisement des tentatives.
+    """Bascule `tmp` -> `target`, en encaissant la contention Windows.
+
+    R8-026 (F2-d) : sur Windows, `os.replace` leve `PermissionError`
+    (WinError 5/32) quand un autre acteur tient la cible ouverte — un lecteur
+    (poller de l'UI, 2e onglet) ou un autre ECRIVAIN qui bascule au meme
+    instant. Sans retentative, l'ecriture est PERDUE : la cible garde son
+    ancienne valeur et l'appelant croit avoir ecrit.
+
+    L'atomicite n'est jamais en cause (`os.replace` reste atomique, il n'y a
+    pas de contenu melange) : c'est un probleme de DISPONIBILITE de la cible.
+
+    La politique vient de PR#718, qui l'a MESUREE sur le site le plus
+    concurrent du depot (`poster_proxy`, sous `ThreadingHTTPServer`) :
+    32 threads sur la meme cible donnent **19 echecs sur 32 sans retentative**
+    et **0 sur 32** avec ce backoff, pire cas observe 6 tentatives.
+
+    Elle remplace un backoff lineaire de 5 x 50 ms, qui etait moins bon des
+    deux cotes : trop lent au cas courant (50 ms d'attente pour une collision
+    qui se resout en 2 ms) et trop court au cas charge (5 tentatives < les 6
+    du pire cas mesure, donc des pertes d'ecriture sous charge).
+
+    Trois proprietes comptent, et aucune n'est decorative :
+    - depart a 2 ms : la quasi-totalite des collisions se resout au 1er retry ;
+    - croissance exponentielle plafonnee a 50 ms : on ne bloque jamais un
+      handler HTTP indefiniment (budget total ~0,41 s sur 12 tentatives,
+      soit MOINS que les 0,75 s de l'ancienne politique sur 5) ;
+    - jitter derive de l'identifiant de thread : sans lui, N threads reveilles
+      par le meme backoff se retelescopent a chaque tour.
+    """
     replace_exc: Optional[PermissionError] = None
-    for attempt in range(_ATOMIC_REPLACE_RETRIES):
+    for attempt in range(_ATOMIC_REPLACE_MAX_ATTEMPTS):
         try:
             os.replace(tmp, target)
             return
         except PermissionError as exc:
             replace_exc = exc
-            time.sleep(0.05 * (attempt + 1))
+            if attempt == _ATOMIC_REPLACE_MAX_ATTEMPTS - 1:
+                break
+            delay = min(_ATOMIC_REPLACE_BACKOFF_CAP_S, _ATOMIC_REPLACE_BACKOFF_BASE_S * (2**attempt))
+            time.sleep(delay + (threading.get_ident() % 8) * 0.0005)
     if replace_exc is not None:
         raise replace_exc
 

@@ -145,54 +145,40 @@ class TestHelperCanonique(_AtomicAssertions):
                 seen.append(str(src))
             return real_replace(src, dst, *a, **kw)
 
-        # Une PermissionError apres epuisement des essais est un resultat
-        # DOCUMENTE de `_replace_with_retry` (5 essais, ~750 ms), pas un defaut :
-        # sous Windows, 16 threads qui promeuvent la MEME cible se disputent le
-        # verrou et la fonction re-leve volontairement apres la derniere
-        # tentative. Interdire ce cas revenait a tester une propriete que le code
-        # ne promet pas — d'ou un echec intermittent mesure a ~2,5 % sur 120
-        # executions, exactement le piege WinError 5/32 documente dans CLAUDE.md.
-        # On separe donc les deux : la contention est TOLEREE, l'invariant sous
-        # test (unicite du .tmp) reste STRICT.
-        contention: List[BaseException] = []
+        # Aucune tolerance : un ecrivain qui echoue a basculer a PERDU son
+        # ecriture, la cible garde son ancienne valeur et l'appelant croit avoir
+        # ecrit. Ce test a d'abord tolere ces echecs — ce qui echangeait un
+        # defaut de corruption contre un defaut de perte silencieuse. La bonne
+        # reponse etait de renforcer la politique de retentative (12 essais,
+        # backoff exponentiel + jitter, mesures de PR#718 : 0 echec sur 32
+        # threads) plutot que d'abaisser l'exigence du test.
         errors: List[BaseException] = []
 
         def worker(i: int) -> None:
             try:
                 atomic_write_json(target, {"writer": i})
-            except AtomicWriteError as exc:
-                cause = exc.__cause__ if isinstance(exc.__cause__, BaseException) else exc
-                with lock:
-                    (contention if isinstance(cause, PermissionError) else errors).append(exc)
-            except PermissionError as exc:
-                with lock:
-                    contention.append(exc)
             except BaseException as exc:  # noqa: BLE001 — remonte au thread principal
                 with lock:
                     errors.append(exc)
 
         with mock.patch("os.replace", recording_replace):
-            threads = [threading.Thread(target=worker, args=(i,)) for i in range(16)]
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(32)]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
 
-        self.assertEqual(errors, [], "un ecrivain concurrent a echoue pour une raison INATTENDUE")
-        # La contention est toleree, mais pas au point de vider le test : si les
-        # 16 ecrivains echouaient, l'unicite des .tmp ne prouverait plus rien
-        # puisqu'aucune promotion n'aurait eu lieu.
-        self.assertLess(
-            len(contention),
-            16,
-            "les 16 ecrivains ont echoue sur os.replace : le test ne demontre plus rien",
+        self.assertEqual(
+            errors,
+            [],
+            "un ecrivain concurrent a echoue : son ecriture est PERDUE, la cible garde son ancienne valeur",
         )
-        # `seen` peut contenir plus de 16 entrees : sous Windows os.replace est
+        # `seen` peut contenir plus de 32 entrees : sous Windows os.replace est
         # retente quand un lecteur tient la cible (R8-026). Ce sont les memes
         # chemins, d'ou l'assertion sur le nombre de tmp DISTINCTS.
         self.assertEqual(
             len(set(seen)),
-            16,
+            32,
             "deux ecrivains concurrents ont utilise le MEME .tmp -> l'un peut promouvoir le contenu de l'autre",
         )
         # Le contenu final reste un JSON valide (jamais un melange des deux).
