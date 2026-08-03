@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,8 +50,12 @@ def film_identity_key(row: Any) -> str:
     if tmdb_id:
         return f"tmdb:{tmdb_id}{ed_suffix}"
 
-    title = _norm_title(str(getattr(row, "proposed_title", "") or ""))
+    # LOTD-DUP-TITLE-YEAR (revue round 1) : meme tolerance que movie_key —
+    # "Titre 2005"|2005 et "Titre"|2005 partagent l'identite (timeline film),
+    # "Blade Runner 2049"|2017 reste distinct. Le proposed_title n'est pas modifie.
     year = int(getattr(row, "proposed_year", 0) or 0)
+    raw_title = str(getattr(row, "proposed_title", "") or "")
+    title = _norm_title(strip_trailing_year_if_equal(raw_title, year))
     return f"title:{title}|{year}{ed_suffix}"
 
 
@@ -119,8 +125,12 @@ def identity_key_from_dict(data: Dict[str, Any]) -> str:
     if tmdb_id:
         return f"tmdb:{tmdb_id}{ed_suffix}"
 
-    title = _norm_title(str(data.get("proposed_title") or ""))
+    # R2 (revue round 2) : identity_key_from_dict est LE chemin vivant
+    # (film_support.get_film_full + timeline) ; film_identity_key ne l'est pas.
+    # La tolerance d'annee doit donc etre ici pour que "Le Grand Voyage 2005" et
+    # "Le Grand Voyage" (annee 2005) partagent une timeline unique.
     year = int(data.get("proposed_year") or 0)
+    title = _norm_title(strip_trailing_year_if_equal(str(data.get("proposed_title") or ""), year))
     return f"title:{title}|{year}{ed_suffix}"
 
 

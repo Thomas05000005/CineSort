@@ -241,13 +241,13 @@ class OmdbClient:
         # Flush cache best-effort (OMDb n'a pas de throttle save : ecritures
         # toujours immediates via _save_cache_atomic, mais on garantit la
         # symetrie avec TmdbClient).
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             self._save_cache_atomic()
         except Exception:  # noqa: BLE001
             pass
         session = getattr(self, "_session", None)
         if session is not None:
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 session.close()
             except Exception:  # noqa: BLE001
                 pass

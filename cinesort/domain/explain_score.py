@@ -200,11 +200,27 @@ def _compute_baseline(
 
     next_tier: Optional[str] = None
     distance: Optional[int] = None
-    for name, threshold in order:
-        if threshold > score:
-            next_tier = name
-            distance = max(0, threshold - score)
-            break
+    # BUG-EXPLAIN-BASELINE-CAP (Lot D 2026-07) : raisonner depuis le tier
+    # AFFICHE (deja plafonne/ajuste par quality_score : cap probe FAILED ->
+    # Silver, cap CAM -> Bronze, hierarchy VP-B) et non depuis le score seul.
+    # Sinon un film cape Silver avec score >= seuil Platinum repondait
+    # next_tier=null ("aucun tier superieur") en contradiction avec le tier
+    # montre a l'utilisateur. distance peut valoir 0 dans ce cas : le blocage
+    # n'est pas une question de points (garde securite), cf _generate_suggestions.
+    tier_index = {name.lower(): i for i, (name, _) in enumerate(order)}
+    displayed_idx = tier_index.get(str(tier or "").strip().lower())
+    if displayed_idx is not None:
+        if displayed_idx + 1 < len(order):
+            next_name, next_threshold = order[displayed_idx + 1]
+            next_tier = next_name
+            distance = max(0, next_threshold - score)
+    else:
+        # Tier non canonique/inconnu : fallback historique base sur le score.
+        for name, threshold in order:
+            if threshold > score:
+                next_tier = name
+                distance = max(0, threshold - score)
+                break
 
     return {
         "tier_thresholds": thresholds,
@@ -230,10 +246,13 @@ def _generate_suggestions(
                 seen.add(text)
                 break
 
-    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique
+    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique.
+    # BUG-EXPLAIN-BASELINE-CAP : distance == 0 signifie tier plafonné par une
+    # garde sécurité (score déjà au-dessus du seuil) — une amélioration de
+    # points n'y changerait rien, donc pas de suggestion générique trompeuse.
     distance = baseline.get("distance_to_next_tier")
     next_tier = baseline.get("next_tier")
-    if not suggestions and distance is not None and distance <= 5 and next_tier:
+    if not suggestions and distance is not None and 1 <= distance <= 5 and next_tier:
         suggestions.append(
             f"Score à {distance} point(s) du tier {next_tier} — une légère amélioration audio ou vidéo suffirait."
         )

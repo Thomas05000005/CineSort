@@ -8,14 +8,16 @@
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_filet_residuals_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
 
-from cinesort.infra.tmdb_client import TmdbClient
-from cinesort.domain.perceptual.audio_perceptual import _compute_audio_score
 from cinesort.domain.duplicate_compare import _bitrate_label
+from cinesort.domain.perceptual.audio_perceptual import _compute_audio_score
+from cinesort.infra.tmdb_client import TmdbClient
 
 
 class _FakeResp:
@@ -46,13 +48,15 @@ def run():
         c = TmdbClient(api_key="fake", cache_path=tmp / "cache.json", timeout_s=5.0)
         c._http_get = fake_http  # type: ignore[assignment]
         key = "tv_search:game of thrones||fr-FR"
-        r1 = c.search_tv("Game of Thrones")
+        c.search_tv("Game of Thrones")
         cached_after_empty = c._cache_get(key)
         r2 = c.search_tv("Game of Thrones")
         results["R8097_empty_not_cached"] = cached_after_empty is None
         results["R8097_refetch_recovers"] = len(r2) == 1 and r2[0].id == 1399
         print("=== R8-097 (search_tv, jumeau R8-041) ===")
-        print(f"  cache après vide = {cached_after_empty} (None attendu) ; re-fetch = {len(r2)} résultat(s) id={r2[0].id if r2 else None}")
+        print(
+            f"  cache après vide = {cached_after_empty} (None attendu) ; re-fetch = {len(r2)} résultat(s) id={r2[0].id if r2 else None}"
+        )
 
     # ===== R8-098 : clipping non mesuré -> pas de s_clip=90 fabriqué =====
     clip_unmeasured = {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
@@ -71,17 +75,20 @@ def run():
     def _avant_label(br):
         kbps = br // 1000 if br > 10000 else br
         return f"{kbps // 1000} Mbps" if kbps >= 1000 else f"{kbps} kbps"
+
     av = _avant_label(8000)
     ap = _bitrate_label(8000)
     # AVANT traite 8000 comme 8000 kbps -> « 8 Mbps » (1000x faux) ; APRÈS « 8 kbps ».
-    results["R8099_bps_divided"] = (av == "8 Mbps" and ap == "8 kbps")
+    results["R8099_bps_divided"] = av == "8 Mbps" and ap == "8 kbps"
     # Cohérence débit élevé : 25 Mbps (25000000 bps) inchangé.
-    results["R8099_high_unchanged"] = (_avant_label(25_000_000) == _bitrate_label(25_000_000) == "25 Mbps")
+    results["R8099_high_unchanged"] = _avant_label(25_000_000) == _bitrate_label(25_000_000) == "25 Mbps"
     print("\n=== R8-099 (_bitrate_label bps/kbps) ===")
     print(f"  8000 bps : AVANT '{av}'  APRÈS '{ap}' ; 25 Mbps inchangé '{_bitrate_label(25_000_000)}'")
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (3 résidus filet : cache TV, clipping vide, bitrate label)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (3 résidus filet : cache TV, clipping vide, bitrate label)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

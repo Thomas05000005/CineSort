@@ -13,7 +13,9 @@ Aucun effet de bord hors du tempdir.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/v5_tv_apply_repro.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
@@ -61,14 +63,24 @@ def run():
     (folder / f"{src_stem}.nfo").write_text("<episodedetails><title>Pilot</title></episodedetails>", encoding="utf-8")
 
     cfg = Cfg(root)
-    row = Row(video=f"{src_stem}.mkv", proposed_title="Showname", proposed_year=2020,
-              tv_season=1, tv_episode=1, tv_episode_title="Pilot", tv_series_name="Showname")
+    row = Row(
+        video=f"{src_stem}.mkv",
+        proposed_title="Showname",
+        proposed_year=2020,
+        tv_season=1,
+        tv_episode=1,
+        tv_episode_title="Pilot",
+        tv_series_name="Showname",
+    )
     res = core.ApplyResult()
     logs = []
     ops = []
 
-    def log(level, msg): logs.append((level, msg))
-    def record_op(op): ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
+    def log(level, msg):
+        logs.append((level, msg))
+
+    def record_op(op):
+        ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
 
     before = sorted(str(p.relative_to(tmp)) for p in root.rglob("*") if p.is_file())
     apply_tv_episode(cfg, folder, row, dry_run=False, log=log, res=res, record_op=record_op)
@@ -94,19 +106,25 @@ def run():
     print()
 
     # --- B2 : ops journalisees portent src_sha1/src_size ? ---
-    move_ops = [o for o in ops if o.get("op_type") == "MOVE_FILE" or o.get("type") == "MOVE_FILE" or "src_path" in o or "src" in o]
+    [o for o in ops if o.get("op_type") == "MOVE_FILE" or o.get("type") == "MOVE_FILE" or "src_path" in o or "src" in o]
     has_hash = [("src_sha1" in o and o.get("src_sha1")) for o in ops]
     any_hash = any(has_hash)
     print("--- B2 (F-V4B-TV2) : empreinte src_sha1/src_size dans les ops ---")
     print(f"  nb ops capturees : {len(ops)}")
     for o in ops:
         keys = sorted(o.keys())
-        print(f"    op: type={o.get('op_type') or o.get('type')} keys={keys} src_sha1={o.get('src_sha1','<absent>')} src_size={o.get('src_size','<absent>')}")
+        print(
+            f"    op: type={o.get('op_type') or o.get('type')} keys={keys} src_sha1={o.get('src_sha1', '<absent>')} src_size={o.get('src_size', '<absent>')}"
+        )
     b2 = not any_hash and len(ops) > 0
-    print(f"  VERDICT B2 : {'CONFIRME (aucune empreinte -> garde-fou undo inerte sur TV)' if b2 else 'empreinte presente'}")
+    print(
+        f"  VERDICT B2 : {'CONFIRME (aucune empreinte -> garde-fou undo inerte sur TV)' if b2 else 'empreinte presente'}"
+    )
     print()
-    print("RESUME:", json.dumps({"B1_sidecars_orphelins": b1, "B2_ops_sans_sha1": b2,
-                                 "res_moves": res.moves}, ensure_ascii=False))
+    print(
+        "RESUME:",
+        json.dumps({"B1_sidecars_orphelins": b1, "B2_ops_sans_sha1": b2, "res_moves": res.moves}, ensure_ascii=False),
+    )
 
 
 if __name__ == "__main__":

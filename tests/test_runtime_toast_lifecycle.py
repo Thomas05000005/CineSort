@@ -66,14 +66,10 @@ def test_toast_save_settings_lifecycle_absent_present_absent(dashboard_page) -> 
     _ensure_toast_loaded(dashboard_page)
 
     # GIVEN : aucun toast initial.
-    dashboard_page.evaluate(
-        "() => window.__toastLifecycle.clearAllToasts && window.__toastLifecycle.clearAllToasts()"
-    )
+    dashboard_page.evaluate("() => window.__toastLifecycle.clearAllToasts && window.__toastLifecycle.clearAllToasts()")
     dashboard_page.wait_for_timeout(150)
 
-    initial_count = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    initial_count = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert initial_count == 0, f"GIVEN: 0 toast initial attendu, vu {initial_count}"
 
     # WHEN : declencher l'action (equivalent save settings OK).
@@ -101,9 +97,7 @@ def test_toast_save_settings_lifecycle_absent_present_absent(dashboard_page) -> 
           };
         }"""
     )
-    assert present_snapshot["count"] == 1, (
-        f"PRESENT: 1 toast attendu, vu {present_snapshot['count']}"
-    )
+    assert present_snapshot["count"] == 1, f"PRESENT: 1 toast attendu, vu {present_snapshot['count']}"
     assert present_snapshot["text"] == "Réglages sauvegardés", (
         f"PRESENT: textContent inattendu : {present_snapshot['text']!r}"
     )
@@ -117,12 +111,8 @@ def test_toast_save_settings_lifecycle_absent_present_absent(dashboard_page) -> 
     dashboard_page.wait_for_timeout(5000)
 
     # THEN (ABSENT) : toast disparu (cycle complet).
-    after_count = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
-    assert after_count == 0, (
-        f"ABSENT: 0 toast attendu apres expiration, vu {after_count}"
-    )
+    after_count = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
+    assert after_count == 0, f"ABSENT: 0 toast attendu apres expiration, vu {after_count}"
 
 
 @pytest.mark.runtime
@@ -133,15 +123,11 @@ def test_toast_error_lifecycle_long_duration_then_absent(dashboard_page) -> None
     et que le cycle absent->present->absent fonctionne avec duration courte.
     """
     _ensure_toast_loaded(dashboard_page)
-    dashboard_page.evaluate(
-        "() => window.__toastLifecycle.clearAllToasts && window.__toastLifecycle.clearAllToasts()"
-    )
+    dashboard_page.evaluate("() => window.__toastLifecycle.clearAllToasts && window.__toastLifecycle.clearAllToasts()")
     dashboard_page.wait_for_timeout(150)
 
     # GIVEN : aucun toast initial.
-    assert dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    ) == 0
+    assert dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length") == 0
 
     # WHEN : emettre toast erreur (duration 600ms pour eviter d'attendre 10s).
     dashboard_page.evaluate(
@@ -173,7 +159,5 @@ def test_toast_error_lifecycle_long_duration_then_absent(dashboard_page) -> None
     dashboard_page.wait_for_timeout(5000)
 
     # THEN : disparu.
-    after = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    after = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert after == 0, f"Apres 5s : 0 toast attendu, vu {after}"

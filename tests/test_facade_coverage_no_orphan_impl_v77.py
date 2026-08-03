@@ -50,11 +50,7 @@ FACADES: Dict[str, Type] = {
 
 def _public_methods(cls: Type) -> List[str]:
     """Retourne la liste triee des methodes publiques d'une facade."""
-    return sorted(
-        m
-        for m in vars(cls)
-        if not m.startswith("_") and callable(getattr(cls, m, None))
-    )
+    return sorted(m for m in vars(cls) if not m.startswith("_") and callable(getattr(cls, m, None)))
 
 
 def _current_facade_methods() -> Dict[str, List[str]]:
@@ -76,20 +72,12 @@ def _referenced_impls() -> Set[str]:
 
 def _all_impls_on_api() -> Set[str]:
     api = CineSortApi()
-    return {
-        m
-        for m in dir(api)
-        if m.endswith("_impl") and not m.startswith("__") and callable(getattr(api, m, None))
-    }
+    return {m for m in dir(api) if m.endswith("_impl") and not m.startswith("__") and callable(getattr(api, m, None))}
 
 
 def _public_residual() -> List[str]:
     api = CineSortApi()
-    return sorted(
-        m
-        for m in dir(api)
-        if not m.startswith("_") and callable(getattr(api, m, None))
-    )
+    return sorted(m for m in dir(api) if not m.startswith("_") and callable(getattr(api, m, None)))
 
 
 def regenerate_facade_snapshot() -> None:
@@ -223,9 +211,7 @@ class FacadeCoverageNoOrphanImplTests(unittest.TestCase):
         leaks: Dict[str, List[str]] = {}
         for name, cls in FACADES.items():
             # vars() inclut tout, on filtre sur les methodes publiques pretes a l'emploi
-            publics = [
-                m for m in vars(cls) if not m.startswith("_") and callable(getattr(cls, m, None))
-            ]
+            publics = [m for m in vars(cls) if not m.startswith("_") and callable(getattr(cls, m, None))]
             internal_like = [m for m in publics if m.startswith("internal_") or m.endswith("_internal")]
             if internal_like:
                 leaks[name] = internal_like

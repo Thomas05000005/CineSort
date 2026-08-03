@@ -13,7 +13,7 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
-import { apiPost } from "../core/api.js";
+import { apiPost, getSettingsEpoch } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
 import * as rightPanel from "../components/right-panel.js";
@@ -245,6 +245,10 @@ const _PING_CACHE_TTL_MS = 5 * 60 * 1000;
 const _pingCache = {
   // { key: { ok: bool, ts: ms } }
 };
+// M21 : derniere epoque de settings pour laquelle _pingCache a ete purge.
+// -1 => purge au tout premier montage (cache vide, no-op) puis seulement quand
+// getSettingsEpoch() change (apres un save_settings).
+let _lastPingPurgeEpoch = -1;
 
 function _pingCacheGet(key) {
   const entry = _pingCache[key];
@@ -258,6 +262,19 @@ function _pingCacheGet(key) {
 
 function _pingCacheSet(key, ok) {
   _pingCache[key] = { ok: !!ok, ts: Date.now() };
+}
+
+/** M21 (audit ultra 2026-07-13) : purge INTEGRALE du cache de ping.
+ *  A appeler a chaque (re)lecture des settings — evenement qui suit toute
+ *  sauvegarde dans Parametres. Sans ca, un changement d'URL/cle d'integration
+ *  (Jellyfin/Plex/Radarr/...) laissait une entree de ping valide (TTL 5 min,
+ *  clef par NOM d'integration, insensible aux valeurs) -> la pastille affichait
+ *  un statut PERIME. On ne fingerprinte PAS les valeurs (get_settings masque les
+ *  secrets, un diff serait aveugle a une cle changee) : on purge sur l'evenement.
+ *  Sur-invalider est sans danger (les pings repartent en arriere-plan juste apres).
+ */
+function _purgePingCacheAll() {
+  for (const k of Object.keys(_pingCache)) delete _pingCache[k];
 }
 
 /** Ping une seule intégration. Retourne true (ok) / false (offline) ou null
@@ -602,6 +619,22 @@ function _extractAccueilSuggestions(stats) {
   return [];
 }
 
+/** LOTC-M2 : filter_hint est un DICT backend ({filter:"x"} | {tier:[...],run_id})
+ * — rendu via String() il affichait "[object Object]". Libelle "cle : valeur"
+ * lisible, chaine vide si inexploitable (le hint est alors masque). */
+function _formatFilterHint(hint) {
+  if (hint == null) return "";
+  if (typeof hint === "string") return hint;
+  if (typeof hint !== "object") return String(hint);
+  const parts = [];
+  for (const [k, v] of Object.entries(hint)) {
+    if (v == null) continue;
+    const val = Array.isArray(v) ? v.join(", ") : (typeof v === "object" ? "" : String(v));
+    if (val) parts.push(`${k} : ${val}`);
+  }
+  return parts.join(" · ");
+}
+
 function _renderSuggestions(stats) {
   const items = _extractAccueilSuggestions(stats);
   if (items.length === 0) {
@@ -623,7 +656,8 @@ function _renderSuggestions(stats) {
     const labelStr = it.label;
     const messageStartsWithCount = it.count != null && /^\d/.test(labelStr.trim());
     const prefix = it.count != null && !messageStartsWithCount ? `${it.count} ` : "";
-    const filterHint = it.filter_hint ? `<span class="accueil-suggestion-hint">${escapeHtml(String(it.filter_hint))}</span>` : "";
+    const hintText = _formatFilterHint(it.filter_hint); // LOTC-M2
+    const filterHint = hintText ? `<span class="accueil-suggestion-hint">${escapeHtml(hintText)}</span>` : "";
     return `
       <li class="accueil-suggestion-row ${sevClass}" data-target-route="${escapeHtml(it.route)}">
         <span class="accueil-suggestion-dot" aria-hidden="true">${sevDot}</span>
@@ -1364,6 +1398,18 @@ export async function initAccueil(container) {
   const _updP = (updateRes && updateRes.data) || updateRes || null;
   const updateInfo = _updP && _updP.ok !== false ? _updP : null;
   _currentSettings = settings;
+
+  // M21 (audit ultra 2026-07-13) + revue R2 : purge le cache de ping UNIQUEMENT
+  // apres un vrai changement de settings (getSettingsEpoch bouge a chaque
+  // save_settings), pas a CHAQUE montage — sinon on re-ping toutes les
+  // integrations et on fait clignoter les pastilles (offline -> ok optimiste ->
+  // warning) a chaque simple navigation vers Accueil. L'epoque couvre aussi les
+  // cles/tokens masques que get_settings ne renvoie jamais en clair.
+  const _ep = getSettingsEpoch();
+  if (_ep !== _lastPingPurgeEpoch) {
+    _purgePingCacheAll();
+    _lastPingPurgeEpoch = _ep;
+  }
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings, updateInfo);
   _bindEvents(container);
