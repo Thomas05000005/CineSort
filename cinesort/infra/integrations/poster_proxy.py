@@ -112,8 +112,8 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
 
                 result = load_secret("tmdb_api_key", blob_b64)
                 return str(result.value or "").strip()
-            except (ImportError, SecretStorageError, Exception) as exc:  # noqa: BLE001 — boundary
-                logger.debug("poster_proxy DPAPI load warn: %s", type(exc).__name__)
+            except (ImportError, SecretStorageError) as exc:
+                logger.warning("poster_proxy: chargement cle DPAPI echoue: %s", type(exc).__name__)
                 return ""
     return ""
 
