@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -8,10 +10,16 @@ from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 
+# AUDIT 2026-06-10 (CRITICAL) : `api._normalize_user_path` n'existe pas (c'est un
+# nom module-level dans cinesort_api, pas une methode d'instance) -> AttributeError
+# non rattrapee -> HTTP 500 sur get_tmdb_posters / search_tmdb des qu'une cle TMDb
+# est configuree. On utilise la vraie fonction module-level.
+from cinesort.ui.api.settings_support import normalize_user_path
+
 logger = logging.getLogger(__name__)
 
 
-def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False) -> Dict[str, Any]:
     if not isinstance(tmdb_ids, list):
         return _err_response(
             t("errors.payload_tmdb_ids_invalid"), category="validation", level="info", log_module=__name__
@@ -25,16 +33,30 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
                 continue
             if value > 0:
                 ids.append(value)
-        ids = sorted(set(ids))[:20]
+        # Fix audit 2026-05-25 (v1.5.5) Vague J : ancien cap [:20] truncait
+        # silencieusement les batchs > 20 IDs (catastrophique pour
+        # _build_library_rows qui appelle avec 853 IDs -> 833 silently dropped).
+        # On garde un cap defensif mais large (2000) pour ne pas exploser TMDb
+        # en cas d'appel pathologique. Les posters sont servis depuis le cache
+        # local (tmdb_cache.json) donc le cout reel est minime apres le 1er run.
+        ids = sorted(set(ids))[:2000]
         if not ids:
             return {"ok": True, "posters": {}}
 
-        settings = api.settings.get_settings()
+        settings = api._internal_settings()  # AUDIT: secrets en clair (tmdb_api_key) sinon 401
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
-            return {"ok": True, "posters": {}}
+            # Audit 2026-06-08 : sans indicateur explicite, le frontend ne peut
+            # pas distinguer 'TMDB non configure' de 'tmdb_id introuvable',
+            # resultat = 100% des cartes affichent le clap generique sans
+            # explication. On ajoute un `reason` pour que bibliotheque.js puisse
+            # afficher une banniere/toast 'Configurez TMDB dans Parametres'.
+            # Backward compat preservee : ok=True + posters={} inchange, le
+            # champ `reason` est purement additif et ignore par les anciens
+            # consommateurs.
+            return {"ok": True, "posters": {}, "reason": "tmdb_not_configured"}
 
-        state_dir = api._normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         # V5-03 polish v7.7.0 : propager le TTL configurable.
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
@@ -48,7 +70,12 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         )
         posters: Dict[str, str] = {}
         for movie_id in ids:
-            url = tmdb.get_movie_poster_thumb_url(movie_id, size=size or "w92")
+            # E4 (verif totale 2026-07) : le bouton refresh jaquette envoie
+            # force_refresh=true depuis 2026-05-24 mais le parametre n'existait
+            # pas cote backend (TypeError => 400). E4-bis (revue) : bypass de
+            # LECTURE du cache (pas de purge) — le fallback stale survit si
+            # TMDb est injoignable.
+            url = tmdb.get_movie_poster_thumb_url(movie_id, size=size or "w92", force_refresh=force_refresh)
             if url:
                 posters[str(movie_id)] = url
         tmdb.flush()
@@ -64,6 +91,153 @@ _SEARCH_POSTER_SIZE = "w185"
 # Hard cap defensif : on n'envoie jamais > N resultats au front pour eviter
 # d'inonder le DOM si TMDb retourne 20 hits sur une requete generique.
 _SEARCH_MAX_RESULTS = 10
+
+
+def _build_tmdb_client(api: Any):
+    """Construit un TmdbClient depuis les settings (secrets EN CLAIR via
+    _internal_settings, sinon cle masquee -> 401). Retourne (tmdb, None) ou
+    (None, err_response) si la cle manque.
+    """
+    settings = api._internal_settings()
+    api_key = str(settings.get("tmdb_api_key") or "").strip()
+    if not api_key:
+        return None, _err_response(
+            "Cle TMDb non configuree (Parametres > Integrations).",
+            category="config",
+            level="info",
+            log_module=__name__,
+        )
+    state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+    try:
+        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+    except (TypeError, ValueError):
+        cache_ttl_days = 30
+    tmdb = TmdbClient(
+        api_key=api_key,
+        cache_path=state_dir / "tmdb_cache.json",
+        timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+        cache_ttl_days=cache_ttl_days,
+    )
+    return tmdb, None
+
+
+def _poster_url_from_path(poster_path: Any, size: str = "w185") -> Optional[str]:
+    path = str(poster_path or "").strip()
+    if not path:
+        return None
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"https://image.tmdb.org/t/p/{size}{path}"
+
+
+def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, Any]:
+    """R5-H2 : resout le tmdb_id (+ jaquette) de films deja identifies (NFO/nom)
+    SANS tmdb_id, par recherche TMDb titre+annee, et le PERSISTE dans le plan.
+
+    N'altere PAS l'identification (proposed_title/year/source inchanges) : on ne
+    fait qu'attacher le tmdb_id. Le poster suit automatiquement car le builder
+    Library recupere les jaquettes par tmdb_id (get_tmdb_posters). Repond au cas
+    biblio 100% NFO ou reactiver TMDb seul ne suffit pas (la recherche TMDb est
+    court-circuitee au scan quand un NFO a matche).
+
+    Returns: {ok, resolved, total, posters: {row_id: url}} ou err.
+    """
+    ids = {str(r) for r in (row_ids or []) if str(r).strip()}
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not ids:
+        return _err_response("Aucun row_id valide.", category="validation", level="info", log_module=__name__)
+
+    tmdb, err = _build_tmdb_client(api)
+    if err:
+        return err
+
+    try:
+        settings = api._internal_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+
+    plan_jsonl = getattr(run_paths, "plan_jsonl", None)
+    if plan_jsonl is None or not plan_jsonl.exists():
+        return _err_response("Plan introuvable pour ce run.", category="resource", level="info", log_module=__name__)
+
+    all_rows: List[Dict[str, Any]] = []
+    with open(plan_jsonl, encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                all_rows.append(data)
+
+    posters: Dict[str, str] = {}
+    # AUDIT 2026-06-14 (R6-H) : on renvoie aussi le tmdb_id resolu par row_id.
+    # Sans ca, le client ne mettait pas a jour r.tmdb_id en memoire -> le rendu
+    # (proxy /api/poster?id=tmdb_id) ne pouvait pas afficher la jaquette fraiche.
+    resolved_ids: Dict[str, int] = {}
+    resolved = 0
+    changed = False
+    for row in all_rows:
+        rid = str(row.get("row_id") or "")
+        if rid not in ids:
+            continue
+        existing = row.get("tmdb_id")
+        try:
+            if existing is not None and int(existing) > 0:
+                continue  # deja un tmdb_id : rien a resoudre.
+        except (TypeError, ValueError):
+            pass
+        title = str(row.get("proposed_title") or row.get("nfo_title") or "").strip()
+        if not title:
+            continue
+        year = int(row.get("proposed_year") or 0) or None
+        try:
+            results = tmdb.search_movie(title, year=year)
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("enrich_tmdb: search '%s' (%s) a echoue: %s", title, year, exc)
+            continue
+        if not results:
+            continue
+        best = results[0]
+        try:
+            tid = int(best.id)
+        except (TypeError, ValueError):
+            continue
+        if tid <= 0:
+            continue
+        row["tmdb_id"] = tid
+        changed = True
+        resolved += 1
+        resolved_ids[rid] = tid
+        url = _poster_url_from_path(getattr(best, "poster_path", None))
+        if url:
+            posters[rid] = url
+
+    if changed:
+        tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fp:
+            for r in all_rows:
+                fp.write(json.dumps(r, ensure_ascii=False) + "\n")
+        tmp_path.replace(plan_jsonl)
+
+        # AUDIT 2026-07-13 (HIGH-17) : toute reecriture de plan.jsonl doit
+        # resynchroniser le snapshot memoire (prefere au fichier par get_plan /
+        # apply / dashboard) et purger le cache dashboard, dont la signature est
+        # calculee sur plan.jsonl (sinon cache empoisonne avec des rows perimees).
+        from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
+
+        resync_run_state_rows(api, run_id)
+
+    with contextlib.suppress(OSError, AttributeError):
+        tmdb.flush()
+
+    return {"ok": True, "resolved": int(resolved), "total": len(ids), "posters": posters, "ids": resolved_ids}
 
 
 def search_tmdb(
@@ -116,7 +290,7 @@ def search_tmdb(
             year_int = None
 
     try:
-        settings = api.settings.get_settings()
+        settings = api._internal_settings()  # AUDIT: secrets en clair (tmdb_api_key) sinon 401
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             return _err_response(
@@ -126,7 +300,7 @@ def search_tmdb(
                 log_module=__name__,
             )
 
-        state_dir = api._normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
         except (TypeError, ValueError):

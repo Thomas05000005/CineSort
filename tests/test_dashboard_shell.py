@@ -11,6 +11,7 @@ Couvre :
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -44,6 +45,17 @@ class DashboardShellHttpTests(unittest.TestCase):
             }
         )
 
+        # ITER 5 — Re-ancrage non-loopback : le test #3 (et frere "valid_token")
+        # doit exercer l'auth Bearer reelle, pas le bypass loopback inconditionnel
+        # introduit le 2026-06-08 (rest_server.py:_check_auth L443-462). Le kill-
+        # switch CINESORT_DISABLE_LOCAL_AUTH=1 est volontairement prevu pour les
+        # tests : il desactive le bypass et force l'evaluation du token, simulant
+        # ainsi un client externe non-loopback (memoire user "ACCEPTATION AUTH =
+        # check runtime non-loopback simulant client externe"). Cf bilan ITER 5
+        # section 1c (Y=ARTEFACT LOOPBACK) et section 3.4 (preuve fix unifie).
+        cls._prev_disable_local_auth = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH")
+        os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = "1"
+
         cls.port = _find_free_port()
         cls.token = "shell-test-token"
         cls.server = RestApiServer(cls.api, port=cls.port, token=cls.token)
@@ -53,6 +65,11 @@ class DashboardShellHttpTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.stop()
+        # Restaurer l'env var pour ne pas polluer les tests suivants.
+        if cls._prev_disable_local_auth is None:
+            os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
+        else:
+            os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = cls._prev_disable_local_auth
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def _get(self, path: str) -> tuple[int, bytes, dict]:
@@ -155,14 +172,18 @@ class DashboardShellHttpTests(unittest.TestCase):
         """L'index contient les placeholder de chaque vue."""
         _, body, _ = self._get("/dashboard/index.html")
         html = body.decode("utf-8")
+        # Verif totale 2026-07 (Phase 5) : conteneurs orphelins retirés
+        # (view-home/quality/jellyfin/plex/radarr/logs — aucune route ne les
+        # activait). On vérifie les placeholders des vues VIVANTES.
         for view_id in (
             "view-login",
             "view-status",
             "view-library",
-            "view-jellyfin",
-            "view-logs",
-            "view-quality",
+            "view-processing",
+            "view-qij",
             "view-settings",
+            "view-help",
+            "view-film-detail",
         ):
             self.assertIn(f'id="{view_id}"', html, f"Vue {view_id} manquante")
 
@@ -191,10 +212,60 @@ class DashboardShellHttpTests(unittest.TestCase):
         self.assertIn("root", data)
 
     def test_login_invalid_token_returns_401(self) -> None:
-        """Un mauvais token retourne 401."""
-        status, data = self._post("/api/settings/get_settings", body={}, token="wrong-token")
-        self.assertEqual(status, 401)
-        self.assertFalse(data["ok"])
+        """Le tunnel auth Bearer reel renvoie 401/200 selon le token.
+
+        ITER 5 etape 2b — re-ancrage sur la VRAIE entree dispatch (path facade
+        /api/settings/get_settings, meme code path que prod). On simule un
+        client non-loopback via le kill-switch CINESORT_DISABLE_LOCAL_AUTH=1
+        (positionne dans setUpClass) qui neutralise le bypass design
+        (rest_server.py L443-462). Le check `client_ip in _LOCAL_CLIENT_IPS
+        && bind_host == "127.0.0.1"` est court-circuite par la 1ere condition
+        `not bypass_disabled`. Le code tombe alors dans la branche Bearer
+        nominale L463-508, comme pour un vrai client LAN sur bind 0.0.0.0.
+
+        Matrice attendue (cf bilan ITER 5 sections 1c + 3.4) :
+          - no-token   -> 401 (Authorization absent, L463/466)
+          - wrong-token-> 401 (hmac.compare_digest False, L475)
+          - valid-token-> 200 (dispatch facade settings/get_settings)
+          - loopback bypass-OFF (env vide) + meme requete -> 200 (bypass actif
+            L452-462, prouve que le bypass design est intact, memoire user
+            BYPASS LOOPBACK CONSERVE).
+        """
+        # --- 1. no-token -> 401 (header Authorization absent) ----------------
+        status_none, data_none = self._post("/api/settings/get_settings", body={}, token=None)
+        self.assertEqual(status_none, 401, f"no-token attendu 401, obtenu {status_none}")
+        self.assertFalse(data_none.get("ok", True), f"ok devait etre False, data={data_none}")
+
+        # --- 2. wrong-token -> 401 (hmac.compare_digest False) ---------------
+        status_wrong, data_wrong = self._post("/api/settings/get_settings", body={}, token="wrong-token")
+        self.assertEqual(status_wrong, 401, f"wrong-token attendu 401, obtenu {status_wrong}")
+        self.assertFalse(data_wrong.get("ok", True), f"ok devait etre False, data={data_wrong}")
+
+        # --- 3. valid-token -> 200 (dispatch facade reussi) ------------------
+        status_ok, data_ok = self._post("/api/settings/get_settings", body={}, token=self.token)
+        self.assertEqual(status_ok, 200, f"valid-token attendu 200, obtenu {status_ok}")
+        self.assertIn("root", data_ok, f"reponse facade incomplete, data={data_ok}")
+
+        # --- 4. loopback bypass actif -> 200 meme avec wrong-token -----------
+        # On retire temporairement l'env var pour reactiver le bypass design.
+        # Preuve que BYPASS LOOPBACK CONSERVE est intact cote code de prod.
+        saved_env = os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
+        try:
+            status_bypass, data_bypass = self._post("/api/settings/get_settings", body={}, token="wrong-token")
+            self.assertEqual(
+                status_bypass,
+                200,
+                f"loopback bypass attendu 200 (bind=127.0.0.1+client=127.0.0.1), "
+                f"obtenu {status_bypass}. Si 401, le bypass design est casse "
+                f"(memoire user BYPASS LOOPBACK CONSERVE violee).",
+            )
+            self.assertIn("root", data_bypass)
+        finally:
+            # Restaurer l'env var pour les assertions suivantes / tests freres.
+            if saved_env is None:
+                os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = "1"
+            else:
+                os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = saved_env
 
     def test_health_accessible_for_version_check(self) -> None:
         """GET /api/health est accessible sans auth (utilise par le login)."""

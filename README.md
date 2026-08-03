@@ -19,6 +19,8 @@
 [![Architecture](https://img.shields.io/badge/architecture-import--linter-blue.svg)](#-architecture)
 
 > ⚠️ **v1.2.0-beta** — itération beta publique. Le code est mature (~50 000 lignes, 4277 tests, audit complet, architecture en couches verrouillée), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. **Ne pas activer en production critique sans dry-run préalable.**
+>
+> 🛡️ **Vague Q stabilisée** — la build courante consolide **5 rounds adversarial bug-hunt + 7 hotfixes** (convergence R1=10 crit → audit final 0 crit, post-fix rates 79 % / 93 % / 100 % / 100 % / 92 %).
 
 [Quick Start](#-quick-start) · [Fonctionnalités](#-fonctionnalités) · [Architecture](#-architecture) · [Captures](#-captures-décran) · [FAQ](#-faq) · [Contribuer](CONTRIBUTING.md)
 
@@ -194,6 +196,40 @@ Garanties CI bloquantes :
 - **0 régression** sur 4277 tests unitaires
 - **EXE < 60 MB**
 - **CodeQL + Bandit + pip-audit + gitleaks + mypy**
+
+## 💾 Stockage DB
+
+> **⚠️ Important** : ne JAMAIS poser la base SQLite de CineSort dans un dossier synchronisé par un service cloud (OneDrive, Dropbox, Google Drive, iCloud Drive, Box, pCloud, Mega, etc.).
+
+**Pourquoi c'est dangereux** :
+
+CineSort utilise SQLite en mode **WAL** (Write-Ahead Logging). Trois fichiers cohabitent en permanence :
+
+| Fichier | Rôle |
+|---|---|
+| `cinesort.sqlite` | Base principale |
+| `cinesort.sqlite-wal` | Journal des écritures en attente de checkpoint |
+| `cinesort.sqlite-shm` | Mémoire partagée (index du WAL) |
+
+Le moteur de synchronisation cloud peut copier le fichier `.sqlite` alors que des pages sont encore dans `-wal` ou `-shm`. Résultat : **corruption silencieuse** détectée plus tard par `PRAGMA integrity_check` au prochain boot. L'auto-restore depuis backup tente de récupérer, mais tous les runs/scans postérieurs au backup sont perdus.
+
+**Recommandations** :
+
+1. **Emplacement par défaut** : `%LOCALAPPDATA%\CineSort\db\cinesort.sqlite` — ce dossier n'est jamais synchronisé par OneDrive/Dropbox/etc. par défaut. **Ne pas changer cet emplacement** sauf cas particulier (NAS local, disque dédié).
+
+2. **Si tu DOIS utiliser un dossier cloud** (déconseillé) : exclure explicitement les fichiers de synchronisation :
+   - `cinesort.sqlite`
+   - `cinesort.sqlite-wal`
+   - `cinesort.sqlite-shm`
+   - Le dossier `backups/` (les backups doivent vivre à côté du `.sqlite` pour le rollback automatique).
+
+   Exemple OneDrive : clic droit sur le dossier → **Toujours conserver sur cet appareil** + exclure les patterns via PowerShell (cf. [docs/TROUBLESHOOTING.md §8](docs/TROUBLESHOOTING.md#8-base-de-données-sqlite)).
+
+3. **Détection automatique** : au démarrage, CineSort logue un `WARNING` explicite si la DB est posée dans un dossier dont le chemin contient `OneDrive`, `Dropbox`, `Google Drive`, `iCloud Drive`, `Box`, `pCloud` ou `Mega` (détection case-insensitive sur les segments). Le warning est visible dans `%LOCALAPPDATA%\CineSort\logs\cinesort.log`.
+
+4. **Alternatives recommandées pour la portabilité** :
+   - Pose la DB sur un **NAS local en SMB** (CineSort détecte et active le profil PRAGMA `nas_smb` automatiquement).
+   - Utilise les **backups** (`%LOCALAPPDATA%\CineSort\backups\`) pour transférer entre machines : copier le backup, restaurer via **Réglages → Base de données → Restaurer un backup**.
 
 ## ❓ FAQ
 

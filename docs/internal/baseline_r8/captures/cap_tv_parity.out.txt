@@ -1,0 +1,99 @@
+==========================================================================
+BASELINE R8 — cap_tv_parity : parite APPLY TV vs FILM (etat CASSE)
+==========================================================================
+repo_root = C:\Users\blanc\projects\CineSort
+
+--- BLOC COMPORTEMENTAL #1 : apply_tv_episode(dry_run=False) ---
+AVANT: ['lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.mkv', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+APRES: ['lib\\Showname (2020)\\Saison 01\\S01E01 - Pilot.mkv', 'lib\\Showname (2020)\\Saison 01\\Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'lib\\Showname (2020)\\Saison 01\\Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+
+[F-V4B-TV1] sidecars orphelins (gardent le nom source)
+  ancre apply_core.py L2253 (cite 2253, verifie=True): dst_side = target_dir / sidecar.name
+  stem video cible : 'S01E01 - Pilot'
+  sidecars ORPHELINS (stem != video) : ['Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'Showname.S01E01.1080p.HDTV.x264-GRP.srt']
+  => CASSE=True
+
+[F-V4B-TV2] ops MOVE_FILE sans src_sha1/src_size
+  ancre apply_core.py L2241 (cite 2241, verifie=True): record_apply_op(
+    op type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+    op type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+    op type=MOVE_FILE keys=['dst_path', 'op_type', 'reversible', 'row_id', 'src_path', 'ts'] src_sha1=<absent> src_size=<absent>
+  => CASSE=True
+
+[F-V6-TV-MKDIR] target_dir.mkdir brut, aucune op MKDIR journalisee
+  ancre apply_core.py L2239 (cite 2239, verifie=True): target_dir.mkdir(parents=True, exist_ok=True)
+  dossier Saison cree : True | ops MKDIR journalisees : 0
+  => CASSE=True
+
+--- BLOC COMPORTEMENTAL #2 : NOOP sur target.exists() ---
+[F-V5-TV3] skip NOOP sans comparaison de contenu (source meilleure ignoree)
+  ancre apply_core.py L2232 (cite 2232, verifie=True): if target_file.exists():
+  res.skipped=1 skip_reasons={'skip_noop_deja_conforme': 1}
+  source NEUVE encore en place : True (taille 11000)
+  cible ANCIENNE inchangee     : True (taille 13)
+  tailles differentes (preuve contenu different) : True
+  => CASSE=True
+
+--- BLOC COMPORTEMENTAL #3 : sidecar droppe si dst existe ---
+[F-V6-TV-SIDECOLL] le .srt source est abandonne, aucun keep-both
+  ancre apply_core.py L2254 (cite 2253/2254, verifie=True): if not dst_side.exists():
+  dst_side attendu (nom SOURCE)          : Showname.S01E03.1080p.WEB.x264-GRP.srt
+  .srt source orphelin (reste en _inbox) : True
+  .srt cible DESYNC conserve tel quel    : True
+  un seul MOVE journalise (video, pas le sidecar) : True
+  (chemin film: keep-both via conflicts_sidecars_root -> ici aucun bucket)
+  => CASSE=True
+
+--- BLOC COMPORTEMENTAL #4 : dry_run ---
+[F-V6-TV-DRYRUN] atomic_move + record_op tous deux sous `if not dry_run`
+  ancre apply_core.py L2238 (cite 2238, verifie=True): if not dry_run:
+  ops journalisees en dry_run : 0 (FS inchange : True)
+  res.moves bumpe meme en dry_run : True (res.moves=1)
+  => CASSE (aucune op planifiee mais compteur bumpe)=True
+
+--- BLOC STRUCTUREL ---
+[F-V6-TV-MAXPATH] killswitch TV ne couvre pas le chemin interne le plus long
+  TV   apply_core.py L2222 (cite 2222, verifie=True): _path_err = check_path_length_killswitch(str(target_file))
+  FILM apply_core.py L1909: _candidate_inner_path = str(dst / _longest_inner) if _longest_inner else str(dst)
+  FILM apply_core.py L1910: _path_err = check_path_length_killswitch(str(dst)) or check_path_length_killswitch(_candidate_inner_path)
+  TV check unique (pas d'inner-path) : True
+  => CASSE=True
+
+[F-V6-TV-UIEDIT] apply TV lit row.proposed_* et ignore l'override UI new_title/new_year
+  dispatch apply_core.py L1567 (cite 1567, verifie=True): if row.kind == "tv_episode":
+  apply_tv_episode lit row.proposed_* : True | ignore new_*: True
+  dispatch -> apply_tv_episode sans new_title : True
+  dispatch -> apply_single AVEC new_title     : True
+  => CASSE=True
+
+[F-V7-TV-LEFTOVERS] le chemin TV n'a ni leftovers_root ni nettoyage source
+  apply_tv_episode signature params : ['cfg', 'folder', 'row', 'dry_run', 'log', 'res', 'record_op']
+  param leftovers_root present (TV)   : False
+  param leftovers_root present (FILM) : True
+  mot-cle 'leftovers' dans le corps TV : False
+  cleanup source (rmdir/rmtree/...) dans TV : False
+  => CASSE=True
+
+[F-V6-TV-ANIME] 'Episode N' sans saison -> season=None -> Saison 00 / S00
+  tv_helpers.py cite L92 (commentaire): # 4. Try "Episode N" pattern (sans saison).
+  tv_helpers.py REEL L95 (assignement) : season = None
+  apply_tv_episode rend 'Saison 00' si season falsy : True
+  => CASSE=True  (DRIFT ligne citee 92 -> reelle 95)
+
+[F-V6-UNDO-CASE] undo case-only classe CONFLIT (pas de garde insensible a la casse)
+  apply_support.py L442 (cite 442, verifie=True): if target_path.exists():
+  bloc marque FAILED + 'Conflit cible existante' : True
+  aucune garde case-only dans le bloc : True
+  => CASSE=True
+
+[F-H3-02] except sidecar avale PermissionError/OSError sans WARN (pass nu)
+  apply_core.py L2263 (cite 2263, verifie=True): except (PermissionError, OSError):
+  ligne suivante == 'pass' nu : True ('pass')
+  aucun log WARN dans le bloc sidecar : True
+  => CASSE=True
+
+==========================================================================
+RESUME: {"F-H3-02": true, "F-V4B-TV1": true, "F-V4B-TV2": true, "F-V5-TV3": true, "F-V6-TV-ANIME": true, "F-V6-TV-DRYRUN": true, "F-V6-TV-MAXPATH": true, "F-V6-TV-MKDIR": true, "F-V6-TV-SIDECOLL": true, "F-V6-TV-UIEDIT": true, "F-V6-UNDO-CASE": true, "F-V7-TV-LEFTOVERS": true}
+DRIFT (lignes citees != reelles): {"F-V6-TV-ANIME": {"cited": 92, "real": 95, "verified": false}}
+TOTAL: 12/12 findings reproduisent l'etat CASSE.
+==========================================================================

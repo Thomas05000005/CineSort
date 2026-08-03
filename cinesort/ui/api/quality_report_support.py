@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from cinesort.domain import compute_quality_score, default_quality_profile
 from cinesort.domain.audio_analysis import analyze_audio
@@ -10,12 +13,12 @@ from cinesort.domain.conversions import to_bool
 from cinesort.domain.encode_analysis import analyze_encode_quality
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.mkv_title_check import check_container_title
+from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
-
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
 # 10% de delta gère les films courts ; 8 min évite de flaguer les remaster/director-cut mineurs.
@@ -104,7 +107,21 @@ def _probe_and_score(
     except (ImportError, KeyError, OSError, TypeError, ValueError, AttributeError):
         tmdb_genres = []
 
-    report = compute_quality_score(
+    # Fix audit ultra 2026-07-13 (HIGH-2 / HIGH-3) : ce call site etait le SEUL
+    # de production et appelait compute_quality_score SANS film_year,
+    # subtitle_info, encode_warnings ni audio_analysis. Consequence : 4 modules
+    # de scoring morts (_apply_era_bonuses / bloc sous-titres de _score_extras /
+    # _apply_encode_warnings / _apply_commentary_penalty) et 6 champs de
+    # rule_context bidon (year=0, subtitle_count=0, subtitle_languages=[],
+    # warning_flags=[]). Un upscale 1080p obtenait le meme tier qu'un vrai 1080p.
+    #
+    # Anti-pattern A : ces sources doivent exister AVANT le score final. On fait
+    # donc un two-pass. La passe 1 (compute_quality_score est PURE, aucune I/O)
+    # ne sert qu'a deriver `metrics.detected` (height/bitrate_kbps/video_codec
+    # deja normalises par _score_video) pour alimenter analyze_encode_quality
+    # sans reimplementer la normalisation. La passe 2 calcule et persiste le
+    # score DEFINITIF avec toutes ses sources.
+    _base_kwargs: Dict[str, Any] = dict(
         normalized_probe=normalized,
         profile=profile_json,
         folder_name=Path(str(row.folder or "")).name,
@@ -113,13 +130,39 @@ def _probe_and_score(
         release_name=str(row.video or ""),
         tmdb_genres=tmdb_genres or None,
     )
+    _pre = compute_quality_score(**_base_kwargs)
+    _detected = (_pre.get("metrics") or {}).get("detected") or {}
+    encode_warnings = analyze_encode_quality(_detected)
+    audio_analysis = analyze_audio(normalized.get("audio_tracks") or [])
+    _subs = normalized.get("subtitles") if isinstance(normalized.get("subtitles"), list) else []
+    subtitle_info = {
+        "count": len(_subs),
+        "languages": [str(s.get("language") or "") for s in _subs if isinstance(s, dict) and s.get("language")],
+        "expected_languages": [],
+        "missing_languages": [],
+        "orphans": 0,
+    }
+    report = compute_quality_score(
+        **_base_kwargs,
+        film_year=(int(row.proposed_year or 0) or None),
+        encode_warnings=encode_warnings or None,
+        audio_analysis=audio_analysis,
+        subtitle_info=subtitle_info,
+    )
+    # Fix audit 2026-05-25 (v1.5.4) Vague I : persister les pistes subtitle EMBARQUEES
+    # dans metrics pour que `_build_library_rows` puisse aligner le compte "sans subs FR"
+    # entre la page Bibliotheque et le rapport Qualite (BUG 2 : 853 films flagges a tort).
+    metrics_out = dict(report.get("metrics") or {})
+    embedded_subs_raw = normalized.get("subtitles") if isinstance(normalized, dict) else None
+    if isinstance(embedded_subs_raw, list):
+        metrics_out["subtitles_embedded"] = list(embedded_subs_raw)
     store.quality.upsert_quality_report(
         run_id=run_id,
         row_id=row_id,
         score=int(report.get("score") or 0),
         tier=str(report.get("tier") or "Reject"),
         reasons=list(report.get("reasons") or []),
-        metrics=dict(report.get("metrics") or {}),
+        metrics=metrics_out,
         profile_id=active_profile_id,
         profile_version=active_profile_version,
     )
@@ -181,7 +224,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 ):
                     probe_quality = str(existing_metrics.get("probe_quality") or "UNKNOWN")
                     confidence, explanation = _extract_confidence_and_explanation(existing_metrics)
-                    return {
+                    cached_result = {
                         "ok": True,
                         **existing,
                         "probe_quality": probe_quality,
@@ -193,6 +236,24 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                         "skipped_existing": True,
                         "media_path": "",
                     }
+                    # R6-QUAL-CACHE-HIT-NO-PERCEPTUAL : enrichir aussi le cache hit
+                    # pour garantir que `result.perceptual` est present sur les 2 chemins
+                    # (sinon le frontend voit un drift apres reload de page).
+                    try:
+                        settings_cached = api.settings.get_settings() if api else {}
+                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                        settings_cached = {}
+                    score_version_cached = _normalize_composite_score_version(
+                        settings_cached.get("composite_score_version") if isinstance(settings_cached, dict) else None
+                    )
+                    enrich_quality_report_with_perceptual(
+                        store,
+                        run_id,
+                        row_id,
+                        cached_result,
+                        composite_score_version=score_version_cached,
+                    )
+                    return cached_result
 
         rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
         row = next((item for item in rows if str(item.row_id) == str(row_id)), None)
@@ -240,7 +301,8 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
             "media_path": str(media_path),
         }
         # Flag integrite si la probe a echoue
-        if pq == "FAILED":
+        # BUG-018 (hotfix1) : helper centralise vs comparaison case-sensitive.
+        if probe_quality_is_failed(pq):
             result["integrity_probe_failed"] = True
         # Analyse d'encodage (upscale, 4K light, re-encode degrade)
         detected_for_encode = metrics_obj.get("detected") or {}
@@ -297,5 +359,12 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         )
         enrich_quality_report_with_perceptual(store, run_id, row_id, result, composite_score_version=score_version)
         return result
-    except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
-        return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+    # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter HTTP 500.
+    except Exception as exc:  # noqa: BLE001 - boundary top-level endpoint quality
+        logger.exception("get_quality_report failed for run_id=%s row_id=%s", run_id, row_id)
+        return {
+            "ok": False,
+            "error": "quality_report_failed",
+            "message": str(exc),
+            "user_message": ("Impossible de generer le rapport qualite. Relance un scan ou verifie l'etat du run."),
+        }

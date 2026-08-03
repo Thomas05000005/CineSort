@@ -206,9 +206,13 @@ class DoublonsViewRightPanelTests(unittest.TestCase):
     def test_right_panel_unmount_clears_sections(self) -> None:
         # Au unmount on doit passer setSections([]) pour eviter de garder
         # les sections d'une vue sur une autre.
-        idx = self.js.find("unmountDoublons")
-        self.assertGreater(idx, -1)
-        sub = self.js[idx : idx + 800]
+        # Fix oracle iter10 (2026-06-09) : self.js.find('unmountDoublons')
+        # matchait le COMMENTAIRE L952 ("unmountDoublons met _state a null...")
+        # avant la vraie declaration L1216 -> faux negatif. On cible
+        # explicitement la declaration "export function unmountDoublons(".
+        m = re.search(r"export\s+function\s+unmountDoublons\s*\(", self.js)
+        self.assertIsNotNone(m, "declaration unmountDoublons introuvable")
+        sub = self.js[m.start() : m.start() + 800]
         self.assertIn("setRightPanelSections", sub)
 
 

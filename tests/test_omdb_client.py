@@ -17,7 +17,6 @@ from cinesort.infra.omdb_client import (
     _parse_year,
 )
 
-
 # --- Mock helpers ---
 
 
@@ -267,6 +266,96 @@ class OmdbClientTests(unittest.TestCase):
         self.assertEqual(result2.title, "The Shawshank Redemption")
         # Le 2e client n'a fait aucun appel HTTP (cache)
         self.assertEqual(mock_get.call_count, 1)
+
+
+# Fix audit 2026-05-26 (v1.5.6) Vague L : omdb-1 — couverture circuit breaker.
+# Avant le fix, _http_get appelait response.raise_for_status() APRES breaker.call,
+# donc les status 5xx/429 ne levaient aucune HTTPError vu par le breaker et le
+# circuit restait ferme indefiniment (rate-limit OMDb pouvait nous tenir bloque
+# en 429 pendant des heures sans qu'on coupe les appels).
+class OmdbCircuitBreakerTests(unittest.TestCase):
+    """Verifie que le circuit breaker compte bien les status d'erreur HTTP."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="omdb_test_cb_")
+        self.cache_path = Path(self.tmp_dir) / "omdb_cache.json"
+
+    def _make_client(self, api_key: str = "test-key") -> OmdbClient:
+        return OmdbClient(api_key=api_key, cache_path=self.cache_path, timeout_s=5.0)
+
+    def _make_status_response(self, status: int):
+        """Construit une Response qui leve HTTPError sur raise_for_status (mimics requests)."""
+        import requests as _req
+
+        resp = MagicMock()
+        resp.status_code = status
+
+        def _raise():
+            err = _req.HTTPError(f"{status} Server Error")
+            err.response = resp
+            raise err
+
+        resp.raise_for_status.side_effect = _raise
+        resp.content = b""
+        resp.json.return_value = {}
+        return resp
+
+    @patch("cinesort.infra.omdb_client.OmdbClient._rate_limit_wait")
+    @patch("requests.Session.get")
+    def test_circuit_opens_after_5_consecutive_503(self, mock_get, _mock_wait):
+        """5 reponses 503 successives doivent ouvrir le circuit -> 6e appel rejete."""
+        mock_get.return_value = self._make_status_response(503)
+        client = self._make_client()
+
+        # 5 appels qui retournent 503 (le circuit doit s'ouvrir au 5e echec).
+        for _ in range(5):
+            result = client.find_by_imdb_id("tt0111161")
+            self.assertIsNone(result)  # 503 -> _http_get retourne None
+
+        # Le circuit doit etre OUVERT maintenant (failure_threshold=5).
+        self.assertTrue(
+            client._breaker.is_open,
+            "Le circuit aurait du s'ouvrir apres 5 echecs 503 consecutifs",
+        )
+        # Le 6e appel ne doit PAS appeler session.get (court-circuit par breaker).
+        previous_call_count = mock_get.call_count
+        result = client.find_by_imdb_id("tt0111162")  # autre id pour bypass cache
+        self.assertIsNone(result)
+        self.assertEqual(
+            mock_get.call_count,
+            previous_call_count,
+            "Le breaker ouvert aurait du empecher l'appel HTTP",
+        )
+
+    @patch("cinesort.infra.omdb_client.OmdbClient._rate_limit_wait")
+    @patch("requests.Session.get")
+    def test_circuit_opens_after_5_consecutive_429(self, mock_get, _mock_wait):
+        """429 (rate-limit) doit aussi compter pour ouvrir le circuit."""
+        mock_get.return_value = self._make_status_response(429)
+        client = self._make_client()
+
+        for _ in range(5):
+            client.find_by_imdb_id("tt0111161")
+
+        self.assertTrue(
+            client._breaker.is_open,
+            "Le circuit aurait du s'ouvrir apres 5 echecs 429 consecutifs",
+        )
+
+    @patch("cinesort.infra.omdb_client.OmdbClient._rate_limit_wait")
+    @patch("requests.Session.get")
+    def test_circuit_does_not_open_on_404(self, mock_get, _mock_wait):
+        """404 = erreur client, ne doit PAS fermer le robinet (cf _is_server_down)."""
+        mock_get.return_value = self._make_status_response(404)
+        client = self._make_client()
+
+        for i in range(10):  # 10 echecs 404 — circuit doit rester ferme
+            client.find_by_imdb_id(f"tt{i:08d}")
+
+        self.assertFalse(
+            client._breaker.is_open,
+            "404 (client error) ne doit pas ouvrir le circuit",
+        )
 
 
 class OmdbResultDataclassTests(unittest.TestCase):

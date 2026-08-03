@@ -13,7 +13,6 @@ from cinesort.domain.perceptual.hdr_analysis import (
     extract_dv_configuration,
 )
 
-
 # ---------------------------------------------------------------------------
 # extract_dv_configuration
 # ---------------------------------------------------------------------------

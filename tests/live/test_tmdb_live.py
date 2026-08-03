@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import live_env
+
 from cinesort.infra.tmdb_client import TmdbClient
 
 

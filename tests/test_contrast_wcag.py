@@ -66,15 +66,27 @@ def contrast_ratio(fg: tuple[int, int, int], bg: tuple[int, int, int]) -> float:
 
 _BLOCK_RE = re.compile(r"([^{}]+)\{([^{}]*)\}", re.DOTALL)
 _COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+# Fix audit 2026-06-09 : retirer les at-rules non-blocales (terminees par ;)
+# comme `@layer reset, tokens, primitives, components, utilities, legacy, v5;`
+# qui contaminent le selecteur du bloc :root suivant dans tokens.css. Sans ce
+# strip, parse_tokens(theme=None) ne capte pas les tokens globaux --text-*,
+# entrainant 16 faux positifs sur les tests de contraste WCAG AA.
+_ATRULE_STMT_RE = re.compile(r"@[\w-]+\s+[^{};]*;", re.DOTALL)
 
 
 def _strip_comments(css_content: str) -> str:
     return _COMMENT_RE.sub("", css_content)
 
 
+def _strip_atrule_statements(css_content: str) -> str:
+    """Retire les at-rules non-blocales (`@layer ...;`, `@charset ...;`) qui
+    se collent au selecteur du bloc suivant via la regex [^{}]+."""
+    return _ATRULE_STMT_RE.sub("", css_content)
+
+
 def _iter_blocks(css_content: str):
     """Itere (selector, body) sur les blocs simples (commentaires retires, pas de nesting)."""
-    cleaned = _strip_comments(css_content)
+    cleaned = _strip_atrule_statements(_strip_comments(css_content))
     for m in _BLOCK_RE.finditer(cleaned):
         yield m.group(1).strip(), m.group(2)
 
