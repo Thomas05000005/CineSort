@@ -23,13 +23,13 @@ LIMITE HONNETE: simulation. Reproduit le SYMPTOME (open lent/echec) pas la cause
 
 NE PAS modifier code produit (cinesort/).
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 from pathlib import Path
-
 
 UNC_HOST = "unreachable-host-cinesort"
 UNC_SHARE = "share"

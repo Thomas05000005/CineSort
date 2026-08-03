@@ -72,9 +72,7 @@ class SubtractIgnoredFlagsTests(unittest.TestCase):
         from unittest.mock import MagicMock
 
         store = MagicMock()
-        store.film_modal.list_ignored_alerts_bulk.side_effect = sqlite3.OperationalError(
-            "database is locked"
-        )
+        store.film_modal.list_ignored_alerts_bulk.side_effect = sqlite3.OperationalError("database is locked")
         with patch("cinesort.ui.api.library_support._get_store", return_value=store):
             rows = _subtract_ignored_flags(object(), self._rows())
         self.assertEqual(rows[0]["warning_flags"], ["year_missing", "low_confidence"])

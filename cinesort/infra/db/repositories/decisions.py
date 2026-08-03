@@ -140,10 +140,7 @@ class DecisionsRepository(_BaseRepository):
         if dec not in _VALID_DECISIONS:
             return {
                 "ok": False,
-                "reason": (
-                    f"decision invalide: {decision!r} "
-                    f"(attendu: {sorted(_VALID_DECISIONS)})"
-                ),
+                "reason": (f"decision invalide: {decision!r} (attendu: {sorted(_VALID_DECISIONS)})"),
             }
 
         self._ensure_tables()
@@ -340,9 +337,7 @@ class DecisionsRepository(_BaseRepository):
             )
             locked_fields_safe: List[str] = []
         else:
-            locked_fields_safe = [
-                _safe_str(f) for f in locked_fields if _safe_str(f)
-            ]
+            locked_fields_safe = [_safe_str(f) for f in locked_fields if _safe_str(f)]
 
         res = self.set_decision(
             film_id,

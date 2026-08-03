@@ -81,9 +81,11 @@ class TierFallbackDashboardTests(unittest.TestCase):
             )
 
         # Sanity : aucun perceptual_report inseré (run_id absent).
-        perc_count = self.store.perceptual.get_perceptual_count_for_run(
-            run_id="run_audit_2026_05_30"
-        ) if hasattr(self.store.perceptual, "get_perceptual_count_for_run") else 0
+        perc_count = (
+            self.store.perceptual.get_perceptual_count_for_run(run_id="run_audit_2026_05_30")
+            if hasattr(self.store.perceptual, "get_perceptual_count_for_run")
+            else 0
+        )
         self.assertEqual(perc_count, 0, "Setup invalide : perceptual_reports devrait etre vide")
 
         result = self.api._get_global_stats_impl(20)
@@ -97,8 +99,7 @@ class TierFallbackDashboardTests(unittest.TestCase):
         self.assertGreaterEqual(
             platinum_count,
             1,
-            f"Platinum devrait etre >= 1 (fallback quality.tier), got {platinum_count}. "
-            f"Distribution complete: {tiers}",
+            f"Platinum devrait etre >= 1 (fallback quality.tier), got {platinum_count}. Distribution complete: {tiers}",
         )
         # Verif plus stricte : on a insere 5 films platinum -> on doit en trouver 5.
         self.assertEqual(

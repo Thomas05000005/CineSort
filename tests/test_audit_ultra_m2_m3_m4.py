@@ -111,27 +111,52 @@ class M2SingleDefinitionTests(unittest.TestCase):
         # tmdb_id resolu => identifie, MEME si source vide/unknown et conf 0.
         # AVANT (librarian section D : `src in ("unknown","") or conf==0`) : compte
         # a tort ce film comme non identifie -> divergence avec le chip biblio.
-        rows = [_Row(row_id="a", proposed_title="Alpha", tmdb_id=550,
-                     proposed_source="unknown", confidence=0, proposed_year=0)]
+        rows = [
+            _Row(
+                row_id="a",
+                proposed_title="Alpha",
+                tmdb_id=550,
+                proposed_source="unknown",
+                confidence=0,
+                proposed_year=0,
+            )
+        ]
         self.assertNotIn("Alpha", _unidentified_details(rows))
 
     def test_librarian_honours_confidence_threshold(self) -> None:
         # source fiable mais confiance < CONF_MEDIUM => non identifie.
         # AVANT : `conf==0` seulement -> conf 45 NON compte (faux negatif).
-        rows = [_Row(row_id="b", proposed_title="Bravo", tmdb_id=None,
-                     proposed_source="name", confidence=45, proposed_year=2019)]
+        rows = [
+            _Row(
+                row_id="b",
+                proposed_title="Bravo",
+                tmdb_id=None,
+                proposed_source="name",
+                confidence=45,
+                proposed_year=2019,
+            )
+        ]
         self.assertIn("Bravo", _unidentified_details(rows))
 
     def test_librarian_honours_missing_year(self) -> None:
         # source fiable + confiance forte mais AUCUNE annee => non identifie.
         # AVANT : annee ignoree -> NON compte (faux negatif).
-        rows = [_Row(row_id="e", proposed_title="Echo", tmdb_id=None,
-                     proposed_source="nfo", confidence=90, proposed_year=0)]
+        rows = [
+            _Row(row_id="e", proposed_title="Echo", tmdb_id=None, proposed_source="nfo", confidence=90, proposed_year=0)
+        ]
         self.assertIn("Echo", _unidentified_details(rows))
 
     def test_librarian_identified_nfo_not_flagged(self) -> None:
-        rows = [_Row(row_id="c", proposed_title="Charlie", tmdb_id=None,
-                     proposed_source="nfo", confidence=87, proposed_year=1957)]
+        rows = [
+            _Row(
+                row_id="c",
+                proposed_title="Charlie",
+                tmdb_id=None,
+                proposed_source="nfo",
+                confidence=87,
+                proposed_year=1957,
+            )
+        ]
         self.assertNotIn("Charlie", _unidentified_details(rows))
 
     def test_parity_librarian_vs_chip_on_same_film(self) -> None:
@@ -141,19 +166,21 @@ class M2SingleDefinitionTests(unittest.TestCase):
         # par M2CandidateResolutionParityTests ci-dessous, qui laisse chaque
         # surface resoudre le tmdb_id elle-meme a partir des candidats.
         for tmdb_id, src, conf, year in [
-            (550, "unknown", 0, 0),      # tmdb shortcut -> identifie
-            (None, "name", 45, 2019),    # conf basse -> non identifie
-            (None, "nfo", 90, 0),        # annee absente -> non identifie
-            (None, "nfo", 87, 1957),     # identifie
+            (550, "unknown", 0, 0),  # tmdb shortcut -> identifie
+            (None, "name", 45, 2019),  # conf basse -> non identifie
+            (None, "nfo", 90, 0),  # annee absente -> non identifie
+            (None, "nfo", 87, 1957),  # identifie
         ]:
             plan = _Row(tmdb_id=tmdb_id, proposed_source=src, confidence=conf, proposed_year=year)
             lib = {"tmdb_id": tmdb_id, "proposed_source": src, "confidence": conf, "year": year}
-            librarian_verdict = row_unidentified({
-                "tmdb_id": getattr(plan, "tmdb_id", None),
-                "proposed_source": getattr(plan, "proposed_source", None),
-                "confidence": getattr(plan, "confidence", 0),
-                "proposed_year": getattr(plan, "proposed_year", 0),
-            })
+            librarian_verdict = row_unidentified(
+                {
+                    "tmdb_id": getattr(plan, "tmdb_id", None),
+                    "proposed_source": getattr(plan, "proposed_source", None),
+                    "confidence": getattr(plan, "confidence", 0),
+                    "proposed_year": getattr(plan, "proposed_year", 0),
+                }
+            )
             self.assertEqual(librarian_verdict, _row_unidentified(lib))
 
 
@@ -251,11 +278,14 @@ class M2ResolveTmdbIdUnitTests(unittest.TestCase):
         self.assertEqual(resolve_tmdb_id(row), 42)
 
     def test_falls_back_to_best_scoring_candidate(self) -> None:
-        row = _Row(tmdb_id=None, candidates=[
-            _Cand(tmdb_id=11, score=0.72),
-            _Cand(tmdb_id=22, score=0.95),
-            _Cand(tmdb_id=33, score=0.80),
-        ])
+        row = _Row(
+            tmdb_id=None,
+            candidates=[
+                _Cand(tmdb_id=11, score=0.72),
+                _Cand(tmdb_id=22, score=0.95),
+                _Cand(tmdb_id=33, score=0.80),
+            ],
+        )
         self.assertEqual(resolve_tmdb_id(row), 22)
 
     def test_threshold_is_0_7(self) -> None:
@@ -263,11 +293,14 @@ class M2ResolveTmdbIdUnitTests(unittest.TestCase):
         self.assertEqual(resolve_tmdb_id(_Row(tmdb_id=None, candidates=[_Cand(tmdb_id=7, score=0.70)])), 7)
 
     def test_candidate_without_tmdb_id_ignored(self) -> None:
-        row = _Row(tmdb_id=None, candidates=[
-            _Cand(tmdb_id=None, score=0.99),
-            _Cand(tmdb_id=0, score=0.99),
-            _Cand(tmdb_id=8, score=0.75),
-        ])
+        row = _Row(
+            tmdb_id=None,
+            candidates=[
+                _Cand(tmdb_id=None, score=0.99),
+                _Cand(tmdb_id=0, score=0.99),
+                _Cand(tmdb_id=8, score=0.75),
+            ],
+        )
         self.assertEqual(resolve_tmdb_id(row), 8)
 
     def test_no_candidates_returns_none(self) -> None:
@@ -339,10 +372,7 @@ class M4BadgeDuplicatesTests(unittest.TestCase):
     def test_tv_episodes_are_not_duplicates(self) -> None:
         # AVANT : 6 episodes meme titre+annee -> badge annonce 6 doublons que
         # l'ecran Doublons ne montre jamais. APRES : 0.
-        rows = [
-            _Row(kind="tv_episode", proposed_title="A Knight", proposed_year=2001)
-            for _ in range(6)
-        ]
+        rows = [_Row(kind="tv_episode", proposed_title="A Knight", proposed_year=2001) for _ in range(6)]
         self.assertEqual(_count_duplicate_films(rows), 0)
 
     def test_single_sharing_titleyear_with_tv_episodes_not_counted(self) -> None:
@@ -391,8 +421,7 @@ class M4ChipDuplicatesTests(unittest.TestCase):
         # Le filtre tv_episode ne touche QUE le comptage doublons : une saga
         # contenant un episode reste comptee dans sagas (pas de sur-exclusion).
         rows = [
-            {"title": "Serie", "year": 2010, "kind": "tv_episode",
-             "tmdb_collection_name": "Ma Saga"},
+            {"title": "Serie", "year": 2010, "kind": "tv_episode", "tmdb_collection_name": "Ma Saga"},
         ]
         in_dup, sagas = _count_duplicates_and_sagas(rows)
         self.assertEqual(in_dup, 0)

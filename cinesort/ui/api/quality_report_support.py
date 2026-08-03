@@ -244,9 +244,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                     except (AttributeError, KeyError, OSError, TypeError, ValueError):
                         settings_cached = {}
                     score_version_cached = _normalize_composite_score_version(
-                        settings_cached.get("composite_score_version")
-                        if isinstance(settings_cached, dict)
-                        else None
+                        settings_cached.get("composite_score_version") if isinstance(settings_cached, dict) else None
                     )
                     enrich_quality_report_with_perceptual(
                         store,
@@ -363,15 +361,10 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         return result
     # Fix audit 2026-05-25 (v1.5.3) Vague F : elargi a Exception pour eviter HTTP 500.
     except Exception as exc:  # noqa: BLE001 - boundary top-level endpoint quality
-        logger.exception(
-            "get_quality_report failed for run_id=%s row_id=%s", run_id, row_id
-        )
+        logger.exception("get_quality_report failed for run_id=%s row_id=%s", run_id, row_id)
         return {
             "ok": False,
             "error": "quality_report_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de generer le rapport qualite. Relance un scan ou "
-                "verifie l'etat du run."
-            ),
+            "user_message": ("Impossible de generer le rapport qualite. Relance un scan ou verifie l'etat du run."),
         }

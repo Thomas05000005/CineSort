@@ -46,9 +46,7 @@ class ExportCsvExcelFrConventionTests(unittest.TestCase):
 
         api = _make_mock_api_with_rows(Path(tmp))
         with self._patch_default_state_dir(Path(tmp)):
-            res = library_actions_support.export_films(
-                api, ["f1", "f2", "f3"], fmt="csv", run_id="r1"
-            )
+            res = library_actions_support.export_films(api, ["f1", "f2", "f3"], fmt="csv", run_id="r1")
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["format"], "csv")
         return Path(res["file_path"])
