@@ -53,10 +53,57 @@ class RunPaths:
     validation_json: Path
 
 
-def new_run(state_dir: Path, run_id: str) -> RunPaths:
+class RunDirectoryConflictError(FileExistsError):
+    """Le dossier `runs/tri_films_<run_id>` est deja pris.
+
+    Herite de `FileExistsError` (donc d'`OSError`) pour que les boundaries
+    existantes qui filtrent OSError continuent de la traiter proprement.
+    """
+
+
+def create_run_dir(run_dir: Path, *, exclusive: bool) -> None:
+    """Cree le dossier d'un run sans jamais ecraser silencieusement l'existant.
+
+    Deux modes :
+
+    - `exclusive=True` : RESERVATION ATOMIQUE. Le `mkdir` est fait sans
+      `exist_ok`, donc c'est le systeme de fichiers lui-meme qui arbitre la
+      course (EEXIST comme signal). C'est le seul mode qui protege le DISQUE :
+      le dossier de run est cree AVANT l'insertion en base, une garde purement
+      cote base arriverait trop tard.
+    - `exclusive=False` : compat des flux qui rouvrent un run EXISTANT (apply,
+      diagnostics, historique). On tolere un dossier deja la, mais on refuse
+      quand meme d'en faire un point de creation s'il est deja PEUPLE lorsque
+      l'appelant a la semantique « nouveau run » (cf. `new_run`).
+    """
+    if exclusive:
+        run_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            run_dir.mkdir()
+        except FileExistsError as exc:
+            raise RunDirectoryConflictError(
+                f"Le dossier de run {run_dir} existe deja : run_id deja utilise, "
+                "creation refusee pour ne pas ecraser un plan existant."
+            ) from exc
+        return
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+
+def new_run(state_dir: Path, run_id: str, *, exclusive: bool = False) -> RunPaths:
     runs = state_dir / "runs"
     run_dir = runs / f"tri_films_{run_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if exclusive:
+        create_run_dir(run_dir, exclusive=True)
+    else:
+        # Sans reservation atomique, on refuse au moins de reutiliser un dossier
+        # deja PEUPLE : c'est exactement le scenario ou le second run ecrasait
+        # le plan.jsonl du premier sans rien signaler.
+        if run_dir.is_dir() and any(run_dir.iterdir()):
+            raise RunDirectoryConflictError(
+                f"Le dossier de run {run_dir} existe deja et contient des donnees "
+                "(plan, logs ou quarantaine) : refus de le reutiliser pour un nouveau run."
+            )
+        create_run_dir(run_dir, exclusive=False)
 
     return RunPaths(
         run_id=run_id,

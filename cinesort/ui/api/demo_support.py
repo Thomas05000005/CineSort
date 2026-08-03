@@ -335,7 +335,10 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
     config = {"is_demo": True, "demo_label": "CineSort démo", "root": DEMO_ROOT}
 
     try:
-        run_paths = state.new_run(state_dir, run_id)
+        # exclusive=True : le mode demo contourne le JobRunner (insert direct,
+        # sans le verrou de run actif). La reservation atomique du dossier est
+        # donc sa seule garde contre l'ecrasement d'un run existant.
+        run_paths = state.new_run(state_dir, run_id, exclusive=True)
         store.run.insert_run_pending(
             run_id=run_id,
             root=DEMO_ROOT,

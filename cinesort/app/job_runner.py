@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Optional
 from cinesort.domain.run_models import RunSnapshot, RunStatus
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.log_context import clear_run_id, set_run_id
-from cinesort.infra.run_id import normalize_or_generate_run_id
+from cinesort.infra.run_id import generate_run_id, normalize_or_generate_run_id
 
 _logger = logging.getLogger(__name__)
 
@@ -97,9 +97,6 @@ class JobRunner:
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             self._debug(f"_write_crash_for_run warning run_id={run_id}: {exc}")
-
-    def _generate_current_format_run_id(self) -> str:
-        return time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
 
     def _safe_stats(self, stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return stats if isinstance(stats, dict) else None
@@ -290,11 +287,20 @@ class JobRunner:
     ) -> str:
         """Démarre un nouveau job en thread daemon et renvoie son `run_id`.
 
-        Lève `RuntimeError` si un run est déjà actif. Génère un `run_id` unique
-        si `run_id_hint` est absent ou en collision avec un run existant.
+        Lève `RuntimeError` si un run est déjà actif.
+
+        Génère un `run_id` unique si `run_id_hint` est absent. Si un
+        `run_id_hint` EXPLICITE entre en collision, on lève au lieu de lui
+        substituer un autre identifiant : l'appelant (start_plan) a déjà créé
+        le dossier `tri_films_<hint>` et le `RunState` sous cet id, et le
+        `job_fn` a capturé le même. Substituer faisait diverger `started_run_id`
+        du hint, ce que start_plan traduisait en erreur interne APRÈS que le
+        thread ait démarré : un scan fantôme, non pilotable, écrivant son plan
+        dans le dossier de l'ancien id pendant que la ligne `runs` vivait sous
+        le nouveau. Lever avant tout démarrage de thread supprime ce cas.
         """
         created_ts = time.time()
-        candidate = run_id_hint or self._generate_current_format_run_id()
+        candidate = run_id_hint or generate_run_id()
         run_id = normalize_or_generate_run_id(candidate)
         run_debug = debug_log or self._debug_logger
         self._debug(
@@ -308,16 +314,22 @@ class JobRunner:
                 self._debug("start_job refused: active run already in progress", run_debug)
                 raise RuntimeError("Un run est deja en cours")
 
-            # If same run_id already exists in DB or memory, fallback to uuid-style id.
+            # Collision memoire/DB detectee sous verrou.
+            #  - hint EXPLICITE : on refuse, sans demarrer de thread (cf docstring).
+            #  - pas de hint : personne n'a encore rien cree sous cet id, la
+            #    substitution est sans effet de bord observable.
             if run_id in self._runs or self._store.run.get_run(run_id) is not None:
+                if run_id_hint:
+                    self._debug(f"start_job refused: run_id hint {run_id} already used", run_debug)
+                    raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}")
                 self._debug(f"start_job run_id collision for {run_id}, generating fallback id", run_debug)
                 run_id = normalize_or_generate_run_id(None)
 
             # Sprint 2 audit P0 #6 : insert_run_pending peut encore lever IntegrityError
             # malgre la pre-verification get_run() ci-dessus, en cas de race entre
-            # plusieurs threads (TOCTOU) ou si la generation _generate_current_format_run_id
-            # produit deux ID identiques dans la meme milliseconde. On retente une fois
-            # avec un run_id genere via normalize_or_generate_run_id(None) (uuid-style).
+            # plusieurs threads (TOCTOU) ou entre deux processus. Meme arbitrage que
+            # ci-dessus : on ne regenere QUE lorsque aucun hint explicite n'a ete
+            # fourni, pour ne jamais faire diverger l'id rendu de l'id du hint.
             try:
                 self._store.run.insert_run_pending(
                     run_id=run_id,
@@ -327,13 +339,24 @@ class JobRunner:
                     created_ts=created_ts,
                 )
             except sqlite3.IntegrityError as exc:
+                if run_id_hint:
+                    _logger.warning(
+                        "job: run_id hint collision on insert run_id=%s err=%s",
+                        run_id,
+                        exc,
+                    )
+                    self._debug(
+                        f"start_job IntegrityError on explicit hint run_id={run_id}, refusing",
+                        run_debug,
+                    )
+                    raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}") from exc
                 _logger.warning(
                     "job: run_id collision on insert, regenerating run_id=%s err=%s",
                     run_id,
                     exc,
                 )
                 self._debug(
-                    f"start_job IntegrityError collision run_id={run_id}, regenerating uuid-style",
+                    f"start_job IntegrityError collision run_id={run_id}, regenerating",
                     run_debug,
                 )
                 run_id = normalize_or_generate_run_id(None)

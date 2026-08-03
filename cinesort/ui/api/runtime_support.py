@@ -15,15 +15,21 @@ import re
 import sys
 import threading
 import time
-import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.app import JobRunner
 from cinesort.app.apply_batches_reconciliation import reconcile_batches_at_boot
 from cinesort.app.move_reconciliation import reconcile_at_boot
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+
+# FACTORISATION : la generation du run_id vivait ici ET dans app/job_runner.py,
+# a l'identique. Deux copies divergent : il n'y a plus qu'UN producteur, dans
+# infra (couche importable par app comme par ui). `generate_run_id` reste
+# re-exporte ici car il appartient au domaine public du module (`__all__`) et
+# est expose par `CineSortApi._generate_run_id`.
+from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
 from cinesort.ui.api.notifications_support import add_notification
 
@@ -71,10 +77,23 @@ def state_dir_key(state_dir: Path) -> str:
         return str(state_dir).lower()
 
 
-def run_paths_for(state_dir: Path, run_id: str, *, ensure_exists: bool) -> state.RunPaths:
+def run_paths_for(
+    state_dir: Path,
+    run_id: str,
+    *,
+    ensure_exists: bool,
+    exclusive: bool = False,
+) -> state.RunPaths:
+    """Resout les chemins d'un run.
+
+    `exclusive=True` (avec `ensure_exists=True`) demande une RESERVATION
+    ATOMIQUE du dossier : `state.RunDirectoryConflictError` si le dossier
+    existe deja. Le defaut `False` preserve la semantique des appelants qui
+    rouvrent un run EXISTANT (apply, diagnostics, historique, dashboard).
+    """
     run_dir = state_dir / "runs" / f"tri_films_{run_id}"
     if ensure_exists:
-        run_dir.mkdir(parents=True, exist_ok=True)
+        state.create_run_dir(run_dir, exclusive=exclusive)
     return state.RunPaths(
         run_id=run_id,
         run_dir=run_dir,
@@ -481,21 +500,72 @@ def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
             api._runs.pop(rid, None)
 
 
-def generate_run_id() -> str:
-    return time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
+# Nombre de candidats essayes avant de rendre les armes. Chaque candidat est
+# deja unique pour le processus (cf. cinesort.infra.run_id) : la boucle ne sert
+# donc plus qu'a ecarter un identifiant deja present en base ou sur disque,
+# c'est-a-dire pose par une session ANTERIEURE.
+_RUN_ID_RESERVATION_ATTEMPTS = 100
 
 
-def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
-    for _ in range(100):
+def _iter_free_run_ids(api: Any, store: SQLiteStore) -> Iterator[str]:
+    """Enumere des run_id absents du registre memoire ET de la table `runs`."""
+    for _ in range(_RUN_ID_RESERVATION_ATTEMPTS):
         run_id = generate_run_id()
         with api._runs_lock:
             if run_id in api._runs:
                 continue
         if store.run.get_run(run_id) is not None:
             continue
+        yield run_id
+
+
+def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
+    """Renvoie un run_id libre en memoire et en base.
+
+    Le repli d'origine `f"{generate_run_id()}-{uuid4().hex[:8]}"` etait un
+    BUG LATENT : ce format a tiret ne matchait pas `RUN_ID_PATTERN`, donc
+    `job_runner.normalize_or_generate_run_id` le remplacait aussitot par un
+    uuid — l'identifiant soigneusement rendu unique etait jete, et l'id rendu
+    par `start_job` divergeait de celui deja utilise pour creer le dossier.
+    Le repli est desormais un identifiant au format canonique, journalise en
+    WARNING pour qu'une saturation ne passe jamais inapercue.
+    """
+    for run_id in _iter_free_run_ids(api, store):
         return run_id
-    # fallback ultime : uuid4 pour eviter blocage definitif
-    return f"{generate_run_id()}-{uuid.uuid4().hex[:8]}"
+    fallback = generate_run_id()
+    _logger.warning(
+        "run_id: %d candidats consecutifs deja pris en base, repli sur %s",
+        _RUN_ID_RESERVATION_ATTEMPTS,
+        fallback,
+    )
+    return fallback
+
+
+def reserve_unique_run(api: Any, store: SQLiteStore, state_dir: Path) -> Tuple[str, state.RunPaths]:
+    """Reserve un run_id ET son dossier `tri_films_<run_id>` d'un seul tenant.
+
+    Pourquoi les deux ensemble : le dossier de run est cree AVANT l'insertion
+    en base (et avant `start_job`). Resoudre l'unicite uniquement cote base
+    laissait donc le DISQUE decouvert — deux runs de meme id partageaient le
+    meme dossier et le second ecrasait le `plan.jsonl` du premier sans rien
+    signaler. Ici, le `mkdir` sans `exist_ok` sert de reservation atomique :
+    si le dossier est deja pris, on passe simplement au candidat suivant.
+
+    Corollaire de conception : l'identifiant rendu ici est deja verifie libre,
+    donc `start_job` le conservera tel quel et l'id retourne ne divergera pas
+    de celui utilise pour le dossier et le `RunState`.
+    """
+    for run_id in _iter_free_run_ids(api, store):
+        try:
+            run_paths = run_paths_for(state_dir, run_id, ensure_exists=True, exclusive=True)
+        except FileExistsError:
+            _logger.warning("run_id: dossier de run deja present pour %s, nouveau candidat", run_id)
+            continue
+        return run_id, run_paths
+    raise RuntimeError(
+        f"Impossible de reserver un run_id libre apres {_RUN_ID_RESERVATION_ATTEMPTS} tentatives "
+        "(base ou dossier runs/ deja occupes)"
+    )
 
 
 def find_run_row(api: Any, run_id: str) -> Optional[Tuple[Dict[str, Any], SQLiteStore]]:
@@ -998,6 +1068,7 @@ __all__ = [
     "get_recent_logs",
     "get_run",
     "purge_terminal_runs_locked",
+    "reserve_unique_run",
     "reset_reconciliation_cache_for_tests",
     "run_paths_for",
     "search_docs",
