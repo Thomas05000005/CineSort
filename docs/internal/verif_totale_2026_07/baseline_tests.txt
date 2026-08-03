@@ -1,0 +1,57 @@
+# BASELINE TESTS — vérif totale 2026-07 (Phase 0.5)
+
+> Référence figée le 2026-07-08 sur verif/totale-2026-07 (post Phase 0.3/0.4/0.2).
+> Interpréteur : .venv Python 3.13.13. Commande = périmètre CI exact :
+> python -m pytest tests/ --ignore=tests/e2e --ignore=tests/e2e_dashboard
+>   --ignore=tests/e2e_desktop --ignore=tests/manual --ignore=tests/live --ignore=tests/stress -q
+> RÈGLE : tout échec HORS de cette liste = régression à corriger avant merge.
+
+## Résumé : 23 failed, 5796 passed, 17 skipped, 6 warnings, 49 errors, 230 subtests passed in 824.59s (0:13:44)
+
+## Vérification anti-pollution Phase 0
+Les 5 échecs des 3 fichiers touchant pyproject/.gitignore/imports
+(test_ci_workflows_pyproject_compat_v77, test_release_hygiene, test_refactor_84_progress_v77)
+rejoués sur 650d162 vierge (worktree B4) : mêmes 5 échecs -> TOUS PRÉEXISTANTS,
+0 régression introduite par la Phase 0.
+
+## 23 FAILED (préexistants, candidats de correction Phase 5)
+- tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_advanced_exists
+- tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_naming_exists
+- tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_omdb_exists
+- tests/test_audit_2026_05_24_regression.py::SettingsDispatcherSectionsTests::test_save_section_sources_exists
+- tests/test_ci_workflows_pyproject_compat_v77.py::CiWorkflowsCompatTests::test_ci_yml_installs_requirements_or_pyproject
+- tests/test_ci_workflows_pyproject_compat_v77.py::CiWorkflowsCompatTests::test_workflows_install_via_known_patterns
+- tests/test_phase3_1b_cta_health_suggestions.py::IntegrationTests::test_render_accueil_passes_3_args
+- tests/test_phase3_1c_env_inspector_states.py::InspectorContentTests::test_shortcuts_section_lists_keys
+- tests/test_phase4_bibliotheque_endpoints.py::ExportFilmsTests::test_export_json_inline_films
+- tests/test_phase4_bibliotheque_endpoints.py::GetLibraryCountersByChipTests::test_unidentified_counted
+- tests/test_phase4_parametres_endpoints.py::ResetSettingsTests::test_scope_apparence_restores_default_theme
+- tests/test_phase5_bibliotheque_complete.py::BulkActionsWiringTests::test_countdown_3s_if_over_50
+- tests/test_phase5_historique_complete.py::ApplyTabDetailTests::test_apply_op_labels
+- tests/test_phase5_traitement_complete.py::ValidationStepTests::test_bulk_approve_shows_toast_5s
+- tests/test_quality_score.py::QualityScoreTests::test_analyze_quality_batch_rejects_concurrent_launch
+- tests/test_refactor_84_progress_v77.py::TestRefactor84LazyImportProgress::test_lazy_imports_bounded
+- tests/test_release_hygiene.py::RecordApplyOpTests::test_returns_false_on_failure_and_logs
+- tests/test_release_hygiene.py::ReleaseHygieneTests::test_no_personal_strings_in_repo
+- tests/test_rest_security.py::RateLimiterHttpIntegrationTests::test_rate_limiter_returns_429_after_5_failures
+- tests/test_rest_security.py::RestSecurityHttpTests::test_request_empty_token_returns_401
+- tests/test_rest_security.py::RestSecurityHttpTests::test_request_invalid_token_returns_401
+- tests/test_rest_security.py::RestSecurityHttpTests::test_request_without_auth_returns_401
+- tests/test_unified_ui_contracts.py::UnifiedUiContractTests::test_app_injects_token_for_native_mode
+
+## Cluster runtime RÉHABILITÉ (Lot C 2026-07-08, commit 0d47260)
+Les 50 ERRORS test_runtime_* d'origine étaient 3 instruments cassés (fixture
+login vs bypass localhost, qij.js supprimé, evaluate non destructuré).
+Après réhabilitation : 39 verts, 5 skips, et 4 échecs RÉELS restants
+(findings Lot C en cours de diagnostic) :
+- tests/test_runtime_apply_history_labels.py::test_apply_history_run_labels_are_french[chromium]
+- tests/test_runtime_apply_history_labels.py::test_apply_history_op_counters_are_french[chromium]
+- tests/test_runtime_skeleton_lifecycle.py::test_skeleton_historique_lifecycle_present_then_replaced[chromium]
+- tests/test_runtime_skeleton_lifecycle.py::test_skeleton_accueil_lifecycle[chromium] (à confirmer, voir sweep)
+
+## MAJ 2026-07-09 (fin Phases 5/6/7)
+Suite complète après purge + réconciliation : 6006 passed, ~22 failed (baseline
+préexistante inchangée), 21 skipped, 2 xfailed. Les 14 échecs introduits par les
+changements INTENTIONNELS de Phase 5/6 ont été soldés en mettant à jour les
+attentes de test (PAGE_SIZE 60→200, conteneurs DOM retirés, onerror→listener
+délégué CSP, i18n qij restauré, wait runtime robuste). Régression de CODE : 0.

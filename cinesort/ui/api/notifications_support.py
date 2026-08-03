@@ -23,6 +23,7 @@ Thread-safe: tous les acces passent par _lock.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import threading
@@ -30,7 +31,6 @@ import time
 import uuid
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -251,15 +251,19 @@ def emit_from_insights(api: Any, insights: List[Dict[str, Any]], *, source: str 
     for ins in insights:
         if not isinstance(ins, dict):
             continue
-        code = str(ins.get("code") or "").strip()
+        # R8-049 (F5) : les insights émettent {type, label, severity, count, ...}
+        # et JAMAIS `code`/`title`/`message`. L'ancien `ins.get("code")` était
+        # toujours vide -> `if not code: continue` SAUTAIT chaque insight -> 0
+        # notification jamais créée (miroir insights -> Centre de notifications MORT).
+        code = str(ins.get("type") or ins.get("code") or "").strip()
         if not code:
             continue
         key = (code, source)
         if key in emitted_set:
             continue
         emitted_set.add(key)
-        title = str(ins.get("title") or code)
-        body = str(ins.get("message") or "")
+        title = str(ins.get("label") or ins.get("title") or code)
+        body = str(ins.get("message") or ins.get("label") or "")
         severity = str(ins.get("severity") or "info")
         level = "warning" if severity in ("warn", "warning") else ("error" if severity == "critical" else "info")
         add_notification(

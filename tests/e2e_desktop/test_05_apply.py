@@ -5,7 +5,6 @@ Lancer : pytest tests/e2e_desktop/test_05_apply.py -v
 
 from __future__ import annotations
 
-
 from .pages.base_page import BasePage
 
 

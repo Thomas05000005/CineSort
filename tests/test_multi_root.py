@@ -7,18 +7,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cinesort.domain.core import Config, PlanRow, Stats
 from cinesort.app.plan_support import (
     _detect_cross_root_duplicates,
     _merge_stats,
     plan_multi_roots,
 )
+from cinesort.domain.core import Config, PlanRow, Stats
 from cinesort.ui.api.settings_support import (
     _migrate_root_to_roots,
     resolve_roots_from_payload,
     validate_roots,
 )
-
 
 # ── PlanRow.source_root ──────────────────────────────────────────────
 

@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-
 SOURCE_EXCLUDE_DIR_NAMES = {
     ".git",
     "build",

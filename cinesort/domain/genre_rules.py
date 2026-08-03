@@ -38,7 +38,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # Mapping canonique genre TMDb → clé interne.
 # Les genres TMDb sont en anglais ("Animation", "Action", "Thriller", ...).
 _GENRE_CANONICAL: Dict[str, str] = {

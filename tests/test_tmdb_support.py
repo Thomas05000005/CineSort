@@ -10,14 +10,20 @@ from cinesort.ui.api import tmdb_support
 
 
 def _make_api(api_key: str = "fake_key", state_dir: str = "/tmp/state", timeout_s: float = 10.0) -> MagicMock:
-    """Construit un faux objet api compatible avec get_tmdb_posters."""
+    """Construit un faux objet api compatible avec get_tmdb_posters.
+
+    AUDIT 2026-06-10 : get_tmdb_posters/search_tmdb lisent desormais
+    _internal_settings (secrets en clair) et normalize_user_path module-level
+    (api._normalize_user_path n'existait pas -> 500).
+    """
     api = MagicMock()
-    api.settings.get_settings.return_value = {
+    _settings = {
         "tmdb_api_key": api_key,
         "state_dir": state_dir,
         "tmdb_timeout_s": timeout_s,
     }
-    api._normalize_user_path.return_value = Path(state_dir)
+    api._internal_settings.return_value = _settings
+    api.settings.get_settings.return_value = _settings
     return api
 
 
@@ -86,7 +92,7 @@ class TestGetTmdbPostersNoApiKey(unittest.TestCase):
 
     def test_none_api_key_returns_empty_posters(self):
         api = MagicMock()
-        api.settings.get_settings.return_value = {"tmdb_api_key": None, "state_dir": "/tmp", "tmdb_timeout_s": 10}
+        api._internal_settings.return_value = {"tmdb_api_key": None, "state_dir": "/tmp", "tmdb_timeout_s": 10}
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
         self.assertTrue(result["ok"])
         self.assertEqual(result["posters"], {})
@@ -98,7 +104,9 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_success_returns_posters_dict(self, mock_client_cls):
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = lambda mid, size: f"https://img/{mid}_{size}.jpg"
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
+            f"https://img/{mid}_{size}.jpg"
+        )
         mock_client_cls.return_value = client
 
         api = _make_api()
@@ -124,7 +132,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         api = _make_api()
         tmdb_support.get_tmdb_posters(api, tmdb_ids=[7], size="w185")
 
-        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w185")
+        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w185", force_refresh=False)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_empty_size_falls_back_to_w92(self, mock_client_cls):
@@ -135,7 +143,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         api = _make_api()
         tmdb_support.get_tmdb_posters(api, tmdb_ids=[7], size="")
 
-        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w92")
+        client.get_movie_poster_thumb_url.assert_called_once_with(7, size="w92", force_refresh=False)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_client_returns_no_url_omits_entry(self, mock_client_cls):
@@ -158,7 +166,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     def test_ids_deduplicated_and_sorted(self, mock_client_cls):
         captured_ids: list[int] = []
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = lambda mid, size: (
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
             captured_ids.append(mid) or f"https://img/{mid}.jpg"
         )
         mock_client_cls.return_value = client
@@ -169,18 +177,37 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         # Dedup et tri
         self.assertEqual(captured_ids, [1, 2, 3])
 
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : tmdb-1 — cap defensif eleve de
+    # 20 a 2000 dans Vague J (cf tmdb_support.py:28-34). Le test originel
+    # test_ids_capped_at_20 etait rouge depuis ce changement. On reecrit pour
+    # verifier le nouveau cap a 2000 + on conserve un cas "sous le cap" pour
+    # detecter une regression dans le sens inverse (cap re-baisse a 20).
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
-    def test_ids_capped_at_20(self, mock_client_cls):
+    def test_ids_capped_at_2000(self, mock_client_cls):
         client = MagicMock()
         client.get_movie_poster_thumb_url.return_value = "https://img/x.jpg"
         mock_client_cls.return_value = client
 
         api = _make_api()
-        big_list = list(range(1, 100))  # 99 ids
+        # 2500 ids > cap 2000 -> doit etre tronque a 2000 appels exactement.
+        big_list = list(range(1, 2501))
         tmdb_support.get_tmdb_posters(api, tmdb_ids=big_list)
 
-        # Cap a 20 => 20 appels
-        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 20)
+        # Cap a 2000 => 2000 appels
+        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 2000)
+
+    @patch("cinesort.ui.api.tmdb_support.TmdbClient")
+    def test_ids_below_cap_not_truncated(self, mock_client_cls):
+        """Garde-fou regression : 100 ids doivent etre tous appeles (pas re-cape a 20)."""
+        client = MagicMock()
+        client.get_movie_poster_thumb_url.return_value = "https://img/x.jpg"
+        mock_client_cls.return_value = client
+
+        api = _make_api()
+        big_list = list(range(1, 100))  # 99 ids, sous le cap 2000
+        tmdb_support.get_tmdb_posters(api, tmdb_ids=big_list)
+
+        self.assertEqual(client.get_movie_poster_thumb_url.call_count, 99)
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_string_numeric_ids_converted_to_int(self, mock_client_cls):
@@ -221,7 +248,7 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         mock_client_cls.return_value = client
 
         api = MagicMock()
-        api.settings.get_settings.return_value = {
+        api._internal_settings.return_value = {
             "tmdb_api_key": "k",
             "state_dir": "/tmp",
             # tmdb_timeout_s absent
@@ -262,7 +289,8 @@ class TestGetTmdbPostersErrors(unittest.TestCase):
 
     def test_get_settings_raises_keyerror_returns_error(self):
         api = MagicMock()
-        api.settings.get_settings.side_effect = KeyError("settings missing")
+        # AUDIT 2026-06-10 : la lecture settings passe par _internal_settings.
+        api._internal_settings.side_effect = KeyError("settings missing")
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
 
         self.assertFalse(result["ok"])
@@ -270,7 +298,7 @@ class TestGetTmdbPostersErrors(unittest.TestCase):
 
     def test_get_settings_raises_typeerror_returns_error(self):
         api = MagicMock()
-        api.settings.get_settings.side_effect = TypeError("api broken")
+        api._internal_settings.side_effect = TypeError("api broken")
         result = tmdb_support.get_tmdb_posters(api, tmdb_ids=[1])
 
         self.assertFalse(result["ok"])

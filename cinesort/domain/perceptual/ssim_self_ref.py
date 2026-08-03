@@ -19,6 +19,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     SSIM_SELF_REF_AMBIGUOUS_THRESHOLD,
     SSIM_SELF_REF_FAKE_THRESHOLD,
@@ -26,8 +28,6 @@ from .constants import (
     SSIM_SELF_REF_SEGMENT_DURATION_S,
     SSIM_SELF_REF_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)
