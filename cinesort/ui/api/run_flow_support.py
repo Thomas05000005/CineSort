@@ -1570,6 +1570,62 @@ def _enrich_groups_with_quality_comparison(
         _enrich_one_group(group, run_id, store)
 
 
+def _decision_member_row_ids(dec: Dict[str, Any]) -> frozenset:
+    """Ensemble des row_ids ARBITRÉS par une décision doublons (gagnant + perdants)."""
+    members = {str(lid or "").strip() for lid in (dec.get("loser_row_ids") or [])}
+    members.add(str(dec.get("winner_row_id") or "").strip())
+    members.discard("")
+    return frozenset(members)
+
+
+def _group_member_row_ids(group: Dict[str, Any]) -> frozenset:
+    """Ensemble des row_ids d'un groupe de doublons du payload check_duplicates."""
+    members = set()
+    for item in group.get("rows") or []:
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get("row_id") or "").strip()
+        if rid:
+            members.add(rid)
+    return frozenset(members)
+
+
+def _decisions_by_row_id_set(decisions: List[Dict[str, Any]]) -> Dict[frozenset, Dict[str, Any]]:
+    """Index de REPLI des décisions doublons par ENSEMBLE de row_ids arbitrés.
+
+    Complète l'index par `group_key`, qui DÉRIVE quand l'utilisateur corrige le
+    titre ou l'année en Validation (cf `_group_key_for` -> `titre|annee`).
+
+    Aucun faux positif possible :
+      * l'égalité est celle d'un ENSEMBLE EXACT, donc une décision ne se
+        rattache qu'à un groupe dont les membres sont exactement ceux qu'elle a
+        arbitrés ;
+      * `find_duplicate_targets` (domain/duplicate_support.py) empile chaque row
+        dans UN SEUL bucket `planned_idx[movie_key]` -> les groupes PARTITIONNENT
+        les rows, deux groupes distincts ne peuvent pas exposer le même ensemble.
+
+    Une décision sans perdant est EXCLUE : elle n'arbitre rien et est déjà
+    ignorée à l'apply (apply_support._resolve_duplicate_loser_row_ids) — la
+    rattacher afficherait un « ✓ Décidé » que l'apply ne suivrait pas.
+
+    Collision (deux clés mortes pour le même ensemble, ex. année corrigée deux
+    fois) : la décision la PLUS RÉCENTE l'emporte, exactement comme la
+    réconciliation d'apply, pour que le badge annonce ce que l'apply fera.
+    """
+    try:
+        ordered = sorted(decisions, key=lambda d: float(d.get("decided_ts") or 0.0), reverse=True)
+    except (TypeError, ValueError):
+        # decided_ts illisible : on garde l'ordre du repo (deja DESC).
+        ordered = list(decisions)
+    index: Dict[frozenset, Dict[str, Any]] = {}
+    for dec in ordered:
+        members = _decision_member_row_ids(dec)
+        if len(members) < 2:
+            continue
+        index.setdefault(members, dec)
+    return index
+
+
 def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: Any) -> None:
     """R8-057 (F5) : joint les décisions doublons PERSISTÉES (table duplicate_decisions)
     au payload check_duplicates -> `winner_decided`/`winner_side`/`winner_row_id`.
@@ -1578,6 +1634,17 @@ def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: An
     « Décidé » disparaissait (decidedCount=0), bien que la décision soit persistée
     et honorée à l'apply. On indexe les décisions par `group_key` (même clé que
     mark_duplicate_winner via `_group_key_for`) et on annote chaque groupe.
+
+    F07 (arbitrage revue post-merge 2026-08-02) : `group_key` DÉRIVE. La clé vaut
+    `titre|annee` d'après la décision de Validation ; si l'utilisateur corrige
+    ensuite l'année ou le titre, plus AUCUNE clé ne matche et le badge
+    disparaissait alors que la décision existe toujours en base et sera bien
+    honorée à l'apply (apply_support._resolve_duplicate_loser_row_ids ne lit que
+    les row_ids). L'utilisateur ne pouvait donc ni la voir ni la reprendre, et
+    « Auto-décider tous » — qui saute les groupes `winner_decided` — écrasait
+    silencieusement son choix. On ajoute un index de REPLI par ENSEMBLE de
+    row_ids, consulté UNIQUEMENT quand la clé ne matche aucun groupe (chemin
+    nominal strictement inchangé).
     """
     apply_repo = getattr(store, "apply", None) if store else None
     lister = getattr(apply_repo, "list_duplicate_decisions", None)
@@ -1587,16 +1654,32 @@ def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: An
         decisions = lister(run_id=run_id)
     except (OSError, KeyError, TypeError, ValueError):
         return
-    by_key = {str(d.get("group_key") or ""): d for d in (decisions or []) if d.get("group_key")}
-    if not by_key:
+    usable = [d for d in (decisions or []) if isinstance(d, dict)]
+    by_key = {str(d.get("group_key") or ""): d for d in usable if d.get("group_key")}
+    by_row_ids = _decisions_by_row_id_set(usable)
+    if not by_key and not by_row_ids:
         return
     for group in data.get("groups") or []:
         dec = by_key.get(_group_key_for(group))
+        stale_key = False
+        if dec is None:
+            dec = by_row_ids.get(_group_member_row_ids(group))
+            stale_key = dec is not None
         if not dec:
             continue
         winner_row_id = str(dec.get("winner_row_id") or "")
         group["winner_decided"] = True
         group["winner_row_id"] = winner_row_id
+        if stale_key:
+            # Additif et diagnostique. NE JAMAIS nommer ce champ `group_key` /
+            # `id` / `signature` : `_group_key_for` (et son miroir `_groupKey` de
+            # doublons.js) les lit EN PRIORITÉ, l'UI reposterait alors la clé
+            # morte et mark_duplicate_winner refuserait la reprise
+            # (« liste périmée »). L'UI garde donc la clé COURANTE : redécider
+            # écrit une nouvelle ligne, que la réconciliation par récence de
+            # l'apply fait gagner sur la décision périmée.
+            group["winner_decision_stale_key"] = True
+            group["winner_decision_group_key"] = str(dec.get("group_key") or "")
         rows = group.get("rows") or []
         for idx, item in enumerate(rows[:2]):
             if str((item or {}).get("row_id") or "") == winner_row_id and winner_row_id:
