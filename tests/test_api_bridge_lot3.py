@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -21,15 +22,15 @@ from tests._helpers import wait_run_done as _wait_terminal
 
 class ApiBridgeLot3Tests(unittest.TestCase):
     def setUp(self) -> None:
-        # CI Windows : sur le runner GitHub, %TEMP% vaut C:\Users\RUNNER~1\...
-        # (nom court 8.3) et traverse des jonctions. open_path() compare
-        # Path.resolve() a Path.absolute() pour detecter un symlink parent :
-        # un chemin temporaire non canonique declenche donc un faux positif
-        # « Les liens symboliques ne sont pas autorises ». On canonise la
-        # racine temporaire pour fournir a l'API un chemin deja resolu, ce qui
-        # est le cas nominal cote produit ; le controle de securite n'est pas
-        # touche (les tests de refus vivent dans test_vague_h_security.py).
-        self._tmp = str(Path(tempfile.mkdtemp(prefix="cinesort_lot3_")).resolve())
+        # Racine temporaire BRUTE, volontairement non canonisee : sur le runner
+        # GitHub Windows %TEMP% vaut C:\Users\RUNNER~1\... (nom court 8.3) et
+        # traverse des jonctions. Ce fut un contournement (.resolve() ici) tant
+        # que open_path() comparait deux CHAINES (resolve() vs absolute()) et
+        # refusait donc ces chemins pourtant legitimes ; la garde compare
+        # desormais des chemins REELS (cf test_vague_h_security.py, classe
+        # OpenPathJunctionTests), les tests tournent donc sur le chemin tel que
+        # le systeme le donne.
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_lot3_")
         self.root = Path(self._tmp) / "root"
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -701,7 +702,15 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             res = api.open_path(str(target_file))
 
         self.assertTrue(res.get("ok"), res)
-        mocked_startfile.assert_called_once_with(str(folder))
+        # open_path ouvre toujours le chemin RESOLU (garde anti path-traversal),
+        # jamais la chaine fournie : sous un %TEMP% derriere une jonction ou en
+        # 8.3 les deux ecritures different alors que c'est le meme dossier reel.
+        mocked_startfile.assert_called_once()
+        opened = str(mocked_startfile.call_args.args[0])
+        self.assertEqual(
+            os.path.normcase(os.path.realpath(opened)),
+            os.path.normcase(os.path.realpath(str(folder))),
+        )
 
     def test_save_settings_rejects_explicit_empty_root(self) -> None:
         api = backend.CineSortApi()
