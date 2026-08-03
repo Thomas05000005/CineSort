@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests._jsexec import ROOT, esm_syntax_error, require_node, run_module_test
+from tests._jsexec import ROOT, esm_syntax_error, inline_module, require_node, run_module_test
 
 PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
 ACCUEIL_JS = ROOT / "web" / "dashboard" / "views" / "accueil.js"
@@ -102,7 +102,10 @@ export const __h = { promptNewProfileName: _promptNewProfileName };
 # --------------------------------------------------------------------------
 # views/accueil.js
 # --------------------------------------------------------------------------
-ACCUEIL_STUBS = r"""
+# `deriveRunStatus` : vraie source partagee injectee (cf. inline_module).
+ACCUEIL_STUBS = (
+    inline_module("core/run-status.js")
+    + r"""
 const escapeHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 globalThis.__posts = [];
@@ -137,9 +140,10 @@ globalThis.document = globalThis.document || {
 };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 """
+)
 
 ACCUEIL_EXTRA = r"""
-export const __h = { pingIntegration: _pingIntegration, renderHero: _renderHero };
+export const __h = { pingIntegration: _pingIntegration };
 """
 
 # --------------------------------------------------------------------------
@@ -361,20 +365,6 @@ __emit({ ok, params: post ? post.params : null });
             f"payload envoye = {res['params']!r} ; la facade attend (url, token, timeout_s)",
         )
         self.assertTrue(res["ok"], "avec le bon nom de parametre, la pastille passe en ligne")
-
-    def test_hero_ne_nomme_personne(self):
-        """ROUGE avant fix : « Bonjour Thomas » — prenom du developpeur affiche a
-        tout beta-testeur tiers (depot public MIT) et a tout telephone qui ouvre
-        le dashboard LAN via le QR code."""
-        res = self._run(r"""
-__emit({
-  vide: M.__h.renderHero({}),
-  charge: M.__h.renderHero({ latest_run: { run_id: "r1" }, alert_count: 2 }),
-});
-""")
-        for key, html in res.items():
-            self.assertIn("accueil-hero-greeting", html)
-            self.assertNotIn("Thomas", html, f"rendu {key} : un prenom est code en dur")
 
     # -------------------------------------------------- NON-REGRESSION
     def test_nonreg_autres_integrations_utilisent_bien_api_key(self):

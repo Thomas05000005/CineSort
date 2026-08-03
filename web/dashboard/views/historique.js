@@ -31,6 +31,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost, cachedGetSettings } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { deriveRunStatus } from "../core/run-status.js";
 import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
@@ -179,7 +180,7 @@ function _writeString(key, value) {
   }
 }
 
-/* --- Status derivation (alignee avec accueil.js) -----------------------
+/* --- Status derivation ------------------------------------------------
  *
  * Revue post-merge 2026-08-03 — le court-circuit `if (run.status) return ...`
  * rendait MORTES toutes les lignes suivantes : `run/get_dashboard` emet toujours
@@ -191,31 +192,18 @@ function _writeString(key, value) {
  *     que le payload porte bien applied_rows / total_rows ;
  *   - AWAITING_VALIDATION mappait vers `is-pending`, classe qui n'existe dans
  *     AUCUN CSS du depot -> statut affiche sans couleur.
- * On repart donc du statut DB (seule source de verite sur l'etat du run) et on
- * ne l'affine avec les compteurs que pour les etats terminaux qui ne disent
- * rien de l'apply (DONE / SAVED / vide) — meme convention qu'accueil.js.
+ *
+ * La regle vit desormais dans `core/run-status.js`, IMPORTEE ICI ET DANS
+ * accueil.js : les deux ecrans decrivent le meme objet et ne peuvent plus se
+ * contredire (la premiere version de ce correctif ne touchait qu'historique.js
+ * et faisait lire ERROR ici, DONE sur l'accueil, pour le meme run).
  *
  * `run.undone` / `run.is_undo` / `run.type` ne sont emis par AUCUN payload :
  * l'undo n'insere pas de ligne dans la table `runs`. Les options de filtre
  * correspondantes sont retirees plus bas plutot que laissees inertes.
  */
-const _NEUTRAL_TERMINAL_STATUS = ["", "DONE", "SAVED"];
-
 function _deriveStatus(run) {
-  const raw = String(run.status || "").toUpperCase();
-  // FAILED est le statut ecrit par le backend (repositories/run.py) ; ERROR est
-  // le vocabulaire de l'UI (filtre, classe CSS, libelle).
-  if (raw === "FAILED" || raw === "ERROR") return "ERROR";
-  // PENDING / RUNNING / PAUSED / CANCELLED / AWAITING_VALIDATION : le statut DB
-  // est plus informatif que n'importe quel compteur, on le garde tel quel.
-  if (!_NEUTRAL_TERMINAL_STATUS.includes(raw)) return raw;
-  const errors = Number(run.errors_count || 0);
-  const applied = Number(run.applied_rows || 0);
-  const total = Number(run.total_rows || 0);
-  if (errors > 0) return "ERROR";
-  if (applied > 0 && applied >= total) return "APPLIED";
-  if (applied > 0 && applied < total) return "PARTIAL";
-  return raw || "DONE";
+  return deriveRunStatus(run);
 }
 
 function _statusClass(status) {

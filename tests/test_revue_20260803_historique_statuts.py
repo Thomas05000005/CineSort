@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests._jsexec import ROOT, node_check, require_node, run_module_test
+from tests._jsexec import ROOT, inline_module, node_check, require_node, run_module_test
 
 JS = ROOT / "web" / "dashboard" / "views" / "historique.js"
 
@@ -53,7 +53,11 @@ RUN_STATUSES = (
 # web/shared/components.css (L6417-6421 + L6441).
 CSS_STATUS_CLASSES = {"is-error", "is-applied", "is-partial", "is-done", "is-cancelled", "is-undone"}
 
-STUBS = r"""
+# `deriveRunStatus` n'est PAS stubbe : on injecte la vraie source partagee
+# (core/run-status.js), sinon le test verifierait une copie ecrite par le testeur.
+STUBS = (
+    inline_module("core/run-status.js")
+    + r"""
 const escapeHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -114,6 +118,7 @@ globalThis.document = globalThis.document || {
 };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 """
+)
 
 EXTRA = r"""
 export const __h = {
