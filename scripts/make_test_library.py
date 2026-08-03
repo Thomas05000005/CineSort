@@ -42,8 +42,8 @@ d'echantillons video reels.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
-import os
 import random
 import shutil
 import subprocess
@@ -54,7 +54,6 @@ from pathlib import Path
 from typing import Iterable
 from urllib import request as urlrequest
 from urllib.error import URLError
-
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -110,9 +109,9 @@ CC_CLIPS: dict[str, CreativeCommonsClip] = {
 class StubSpec:
     """Specification d'un fichier stub (tronque, taille plausible)."""
 
-    relpath: str            # chemin RELATIF au root (RootA ou RootB)
-    size_bytes: int         # taille cible, entre 100 KB et 2 MB
-    note: str = ""          # commentaire affiche dans README
+    relpath: str  # chemin RELATIF au root (RootA ou RootB)
+    size_bytes: int  # taille cible, entre 100 KB et 2 MB
+    note: str = ""  # commentaire affiche dans README
     # Si renseigne, on cree aussi un movie.nfo a cote du fichier
     nfo_imdb_id: str | None = None
     nfo_title: str | None = None
@@ -124,7 +123,7 @@ class ClipSpec:
     """Specification d'un fichier qui DOIT etre un clip video reel (CC)."""
 
     relpath: str
-    source_key: str         # cle dans CC_CLIPS
+    source_key: str  # cle dans CC_CLIPS
     trim_seconds: int = 30
     # Operation supplementaire optionnelle :
     #   "upscale_4k"    -> ffmpeg scale=3840:2160 (faux 4K)
@@ -195,14 +194,12 @@ def build_catalog() -> tuple[list[ClipSpec], list[StubSpec], list[ClipSpec], lis
             note="Annee MANQUANTE dans nom et dossier",
         ),
         StubSpec(
-            relpath="Movies/Le Fabuleux Destin d Amelie Poulain (2001)/"
-                    "Le Fabuleux Destin d Amelie Poulain (2001).mkv",
+            relpath="Movies/Le Fabuleux Destin d Amelie Poulain (2001)/Le Fabuleux Destin d Amelie Poulain (2001).mkv",
             size_bytes=1_500_000,
             note="Accents FR + apostrophe remplacee par espace (shell-safe)",
         ),
         StubSpec(
-            relpath="Movies/Sen to Chihiro no Kamikakushi (2001)/"
-                    "Sen to Chihiro no Kamikakushi (2001).mkv",
+            relpath="Movies/Sen to Chihiro no Kamikakushi (2001)/Sen to Chihiro no Kamikakushi (2001).mkv",
             size_bytes=1_400_000,
             note="Titre etranger japonais (translitteration romaji)",
         ),
@@ -275,15 +272,13 @@ def build_catalog() -> tuple[list[ClipSpec], list[StubSpec], list[ClipSpec], lis
             note="Serie TV nommage SxxExx variante (x au lieu de E)",
         ),
         StubSpec(
-            relpath="Shows/Breaking Bad/Saison 1/"
-                    "Breaking Bad Saison 1 Episode 3.mkv",
+            relpath="Shows/Breaking Bad/Saison 1/Breaking Bad Saison 1 Episode 3.mkv",
             size_bytes=800_000,
             note="Serie TV nommage FR verbeux (Saison N Episode N)",
         ),
         # NFO Jellyfin/Kodi : Night of the Living Dead, avec ID IMDb
         StubSpec(
-            relpath="Movies/Night of the Living Dead (1968)/"
-                    "Night of the Living Dead (1968).mkv",
+            relpath="Movies/Night of the Living Dead (1968)/Night of the Living Dead (1968).mkv",
             size_bytes=1_000_000,
             note="Domaine public, avec movie.nfo contenant l'ID IMDb",
             nfo_imdb_id="tt0063350",
@@ -357,9 +352,7 @@ def download_to_cache(
         # requetes sans User-Agent. On en fournit un explicite.
         req = urlrequest.Request(
             clip.url,
-            headers={
-                "User-Agent": "CineSort-test-library/1.0 (+make_test_library.py)"
-            },
+            headers={"User-Agent": "CineSort-test-library/1.0 (+make_test_library.py)"},
         )
         with urlrequest.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             data = resp.read()
@@ -370,10 +363,8 @@ def download_to_cache(
         report.log("warn", f"telechargement KO {clip.key}: {exc}")
         # On nettoie un fichier partiel
         if cache_path.exists():
-            try:
+            with contextlib.suppress(OSError):
                 cache_path.unlink()
-            except OSError:
-                pass
         return None
 
 
@@ -381,9 +372,7 @@ def run_ffmpeg(args: list[str], report: BuildReport) -> bool:
     """Execute ffmpeg en silencieux. Retourne True si exit code == 0."""
     cmd = ["ffmpeg", "-y", "-loglevel", "error", *args]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, check=False
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         report.log("warn", "ffmpeg introuvable au moment de l'execution")
         return False
@@ -439,12 +428,12 @@ def write_movie_nfo(
         return
     year_xml = f"  <year>{year}</year>\n" if year else ""
     content = (
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         "<movie>\n"
         f"  <title>{title}</title>\n"
         f"{year_xml}"
         f"  <imdbid>{imdb_id}</imdbid>\n"
-        f"  <uniqueid type=\"imdb\" default=\"true\">{imdb_id}</uniqueid>\n"
+        f'  <uniqueid type="imdb" default="true">{imdb_id}</uniqueid>\n'
         "</movie>\n"
     )
     nfo_path.write_text(content, encoding="utf-8")
@@ -485,27 +474,62 @@ def create_clip(
 
     if spec.transform == "upscale_4k":
         args += [
-            "-vf", "scale=3840:2160:flags=neighbor",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
-            "-c:a", "aac", "-b:a", "96k",
+            "-vf",
+            "scale=3840:2160:flags=neighbor",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "30",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
         ]
     elif spec.transform == "bad_reencode":
         args += [
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-b:v", "200k", "-crf", "40",
-            "-c:a", "aac", "-b:a", "64k",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-b:v",
+            "200k",
+            "-crf",
+            "40",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k",
         ]
     elif spec.transform == "downscale_720p":
         args += [
-            "-vf", "scale=1280:720",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-            "-c:a", "aac", "-b:a", "128k",
+            "-vf",
+            "scale=1280:720",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "26",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
         ]
     else:
         # Trim simple (re-encode rapide pour garantir un fichier autonome)
         args += [
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-            "-c:a", "aac", "-b:a", "128k",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "26",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
         ]
 
     args.append(str(target))
@@ -537,10 +561,7 @@ def create_clip(
 def iter_library_files(root: Path) -> Iterable[Path]:
     if not root.exists():
         return []
-    return sorted(
-        p for p in root.rglob("*")
-        if p.is_file() and not p.name.startswith(".")
-    )
+    return sorted(p for p in root.rglob("*") if p.is_file() and not p.name.startswith("."))
 
 
 def count_files_in_library() -> int:
@@ -574,13 +595,11 @@ def render_readme(
 
     def fmt_stub(s: StubSpec) -> str:
         nfo = f" + movie.nfo ({s.nfo_imdb_id})" if s.nfo_imdb_id else ""
-        return (
-            f"- `{s.relpath}` (~{human_size(s.size_bytes)}){nfo}\n"
-            f"  - Note : {s.note}\n"
-        )
+        return f"- `{s.relpath}` (~{human_size(s.size_bytes)}){nfo}\n  - Note : {s.note}\n"
 
-    body = textwrap.dedent(
-        """
+    body = (
+        textwrap.dedent(
+            """
         # test_library/
 
         Bibliotheque fictive multi-root generee par `scripts/make_test_library.py`.
@@ -607,7 +626,9 @@ def render_readme(
         ## Sources Creative Commons utilisees
 
         """
-    ).strip() + "\n\n"
+        ).strip()
+        + "\n\n"
+    )
     for clip in CC_CLIPS.values():
         body += f"- **{clip.key}** -- {clip.license} -- {clip.credit}\n"
         body += f"  - URL : <{clip.url}>\n"

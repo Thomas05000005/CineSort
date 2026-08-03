@@ -143,9 +143,7 @@ class RunNasBenchmarkTests(unittest.TestCase):
             result = run_nas_benchmark(db_path, n_writes=50, n_reads=200)
 
             missing = self.EXPECTED_KEYS - set(result.keys())
-            self.assertFalse(
-                missing, f"Cles manquantes dans le resultat : {missing}"
-            )
+            self.assertFalse(missing, f"Cles manquantes dans le resultat : {missing}")
             self.assertTrue(result["ok"], f"ok=False : {result.get('error')}")
             self.assertEqual(result["n_writes"], 50)
             self.assertEqual(result["n_reads"], 200)
@@ -177,8 +175,7 @@ class RunNasBenchmarkTests(unittest.TestCase):
             conn = sqlite3.connect(str(db_path))
             try:
                 rows = conn.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name LIKE '__cinesort_nas_bench_%'"
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '__cinesort_nas_bench_%'"
                 ).fetchall()
                 self.assertEqual(
                     rows,
@@ -230,9 +227,7 @@ class RunNasBenchmarkTests(unittest.TestCase):
             # Simuler un schema deja en place (ordre CREATE TABLE -> CREATE INDEX,
             # pas d'ALTER TABLE -- conforme memoire utilisateur).
             conn = sqlite3.connect(str(db_path))
-            conn.execute(
-                "CREATE TABLE films (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"
-            )
+            conn.execute("CREATE TABLE films (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
             conn.execute("CREATE INDEX idx_films_title ON films(title)")
             conn.execute("INSERT INTO films (id, title) VALUES (1, 'Inception')")
             conn.commit()
@@ -244,9 +239,7 @@ class RunNasBenchmarkTests(unittest.TestCase):
             # La table d'origine doit etre intacte apres bench.
             conn = sqlite3.connect(str(db_path))
             try:
-                row = conn.execute(
-                    "SELECT title FROM films WHERE id = 1"
-                ).fetchone()
+                row = conn.execute("SELECT title FROM films WHERE id = 1").fetchone()
                 self.assertIsNotNone(row)
                 self.assertEqual(row[0], "Inception")
             finally:

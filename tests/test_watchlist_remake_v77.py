@@ -16,6 +16,7 @@ NB : ce fichier de test n'a PAS le skip-guard `web/index.html` de
 test_watchlist.py (qui rend toute la suite watchlist inactive). Il teste la
 logique pure compare_watchlist directement, donc il s'execute reellement.
 """
+
 from __future__ import annotations
 
 import unittest

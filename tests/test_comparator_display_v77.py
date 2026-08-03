@@ -35,8 +35,9 @@ class ComparatorDisplayTests(unittest.TestCase):
         size_crit = next((c for c in crits if c.name == "file_size"), None)
         self.assertIsNotNone(size_crit, "critere file_size attendu")
         # Ne doit PAS etre une suite de chiffres bruts.
-        self.assertFalse(re.fullmatch(r"\d+", size_crit.value_a or ""),
-                         f"taille en octets bruts: {size_crit.value_a!r}")
+        self.assertFalse(
+            re.fullmatch(r"\d+", size_crit.value_a or ""), f"taille en octets bruts: {size_crit.value_a!r}"
+        )
         self.assertRegex(size_crit.value_a, r"(o|Ko|Mo|Go|To)$")
 
 

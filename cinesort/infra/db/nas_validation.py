@@ -41,6 +41,7 @@ par l'utilisateur pour la DB CineSort :
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -283,10 +284,8 @@ def run_nas_benchmark(
                 checkpoint_count += 1
             except sqlite3.Error as exc:
                 logger.debug("nas_bench: wal_checkpoint(TRUNCATE) final a echoue : %s", exc)
-            try:
+            with contextlib.suppress(sqlite3.Error):
                 conn.close()
-            except sqlite3.Error:
-                pass
 
     wal_growth_kb = max(0.0, (wal_after - wal_before) / 1024.0)
     total_duration_s = time.monotonic() - started_monotonic

@@ -299,52 +299,39 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
         except Exception as _dbg_exc:  # noqa: BLE001 — debug only
             print(f"[DEBUG-TOKEN] {label} dump failed: {_dbg_exc}", file=sys.stderr)
 
+    # [SEC-2] Le token REST est chiffre au repos (enveloppe rest_api_token_secret
+    # dans settings.json). On resout le token CLAIR via _internal_settings() qui
+    # DECHIFFRE l'enveloppe. Surtout PAS via une lecture brute de settings.json
+    # (le clair n'y est plus depuis SEC-2 -> lecture vide) ni via `s` (get_settings
+    # MASQUE le token en "••••••••"). Sinon le serveur demarrait avec le masque de
+    # 8 puces -> len 8 < MIN_LAN_TOKEN_LENGTH (32) -> bind LAN retrograde en
+    # 127.0.0.1 -> appareils distants coupes + 401 systematique sur le dashboard.
+    # NB : _internal_settings() -> read_settings() tolere deja le BOM (utf-8-sig).
     try:
-        import json as _json
-        from pathlib import Path as _Path
-
-        settings_path = _Path(api._state_dir) / "settings.json" if hasattr(api, "_state_dir") else None
-        if settings_path and settings_path.is_file():
-            # Fix BOM : settings.json peut contenir un BOM UTF-8 (editeurs Windows,
-            # outils PowerShell par defaut). 'utf-8' strict leve UnicodeDecodeError,
-            # le bloc except masque le token avec _SECRET_MASK -> 401 systematique.
-            # 'utf-8-sig' tolere ET supprime le BOM si present.
-            _raw_bytes = settings_path.read_bytes()
-            if _DEBUG_TOKEN:
-                print(
-                    f"[DEBUG-TOKEN] settings.json bytes_len={len(_raw_bytes)} "
-                    f"first_4_bytes={_raw_bytes[:4]!r}",
-                    file=sys.stderr,
-                )
-            raw = _json.loads(settings_path.read_text(encoding="utf-8-sig"))
-            persisted_token = str(raw.get("rest_api_token") or "").strip()
-            in_memory_token = str(s.get("rest_api_token") or "").strip()
-            _dbg_codepoints("persisted_token (settings.json)", persisted_token)
-            _dbg_codepoints("in_memory_token (api.settings)", in_memory_token)
-            if persisted_token:
-                # Source de verite = disque. Synchronise s en cas de drift.
-                token = persisted_token
-                if persisted_token != in_memory_token:
-                    s = {**s, "rest_api_token": persisted_token}
-                    if _DEBUG_TOKEN:
-                        print(
-                            "[DEBUG-TOKEN] DRIFT detecte persisted!=in_memory, sync vers disque",
-                            file=sys.stderr,
-                        )
-            elif in_memory_token:
-                # Disque vide mais memoire a un token (auto-gen) : persister maintenant
-                # AVANT de demarrer le serveur, pour eviter qu'un autre get_settings
-                # ulterieur ne genere un autre token.
-                api.settings.save_settings({**s, "rest_api_token": in_memory_token})
-                token = in_memory_token
-                print("[REST] Token persiste dans settings.json (auto-gen).", file=sys.stderr)
-            else:
-                token = ""  # cas exotique : pas de token nulle part
-        else:
-            token = str(s.get("rest_api_token") or "").strip()
+        token = str(api._internal_settings().get("rest_api_token") or "").strip()
     except Exception as exc:
-        token = str(s.get("rest_api_token") or "").strip()
-        print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
+        token = ""
+        print(f"[REST] Avertissement lecture token: {exc}", file=sys.stderr)
+    # Garde-fou defensif : ne JAMAIS demarrer avec le masque (contournerait la
+    # protection MIN_LAN_TOKEN_LENGTH avec un secret public de 8 puces).
+    from cinesort.ui.api.settings_support import _SECRET_MASK as _MASK
+
+    if token == _MASK:
+        token = ""
+    if not token:
+        # Aucun token configure (tout 1er lancement, avant tout save) : en generer
+        # un et le persister (chiffre au repos par SEC-2 lors du save) pour que
+        # tout get_settings ulterieur renvoie la meme valeur. On echo `s`
+        # (masque) : _unmask_secrets_for_save restaure les autres secrets depuis
+        # le disque, seul rest_api_token change vers une vraie valeur claire.
+        import secrets as _secrets
+
+        token = _secrets.token_urlsafe(24)
+        try:
+            api.settings.save_settings({**s, "rest_api_token": token})
+            print("[REST] Token REST genere et persiste (1er lancement).", file=sys.stderr)
+        except Exception as exc:
+            print(f"[REST] Avertissement persistance token: {exc}", file=sys.stderr)
     _dbg_codepoints("token FINAL passe a RestApiServer", token)
     port = int(s.get("rest_api_port") or 8642)
     is_public = bool(s.get("rest_api_enabled"))
@@ -365,6 +352,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
         # R5-finding-1 : OSError = port deja utilise (WinError 10048 / EADDRINUSE).
         # M1 : RuntimeError = HTTPS demande mais cert/key invalide.
         import errno
+
         if isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048):
             msg = (
                 f"Le port REST {port} est deja utilise par un autre processus. "
@@ -447,8 +435,17 @@ def main_api() -> None:
         _logging_api.getLogger("cinesort.boot").debug("i18n boot skipped: %s", _i18n_exc)
 
     port = _parse_api_port()
-    token = str(settings.get("rest_api_token") or "").strip()
+    # [SEC-2] rest_api_token est chiffre au repos et get_settings() le MASQUE.
+    # Le boot headless doit lire le token CLAIR via _internal_settings()
+    # (dechiffre) : sinon `token` valait le masque "••••••••" (bearer = constante
+    # publique devinable) et le garde `if not token` etait MORT (masque truthy).
+    # Contrairement au chemin desktop, le mode --api NE genere PAS de token : il
+    # exige un token deja configure (via l'UI) et refuse de demarrer sinon.
+    token = str(api._internal_settings().get("rest_api_token") or "").strip()
+    from cinesort.ui.api.settings_support import _SECRET_MASK as _MASK
 
+    if token == _MASK:
+        token = ""
     if not token:
         print("[REST] Aucun token configure dans les reglages. Utilisez l'UI pour en definir un.", file=sys.stderr)
         raise SystemExit(1)
@@ -572,8 +569,7 @@ def _configure_webview2_runtime() -> None:
     # Sanity-check : msedgewebview2.exe doit etre present a la racine du bundle.
     if not (bundle_root / "msedgewebview2.exe").is_file():
         print(
-            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - "
-            "fallback Evergreen.",
+            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - fallback Evergreen.",
             file=sys.stderr,
         )
         return
@@ -632,6 +628,7 @@ def main() -> None:
     # evite que l'enfant ne re-execute main() en boucle infinie (fork-bomb classique
     # sur Windows). Doit etre appele au TOUT debut, avant toute init lourde.
     import multiprocessing
+
     multiprocessing.freeze_support()
 
     # H-3 audit QA 20260428 : installer le scrubber AVANT toute creation
@@ -644,7 +641,6 @@ def main() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
-        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -806,14 +802,19 @@ def main() -> None:
             # DEBUG VERBOSE 2026-06-08 : dump codepoints du token tel quel
             # APRES recuperation depuis rest_server._token + strip. Permet de
             # detecter une corruption survenue entre _start_rest_server et ici.
-            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+                "debug",
+            }
             if _DEBUG_NB:
                 try:
                     cps = [f"U+{ord(c):04X}" for c in _desktop_dashboard_token]
                     non_ascii = [(i, c, ord(c)) for i, c in enumerate(_desktop_dashboard_token) if ord(c) > 0x7F]
                     print(
-                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} "
-                        f"codepoints={cps}",
+                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} codepoints={cps}",
                         file=sys.stderr,
                     )
                     for i, c, o in non_ascii:
@@ -859,6 +860,7 @@ def main() -> None:
                 # port, native, type) pour faciliter le tri post-mortem.
                 # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
                 import logging as _logging_nb
+
                 _logger_nb = _logging_nb.getLogger("cinesort.app.native_boot")
                 _token_type = type(_desktop_dashboard_token).__name__
                 _logger_nb.error(
