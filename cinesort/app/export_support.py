@@ -223,6 +223,16 @@ _NFO_XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 _TMDB_ID_RE = re.compile(r"^[1-9][0-9]{0,9}$")
 _IMDB_ID_RE = re.compile(r"^tt[0-9]{7,12}$")
 
+# Annee : chiffres ASCII UNIQUEMENT. `int()` accepte les separateurs et les
+# signes, donc `int("1_999") == 1999` et `int("+2020") == 2020` — une
+# REINTERPRETATION silencieuse de la donnee. Le motif l'interdit.
+_YEAR_DIGITS_RE = re.compile(r"^[0-9]+$")
+# Bornes de plausibilite : le premier film date de 1888. Hors de cette plage,
+# Kodi et Jellyfin ignorent le `<year>` a la lecture, sans rien signaler —
+# CineSort doit donc le signaler lui-meme plutot qu'ecrire `<year>-500</year>`.
+_MIN_PLAUSIBLE_YEAR = 1870
+_MAX_PLAUSIBLE_YEAR = 2200
+
 
 class _RowDataError(ValueError):
     """Donnee de row inexploitable : la row est ISOLEE et signalee, l'export continue.
@@ -235,10 +245,12 @@ class _RowDataError(ValueError):
 def _coerce_year(*candidates: Any) -> int:
     """Retourne la premiere annee exploitable parmi `candidates`, ou 0 si toutes sont vides.
 
-    Leve `_RowDataError` si une annee est PRESENTE mais non numerique. On ne
-    retombe alors pas sur le candidat suivant : une annee de decision fautive
-    doit etre signalee a l'utilisateur, pas remplacee en douce par la valeur
-    proposee (un echec ne devient jamais un succes silencieux).
+    Leve `_RowDataError` si une annee est PRESENTE mais non numerique, ou hors
+    de la plage plausible. On ne retombe alors pas sur le candidat suivant :
+    une annee de decision fautive doit etre signalee a l'utilisateur, pas
+    remplacee en douce par la valeur proposee (un echec ne devient jamais un
+    succes silencieux). Meme raison pour le refus de `"1_999"` ou `2020.7` :
+    une valeur reinterpretee sans le dire est un succes silencieux deguise.
     """
     for raw in candidates:
         if raw is None:
@@ -250,20 +262,25 @@ def _coerce_year(*candidates: Any) -> int:
             text = raw.strip()
             if not text:
                 continue
-            try:
-                return int(text)
-            except ValueError:
-                raise _RowDataError(f"annee non numerique ({raw!r})") from None
-        elif isinstance(raw, (int, float)):
-            if raw == 0:
-                continue
-            try:
-                return int(raw)
-            except (OverflowError, ValueError):
-                # float("nan") / float("inf")
-                raise _RowDataError(f"annee non numerique ({raw!r})") from None
+            if not _YEAR_DIGITS_RE.fullmatch(text):
+                raise _RowDataError(f"annee non numerique ({raw!r})")
+            value = int(text)
+        elif isinstance(raw, float):
+            # `is_integer()` couvre aussi nan et inf : ni l'un ni l'autre n'est
+            # entier, donc aucun ne passe. Une part decimale serait tronquee.
+            if not raw.is_integer():
+                raise _RowDataError(f"annee non numerique ({raw!r})")
+            value = int(raw)
+        elif isinstance(raw, int):
+            value = raw
         else:
             raise _RowDataError(f"annee non numerique ({raw!r})")
+        if value == 0:
+            # 0 / "0" est la sentinelle « annee absente » du payload amont.
+            continue
+        if not _MIN_PLAUSIBLE_YEAR <= value <= _MAX_PLAUSIBLE_YEAR:
+            raise _RowDataError(f"annee hors plage ({raw!r})")
+        return value
     return 0
 
 
@@ -285,7 +302,13 @@ def _resolve_nfo_path(folder: str, video: str) -> Path:
     Issue #564 (CWE-22) : `video` vient d'un PlanRow qui peut avoir ete altere
     (base modifiee, plan.jsonl importe). Un `..` ou un chemin absolu faisait
     ecrire le .nfo hors du dossier cible. Le containment est verifie sur les
-    chemins RESOLUS, ce qui couvre aussi l'echappement par lien symbolique.
+    chemins RESOLUS, ce qui couvre aussi l'echappement par lien symbolique ou
+    par jonction NTFS.
+
+    C'est le chemin RESOLU qui est retourne, donc celui sur lequel le
+    containment vient d'etre verifie : ecrire sur le chemin brut rouvrirait la
+    fenetre qu'on vient de fermer (un composant intermediaire transforme en
+    lien entre la verification et l'ecriture).
     """
     base = Path(folder)
     nfo_path = (base / video).with_suffix(".nfo")
@@ -296,7 +319,7 @@ def _resolve_nfo_path(folder: str, video: str) -> Path:
         raise _RowDataError(f"chemin illisible ({exc})") from None
     if nfo_resolved == base_resolved or not nfo_resolved.is_relative_to(base_resolved):
         raise _RowDataError("chemin .nfo hors du dossier du film")
-    return nfo_path
+    return nfo_resolved
 
 
 def _build_nfo_xml(title: str, year: int, original_title: str = "", tmdb_id: str = "", imdb_id: str = "") -> str:
@@ -366,8 +389,13 @@ def export_nfo_for_run(
             nfo_path = _resolve_nfo_path(folder, video)
         except _RowDataError as exc:
             errors += 1
-            details.append({"path": str(Path(folder) / video), "status": f"error: {exc}"})
-            _logger.warning("export nfo: row ignoree (%s) — %s", title, exc)
+            # Coherence avec #427 : la valeur alteree est LOGGEE, jamais
+            # renvoyee a l'UI. `Path(folder) / video` reflechissait le chemin
+            # brut de la row — chemin absolu compris quand `video` en portait
+            # un — c'est-a-dire exactement la valeur qu'on vient de refuser.
+            # Seul le dossier du film (la base du containment) repart.
+            details.append({"path": folder, "status": f"error: {exc}"})
+            _logger.warning("export nfo: row ignoree (%s, video=%r) — %s", title, video, exc)
             continue
 
         if nfo_path.exists() and not overwrite:

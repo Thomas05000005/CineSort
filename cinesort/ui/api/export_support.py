@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api._validators import is_valid_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -89,19 +90,6 @@ class _UnsafeRunId(ValueError):
     `requires_valid_run_id` est applique 7 fois dans `apply_support.py`.
     Defense en profondeur : l'exploitation exige une ECRITURE en base.
     """
-
-
-def _is_valid_run_id(run_id: Any) -> bool:
-    """Valide un run_id contre l'invariant PARTAGE `cinesort_api.RUN_ID_RE`.
-
-    L'import est tardif a dessein : `cinesort_api` importe ce module au
-    chargement (son bloc `from cinesort.ui.api import (..., export_support)`),
-    un import de module a module creerait un cycle. Le regex n'est pas
-    recopie ici : une copie deriverait le jour ou l'invariant bouge.
-    """
-    from cinesort.ui.api.cinesort_api import RUN_ID_RE
-
-    return bool(RUN_ID_RE.fullmatch(str(run_id or "").strip()))
 
 
 def _resolve_run_dir(state_dir: Path, run_id: str) -> Optional[Path]:
@@ -198,7 +186,9 @@ def export_full_library(api: Any) -> Dict[str, Any]:
             # validation. On refuse bruyamment plutot que de rendre un export
             # ampute en silence — le run_id fautif n'est PAS renvoye a l'UI
             # (il est logge), pour ne pas reflechir une valeur alteree.
-            if not _is_valid_run_id(last_done_run_id):
+            # `is_valid_run_id` vient de `_validators`, source de verite unique
+            # de l'invariant : pas de copie du regex, pas d'import differe.
+            if not is_valid_run_id(last_done_run_id):
                 logger.warning("export: run_id invalide en base (%r)", last_done_run_id)
                 return _err_response(
                     "Export refuse : identifiant de run invalide en base.",

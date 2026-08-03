@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import cinesort.ui.api._validators as _validators
 from cinesort.ui.api.export_support import (
     _SECRET_KEYS,
     EXPORT_FORMAT_VERSION,
@@ -17,6 +20,30 @@ from cinesort.ui.api.export_support import (
     _UnsafeRunId,
     export_full_library,
 )
+
+_IS_WINDOWS = os.name == "nt"
+
+
+def _make_dir_link(link: Path, target: Path) -> None:
+    """Cree un lien de dossier vers `target` (meme approche que l'issue #517).
+
+    Sous Windows : une VRAIE jonction NTFS (`mklink /J`). C'est le seul vecteur
+    par lequel la garde de containment peut se declencher en production, un
+    run_id bien forme ne pouvant pas contenir de `..`. La creation de jonction
+    ne demande aucun privilege : un echec est une erreur dure, jamais un skip.
+
+    Ailleurs : un lien symbolique de dossier, equivalent fonctionnel.
+    """
+    if _IS_WINDOWS:
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not link.exists():
+            raise AssertionError(f"mklink /J a echoue (rc={proc.returncode}): {proc.stdout} {proc.stderr}")
+        return
+    link.symlink_to(target, target_is_directory=True)
 
 
 class SanitizeSettingsTests(unittest.TestCase):
@@ -233,6 +260,35 @@ class RunIdValidationTests(unittest.TestCase):
         outside.mkdir()
         with self.assertRaises(_UnsafeRunId):
             _resolve_run_dir(self.state_dir, "../../outside")
+
+    def test_resolve_run_dir_refuses_a_junction_pointing_outside(self) -> None:
+        """Garde 2 sur son SEUL vecteur reel : un run_id BIEN FORME qui echappe.
+
+        `../../outside` ne prouve pas grand-chose : `is_valid_run_id` le rejette
+        en amont, la garde de containment n'est jamais atteinte en production
+        avec une telle valeur. Le cas exploitable est un run_id conforme au
+        regex dont le dossier `runs/tri_films_<id>` est une jonction NTFS (ou
+        un lien symbolique) vers l'exterieur de `state_dir`.
+        """
+        run_id = "20260803_141500_123"
+        self.assertTrue(_validators.is_valid_run_id(run_id), "le run_id du test doit passer la garde 1")
+        outside = self._tmp / "outside"
+        (outside / "runs_voles").mkdir(parents=True)
+        _make_dir_link(self.state_dir / "runs" / f"tri_films_{run_id}", outside / "runs_voles")
+
+        with self.assertRaises(_UnsafeRunId):
+            _resolve_run_dir(self.state_dir, run_id)
+
+    def test_export_refuses_a_run_whose_directory_escapes_state_dir(self) -> None:
+        """Bout en bout : l'echappement remonte en refus d'export, pas en export vide."""
+        run_id = "20260803_141500_123"
+        outside = self._tmp / "outside"
+        (outside / "runs_voles").mkdir(parents=True)
+        _make_dir_link(self.state_dir / "runs" / f"tri_films_{run_id}", outside / "runs_voles")
+
+        out = export_full_library(self._api_with_run_id(run_id))
+        self.assertFalse(out["ok"])
+        self.assertNotIn("films", out)
 
     def test_resolve_run_dir_returns_none_when_run_purged(self) -> None:
         """Un run efface du disque est un cas NORMAL : None, pas une exception."""

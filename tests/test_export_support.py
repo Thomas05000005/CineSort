@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,27 @@ from cinesort.app.export_support import (
     export_html_report,
     export_nfo_for_run,
 )
+
+_IS_WINDOWS = os.name == "nt"
+
+
+def _make_dir_link(link: Path, target: Path) -> None:
+    """Cree un lien de dossier vers `target` (meme approche que l'issue #517).
+
+    Sous Windows : une VRAIE jonction NTFS (`mklink /J`), que `is_symlink()` ne
+    voit pas — c'est ce qui rend le containment lexical insuffisant. Sa creation
+    ne demande aucun privilege : un echec est une erreur dure, jamais un skip.
+    """
+    if _IS_WINDOWS:
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not link.exists():
+            raise AssertionError(f"mklink /J a echoue (rc={proc.returncode}): {proc.stdout} {proc.stderr}")
+        return
+    link.symlink_to(target, target_is_directory=True)
 
 
 def _make_report(rows=None, counts=None):
@@ -261,6 +284,49 @@ class TestNfoYearIsolation(unittest.TestCase):
             self.assertEqual(result["written"], 1)
             self.assertEqual(result["errors"], 0)
 
+    def test_zero_year_sentinel_is_not_an_error(self):
+        """0 et "0" sont la sentinelle « annee absente » du payload amont."""
+        for sentinel in (0, "0"):
+            with self.subTest(year=sentinel), tempfile.TemporaryDirectory() as tmpdir:
+                rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": sentinel}]
+                result = export_nfo_for_run(rows, dry_run=True)
+                self.assertEqual(result["written"], 1)
+                self.assertEqual(result["errors"], 0)
+
+    def test_underscore_separator_is_not_silently_reinterpreted(self):
+        """`int("1_999")` vaut 1999 : accepter cette valeur ecrirait une AUTRE annee."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": "1_999"}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(result["written"], 0)
+            self.assertFalse((Path(tmpdir) / "x.nfo").exists())
+
+    def test_year_outside_plausible_range_is_refused(self):
+        """`<year>-500</year>` est ignore EN SILENCE par Kodi et Jellyfin."""
+        for bad in ("-500", -500, 99999):
+            with self.subTest(year=bad), tempfile.TemporaryDirectory() as tmpdir:
+                rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": bad}]
+                result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+                self.assertEqual(result["errors"], 1)
+                self.assertEqual(result["written"], 0)
+
+    def test_fractional_float_year_is_refused_instead_of_truncated(self):
+        """`int(2020.7)` tronque a 2020 : une valeur reinterpretee sans le dire."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": 2020.7}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(result["written"], 0)
+
+    def test_integral_float_year_still_works(self):
+        """Une annee JSON deserialisee en float entier reste une annee valide."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": 2020.0}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["written"], 1)
+            self.assertIn("<year>2020</year>", (Path(tmpdir) / "x.nfo").read_text(encoding="utf-8"))
+
 
 class TestNfoPathContainment(unittest.TestCase):
     """Issue #564 (CWE-22) — le .nfo ne peut pas s'ecrire hors du dossier du film."""
@@ -313,6 +379,59 @@ class TestNfoPathContainment(unittest.TestCase):
             result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
             self.assertEqual(result["written"], 1)
             self.assertTrue((Path(tmpdir) / "sub" / "film.nfo").exists())
+
+    def test_directory_junction_escape_is_refused(self):
+        """La docstring annonce que le containment couvre les liens : on l'eprouve.
+
+        Un sous-dossier du film qui est une jonction NTFS (ou un lien
+        symbolique) vers l'exterieur : le chemin est LEXICALEMENT contenu, seul
+        le containment sur les chemins RESOLUS peut le refuser.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "film"
+            base.mkdir()
+            outside = Path(tmpdir) / "outside"
+            outside.mkdir()
+            _make_dir_link(base / "lien", outside)
+
+            rows = [{"folder": str(base), "video": "lien/pwned.mkv", "proposed_title": "Pwned", "proposed_year": 2020}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(result["written"], 0)
+            self.assertFalse((outside / "pwned.nfo").exists())
+
+    def test_refused_row_does_not_reflect_the_tampered_path(self):
+        """Coherence avec #427 : la valeur refusee est loggee, pas renvoyee a l'UI."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "film"
+            base.mkdir()
+            outside = Path(tmpdir) / "outside"
+            outside.mkdir()
+            tampered = str(outside / "pwned.mkv")
+            rows = [{"folder": str(base), "video": tampered, "proposed_title": "Pwned", "proposed_year": 2020}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["errors"], 1)
+            reflected = " ".join(f"{d.get('path')} {d.get('status')}" for d in result["details"])
+            self.assertNotIn("pwned", reflected.lower(), reflected)
+
+    def test_written_path_is_the_one_that_was_validated(self):
+        """On ecrit sur le chemin RESOLU, celui sur lequel le containment a porte.
+
+        `sub/../x.mkv` reste dans le dossier du film, mais son chemin BRUT
+        traverse `sub` : ecrire dessus rouvre la fenetre entre la verification
+        et l'ecriture (`sub` transforme en lien entre les deux). pathlib ne
+        replie pas `..`, la difference brut/resolu est donc observable.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "film"
+            (base / "sub").mkdir(parents=True)
+            rows = [{"folder": str(base), "video": "sub/../x.mkv", "proposed_title": "X", "proposed_year": 2020}]
+            result = export_nfo_for_run(rows, overwrite=True, dry_run=False)
+            self.assertEqual(result["written"], 1)
+            announced = Path(result["details"][0]["path"])
+            self.assertNotIn("..", announced.parts)
+            self.assertEqual(announced, announced.resolve())
+            self.assertTrue(announced.is_file())
 
 
 class TestNfoProviderIds(unittest.TestCase):

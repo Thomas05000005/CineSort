@@ -13,14 +13,35 @@ bornir les valeurs `timeout_s` des endpoints de test de connexion
 distant compromis ou test E2E mal calibre) passe une valeur extreme
 (timeout_s=0, timeout_s=86400, NaN, str) qui ferait crasher le client
 HTTP ou bloquerait le thread API.
+
+Issue #427 : `RUN_ID_RE` habite ici, et non plus dans `cinesort_api`. Ce
+module est deja le domicile de l'invariant run_id (`requires_valid_run_id`)
+et n'importe que `cinesort.domain.i18n_messages` — donc tout module `ui`
+peut le prendre en import TOP-LEVEL, sans cycle et sans import differe.
 """
 
 from __future__ import annotations
 
+import re
 from functools import wraps
 from typing import Any, Callable
 
 from cinesort.domain.i18n_messages import t
+
+# Invariant de nommage d'un run_id, source de verite UNIQUE du paquet `ui`.
+# `cinesort_api.RUN_ID_RE` en est un re-export : ne jamais en recopier la
+# valeur ailleurs, une copie deriverait le jour ou l'invariant bouge.
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
+
+
+def is_valid_run_id(run_id: Any) -> bool:
+    """Valide un run_id contre `RUN_ID_RE`, apres la normalisation d'usage.
+
+    La normalisation (`str(x or "").strip()`) fait partie de l'invariant au
+    meme titre que le motif : elle est portee ici pour que tous les appelants
+    valident exactement la meme chose.
+    """
+    return bool(RUN_ID_RE.fullmatch(str(run_id or "").strip()))
 
 
 def clamp_timeout(value: Any, default: float = 10.0, lo: float = 1.0, hi: float = 60.0) -> float:
