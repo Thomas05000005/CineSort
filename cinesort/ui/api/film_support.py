@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api.settings_support import _SECRET_MASK, normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,17 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
     except ImportError:
         return out
     try:
-        settings = api.settings.get_settings()
+        # AUDIT F20 : _internal_settings() -> secrets EN CLAIR. get_settings()
+        # renvoie tmdb_api_key MASQUEE ("••••••••") depuis SEC-H2, et le masque
+        # etant truthy le garde `if not api_key` ne stoppait rien : la cle
+        # masquee partait telle quelle vers api.themoviedb.org -> 401 -> runtime
+        # /director/overview systematiquement null. Meme correctif qu'a
+        # tmdb_support.py:103 et library_actions_support.py:661-664.
+        settings = api._internal_settings()
         api_key = str(settings.get("tmdb_api_key") or "").strip()
-        if not api_key:
+        if not api_key or api_key == _SECRET_MASK:
+            # Masque residuel (settings.json illisible / secret non de-masque) :
+            # inutile de bruler des requetes HTTP vouees au 401.
             return out
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         try:
@@ -100,51 +109,72 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
             out["runtime"] = client.get_movie_runtime(int(tmdb_id))
         except (AttributeError, TypeError, ValueError) as exc:
             logger.debug("tmdb runtime fetch error: %s", exc)
-        # Director : via _get_movie_detail_cached -> data["credits"]["crew"]
-        # Le cache TmdbClient ne stocke pas le director ; on tape directement
-        # le HTTP detail pour beneficier du cache local file-side.
-        try:
-            detail = client._get_movie_detail_cached(int(tmdb_id))
-            if isinstance(detail, dict):
-                # overview / director ne sont pas systematiquement caches : on
-                # fait un appel direct si besoin.
-                pass
-        except (AttributeError, KeyError, TypeError, ValueError):
-            pass
-        # Director + overview : appel HTTP frais (le cache _get_movie_detail_cached
-        # ne stocke pas ces champs aujourd'hui). On utilise l'API requests
-        # directement avec append_to_response=credits pour avoir crew.
-        try:
-            import requests as _req
+        # AUDIT F20 (revue R1) : director + overview ne sont dans AUCUN champ du
+        # cache TmdbClient (_get_movie_detail_cached ne stocke que poster /
+        # collection / genres / budget / companies / runtime, et ne demande meme
+        # pas append_to_response=credits). Ils partaient donc en GET NON CACHE a
+        # chaque appel : 1 par ouverture de fiche film, et surtout N en parallele
+        # quand la vue Doublons hydrate N groupes (un library/get_film_full par
+        # groupe, Promise.allSettled). On range desormais le resultat dans le
+        # cache local du client (meme tmdb_cache.json, meme TTL configure) sous
+        # une cle dediee : le 2e appel et les suivants ne touchent plus le reseau.
+        extras_key = f"movie_extras|{int(tmdb_id)}"
+        cached_extras: Any = None
+        with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
+            cached_extras = client._cache_get(extras_key)
+        if isinstance(cached_extras, dict):
+            out["director"] = cached_extras.get("director") or None
+            out["overview"] = cached_extras.get("overview") or None
+            if not out.get("runtime"):
+                out["runtime"] = cached_extras.get("runtime") or None
+        else:
+            # Miss (ou cache indisponible) : appel HTTP frais avec
+            # append_to_response=credits pour recuperer crew -> Director.
+            try:
+                import requests as _req
 
-            r = _req.get(
-                f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
-                params={
-                    "api_key": api_key,
-                    "language": "fr-FR",
-                    "append_to_response": "credits",
-                },
-                timeout=float(settings.get("tmdb_timeout_s") or 10.0),
-            )
-            if r.status_code == 200:
-                data = r.json() or {}
-                # Director : prend le premier crew member job=Director
-                credits = data.get("credits") or {}
-                crew = credits.get("crew") or []
-                for c in crew:
-                    if str(c.get("job") or "").lower() == "director":
-                        out["director"] = str(c.get("name") or "").strip() or None
-                        break
-                out["overview"] = str(data.get("overview") or "").strip() or None
-                # Runtime aussi en fallback si pas deja recupere
-                if not out.get("runtime"):
+                r = _req.get(
+                    f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
+                    params={
+                        "api_key": api_key,
+                        "language": "fr-FR",
+                        "append_to_response": "credits",
+                    },
+                    timeout=float(settings.get("tmdb_timeout_s") or 10.0),
+                )
+                if r.status_code == 200:
+                    data = r.json() or {}
+                    # Director : prend le premier crew member job=Director
+                    credits = data.get("credits") or {}
+                    crew = credits.get("crew") or []
+                    for c in crew:
+                        if str(c.get("job") or "").lower() == "director":
+                            out["director"] = str(c.get("name") or "").strip() or None
+                            break
+                    out["overview"] = str(data.get("overview") or "").strip() or None
+                    # Runtime aussi en fallback si pas deja recupere
+                    fresh_runtime: Optional[int] = None
                     try:
                         rt = int(data.get("runtime") or 0)
-                        out["runtime"] = rt if rt > 0 else None
+                        fresh_runtime = rt if rt > 0 else None
                     except (TypeError, ValueError):
-                        pass
-        except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
-            logger.debug("tmdb extras http fetch error: %s", exc)
+                        fresh_runtime = None
+                    if not out.get("runtime"):
+                        out["runtime"] = fresh_runtime
+                    # On ne memorise QUE les reponses 200 : une erreur reseau ou
+                    # un 401 doit etre reessaye au prochain appel, pas fige pour
+                    # la duree du TTL.
+                    with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
+                        client._cache_set(
+                            extras_key,
+                            {
+                                "director": out.get("director"),
+                                "overview": out.get("overview"),
+                                "runtime": out.get("runtime") or fresh_runtime,
+                            },
+                        )
+            except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
+                logger.debug("tmdb extras http fetch error: %s", exc)
         with contextlib.suppress(OSError, AttributeError):
             client.flush()
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -248,8 +278,7 @@ def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any
             "error": "film_load_failed",
             "message": str(exc),
             "user_message": (
-                "Impossible de charger ce film (run obsolete ou base inaccessible). "
-                "Relance un scan ou redemarre l'app."
+                "Impossible de charger ce film (run obsolete ou base inaccessible). Relance un scan ou redemarre l'app."
             ),
         }
 
@@ -287,10 +316,41 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
 
         # R7-12 : flags d'etat pour exposer les actions d'annulation dans l'UI
         # (revenir au match auto / annuler le marquage pour suppression).
+        #
+        # Revue adversaire R3 2026-07-13 (defaut 5) : `is_marked_for_deletion` ne
+        # lit QUE la table DB, alors que l'apply honore l'UNION DB + legacy
+        # (apply_support.py:1584). C'etait le seul chemin de lecture des marques
+        # SANS le drain : sur une install portant encore un deletion_marks.json,
+        # ouvrir une fiche film affichait "Marquer pour suppression" pour un film
+        # qui SERA pourtant bucketise a l'apply. On draine donc ici aussi, et on
+        # prend l'UNION avec les row_ids restes en attente (drain DB en echec).
+        _legacy_marked = set()
+        try:
+            from cinesort.ui.api.library_actions_support import (  # noqa: PLC0415
+                migrate_legacy_deletion_marks,
+            )
+
+            _legacy_marked = set(migrate_legacy_deletion_marks(api, resolved_rid) or [])
+        except (
+            ImportError,
+            AttributeError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            sqlite3.Error,
+        ) as exc:
+            logger.warning("drain deletion_marks legacy ignore run_id=%s: %s", resolved_rid, exc)
+
+        _is_marked = str(row_id) in _legacy_marked
         try:
             _has_override = store.film_modal.get_tmdb_override(run_id=resolved_rid, row_id=str(row_id)) is not None
-            _is_marked = bool(store.film_modal.is_marked_for_deletion(run_id=resolved_rid, row_id=str(row_id)))
-        except (AttributeError, OSError, TypeError, ValueError):
+            # Revue adversaire R3 (defaut 5) : sqlite3.Error n'herite PAS d'OSError.
+            _is_marked = _is_marked or bool(
+                store.film_modal.is_marked_for_deletion(run_id=resolved_rid, row_id=str(row_id))
+            )
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
             pass
 
         # Perceptual
@@ -389,8 +449,7 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
             new_candidates.append(new_cand)
         if multiple_match_count > 0:
             logger.warning(
-                "get_film_full: %d candidat(s) duplique(s) avec tmdb_id=%s "
-                "pour row_id=%s — un seul marque chosen=True",
+                "get_film_full: %d candidat(s) duplique(s) avec tmdb_id=%s pour row_id=%s — un seul marque chosen=True",
                 multiple_match_count,
                 chosen_tmdb_id,
                 row_id,

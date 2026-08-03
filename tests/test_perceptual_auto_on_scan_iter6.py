@@ -148,10 +148,7 @@ class PerceptualAutoOnScanIter6Tests(unittest.TestCase):
         # Format _run_state.RunState.log : items {"ts","level","msg"}.
         logs_status = api.run.get_status(start["run_id"], 0)
         all_logs = logs_status.get("logs") or status.get("logs") or []
-        warn_msgs = [
-            str(l.get("msg", "") if isinstance(l, dict) else l)
-            for l in all_logs
-        ]
+        warn_msgs = [str(l.get("msg", "") if isinstance(l, dict) else l) for l in all_logs]
         joined = " | ".join(warn_msgs)
         self.assertIn(
             "perceptual_auto_on_scan",

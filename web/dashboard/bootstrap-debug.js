@@ -10,6 +10,10 @@
   window.__BOOT_DEBUG_INSTALLED = true;
   window.__BOOT_DEBUG_ERRORS = errors;
   window.addEventListener("error", function (ev) {
+    // LOTC-M5 : les error events de RESSOURCES (img/script/link) arrivent ici
+    // en capture SANS message/filename -> log bruit "undefined" partout ; le
+    // listener resource.error dedie ci-dessous les couvre deja.
+    if (!ev.message && !ev.filename) return;
     record("window.error", {
       message: ev.message,
       source: ev.filename,

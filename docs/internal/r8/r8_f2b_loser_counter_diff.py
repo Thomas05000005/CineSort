@@ -15,7 +15,9 @@ Prouve casse->correct :
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2b_loser_counter_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import re
 import tempfile
@@ -53,16 +55,25 @@ def run():
     tmp = Path(tempfile.mkdtemp(prefix="cs_f2b_cnt_"))
     root = tmp / "lib"
     bucket = root / "_review" / "_duplicates_user_decided"
-    f1 = root / "Loser (2020)"; f1.mkdir(parents=True); (f1 / "a.mkv").write_bytes(b"a")
+    f1 = root / "Loser (2020)"
+    f1.mkdir(parents=True)
+    (f1 / "a.mkv").write_bytes(b"a")
     cfg, res = Cfg(root), core.ApplyResult()
-    move_duplicate_losers_to_user_decided(cfg, [Row(row_id="L1", folder=str(f1), kind="single")], {"L1"},
-                                          duplicates_user_decided_root=bucket, dry_run=False,
-                                          log=lambda lv, m: None, res=res, record_op=lambda op: None)
+    move_duplicate_losers_to_user_decided(
+        cfg,
+        [Row(row_id="L1", folder=str(f1), kind="single")],
+        {"L1"},
+        duplicates_user_decided_root=bucket,
+        dry_run=False,
+        log=lambda lv, m: None,
+        res=res,
+        record_op=lambda op: None,
+    )
     di_moved = res.duplicates_identical_moved_count
     di_deleted = res.duplicates_identical_deleted_count
     ud_moved = getattr(res, "duplicates_user_decided_moved_count", "<absent>")
-    invariant_ok = (di_moved == di_deleted)  # 0 == 0 (le loser ne pollue plus le compteur byte-identique)
-    dedicated_ok = (ud_moved == 1)
+    invariant_ok = di_moved == di_deleted  # 0 == 0 (le loser ne pollue plus le compteur byte-identique)
+    dedicated_ok = ud_moved == 1
     loser_in_real_bucket = any(bucket.rglob("a.mkv"))
     results["S1_invariant_moved_eq_deleted"] = invariant_ok
     results["S1_compteur_dedie_loser"] = dedicated_ok
@@ -75,8 +86,9 @@ def run():
 
     # ---- S2 : chemin de recuperation pointe le bucket REEL (verif code apply_support) ----
     src = Path("cinesort/ui/api/apply_support.py").read_text(encoding="utf-8", errors="replace")
-    points_real = bool(re.search(r"duplicates_user_decided_moved_count > 0", src)) and \
-        bool(re.search(r"_duplicates_user_decided['\"]\}", src) or "_duplicates_user_decided'" in src)
+    points_real = bool(re.search(r"duplicates_user_decided_moved_count > 0", src)) and bool(
+        re.search(r"_duplicates_user_decided['\"]\}", src) or "_duplicates_user_decided'" in src
+    )
     # AVANT : seul _duplicates_identical etait propose en chemin de recup pour les losers.
     results["S2_chemin_recup_reel"] = points_real
     print("\n=== S2 (R8-018 chemin de recuperation reel) ===")
