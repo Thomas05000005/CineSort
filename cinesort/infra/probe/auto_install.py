@@ -212,12 +212,15 @@ def _resolve_expected_sha256(env_var: str, override: Optional[str], constant: Op
 
 
 def _assert_https(url: str) -> None:
-    """Refuse les URLs non-HTTPS (defense en profondeur cote URL).
+    """Refuse tout schema d'URL autre que HTTPS.
 
-    Note : on autorise file:// uniquement pour tests unitaires (mocks).
+    `file://` etait tolere « pour les tests unitaires » : c'etait un
+    contournement du controle de transport laisse dans le code de production.
+    Les tests simulent desormais le transport (`urlretrieve` mocke) et n'ont
+    plus besoin de cette breche.
     """
     scheme = urlparse(url).scheme.lower()
-    if scheme not in ("https", "file"):
+    if scheme != "https":
         raise IntegrityError(f"URL scheme '{scheme}' refuse (HTTPS requis) : {url}")
 
 
@@ -310,7 +313,12 @@ def _download_bounded(url: str, dest: str, *, label: str) -> None:
     """
     _assert_https(url)
     with _socket_timeout(_DOWNLOAD_TIMEOUT_S):
-        urlretrieve(url, dest, _bounded_reporthook(label))
+        # nosec B310 - le schema est verifie HTTPS juste au-dessus (aucun
+        # file:// ni schema exotique n'est accepte), l'URL est une constante du
+        # module et non une entree utilisateur, le volume est borne par le
+        # reporthook, et l'archive obtenue n'est utilisee qu'apres verification
+        # de son empreinte SHA256.
+        urlretrieve(url, dest, _bounded_reporthook(label))  # nosec B310
     size = os.path.getsize(dest)
     if size > _MAX_ARCHIVE_BYTES:
         with suppress(OSError):

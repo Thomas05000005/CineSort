@@ -256,6 +256,12 @@ class TestSha256Verification(unittest.TestCase):
         """HTTPS passe sans exception."""
         _assert_https("https://example.com/x.zip")  # no raise
 
+    def test_assert_https_rejects_file_scheme(self):
+        """`file://` n'est plus tolere : c'etait un contournement du controle de transport."""
+        for url in ("file:///C:/tmp/ffmpeg.zip", "ftp://example.com/x.zip", "javascript:alert(1)"):
+            with self.assertRaises(IntegrityError, msg=url):
+                _assert_https(url)
+
     def test_verify_archive_without_pin_fails_closed(self):
         """#466 — sans empreinte de reference, _verify_archive REFUSE et efface l'archive.
 
