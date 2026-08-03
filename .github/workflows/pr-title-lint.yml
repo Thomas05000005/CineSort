@@ -45,6 +45,17 @@ jobs:
             style
             revert
             deps
+            # Ajoutes le 2026-08-03. Le bot d'audit produit ces deux types depuis
+            # des mois et ils portent une information que `fix` dilue : `sec` =
+            # correctif de securite (CWE identifie), `rel` = fiabilite (ecriture
+            # atomique, fsync, course entre ecrivains). Ils n'etaient pas dans la
+            # liste, donc le check OBLIGATOIRE « Validate PR title » recalait ces
+            # PR quelle que soit la qualite du code : 11 PR ouvertes bloquees pour
+            # cette seule raison, dont 3 correctifs de securite. Les autoriser vaut
+            # mieux que renommer au cas par cas — la convention existe deja dans
+            # les faits, et le renommage effacerait le signal.
+            sec
+            rel
           requireScope: false
           subjectPattern: ^[A-Za-z0-9_].+$
           subjectPatternError: |
