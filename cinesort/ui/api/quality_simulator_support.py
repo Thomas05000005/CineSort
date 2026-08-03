@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -440,8 +441,6 @@ def _group_avg_delta(results: List[Dict[str, Any]], key: str) -> Dict[str, Dict[
 
 
 def _slugify(name: str) -> str:
-    import re
-
     s = str(name).strip().lower()
     s = re.sub(r"[^a-z0-9]+", "_", s)
     return s.strip("_")[:40] or "custom"

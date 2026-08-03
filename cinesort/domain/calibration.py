@@ -18,23 +18,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, Optional
 
+# SCORE-02 (Vague M, M-06) : centralisation des helpers tiers dans
+# tiers_helpers. On reexporte tier_ordinal pour ne pas casser les imports
+# existants (cinesort.domain.calibration.tier_ordinal).
+from cinesort.domain.tiers_helpers import tier_ordinal
+
 logger = logging.getLogger(__name__)
-
-
-# Ordre des tiers (du plus bas au plus haut), pour calculer les deltas ordinaux.
-_TIER_ORDER = ["Reject", "Bronze", "Silver", "Gold", "Platinum"]
-
-
-def tier_ordinal(tier: str) -> int:
-    """Retourne le rang du tier (0 = Reject, 4 = Platinum). -1 si inconnu."""
-    t = str(tier or "").strip().title()
-    # Accepter les alias legacy
-    legacy = {"Premium": "Platinum", "Bon": "Gold", "Moyen": "Silver", "Mauvais": "Reject", "Faible": "Bronze"}
-    t = legacy.get(t, t)
-    try:
-        return _TIER_ORDER.index(t)
-    except ValueError:
-        return -1
 
 
 def compute_tier_delta(computed_tier: str, user_tier: str) -> int:

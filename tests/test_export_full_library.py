@@ -10,9 +10,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from cinesort.ui.api.export_support import (
+    _SECRET_KEYS,
     EXPORT_FORMAT_VERSION,
     _sanitize_settings,
-    _SECRET_KEYS,
     export_full_library,
 )
 

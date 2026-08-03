@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.tiers_helpers import normalize_tiers as _normalize_tiers
 
 # --- Libellés catégories (utilisés dans narrative + UI) -----------------
 
@@ -178,11 +179,16 @@ def _compute_baseline(
     tiers: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Distance au tier supérieur + résumé des seuils."""
-    # Normaliser les seuils (compat anciens noms)
-    plat = int(tiers.get("platinum", tiers.get("premium", 85)) or 85)
-    gold = int(tiers.get("gold", tiers.get("bon", 68)) or 68)
-    silver = int(tiers.get("silver", tiers.get("moyen", 54)) or 54)
-    bronze = int(tiers.get("bronze", 30) or 30)
+    # SCORE-01 (Vague M, M-06) : utiliser tiers_helpers.normalize_tiers pour
+    # aligner les defaults sur la calibration biblio reelle v1.5.7 (70/66/55/40).
+    # Avant : defaults 85/68/54/30 (legacy pre-v1.5.5) qui divergeaient de
+    # quality_score.default_quality_profile() -> distance_to_next_tier faux pour
+    # les profils sans seuils explicites.
+    normalized = _normalize_tiers(tiers)
+    plat = normalized["platinum"]
+    gold = normalized["gold"]
+    silver = normalized["silver"]
+    bronze = normalized["bronze"]
 
     thresholds = {
         "Platinum": plat,
@@ -194,11 +200,27 @@ def _compute_baseline(
 
     next_tier: Optional[str] = None
     distance: Optional[int] = None
-    for name, threshold in order:
-        if threshold > score:
-            next_tier = name
-            distance = max(0, threshold - score)
-            break
+    # BUG-EXPLAIN-BASELINE-CAP (Lot D 2026-07) : raisonner depuis le tier
+    # AFFICHE (deja plafonne/ajuste par quality_score : cap probe FAILED ->
+    # Silver, cap CAM -> Bronze, hierarchy VP-B) et non depuis le score seul.
+    # Sinon un film cape Silver avec score >= seuil Platinum repondait
+    # next_tier=null ("aucun tier superieur") en contradiction avec le tier
+    # montre a l'utilisateur. distance peut valoir 0 dans ce cas : le blocage
+    # n'est pas une question de points (garde securite), cf _generate_suggestions.
+    tier_index = {name.lower(): i for i, (name, _) in enumerate(order)}
+    displayed_idx = tier_index.get(str(tier or "").strip().lower())
+    if displayed_idx is not None:
+        if displayed_idx + 1 < len(order):
+            next_name, next_threshold = order[displayed_idx + 1]
+            next_tier = next_name
+            distance = max(0, next_threshold - score)
+    else:
+        # Tier non canonique/inconnu : fallback historique base sur le score.
+        for name, threshold in order:
+            if threshold > score:
+                next_tier = name
+                distance = max(0, threshold - score)
+                break
 
     return {
         "tier_thresholds": thresholds,
@@ -224,10 +246,13 @@ def _generate_suggestions(
                 seen.add(text)
                 break
 
-    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique
+    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique.
+    # BUG-EXPLAIN-BASELINE-CAP : distance == 0 signifie tier plafonné par une
+    # garde sécurité (score déjà au-dessus du seuil) — une amélioration de
+    # points n'y changerait rien, donc pas de suggestion générique trompeuse.
     distance = baseline.get("distance_to_next_tier")
     next_tier = baseline.get("next_tier")
-    if not suggestions and distance is not None and distance <= 5 and next_tier:
+    if not suggestions and distance is not None and 1 <= distance <= 5 and next_tier:
         suggestions.append(
             f"Score à {distance} point(s) du tier {next_tier} — une légère amélioration audio ou vidéo suffirait."
         )

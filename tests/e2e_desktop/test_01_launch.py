@@ -6,9 +6,8 @@ Lancer : pytest tests/e2e_desktop/test_01_launch.py -v
 
 from __future__ import annotations
 
-
-from .pages.base_page import BasePage
 from .pages.accueil_page import AccueilPage
+from .pages.base_page import BasePage
 
 
 class TestAppLaunch:

@@ -90,6 +90,21 @@ class TestHtmlReport(unittest.TestCase):
         self.assertIn("Platinum", html)
         self.assertIn("Gold", html)
 
+    def test_tier_colors_are_invariant(self):
+        """GATE AUDIT 2026-06-10 : l'export HTML doit utiliser les couleurs tier
+        INVARIANTES (memoire user / CLAUDE.md #2), pas les anciennes fausses."""
+        from cinesort.app.export_support import _TIER_COLORS
+
+        self.assertEqual(_TIER_COLORS["platinum"].upper(), "#E5E4E2")
+        self.assertEqual(_TIER_COLORS["gold"].upper(), "#FFD700")
+        self.assertEqual(_TIER_COLORS["silver"].upper(), "#C0C0C0")
+        self.assertEqual(_TIER_COLORS["bronze"].upper(), "#CD7F32")
+        # retro-compat alignee aussi
+        self.assertEqual(_TIER_COLORS["bon"].upper(), "#FFD700")
+        # plus aucune des anciennes couleurs fausses
+        for bad in ("#e2e8f0", "#f59e0b", "#94a3b8", "#ca8a04"):
+            self.assertNotIn(bad, [v.lower() for v in _TIER_COLORS.values()])
+
     def test_contains_table(self):
         html = export_html_report(_make_report())
         self.assertIn("Avatar", html)
