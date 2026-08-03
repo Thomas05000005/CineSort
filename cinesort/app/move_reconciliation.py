@@ -22,12 +22,28 @@ le caller peut afficher dans l'UI / logs.
 
 Verification d'identite (issue #512) : `exists()` seul ne prouve RIEN. Un
 homonyme a dst (ancien apply skippe, re-scan, fichier remis a la main) suffisait
-a rendre un verdict `completed` sur un fichier DIFFERENT, donc a supprimer la
-trace d'un deplacement qui n'avait jamais abouti — et un undo ne peut pas
-defaire ce dont il n'a plus la trace. `apply_pending_moves` stocke justement
-l'empreinte capturee AVANT le move (`src_sha1` + `src_size`, cf.
-`apply_core.py` MOVE_FILE et MOVE_DIR) : on la confronte au contenu reel de dst
-avant de conclure.
+a rendre un verdict `completed` sur un fichier DIFFERENT. `apply_pending_moves`
+stocke justement l'empreinte capturee AVANT le move (`src_sha1` + `src_size`) :
+on la confronte au contenu reel de dst avant de conclure.
+
+Ce que ce controle change, exactement — et ce qu'il ne change PAS. L'entree
+pending est supprimee apres examen dans TOUS les cas, `mismatched` compris : il
+ne s'agit donc pas de rendre un deplacement annulable. La trace que lisent
+l'undo et le rollback est `apply_operations` (cf. `apply_rollback.py`), pas
+cette table, qui n'est qu'un journal write-ahead d'atomicite. Ce qui change,
+c'est qu'un `completed` mensonger devient une alerte honnete : l'operateur
+apprend que la destination ne contient pas son fichier, au lieu de croire le
+deplacement termine.
+
+Portee reelle de la branche MOVE_DIR. Le SEUL site de production qui ecrit
+aujourd'hui une empreinte dans `apply_pending_moves` est le MOVE_FILE de
+`apply_core` (`atomic_move(..., src_sha1=..., src_size=...)`). Les moves de
+DOSSIER n'en passent aucune, et `apply_single` renomme le dossier hors journal
+(son empreinte part dans `record_apply_op` -> `apply_operations`, une autre
+table). `_dir_contains_fingerprint` est donc atteinte depuis la production dans
+le seul cas ou la destination d'un MOVE_FILE se trouve occupee par un DOSSIER ;
+pour un vrai MOVE_DIR elle est PREVENTIVE, prete pour le jour ou ces sites
+porteront une empreinte.
 """
 
 from __future__ import annotations
@@ -36,6 +52,8 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from cinesort.app.apply_core import sha1_quick
 
 _logger = logging.getLogger(__name__)
 
@@ -64,11 +82,12 @@ def _file_matches_fingerprint(path: Path, expected_sha1: str, expected_size: int
     except (OSError, PermissionError):
         return None
     if actual_size != expected_size:
-        return False  # pre-filtre a cout nul : inutile de hasher
-    # Import local : `apply_core` est un gros module de la meme couche, l'importer
-    # au niveau module creerait un cycle a l'import du boot (cf. apply_rollback).
-    from cinesort.app.apply_core import sha1_quick
-
+        # Ce n'est PAS qu'une optimisation, c'est une garde a part entiere :
+        # `sha1_quick` (apply_core.py:273) ne hashe que les 8 premiers Mo + les 8
+        # derniers Mo des le moment ou le fichier atteint 16 Mio. Deux fichiers de
+        # TAILLES DIFFERENTES qui partagent ces deux extremites ont donc exactement
+        # le meme sha1_quick : seule la comparaison de taille les separe.
+        return False
     actual_sha1 = sha1_quick(path).strip().lower()
     if not actual_sha1:
         # sha1_quick renvoie "" sur OSError/timeout : on ne sait pas, on ne
@@ -78,12 +97,16 @@ def _file_matches_fingerprint(path: Path, expected_sha1: str, expected_size: int
 
 
 def _dir_contains_fingerprint(dst: Path, expected_sha1: str, expected_size: int) -> Optional[bool]:
-    """Cas MOVE_DIR : l'empreinte est celle de la video principale, pas du dossier.
+    """dst est un DOSSIER : l'empreinte est celle d'un fichier, pas du dossier.
+
+    Deux cas y menent : la destination d'un MOVE_FILE occupee par un dossier (le
+    seul atteignable depuis la production aujourd'hui, cf. docstring du module),
+    et un vrai MOVE_DIR le jour ou ces sites poseront une empreinte.
 
     `apply_core.find_main_video_in_folder` prend le plus gros fichier video du
     dossier, sans recursion : on cherche donc, a la racine de dst, un fichier
-    qui porte l'empreinte enregistree. Le pre-filtre par taille evite de hasher
-    autre chose que les candidats plausibles.
+    qui porte l'empreinte enregistree (taille ET sha1, cf.
+    `_file_matches_fingerprint`).
     """
     try:
         entries = [child for child in dst.iterdir() if child.is_file()]
@@ -112,7 +135,9 @@ def _classify_dst_present(entry: Dict[str, Any], dst: Path) -> str:
     if dst.is_file():
         matched = _file_matches_fingerprint(dst, expected_sha1, expected_size)
     elif dst.is_dir():
-        # MOVE_DIR : dst est le DOSSIER deplace, l'empreinte celle de la video.
+        # dst est un dossier : l'empreinte est celle d'un fichier, on la cherche
+        # a l'interieur (MOVE_FILE dont la cible est squattee par un dossier, ou
+        # MOVE_DIR le jour ou ces sites poseront une empreinte).
         matched = _dir_contains_fingerprint(dst, expected_sha1, expected_size)
     else:
         # Ni fichier ni dossier alors que `exists()` etait vrai juste avant :

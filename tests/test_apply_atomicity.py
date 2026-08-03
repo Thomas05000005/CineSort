@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 
 from cinesort.app.apply_core import sha1_quick
@@ -36,7 +37,9 @@ from cinesort.app.move_reconciliation import (
     reconcile_at_boot,
     reconcile_pending_moves,
 )
-from cinesort.infra.db.sqlite_store import SQLiteStore
+from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
+from cinesort.ui.api import cinesort_api as backend
+from cinesort.ui.api import runtime_support
 
 
 def _make_store() -> tuple[SQLiteStore, Path]:
@@ -471,6 +474,41 @@ class ClassifyPendingIdentityTests(unittest.TestCase):
         entry = self._entry(self.src, self.dst, sha1="a" * 40, size=expected_size)
         self.assertEqual(_classify_pending(entry), "mismatched")
 
+    def test_meme_sha1_quick_mais_taille_differente_nest_pas_completed(self) -> None:
+        """La comparaison de taille est une GARDE, pas un simple pre-filtre.
+
+        `sha1_quick` (apply_core.py:273) ne hashe QUE les 8 premiers Mo et les 8
+        derniers Mo des que le fichier atteint 16 Mio. Deux fichiers de tailles
+        differentes qui partagent ces deux extremites ont donc le MEME
+        sha1_quick : sans la comparaison de taille, l'impostuer passerait
+        `completed`. Ce test construit exactement cette collision.
+        """
+        block = bytes(range(256)) * 4096  # 1 Mio deterministe
+        tail = block[::-1]
+
+        def _forge(path: Path, filler: bytes) -> None:
+            with path.open("wb") as handle:
+                for _ in range(8):  # 8 Mio de tete, identiques
+                    handle.write(block)
+                handle.write(filler)  # seul le ventre differe
+                for _ in range(8):  # 8 Mio de queue, identiques
+                    handle.write(tail)
+
+        reference = self._tmp / "reference.mkv"
+        _forge(reference, b"\x01")
+        _forge(self.dst, b"\x01\x02")
+        expected_sha1, expected_size = sha1_quick(reference), reference.stat().st_size
+
+        self.assertEqual(
+            sha1_quick(self.dst),
+            expected_sha1,
+            "prealable du test : les deux fichiers doivent bien collisionner sur sha1_quick",
+        )
+        self.assertNotEqual(self.dst.stat().st_size, expected_size, "prealable : tailles differentes")
+
+        entry = self._entry(self.src, self.dst, sha1=expected_sha1, size=expected_size)
+        self.assertEqual(_classify_pending(entry), "mismatched")
+
     def test_sans_empreinte_enregistree_le_verdict_reste_completed(self) -> None:
         """Retro-compat : lignes anterieures aux colonnes d'empreinte."""
         self.dst.write_bytes(b"peu importe")
@@ -597,6 +635,72 @@ class ReconcileIdentityReportTests(unittest.TestCase):
         notify.notify.assert_called_once()
         args, _kwargs = notify.notify.call_args
         self.assertEqual(args[0], "error")
+
+
+class ReconcileBootSummaryLogTests(unittest.TestCase):
+    """Issue #512 — la ligne de synthese du boot ne doit pas taire les nouveaux verdicts.
+
+    Elle ne loguait que examined / completed / rolled_back / duplicated / lost :
+    une entree `mismatched`, pourtant qualifiee de critique, s'affichait
+    « 1 examinee, 0 completed, 0 rolled_back, 0 duplicated, 0 lost ». Le detail
+    partait bien en `error`, mais la synthese, elle, mentait.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_reconcile_boot_log_"))
+        self.state_dir = self._tmp / "state"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        runtime_support._RECONCILED_STATE_DIRS.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _seed_pending(self, *, sha1: str, size: int, payload: bytes) -> None:
+        """Pose une entree pending dont la source a disparu et dont dst existe."""
+        store = SQLiteStore(db_path_for_state_dir(self.state_dir), busy_timeout_ms=5000)
+        store.initialize()
+        dst = self._tmp / "dst.mkv"
+        dst.write_bytes(payload)
+        store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self._tmp / "disparu.mkv"),
+            dst_path=str(dst),
+            src_sha1=sha1,
+            src_size=size if size >= 0 else dst.stat().st_size,
+        )
+        store.close()
+
+    def _boot_summary(self) -> str:
+        """Boot reel via `_get_or_create_infra` ; retourne la ligne de synthese."""
+        runtime_support._RECONCILED_STATE_DIRS.clear()
+        api = backend.CineSortApi()
+        with self.assertLogs("cinesort.ui.api.runtime_support", level="INFO") as captured:
+            store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
+        store.close()
+        summary = [line for line in captured.output if "reconcile_at_boot:" in line]
+        self.assertEqual(len(summary), 1, f"une seule ligne de synthese attendue: {captured.output}")
+        return summary[0]
+
+    def test_la_synthese_de_boot_compte_les_mismatched(self) -> None:
+        # Meme taille, empreinte differente -> verdict `mismatched`.
+        self._seed_pending(sha1="a" * 40, size=-1, payload=b"un tout autre film")
+        line = self._boot_summary()
+        self.assertIn("1 entree(s) examinee(s)", line)
+        self.assertIn("1 mismatched", line)
+
+    def test_la_synthese_de_boot_compte_les_unverified(self) -> None:
+        """`sha1_quick` renvoie "" quand la lecture echoue (NAS deconnecte, timeout).
+
+        Le verdict devient alors `unverified` : la synthese doit le dire.
+        """
+        payload = b"le vrai film" * 32
+        reference = self._tmp / "reference.mkv"
+        reference.write_bytes(payload)
+        self._seed_pending(sha1=sha1_quick(reference), size=len(payload), payload=payload)
+        with mock.patch("cinesort.app.move_reconciliation.sha1_quick", return_value=""):
+            line = self._boot_summary()
+        self.assertIn("1 entree(s) examinee(s)", line)
+        self.assertIn("1 unverified", line)
 
 
 if __name__ == "__main__":
