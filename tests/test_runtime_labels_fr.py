@@ -56,9 +56,7 @@ def test_sidebar_labels_utf8_strict(dashboard_page, description: str, selector: 
     capturera la divergence byte-pour-byte.
     """
     dashboard_page.wait_for_selector(selector, timeout=8000)
-    actual = dashboard_page.evaluate(
-        f"() => (document.querySelector({selector!r})?.textContent || '').trim()"
-    )
+    actual = dashboard_page.evaluate(f"() => (document.querySelector({selector!r})?.textContent || '').trim()")
     assert actual == expected, (
         f"[{description}] mojibake detecte : "
         f"attendu={expected!r} ({expected.encode('utf-8').hex()}), "
@@ -118,9 +116,7 @@ def test_traitement_etape2_label_utf8_strict(dashboard_page) -> None:
     )
     # Strict : ne doit JAMAIS contenir les patterns mojibake double-encode.
     for bad in ("Ã©", "Ã¨", "Ã ", "Ã\xaa", "�"):
-        assert bad not in actual, (
-            f"[Etape 2] pattern mojibake {bad!r} detecte dans rendu DOM : {actual!r}"
-        )
+        assert bad not in actual, f"[Etape 2] pattern mojibake {bad!r} detecte dans rendu DOM : {actual!r}"
 
 
 @pytest.mark.runtime
@@ -167,6 +163,4 @@ def test_rest_api_token_masked_bullets_utf8(dashboard_page) -> None:
         )
         # Verifier qu'on n'a pas le mojibake `â€¢` (bullet UTF-8 decode-en-latin1).
         for bad in ("â€¢", "�"):
-            assert bad not in value, (
-                f"[rest_api_token] pattern mojibake {bad!r} dans mask : {value!r}"
-            )
+            assert bad not in value, f"[rest_api_token] pattern mojibake {bad!r} dans mask : {value!r}"

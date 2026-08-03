@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gc
 import tempfile
 import threading
 import time
@@ -22,6 +23,13 @@ class QualityScoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_quality_")
         self.addCleanup(self._tmp.cleanup)
+        # addCleanup est LIFO : ce gc.collect() s'execute AVANT la suppression du
+        # dossier temporaire. `mock.patch(..., side_effect=OSError(...))` garde
+        # l'INSTANCE d'exception vivante, donc son __traceback__, donc les frames
+        # et leurs locals (connexions sqlite3 comprises) : ce sont des cycles que
+        # seul le GC casse. Sans ce collect, la suppression du tmpdir echouait
+        # sous Windows avec WinError 32 (fichier state/db/cinesort.sqlite verrouille).
+        self.addCleanup(gc.collect)
         self.root = Path(self._tmp.name) / "root"
         self.state_dir = Path(self._tmp.name) / "state"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -91,12 +99,29 @@ class QualityScoreTests(unittest.TestCase):
                 "tmdb_enabled": False,
                 "collection_folder_enabled": True,
                 "probe_backend": "none",
+                # Le scan lance en fin de job des travaux de fond OPTIONNELS
+                # (recalcul qualite auto, analyse perceptuelle auto) dans des
+                # threads daemon qui SURVIVENT a `done=True` et continuent
+                # d'ecrire dans state/db/cinesort.sqlite. Sous Windows, ce
+                # handle encore ouvert fait echouer la suppression du dossier
+                # temporaire en teardown (WinError 32) : mesure du 2026-08-03,
+                # 7 echecs sur 8 executions de
+                # `pytest tests/test_i18n_infrastructure.py tests/test_i18n_round_trip.py
+                # tests/test_quality_score.py`.
+                # Ces tests pilotent analyze_quality_batch EXPLICITEMENT : le
+                # recalcul automatique n'est pas leur sujet, on le coupe pour
+                # que le run soit reellement termine quand `done` passe a True.
+                "auto_recompute_quality_on_scan": False,
+                "perceptual_auto_on_scan": False,
             }
         )
         self.assertTrue(start.get("ok"), start)
         run_id = str(start["run_id"])
 
-        deadline = time.monotonic() + 6.0
+        # 6 s suffisent en local mais pas forcement sur un runner GitHub sous
+        # coverage (2 vCPU, disque lent) : `done` n'est pose qu'apres le retour
+        # complet du thread de job, pas des la construction du plan.
+        deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
             st = api.run.get_status(run_id, 0)
             if st.get("done"):

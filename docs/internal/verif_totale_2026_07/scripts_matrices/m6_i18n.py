@@ -22,6 +22,7 @@ Ce que fait le script (lecture seule, aucun fichier source modifie) :
   6. Echantillon (max 20) de textes UI en dur dans les JS des vues/composants
      qui devraient passer par t() : TEXTE_EN_DUR.
 """
+
 from __future__ import annotations
 
 import io
@@ -31,7 +32,7 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[4]          # -> racine du repo CineSort
+ROOT = Path(__file__).resolve().parents[4]  # -> racine du repo CineSort
 WEB = ROOT / "web"
 LOCALES = ROOT / "locales"
 BACKEND = ROOT / "cinesort"
@@ -43,6 +44,7 @@ KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def load_flat(path: Path) -> dict[str, str]:
     """Charge un JSON de locale (utf-8-sig) et l'aplatit en cles dotted."""
@@ -70,45 +72,65 @@ def strip_js_comments(src: str) -> str:
     """
     out = []
     i, n = 0, len(src)
-    state = "code"          # code | line | block | sq | dq | tpl
+    state = "code"  # code | line | block | sq | dq | tpl
     while i < n:
         c = src[i]
         nxt = src[i + 1] if i + 1 < n else ""
         if state == "code":
             if c == "/" and nxt == "/":
-                state = "line"; out.append("  "); i += 2; continue
+                state = "line"
+                out.append("  ")
+                i += 2
+                continue
             if c == "/" and nxt == "*":
-                state = "block"; out.append("  "); i += 2; continue
+                state = "block"
+                out.append("  ")
+                i += 2
+                continue
             if c == "'":
                 state = "sq"
             elif c == '"':
                 state = "dq"
             elif c == "`":
                 state = "tpl"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
         elif state == "line":
             if c == "\n":
-                state = "code"; out.append(c)
+                state = "code"
+                out.append(c)
             else:
                 out.append(" ")
             i += 1
         elif state == "block":
             if c == "*" and nxt == "/":
-                state = "code"; out.append("  "); i += 2; continue
-            out.append(c if c == "\n" else " "); i += 1
+                state = "code"
+                out.append("  ")
+                i += 2
+                continue
+            out.append(c if c == "\n" else " ")
+            i += 1
         elif state in ("sq", "dq"):
             quote = "'" if state == "sq" else '"'
             if c == "\\":
-                out.append(c); out.append(nxt); i += 2; continue
+                out.append(c)
+                out.append(nxt)
+                i += 2
+                continue
             if c == quote or c == "\n":
                 state = "code"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
         else:  # tpl — approximation suffisante (pas de nesting de backticks)
             if c == "\\":
-                out.append(c); out.append(nxt); i += 2; continue
+                out.append(c)
+                out.append(nxt)
+                i += 2
+                continue
             if c == "`":
                 state = "code"
-            out.append(c); i += 1
+            out.append(c)
+            i += 1
     return "".join(out)
 
 
@@ -141,20 +163,18 @@ all_defined = fr_keys | en_keys
 
 # t('cle') / t("cle") — lookbehind pour exclure .t( split( etc. ; groupe 3 =
 # 1er char apres la string ("+" => concat dynamique, pas une cle complete).
-STATIC_RE = re.compile(
-    r"""(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)+?)\1\s*(.)?""", re.S)
+STATIC_RE = re.compile(r"""(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)+?)\1\s*(.)?""", re.S)
 TPL_RE = re.compile(r"(?<![\w$.])t\(\s*`([^`]*)`", re.S)
 IDENT_RE = re.compile(r"(?<![\w$.])t\(\s*(?!['\"`])([A-Za-z_$][\w$.\[\]]*)")
 LABELKEY_RE = re.compile(r"""\blabelKey\s*:\s*(['"])([A-Za-z0-9_.\-]+)\1""")
 # Prefixes de concat probables : string finissant par un point ("a.b." + x)
-CONCAT_PREFIX_RE = re.compile(
-    r"""(['"])([a-z0-9_]+(?:\.[a-z0-9_]+)+\.)\1\s*\+""")
+CONCAT_PREFIX_RE = re.compile(r"""(['"])([a-z0-9_]+(?:\.[a-z0-9_]+)+\.)\1\s*\+""")
 
-static_refs: dict[str, list[str]] = {}       # cle -> ["fichier:ligne", ...]
+static_refs: dict[str, list[str]] = {}  # cle -> ["fichier:ligne", ...]
 dynamic_prefixes: dict[str, list[str]] = {}  # prefixe -> emplacements
-ident_calls: list[str] = []                  # t(variable) — emplacements
+ident_calls: list[str] = []  # t(variable) — emplacements
 
-web_corpus: dict[str, str] = {}              # rel -> contenu sans commentaires
+web_corpus: dict[str, str] = {}  # rel -> contenu sans commentaires
 
 for path, rel in iter_web_files():
     raw = io.open(path, encoding="utf-8-sig", errors="replace").read()
@@ -187,12 +207,10 @@ for path, rel in iter_web_files():
         ident_calls.append(f"{rel}:{line_of(src, m.start())} (t({m.group(1)}))")
 
     for m in LABELKEY_RE.finditer(src):
-        static_refs.setdefault(m.group(2), []).append(
-            f"{rel}:{line_of(src, m.start())} (labelKey)")
+        static_refs.setdefault(m.group(2), []).append(f"{rel}:{line_of(src, m.start())} (labelKey)")
 
     for m in CONCAT_PREFIX_RE.finditer(src):
-        dynamic_prefixes.setdefault(m.group(2), []).append(
-            f"{rel}:{line_of(src, m.start())} (concat)")
+        dynamic_prefixes.setdefault(m.group(2), []).append(f"{rel}:{line_of(src, m.start())} (concat)")
 
 # --------------------------------------------------------------------------- #
 # 3-4. Croisement references <-> locales + divergences fr/en                  #
@@ -209,35 +227,51 @@ for key in sorted(static_refs):
         continue
     if not in_fr:
         missing_fr += 1
-        findings.append({
-            "verdict": "MANQUANTE_FR", "categorie": "ref_sans_locale",
-            "element": key, "preuve": locs,
-            "detail": "cle referencee dans web/ mais absente de locales/fr.json"
-                      + ("" if in_en else " (absente aussi de en.json)"),
-        })
+        findings.append(
+            {
+                "verdict": "MANQUANTE_FR",
+                "categorie": "ref_sans_locale",
+                "element": key,
+                "preuve": locs,
+                "detail": "cle referencee dans web/ mais absente de locales/fr.json"
+                + ("" if in_en else " (absente aussi de en.json)"),
+            }
+        )
     if not in_en:
         missing_en += 1
-        findings.append({
-            "verdict": "MANQUANTE_EN", "categorie": "ref_sans_locale",
-            "element": key, "preuve": locs,
-            "detail": "cle referencee dans web/ mais absente de locales/en.json"
-                      + ("" if in_fr else " (absente aussi de fr.json)"),
-        })
+        findings.append(
+            {
+                "verdict": "MANQUANTE_EN",
+                "categorie": "ref_sans_locale",
+                "element": key,
+                "preuve": locs,
+                "detail": "cle referencee dans web/ mais absente de locales/en.json"
+                + ("" if in_fr else " (absente aussi de fr.json)"),
+            }
+        )
 
 div_fr_only = sorted(fr_keys - en_keys)
 div_en_only = sorted(en_keys - fr_keys)
 for key in div_fr_only:
-    findings.append({
-        "verdict": "MANQUANTE_EN", "categorie": "divergence_locales",
-        "element": key, "preuve": ["locales/fr.json (presente) / locales/en.json (absente)"],
-        "detail": f"fr='{fr[key][:80]}'",
-    })
+    findings.append(
+        {
+            "verdict": "MANQUANTE_EN",
+            "categorie": "divergence_locales",
+            "element": key,
+            "preuve": ["locales/fr.json (presente) / locales/en.json (absente)"],
+            "detail": f"fr='{fr[key][:80]}'",
+        }
+    )
 for key in div_en_only:
-    findings.append({
-        "verdict": "MANQUANTE_FR", "categorie": "divergence_locales",
-        "element": key, "preuve": ["locales/en.json (presente) / locales/fr.json (absente)"],
-        "detail": f"en='{en[key][:80]}'",
-    })
+    findings.append(
+        {
+            "verdict": "MANQUANTE_FR",
+            "categorie": "divergence_locales",
+            "element": key,
+            "preuve": ["locales/en.json (presente) / locales/fr.json (absente)"],
+            "detail": f"en='{en[key][:80]}'",
+        }
+    )
 
 # --------------------------------------------------------------------------- #
 # 5. Cles definies jamais referencees (ORPHELINE / INCERTAIN)                 #
@@ -265,29 +299,39 @@ for key in sorted(all_defined):
     dyn = [p for p in prefixes if key.startswith(p)]
     if dyn:
         incert_dyn += 1
-        orphan_rows.append({
-            "verdict": "INCERTAIN", "categorie": "cle_dynamique_possible",
-            "element": key,
-            "preuve": dynamic_prefixes[dyn[0]][:2],
-            "detail": f"matche le prefixe dynamique '{dyn[0]}'",
-        })
+        orphan_rows.append(
+            {
+                "verdict": "INCERTAIN",
+                "categorie": "cle_dynamique_possible",
+                "element": key,
+                "preuve": dynamic_prefixes[dyn[0]][:2],
+                "detail": f"matche le prefixe dynamique '{dyn[0]}'",
+            }
+        )
         continue
     in_backend = (f'"{key}"' in backend_corpus) or (f"'{key}'" in backend_corpus)
     if in_backend:
         incert_backend += 1
-        orphan_rows.append({
-            "verdict": "INCERTAIN", "categorie": "referencee_backend_seulement",
-            "element": key, "preuve": ["cinesort/ (grep literal)"],
-            "detail": "cle absente de web/ mais literal present dans le backend python",
-        })
+        orphan_rows.append(
+            {
+                "verdict": "INCERTAIN",
+                "categorie": "referencee_backend_seulement",
+                "element": key,
+                "preuve": ["cinesort/ (grep literal)"],
+                "detail": "cle absente de web/ mais literal present dans le backend python",
+            }
+        )
         continue
     orphan += 1
-    orphan_rows.append({
-        "verdict": "ORPHELINE", "categorie": "definie_jamais_referencee",
-        "element": key,
-        "preuve": [f"locales/fr.json" if key in fr_keys else "locales/en.json"],
-        "detail": f"valeur fr='{fr.get(key, en.get(key, ''))[:60]}'",
-    })
+    orphan_rows.append(
+        {
+            "verdict": "ORPHELINE",
+            "categorie": "definie_jamais_referencee",
+            "element": key,
+            "preuve": ["locales/fr.json" if key in fr_keys else "locales/en.json"],
+            "detail": f"valeur fr='{fr.get(key, en.get(key, ''))[:60]}'",
+        }
+    )
 findings.extend(orphan_rows)
 
 # --------------------------------------------------------------------------- #
@@ -295,12 +339,13 @@ findings.extend(orphan_rows)
 # --------------------------------------------------------------------------- #
 
 TEXT_NODE_RE = re.compile(r">([^<>{}`\n]{2,90})<")
-ATTR_RE = re.compile(
-    r"""(?:placeholder|title|aria-label|alt|data-tooltip)\s*=\s*"([^"<>{}]{3,90})\"""")
+ATTR_RE = re.compile(r"""(?:placeholder|title|aria-label|alt|data-tooltip)\s*=\s*"([^"<>{}]{3,90})\"""")
 WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{3,}")
+
 
 def has_accent(s: str) -> bool:
     return any(unicodedata.combining(c) or ord(c) > 127 for c in unicodedata.normalize("NFD", s))
+
 
 def looks_like_ui_text(s: str) -> bool:
     s = s.strip()
@@ -322,11 +367,12 @@ def looks_like_ui_text(s: str) -> bool:
         return False
     return True
 
+
 hard_rows: list[dict] = []
 seen_texts: set[str] = set()
 scan_dirs = ("web/dashboard/views/", "web/dashboard/components/")
 locale_values = {v.strip() for v in list(fr.values()) + list(en.values())}
-MAX_PER_FILE = 3   # diversifier l'echantillon (max 20 au total)
+MAX_PER_FILE = 3  # diversifier l'echantillon (max 20 au total)
 
 for rel in sorted(web_corpus):
     if not rel.startswith(scan_dirs) or not rel.endswith(".js"):
@@ -339,14 +385,17 @@ for rel in sorted(web_corpus):
             if not looks_like_ui_text(txt) or txt in seen_texts:
                 continue
             seen_texts.add(txt)
-            hard_rows.append({
-                "verdict": "TEXTE_EN_DUR", "categorie": f"texte_dur_{kind}",
-                "element": txt[:80],
-                "preuve": [f"{rel}:{line_of(src, m.start())}"],
-                "detail": "existe dans les locales (valeur identique)"
-                          if txt in locale_values else
-                          "texte visible non passe par t()",
-            })
+            hard_rows.append(
+                {
+                    "verdict": "TEXTE_EN_DUR",
+                    "categorie": f"texte_dur_{kind}",
+                    "element": txt[:80],
+                    "preuve": [f"{rel}:{line_of(src, m.start())}"],
+                    "detail": "existe dans les locales (valeur identique)"
+                    if txt in locale_values
+                    else "texte visible non passe par t()",
+                }
+            )
             per_file += 1
             if len(hard_rows) >= 20 or per_file >= MAX_PER_FILE:
                 break
@@ -373,8 +422,8 @@ result = {
     "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m6_i18n.py",
     "pattern_reel": "import { t } from core/i18n.js ; t('cle'), t(`...${x}`), "
-                    "t(item.labelKey) + labelKey:'cle' ; fetch /locales/<locale>.json ; "
-                    "fallback _FALLBACK_FR hardcode dans i18n.js ; pas de data-i18n",
+    "t(item.labelKey) + labelKey:'cle' ; fetch /locales/<locale>.json ; "
+    "fallback _FALLBACK_FR hardcode dans i18n.js ; pas de data-i18n",
     "stats": stats,
     "resume": {
         "cles_fr": len(fr_keys),

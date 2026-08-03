@@ -347,9 +347,7 @@ def _log_auth_mismatch_debug(bearer: str, server_token: str) -> None:
     # ne logge que les POSITIONS, jamais les codepoints.
     token_is_ascii = server_token.isascii()
     bearer_non_ascii = [
-        (i, f"U+{ord(c):04X}" if token_is_ascii else "<redacted>")
-        for i, c in enumerate(bearer)
-        if ord(c) > 0x7F
+        (i, f"U+{ord(c):04X}" if token_is_ascii else "<redacted>") for i, c in enumerate(bearer) if ord(c) > 0x7F
     ]
     if bearer_non_ascii:
         logger.warning("[DEBUG-AUTH] bearer NON-ASCII pos+cp=%s", bearer_non_ascii)
@@ -636,11 +634,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # interface vs un vrai loopback. Securite critique.
         client_ip = self.client_address[0] if self.client_address else ""
         bypass_disabled = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH", "0").strip() == "1"
-        if (
-            not bypass_disabled
-            and client_ip in _LOCAL_CLIENT_IPS
-            and self.bind_host == "127.0.0.1"
-        ):
+        if not bypass_disabled and client_ip in _LOCAL_CLIENT_IPS and self.bind_host == "127.0.0.1":
             logger.info(
                 "Auth bypass localhost (client=%s, bind=%s) — desktop trusted mode",
                 client_ip,
@@ -747,11 +741,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # pourrait encore servir a calculer is_blocked sur un autre handler si
         # un futur refactor oublie l'exemption a l'entree. Defense en profondeur.
         client_ip = self._client_ip()
-        if (
-            self.rate_limiter
-            and self._has_bearer_header()
-            and client_ip not in _LOCAL_CLIENT_IPS
-        ):
+        if self.rate_limiter and self._has_bearer_header() and client_ip not in _LOCAL_CLIENT_IPS:
             self.rate_limiter.record_failure(client_ip)
         self._respond_json(401, {"ok": False, "message": "Cle d'acces invalide ou manquante."})
 
@@ -1087,6 +1077,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
             from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
             from cinesort.infra.state import default_state_dir  # noqa: PLC0415
+
             # Resoudre state_dir : preferer l'API si disponible, sinon
             # default_state_dir() (compat tests sans API monte).
             api = getattr(self, "api", None)
@@ -1121,9 +1112,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             try:
                 # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
                 # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
-                poster_proxy.serve_poster(
-                    self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted
-                )
+                poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
                 logger.debug(
                     "REST GET /api/poster client disconnect (%s, %.0fms)",
@@ -1575,8 +1564,7 @@ class RestApiServer:
                 # sous-jacente pour debloquer serve_forever() et eviter de
                 # garder le port occupe (regression bind au restart).
                 logger.warning(
-                    "REST: thread %s toujours vivant apres timeout, "
-                    "force-close de la socket pour liberer le port.",
+                    "REST: thread %s toujours vivant apres timeout, force-close de la socket pour liberer le port.",
                     thread.name,
                 )
                 if server is not None:
@@ -1631,11 +1619,7 @@ class RestApiServer:
         # invalidation volontaire (rotation post-compromission). L'invalidation
         # immediate est plus prioritaire que la garde anti-degradation : on
         # autorise toujours le hot-swap vers "" meme sur 0.0.0.0.
-        if (
-            new_token
-            and self._host == "0.0.0.0"
-            and len(new_token) < self.MIN_LAN_TOKEN_LENGTH
-        ):
+        if new_token and self._host == "0.0.0.0" and len(new_token) < self.MIN_LAN_TOKEN_LENGTH:
             logger.warning(
                 "REST: hot-swap du token REFUSE — le serveur ecoute sur 0.0.0.0 "
                 "(exposition LAN) et le nouveau token est trop court "
@@ -1655,13 +1639,9 @@ class RestApiServer:
             with contextlib.suppress(Exception):
                 self._rate_limiter.reset()
             if not new_token:
-                logger.warning(
-                    "REST: token REST efface — auth desactivee (kill-switch)"
-                )
+                logger.warning("REST: token REST efface — auth desactivee (kill-switch)")
             else:
-                logger.info(
-                    "REST: auth token hot-swapped (len=%d)", len(new_token)
-                )
+                logger.info("REST: auth token hot-swapped (len=%d)", len(new_token))
 
     def join(self) -> None:
         """Block until the server thread ends (standalone mode)."""

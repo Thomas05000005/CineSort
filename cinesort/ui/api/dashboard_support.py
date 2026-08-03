@@ -299,8 +299,14 @@ def _build_dashboard_section(
     from cinesort.domain.conversions import to_int as _to_int
     from cinesort.ui.api.run_read_support import (
         _CONFLICT_FLAGS,
+    )
+    from cinesort.ui.api.run_read_support import (
         effective_flags as _effective_flags,
+    )
+    from cinesort.ui.api.run_read_support import (
         ignored_alerts_by_row as _ignored_alerts_by_row,
+    )
+    from cinesort.ui.api.run_read_support import (
         is_auto_approvable_flags as _is_auto_approvable_flags,
     )
 
@@ -386,9 +392,7 @@ def _build_dashboard_section(
         "films_rejected_name": int(stats_obj.get("films_rejected_name") or 0),
         "folders_rejected_underscore": int(stats_obj.get("folders_rejected_underscore") or 0),
         "folders_rejected_depth": int(stats_obj.get("folders_rejected_depth") or 0),
-        "folders_rejected_scandir_error": int(
-            stats_obj.get("folders_rejected_scandir_error") or 0
-        ),
+        "folders_rejected_scandir_error": int(stats_obj.get("folders_rejected_scandir_error") or 0),
     }
     scan_diagnostic["total_excluded"] = int(
         scan_diagnostic["films_rejected_ext"]
@@ -861,10 +865,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             "ok": False,
             "error": "dashboard_load_failed",
             "message": "Impossible de charger la synthese du run.",
-            "user_message": (
-                "Impossible de charger la synthese du run. Relance un scan ou "
-                "redemarre l'app."
-            ),
+            "user_message": ("Impossible de charger la synthese du run. Relance un scan ou redemarre l'app."),
             "detail": str(exc),
         }
 
@@ -996,12 +997,14 @@ def compose_score_explanation(
     # custom_rules pour la cohérence du waterfall (contribution non chiffrée
     # ici car deja agregee dans la video subscore par compute_quality_score).
     if applied_rule_ids and not any(c.get("name") == "custom_rules" for c in categories_list):
-        categories_list.append({
-            "name": "custom_rules",
-            "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
-            "rule_ids": list(applied_rule_ids),
-            "rules_count": len(applied_rule_ids),
-        })
+        categories_list.append(
+            {
+                "name": "custom_rules",
+                "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
+                "rule_ids": list(applied_rule_ids),
+                "rules_count": len(applied_rule_ids),
+            }
+        )
 
     return {
         "categories": categories_list,
@@ -1050,7 +1053,7 @@ def _build_row_payload(
     from cinesort.ui.api.run_read_support import reconcile_subtitle_flags
 
     present_langs: set = set()
-    for _lang in (getattr(row, "subtitle_languages", None) or []):
+    for _lang in getattr(row, "subtitle_languages", None) or []:
         _n = _normalize_iso639(str(_lang)) or str(_lang).strip().lower()
         if _n:
             present_langs.add(_n)
@@ -1067,9 +1070,7 @@ def _build_row_payload(
     # _subtract_ignored_flags -> _enrich_plan_payload). Order-preserving comme
     # _subtract_ignored_flags (filtre de liste, PAS effective_flags qui renvoie un set non trie).
     _ignored_codes = {str(_c) for _c in (ignored_alerts or ())}
-    _raw_flags = [
-        str(_f) for _f in (getattr(row, "warning_flags", None) or []) if str(_f) not in _ignored_codes
-    ]
+    _raw_flags = [str(_f) for _f in (getattr(row, "warning_flags", None) or []) if str(_f) not in _ignored_codes]
     _flags = reconcile_subtitle_flags(_raw_flags, present_langs)
     _missing = [
         str(_l)
@@ -1443,9 +1444,7 @@ def _compute_librarian_suggestions(
         # R8-049 (F5) : compte des films basse-confiance d'identification, source de
         # l'insight métier `films_low_confidence` (le librarian n'émet pas ce type).
         if isinstance(result, dict):
-            result["low_confidence_count"] = sum(
-                1 for r in rows if _is_low_confidence_identification(r)
-            )
+            result["low_confidence_count"] = sum(1 for r in rows if _is_low_confidence_identification(r))
         return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         logger.debug("librarian suggestions error: %s", exc)
@@ -1846,9 +1845,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             _latest_scan_row = store.run.get_latest_run()
         except (OSError, AttributeError, TypeError, ValueError):
             _latest_scan_row = None
-        latest_scan_rid = str((_latest_scan_row or {}).get("run_id") or "") or (
-            run_ids[0] if run_ids else ""
-        )
+        latest_scan_rid = str((_latest_scan_row or {}).get("run_id") or "") or (run_ids[0] if run_ids else "")
 
         # 3. Global tier distribution
         # AUDIT 2026-06-14 (R6-F) : distribution "etat courant" = DERNIER run
@@ -1937,9 +1934,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # AUDIT 2026-06-14 (R6-F) : V2 perceptuel du DERNIER run uniquement
         # (run_ids[:1]). Avant, le cumul sur 20 runs donnait ~1265 lignes quasi
         # toutes "bronze" (perceptuel partiel/ancien) -> faux "Sante 0% / tout Bronze".
-        v2_tier_distribution = _compute_v2_tier_distribution(
-            store, [latest_scan_rid] if latest_scan_rid else []
-        )
+        v2_tier_distribution = _compute_v2_tier_distribution(store, [latest_scan_rid] if latest_scan_rid else [])
         trend_30days = _compute_trend_30days(store)
         insights = _compute_active_insights(
             api, store, run_ids, settings, librarian_data, latest_scan_rid=latest_scan_rid
@@ -2000,10 +1995,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             "ok": False,
             "error": "global_stats_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de calculer les statistiques globales. "
-                "Relance un scan ou redemarre l'app."
-            ),
+            "user_message": ("Impossible de calculer les statistiques globales. Relance un scan ou redemarre l'app."),
         }
 
 
@@ -2109,9 +2101,13 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         from cinesort.ui.api.history_support import _present_langs_from_payload
         from cinesort.ui.api.run_read_support import (
             build_qr_by_id,
-            effective_flags as _effective_flags,
-            ignored_alerts_by_row as _ignored_alerts_by_row,
             reconcile_subtitle_flags,
+        )
+        from cinesort.ui.api.run_read_support import (
+            effective_flags as _effective_flags,
+        )
+        from cinesort.ui.api.run_read_support import (
+            ignored_alerts_by_row as _ignored_alerts_by_row,
         )
 
         qr_by_id: Dict[str, Dict[str, Any]] = {}

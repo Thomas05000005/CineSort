@@ -141,9 +141,7 @@ def _mark_many(
     managed = getattr(repo, "_managed_conn", None)
     if callable(ensure) and callable(managed):
         ts = time.time()
-        params = [
-            (str(run_id), rid, ts, str(source_paths.get(rid, "") or "")) for rid in rids
-        ]
+        params = [(str(run_id), rid, ts, str(source_paths.get(rid, "") or "")) for rid in rids]
         try:
             ensure()
             with managed() as conn:
@@ -226,9 +224,7 @@ def migrate_legacy_deletion_marks(api: Any, run_id: str) -> List[str]:
     except (OSError, AttributeError, TypeError, ValueError):
         return []
 
-    row_ids = [
-        str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()
-    ]
+    row_ids = [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
     if not row_ids:
         # Fichier vide/corrompu : plus rien a honorer, on le retire.
         with contextlib.suppress(OSError, TypeError, ValueError):
@@ -298,9 +294,7 @@ def remove_legacy_deletion_mark(api: Any, run_id: str, row_id: str) -> bool:
         return True
 
     remaining = [r for r in row_ids if r != rid_s]
-    marked_ts = {
-        str(k): v for k, v in (data.get("marked_ts") or {}).items() if str(k) != rid_s
-    }
+    marked_ts = {str(k): v for k, v in (data.get("marked_ts") or {}).items() if str(k) != rid_s}
     try:
         if remaining:
             path.write_text(
@@ -361,10 +355,7 @@ def _mark_rows_for_deletion(api: Any, run_id: str, row_ids: List[str]) -> Dict[s
         return {"count": 0, "failed": failed}
 
     try:
-        already = {
-            str(m.get("row_id") or "")
-            for m in (repo.list_marked_for_deletion(run_id=str(run_id)) or [])
-        }
+        already = {str(m.get("row_id") or "") for m in (repo.list_marked_for_deletion(run_id=str(run_id)) or [])}
     except _DB_ERRORS as exc:
         logger.warning("list_marked_for_deletion echoue run_id=%s: %s", run_id, exc)
         already = set()
@@ -748,9 +739,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
     # P4 v2 : la row porte source_root (le root EXACT du scan, core.py:424) —
     # candidat autoritaire teste en premier, avant les roots reconstruits de la DB.
-    scan_root = _resolve_scan_root_for_replan(
-        api, run_id, folder_path, priority_candidates=[target.get("source_root")]
-    )
+    scan_root = _resolve_scan_root_for_replan(api, run_id, folder_path, priority_candidates=[target.get("source_root")])
 
     new_row = replan_single_row(
         cfg,
@@ -781,12 +770,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     try:
         old_film_id = compute_film_id(target)
         new_film_id = compute_film_id(new_row_json)
-        if (
-            old_film_id
-            and new_film_id
-            and old_film_id != new_film_id
-            and is_path_film_id(old_film_id)
-        ):
+        if old_film_id and new_film_id and old_film_id != new_film_id and is_path_film_id(old_film_id):
             repo = _get_field_locks_repo(api)
             if repo is not None:
                 try:

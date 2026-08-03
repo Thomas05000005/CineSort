@@ -23,7 +23,8 @@ class QualiteDistributionLatestRunTests(unittest.TestCase):
     def test_backend_v1_distribution_latest_run_only(self) -> None:
         src = _DASH.read_text(encoding="utf-8")
         self.assertIn(
-            "get_global_tier_distribution(limit_runs=1)", src,
+            "get_global_tier_distribution(limit_runs=1)",
+            src,
             "La distribution V1 'etat courant' doit cibler le dernier run (limit_runs=1).",
         )
 
@@ -33,10 +34,22 @@ class QualiteDistributionLatestRunTests(unittest.TestCase):
         # SCAN (latest_scan_rid, resolu via get_latest_run qui exclut les runs
         # utilitaires de bulk re-scan), plus run_ids[:1] brut qui prenait le
         # parasite apres un re-scan groupe. Toujours un seul run (pas le cumul).
-        self.assertIn(
-            "_compute_v2_tier_distribution(\n            store, [latest_scan_rid] if latest_scan_rid else []\n        )",
+        # Assertion INSENSIBLE AU FORMATAGE (2026-08-02) : la version precedente
+        # comparait une chaine litterale de code source, retours a la ligne
+        # compris. Elle est tombee au premier passage du formateur alors que le
+        # code etait rigoureusement identique (ruff a simplement replie l'appel
+        # sur une ligne) — un test ne doit pas rougir parce que la mise en forme
+        # change, seulement parce que le comportement change.
+        self.assertRegex(
             src,
+            r"_compute_v2_tier_distribution\(\s*store,\s*\[latest_scan_rid\]\s+if\s+latest_scan_rid\s+else\s+\[\]\s*\)",
             "La distribution V2 doit cibler latest_scan_rid (dernier run de scan), pas le cumul ni le parasite.",
+        )
+        # Garde-fou explicite sur l'anti-pattern que ce finding avait supprime.
+        self.assertNotRegex(
+            src,
+            r"_compute_v2_tier_distribution\(\s*store,\s*run_ids\[:1\]",
+            "run_ids[:1] reprenait le run parasite laisse par un re-scan groupe.",
         )
 
     def test_frontend_prefers_v1_complete(self) -> None:
