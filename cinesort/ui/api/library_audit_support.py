@@ -187,6 +187,82 @@ def _collect_owned_by_collection(rows: List[Dict[str, Any]]) -> Dict[int, Dict[s
     return grouped
 
 
+def _matching_candidates(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Candidats de la row qui correspondent REELLEMENT a sa proposition.
+
+    `PlanRow.candidates` n'est pas trie : `pick_best_candidate` classe une COPIE
+    locale et `_build_resolved_row` reserialise la liste d'origine. Prendre
+    `candidates[0]` a l'aveugle rendrait donc le tmdb_id d'un AUTRE film.
+    On ne retient que les candidats dont (titre, annee) redonnent exactement
+    `proposed_title` / `proposed_year`, tries par score decroissant.
+
+    Une annee absente (0) n'est PAS un joker : `_build_unresolved_row` produit
+    `proposed_year = 0` et des candidats sans annee, qui matcheraient alors sur
+    le seul titre. `_build_resolved_row` exige `chosen.year`, donc toute row
+    reellement resolue porte une annee — refuser 0 ne coute rien et ferme la
+    porte a une revendication de possession sur une row non resolue.
+    """
+    from cinesort.domain.core import windows_safe
+
+    def _key(value: Any) -> str:
+        return windows_safe(str(value or "")).strip().casefold()
+
+    wanted_title = _key(row.get("proposed_title"))
+    if not wanted_title:
+        return []
+    try:
+        wanted_year = int(row.get("proposed_year") or 0)
+    except (TypeError, ValueError):
+        return []
+    if wanted_year <= 0:
+        return []
+
+    matching: List[Dict[str, Any]] = []
+    for cand in row.get("candidates") or []:
+        if not isinstance(cand, dict):
+            continue
+        if _key(cand.get("title")) != wanted_title:
+            continue
+        try:
+            cand_year = int(cand.get("year") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cand_year != wanted_year:
+            continue
+        matching.append(cand)
+
+    def _score(cand: Dict[str, Any]) -> float:
+        try:
+            return float(cand.get("score") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # `sorted` est stable : a score egal l'ordre du plan est conserve.
+    return sorted(matching, key=_score, reverse=True)
+
+
+def _plan_row_tmdb_id(row: Dict[str, Any]) -> Optional[int]:
+    """Resout le tmdb_id d'une PlanRow serialisee, ou None.
+
+    `PlanRow` (`cinesort/domain/core.py`) ne porte AUCUN `tmdb_id` top-level :
+    le tmdb_id reel vit sur les `Candidate`. Le seul producteur de
+    `row["tmdb_id"]` est `film_support.overlay_tmdb_override`, applique par
+    `history_support._enrich_plan_payload` UNIQUEMENT quand l'utilisateur a
+    choisi un candidat A LA MAIN (table `film_tmdb_overrides`). Pour tous les
+    matchs automatiques — la quasi-totalite d'une bibliotheque — la clef est
+    absente et `owned_tmdb_ids` restait vide : le match primaire des sagas etait
+    mort, la completude reposait sur le seul repli (titre, annee).
+
+    La priorite (`chosen_tmdb_id` > `tmdb_id` > candidat) reste celle du helper
+    canonique du depot, `film_support._resolve_chosen_tmdb_id` : on ne duplique
+    pas une variante, on lui restreint seulement les candidats offerts.
+    """
+    from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
+
+    resolved = _resolve_chosen_tmdb_id(row, _matching_candidates(row))
+    return int(resolved) if resolved > 0 else None
+
+
 def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any]]:
     """Charge le plan en preservant tmdb_collection_id/name + tmdb_id.
 
@@ -206,9 +282,14 @@ def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any
         out.append(
             {
                 "row_id": str(r.get("row_id") or ""),
-                "title": r.get("proposed_title") or r.get("nfo_title") or "",
+                # #714 (meme famille) : le repli `r.get("nfo_title")` etait une
+                # seconde clef fantome — `PlanRow` porte `nfo_path`, jamais
+                # `nfo_title`, et aucun enrichissement ne la pose. Repli mort.
+                "title": r.get("proposed_title") or "",
                 "year": int(r.get("proposed_year") or 0),
-                "tmdb_id": r.get("tmdb_id"),
+                # #714 : `r.get("tmdb_id")` etait une clef FANTOME (absente du
+                # dataclass PlanRow) -> owned_tmdb_ids toujours vide.
+                "tmdb_id": _plan_row_tmdb_id(r),
                 "tmdb_collection_id": r.get("tmdb_collection_id"),
                 "tmdb_collection_name": r.get("tmdb_collection_name"),
             }

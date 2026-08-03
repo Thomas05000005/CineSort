@@ -10,9 +10,10 @@ from cinesort.app.jellyfin_sync import (
     _MAX_RETRY_DELAY_S,
     RestoreResult,
     WatchedInfo,
-    _build_path_mapping,
+    _build_move_sequence,
     _compute_retry_delay,
     _normalize_path,
+    _remap_path,
     restore_watched,
     snapshot_watched,
 )
@@ -68,11 +69,11 @@ class TestNormalizePath(unittest.TestCase):
         self.assertFalse(result.endswith("/"))
 
 
-# ── _build_path_mapping ───���─────────────────────────────────────────
+# ── _build_move_sequence ─────────────────────────────────────────────
 
 
-class TestBuildPathMapping(unittest.TestCase):
-    """Tests pour _build_path_mapping."""
+class TestBuildMoveSequence(unittest.TestCase):
+    """Tests pour _build_move_sequence (ex-_build_path_mapping)."""
 
     def test_move_operation(self):
         ops = [
@@ -83,36 +84,147 @@ class TestBuildPathMapping(unittest.TestCase):
                 "undo_status": "PENDING",
             }
         ]
-        mapping = _build_path_mapping(ops)
-        self.assertEqual(len(mapping), 1)
-        src_norm = _normalize_path(r"C:\Films\inception\inception.mkv")
-        dst_norm = _normalize_path(r"C:\Films\Inception (2010)\Inception (2010).mkv")
-        self.assertEqual(mapping[src_norm], dst_norm)
+        sequence = _build_move_sequence(ops)
+        self.assertEqual(len(sequence), 1)
+        self.assertFalse(sequence[0].is_dir)
+        self.assertEqual(sequence[0].src, _normalize_path(r"C:\Films\inception\inception.mkv"))
+        self.assertEqual(sequence[0].dst, _normalize_path(r"C:\Films\Inception (2010)\Inception (2010).mkv"))
 
     def test_ignores_non_move_ops(self):
         ops = [
             {"op_type": "DELETE", "src_path": "a", "dst_path": "b", "undo_status": "PENDING"},
             {"op_type": "CREATE_DIR", "src_path": "", "dst_path": "c", "undo_status": "PENDING"},
+            {"op_type": "MKDIR", "src_path": "", "dst_path": "d", "undo_status": "PENDING"},
         ]
-        mapping = _build_path_mapping(ops)
-        self.assertEqual(len(mapping), 0)
+        self.assertEqual(_build_move_sequence(ops), [])
 
     def test_ignores_already_undone(self):
         ops = [
             {"op_type": "MOVE", "src_path": "a.mkv", "dst_path": "b.mkv", "undo_status": "DONE"},
+            {"op_type": "MOVE_DIR", "src_path": "a", "dst_path": "b", "undo_status": "DONE"},
         ]
-        mapping = _build_path_mapping(ops)
-        self.assertEqual(len(mapping), 0)
+        self.assertEqual(_build_move_sequence(ops), [])
 
     def test_rename_operation(self):
         ops = [
             {"op_type": "RENAME", "src_path": "old.mkv", "dst_path": "new.mkv", "undo_status": "PENDING"},
         ]
-        mapping = _build_path_mapping(ops)
-        self.assertEqual(len(mapping), 1)
+        sequence = _build_move_sequence(ops)
+        self.assertEqual(len(sequence), 1)
+        self.assertFalse(sequence[0].is_dir)
 
     def test_empty_operations(self):
-        self.assertEqual(_build_path_mapping([]), {})
+        self.assertEqual(_build_move_sequence([]), [])
+
+    def test_move_dir_is_collected_and_flagged_as_dir(self):
+        """#680 : MOVE_DIR est la voie NOMINALE du tri de films (apply_single
+        renomme le DOSSIER, jamais le fichier video). Le filtre l'excluait."""
+        ops = [
+            {
+                "op_type": "MOVE_DIR",
+                "src_path": r"C:\Films\inception",
+                "dst_path": r"C:\Films\Inception (2010)",
+                "undo_status": "PENDING",
+            }
+        ]
+        sequence = _build_move_sequence(ops)
+        self.assertEqual(len(sequence), 1)
+        self.assertTrue(sequence[0].is_dir)
+
+    def test_execution_order_is_preserved(self):
+        ops = [
+            {"op_type": "MOVE_DIR", "src_path": "a", "dst_path": "b", "undo_status": "PENDING"},
+            {"op_type": "MOVE_FILE", "src_path": "b/x.mkv", "dst_path": "b/y.mkv", "undo_status": "PENDING"},
+        ]
+        sequence = _build_move_sequence(ops)
+        self.assertEqual([m.src for m in sequence], ["a", "b/x.mkv"])
+
+
+# ── _remap_path (#680) ───────────────────────────────────────────────
+
+
+class TestRemapPath(unittest.TestCase):
+    """#680 : Jellyfin indexe les films par chemin de FICHIER, le journal apply
+    ne cite que des DOSSIERS pour un MOVE_DIR. Sans re-prefixation, aucune cle
+    du snapshot ne matche et le statut « vu » est perdu apres chaque apply."""
+
+    def test_file_move_is_exact_match(self):
+        seq = _build_move_sequence(
+            [{"op_type": "MOVE_FILE", "src_path": "c:/f/a.mkv", "dst_path": "c:/f/b.mkv", "undo_status": "PENDING"}]
+        )
+        self.assertEqual(_remap_path("c:/f/a.mkv", seq), "c:/f/b.mkv")
+
+    def test_dir_move_reprefixes_the_video_inside(self):
+        seq = _build_move_sequence(
+            [
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": r"C:\Films\inception",
+                    "dst_path": r"C:\Films\Inception (2010)",
+                    "undo_status": "PENDING",
+                }
+            ]
+        )
+        old = _normalize_path(r"C:\Films\inception\Inception.BluRay.mkv")
+        self.assertEqual(_remap_path(old, seq), _normalize_path(r"C:\Films\Inception (2010)\Inception.BluRay.mkv"))
+
+    def test_dir_move_does_not_capture_a_sibling_with_same_prefix(self):
+        seq = _build_move_sequence(
+            [
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": "c:/films/dune",
+                    "dst_path": "c:/films/Dune (2021)",
+                    "undo_status": "PENDING",
+                }
+            ]
+        )
+        # "dune 2" n'est PAS sous "dune" : le chemin doit rester intact.
+        self.assertEqual(_remap_path("c:/films/dune 2/dune2.mkv", seq), "c:/films/dune 2/dune2.mkv")
+
+    def test_dir_move_matching_the_media_path_itself(self):
+        """Jellyfin peut indexer un rip BDMV par son DOSSIER."""
+        seq = _build_move_sequence(
+            [
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": "c:/films/heat",
+                    "dst_path": "c:/films/Heat (1995)",
+                    "undo_status": "PENDING",
+                }
+            ]
+        )
+        self.assertEqual(_remap_path("c:/films/heat", seq), "c:/films/heat (1995)")
+
+    def test_chained_dir_moves_compose(self):
+        """Renommage du dossier PUIS deplacement sous la racine Collection : un
+        simple dict ancien->nouveau perdrait la composition."""
+        seq = _build_move_sequence(
+            [
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": "c:/films/matrix",
+                    "dst_path": "c:/films/Matrix (1999)",
+                    "undo_status": "PENDING",
+                },
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": "c:/films/Matrix (1999)",
+                    "dst_path": "c:/films/_Collection/Matrix (1999)",
+                    "undo_status": "PENDING",
+                },
+            ]
+        )
+        self.assertEqual(
+            _remap_path("c:/films/matrix/matrix.mkv", seq),
+            "c:/films/_collection/matrix (1999)/matrix.mkv",
+        )
+
+    def test_untouched_path_is_returned_unchanged(self):
+        seq = _build_move_sequence(
+            [{"op_type": "MOVE_DIR", "src_path": "c:/films/a", "dst_path": "c:/films/b", "undo_status": "PENDING"}]
+        )
+        self.assertEqual(_remap_path("c:/autre/film.mkv", seq), "c:/autre/film.mkv")
 
 
 # ── snapshot_watched ─────────────────────────────────────────────────
@@ -205,6 +317,45 @@ class TestRestoreWatched(unittest.TestCase):
         self.assertEqual(result.not_found, 0)
         self.assertEqual(result.errors, 0)
         client.mark_played.assert_called_once_with("uid", "jf-item-1")
+
+    @patch("cinesort.app.jellyfin_sync.time.sleep")
+    def test_move_dir_restores_watched_status(self, mock_sleep):
+        """#680 — le cas NOMINAL du tri de films : apply_single renomme le
+        DOSSIER (MOVE_DIR), le fichier video garde son nom. Avant le correctif,
+        aucun film vu n'etait retrouve (skipped) et l'utilisateur retrouvait ses
+        films marques NON VUS.
+        """
+        old_dir = r"C:\Films\inception"
+        new_dir = r"C:\Films\Inception (2010)"
+        video_name = "Inception.2010.1080p.BluRay.mkv"
+        old_path = rf"{old_dir}\{video_name}"
+        new_path = rf"{new_dir}\{video_name}"
+
+        snapshot = {_normalize_path(old_path): WatchedInfo(True, 3, "2025-12-01")}
+        operations = [
+            {"op_type": "MKDIR", "src_path": "", "dst_path": new_dir, "undo_status": "PENDING"},
+            {"op_type": "MOVE_DIR", "src_path": old_dir, "dst_path": new_dir, "undo_status": "PENDING"},
+        ]
+
+        client = MagicMock()
+        client.get_all_movies_from_all_libraries.return_value = [
+            {"id": "jf-inception", "path": new_path, "played": False, "play_count": 0, "last_played_date": ""},
+        ]
+        client.mark_played.return_value = True
+
+        result = restore_watched(
+            client,
+            "uid",
+            snapshot,
+            operations,
+            initial_delay_s=0,
+            retry_delay_s=0,
+            max_retries=1,
+        )
+        self.assertEqual(result.restored, 1)
+        self.assertEqual(result.skipped, 0)
+        self.assertEqual(result.not_found, 0)
+        client.mark_played.assert_called_once_with("uid", "jf-inception")
 
     @patch("cinesort.app.jellyfin_sync.time.sleep")
     def test_movie_not_found_after_retries(self, mock_sleep):
