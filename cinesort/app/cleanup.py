@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
@@ -16,6 +17,10 @@ from cinesort.domain.core import (
 )
 
 _logger = logging.getLogger(__name__)
+
+# ERROR_NOT_SAME_DEVICE : Windows ne renseigne pas toujours errno.EXDEV sur un
+# rename inter-volumes, on teste donc aussi le winerror brut.
+_WINERROR_NOT_SAME_DEVICE = 17
 
 if TYPE_CHECKING:
     from cinesort.domain.core import ApplyResult, Config
@@ -258,6 +263,43 @@ def preview_cleanup_residual_folders(cfg: "Config", touched_top_level_dirs: Set[
     return preview
 
 
+def _move_dir_without_destructive_fallback(
+    record_op: Callable[[Dict[str, Any]], None] | None,
+    *,
+    src: Path,
+    dst: Path,
+) -> None:
+    """Déplace un DOSSIER entier sans jamais dégrader en copie destructive.
+
+    `shutil.move` (utilisé par `atomic_move`) retombe sur copytree + rmtree dès
+    que `os.rename` échoue — y compris pour un banal verrou Windows sur UN
+    fichier interne (indexeur, antivirus, aperçu Explorateur, éditeur de .nfo).
+    Mesuré sur Windows 11 avec un simple `open()` sur `BBB/film.srt` :
+
+    - `Path.rename` -> PermissionError WinError 5, source INTACTE (3 fichiers),
+      destination ABSENTE ; rien n'a bougé.
+    - `shutil.move`  -> PermissionError WinError 32, destination contenant les
+      3 fichiers ET source amputée de `film.nfo` : contenu dédoublé, source
+      éventrée, et comme `record_apply_op` n'est appelé qu'APRÈS le move, cette
+      copie n'est journalisée nulle part — donc invisible de l'undo.
+
+    Ici `bucket_root` est sous `cfg.root` et `src` est un enfant direct de
+    `cfg.root` : le même volume est garanti en pratique, `Path.rename` est
+    atomique et « tout ou rien ». On ne repasse par `atomic_move` (et son
+    journal write-ahead, qui n'existe que pour rattraper la non-atomicité de la
+    copie) que sur un vrai EXDEV, seul cas où la copie est l'unique issue.
+    """
+    try:
+        src.rename(dst)
+    except OSError as exc:
+        cross_device = getattr(exc, "errno", None) == errno.EXDEV or (
+            getattr(exc, "winerror", None) == _WINERROR_NOT_SAME_DEVICE
+        )
+        if not cross_device:
+            raise
+        atomic_move(record_op, src=src, dst=dst, op_type="MOVE_DIR")
+
+
 def _move_dirs_to_bucket(
     candidates: List[Path],
     *,
@@ -266,35 +308,70 @@ def _move_dirs_to_bucket(
     dry_run: bool,
     log: Callable[[str, str], None],
     log_prefix: str,
+    res: "ApplyResult",
+    counter_attr: str,
     record_op: Callable[[Dict[str, Any]], None] | None = None,
 ) -> int:
     """Déplace chaque dossier éligible vers `bucket_root` et journalise l'opération.
 
-    Renvoie le nombre de dossiers réellement déplacés (0 si dry_run ou aucun éligible).
+    Isolation PAR DOSSIER (le résultat n'était pas isolé auparavant) : un verrou
+    sur un seul dossier faisait remonter l'exception jusqu'au garde F10 de
+    `apply_core`, qui n'est posé qu'autour de la fonction ENTIÈRE. Conséquences
+    mesurées : les dossiers suivants n'étaient jamais traités, et le `+=` du
+    compteur étant sauté en bloc, le résumé affichait « aucun déplacement »
+    alors que des dossiers avaient bel et bien quitté la bibliothèque.
+
+    `res.<counter_attr>` est donc incrémenté à CHAQUE succès, et chaque échec
+    est compté dans `res.errors` puis décrit dans `res.error_messages`.
+
+    Renvoie le nombre de dossiers réellement déplacés (en dry-run, le nombre de
+    dossiers éligibles : aucun déplacement n'est tenté mais le compteur sert au
+    diagnostic de prévisualisation).
     """
     # Cycle app.cleanup <-> app.apply_core : apply_core importe cleanup en
     # top-level donc on garde apply_core en import tardif ici.
+    from cinesort.app.apply_core import _append_error_message
     from cinesort.app.apply_core import record_apply_op as _record_apply_op
     from cinesort.app.apply_core import unique_path as _unique_path
 
     moved = 0
     for src in candidates:
-        if not is_eligible(src):
+        dst: Path | None = None
+        try:
+            if not is_eligible(src):
+                continue
+            dst = _unique_path(bucket_root / windows_safe(src.name))
+            log("INFO", f"{log_prefix}: {src} -> {dst}")
+            _logger.info("cleanup: %s -> %s (dry_run=%s)", src.name, dst, dry_run)
+            if not dry_run:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                _move_dir_without_destructive_fallback(record_op, src=src, dst=dst)
+                _record_apply_op(
+                    record_op,
+                    op_type="MOVE_DIR",
+                    src_path=src,
+                    dst_path=dst,
+                    reversible=True,
+                )
+        except OSError as exc:
+            res.errors += 1
+            _append_error_message(res, f"{log_prefix} {src.name} : {exc}")
+            log("ERROR", f"{log_prefix} echoue sur {src} (les autres dossiers continuent) : {exc}")
+            _logger.warning("cleanup: %s echoue sur %s: %s", log_prefix, src, exc)
+            if dst is not None and dst.exists():
+                # Reste possible uniquement sur le chemin EXDEV (copie). On NE
+                # SUPPRIME PAS `dst` : la copie est un sur-ensemble de ce qui
+                # reste dans `src`, l'effacer detruirait definitivement les
+                # fichiers deja retires de la source. On le signale, c'est tout.
+                partial = (
+                    f"{log_prefix} {src.name} : copie partielle laissee dans {dst} — la source est "
+                    "incomplete, comparez les deux dossiers AVANT toute suppression."
+                )
+                _append_error_message(res, partial)
+                log("ERROR", partial)
             continue
-        dst = _unique_path(bucket_root / windows_safe(src.name))
-        log("INFO", f"{log_prefix}: {src} -> {dst}")
-        _logger.info("cleanup: %s -> %s (dry_run=%s)", src.name, dst, dry_run)
-        if not dry_run:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            atomic_move(record_op, src=src, dst=dst, op_type="MOVE_DIR")
-            _record_apply_op(
-                record_op,
-                op_type="MOVE_DIR",
-                src_path=src,
-                dst_path=dst,
-                reversible=True,
-            )
         moved += 1
+        setattr(res, counter_attr, int(getattr(res, counter_attr, 0) or 0) + 1)
     return moved
 
 
@@ -318,13 +395,18 @@ def _move_residual_top_level_dirs(
     ensure_inside_root(cfg, bucket_root)
     candidates = _residual_cleanup_candidates(cfg, touched_top_level_dirs, bucket_root=bucket_root)
 
-    res.cleanup_residual_folders_moved_count += _move_dirs_to_bucket(
+    # `res` est incremente dossier par dossier DANS `_move_dirs_to_bucket` (et
+    # non par un `+=` final) : un echec sur un dossier ne doit plus faire perdre
+    # le compte des dossiers deja deplaces.
+    _move_dirs_to_bucket(
         candidates,
         is_eligible=lambda src: _classify_cleanable_residual_dir(cfg, src) == "eligible",
         bucket_root=bucket_root,
         dry_run=dry_run,
         log=log,
         log_prefix="DOSSIER NETTOYAGE",
+        res=res,
+        counter_attr="cleanup_residual_folders_moved_count",
         record_op=record_op,
     )
 
@@ -374,12 +456,14 @@ def _move_empty_top_level_dirs(
         and not src.name.startswith("_")
     ]
 
-    res.empty_folders_moved_count += _move_dirs_to_bucket(
+    _move_dirs_to_bucket(
         candidates,
         is_eligible=is_dir_empty,
         bucket_root=bucket_root,
         dry_run=dry_run,
         log=log,
         log_prefix="DOSSIER VIDE",
+        res=res,
+        counter_attr="empty_folders_moved_count",
         record_op=record_op,
     )

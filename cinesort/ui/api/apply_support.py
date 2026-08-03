@@ -2183,8 +2183,21 @@ def _cleanup_apply(
                     "ops_count": int(op_index),
                 },
             )
-        except (OSError, TypeError, ValueError) as exc:
-            log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            # F11 (suite) : sqlite3.Error n'herite PAS de OSError. `close_apply_batch`
+            # est appelee APRES que tous les deplacements ont ete faits sur disque —
+            # c'est exactement le cas ou l'invariant « un echec de journal n'empeche
+            # jamais un move » s'applique (contrairement a `insert_apply_batch`
+            # ci-dessus, volontairement fail-closed). Sans cette entree, un
+            # « database is locked » (ThreadingHTTPServer du dashboard + threads de
+            # fond concurrents, disque plein, disk I/O error) s'echappait de
+            # _cleanup_apply, faisait remonter un apply REUSSI en HTTP 500 et — en
+            # mode atomique — declenchait un rollback destructif.
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise ({type(exc).__name__}, batch_id={apply_batch_id}) : {exc} "
+                "— l'apply disque est termine, mais le batch reste PENDING donc l'undo peut etre indisponible.",
+            )
         except RuntimeError as exc:
             # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
             # (sous-classe de RuntimeError, definie dans
@@ -2738,6 +2751,12 @@ def _apply_changes_body(
     if not dry_run:
         watched_ctx = _snapshot_jellyfin_watched(api, log_fn)
 
+    # Le rollback atomique ne doit rejouer QUE l'echec d'un apply incomplet. Ce
+    # drapeau passe a True des que `_execute_apply` a rendu la main : au-dela, le
+    # disque est dans l'etat voulu et toute exception ulterieure (finalisation du
+    # journal, resume, notifications, sync Jellyfin/Plex) ne justifie plus de
+    # defaire les deplacements — cf. le garde-fou plus bas.
+    apply_execution_completed = False
     try:
         try:
             result, batch_id, ops = _execute_apply(
@@ -2765,6 +2784,7 @@ def _apply_changes_body(
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
+        apply_execution_completed = True
 
         skip_counts, applied_count, total_rows, cleanup_diag = _cleanup_apply(
             result,
@@ -2875,7 +2895,11 @@ def _apply_changes_body(
                         "ops_count": int(op_index),
                     },
                 )
-            except (OSError, RuntimeError, TypeError, ValueError) as close_exc:
+            except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as close_exc:
+                # F11 (suite) : sans sqlite3.Error, un lock DB ici relevait une
+                # exception DEPUIS le handler d'erreur — elle sortait de
+                # _apply_changes_body avant meme le log « Echec application » et
+                # avant le rollback, ne laissant qu'un HTTP 500 generique.
                 log_fn(
                     "WARN",
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
@@ -2888,7 +2912,19 @@ def _apply_changes_body(
         # dict synthese qu'on logge sans propager (le caller recoit l'erreur
         # initiale via _err_response).
         atomic_rollback_summary: Optional[Dict[str, Any]] = None
-        if bool(apply_atomic) and apply_batch_id is not None:
+        if bool(apply_atomic) and apply_batch_id is not None and apply_execution_completed:
+            # L'apply lui-meme est alle au bout : le disque est dans l'etat
+            # demande et defaire 500 deplacements reussis a cause d'un echec de
+            # finalisation (journal verrouille, ecriture du resume, notification)
+            # serait la pire issue possible. On le dit explicitement dans le log
+            # d'apply pour que l'utilisateur sache pourquoi le badge « rollback
+            # atomique » n'apparait pas.
+            log_fn(
+                "WARN",
+                f"Mode atomique : rollback NON declenche batch={apply_batch_id} — l'apply s'est "
+                f"execute jusqu'au bout, l'echec est posterieur aux deplacements ({exc}).",
+            )
+        elif bool(apply_atomic) and apply_batch_id is not None:
             try:
                 atomic_rollback_summary = _atomic_rollback_forward(
                     store,
@@ -2932,7 +2968,10 @@ def _apply_changes_body(
                             "rollback_counts": atomic_rollback_summary.get("counts"),
                         },
                     )
-                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    # F11 (suite) : meme raison qu'aux deux except ci-dessus — le FS
+                    # est deja restaure, un lock DB ne doit pas transformer ce simple
+                    # marquage de statut en exception non rattrapee.
                     log_fn(
                         "WARN",
                         f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "
