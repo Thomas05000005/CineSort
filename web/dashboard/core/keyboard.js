@@ -128,11 +128,24 @@ export function initKeyboard() {
     // donc la frappe (preventDefault) pour ne rien faire, pendant que la modale
     // d'aide et /aide promettaient « Annuler la derniere application ».
     //
-    // On ne le recable PAS sur run/undo_last_apply : l'undo est une action
-    // dangereuse qui exige une confirmation explicite (regle projet). Une
-    // frappe nue ne doit jamais declencher un deplacement de fichiers. L'undo
-    // reste accessible par ses deux boutons dedies (Traitement etape 5 et
-    // Historique -> « Annuler l'apply »), tous deux derriere dangerConfirmModal.
+    // On ne le recable pas non plus, pour une raison de CIBLE, pas de
+    // confirmation. Correction d'une justification fausse ecrite ici lors du
+    // lot NUANCES (PR #873) et relevee en relecture : invoquer la regle des
+    // actions destructives etait un homme de paille. Personne ne proposait de
+    // cabler une frappe nue sur `run/undo_last_apply` ; le brancher sur
+    // `_onUndoExecute` (traitement.js) ou `_doUndoApply` (historique.js) aurait
+    // conserve `dangerConfirmModal` et n'aurait donc rien viole. Une regle
+    // projet mal invoquee dans le depot est pire que pas de justification :
+    // elle finit citee ailleurs.
+    //
+    // Le vrai motif : l'undo n'a pas de cible non ambigue depuis un raccourci
+    // GLOBAL. Il porte sur un batch precis — `_runInfo.pendingUndo` cote
+    // Traitement, le run selectionne cote Historique — etat qui n'existe que
+    // dans la vue montee. Depuis /parametres ou /bibliotheque, Ctrl+Z n'aurait
+    // aucun batch a designer, et depuis Historique il devrait deviner lequel
+    // des runs listes viser. L'undo reste donc accessible par ses deux boutons
+    // dedies (Traitement etape 5, Historique -> « Annuler l'apply »), la ou la
+    // cible est explicite — tous deux derriere `dangerConfirmModal`.
 
     // 5. F1 : aide
     if (e.key === "F1") {

@@ -33,6 +33,30 @@ Findings couverts :
   N35      traitement.js     un apply retournant `errors > 0` (fichier
                              verrouille) affichait un toast VERT « Apply
                              termine ».
+
+Relecture adversaire de la PR #873 — deux REGRESSIONS que le lot creait
+lui-meme, corrigees et verrouillees ici :
+
+  point 1  traitement.js     F5 pendant un apply reel -> le nouvel auditeur
+                             `cinesort:refresh` re-monte la route ->
+                             `unmountTraitement()` -> `_abortController.abort()`
+                             -> le POST `run/apply` (emis avec `_signal()`)
+                             rejette un AbortError -> toast ROUGE « Erreur lors
+                             de l'apply. » PENDANT que le backend deplace les
+                             fichiers. Avant la PR, F5 etait 100 % inerte.
+                             Couvert par `ApplyAbortPendantLeVolTests` sur les
+                             TROIS chemins qui postent avec `_signal()` (apply
+                             reel, dry-run, undo), + non-reg : une vraie panne
+                             reseau reste un toast rouge.
+  point 2  traitement.js     la modale de danger SOUS-annoncait : `opsLine` ne
+                             lisait que `totals.renames`/`totals.moves`, or
+                             `build_apply_preview` force
+                             `quarantine_unapproved=False` — « 0 renommage · 0
+                             deplacement » pour un apply qui deplace 50 dossiers
+                             vers `_review/`. Couvert par un test d'INVARIANT
+                             (`test_invariant_aucune_operation_disque_prevue_ne_manque_a_la_modale`)
+                             qui verrouille la chaine cle du payload run/apply
+                             -> registre `_APPLY_DISK_OPS` -> texte rendu.
 """
 
 from __future__ import annotations
@@ -506,15 +530,52 @@ globalThis.__dangerOpts = [];
 globalThis.__dispatched = [];
 globalThis.__applyResult = { ok: true, result: { errors: 0, error_messages: [], renames: 3, moves: 1 } };
 globalThis.__applyDelayMs = 0;
+globalThis.__undoDelayMs = 0;
 
-const apiPost = async (endpoint, body) => {
+// Le stub honore `AbortSignal` EXACTEMENT comme le vrai `core/api.js`
+// (`_mkAbortError` + `_perCallerView`, api.js:137-171) : signal deja abort ->
+// rejet immediat ; sinon course entre la reponse et l'evenement 'abort'.
+// Point capital : la requete est DEJA PARTIE cote backend quand l'abort
+// survient (__applyCalls est incremente AVANT la course) — c'est tout le sujet
+// du finding : le backend continue de deplacer les fichiers.
+const _mkAbortError = () => { const e = new Error("Aborted"); e.name = "AbortError"; return e; };
+const _perCallerView = (promise, signal) => {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(_mkAbortError());
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const onAbort = () => { if (done) return; done = true; reject(_mkAbortError()); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (v) => { if (done) return; done = true; resolve(v); },
+      (e) => { if (done) return; done = true; reject(e); },
+    );
+  });
+};
+const _delayed = (ms, value) => (async () => {
+  if (ms) await new Promise((r) => setTimeout(r, ms));
+  return value();
+})();
+
+const apiPost = async (endpoint, body, opts) => {
+  const signal = opts && opts.signal;
   if (endpoint === "run/apply") {
     globalThis.__applyCalls.push(JSON.parse(JSON.stringify(body || {})));
-    if (globalThis.__applyDelayMs) await new Promise((r) => setTimeout(r, globalThis.__applyDelayMs));
-    return { status: 200, data: globalThis.__applyResult };
+    return _perCallerView(
+      _delayed(globalThis.__applyDelayMs, () => {
+        // Panne reseau reelle : fetch() rejette un TypeError, PAS un AbortError.
+        if (globalThis.__forceApplyThrow) throw new TypeError("Failed to fetch");
+        return { status: 200, data: globalThis.__applyResult };
+      }),
+      signal,
+    );
   }
   if (endpoint === "run/undo_last_apply") {
-    return { status: 200, data: globalThis.__undoResult || { ok: true } };
+    globalThis.__undoCalls = (globalThis.__undoCalls || 0) + 1;
+    return _perCallerView(
+      _delayed(globalThis.__undoDelayMs, () => ({ status: 200, data: globalThis.__undoResult || { ok: true } })),
+      signal,
+    );
   }
   if (endpoint === "run/build_apply_preview") {
     return { status: 200, data: { ok: true, films: [], totals: { renames: 12, moves: 3, quarantined: 0 } } };
@@ -582,6 +643,12 @@ export const __h = {
   undoExecute: () => { _runInfo = { runId: "run-1", pendingUndo: { reversibleCount: 3, batchId: "b1" } }; _onUndoExecute(); },
   applyStatus: () => _applyStatus,
   setDryRun: (v) => { _applyOptions.dry_run = Boolean(v); },
+  setQuarantine: (v) => { _applyOptions.quarantine = Boolean(v); },
+  // `initTraitement()` (traitement.js:2960) arme l'AbortController de la vue ;
+  // `unmountTraitement()` l'abort. On reproduit le montage sans DOM.
+  arm: () => { _abortController = new AbortController(); },
+  // Registre des operations disque annoncables : sert au test d'INVARIANT.
+  diskOpKeys: () => _APPLY_DISK_OPS.map((o) => o.key),
 };
 """
 
@@ -639,6 +706,128 @@ __emit({ items: M.__h.dangerOpts()[0].items });
         self.assertIn("film", ligne.lower())
         self.assertNotIn("fichiers renommés", ligne)
 
+    def test_quarantine_active_la_modale_annonce_le_nombre_de_films_deplaces(self):
+        """Relecture adversaire de la PR #873, point 2 — la modale SOUS-annoncait.
+
+        `build_apply_preview` force `quarantine_unapproved=False`
+        (apply_support.py:3133) : ses `totals` ne portent JAMAIS de mise en
+        quarantaine. L'apply reel envoie `_applyOptions.quarantine` et
+        `apply_core.py:2009` deplace CHAQUE film non approuve vers `_review/`
+        (increment de `res.quarantined`, jamais de `renames`/`moves`).
+        Bibliotheque deja rangee + quarantaine + 50 refuses : la modale
+        annoncait « 0 renommage · 0 deplacement » pour 50 dossiers deplaces.
+        """
+        res = self._run(
+            r"""
+const rows = [];
+for (let i = 0; i < 250; i++) rows.push({ row_id: "r" + i, proposed_year: 2000, decision: i < 50 ? "REJECT" : "OK" });
+M.__h.seed(rows, { totals: { renames: 0, moves: 0, quarantined: 0 } });
+M.__h.setQuarantine(true);
+await M.__h.applyNow();
+const sansPlan = [];
+M.__h.seed(rows, null);             // build_apply_preview pas encore repondu
+M.__h.setQuarantine(true);
+await M.__h.applyNow();
+__emit({ items: M.__h.dangerOpts()[0].items, itemsSansPlan: M.__h.dangerOpts()[1].items });
+"""
+        )
+        # 1. La ligne d'operations elle-meme doit porter le compte.
+        self.assertIn(
+            "50",
+            res["items"][0],
+            f"les 50 mises en quarantaine doivent etre annoncees dans la ligne d'operations : {res['items'][0]}",
+        )
+        # 2. L'item « Quarantaine » doit dire COMBIEN et OU, pas juste « activee ».
+        quarantaine = [i for i in res["items"] if i.startswith("Quarantaine")]
+        self.assertEqual(len(quarantaine), 1)
+        self.assertIn("50", quarantaine[0], f"item quarantaine muet sur le nombre : {quarantaine[0]}")
+        self.assertIn("_review", quarantaine[0], f"item quarantaine muet sur la destination : {quarantaine[0]}")
+        # 3. Meme sans plan backend, la quarantaine est connue COTE CLIENT : le
+        #    repli ne doit pas la perdre.
+        self.assertIn(
+            "50",
+            res["itemsSansPlan"][0],
+            f"repli sans plan : la quarantaine reste annoncable cote client : {res['itemsSansPlan'][0]}",
+        )
+
+    def test_invariant_aucune_operation_disque_prevue_ne_manque_a_la_modale(self):
+        """INVARIANT — le test qui empeche le trou de se recreer.
+
+        Trois verrous, tous observes en RUNTIME sur la vraie source :
+
+        1. STRUCTUREL : toute cle du payload `run/apply` reellement poste est
+           classee, soit comme n'entrainant aucune operation disque, soit comme
+           liee a une operation que la modale doit annoncer. Ajouter demain un
+           `delete_leftovers: true` au payload rend ce test ROUGE tant que
+           l'operation n'a pas ete cablee dans la modale.
+        2. REGISTRE : chaque operation ainsi declaree existe dans le registre
+           `_APPLY_DISK_OPS` de traitement.js (source unique de la modale).
+        3. RENDU : chaque entree du registre apparait effectivement dans le
+           texte de la modale, avec son compte.
+        """
+        res = self._run(
+            r"""
+const rows = [];
+for (let i = 0; i < 250; i++) rows.push({ row_id: "r" + i, proposed_year: 2000, decision: i < 50 ? "REJECT" : "OK" });
+M.__h.seed(rows, { totals: { renames: 7, moves: 4, quarantined: 0 } });
+M.__h.setQuarantine(true);
+await M.__h.applyNow();
+const items = M.__h.dangerOpts()[0].items;
+await M.__h.runConfirm();           // pour observer le VRAI payload run/apply
+__emit({ items, payload: globalThis.__applyCalls[0], keys: M.__h.diskOpKeys() });
+"""
+        )
+        # 1. STRUCTUREL — toute cle du payload doit etre classee.
+        sans_operation = {"run_id", "dry_run", "apply_atomic"}
+        avec_operation = {"decisions": ("renames", "moves"), "quarantine_unapproved": ("quarantined",)}
+        payload_keys = set(res["payload"].keys())
+        self.assertEqual(
+            payload_keys,
+            sans_operation | set(avec_operation),
+            "une cle du payload run/apply n'est pas classee : soit elle ne declenche aucune "
+            "operation disque (ajouter a `sans_operation`), soit la modale doit l'annoncer",
+        )
+        # 2. REGISTRE — chaque operation declaree est connue du registre front.
+        registre = set(res["keys"])
+        attendues = {op for ops in avec_operation.values() for op in ops}
+        self.assertTrue(
+            attendues <= registre,
+            f"operations non annoncables par la modale : {sorted(attendues - registre)}",
+        )
+        # 3. RENDU — chaque entree du registre apparait dans la LIGNE
+        #    d'operations de la modale (items[0]), pas seulement quelque part
+        #    dans la modale : c'est cette ligne qui recapitule ce qui va bouger.
+        ligne_ops = res["items"][0]
+        for compte in ("7", "4", "50"):
+            self.assertIn(compte, ligne_ops, f"compte {compte} absent de la ligne d'operations : {ligne_ops}")
+
+    def test_invariant_activer_la_quarantaine_change_ce_qui_est_annonce(self):
+        """Verrou differentiel : une option du payload qui fait bouger N dossiers
+        de plus DOIT changer ce que la modale annonce. Sans ca, les deux rendus
+        seraient identiques — exactement le defaut mesure par le relecteur."""
+        res = self._run(
+            r"""
+const rows = [];
+for (let i = 0; i < 250; i++) rows.push({ row_id: "r" + i, proposed_year: 2000, decision: i < 50 ? "REJECT" : "OK" });
+M.__h.seed(rows, { totals: { renames: 0, moves: 0, quarantined: 0 } });
+M.__h.setQuarantine(false);
+await M.__h.applyNow();
+const sans = M.__h.dangerOpts()[0].items.join(" | ");
+M.__h.seed(rows, { totals: { renames: 0, moves: 0, quarantined: 0 } });
+M.__h.setQuarantine(true);
+await M.__h.applyNow();
+const avec = M.__h.dangerOpts()[1].items.join(" | ");
+__emit({ sans, avec });
+"""
+        )
+        self.assertNotEqual(
+            res["sans"],
+            res["avec"],
+            "quarantaine ON deplace 50 dossiers de plus : la modale doit le dire",
+        )
+        self.assertIn("50", res["avec"])
+        self.assertNotIn("50", res["sans"], "sans quarantaine, aucun des 50 refuses ne bouge")
+
     def test_la_modale_dapply_se_ferme_avant_de_lancer_lapply(self):
         """N13 : contrat passe a dangerConfirmModal par CE site d'appel."""
         res = self._run(
@@ -670,6 +859,114 @@ __emit({ modales, applyCalls: globalThis.__applyCalls.length });
         )
         self.assertEqual(res["applyCalls"], 1, "un seul POST run/apply")
         self.assertEqual(res["modales"], 1, "le 2e clic ne doit pas rouvrir la modale")
+
+
+class ApplyAbortPendantLeVolTests(unittest.TestCase):
+    """Relecture adversaire de la PR #873, point 1 — REGRESSION creee par le lot.
+
+    Le nouvel auditeur `cinesort:refresh` (app.js) re-monte la route courante :
+    `navigateTo(currentRoute())` -> `hashchange` -> cleanup de la vue ->
+    `unmountTraitement()` -> `_abortController.abort()` (traitement.js:2996).
+    Le POST `run/apply` etant emis AVEC `_signal()`, il est annule cote CLIENT
+    alors que le backend, lui, CONTINUE de deplacer les fichiers. Le `catch`
+    affichait alors « Erreur lors de l'apply. » en rouge — le pire message
+    possible sur un chemin destructif, l'utilisateur relance.
+
+    Ce que ces tests verrouillent : un abort en vol ne doit produire AUCUN toast
+    d'erreur, sur les trois chemins qui postent avec `_signal()` (apply reel,
+    dry-run, undo). Le POST doit avoir ete emis (le backend travaille), et
+    l'ordre des evenements doit rester : requete partie PUIS abort.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(TRAITEMENT_JS, stubs=_TRAITEMENT_STUBS, extra=_TRAITEMENT_EXTRA, driver=driver + _EXIT)
+
+    def test_f5_pendant_un_apply_reel_naffiche_aucune_erreur(self):
+        """ROUGE avant fix : toast {type: error, text: "Erreur lors de l'apply."}
+        alors que le backend deplace les fichiers."""
+        res = self._run(
+            _ROWS
+            + r"""
+M.__h.seed(rows, { totals: { renames: 12, moves: 3 } });
+M.__h.arm();                        // la vue est montee : AbortController arme
+globalThis.__applyDelayMs = 400;
+await M.__h.applyNow();
+const p = M.__h.runConfirm();       // POST run/apply en vol, avec _signal()
+await globalThis.__sleep(30);
+M.unmountTraitement();              // F5 -> navigateTo -> cleanup de la vue
+await p;
+__emit({ toasts: globalThis.__toasts, applyCalls: globalThis.__applyCalls.length });
+"""
+        )
+        self.assertEqual(res["applyCalls"], 1, "le POST est bien parti : le backend deplace les fichiers")
+        erreurs = [t for t in res["toasts"] if t.get("type") == "error"]
+        self.assertEqual(
+            erreurs,
+            [],
+            f"un apply annule cote CLIENT ne doit PAS etre annonce comme un echec : {res['toasts']}",
+        )
+
+    def test_f5_pendant_un_dry_run_naffiche_aucune_erreur(self):
+        """Meme chemin, branche dry-run (traitement.js:2342)."""
+        res = self._run(
+            _ROWS
+            + r"""
+M.__h.seed(rows, null);
+M.__h.arm();
+M.__h.setDryRun(true);
+globalThis.__applyDelayMs = 400;
+const p = M.__h.applyNow();         // le dry-run poste sans passer par la modale
+await globalThis.__sleep(30);
+M.unmountTraitement();
+await p;
+__emit({ toasts: globalThis.__toasts, applyCalls: globalThis.__applyCalls.length });
+"""
+        )
+        self.assertEqual(res["applyCalls"], 1)
+        erreurs = [t for t in res["toasts"] if t.get("type") == "error"]
+        self.assertEqual(erreurs, [], f"dry-run annule cote client : aucun toast d'erreur : {res['toasts']}")
+
+    def test_f5_pendant_un_undo_naffiche_aucune_erreur(self):
+        """Meme cause, meme gravite : `_onUndoExecute` poste `run/undo_last_apply`
+        avec `_signal()` (traitement.js:1387) et son catch affichait « Erreur lors
+        de l'annulation. » pendant que le backend RESTAURE les fichiers."""
+        res = self._run(
+            r"""
+M.__h.seed([{ row_id: "r1", decision: "OK" }], null);
+M.__h.arm();
+globalThis.__undoDelayMs = 400;
+M.__h.undoExecute();
+const p = M.__h.runConfirm();
+await globalThis.__sleep(30);
+M.unmountTraitement();
+await p;
+__emit({ toasts: globalThis.__toasts, undoCalls: globalThis.__undoCalls || 0 });
+"""
+        )
+        self.assertEqual(res["undoCalls"], 1, "le POST undo est parti : le backend restaure")
+        erreurs = [t for t in res["toasts"] if t.get("type") == "error"]
+        self.assertEqual(erreurs, [], f"undo annule cote client : aucun toast d'erreur : {res['toasts']}")
+
+    def test_nonreg_une_vraie_panne_reseau_reste_signalee(self):
+        """Le filtre ne doit avaler QUE `AbortError` : une exception reseau
+        (TypeError « Failed to fetch ») reste un toast rouge."""
+        res = self._run(
+            _ROWS
+            + r"""
+M.__h.seed(rows, { totals: { renames: 12, moves: 3 } });
+M.__h.arm();
+globalThis.__applyResult = null;
+globalThis.__forceApplyThrow = true;
+await M.__h.applyNow();
+await M.__h.runConfirm();
+__emit({ toasts: globalThis.__toasts });
+"""
+        )
+        self.assertEqual(len(res["toasts"]), 1)
+        self.assertEqual(res["toasts"][0]["type"], "error", "une vraie panne doit rester visible")
 
 
 class ApplyErrorsToastTests(unittest.TestCase):
