@@ -113,9 +113,7 @@ def main() -> int:
         print(f"[3] loopback (saturated counter) status={status_loopback}")
         # Loopback exempte du rate-limit, donc passe a auth. CINESORT_DISABLE_LOCAL_AUTH=1
         # est positionne, donc bypass loopback _check_auth desactive ; bon token = 200.
-        assert status_loopback == 200, (
-            f"Attendu 200 sur loopback exempte rate-limit, recu {status_loopback}"
-        )
+        assert status_loopback == 200, f"Attendu 200 sur loopback exempte rate-limit, recu {status_loopback}"
         print("[3] OK bypass rate-limit loopback CONSERVE (jamais 429 en 127.0.0.1)")
 
         print("\nFIX_OK")

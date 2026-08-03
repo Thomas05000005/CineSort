@@ -4,7 +4,9 @@ Les methodes repo unmark_for_deletion / clear_tmdb_override existaient sans aucu
 appelant (reversibilite promise mais impossible). Wiring complet : library_support
 + impl cinesort_api + LibraryFacade + flags get_film_full + boutons/handlers UI.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

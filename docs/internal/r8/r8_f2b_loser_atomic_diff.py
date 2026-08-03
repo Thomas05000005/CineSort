@@ -13,13 +13,15 @@ Prouve casse->correct (le helper isole desormais l'echec per-loser, ne propage p
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2b_loser_atomic_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
 
-import cinesort.domain.core as core
 import cinesort.app.apply_core as apply_core
+import cinesort.domain.core as core
 from cinesort.app.apply_core import move_duplicate_losers_to_user_decided
 
 
@@ -51,21 +53,35 @@ def run():
     tmp = Path(tempfile.mkdtemp(prefix="cs_f2b_s1_"))
     root = tmp / "lib"
     bucket = root / "_review" / "_duplicates_user_decided"
-    f1 = root / "Loser One (2020)"; f1.mkdir(parents=True); (f1 / "a.mkv").write_bytes(b"a")
-    f2 = root / "Loser Two (2020)"; f2.mkdir(parents=True); (f2 / "b.mkv").write_bytes(b"b")
+    f1 = root / "Loser One (2020)"
+    f1.mkdir(parents=True)
+    (f1 / "a.mkv").write_bytes(b"a")
+    f2 = root / "Loser Two (2020)"
+    f2.mkdir(parents=True)
+    (f2 / "b.mkv").write_bytes(b"b")
     cfg, res = Cfg(root), core.ApplyResult()
     rows = [Row(row_id="L1", folder=str(f1), kind="single"), Row(row_id="L2", folder=str(f2), kind="single")]
 
     orig_am = apply_core.atomic_move
+
     def patched_am(record_op, *, src, dst, op_type, **kw):
         if Path(src).name == "Loser One (2020)":
             raise PermissionError("[simule] loser verrouille: Loser One (2020)")
         return orig_am(record_op, src=src, dst=dst, op_type=op_type, **kw)
+
     apply_core.atomic_move = patched_am
     raised = None
     try:
-        move_duplicate_losers_to_user_decided(cfg, rows, {"L1", "L2"}, duplicates_user_decided_root=bucket,
-                                              dry_run=False, log=lambda lv, m: None, res=res, record_op=lambda op: None)
+        move_duplicate_losers_to_user_decided(
+            cfg,
+            rows,
+            {"L1", "L2"},
+            duplicates_user_decided_root=bucket,
+            dry_run=False,
+            log=lambda lv, m: None,
+            res=res,
+            record_op=lambda op: None,
+        )
     except (PermissionError, OSError) as e:
         raised = str(e)
     finally:
@@ -85,7 +101,8 @@ def run():
     tmp2 = Path(tempfile.mkdtemp(prefix="cs_f2b_s2_"))
     root2 = tmp2 / "lib"
     bucket2 = root2 / "_review" / "_duplicates_user_decided"
-    saga = root2 / "Saga"; saga.mkdir(parents=True)
+    saga = root2 / "Saga"
+    saga.mkdir(parents=True)
     stem = "Film.2020.1080p"
     (saga / f"{stem}.mkv").write_bytes(b"v" * 50)
     (saga / f"{stem}.srt").write_text("s", encoding="utf-8")
@@ -94,15 +111,25 @@ def run():
     rows2 = [Row(row_id="C1", folder=str(saga), video=f"{stem}.mkv", kind="collection")]
 
     orig_mb = apply_core.move_to_review_bucket
+
     def patched_mb(src_file, **kw):
         if Path(src_file).suffix.lower() == ".mkv":
             raise PermissionError(f"[simule] video verrouillee: {Path(src_file).name}")
         return orig_mb(src_file, **kw)
+
     apply_core.move_to_review_bucket = patched_mb
     raised2 = None
     try:
-        move_duplicate_losers_to_user_decided(cfg2, rows2, {"C1"}, duplicates_user_decided_root=bucket2,
-                                              dry_run=False, log=lambda lv, m: None, res=res2, record_op=lambda op: None)
+        move_duplicate_losers_to_user_decided(
+            cfg2,
+            rows2,
+            {"C1"},
+            duplicates_user_decided_root=bucket2,
+            dry_run=False,
+            log=lambda lv, m: None,
+            res=res2,
+            record_op=lambda op: None,
+        )
     except (PermissionError, OSError) as e:
         raised2 = str(e)
     finally:

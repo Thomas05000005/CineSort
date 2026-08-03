@@ -50,6 +50,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -177,9 +178,26 @@ def _accept_all(rows: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
     }
 
 
+# Regle « fix double-annee disque » (cinesort/domain/naming.py::_apply_template,
+# commentaire L368-373) : quand le template contient `{year}`, le titre perd son
+# annee de QUEUE si elle egale l'annee du couple, pour ne pas produire
+# "Le Havre 2011 (2011)". Le `proposed_title` STOCKE, lui, reste intact (cle de
+# dedoublonnage / seed torrents — cf. core.py::build_candidates_from_name L874).
+# Les fixtures de ce fichier ("Alpha.Movie.2019.1080p") donnent donc
+# proposed_title="Alpha Movie 2019" et un dossier disque "Alpha Movie (2019)".
+# La regle est REIMPLEMENTEE ici volontairement (et non importee de la prod) :
+# le test doit rougir si le renommage disque reintroduit "Alpha Movie 2019 (2019)".
+_TRAILING_YEAR_RE = re.compile(r"^(?P<head>.+?)[\s._-]+(?P<yr>19\d{2}|20\d{2})$")
+
+
 def _expected_folder_name(row: Dict[str, object]) -> str:
     """Nom de dossier attendu par le template par defaut `{title} ({year})`."""
-    return f"{row.get('proposed_title')} ({row.get('proposed_year')})"
+    title = str(row.get("proposed_title") or "")
+    year = row.get("proposed_year")
+    match = _TRAILING_YEAR_RE.match(title.strip())
+    if match is not None and year is not None and int(match.group("yr")) == int(year):
+        title = match.group("head").strip(" -_.") or title
+    return f"{title} ({year})"
 
 
 def _inject_saga_in_plan(env: ChainEnv, run_id: str, saga: str) -> None:

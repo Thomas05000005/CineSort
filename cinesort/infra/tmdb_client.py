@@ -183,11 +183,13 @@ class TmdbClient:
         (401 cle invalide, 404...) passent intacts pour ne pas casser les callers
         qui les gerent gracieusement (ex validate_connection).
         """
+
         def _do_get() -> requests.Response:
             resp = self._session.get(url, params=params, timeout=self.timeout_s)
             if resp.status_code >= 500 or resp.status_code == 429:
                 resp.raise_for_status()
             return resp
+
         return self._breaker.call(_do_get)
 
     def _debug(self, message: str) -> None:
@@ -363,13 +365,13 @@ class TmdbClient:
     def close(self) -> None:
         """Ferme la session HTTP sous-jacente et flush le cache (idempotent)."""
         # Flush cache d'abord pour persister les ecritures en attente
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             self.flush()
         except Exception:  # noqa: BLE001 — best-effort
             pass
         session = getattr(self, "_session", None)
         if session is not None:
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 session.close()
             except Exception:  # noqa: BLE001
                 pass

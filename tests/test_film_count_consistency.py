@@ -138,7 +138,8 @@ class FilmCountConsistencyTests(unittest.TestCase):
         # AVANT le fix : total_movies == 3 (snapshot DB)
         # APRES le fix : total_movies == 5 (len(rows) reel)
         self.assertEqual(
-            total_movies, 5,
+            total_movies,
+            5,
             "total_movies du dashboard doit refleter len(plan.jsonl), pas le snapshot DB obsolete",
         )
 
@@ -156,7 +157,8 @@ class FilmCountConsistencyTests(unittest.TestCase):
         self.assertIsNotNone(entry, "Le run doit etre dans runs_history")
         assert entry is not None
         self.assertEqual(
-            int(entry.get("total_rows") or 0), 7,
+            int(entry.get("total_rows") or 0),
+            7,
             "runs_history.total_rows doit utiliser plan.jsonl, pas stats.planned_rows",
         )
 
@@ -168,10 +170,12 @@ class FilmCountConsistencyTests(unittest.TestCase):
         self._insert_run_done(run_id, planned_rows_snapshot=2)  # snapshot tres faux
 
         from cinesort.ui.api import history_support
+
         result = history_support._get_history_stats_impl(self.api, run_id)
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(
-            int(result.get("run", {}).get("total_rows") or 0), 9,
+            int(result.get("run", {}).get("total_rows") or 0),
+            9,
             "get_history_stats.total_rows doit utiliser plan.jsonl",
         )
 
@@ -198,7 +202,8 @@ class FilmCountConsistencyTests(unittest.TestCase):
         dashboard_total = int(dashboard.get("kpis", {}).get("total_movies") or 0)
 
         self.assertEqual(
-            validation_total, dashboard_total,
+            validation_total,
+            dashboard_total,
             f"Validation ({validation_total}) doit avoir le meme compteur que "
             f"Accueil/Dashboard ({dashboard_total}). C'est exactement le bug "
             f"reproduit : 855 vs 853 sur le meme run.",

@@ -15,12 +15,9 @@ import base64
 import struct
 import unittest
 from typing import List
-from unittest.mock import patch
 
 from cinesort.domain.duplicate_multi_signal import (
     DEFAULT_PHASES,
-    FINGERPRINT_MIN_SIMILARITY,
-    FUZZY_TITLE_MIN_SCORE,
     PHASE_AUDIO_FINGERPRINT,
     PHASE_FUZZY_TITLE,
     PHASE_STRICT_METADATA,
@@ -60,9 +57,7 @@ class StrictMetadataPhaseTests(unittest.TestCase):
     def test_edition_separates_groups(self):
         cands = [
             MultiSignalCandidate(item_id="r1", title="Blade Runner", year=1982),
-            MultiSignalCandidate(
-                item_id="r2", title="Blade Runner", year=1982, edition="Director's Cut"
-            ),
+            MultiSignalCandidate(item_id="r2", title="Blade Runner", year=1982, edition="Director's Cut"),
             MultiSignalCandidate(item_id="r3", title="Blade Runner", year=1982),
         ]
         result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA])
@@ -100,9 +95,7 @@ class FuzzyTitlePhaseTests(unittest.TestCase):
             MultiSignalCandidate(item_id="r1", title="Dune Part One", year=2021),
             MultiSignalCandidate(item_id="r2", title="Dune", year=2022),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         # Avec token_sort_ratio "dune" vs "dune part one" >= 88 ? Verifions
         # qu'au moins le pipeline fonctionne sans erreur.
         # Si fuzz token_sort_ratio < 88 entre "dune" et "dune part one",
@@ -114,18 +107,14 @@ class FuzzyTitlePhaseTests(unittest.TestCase):
     def test_similar_long_titles_grouped(self):
         """Avec des titres longs et token_sort match, regroupement."""
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="The Lord of the Rings Fellowship", year=2001
-            ),
+            MultiSignalCandidate(item_id="r1", title="The Lord of the Rings Fellowship", year=2001),
             MultiSignalCandidate(
                 item_id="r2",
                 title="Fellowship of the Rings Lord The",
                 year=2002,
             ),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         # token_sort_ratio insensible a l'ordre des mots, devrait matcher
         self.assertEqual(len(result.groups), 1, msg=f"groups={result.groups}")
         self.assertEqual(set(result.groups[0].members), {"r1", "r2"})
@@ -133,27 +122,17 @@ class FuzzyTitlePhaseTests(unittest.TestCase):
 
     def test_year_too_far_not_grouped(self):
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="The Lord of the Rings", year=2001
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Lord of the Rings The", year=2005
-            ),
+            MultiSignalCandidate(item_id="r1", title="The Lord of the Rings", year=2001),
+            MultiSignalCandidate(item_id="r2", title="Lord of the Rings The", year=2005),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         # year +-1 par defaut, 2001 vs 2005 hors tolerance
         self.assertEqual(len(result.groups), 0)
 
     def test_year_tolerance_custom(self):
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="The Lord of the Rings", year=2001
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Lord of the Rings The", year=2005
-            ),
+            MultiSignalCandidate(item_id="r1", title="The Lord of the Rings", year=2001),
+            MultiSignalCandidate(item_id="r2", title="Lord of the Rings The", year=2005),
         ]
         result = group_by_multi_signal(
             cands,
@@ -165,19 +144,11 @@ class FuzzyTitlePhaseTests(unittest.TestCase):
     def test_fuzzy_adds_to_existing_strict_group(self):
         """Phase B doit pouvoir ajouter a un groupe deja cree par Phase A."""
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="The Lord of the Rings", year=2001
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="The Lord of the Rings", year=2001
-            ),
-            MultiSignalCandidate(
-                item_id="r3", title="Lord of the Rings The", year=2002
-            ),
+            MultiSignalCandidate(item_id="r1", title="The Lord of the Rings", year=2001),
+            MultiSignalCandidate(item_id="r2", title="The Lord of the Rings", year=2001),
+            MultiSignalCandidate(item_id="r3", title="Lord of the Rings The", year=2002),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         self.assertEqual(len(result.groups), 1)
         self.assertEqual(set(result.groups[0].members), {"r1", "r2", "r3"})
         # Le groupe etait Phase A a l'origine
@@ -215,31 +186,19 @@ class AudioFingerprintPhaseTests(unittest.TestCase):
         fp_a = _encode_fp([0x00000000] * 32)
         fp_b = _encode_fp([0xFFFFFFFF] * 32)
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="Movie A", year=2020, audio_fingerprint=fp_a
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Movie B", year=2020, audio_fingerprint=fp_b
-            ),
+            MultiSignalCandidate(item_id="r1", title="Movie A", year=2020, audio_fingerprint=fp_a),
+            MultiSignalCandidate(item_id="r2", title="Movie B", year=2020, audio_fingerprint=fp_b),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_AUDIO_FINGERPRINT]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_AUDIO_FINGERPRINT])
         # Distance Hamming maximale (0% similarite) -> pas de groupement
         self.assertEqual(len(result.groups), 0)
 
     def test_no_fingerprint_falls_through(self):
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="Movie A", year=2020, audio_fingerprint=None
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Movie B", year=2020, audio_fingerprint=None
-            ),
+            MultiSignalCandidate(item_id="r1", title="Movie A", year=2020, audio_fingerprint=None),
+            MultiSignalCandidate(item_id="r2", title="Movie B", year=2020, audio_fingerprint=None),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_AUDIO_FINGERPRINT]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_AUDIO_FINGERPRINT])
         # Sans fingerprint, Phase C ne fait rien
         self.assertEqual(len(result.groups), 0)
 
@@ -247,12 +206,8 @@ class AudioFingerprintPhaseTests(unittest.TestCase):
         """Phase C pre-filtre par annee +-2 pour eviter NxN."""
         fp = _encode_fp([0xDEADBEEF] * 16)
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="Movie A", year=1980, audio_fingerprint=fp
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Movie B", year=2020, audio_fingerprint=fp
-            ),
+            MultiSignalCandidate(item_id="r1", title="Movie A", year=1980, audio_fingerprint=fp),
+            MultiSignalCandidate(item_id="r2", title="Movie B", year=2020, audio_fingerprint=fp),
         ]
         result = group_by_multi_signal(
             cands,
@@ -273,20 +228,14 @@ class PhaseConfigurationTests(unittest.TestCase):
 
     def test_only_strict_metadata(self):
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="Lord of the Rings", year=2001
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Rings of the Lord", year=2002
-            ),
+            MultiSignalCandidate(item_id="r1", title="Lord of the Rings", year=2001),
+            MultiSignalCandidate(item_id="r2", title="Rings of the Lord", year=2002),
         ]
         # Avec phases=[strict_metadata] seul, pas de groupe (titres differents)
         result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA])
         self.assertEqual(len(result.groups), 0)
         # Avec phases=[strict, fuzzy], le groupe est trouve via Phase B
-        result2 = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result2 = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         self.assertEqual(len(result2.groups), 1)
 
     def test_disable_audio_fingerprint(self):
@@ -307,9 +256,7 @@ class PhaseConfigurationTests(unittest.TestCase):
                 audio_fingerprint=fp,
             ),
         ]
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE]
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA, PHASE_FUZZY_TITLE])
         # Sans Phase C, titres tres differents -> pas de groupe
         self.assertEqual(len(result.groups), 0)
 
@@ -335,15 +282,9 @@ class BackwardCompatibilityTests(unittest.TestCase):
             return (s or "").strip().lower()
 
         cands = [
-            MultiSignalCandidate(
-                item_id="r1", title="Inception", year=2010, edition=None
-            ),
-            MultiSignalCandidate(
-                item_id="r2", title="Inception", year=2010, edition=None
-            ),
-            MultiSignalCandidate(
-                item_id="r3", title="Inception", year=2010, edition="IMAX"
-            ),
+            MultiSignalCandidate(item_id="r1", title="Inception", year=2010, edition=None),
+            MultiSignalCandidate(item_id="r2", title="Inception", year=2010, edition=None),
+            MultiSignalCandidate(item_id="r3", title="Inception", year=2010, edition="IMAX"),
         ]
 
         # Algo historique
@@ -354,9 +295,7 @@ class BackwardCompatibilityTests(unittest.TestCase):
         legacy_groups = {tuple(sorted(v)) for v in buckets.values() if len(v) >= 2}
 
         # Nouveau pipeline en mode strict seul
-        result = group_by_multi_signal(
-            cands, phases=[PHASE_STRICT_METADATA], norm_for_tokens=_norm
-        )
+        result = group_by_multi_signal(cands, phases=[PHASE_STRICT_METADATA], norm_for_tokens=_norm)
         new_groups = {tuple(sorted(g.members)) for g in result.groups}
 
         self.assertEqual(legacy_groups, new_groups)
@@ -407,9 +346,7 @@ class AugmentIntegrationTests(unittest.TestCase):
         fp = _encode_fp([0xDEADBEEF])
         rows = [self._row("r1", "Movie", 2020)]
         decisions = {"r1": {"ok": True}}
-        out = candidates_from_rows(
-            rows, decisions, fingerprint_lookup=lambda rid: fp
-        )
+        out = candidates_from_rows(rows, decisions, fingerprint_lookup=lambda rid: fp)
         self.assertEqual(out[0].audio_fingerprint, fp)
 
     def test_augment_preserves_existing_groups(self):
