@@ -99,11 +99,19 @@ function _renderError(message) {
   `;
 }
 
+/* Revue post-merge 2026-08-03 : le prenom du developpeur etait code en dur dans
+ * le tout premier titre de la route d'atterrissage. Le depot est public (MIT) et
+ * la beta sert a recueillir des retours de tiers : chaque beta-testeur — et
+ * chaque telephone qui ouvre le dashboard LAN via le QR code de Parametres —
+ * etait accueilli par « Bonjour <prenom d'un inconnu> », en francais y compris
+ * en locale EN (le H1 court-circuite entierement core/i18n.js). Salut neutre,
+ * sans identite, en attendant une cle i18n + un reglage de nom cote backend.
+ */
 function _renderHero(heroState) {
   const { summary } = computeHeroSummary(heroState);
   return `
     <header class="accueil-hero">
-      <h1 class="accueil-hero-greeting">Bonjour Thomas</h1>
+      <h1 class="accueil-hero-greeting">Bonjour</h1>
       <p class="accueil-hero-summary">${escapeHtml(summary)}</p>
     </header>
   `;
@@ -314,8 +322,15 @@ async function _pingIntegration(key, settings, signal) {
     } else if (key === "plex") {
       const url = String(s.plex_url || "");
       const token = String(s.plex_token || "");
+      // Revue post-merge 2026-08-03 : le parametre s'appelle `token`, PAS
+      // `api_key` (IntegrationsFacade.test_plex_connection(url, token, timeout_s)
+      // — Plex est la seule integration a ne pas utiliser `api_key`). Le serveur
+      // REST fait `method(**params)` sans aliasing : `api_key` levait un
+      // TypeError -> HTTP 400 -> pastille Plex bloquee sur « hors ligne » des
+      // qu'un token etait configure, alors que Parametres > Tester repondait OK
+      // sur le meme serveur (parametres.js envoie bien `token`).
       const payload = (url || token)
-        ? { url, api_key: token, timeout_s: 5 }
+        ? { url, token, timeout_s: 5 }
         : {};
       res = await apiPost("integrations/test_plex_connection", payload, _opts);
     } else if (key === "radarr") {

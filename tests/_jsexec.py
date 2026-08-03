@@ -115,3 +115,23 @@ def node_check(test: unittest.TestCase, js_path: Path) -> None:
         ["node", "--check", str(js_path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     test.assertEqual(proc.returncode, 0, f"node --check {js_path.name} : {proc.stderr}")
+
+
+def esm_syntax_error(js_path: Path) -> str:
+    """Parse le fichier en tant que MODULE ES et retourne l'erreur, ou "".
+
+    `node --check fichier.js` parse en mode SCRIPT (CommonJS) et laisse passer
+    des fichiers que le navigateur refuse : mesure faite le 2026-08-03 sur
+    historique.js ou une backquote glissee dans un commentaire HTML *a
+    l'interieur d'un template literal* fermait la chaine prematurement —
+    `node --check x.js` -> rc=0, `node --check x.mjs` -> rc=1 (SyntaxError).
+    Le dashboard etant 100 % ESM, c'est la seconde qui fait foi.
+    """
+    src = js_path.read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as td:
+        mjs = Path(td) / (js_path.stem + ".mjs")
+        mjs.write_text(src, encoding="utf-8")
+        proc = subprocess.run(
+            ["node", "--check", str(mjs)], capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    return "" if proc.returncode == 0 else (proc.stderr or "").strip()
