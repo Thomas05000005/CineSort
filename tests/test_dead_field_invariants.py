@@ -302,10 +302,10 @@ def _collect_defined_api_attrs() -> Set[str]:
     """Noms d'attributs qu'un objet `api` porte reellement.
 
     Trois sources, et TROIS SEULEMENT — c'est la precision de cet ensemble
-    qui fait la valeur du test. Le tentant `tout `x.<nom> = ...` dans
-    cinesort/` serait bien trop large : `_store` serait declare « existant »
-    parce que `JobRunner.__init__` fait `self._store = store`, et le bug
-    #441 repasserait au vert.
+    qui fait la valeur du test. La definition tentante « n'importe quel
+    `x.<nom> = ...` dans cinesort/ » serait bien trop large : `_store` y
+    serait declare « existant » parce que `JobRunner.__init__` fait
+    `self._store = store`, et le bug #441 repasserait au vert.
       1. l'introspection de la classe `CineSortApi` ;
       2. les `self.<nom> = ...` du corps de la classe `CineSortApi` ;
       3. les `api.<nom> = ...` de `cinesort/` (attributs poses en lazy-init
