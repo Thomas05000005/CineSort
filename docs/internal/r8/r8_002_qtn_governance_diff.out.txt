@@ -1,0 +1,9 @@
+=== R8-002 F-QTN-GOV — gouvernance TTL quarantaine vs retention-runs ===
+  keep_last                                 : 2
+  original quarantine AVANT (taille)        : True (280 o)
+  run_dir vieux encore present apres clean  : False
+  original encore a son emplacement d'origine: False
+  copie PRESERVEE ailleurs sous state_dir   : ['runs\\_preserved_review\\20260101_120000\\_conflicts\\Film (2020)\\__from__\\Saga\\original_movie.mkv']
+
+VERDICT : GOUVERNE — l'original quarantine est PRESERVE (pas de perte).
+RESUME: {"data_lost": false, "qfile_at_origin": false, "preserved_copies": 1, "old_run_dir_removed": true}

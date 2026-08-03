@@ -1,0 +1,12 @@
+=== S1 (R8-018 invariant + compteur dedie) ===
+  duplicates_identical_moved_count  : 0 (AVANT=1 a tort ; APRES attendu 0)
+  duplicates_identical_deleted_count: 0
+  -> invariant moved==deleted        : True (AVANT casse : 1 != 0)
+  duplicates_user_decided_moved_count: 1 (compteur DEDIE, attendu 1)
+  loser dans le bucket REEL          : True (_duplicates_user_decided)
+
+=== S2 (R8-018 chemin de recuperation reel) ===
+  apply_support propose _duplicates_user_decided pour le compteur loser : True
+
+VERDICT : CORRIGE (invariant preserve + compteur dedie + chemin reel)
+RESUME: {"S1_invariant_moved_eq_deleted": true, "S1_compteur_dedie_loser": true, "S2_chemin_recup_reel": true}

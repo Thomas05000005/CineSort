@@ -1,0 +1,23 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\blanc\projects\CineSort\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: C:\Users\blanc\projects\CineSort
+configfile: pyproject.toml
+plugins: hypothesis-6.152.9, asyncio-1.3.0, base-url-2.1.0, playwright-0.8.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 11 items
+
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_01_source_root_correct_sur_chaque_row PASSED [  9%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_02_titres_et_annees_parses PASSED [ 18%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_03_exclusions_video_exts_et_noms_suspects PASSED [ 27%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_04_tv_standard_sxxexx_detectee PASSED [ 36%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_05_r8_079_pack_tv_non_standard_planifie_comme_film XFAIL [ 45%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_06_gap_nfo_tmdb_id_non_propage_au_plan XFAIL [ 54%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_07_collision_cross_root_flaggee PASSED [ 63%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_08_plan_jsonl_ecrit_et_relisible PASSED [ 72%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_09_rescan_incremental_sert_le_cache PASSED [ 81%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_09b_metrique_misses_fantome_au_rescan XFAIL [ 90%]
+tests/test_lotd_chain_scan_plan.py::TestLotDChainScanPlan::test_10_rescan_produit_le_meme_plan PASSED [100%]
+
+======================== 8 passed, 3 xfailed in 3.48s =========================

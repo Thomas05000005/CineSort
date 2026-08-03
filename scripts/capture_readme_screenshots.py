@@ -39,6 +39,8 @@ for _p in (_E2E_DIR, _PROJECT_ROOT):
     if _s not in sys.path:
         sys.path.insert(0, _s)
 
+import contextlib
+
 from create_test_data import (  # noqa: E402
     _TOKEN,
     build_plan_rows,
@@ -46,7 +48,6 @@ from create_test_data import (  # noqa: E402
     populate_database,
     write_plan_file,
 )
-import contextlib
 
 OUTPUT_DIR = _PROJECT_ROOT / "docs" / "screenshots"
 VIEWPORT = {"width": 1280, "height": 800}

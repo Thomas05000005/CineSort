@@ -20,7 +20,6 @@ from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.ui.api import run_control_support
 from cinesort.ui.api.cinesort_api import CineSortApi
 
-
 # ---------- helpers DB ----------
 
 

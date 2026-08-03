@@ -34,10 +34,10 @@
  *   closeFilmDetail()       ferme le mode C (overlay) actif
  */
 
-import { escapeHtml } from "../core/dom.js";
+import { escapeHtml, posterProxyUrl } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
 import { labelsForFlags, countBySeverity } from "../core/alert-labels.js";
-import { dangerConfirmModal, showModal, closeModal } from "./modal.js";
+import { dangerConfirmModal, showModal, closeModal, trapFocus } from "./modal.js"; // R8-078b : trapFocus partagé
 import { showToast } from "./toast.js";
 import { openPerceptualModal } from "./perceptual-modal.js";
 import * as rightPanel from "./right-panel.js";
@@ -57,6 +57,12 @@ const _state = {
   onClose: null,
   showAllCandidates: false,
   loading: false,
+  // F05 (revue post-merge 2026-07-18) : compteur d'epoque de chargement.
+  // get_film_full a une latence tres variable (TMDb froid ~10 s vs instantane) et
+  // apiPost ne dedup/abort pas : deux ouvertures rapprochees (film A lent puis
+  // film B rapide) laissaient la reponse tardive de A repeindre la fiche de B.
+  // Toute reponse dont l'epoque n'est plus l'epoque courante est jetee.
+  loadSeq: 0,
   // sprint orphelins #350 : feedback utilisateur sur le scoring.
   // Apres soumission, on retient le feedback_id pour permettre annulation
   // (delete_score_feedback). Pas persiste cross-mount : la session courante
@@ -101,8 +107,11 @@ async function _loadFilmFull(rowId, runId) {
   const res = await apiPost("library/get_film_full", params);
   const data = res && res.data ? res.data : res;
   if (!data || data.ok === false) {
-    const err = (data && (data.message || data.error)) || "Film introuvable.";
-    throw new Error(err);
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : prefere user_message (message UX clair)
+    // avant de retomber sur message technique ou error. Evite l'affichage de
+    // "Serveur indisponible (HTTP 500)" quand le backend a fourni un contrat propre.
+    const userMsg = (data && data.user_message) || (data && data.message) || (data && data.error) || "Impossible de charger le film. Reessaye dans quelques instants.";
+    throw new Error(userMsg);
   }
   return data;
 }
@@ -163,8 +172,13 @@ function _renderHero(data) {
     ? Math.round(Number(topCand.confidence))
     : (row.confidence != null ? Math.round(Number(row.confidence)) : null);
 
-  // Source (NFO / Probe / etc.)
-  const source = row.match_source || row.identification_source || "—";
+  // Source d'identification (NFO / nom / TMDb...).
+  // AUDIT 2026-06-13 (R5-I) : les rows exposent `proposed_source` (nfo/name/
+  // tmdb), pas match_source/identification_source -> la stat affichait toujours
+  // "—" alors que les films sont identifies (ex. par NFO). On lit la bonne cle.
+  const _srcMap = { nfo: "NFO", name: "Nom de fichier", tmdb: "TMDb", imdb: "IMDb", unknown: "—" };
+  const _rawSrc = String(row.match_source || row.identification_source || row.proposed_source || "").trim().toLowerCase();
+  const source = _srcMap[_rawSrc] || (_rawSrc ? _rawSrc.toUpperCase() : "—");
 
   // Poster
   const posterUrl = data.poster_url || topCand.poster_url || null;
@@ -182,14 +196,30 @@ function _renderHero(data) {
               title="Rafraîchir le poster depuis TMDb"
               aria-label="Rafraîchir le poster depuis TMDb">🔄</button>`
     : "";
-  const posterInner = posterUrl
-    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)}" loading="eager">`
+  // Iter12 ETAPE 2 : prioriser le proxy `/api/poster` (size w342 pour fiche film).
+  // tmdbIdForRefresh est deja resolu plus haut depuis row/topCand. Fallback
+  // sur `posterUrl` direct preserve backward compat (acquis 242cf339).
+  // E4-bis : propage le bust d'un refresh manuel pour que les re-renders
+  // (changement d'onglet...) gardent l'image fraiche au lieu du cache proxy.
+  const proxiedPosterUrl = posterProxyUrl(
+    tmdbIdForRefresh, "w342", _state.data && _state.data._posterBust
+  );
+  const posterSrc = proxiedPosterUrl || posterUrl || "";
+  // AUDIT 2026-06-14 (R6-H) : fallback placeholder. Le proxy /api/poster peut
+  // renvoyer un corps JSON (404 sans poster / 503 cle absente) au lieu d'une
+  // image ; sans ce filet, l'<img> affiche une icone cassee.
+  // LOTC-C1 : la CSP script-src 'self' bloque les handlers inline -> filet
+  // deplace vers le listener 'error' delegue _onPosterError (phase capture).
+  const posterInner = posterSrc
+    ? `<img class="film-detail-poster" data-film-poster-img src="${escapeHtml(posterSrc)}" alt="${escapeHtml(title)}" loading="eager">`
     : `<div class="film-detail-poster film-detail-poster--placeholder" aria-hidden="true">🎬</div>`;
   const posterHtml = `<div class="film-detail-poster-wrap">${posterInner}${refreshBtnHtml}</div>`;
 
   // Chemin + fichier
-  const sourcePath = row.source_path || row.source_folder || "";
-  const videoFilename = row.video_filename || "";
+  // Compat ascendante : PlanRow expose `folder` (chemin) et `video` (nom fichier),
+  // tandis que get_film_full historique utilisait `source_path` / `video_filename`.
+  const sourcePath = row.source_path || row.source_folder || row.folder || "";
+  const videoFilename = row.video_filename || row.video || "";
   const sizeStr = _formatBytes(row.size_bytes);
 
   // Score circle
@@ -214,14 +244,14 @@ function _renderHero(data) {
     <header class="film-detail-hero">
       ${posterHtml}
       <div class="film-detail-meta">
-        <h2 class="film-detail-title">
+        <h2 id="film-detail-title" class="film-detail-title">
           ${escapeHtml(title)}${year ? ` <span class="film-detail-year">(${escapeHtml(String(year))})</span>` : ""}
         </h2>
         ${metaLine ? `<div class="film-detail-meta-line">${metaLine}</div>` : ""}
         <div class="film-detail-meta-stats">
           ${score != null ? `<div class="film-detail-score" data-film-action="open-analysis" title="Voir détail Score V2">${scoreCircle}</div>` : ""}
-          ${confidence != null ? `<div class="film-detail-stat"><span class="film-detail-stat-label">Confiance match</span><span class="film-detail-stat-value">${confidence}%</span></div>` : ""}
-          <div class="film-detail-stat"><span class="film-detail-stat-label">Source</span><span class="film-detail-stat-value">${escapeHtml(source)}</span></div>
+          ${confidence != null ? `<div class="film-detail-stat" title="Confiance globale que ce film est correctement identifié (titre + année)"><span class="film-detail-stat-label">Confiance d'identification</span><span class="film-detail-stat-value">${confidence}%</span></div>` : ""}
+          <div class="film-detail-stat" title="Méthode d'identification du film"><span class="film-detail-stat-label">Identifié via</span><span class="film-detail-stat-value">${escapeHtml(source)}</span></div>
         </div>
         ${sourcePath ? `<div class="film-detail-path">📁 <span class="film-detail-path-text" title="${escapeHtml(sourcePath)}">${escapeHtml(sourcePath)}</span></div>` : ""}
         ${videoBlock}
@@ -346,9 +376,24 @@ function _renderCandidates(data) {
   const candidates = Array.isArray(row.candidates) ? row.candidates : [];
   if (candidates.length === 0) return "";
 
-  // Le premier candidat est par convention le "chosen" (top score).
-  // Si row.chosen_tmdb_id est defini, on l'utilise pour determiner le choisi.
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : garantir qu'UN SEUL candidat
+  // est marque "Choisi" dans l'UI. Cause racine du bug "Avatar : De feu et
+  // de cendres + Avatar 3 tous deux ✓ Choisi" : si deux candidates avaient
+  // le meme tmdb_id ou si chosenId matchait plusieurs (cas degrade), tous
+  // etaient highlightes. Priorite :
+  //  1. cand.chosen === true (annotation backend canonique, Vague I)
+  //  2. premier candidat dont tmdb_id matche row.chosen_tmdb_id / row.tmdb_id
+  //  3. premier candidat (top score) en fallback
+  // Une fois UN candidat marque, les suivants sont forces a NON choisis.
   const chosenId = row.chosen_tmdb_id || row.tmdb_id || (candidates[0] && candidates[0].tmdb_id);
+  const backendMarkedIdx = candidates.findIndex((c) => c && c.chosen === true);
+  let firstChosenIdx = backendMarkedIdx;
+  if (firstChosenIdx < 0) {
+    firstChosenIdx = candidates.findIndex((c) => c && String(c.tmdb_id) === String(chosenId));
+  }
+  if (firstChosenIdx < 0 && candidates.length > 0) {
+    firstChosenIdx = 0; // fallback safe : premier candidat
+  }
 
   const visibleCount = _state.showAllCandidates ? candidates.length : Math.min(3, candidates.length);
   const visible = candidates.slice(0, visibleCount);
@@ -358,7 +403,7 @@ function _renderCandidates(data) {
     <section class="film-detail-candidates">
       <h3 class="film-detail-section-title">🏷 Candidats TMDb (${candidates.length})</h3>
       <div class="film-detail-candidates-list">
-        ${visible.map((c) => _renderCandidate(c, String(c.tmdb_id) === String(chosenId))).join("")}
+        ${visible.map((c, idx) => _renderCandidate(c, idx === firstChosenIdx)).join("")}
       </div>
       ${more > 0
         ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--sm" data-film-action="expand-candidates">▾ Voir ${more} autre${more > 1 ? "s" : ""} candidat${more > 1 ? "s" : ""}</button>`
@@ -400,17 +445,26 @@ function _renderTabsBar() {
 
 function _renderOverviewTab(data) {
   const probe = data.probe || {};
-  const video = probe.video || {};
-  const audioTracks = Array.isArray(probe.audio) ? probe.audio : [];
-  const subs = Array.isArray(probe.subtitles) ? probe.subtitles : [];
+  // AUDIT 2026-06-14 (R7-2) : get_film_full renvoie le `metrics` brut -> les
+  // caracteristiques techniques vivent SOUS probe.detected.* (plat), pas dans
+  // probe.video/probe.audio/probe.subtitles. Avant, l'apercu affichait tout
+  // vide ("Pistes audio: 0", Resolution/Codec/Bitrate absents). Le nombre de
+  // sous-titres n'est pas dans metrics : on le lit sur la PlanRow (data.row).
+  const det = probe.detected || {};
+  const row = data.row || {};
+  const resolution = det.resolution || (det.width && det.height ? `${det.width}×${det.height}` : "");
+  const durMin = det.duration_s ? Math.round(Number(det.duration_s) / 60) : 0;
+  const audioCount = Number(det.audio_tracks_count || 0);
+  const subCount = Number(row.subtitle_count || 0);
   return `
     <div class="film-detail-overview">
       <dl class="film-detail-data-list">
-        ${video.width && video.height ? `<dt>Résolution</dt><dd>${escapeHtml(video.width)}×${escapeHtml(video.height)}</dd>` : ""}
-        ${video.codec ? `<dt>Codec</dt><dd>${escapeHtml(String(video.codec).toUpperCase())}</dd>` : ""}
-        ${video.bitrate_kbps ? `<dt>Bitrate</dt><dd>${escapeHtml(String(video.bitrate_kbps))} kbps</dd>` : ""}
-        <dt>Pistes audio</dt><dd>${audioTracks.length}</dd>
-        <dt>Sous-titres</dt><dd>${subs.length}</dd>
+        ${resolution ? `<dt>Résolution</dt><dd>${escapeHtml(resolution)}</dd>` : ""}
+        ${det.video_codec ? `<dt>Codec</dt><dd>${escapeHtml(String(det.video_codec).toUpperCase())}</dd>` : ""}
+        ${det.bitrate_kbps ? `<dt>Bitrate</dt><dd>${escapeHtml(String(det.bitrate_kbps))} kbps</dd>` : ""}
+        ${durMin > 0 ? `<dt>Durée</dt><dd>${durMin} min</dd>` : ""}
+        <dt>Pistes audio</dt><dd>${audioCount}</dd>
+        <dt>Sous-titres</dt><dd>${subCount}</dd>
       </dl>
     </div>
   `;
@@ -583,14 +637,31 @@ function _renderTabPanel() {
  * Actions principales
  * =========================================================== */
 
-function _renderActions() {
+function _renderActions(data) {
+  const d = data || {};
+  // AUDIT 2026-06-14 (R7-12) : actions d'annulation des corrections manuelles,
+  // affichees seulement si l'etat le justifie (flags get_film_full).
+  const overrideBtn = d.has_tmdb_override
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="clear-override" title="Annuler le choix manuel et revenir au match TMDb automatique">↩ Revenir au match auto</button>`
+    : "";
+  const deleteBtn = d.is_marked_for_deletion
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="unmark-delete">↩ Annuler le marquage suppression</button>`
+    : `<button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>`;
+  // E3 (verif totale 2026-07) : open_path est exclu du REST par design
+  // (_EXCLUDED_METHODS, anti path-traversal) — ouvrir l'explorateur n'a de
+  // sens qu'en mode desktop pywebview, via le bridge natif. En mode
+  // navigateur pur, le bouton n'est pas rendu.
+  const openFolderBtn = (window.pywebview && window.pywebview.api)
+    ? `<button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>`
+    : "";
   return `
     <footer class="film-detail-actions">
       <button type="button" class="v5-btn v5-btn--primary" data-film-action="validate">✓ Valider</button>
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="analyze-perceptual">▶ Analyser perceptuel</button>
-      <button type="button" class="v5-btn v5-btn--secondary" data-film-action="open-folder">📂 Ouvrir dossier</button>
+      ${openFolderBtn}
       <button type="button" class="v5-btn v5-btn--secondary" data-film-action="rescan">↻ Re-scanner</button>
-      <button type="button" class="v5-btn v5-btn--danger" data-film-action="mark-delete">🗑 Marquer pour suppression</button>
+      ${overrideBtn}
+      ${deleteBtn}
     </footer>
   `;
 }
@@ -599,17 +670,30 @@ function _renderActions() {
  * Render principal
  * =========================================================== */
 
+// E3-bis (revue Lot E) : window.pywebview est injecte de maniere asynchrone
+// (event pywebviewready) — une fiche rendue AVANT l'injection n'aurait jamais
+// son bouton "Ouvrir dossier". Re-render du contenu quand le bridge arrive.
+window.addEventListener("pywebviewready", () => {
+  if (_state.containerEl && _state.data && !_state.loading) _renderAll();
+});
+
 function _renderAll() {
   if (!_state.containerEl || !_state.data) return;
   const data = _state.data;
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : role="dialog"+aria-modal sur l'article
+  // (mode C overlay) pour annoncer la modale aux AT. Mode A/B = embed donc juste region.
+  const isOverlay = _state.mode === "C";
+  const dlgAttrs = isOverlay
+    ? 'role="dialog" aria-modal="true" aria-labelledby="film-detail-title"'
+    : 'role="region" aria-labelledby="film-detail-title"';
   _state.containerEl.innerHTML = `
-    <article class="film-detail film-detail--mode-${escapeHtml(_state.mode || "B")}">
+    <article class="film-detail film-detail--mode-${escapeHtml(_state.mode || "B")}" ${dlgAttrs}>
       ${_renderHero(data)}
       ${_renderSynopsis(data)}
       ${_renderAlerts(data)}
       ${_renderCandidates(data)}
       ${_renderTabsBar()}
-      ${_renderActions()}
+      ${_renderActions(data)}
     </article>
   `;
   _bindEvents();
@@ -620,9 +704,37 @@ function _renderAll() {
  * Event handlers
  * =========================================================== */
 
+// LOTC-C1 : la CSP (script-src 'self') bloque les handlers 'onerror' inline ->
+// filet jaquettes via listener 'error' DELEGUE en phase capture (les events
+// error des <img> ne bouillonnent pas), meme pattern que la grille
+// Bibliotheque (R6-H). Fonction nommee -> addEventListener repete = no-op.
+function _onPosterError(ev) {
+  const img = ev.target;
+  if (!img || img.tagName !== "IMG" || !img.classList) return;
+  if (img.dataset && img.dataset.posterFallbackDone === "1") return; // idempotent
+  if (img.dataset) img.dataset.posterFallbackDone = "1";
+  if (img.classList.contains("film-detail-poster")) {
+    // Poster principal : placeholder 🎬 (comportement R6-H conserve).
+    const ph = document.createElement("div");
+    ph.className = "film-detail-poster film-detail-poster--placeholder";
+    ph.setAttribute("aria-hidden", "true");
+    ph.textContent = "🎬";
+    img.replaceWith(ph);
+  } else if (
+    img.classList.contains("film-detail-candidate-poster")
+    || img.classList.contains("tmdb-manual-search-poster")
+  ) {
+    // Vignettes secondaires (R7-16) : masquage simple conserve.
+    img.style.display = "none";
+  }
+}
+
 function _bindEvents() {
   const root = _state.containerEl;
   if (!root) return;
+
+  // LOTC-C1 : filet jaquettes (capture, cf. _onPosterError ci-dessus).
+  root.addEventListener("error", _onPosterError, true);
 
   // Onglets
   root.querySelectorAll("[data-film-tab]").forEach((btn) => {
@@ -662,8 +774,17 @@ function _bindEvents() {
 async function _handleAction(action, btn) {
   if (!_state.data) return;
   const row = _state.data.row || {};
-  const runId = _state.runId || _state.data.run_id;
-  const rowId = _state.rowId || _state.data.row_id;
+  // F05 (defense en profondeur) : l'identite doit venir du payload AFFICHE, pas
+  // de l'etat de navigation — sinon la modale de confirmation montre le film A
+  // et le POST destructif porte sur le film B. get_film_full renvoie toujours
+  // row_id/run_id au niveau racine (ui/api/film_support.py) ; le fallback sur
+  // _state garde le mode B legacy fonctionnel si le payload ne les porte pas.
+  const runId = _state.data.run_id || _state.runId;
+  const rowId = String(_state.data.row_id || _state.rowId || "");
+  if (_state.rowId && rowId !== String(_state.rowId)) {
+    showToast({ type: "warn", text: "La fiche affichée n'est plus à jour. Rouvre le film avant d'agir." });
+    return;
+  }
 
   switch (action) {
     case "open-analysis":
@@ -707,6 +828,28 @@ async function _handleAction(action, btn) {
 
     case "mark-delete":
       _markForDeletionWithConfirm(row, runId, rowId);
+      break;
+
+    case "unmark-delete":
+      // R7-12 : annule le marquage pour suppression.
+      try {
+        const r = await apiPost("library/unmark_for_deletion", { run_id: runId, row_id: rowId });
+        const d = (r && r.data) || r || {};
+        if (d.ok === false) { showToast({ type: "error", text: d.message || "Annulation impossible." }); break; }
+        showToast({ type: "success", text: "Marquage suppression annulé." });
+        _reload();
+      } catch (e) { showToast({ type: "error", text: String(e && e.message ? e.message : e) }); }
+      break;
+
+    case "clear-override":
+      // R7-12 : revient au match TMDb automatique.
+      try {
+        const r = await apiPost("library/clear_tmdb_override", { run_id: runId, row_id: rowId });
+        const d = (r && r.data) || r || {};
+        if (d.ok === false) { showToast({ type: "error", text: d.message || "Annulation impossible." }); break; }
+        showToast({ type: "success", text: "Choix manuel annulé (retour au match auto)." });
+        _reload();
+      } catch (e) { showToast({ type: "error", text: String(e && e.message ? e.message : e) }); }
       break;
 
     case "search-tmdb":
@@ -795,7 +938,7 @@ async function _doSubmitScoreFeedback(userTier, runId, rowId, comment, btn) {
     _renderTabPanel();
   } catch (e) {
     console.error("[film-detail] submit_score_feedback:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; }
   }
 }
@@ -818,7 +961,7 @@ async function _deleteScoreFeedback(btn) {
     _renderTabPanel();
   } catch (e) {
     console.error("[film-detail] delete_score_feedback:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; }
   }
 }
@@ -848,6 +991,15 @@ async function _refreshPosterUnit(tmdbId, btn) {
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Echec refresh poster.");
     }
+    // AUDIT 2026-06-14 (R7-17) : get_tmdb_posters renvoie ok:true +
+    // reason:"tmdb_not_configured" (pas ok:false) quand la cle manque. Sans ce
+    // test, on tombait sur le throw generique "Reessayer ?" (incite a reessayer
+    // en vain). Message precis + sortie propre.
+    if (data.reason === "tmdb_not_configured") {
+      if (img) img.style.opacity = "1";
+      showToast({ type: "warn", text: "Clé TMDb non configurée (Paramètres ▸ TMDb)." });
+      return;
+    }
     // La facade peut retourner soit { posters: { "<id>": "<url>" } }, soit
     // { results: [ { tmdb_id, poster_url } ] }. On gere les 2 shapes.
     let newUrl = null;
@@ -861,19 +1013,26 @@ async function _refreshPosterUnit(tmdbId, btn) {
     if (!newUrl) {
       throw new Error("Poster introuvable dans la réponse.");
     }
-    // Cache-bust pour forcer le rechargement visuel meme si l'URL est identique.
-    const bust = newUrl + (newUrl.includes("?") ? "&" : "?") + "_ts=" + Date.now();
+    // E4-bis (revue Lot E) : le rendu prefere le proxy /api/poster (cache
+    // disque immuable 30j) — sans bust force=1 cote proxy, l'image fraiche
+    // affichee ici serait ecrasee par l'ancienne au prochain re-render.
+    // posterProxyUrl(bust) => &force=1&v=<ts> (pattern R7-8).
+    const bustTs = Date.now();
+    const proxied = posterProxyUrl(tmdbId, "w342", bustTs);
     if (img) {
-      img.src = bust;
+      img.src = proxied || newUrl + (newUrl.includes("?") ? "&" : "?") + "_ts=" + bustTs;
       img.style.opacity = "1";
     }
     // Memorise pour les re-renders ulterieurs (changement d'onglet, etc.).
-    if (_state.data) _state.data.poster_url = newUrl;
+    if (_state.data) {
+      _state.data.poster_url = newUrl;
+      _state.data._posterBust = bustTs;
+    }
     showToast({ type: "success", text: "Poster rafraîchi depuis TMDb." });
   } catch (e) {
     console.error("[film-detail] refresh-poster:", e);
     if (img) img.style.opacity = "1";
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -886,8 +1045,9 @@ async function _refreshPosterUnit(tmdbId, btn) {
 async function _chooseCandidate(tmdbId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "..."; }
   try {
-    const runId = _state.runId || (_state.data && _state.data.run_id);
-    const rowId = _state.rowId || (_state.data && _state.data.row_id);
+    // F05 : meme ordre que _handleAction — le payload affiche fait foi.
+    const runId = (_state.data && _state.data.run_id) || _state.runId;
+    const rowId = (_state.data && _state.data.row_id) || _state.rowId;
     const res = await apiPost("library/set_film_tmdb_candidate", {
       run_id: runId,
       row_id: rowId,
@@ -901,7 +1061,7 @@ async function _chooseCandidate(tmdbId, btn) {
     await _reload();
   } catch (e) {
     console.error("[film-detail] choose-candidate:", e);
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) { btn.disabled = false; btn.textContent = "Choisir"; }
   }
 }
@@ -1051,6 +1211,7 @@ function _openTmdbManualSearchModal(_rowId, _runId) {
   `;
   document.body.appendChild(overlay);
   overlay._previouslyFocused = document.activeElement;
+  trapFocus(overlay); // R8-078b (filet F6-a) : Tab/Shift+Tab piégés dans la recherche TMDb manuelle (aria-modal)
 
   overlay._escHandler = (ev) => {
     if (ev.key === "Escape") {
@@ -1062,6 +1223,8 @@ function _openTmdbManualSearchModal(_rowId, _runId) {
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) _closeTmdbManualSearchModal();
   });
+  // LOTC-C1 : overlay hors containerEl -> filet jaquettes dedie (capture).
+  overlay.addEventListener("error", _onPosterError, true);
   overlay.querySelectorAll("[data-tmdb-search-close]").forEach((b) => {
     b.addEventListener("click", _closeTmdbManualSearchModal);
   });
@@ -1105,27 +1268,36 @@ async function _validateFilm(btn, runId, rowId) {
     }
     showToast({ type: "success", text: "Film validé pour le prochain apply." });
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "✓ Valider"; }
   }
 }
 
 async function _openFolder(row) {
-  const path = row.source_path || row.source_folder || row.current_path || "";
+  // Compat ascendante : PlanRow expose `folder` (champ canonique).
+  const path = row.source_path || row.source_folder || row.current_path || row.folder || "";
   if (!path) {
     showToast({ type: "warn", text: "Aucun chemin de dossier disponible." });
     return;
   }
+  // E3 (verif totale 2026-07) : l'ancien apiPost("open_path") tombait sur
+  // _EXCLUDED_METHODS (exclusion REST deliberee, anti path-traversal) => mort
+  // partout. Le bridge pywebview natif expose open_path directement (meme
+  // validation cote CineSortApi) ; hors desktop le bouton n'est pas rendu,
+  // ce garde couvre le cas residuel (bridge disparu apres render).
+  if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_path === "function")) {
+    showToast({ type: "warn", text: "Disponible uniquement dans l'application de bureau." });
+    return;
+  }
   try {
-    const res = await apiPost("open_path", { path });
-    const data = res && res.data ? res.data : res;
+    const data = await window.pywebview.api.open_path(path);
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Ouverture refusée.");
     }
     showToast({ type: "success", text: "Dossier ouvert dans l'explorateur." });
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
   }
 }
 
@@ -1144,7 +1316,7 @@ async function _rescanRow(btn, runId, rowId) {
     showToast({ type: "success", text: "Re-scan terminé. Mise à jour de la fiche..." });
     await _reload();
   } catch (e) {
-    showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+    showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
     if (btn) {
       btn.disabled = false;
       btn.textContent = btn.dataset.originalText || "↻ Re-scanner";
@@ -1171,7 +1343,7 @@ function _markForDeletionWithConfirm(row, runId, rowId) {
         }
         showToast({ type: "success", text: "Film marqué pour suppression." });
       } catch (e) {
-        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+        showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
       }
     },
   });
@@ -1179,7 +1351,8 @@ function _markForDeletionWithConfirm(row, runId, rowId) {
 
 async function _handleAlertAction(kind, code) {
   const row = (_state.data && _state.data.row) || {};
-  const rowId = _state.rowId || (_state.data && _state.data.row_id);
+  // F05 : meme ordre que _handleAction — le payload affiche fait foi.
+  const rowId = (_state.data && _state.data.row_id) || _state.rowId;
   switch (kind) {
     case "ignore": {
       try {
@@ -1237,7 +1410,7 @@ async function _handleAlertAction(kind, code) {
           }, 240);
         }
       } catch (e) {
-        showToast({ type: "error", text: `Erreur : ${e.message || e}` });
+        showToast({ type: "error", text: "L'action n'a pas pu être effectuée. Réessayer ?" });
       }
       break;
     }
@@ -1275,13 +1448,24 @@ function _renderInto(html) {
 
 async function _reload() {
   if (!_state.rowId) return;
+  // F05 : identite + epoque capturees AVANT l'await. Le skeleton reste ecrit
+  // inconditionnellement (sinon la fiche qu'on ouvre perdrait son skeleton).
+  const rowId = _state.rowId;
+  const runId = _state.runId;
+  const seq = (_state.loadSeq += 1);
   _state.loading = true;
   _renderInto(_renderSkeleton());
   try {
-    _state.data = await _loadFilmFull(_state.rowId, _state.runId);
+    const data = await _loadFilmFull(rowId, runId);
+    // F05 : reponse perimee (autre film ouvert entre-temps, ou overlay ferme)
+    // -> on ne publie rien et on ne repeint rien.
+    if (seq !== _state.loadSeq || _state.rowId !== rowId) return;
+    _state.data = data;
     _state.loading = false;
     _renderAll();
   } catch (e) {
+    // F05 : meme garde sur l'echec, sinon l'erreur du film A efface la fiche B.
+    if (seq !== _state.loadSeq || _state.rowId !== rowId) return;
     _state.loading = false;
     _state.data = null;
     _renderInto(_renderErrorState(e && (e.message || String(e))));
@@ -1319,10 +1503,29 @@ function _ensureModeCOverlay() {
   overlay._previouslyFocused = document.activeElement;
 
   // Esc + clic backdrop ferment
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : focus trap Tab/Shift+Tab pour conformite WCAG 2.4.3
+  // Le keydown handler gere Escape (deja existant) ET le piegeage du focus dans la modale.
+  const _focusableSel = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   overlay._escHandler = (ev) => {
     if (ev.key === "Escape") {
       ev.stopPropagation();
       closeFilmDetail();
+      return;
+    }
+    if (ev.key === "Tab") {
+      const focusables = Array.from(overlay.querySelectorAll(_focusableSel))
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (ev.shiftKey && active === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && active === last) {
+        ev.preventDefault();
+        first.focus();
+      }
     }
   };
   document.addEventListener("keydown", overlay._escHandler);
@@ -1379,6 +1582,9 @@ export async function renderFilmDetail(opts) {
 
 /** Ferme le mode C overlay (no-op pour A et B). */
 export function closeFilmDetail() {
+  // F05 : invalide toute reponse get_film_full encore en vol, sinon elle
+  // repeindrait un overlay deja ferme (ou celui d'un autre film).
+  _state.loadSeq += 1;
   if (_state.overlayEl) {
     if (_state.overlayEl._escHandler) {
       document.removeEventListener("keydown", _state.overlayEl._escHandler);

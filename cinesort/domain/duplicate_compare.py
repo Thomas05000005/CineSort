@@ -11,6 +11,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import (
+    AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK,
+)
+from cinesort.domain.codec_ranks import (
+    format_audio_channels as _format_audio_channels,
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Ponderations des criteres -------------------------------------------
@@ -43,20 +50,8 @@ _VIDEO_CODEC_RANK = {
     "divx": 1,
 }
 
-_AUDIO_CODEC_RANK = {
-    "truehd": 5,
-    "atmos": 5,
-    "dts-hd ma": 4,
-    "dtshd": 4,
-    "dts-hd": 4,
-    "flac": 3,
-    "dts": 2,
-    "ac3": 2,
-    "eac3": 2,
-    "aac": 1,
-    "mp3": 1,
-    "opus": 1,
-}
+# _AUDIO_CODEC_RANK : dict[str, int] importe depuis cinesort.domain.codec_ranks
+# (lookup exact, semantique differente du ranking par substring du badge audio)
 
 
 # --- Dataclasses ---------------------------------------------------------
@@ -268,9 +263,9 @@ def compare_by_criteria(
     results.append(
         CriterionResult(
             name="file_size",
-            label="Taille",
-            value_a=str(size_a),
-            value_b=str(size_b),
+            label="Taille (estimée)",
+            value_a=_human_size(size_a),
+            value_b=_human_size(size_b),
             winner="tie",
             points_delta=0,
         )
@@ -414,21 +409,18 @@ def _audio_codec_label(rank: Optional[int]) -> str:
 
 
 def _channels_label(ch: Optional[int]) -> str:
-    if not ch or ch <= 0:
-        return "?"
-    if ch == 2:
-        return "2.0"
-    if ch == 6:
-        return "5.1"
-    if ch == 8:
-        return "7.1"
-    return f"{ch}ch"
+    """VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `?`)."""
+    return _format_audio_channels(ch, invalid="?")
 
 
 def _bitrate_label(br: Optional[int]) -> str:
     if not br or br <= 0:
         return "?"
-    kbps = br // 1000 if br > 10000 else br
+    # R8-099 (filet F4) : le bitrate est TOUJOURS en bits/s (invariant probe,
+    # cf to_optional_bitrate). Division INCONDITIONNELLE /1000 (même anti-pattern
+    # bps/kbps que R8-038 pour l'audio) ; l'ancien seuil > 10000 affichait un flux
+    # < 10000 bps comme « <N> kbps » au lieu de quelques kbps.
+    kbps = br // 1000
     if kbps >= 1000:
         return f"{kbps // 1000} Mbps"
     return f"{kbps} kbps"
@@ -448,6 +440,21 @@ def _best_audio(probe: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             best = t
             best_rank = r
     return best
+
+
+def _human_size(n: int) -> str:
+    """AUDIT 2026-06-14 (R6-D) : taille lisible pour la table criteres du
+    comparateur (avant : octets bruts type "1610612736")."""
+    n = int(n or 0)
+    if n <= 0:
+        return "?"
+    units = ["o", "Ko", "Mo", "Go", "To"]
+    size = float(n)
+    idx = 0
+    while size >= 1024 and idx < len(units) - 1:
+        size /= 1024
+        idx += 1
+    return f"{int(size)} {units[idx]}" if idx == 0 else f"{size:.1f} {units[idx]}"
 
 
 def _file_size(probe: Optional[Dict[str, Any]]) -> int:

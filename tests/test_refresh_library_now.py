@@ -67,7 +67,9 @@ class RefreshJellyfinNowTests(unittest.TestCase):
             mk_client.return_value = client_mock
             r = refresh_jellyfin_library_now(self.api)
         self.assertFalse(r["ok"])
-        self.assertIn("Jellyfin", r["message"])
+        # Securite (mega-hotfix integration_leaks_5) : on ne renvoie plus le str(exc)
+        # au frontend (pouvait fuiter URL+api_key). Message generique localise.
+        self.assertNotIn("server down", r["message"])
 
 
 class RefreshPlexNowTests(unittest.TestCase):
