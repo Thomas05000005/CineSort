@@ -176,9 +176,12 @@ def _run_plugin(
         cmd = [
             "cmd.exe",
             "/c",
-            "chcp", "65001", ">nul",
+            "chcp",
+            "65001",
+            ">nul",
             "&&",
-            "call", str(plugin_path),
+            "call",
+            str(plugin_path),
         ]
     elif ext == ".ps1":
         # BUG-007: PowerShell herite aussi du code page console. On force

@@ -370,6 +370,7 @@ async function _loadFramesTab() {
   // Cache par paire (cas 3+ fichiers).
   if (!_state.framesLoadedByPair) _state.framesLoadedByPair = {};
   if (!_state.framesLoadingByPair) _state.framesLoadingByPair = {};
+  if (!_state.framesHtmlByPair) _state.framesHtmlByPair = {};
   if (_state.framesLoadedByPair[pairKey]) return; // deja charge avec succes
   if (_state.framesLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="frames"]');
@@ -389,13 +390,16 @@ async function _loadFramesTab() {
     const data = _payload(res);
     if (data.ok === false) {
       const msg = data.message || data.error || "Échec extraction frames";
-      _replaceTabContent("frames", _renderFramesError(msg));
+      _replaceTabContent("frames", _renderFramesError(msg), pairKey);
       return; // pas de cache -> reessayable
     }
     _state.framesLoadedByPair[pairKey] = true; // succes uniquement -> cache
-    _replaceTabContent("frames", _renderFramesPayload(data));
+    // F21 : on memorise le HTML AVANT de tenter l'ecriture. Si le garde la
+    // refuse (onglet/paire change), _renderTabContent le retrouvera au retour.
+    _state.framesHtmlByPair[pairKey] = _renderFramesPayload(data);
+    _replaceTabContent("frames", _state.framesHtmlByPair[pairKey], pairKey);
   } catch (err) {
-    _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)));
+    _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)), pairKey);
   } finally {
     _state.framesLoadingByPair[pairKey] = false;
   }
@@ -453,6 +457,7 @@ async function _loadAudioTab() {
   const pairKey = pair ? pair.key : "default";
   if (!_state.audioLoadedByPair) _state.audioLoadedByPair = {};
   if (!_state.audioLoadingByPair) _state.audioLoadingByPair = {};
+  if (!_state.audioHtmlByPair) _state.audioHtmlByPair = {};
   if (_state.audioLoadedByPair[pairKey]) return; // deja charge avec succes
   if (_state.audioLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="audio"]');
@@ -470,13 +475,15 @@ async function _loadAudioTab() {
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"));
+      _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"), pairKey);
       return; // pas de cache -> reessayable
     }
     _state.audioLoadedByPair[pairKey] = true; // succes uniquement -> cache
-    _replaceTabContent("audio", _renderAudioPayload(data));
+    // F21 : cf. _loadFramesTab — memorisation avant ecriture.
+    _state.audioHtmlByPair[pairKey] = _renderAudioPayload(data);
+    _replaceTabContent("audio", _state.audioHtmlByPair[pairKey], pairKey);
   } catch (err) {
-    _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)));
+    _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)), pairKey);
   } finally {
     _state.audioLoadingByPair[pairKey] = false;
   }
@@ -484,23 +491,37 @@ async function _loadAudioTab() {
 
 /* --- Tabs management --- */
 
+// F21 (revue post-merge 2026-07-18) : le HTML deja calcule est memorise PAR
+// PAIRE. Sans ce cache, le garde de _replaceTabContent transformerait le bug en
+// regression : `framesLoadedByPair[pairKey]` est pose avant l'ecriture, donc un
+// retour sur l'onglet re-rendrait le placeholder sans jamais recharger.
 function _renderTabContent() {
+  const pk = _currentPair() ? _currentPair().key : "default";
   switch (_state.activeTab) {
     case "frames":
-      return _renderFramesPlaceholder();
+      return (_state.framesHtmlByPair && _state.framesHtmlByPair[pk]) || _renderFramesPlaceholder();
     case "audio":
-      return _renderAudioPlaceholder();
+      return (_state.audioHtmlByPair && _state.audioHtmlByPair[pk]) || _renderAudioPlaceholder();
     default:
       return _renderApercu();
   }
 }
 
-function _replaceTabContent(tab, html) {
-  if (!_modalEl) return;
+// F21 : le wrapper [data-duplicate-tabbody] est UNIQUE et partage par les 3
+// onglets. Une reponse tardive (frames ffmpeg lent) ecrivait donc son contenu
+// sous le libelle de l'onglet — ou de la paire — devenu actif entre-temps.
+// `tab` et `pairKey` sont desormais verifies contre l'etat courant.
+// Retourne true si l'ecriture a eu lieu.
+function _replaceTabContent(tab, html, pairKey) {
+  if (!_modalEl || !_state) return false;
+  if (tab && _state.activeTab !== tab) return false;
+  const curKey = _currentPair() ? _currentPair().key : "default";
+  if (pairKey != null && pairKey !== curKey) return false;
   const wrapper = _modalEl.querySelector("[data-duplicate-tabbody]");
-  if (!wrapper) return;
+  if (!wrapper) return false;
   wrapper.innerHTML = html;
   _bindTabContentEvents();
+  return true;
 }
 
 function _switchTab(tabId) {
@@ -681,7 +702,10 @@ function _bindTabContentEvents() {
       const pair = _currentPair();
       const pairKey = pair ? pair.key : "default";
       if (_state.framesLoadedByPair) _state.framesLoadedByPair[pairKey] = false;
-      _replaceTabContent("frames", _renderFramesPlaceholder());
+      // F21 : purger aussi le HTML memorise, sinon _renderTabContent re-servirait
+      // l'ancien rendu au lieu du placeholder « chargement ».
+      if (_state.framesHtmlByPair) delete _state.framesHtmlByPair[pairKey];
+      _replaceTabContent("frames", _renderFramesPlaceholder(), pairKey);
       void _loadFramesTab();
     }, opts);
   }
@@ -691,7 +715,9 @@ function _bindTabContentEvents() {
       const pair = _currentPair();
       const pairKey = pair ? pair.key : "default";
       if (_state.audioLoadedByPair) _state.audioLoadedByPair[pairKey] = false;
-      _replaceTabContent("audio", _renderAudioPlaceholder());
+      // F21 : cf. retry frames.
+      if (_state.audioHtmlByPair) delete _state.audioHtmlByPair[pairKey];
+      _replaceTabContent("audio", _renderAudioPlaceholder(), pairKey);
       void _loadAudioTab();
     }, opts);
   }
@@ -786,6 +812,9 @@ export function openDuplicateComparatorModal(opts) {
     activeTab: "apercu",
     framesLoadedByPair: {},
     audioLoadedByPair: {},
+    // F21 : HTML rendu memorise par paire (cf. _renderTabContent).
+    framesHtmlByPair: {},
+    audioHtmlByPair: {},
     // R6-D : gardes anti-concurrence (chargement en vol) distinctes du cache succes.
     framesLoadingByPair: {},
     audioLoadingByPair: {},

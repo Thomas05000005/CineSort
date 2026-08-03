@@ -30,6 +30,7 @@ Findings couverts :
 NOTE GENERALE : une valeur "fausse" peut etre un choix de design legitime selon le
 contexte. Ce harnais CAPTURE l'etat reel ; le jugement bug/non-bug reste a faire.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,6 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
-
 
 SEP = "=" * 78
 
@@ -55,7 +55,7 @@ def cap_h4_01() -> Dict[str, Any]:
 
     cases = [8000, 10000, 10001, 48000, 192000, 640000]
     out: Dict[str, Any] = {}
-    print(f"  source : cinesort/domain/quality_score.py:538 (seuil 'n > 10000.0' l.563)")
+    print("  source : cinesort/domain/quality_score.py:538 (seuil 'n > 10000.0' l.563)")
     for raw in cases:
         kbps = _normalize_audio_bitrate_kbps(raw)
         # reproduction du calcul per_channel utilise par le scorer (l.973), 6 canaux
@@ -78,8 +78,7 @@ def cap_h4_01() -> Dict[str, Any]:
             tag = "  <-- 10000 bps NON divise (seuil strict) -> 10000 kbps"
         elif raw == 10001:
             tag = "  <-- juste au-dessus du seuil -> divise -> 10 kbps (cliff)"
-        print(f"  in={raw:>7} bps -> normalize={kbps!r:>7} kbps "
-              f"| per_channel(6ch)={per_channel} -> bonus={bonus}{tag}")
+        print(f"  in={raw:>7} bps -> normalize={kbps!r:>7} kbps | per_channel(6ch)={per_channel} -> bonus={bonus}{tag}")
 
     bug_8000 = out["8000"] == 8000
     cliff = out["10000"] == 10000 and out["10001"] == 10
@@ -100,8 +99,8 @@ def cap_h5_01() -> Dict[str, Any]:
     # Le symbole demande 'scene_parser.clean_title_guess' n'existe PAS : la vraie
     # fonction publique est title_helpers.clean_title_guess (re-exportee par
     # domain.core), qui delegue a scene_parser.parse_scene_title.
-    from cinesort.domain.title_helpers import clean_title_guess
     from cinesort.domain.scene_parser import parse_scene_title
+    from cinesort.domain.title_helpers import clean_title_guess
 
     print("  NOTE drift symbole : 'scene_parser.clean_title_guess' inexistant.")
     print("  Vraie fonction = title_helpers.clean_title_guess (l.254) -> delegue")
@@ -142,8 +141,8 @@ def cap_h5_01() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 def cap_conf_01() -> Dict[str, Any]:
     section("F-CONF-01  _save_section_probe persiste calc.exe ; _binary_name_allowed le refuse")
+    from cinesort.infra.probe.tooling import EXPECTED_BINARY_NAMES, _binary_name_allowed
     from cinesort.ui.api.settings_support import _save_section_probe
-    from cinesort.infra.probe.tooling import _binary_name_allowed, EXPECTED_BINARY_NAMES
 
     bogus = "C:/Windows/System32/calc.exe"
     payload = {
@@ -158,8 +157,8 @@ def cap_conf_01() -> Dict[str, Any]:
     persisted = saved.get("ffprobe_path")
     allowed = _binary_name_allowed("ffprobe", bogus)
 
-    print(f"  source persist  : cinesort/ui/api/settings_support.py:1366 (_save_section_probe)")
-    print(f"  source resolver : cinesort/infra/probe/tooling.py:30 (_binary_name_allowed)")
+    print("  source persist  : cinesort/ui/api/settings_support.py:1366 (_save_section_probe)")
+    print("  source resolver : cinesort/infra/probe/tooling.py:30 (_binary_name_allowed)")
     print(f"  EXPECTED_BINARY_NAMES['ffprobe'] = {sorted(EXPECTED_BINARY_NAMES['ffprobe'])}\n")
     print(f"  payload ffprobe_path                     = {bogus!r}")
     print(f"  _save_section_probe -> persiste tel quel : {persisted!r}")
@@ -208,11 +207,22 @@ def cap_h7_01() -> Dict[str, Any]:
     def fake_http_get(url: str, *, params: Optional[Dict[str, Any]] = None) -> _FakeResp:
         if state["phase"] == "empty":
             return _FakeResp({"results": []})
-        return _FakeResp({"results": [
-            {"id": 475557, "title": "Joker", "release_date": "2019-10-02",
-             "original_title": "Joker", "popularity": 9.9, "vote_count": 1000,
-             "vote_average": 8.2, "poster_path": "/x.jpg"},
-        ]})
+        return _FakeResp(
+            {
+                "results": [
+                    {
+                        "id": 475557,
+                        "title": "Joker",
+                        "release_date": "2019-10-02",
+                        "original_title": "Joker",
+                        "popularity": 9.9,
+                        "vote_count": 1000,
+                        "vote_average": 8.2,
+                        "poster_path": "/x.jpg",
+                    },
+                ]
+            }
+        )
 
     client._http_get = fake_http_get  # type: ignore[assignment]
 
@@ -223,20 +233,23 @@ def cap_h7_01() -> Dict[str, Any]:
     print(f"  appel #1 (TMDb renvoie 200 results:[]) -> {len(r1)} resultat(s)")
 
     cache_after_empty = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
-    poisoned_keys = {k: v.get("value") if isinstance(v, dict) else v
-                     for k, v in cache_after_empty.items()}
+    poisoned_keys = {k: v.get("value") if isinstance(v, dict) else v for k, v in cache_after_empty.items()}
     print(f"  cache disque apres #1 : {json.dumps(poisoned_keys, ensure_ascii=False)}")
 
     # Le vrai resultat est maintenant disponible cote 'API'...
     state["phase"] = "real"
     r2 = client.search_movie("Joker", year=2019)
-    print(f"  appel #2 (TMDb renverrait Joker) -> {len(r2)} resultat(s) "
-          f"(re-fetch ? {'NON, sert le cache []' if len(r2) == 0 else 'oui'})")
+    print(
+        f"  appel #2 (TMDb renverrait Joker) -> {len(r2)} resultat(s) "
+        f"(re-fetch ? {'NON, sert le cache []' if len(r2) == 0 else 'oui'})"
+    )
 
     # Preuve falsifiable : une cle differente (non empoisonnee) renvoie bien le film.
     r3 = client.search_movie("Inception", year=2010)
-    print(f"  appel #3 (cle differente, non empoisonnee) -> {len(r3)} resultat(s) "
-          f"(prouve que le stub PEUT rendre un vrai resultat)")
+    print(
+        f"  appel #3 (cle differente, non empoisonnee) -> {len(r3)} resultat(s) "
+        f"(prouve que le stub PEUT rendre un vrai resultat)"
+    )
 
     poisoned = (len(r1) == 0) and (len(r2) == 0) and (len(r3) >= 1)
     print(f"\n  CACHE EMPOISONNE (re-search reste 0 alors qu'un vrai resultat existe) : {poisoned}")
@@ -274,7 +287,7 @@ def cap_perc_01() -> Dict[str, Any]:
     cmd_str = " ".join(cmd)
     has_quiet = ("-v" in cmd) and (cmd[cmd.index("-v") + 1] == "quiet" if "-v" in cmd else False)
     reads_stderr = True  # confirme par lecture du code (l.145-148 : if not stderr -> None)
-    print(f"  source : cinesort/domain/perceptual/audio_perceptual.py:124 (analyze_loudnorm)")
+    print("  source : cinesort/domain/perceptual/audio_perceptual.py:124 (analyze_loudnorm)")
     print(f"  argv construit : {cmd_str}")
     print(f"  contient '-v quiet'              : {has_quiet}")
     print(f"  utilise loudnorm=print_format=json: {'loudnorm=print_format=json' in cmd_str}")
@@ -325,8 +338,8 @@ def cap_perc_02() -> Dict[str, Any]:
         vf = cmd[cmd.index("-vf") + 1]
     has_signalstats = "signalstats" in vf
     has_metadata_print = "metadata=mode=print" in vf or "metadata=print" in vf
-    print(f"  source : cinesort/domain/perceptual/video_analysis.py:90 (filtre vf)")
-    print(f"           parser cherche 'YAVG=' (l.52, l.122)")
+    print("  source : cinesort/domain/perceptual/video_analysis.py:90 (filtre vf)")
+    print("           parser cherche 'YAVG=' (l.52, l.122)")
     print(f"  -vf construit : {vf}")
     print(f"  contient 'signalstats'        : {has_signalstats}")
     print(f"  contient 'metadata=mode=print': {has_metadata_print}")
@@ -347,9 +360,13 @@ def cap_perc_02() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 def cap_perc_03() -> Dict[str, Any]:
     section("F-PERC-03  astats : Crest factor / Dynamic range par-canal, hors bloc Overall")
-    import cinesort.domain.perceptual.audio_perceptual as ap
     from cinesort.domain.perceptual.audio_perceptual import (
-        _extract_overall_block, _RE_CREST, _RE_DYNRANGE, _RE_RMS, _RE_PEAK, _RE_NOISE,
+        _RE_CREST,
+        _RE_DYNRANGE,
+        _RE_NOISE,
+        _RE_PEAK,
+        _RE_RMS,
+        _extract_overall_block,
     )
 
     # Sortie astats au FORMAT FFMPEG REEL : Crest factor et Dynamic range sont
@@ -395,12 +412,12 @@ def cap_perc_03() -> Dict[str, Any]:
     crest_full = grab(_RE_CREST, real_astats_stderr)
     dyn_full = grab(_RE_DYNRANGE, real_astats_stderr)
 
-    print(f"  source : cinesort/domain/perceptual/audio_perceptual.py:234-240 + _extract_overall_block (l.744)")
-    print(f"  bloc Overall extrait :\n      " + overall.replace('\n', '\n      ').rstrip())
+    print("  source : cinesort/domain/perceptual/audio_perceptual.py:234-240 + _extract_overall_block (l.744)")
+    print("  bloc Overall extrait :\n      " + overall.replace("\n", "\n      ").rstrip())
     print()
-    print(f"  Sur le bloc Overall (ce que le code lit) :")
+    print("  Sur le bloc Overall (ce que le code lit) :")
     print(f"    RMS={rms_o}  Peak={peak_o}  Noise={noise_o}  Crest={crest_o}  Dynamic={dyn_o}")
-    print(f"  Dans le texte complet (blocs par-canal) :")
+    print("  Dans le texte complet (blocs par-canal) :")
     print(f"    Crest={crest_full}  Dynamic={dyn_full}  (presents, mais ignores)")
 
     lost = (crest_o is None) and (dyn_o is None) and (crest_full is not None) and (dyn_full is not None)
@@ -437,8 +454,7 @@ def main() -> None:
         "F-PERC-03": resume["F-PERC-03"]["crest_dynamic_lost_in_overall"],
     }
     print("RESUME:", json.dumps({"verdicts": verdicts, "detail": resume}, ensure_ascii=False, default=str))
-    print(f"\nfindings confirmes (broken-state observe) : "
-          f"{sum(1 for v in verdicts.values() if v)}/{len(verdicts)}")
+    print(f"\nfindings confirmes (broken-state observe) : {sum(1 for v in verdicts.values() if v)}/{len(verdicts)}")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,9 @@ Findings couverts :
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/baseline_r8/captures/cap_residual.py
 """
+
 from __future__ import annotations
+
 import io
 import json
 import re
@@ -62,7 +64,9 @@ try:
     has_default_5000 = bool(re.search(r"_DEFAULT_BUSY_TIMEOUT_MS\s*[:=]\s*5000", src))
     overwrites = bool(re.search(r"busy_timeout", src, re.I)) and has_default_5000
     print(f"  _DEFAULT_BUSY_TIMEOUT_MS==5000 : {has_default_5000}")
-    print(f"  -> 8000 (store prod) != 5000 (defaut) => branche back-compat REECRASE le busy_timeout du profil NAS (30000/60000) par 8000")
+    print(
+        "  -> 8000 (store prod) != 5000 (defaut) => branche back-compat REECRASE le busy_timeout du profil NAS (30000/60000) par 8000"
+    )
     RESUME["R8-025_busy_timeout_overwrite"] = overwrites
     print(f"  VERDICT : {'CONFIRME (override back-compat ecrase le profil NAS)' if overwrites else 'a verifier'}")
 except Exception as e:
@@ -99,7 +103,7 @@ try:
     # should_cancel passe a analyze_perceptual_batch ?
     blk = "\n".join(read("cinesort/ui/api/run_flow_support.py"))
     m = re.search(r"analyze_perceptual_batch\((.{0,400}?)\)", blk, re.S)
-    arglist = (m.group(1) if m else "")
+    arglist = m.group(1) if m else ""
     passes_cancel = "should_cancel" in arglist
     print(f"  arglist analyze_perceptual_batch contient should_cancel : {passes_cancel}")
     pc = grep("cinesort/ui/api/perceptual_support.py", r"_perceptual_cancel_event", re.I)
@@ -110,7 +114,9 @@ try:
     confirmed = (not passes_cancel) and (not assigned_event)
     print(f"  _perceptual_cancel_event assigne un Event() en prod : {assigned_event}")
     RESUME["R8-037_cancel_inert"] = confirmed
-    print(f"  VERDICT : {'CONFIRME (cancel inerte : ni should_cancel propage, ni Event assigne)' if confirmed else 'a verifier'}")
+    print(
+        f"  VERDICT : {'CONFIRME (cancel inerte : ni should_cancel propage, ni Event assigne)' if confirmed else 'a verifier'}"
+    )
 except Exception as e:
     print(f"  [erreur lecture] {e}")
     RESUME["R8-037_cancel_inert"] = False
@@ -119,13 +125,19 @@ except Exception as e:
 # ----------------------------------------------------------------- R8-016 [8]
 section("R8-016 [8] — batch zombie sans expected_ops classe ROLLED_BACK (UPDATE statut seul)")
 try:
-    hits = grep("cinesort/app/apply_batches_reconciliation.py", r"expected_ops|rolled_back|ROLLED_BACK|_close_batch|expected is None", re.I)
+    hits = grep(
+        "cinesort/app/apply_batches_reconciliation.py",
+        r"expected_ops|rolled_back|ROLLED_BACK|_close_batch|expected is None",
+        re.I,
+    )
     for n, t in hits[:20]:
         print(f"  reconciliation.py:{n}: {t}")
     src = "\n".join(read("cinesort/app/apply_batches_reconciliation.py"))
     confirmed = bool(re.search(r"expected\s+is\s+None", src)) and bool(re.search(r"rolled_back", src, re.I))
     RESUME["R8-016_zombie_mislabel"] = confirmed
-    print(f"  VERDICT : {'CONFIRME (expected None -> rolled_back, mislabel observabilite, aucune action FS)' if confirmed else 'a verifier'}")
+    print(
+        f"  VERDICT : {'CONFIRME (expected None -> rolled_back, mislabel observabilite, aucune action FS)' if confirmed else 'a verifier'}"
+    )
 except Exception as e:
     print(f"  [erreur lecture] {e}")
     RESUME["R8-016_zombie_mislabel"] = False
@@ -155,6 +167,7 @@ except Exception as e:
 section("R8-079 F-H5-03 — convention TV non-standard non detectee comme serie")
 try:
     import cinesort.domain.core as core
+
     fn = getattr(core, "looks_tv_like", None)
     # signature : looks_tv_like(name, videos) -> un PACK est-il une serie ?
     nonstd = {
@@ -174,7 +187,9 @@ try:
         print(f"  controles standard (attendu True)           : {st}")
         confirmed = (not any(ns.values())) and all(st.values())
         RESUME["R8-079_nonstd_tv_missed"] = confirmed
-        print(f"  VERDICT : {'CONFIRME (conventions non-standard non detectees, standard OK)' if confirmed else 'partiel/a verifier'}")
+        print(
+            f"  VERDICT : {'CONFIRME (conventions non-standard non detectees, standard OK)' if confirmed else 'partiel/a verifier'}"
+        )
     else:
         print("  [looks_tv_like introuvable] -> grep de secours")
         for n, t in grep("cinesort/domain/core.py", r"_TV_HINT_RE|def looks_tv_like", re.I)[:8]:
@@ -198,9 +213,13 @@ try:
     has_mark = "mark_played" in src
     has_fail = "mark_played failed" in src
     confirmed = has_mark and has_fail
-    print(f"  appelle client.mark_played : {has_mark} ; branche d'echec 'mark_played failed' (errors++, pas de re-queue) : {has_fail}")
+    print(
+        f"  appelle client.mark_played : {has_mark} ; branche d'echec 'mark_played failed' (errors++, pas de re-queue) : {has_fail}"
+    )
     RESUME["R8-080_played_not_retried"] = confirmed
-    print(f"  VERDICT : {'CONFIRME (echec mark_played -> errors++ sans re-tentative dans ce run)' if confirmed else 'a verifier'}")
+    print(
+        f"  VERDICT : {'CONFIRME (echec mark_played -> errors++ sans re-tentative dans ce run)' if confirmed else 'a verifier'}"
+    )
 except Exception as e:
     print(f"  [erreur lecture] {e}")
     RESUME["R8-080_played_not_retried"] = False
@@ -219,7 +238,9 @@ try:
     always_true = all(truth.values())
     confirmed = has_or_true and always_true
     RESUME["R8-081_tautological_assert"] = confirmed
-    print(f"  VERDICT : {'CONFIRME (assertTrue(d.exists() or True) passe quoi qu il arrive)' if confirmed else 'a verifier'}")
+    print(
+        f"  VERDICT : {'CONFIRME (assertTrue(d.exists() or True) passe quoi qu il arrive)' if confirmed else 'a verifier'}"
+    )
 except Exception as e:
     print(f"  [erreur lecture] {e}")
     RESUME["R8-081_tautological_assert"] = False

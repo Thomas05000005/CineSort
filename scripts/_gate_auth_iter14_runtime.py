@@ -19,6 +19,7 @@ Strategie deux phases :
     -> bypass loopback ACTIF, conserve.
     -> Test bypass valid-token + no-token -> 200.
 """
+
 from __future__ import annotations
 
 import json
@@ -162,12 +163,8 @@ def main() -> int:
     print(json.dumps(results, indent=2, default=str))
 
     # Verdicts
-    facade_5_no_token_401 = all(
-        v["status"] == 401 for v in results["facade_5_endpoints"].values()
-    )
-    facade_5_xreq = all(
-        v["xreq"] for v in results["facade_5_endpoints"].values()
-    )
+    facade_5_no_token_401 = all(v["status"] == 401 for v in results["facade_5_endpoints"].values())
+    facade_5_xreq = all(v["xreq"] for v in results["facade_5_endpoints"].values())
     verdicts = {
         "non_loopback_no_token=401": results["non_loopback_no_token"] == 401,
         "non_loopback_wrong_token=401": results["non_loopback_wrong_token"] == 401,
