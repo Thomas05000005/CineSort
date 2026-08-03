@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
@@ -29,6 +30,110 @@ from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Contrat de lecture des PlanRow serialisees (helper PARTAGE)
+# ---------------------------------------------------------------------------
+# AUDIT 2026-08-03 (#447 / #730) : `api.run.get_plan()` renvoie un simple
+# `asdict(PlanRow)` (run_data_support.serialize_rows_for_payload), enrichi de
+# quelques clefs seulement par `history_support._enrich_plan_payload`
+# (display_title / auto_approvable / tmdb_id via overlay_tmdb_override).
+# TOUTE autre clef lue sur ces dicts vaut None EN PERMANENCE et se fait avaler
+# par un fallback falsy (`or 0`, `or ""`) : aucune exception, juste une
+# fonctionnalite morte.
+#
+# `mtime`, `source_path` et `size_bytes` etaient exactement dans ce cas. Degats
+# constates cote utilisateur :
+#   - `added_ts` toujours 0.0  -> tris "added_asc"/"added_desc" inertes,
+#     filtres added_after/added_before jamais appliques, chip
+#     "recently_modified" (_row_recently_modified) toujours vide ;
+#   - `path` toujours ""       -> podiums release group / source vides
+#     (library_podiums_support:176 derive le filename du path), fallback
+#     filesystem de la timeline mort (library_timeline_support:277), colonne
+#     chemin vide a l'export (library_actions_support:1121) ;
+#   - `size_bytes` retombait sur la seule ESTIMATION bitrate x duree.
+#
+# Les trois se DERIVENT de `folder` + `video`, qui existent, eux, sur PlanRow.
+# Ces deux helpers sont la source unique de cette derivation : tout module qui
+# a besoin du chemin / de la date / de la taille d'une PlanRow doit les
+# appeler plutot que d'inventer une nouvelle clef fantome.
+
+
+def plan_row_media_path(row: Mapping[str, Any]) -> str:
+    """Chemin du media d'une PlanRow serialisee (`folder` + `video`).
+
+    Retourne le dossier seul quand `video` est vide (cas d'une PlanRow
+    "single" dont le fichier n'a pas ete resolu), et "" si les deux manquent.
+    """
+    folder = str(row.get("folder") or "").strip()
+    video = str(row.get("video") or "").strip()
+    if folder and video:
+        return os.path.join(folder, video)
+    return folder or video
+
+
+def _folder_fs_facts(folder: str, cache: Dict[str, Dict[str, Tuple[float, int]]]) -> Dict[str, Tuple[float, int]]:
+    """Index {nom_de_fichier: (mtime, size)} d'un dossier, memoise.
+
+    UN `os.scandir` par dossier DISTINCT plutot qu'un `os.stat` par film.
+    Pour un dossier mono-film les deux se valent (une enumeration de
+    repertoire vaut un aller-retour, comme un stat) ; le gain est sur les
+    dossiers PARTAGES — kinds "collection" et "extra", ou K PlanRow pointent
+    le meme dossier — qui passent de K aller-retours a un seul.
+
+    Cout mesure (853 films, 3 entrees par dossier, SSD local, 2026-08-03) :
+    38 ms au total, soit 45 us par film — face aux ~15 s que met deja la vue
+    Bibliotheque, c'est sous le bruit. Sur un root SMB/NAS c'est un
+    aller-retour par dossier, la ou la donnee n'existe nulle part ailleurs
+    (aucune table ne persiste la mtime d'un fichier video indexable par
+    chemin : `probe_cache` et `incremental_file_hashes` ont la mtime dans
+    leur CLE primaire, pas en colonne interrogeable).
+    """
+    known = cache.get(folder)
+    if known is not None:
+        return known
+    facts: Dict[str, Tuple[float, int]] = {}
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                facts[entry.name] = (float(st.st_mtime), int(st.st_size))
+    except OSError as exc:
+        # Root debranche / dossier deja deplace : on degrade a (0.0, 0), qui
+        # est neutre pour les filtres (cf `_row_recently_modified`).
+        logger.debug("library_support: dossier illisible %s (%s)", folder, exc)
+    cache[folder] = facts
+    return facts
+
+
+def plan_row_fs_facts(
+    row: Mapping[str, Any],
+    cache: Optional[Dict[str, Dict[str, Tuple[float, int]]]] = None,
+) -> Tuple[float, int]:
+    """Retourne `(mtime_epoch, size_bytes)` reels du media d'une PlanRow.
+
+    `(0.0, 0)` si le media est introuvable/illisible — jamais d'exception :
+    la vue Bibliotheque doit rester affichable avec un root debranche.
+    """
+    if cache is None:
+        cache = {}
+    folder = str(row.get("folder") or "").strip()
+    video = str(row.get("video") or "").strip()
+    if folder and video:
+        return _folder_fs_facts(folder, cache).get(video, (0.0, 0))
+    target = folder or video
+    if not target:
+        return (0.0, 0)
+    try:
+        st = os.stat(target)
+    except OSError:
+        return (0.0, 0)
+    return (float(st.st_mtime), int(st.st_size))
+
 
 # ---------------------------------------------------------------------------
 # Utilitaires
@@ -305,6 +410,11 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             logger.debug("library_support poster batch fetch error: %s", exc)
 
+    # AUDIT 2026-08-03 (#447 / #730) : index {dossier: {fichier: (mtime, size)}}
+    # partage par toutes les rows du run -> un seul `os.scandir` par dossier
+    # distinct, meme pour les dossiers partages (collection / extras).
+    fs_cache: Dict[str, Dict[str, Tuple[float, int]]] = {}
+
     out: List[Dict[str, Any]] = []
     for r in plan_rows:
         row_id = str(r.get("row_id") or "")
@@ -416,6 +526,13 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
                     poster_url = cand_poster
                     break
 
+        # AUDIT 2026-08-03 (#447 / #730) : chemin + date + taille derives de
+        # folder/video (cf plan_row_media_path / plan_row_fs_facts en tete de
+        # module). Avant : r.get("mtime") / r.get("source_path") /
+        # r.get("size_bytes"), trois clefs absentes de PlanRow.
+        media_path = plan_row_media_path(r)
+        fs_mtime, fs_size = plan_row_fs_facts(r, fs_cache)
+
         row = {
             "row_id": row_id,
             "title": r.get("proposed_title") or r.get("nfo_title") or "",
@@ -467,8 +584,8 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
-            "added_ts": float(r.get("mtime") or 0),
-            "path": r.get("source_path") or "",
+            "added_ts": fs_mtime,
+            "path": media_path,
             "poster_url": poster_url,
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),
@@ -481,15 +598,21 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             # AUDIT 2026-06-11 (R3) : source MEDIA (bluray/web/dvd/other) derivee du
             # nom video, pour le filtre Source du drawer (distincte de
             # proposed_source = source d'identification).
-            "media_source": _media_source_label(r.get("video") or r.get("source_path") or ""),
+            "media_source": _media_source_label(r.get("video") or media_path),
             "confidence": confidence,
             # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-2) : metrics["size_bytes"]
             # n'existe pas. La taille estimee est dans detected.file_size_bytes
             # (bitrate_kbps * duration_s, cf _estimate_file_size en domain/quality_score.py).
-            # Avant : metrics.get("size_bytes") = None -> tous les size_bytes
-            # provenaient uniquement de PlanRow.size_bytes (lui-meme souvent 0
-            # tant que le scan FS n'a pas posé la stat), cassant le tri/filtre taille.
-            "size_bytes": int(r.get("size_bytes") or detected.get("file_size_bytes") or 0),
+            #
+            # AUDIT 2026-08-03 (#447 / #730) : le terme prioritaire etait
+            # `r.get("size_bytes")` et le commentaire ci-dessus affirmait a tort
+            # que « PlanRow.size_bytes » existait — il n'a jamais existe (cf
+            # domain/core.py:PlanRow). La taille affichee etait donc TOUJOURS
+            # l'estimation bitrate x duree, jamais la taille reelle du fichier.
+            # `fs_size` (issu du meme scandir que fs_mtime, donc gratuit) est la
+            # vraie taille ; l'estimation reste en repli quand le media est
+            # illisible (root debranche).
+            "size_bytes": int(fs_size or detected.get("file_size_bytes") or 0),
         }
 
         # Si grain dans metrics
