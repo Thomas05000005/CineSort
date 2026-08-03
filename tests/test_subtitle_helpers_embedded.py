@@ -129,13 +129,9 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
             video.touch()
 
             report_old = build_subtitle_report(folder, video, ["fr"])
-            report_new = build_subtitle_report(
-                folder, video, ["fr"], embedded_subtitles=None
-            )
+            report_new = build_subtitle_report(folder, video, ["fr"], embedded_subtitles=None)
             self.assertEqual(report_old.languages, report_new.languages)
-            self.assertEqual(
-                report_old.missing_languages, report_new.missing_languages
-            )
+            self.assertEqual(report_old.missing_languages, report_new.missing_languages)
             self.assertEqual(report_old.count, report_new.count)
 
     def test_embedded_non_dict_items_skipped(self):
@@ -176,9 +172,7 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
             video.touch()
 
             embedded = [{"index": 0, "language": "ger", "forced": False}]
-            report = build_subtitle_report(
-                folder, video, ["fr"], embedded_subtitles=embedded
-            )
+            report = build_subtitle_report(folder, video, ["fr"], embedded_subtitles=embedded)
             self.assertEqual(report.languages, ["de"], "'ger' doit normaliser vers 'de', pas 'fr'")
             self.assertEqual(
                 report.missing_languages,
@@ -199,9 +193,7 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
                 {"index": 1, "language": "ger", "forced": False},
                 {"index": 2, "language": "spa", "forced": False},
             ]
-            report = build_subtitle_report(
-                folder, video, ["fr"], embedded_subtitles=embedded
-            )
+            report = build_subtitle_report(folder, video, ["fr"], embedded_subtitles=embedded)
             self.assertEqual(report.languages, ["de", "en", "es"])
             self.assertEqual(report.missing_languages, ["fr"])
 
@@ -234,9 +226,7 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
 
             embedded = [{"index": 0, "language": "fre", "forced": False}]
             for exp in ("french", "French", "FRENCH", "fre"):
-                report = build_subtitle_report(
-                    folder, video, [exp], embedded_subtitles=embedded
-                )
+                report = build_subtitle_report(folder, video, [exp], embedded_subtitles=embedded)
                 self.assertEqual(
                     report.missing_languages,
                     [],
@@ -254,9 +244,7 @@ class TestBuildSubtitleReportEmbedded(unittest.TestCase):
             video.touch()
 
             embedded = [{"index": 0, "language": "eng", "forced": False}]
-            report = build_subtitle_report(
-                folder, video, ["fra"], embedded_subtitles=embedded
-            )
+            report = build_subtitle_report(folder, video, ["fra"], embedded_subtitles=embedded)
             self.assertEqual(report.languages, ["en"])
             self.assertEqual(report.missing_languages, ["fr"])
 

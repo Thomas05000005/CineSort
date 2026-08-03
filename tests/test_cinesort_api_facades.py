@@ -879,10 +879,13 @@ class RunFacadeAutoApproveUndoExtensionTests(unittest.TestCase):
         self.assertEqual(result, sentinel)
 
     def test_get_auto_approved_summary_defaults(self) -> None:
+        # threshold=None par défaut : le seuil est résolu depuis les settings
+        # (auto_approve_threshold) dans get_auto_approved_summary -> cohérent avec
+        # dashboard.review_queue_count (fix double-comptage seuil != 85).
         sentinel = {"ok": True}
         with patch.object(self.api, "_get_auto_approved_summary_impl", return_value=sentinel) as mocked:
             self.api.run.get_auto_approved_summary("run_xyz")
-        mocked.assert_called_once_with("run_xyz", threshold=85, enabled=False, quarantine_corrupted=False)
+        mocked.assert_called_once_with("run_xyz", threshold=None, enabled=False, quarantine_corrupted=False)
 
     def test_undo_last_apply_preview_exposed_and_delegates(self) -> None:
         self.assertTrue(callable(getattr(self.api.run, "undo_last_apply_preview", None)))

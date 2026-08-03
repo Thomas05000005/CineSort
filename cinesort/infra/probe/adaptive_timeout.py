@@ -56,11 +56,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cinesort.infra.probe.constants import (
+    _PROBE_TIMEOUT_GB_UNIT_BYTES,
     PROBE_TIMEOUT_BASE_S,
     PROBE_TIMEOUT_CEILING_S,
     PROBE_TIMEOUT_FLOOR_S,
     PROBE_TIMEOUT_PER_GB_S,
-    _PROBE_TIMEOUT_GB_UNIT_BYTES,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,9 +103,7 @@ def _read_float_env(name: str) -> Optional[float]:
     try:
         return float(raw)
     except (TypeError, ValueError):
-        logger.warning(
-            "Env %s=%r invalide (float attendu), valeur ignoree.", name, raw
-        )
+        logger.warning("Env %s=%r invalide (float attendu), valeur ignoree.", name, raw)
         return None
 
 
@@ -172,9 +170,7 @@ def resolve_adaptive_timeout_config(
     if ceiling <= 0:
         ceiling = float(PROBE_TIMEOUT_CEILING_S)
 
-    return AdaptiveTimeoutConfig(
-        base_s=base, per_gb_s=per_gb, floor_s=floor, ceiling_s=ceiling
-    )
+    return AdaptiveTimeoutConfig(base_s=base, per_gb_s=per_gb, floor_s=floor, ceiling_s=ceiling)
 
 
 def _safe_file_size_bytes(media_path: Path) -> int:

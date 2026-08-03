@@ -1,9 +1,29 @@
-# PHASE 5 — Arbitrages produit en attente (décision Thomas) — 2026-07-09
+# PHASE 5 — Arbitrages produit — 2026-07-09 (tranchés 2026-07-10)
 
 > La purge de code mort (Phase 5) a supprimé le franchement mort. Restent des
 > zones qui demandent une **décision produit** (câbler / assumer / élaguer) plutôt
 > qu'une suppression mécanique — la règle de backward-compat interdit de retirer
 > des clés settings ou API sans arbitrage. Ce document les liste pour trancher.
+
+## ✅ DÉCISIONS TRANCHÉES (Thomas, 2026-07-10)
+1. **i18n → FR-only (partiel).** Élagage des 3 familles 100 % orphelines
+   (legacy+plex+radarr = 120 clés) + retrait du sélecteur de langue. Le reste
+   (~400 clés) est verrouillé par 6 fichiers de tests de structure → décision
+   séparée. ✅ FAIT (commit i18n). Détail §1.
+2. **Auto-approbation → IMPLÉMENTÉE** (seed READ-TIME de la Validation, jamais
+   persisté, apply intact). ✅ FAIT (commit auto-approve). Détail §2.
+3. **Méthodes façade orphelines → GARDER** (backward-compat), câblage à la demande.
+   Rien supprimé. Détail §3.
+4. **R8-079 (pack TV NxNN « Show.101 ») → ABANDONNÉ.** Après 2 passes de revue
+   adversaire (4 bugs de mutilation de titre / perte de données : « Fahrenheit 451 »
+   éditions collisionnées en S04E51, « MCU 101 Iron Man » collection transformée en
+   série, film isolé mutilé dans un dossier TV, épisode nu droppé si son code = token
+   technique), la détection de nombres à 3 chiffres NUS s'est révélée **non
+   fiabilisable** dans la zone titre seed-critique (règle inviolable « ne jamais
+   mutiler un titre »). Code retiré. **Limite documentée** : les packs TV doivent
+   être nommés en `S01E01` ou `1x01` (formats non ambigus, déjà détectés). Détail §4.
+
+Statut d'implémentation : commits du cycle 2026-07-10 (branche arbitrages/produit).
 
 ## 1. i18n — le dashboard est majoritairement FR-only
 

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Set
 # quality_reports.metrics.subtitles_embedded. Avant, generate_suggestions
 # ignorait les embedded -> divergence de comptage entre les 2 vues (BUG 2 Vague I
 # faussement corrige).
+from cinesort.domain.confidence_thresholds import CONF_MEDIUM
 from cinesort.domain.subtitle_helpers import _normalize_iso639
 
 # Codecs video consideres comme obsoletes
@@ -28,6 +29,105 @@ _PRIORITY_LOW = "low"
 
 # Ordre de tri des priorites
 _PRIORITY_ORDER = {_PRIORITY_HIGH: 0, _PRIORITY_MEDIUM: 1, _PRIORITY_LOW: 2}
+
+
+def row_unidentified(row: Dict[str, Any]) -> bool:
+    """True si le film n'a PAS pu etre identifie (titre+annee fiables).
+
+    AUDIT 2026-07-15 (M2) : DEFINITION UNIQUE partagee. Avant, la carte Accueil
+    "films non identifies" (librarian, section D) rendait un verdict OPPOSE au
+    chip Bibliotheque (`identified` via ce predicat) sur le MEME film : elle
+    ignorait `tmdb_id` ET `proposed_year` et utilisait `confidence == 0` au lieu
+    du seuil CONF_MEDIUM. Les deux surfaces consomment desormais CE predicat.
+    library_support._row_unidentified en est un alias (couvert par
+    tests/test_identification_nfo_v77.py).
+
+    AUDIT 2026-06-13 (R5-A) : l'ancienne version exigeait `tmdb_id > 0` EN
+    PREMIER (`if tmdb_id_int <= 0: return True`). Or l'identification ne passe
+    pas forcement par TMDb : un film resolu par fichier NFO ou par parsing du
+    nom n'a AUCUN tmdb_id mais EST parfaitement identifie (titre + annee +
+    confiance). Sur une biblio reelle 100% NFO (TMDb desactive), ce bug
+    classait les 1027 films "non identifies" et affichait "Identifier" partout.
+    Le tmdb_id ne sert qu'aux jaquettes / au match Jellyfin, PAS a decider de
+    l'identification.
+
+    Critere :
+    - tmdb_id resolu (> 0) => identifie (raccourci suffisant).
+    - sinon : identifie si proposed_source est fiable (nfo / name / tmdb /
+      imdb ...), confiance >= CONF_MEDIUM (60) ET une annee est resolue.
+    - non identifie si source unknown/vide, confiance < CONF_MEDIUM, ou annee absente.
+
+    Le predicat accepte un dict (row Library expose `year`, PlanRow `proposed_year`).
+    """
+    tmdb_id = row.get("tmdb_id")
+    try:
+        if tmdb_id is not None and int(tmdb_id) > 0:
+            return False  # tmdb_id resolu : identifie (raccourci).
+    except (TypeError, ValueError):
+        pass
+    src = str(row.get("proposed_source") or "").strip().lower()
+    if src in ("", "unknown"):
+        return True
+    if int(row.get("confidence") or 0) < CONF_MEDIUM:
+        return True
+    # La row Library expose `year`, la PlanRow `proposed_year` : on tolere les 2.
+    year = int(row.get("proposed_year") or row.get("year") or 0)
+    if year <= 0:
+        return True
+    return False
+
+
+def resolve_tmdb_id(row: Any) -> Optional[int]:
+    """Resoud le tmdb_id EFFECTIF d'une PlanRow : top-level d'abord, puis le
+    candidat de meilleur score (>= 0.7) porteur d'un tmdb_id valide, sinon None.
+
+    AUDIT 2026-07-15 (M2, suivi) : MIROIR EXACT du resolveur du chip Bibliotheque
+    (library_support._build_library_rows._resolve_tmdb_id). La carte Accueil
+    (generate_suggestions, section D) nourrissait row_unidentified avec
+    `getattr(row, "tmdb_id")` BRUT. Or PlanRow.tmdb_id top-level est TOUJOURS None
+    apres scan : le linker ecrit le tmdb_id sur les Candidate ENFANTS, pas au
+    top-level du row (cf. commentaire library_support v1.5.5 Vague J). Le chip,
+    lui, resolvait deja depuis les candidats -> le raccourci `tmdb_id > 0` de
+    row_unidentified ne se declenchait JAMAIS cote Accueil et les 2 surfaces
+    rendaient des verdicts OPPOSES sur les films identifies uniquement par un
+    candidat (match TMDb auto sans NFO/nom fiable). On resout donc ICI, en
+    DOMAINE, sans importer library_support (inversion de couche interdite).
+
+    Seuil (0.7) et selection (meilleur score) alignes sur le resolveur du chip.
+    Accepte des candidats dict (plan.jsonl) OU objets (core.Candidate).
+    """
+    tid_top = getattr(row, "tmdb_id", None)
+    if tid_top:
+        try:
+            v = int(tid_top)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    # Fallback : meilleur candidat (score >= 0.7) porteur d'un tmdb_id. La liste
+    # est deja ordonnee par score desc cote linker domain, mais on selectionne
+    # explicitement le max pour ne dependre d'aucun ordre implicite.
+    best: Optional[int] = None
+    best_score = -1.0
+    for cand in getattr(row, "candidates", None) or []:
+        cid = cand.get("tmdb_id") if isinstance(cand, dict) else getattr(cand, "tmdb_id", None)
+        if not cid:
+            continue
+        raw_score = cand.get("score") if isinstance(cand, dict) else getattr(cand, "score", None)
+        try:
+            score = float(raw_score or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < 0.7:
+            # Confiance candidat insuffisante : on n'auto-resolve pas.
+            continue
+        if score > best_score:
+            try:
+                best = int(cid)
+                best_score = score
+            except (TypeError, ValueError):
+                continue
+    return best
 
 
 # 164L : analyse de 6 categories de suggestions — lineaire, chaque
@@ -174,11 +274,26 @@ def generate_suggestions(
         )
 
     # --- D. Films non identifies ---
+    # AUDIT 2026-07-15 (M2) : delegue au predicat UNIQUE row_unidentified (tmdb_id
+    # + source + CONF_MEDIUM + annee), MEME source de verite que le chip
+    # Bibliotheque (library_support._row_unidentified). Avant, ce bloc ignorait
+    # tmdb_id et proposed_year et testait `conf == 0` -> verdict OPPOSE a la
+    # Bibliotheque sur le meme film (ex: tmdb_id resolu + source vide, ou NFO a
+    # confiance 45 / sans annee).
     unidentified_films: List[str] = []
     for row in rows:
-        src = str(getattr(row, "proposed_source", "") or "").strip().lower()
-        conf = int(getattr(row, "confidence", 0) or 0)
-        if src in ("unknown", "") or conf == 0:
+        row_view = {
+            # AUDIT 2026-07-15 (M2, suivi) : tmdb_id RESOLU depuis les candidats
+            # (miroir du chip), PAS le top-level BRUT qui est TOUJOURS None apres
+            # scan. Sans ca le raccourci `tmdb_id > 0` de row_unidentified restait
+            # mort cote Accueil -> divergence avec le chip Bibliotheque sur les
+            # films identifies uniquement par un candidat.
+            "tmdb_id": resolve_tmdb_id(row),
+            "proposed_source": getattr(row, "proposed_source", None),
+            "confidence": getattr(row, "confidence", 0),
+            "proposed_year": getattr(row, "proposed_year", 0),
+        }
+        if row_unidentified(row_view):
             rid = str(getattr(row, "row_id", ""))
             title = str(getattr(row, "proposed_title", "") or rid)
             unidentified_films.append(title)
