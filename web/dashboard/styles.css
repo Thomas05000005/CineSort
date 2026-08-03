@@ -4,6 +4,13 @@
    Glass morphism, gradient accents, micro-animations.
    ============================================================ */
 
+/* V1.4 — Tout le styles.css legacy est wrappe dans @layer legacy.
+   Ordre canonique declare dans tokens.css : reset, tokens, primitives,
+   components, utilities, legacy, v5. Donc v5 (.v5-*) gagne sur legacy en
+   cas de conflit. Tier hex (Gold #FFD700, Silver #C0C0C0, Bronze #CD7F32,
+   Platinum #E5E4E2) restent INVARIANTES — ne pas toucher au hex. */
+@layer legacy {
+
 /* --- Font -------------------------------------------------- */
 /* V3-02 (v7.7.0) : police partagee depuis web/shared/fonts/ (deduplication
    162 KB). Servi par REST handler _serve_shared_file (/shared/fonts/...). */
@@ -27,14 +34,17 @@
   /* Text */
   --text-primary:   #E8ECF1;
   --text-secondary: #8B97AB;
-  --text-muted:     #4A5568;
+  /* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-003 : on retire
+     l'override #4A5568 qui chutait le contraste WCAG (~2.7:1 sur bg-base).
+     On laisse le token global de tokens.css (#6B7A95) qui donne ratio ~4.7:1
+     (WCAG AA >= 4.5 sur fond #06090F). */
 
-  /* Accent */
-  --accent:        #60A5FA;
-  --accent-hover:  #3B82F6;
-  --accent-soft:   rgba(96,165,250,.12);
-  --accent-glow:   rgba(96,165,250,.15);
-  --accent-border: rgba(96,165,250,.25);
+  /* Accent — Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-004 :
+     Les overrides --accent* sont retires de :root car ils ecrasaient le
+     theme actif (themes.css). Le theme Luxe definissait deja --accent
+     #FBBF24 (or) mais styles.css le surchargeait avec #60A5FA (bleu Studio)
+     parce que styles.css est charge APRES themes.css avec meme specificite
+     (:root vs :root[data-theme="luxe"]). Maintenant themes.css gere seul. */
 
   /* Gold */
   --gold:      #F59E0B;
@@ -269,6 +279,69 @@ a:hover { text-decoration: underline; }
 
 .card--banner { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); border-left: 4px solid var(--warning); background: rgba(251, 191, 36, 0.06); }
 
+/* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-005 : bandeau ffprobe
+   utilise tokens design system (sev-warning, radius-sm, sp-3) au lieu de
+   styles inline. Icone alignee, variante warning, contraste WCAG AA. */
+.ffprobe-banner {
+  position: fixed;
+  top: var(--sp-2);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - var(--sp-7));
+  /* Fix VN-A.2 : z-index token unifie (banner system au niveau top-bar). */
+  z-index: var(--z-top-bar, 150);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-2, 0 4px 12px rgba(0, 0, 0, 0.25));
+}
+.ffprobe-banner--warning {
+  background: var(--sev-warning-bg, rgba(251, 191, 36, 0.10));
+  color: var(--text-primary);
+  border: 1px solid var(--sev-warning-solid, #FBBF24);
+}
+.ffprobe-banner__icon {
+  font-size: var(--fs-lg);
+  color: var(--sev-warning-solid, #FBBF24);
+  line-height: 1;
+  flex-shrink: 0;
+}
+.ffprobe-banner__title {
+  font-weight: var(--fw-semibold, 600);
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.ffprobe-banner__msg {
+  flex: 1;
+  color: var(--text-secondary);
+}
+.ffprobe-banner__action {
+  background: var(--sev-warning-solid, #FBBF24);
+  color: #1F2937;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-weight: var(--fw-semibold, 600);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ffprobe-banner__action:hover { filter: brightness(1.1); }
+.ffprobe-banner__close {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+.ffprobe-banner__close:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
 /* --- Buttons ----------------------------------------------- */
 .btn {
   display: inline-flex; align-items: center; gap: var(--sp-2);
@@ -284,7 +357,17 @@ a:hover { text-decoration: underline; }
 .btn:active { transform: scale(.97); }
 .btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
 
-.btn--compact { height: 28px; min-height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+/* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-02 touch target >=36px (anciennement 28px, sous le seuil WCAG 2.5.5/2.5.8). */
+.btn--compact { height: 36px; min-height: 36px; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+
+/* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-04 utilitaire visually-hidden pour labels SR-only. */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
 
 .btn-primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -301,6 +384,8 @@ a:hover { text-decoration: underline; }
 /* --- Inputs ------------------------------------------------ */
 .input {
   width: 100%; padding: var(--sp-2) var(--sp-3);
+  /* AUDIT 2026-06-14 (R7-9) : popup natif des <select>.input en sombre (Windows). */
+  color-scheme: dark;
   background: var(--bg-raised); border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm); color: var(--text-primary);
   font: inherit; font-size: var(--fs-sm);
@@ -494,9 +579,15 @@ body.is-background .login-wrap { animation-play-state: paused; }
 .login-card {
   width: 100%; max-width: 400px;
 }
-.login-card h1 {
+.login-card h1,
+.login-card .login-brand {
+  /* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-007 : selecteur
+     duplique pour login-brand (div.login-brand remplace le h1 pour eviter
+     le double h1 avec accueil-hero-greeting). */
   font-size: var(--fs-xl); font-weight: var(--fw-bold);
   margin-bottom: var(--sp-1);
+  color: var(--text-primary);
+  line-height: 1.2;
 }
 .login-card .subtitle {
   color: var(--text-secondary); font-size: var(--fs-sm);
@@ -521,7 +612,8 @@ body.is-background .login-wrap { animation-play-state: paused; }
 /* --- Utility ----------------------------------------------- */
 /* --- Modal ------------------------------------------------- */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 1000;
+  /* Fix VN-A.2 : z-index token unifie. */
+  position: fixed; inset: 0; z-index: var(--z-modal, 1000);
   background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: var(--sp-4);
@@ -531,6 +623,13 @@ body.is-background .login-wrap { animation-play-state: paused; }
 .modal-card {
   width: 100%; max-width: 560px; max-height: 85vh;
   display: flex; flex-direction: column;
+  /* AUDIT 2026-06-14 (R6-E) : la classe .card ne definit aucun background
+     (commentaire "defini dans themes.css" obsolete -> regle absente), donc la
+     fenetre showModal (ex: confirmation de decision) etait transparente. On
+     pose un fond opaque + bordure + ombre comme pour .danger-modal. */
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   animation: modalSlideUp var(--dur-slow) var(--ease-out);
 }
 @keyframes modalSlideUp { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -663,6 +762,16 @@ body.is-background .login-wrap { animation-play-state: paused; }
   background: var(--danger-strong-soft); color: var(--danger-strong);
   border: 1px solid var(--danger-strong-border);
 }
+/* VN-A.1 : badges probe_quality (FAILED/PARTIAL) — visibilite explicite du
+ * NormalizedProbe.probe_quality dans la table de validation et inspecteur. */
+.badge-probe-failed {
+  background: var(--danger-strong-soft); color: var(--danger-strong);
+  border: 1px solid var(--danger-strong-border);
+}
+.badge-probe-partial {
+  background: var(--warning-soft); color: var(--warning);
+  border: 1px solid var(--warning-border);
+}
 .badge-saga {
   background: var(--purple-soft); color: var(--purple);
   border: 1px solid var(--purple-border);
@@ -671,10 +780,14 @@ body.is-background .login-wrap { animation-play-state: paused; }
   background: var(--lavender-soft); color: var(--lavender);
   border: 1px solid var(--lavender-border);
 }
-/* Audio badges */
+/* Audio badges — canoniques (QW02) + alias legacy retro-compat */
+.badge-audio-platinum,
 .badge-audio-premium { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold-border); }
+.badge-audio-gold,
 .badge-audio-bon { background: var(--success-soft); color: var(--success); border: 1px solid var(--success-border); }
+.badge-audio-silver,
 .badge-audio-standard { background: var(--accent-soft-15); color: var(--accent); border: 1px solid var(--accent-border-30); }
+.badge-audio-bronze,
 .badge-audio-basique { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-audio-lang { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--warning-border); }
 .badge-mkv-title { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--warning-border); }
@@ -1051,12 +1164,83 @@ body.is-background .skeleton { animation-play-state: paused; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ============================================================
+   DOUBLONS — BARRE DE PROGRESSION BULK PERCEPTUAL (DUP-1)
+   Miroir exact de .traitement-scan-progress* (shared/components.css)
+   pour assurer la coherence visuelle entre la barre du scan etape 1
+   et celle du bulk perceptuel dans la vue Doublons. Memes hauteurs,
+   meme animation pilotee par la variable CSS --progress (decimal 0..1).
+   ============================================================ */
+.doublons-bulk-progress {
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.doublons-bulk-progress-bar {
+  width: 100%;
+  height: 12px;
+  background: var(--surface-2, var(--bg-raised));
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+  border: 1px solid var(--border-1, var(--border-strong));
+}
+.doublons-bulk-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
+  /* Audit C17 P1 : transform: scaleX au lieu de width (compositor only). */
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.4s ease-out;
+}
+.doublons-bulk-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: var(--text-2, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* AUDIT 2026-06-13 (R5-D) : barre de progression de l'analyse perceptuelle
+   batch dans la toolbar bulk de la Bibliotheque. Meme animation --progress
+   (0..1) que la barre des doublons / du scan, pour coherence visuelle. */
+.bibliotheque-perc-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1, 4px);
+  flex-basis: 100%;
+  margin-top: var(--sp-2, 8px);
+}
+.bibliotheque-perc-progress-bar {
+  width: 100%;
+  height: 10px;
+  background: var(--surface-2, var(--bg-raised));
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+  border: 1px solid var(--border-1, var(--border-strong));
+}
+.bibliotheque-perc-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success, #16a34a));
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.4s ease-out;
+}
+.bibliotheque-perc-progress-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    TOASTS GLOBAUX (D5) — copie du desktop avec memes tokens.
    ============================================================ */
 #toast-container {
   position: fixed; bottom: 24px; right: 24px;
   display: flex; flex-direction: column-reverse; gap: 10px;
-  z-index: 10000; pointer-events: none;
+  /* Fix VN-A.2 : z-index token unifie (cf shared/tokens.css). */
+  z-index: var(--z-toast, 10000); pointer-events: none;
 }
 .toast {
   display: flex; align-items: center; gap: 12px;
@@ -1071,20 +1255,56 @@ body.is-background .skeleton { animation-play-state: paused; }
   color: var(--text-primary); font-size: 0.9rem; pointer-events: auto;
   animation: toast-in 220ms cubic-bezier(.16,.84,.32,1);
 }
-.toast--success { border-left-color: var(--success, #34D399); }
-.toast--success .toast__icon { color: var(--success, #34D399); }
-.toast--error { border-left-color: var(--danger, #F87171); }
-.toast--error .toast__icon { color: var(--danger, #F87171); }
-.toast--warn { border-left-color: var(--warning, #FBBF24); }
-.toast--warn .toast__icon { color: var(--warning, #FBBF24); }
+.toast--success { border-left-color: var(--sev-success-solid, var(--success, #34D399)); }
+.toast--success .toast__icon { color: var(--sev-success-solid, var(--success, #34D399)); }
+.toast--error { border-left-color: var(--sev-danger-solid, var(--danger, #F87171)); }
+.toast--error .toast__icon { color: var(--sev-danger-solid, var(--danger, #F87171)); }
+/* Fix VN-A.2 (Vague N batch 1) : ajout du selecteur .toast--warning manquant.
+   Le code toast.js normalise "warn" -> "warning" (cf _normalizeType) et emet
+   `toast--warning` sur le node, mais seul `.toast--warn` etait stylise.
+   Resultat : les toasts warning n'avaient pas de border-left jaune. On garde
+   `.toast--warn` en alias retro-compat (selecteur groupe). Tokens reutilises :
+   --sev-warning-solid (contraste WCAG AA sur fond glass sombre). */
+.toast--warning,
+.toast--warn { border-left-color: var(--sev-warning-solid, var(--warning, #FBBF24)); }
+.toast--warning .toast__icon,
+.toast--warn .toast__icon { color: var(--sev-warning-solid, var(--warning, #FBBF24)); }
 .toast--info .toast__icon { color: var(--accent, #60A5FA); }
 .toast__icon { display: flex; flex-shrink: 0; }
 .toast__text { flex: 1; }
+/* TOAST-1 : badge de dedup ("xN") affiche dans showToast quand un toast
+   identique est redemande dans la fenetre de dedup. Reutilise les tokens
+   du design system (text-muted, tabular-nums) pour rester coherent. */
+.toast__count {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+/* Fix VN-A.4 (Vague N batch 1) — WCAG 2.2.1 Level AA "Target Size (Minimum)"
+   24x24 CSS pixels minimum pour les controles interactifs. L'ancienne version
+   (padding 0 4px, font-size 18px) donnait une cible d'environ 16x18 px : trop
+   petite pour un clic precis a la souris et carrement inutilisable au tactile.
+   Reference : https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html
+   On utilise display:inline-flex + min-width/min-height pour preserver le
+   layout flex existant. Le bouton "action" inline (toast__action) repose deja
+   sur les classes .v5-btn--sm qui respectent la cible 24px, mais on garantit
+   un floor explicite ici au cas ou ces classes ne seraient pas chargees. */
 .toast__close {
   background: transparent; border: 0; color: var(--text-muted); cursor: pointer;
-  font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0;
+  font-size: 18px; line-height: 1; padding: 0; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; border-radius: 4px;
 }
-.toast__close:hover { color: var(--text-primary); }
+.toast__close:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+.toast__action {
+  /* Floor WCAG 2.2.1 24x24 explicite, meme si .v5-btn--sm fournit deja la taille. */
+  min-width: 24px; min-height: 24px;
+}
 .toast--out { animation: toast-out 200ms ease forwards; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
 @keyframes toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(40px); } }
@@ -1659,7 +1879,8 @@ a:focus-visible,
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 10vh;
-  z-index: 10001;
+  /* Fix VN-A.2 : z-index token unifie (palette > toast > modal). */
+  z-index: var(--z-palette, 10001);
   animation: cmd-fade-in 140ms ease-out;
 }
 .cmd-palette-overlay.hidden { display: none; }
@@ -1737,7 +1958,8 @@ kbd {
   /* background/backdrop-filter/border-bottom/box-shadow : definis dans themes.css V6 */
   position: sticky;
   top: 0;
-  z-index: 100;
+  /* Fix VN-A.2 : z-index token unifie. */
+  z-index: var(--z-top-bar, 300);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1813,11 +2035,16 @@ kbd {
 }
 
 /* §16b v7.5.0 — Score composite V2 (parite desktop) */
+/* INVARIANTES ABSOLUES — ne pas modifier les hex tier (charte Gold/Silver/Bronze/Platinum)
+ * Source unique : tokens.css definit --tier-X-solid (#FFD700/#C0C0C0/#CD7F32/#E5E4E2).
+ * On reexporte ici les alias --tier-X via var(--tier-X-solid) pour preserver la
+ * compat avec .tier-platinum/.tier-gold/.tier-silver/.tier-bronze definis ci-dessous,
+ * sans creer une 2eme source de verite divergente (cf project_cinesort_tier_duplication_historique). */
 :root {
-  --tier-platinum: #FFD700;
-  --tier-gold:     #22C55E;
-  --tier-silver:   #3B82F6;
-  --tier-bronze:   #F59E0B;
+  --tier-platinum: var(--tier-platinum-solid, #E5E4E2);
+  --tier-gold:     var(--tier-gold-solid, #FFD700);
+  --tier-silver:   var(--tier-silver-solid, #C0C0C0);
+  --tier-bronze:   var(--tier-bronze-solid, #CD7F32);
   --tier-reject:   #EF4444;
   --tier-unknown:  #6B7280;
 }
@@ -1857,10 +2084,10 @@ kbd {
   animation: scoreGaugeFill 1s cubic-bezier(0.22,0.61,0.36,1) forwards; }
 @keyframes scoreGaugeFill { to { width: var(--gauge-target, 0%); } }
 .score-gauge-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-.bg-platinum { background: linear-gradient(90deg, #D4A017, var(--tier-platinum)); }
-.bg-gold     { background: linear-gradient(90deg, #16A34A, var(--tier-gold)); }
-.bg-silver   { background: linear-gradient(90deg, #2563EB, var(--tier-silver)); }
-.bg-bronze   { background: linear-gradient(90deg, #D97706, var(--tier-bronze)); }
+.bg-platinum { background: linear-gradient(90deg, #B8B7B5, var(--tier-platinum)); }
+.bg-gold     { background: linear-gradient(90deg, #D4A017, var(--tier-gold)); }
+.bg-silver   { background: linear-gradient(90deg, #909090, var(--tier-silver)); }
+.bg-bronze   { background: linear-gradient(90deg, #8B4513, var(--tier-bronze)); }
 .bg-reject   { background: linear-gradient(90deg, #B91C1C, var(--tier-reject)); }
 .bg-unknown  { background: var(--tier-unknown); }
 .score-accordion { margin-top: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -1891,6 +2118,69 @@ kbd {
 .score-v2-compare-label { font-weight: 600; color: var(--text-secondary); font-size: var(--fs-sm); }
 .score-v2-compare-delta { grid-column: 1 / -1; text-align: center; font-size: var(--fs-sm);
   color: var(--text-muted); padding-top: var(--sp-2); border-top: 1px solid rgba(255,255,255,.06); }
+
+/* ============================================================
+   VO-C-FRONTEND-SCORE-V2 (Vague O) — Quality waterfall inspector.
+   Prefix `.score-waterfall-*` EXCLUSIF (memoire feedback_js_release_checks :
+   pas de classe CSS partagee entre composants DOM differents).
+   Tier colors via var(--tier-*) deja definies plus haut (INVARIANTES).
+   ============================================================ */
+.score-waterfall-section { margin-top: var(--sp-3); padding: var(--sp-3);
+  background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.05); border-radius: 8px;
+  display: flex; flex-direction: column; gap: var(--sp-3); }
+.score-waterfall-section-header { font-weight: 600; font-size: var(--fs-body);
+  color: var(--text-primary); letter-spacing: .01em; }
+.score-waterfall-narrative { color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.5; }
+.score-waterfall { display: flex; flex-direction: column; gap: var(--sp-2); }
+.score-waterfall-title { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 600; }
+.score-waterfall-bars { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-row { display: grid; grid-template-columns: 140px 1fr 60px; align-items: center;
+  gap: var(--sp-2); font-size: var(--fs-sm); }
+.score-waterfall-label { color: var(--text-secondary); font-weight: 500; }
+.score-waterfall-rules-badge { display: inline-block; min-width: 18px; padding: 1px 6px;
+  margin-left: 4px; background: rgba(255,255,255,.08); border-radius: 9px; font-size: 10px;
+  font-weight: 700; color: var(--text-primary); text-align: center; }
+.score-waterfall-track { position: relative; height: 10px; background: rgba(255,255,255,.04);
+  border-radius: 5px; overflow: hidden; }
+.score-waterfall-bar { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px; width: 0%;
+  animation: scoreWaterfallFill .8s cubic-bezier(0.22,0.61,0.36,1) forwards; }
+.score-waterfall-bar--positive { background: linear-gradient(90deg, #D4A017, var(--tier-gold)); }
+.score-waterfall-bar--negative { background: linear-gradient(90deg, #B91C1C, var(--tier-reject)); }
+@keyframes scoreWaterfallFill { to { width: var(--waterfall-target, 0%); } }
+.score-waterfall-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.score-waterfall-row[data-sign="positive"] .score-waterfall-value { color: var(--tier-gold); }
+.score-waterfall-row[data-sign="negative"] .score-waterfall-value { color: var(--tier-reject); }
+.score-waterfall-baseline { font-size: var(--fs-sm); color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-3); background: rgba(255,255,255,.03); border-radius: 6px; }
+.score-waterfall-baseline-score { font-weight: 700; font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums; }
+.score-waterfall-baseline-tier { color: var(--text-muted); }
+.score-waterfall-baseline-next { color: var(--text-primary); font-weight: 500; }
+.score-waterfall-custom-formats { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-custom-formats-title { font-size: var(--fs-sm); color: var(--text-secondary);
+  font-weight: 600; }
+.score-waterfall-custom-formats-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.score-waterfall-custom-formats-item { display: flex; justify-content: space-between; align-items: center;
+  gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); background: rgba(255,255,255,.02);
+  border-radius: 4px; font-size: var(--fs-sm); }
+.score-waterfall-custom-formats-name { color: var(--text-primary); flex: 1; }
+.score-waterfall-custom-formats-score { font-variant-numeric: tabular-nums; font-weight: 600;
+  font-size: var(--fs-xs); padding: 2px 6px; border-radius: 3px; }
+.score-waterfall-custom-formats-score--positive { color: var(--tier-gold);
+  background: rgba(255,215,0,.08); }
+.score-waterfall-custom-formats-score--negative { color: var(--tier-reject);
+  background: rgba(239,68,68,.08); }
+.score-waterfall-suggestions { display: flex; flex-direction: column; gap: var(--sp-1); }
+.score-waterfall-suggestions-title { font-size: var(--fs-sm); color: var(--text-secondary);
+  font-weight: 600; }
+.score-waterfall-suggestions-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.score-waterfall-suggestions-item { display: flex; justify-content: space-between; align-items: flex-start;
+  gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.score-waterfall-suggestions-message { color: var(--text-primary); flex: 1; line-height: 1.45; }
+.score-waterfall-suggestions-gain { color: var(--tier-gold); font-variant-numeric: tabular-nums;
+  font-weight: 600; white-space: nowrap; }
 
 /* --- V2-07 : composant EmptyState (mirror du desktop) ----------- */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1958,7 +2248,8 @@ body.expert-mode-off [data-advanced="true"] {
   outline-offset: 2px;
 }
 .glossary-popover {
-  z-index: 9999;
+  /* Fix VN-A.2 : z-index token unifie (tooltip-level). */
+  z-index: var(--z-tooltip, 9999);
   background: var(--bg-overlay);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-md);
@@ -1985,7 +2276,8 @@ body.expert-mode-off [data-advanced="true"] {
   position: fixed;
   inset: 0;
   background: rgba(6, 9, 15, 0.88);
-  z-index: 99999;
+  /* Fix VN-A.2 : z-index token unifie (au-dessus de toast/palette). */
+  z-index: var(--z-tooltip, 99999);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2041,7 +2333,8 @@ body.expert-mode-off [data-advanced="true"] {
   gap: var(--sp-3);
   font-size: var(--fs-sm);
   font-weight: 500;
-  z-index: 9000;
+  /* Fix VN-A.2 : z-index token unifie (banner sticky, niveau top-bar). */
+  z-index: var(--z-top-bar, 300);
   position: sticky;
   top: 0;
   flex-wrap: wrap;
@@ -2226,7 +2519,8 @@ body.demo-mode-active .topbar { top: 36px; }
   font-size: 1.25rem;
   font-weight: 700;
   cursor: pointer;
-  z-index: 100;
+  /* Fix VN-A.2 : z-index token unifie (FAB ancre, niveau sidebar). */
+  z-index: var(--z-sidebar, 200);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   display: inline-flex;
   align-items: center;
@@ -2271,3 +2565,5 @@ body.demo-mode-active .topbar { top: 36px; }
   font-size: 1.25rem;
   line-height: 1;
 }
+
+} /* end @layer legacy */

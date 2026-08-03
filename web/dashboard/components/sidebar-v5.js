@@ -28,12 +28,18 @@ export const NAV_ITEMS = [
     svg: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>' },
   { id: "quality",      labelKey: "sidebar.nav.quality",     shortcut: "Alt+4", badgeKey: "quality",
     svg: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>' },
+  // AUDIT 2026-06-13 (R5-E) : entree dediee Doublons (la vue /doublons existait
+  // mais n'etait atteignable que via Traitement -> Etape 4, donc invisible).
+  // Pas de raccourci Alt+N (le handler clavier ne gere que 1..7, deja pris) ;
+  // badge "duplicates" alimente par run/get_sidebar_counters.
+  { id: "doublons",     labelKey: "sidebar.nav.doublons",                       badgeKey: "duplicates",
+    svg: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' },
   { id: "history",      labelKey: "sidebar.nav.history",     shortcut: "Alt+5",
     svg: '<polyline points="3 12 3 4 21 4 21 20 3 20 3 12"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="20"/>' },
   { id: "_separator" },
-  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+,",
+  { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+6",
     svg: '<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/>' },
-  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "?",
+  { id: "help",         labelKey: "sidebar.nav.help",        shortcut: "Alt+7",
     svg: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
 ];
 
@@ -66,16 +72,21 @@ function _buildItemHtml(item, active) {
   const badge = item.badgeKey
     ? `<span class="v5-sidebar-badge" data-badge-key="${escapeHtml(item.badgeKey)}" role="status" aria-live="polite" aria-label="${escapeHtml(t("sidebar.counter_aria", { label }))}"></span>`
     : '';
+  // AUDIT 2026-06-13 (R5-E) : shortcut optionnel (ex. Doublons n'a pas de
+  // Alt+N libre). Sans raccourci, titre = label seul et chip raccourci omis.
+  const titleText = item.shortcut
+    ? t("sidebar.title_with_shortcut", { label, shortcut: item.shortcut })
+    : label;
   return `
     <button type="button" class="v5-sidebar-item ${active ? "is-active" : ""}"
             data-route="${escapeHtml(item.id)}"
-            data-shortcut="${escapeHtml(item.shortcut)}"
+            data-shortcut="${escapeHtml(item.shortcut || "")}"
             ${ariaCurrent}
             tabindex="${active ? "0" : "-1"}"
-            title="${escapeHtml(t("sidebar.title_with_shortcut", { label, shortcut: item.shortcut }))}">
+            title="${escapeHtml(titleText)}">
       <span class="v5-sidebar-icon">${_svgIcon(item.svg)}</span>
       <span class="v5-sidebar-label">${escapeHtml(label)}</span>
-      <span class="v5-sidebar-shortcut">${escapeHtml(item.shortcut)}</span>
+      ${item.shortcut ? `<span class="v5-sidebar-shortcut">${escapeHtml(item.shortcut)}</span>` : ""}
       ${badge}
     </button>
   `;
@@ -180,12 +191,21 @@ export function updateSidebarBadges(counters) {
 export function markIntegrationState(itemId, enabled, label) {
   const el = document.querySelector(`.v5-sidebar-item[data-route="${itemId}"]`);
   if (!el) return;
+  // Fix bug "tooltip Jellyfin desactive persiste apres reactivation" :
+  // memoriser le title d'origine pour le restaurer quand enabled=true.
+  if (el.dataset.titleDefault == null) {
+    el.dataset.titleDefault = el.getAttribute("title") || "";
+  }
   el.classList.toggle("v5-sidebar-item--disabled", !enabled);
   if (!enabled) {
     el.setAttribute("title", t("sidebar.integration_disabled_title", { label }));
     el.setAttribute("aria-disabled", "true");
   } else {
     el.removeAttribute("aria-disabled");
+    // Restaurer le titre d'origine "Alt+X" si stocke, sinon retirer.
+    const defaultTitle = el.dataset.titleDefault || "";
+    if (defaultTitle) el.setAttribute("title", defaultTitle);
+    else el.removeAttribute("title");
   }
 }
 

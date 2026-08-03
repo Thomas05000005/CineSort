@@ -1,0 +1,637 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CineSort API Schemas (V2.1)",
+  "version": "v1.5.2-beta",
+  "endpoints": {
+    "start_plan": {
+      "request": {
+        "$defs": {
+          "PlanSettings": {
+            "additionalProperties": true,
+            "description": "Settings dict transmis a `RunFacade.start_plan(settings)`.\n\nLe body REST REEL est `{\"settings\": {\"library_path\": \"...\", ...}}` — ce\nwrapper modelise le contenu de la cle `settings`. `library_path` est\nobligatoire ; toutes les autres options legacy (~50 cles) passent par\n`options` ou directement en extra (`extra=\"allow\"`).",
+            "properties": {
+              "library_path": {
+                "description": "Chemin de la bibliotheque a scanner (Windows path accepte).",
+                "minLength": 1,
+                "title": "Library Path",
+                "type": "string"
+              },
+              "options": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Options additionnelles (compatibilite legacy : tout settings dict est tolere).",
+                "title": "Options"
+              }
+            },
+            "required": [
+              "library_path"
+            ],
+            "title": "PlanSettings",
+            "type": "object"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Entree REST de `RunFacade.start_plan` : body `{\"settings\": {...}}`.\n\nAligne sur le body REEL observe en prod (memoire utilisateur). La cle\n`settings` enveloppe un `PlanSettings` (qui contient `library_path` +\noptions legacy). `extra=\"allow\"` au niveau top pour tolerer des cles\nadditionnelles cote caller sans casser.",
+        "properties": {
+          "settings": {
+            "$ref": "#/$defs/PlanSettings",
+            "description": "Wrapper REST autour du dict settings passe a start_plan."
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "title": "StartPlanRequest",
+        "type": "object"
+      },
+      "response": {
+        "additionalProperties": true,
+        "description": "Sortie de `RunFacade.start_plan`.\n\nLe legacy retourne historiquement `{ok, run_id, ...}`. On modelise les\nchamps structurants (`run_id`, `plan_summary`) sans rejeter le reste\n(extra=\"allow\") pour rester backward-compat.",
+        "properties": {
+          "ok": {
+            "default": true,
+            "description": "True si le scan/plan a demarre correctement.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "run_id": {
+            "description": "Identifiant du run cree.",
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "plan_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Resume du plan (totaux, KPIs, scores tier). Optionnel : peut etre None si le plan n'a pas encore demarre (mode async).",
+            "title": "Plan Summary"
+          },
+          "warnings": {
+            "description": "Avertissements non-bloquants (path invalide partiel, FS lent...).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "StartPlanResponse",
+        "type": "object"
+      }
+    },
+    "check_duplicates": {
+      "request": {
+        "additionalProperties": true,
+        "description": "Entree de `RunFacade.check_duplicates(run_id, decisions)`.\n\nAlignee sur la signature reelle (run_id + decisions dict). Le body REST\nREEL est `{\"run_id\":\"...\",\"decisions\":{}}` — `decisions` est un dict\n(PAS une list), typé `dict[str, Any]` pour absorber la grande variete\nde cles legacy (ok, decision, dest_override, ...).",
+        "properties": {
+          "run_id": {
+            "description": "Identifiant du run cible.",
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "decisions": {
+            "additionalProperties": true,
+            "description": "Dict {row_id: {decision, ok, dest_override, ...}} ou {} au 1er appel.",
+            "title": "Decisions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "CheckDuplicatesRequest",
+        "type": "object"
+      },
+      "response": {
+        "$defs": {
+          "DuplicateGroupCollision": {
+            "additionalProperties": true,
+            "description": "Groupe de doublons par collision de destination (rename identique).",
+            "properties": {
+              "group_key": {
+                "description": "Cle stable du groupe.",
+                "minLength": 1,
+                "title": "Group Key",
+                "type": "string"
+              },
+              "row_ids": {
+                "description": "Identifiants des rows membres du groupe (>=2 attendus).",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Row Ids",
+                "type": "array"
+              },
+              "kind": {
+                "const": "collision",
+                "default": "collision",
+                "title": "Kind",
+                "type": "string"
+              },
+              "dest_path": {
+                "description": "Chemin de destination commun cause de la collision.",
+                "minLength": 1,
+                "title": "Dest Path",
+                "type": "string"
+              }
+            },
+            "required": [
+              "group_key",
+              "dest_path"
+            ],
+            "title": "DuplicateGroupCollision",
+            "type": "object"
+          },
+          "DuplicateGroupSimilarity": {
+            "additionalProperties": true,
+            "description": "Groupe de doublons par similarite perceptuelle / fingerprint.",
+            "properties": {
+              "group_key": {
+                "description": "Cle stable du groupe.",
+                "minLength": 1,
+                "title": "Group Key",
+                "type": "string"
+              },
+              "row_ids": {
+                "description": "Identifiants des rows membres du groupe (>=2 attendus).",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Row Ids",
+                "type": "array"
+              },
+              "kind": {
+                "const": "similarity",
+                "default": "similarity",
+                "title": "Kind",
+                "type": "string"
+              },
+              "similarity_score": {
+                "description": "Score de similarite dans [0.0, 1.0] (1.0 = identique).",
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "title": "Similarity Score",
+                "type": "number"
+              },
+              "signal": {
+                "default": "perceptual",
+                "description": "Signal qui a declenche la detection (perceptual / audio_fp / vision...).",
+                "title": "Signal",
+                "type": "string"
+              }
+            },
+            "required": [
+              "group_key",
+              "similarity_score"
+            ],
+            "title": "DuplicateGroupSimilarity",
+            "type": "object"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Sortie de `RunFacade.check_duplicates`.\n\n`groups` est la liste polymorphique discriminee par `kind`. Les autres\nchamps (compteurs, warnings) suivent la shape historique.",
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "run_id": {
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "groups": {
+            "description": "Groupes de doublons detectes (collision ou similarity).",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "collision": "#/$defs/DuplicateGroupCollision",
+                  "similarity": "#/$defs/DuplicateGroupSimilarity"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/DuplicateGroupCollision"
+                },
+                {
+                  "$ref": "#/$defs/DuplicateGroupSimilarity"
+                }
+              ]
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "total_groups": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Groups",
+            "type": "integer"
+          },
+          "total_rows_in_groups": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Rows In Groups",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Diagnostics"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "CheckDuplicatesResponse",
+        "type": "object"
+      }
+    },
+    "apply": {
+      "request": {
+        "additionalProperties": true,
+        "description": "Entree de `RunFacade.apply(run_id, decisions, dry_run, quarantine_unapproved)`.",
+        "properties": {
+          "run_id": {
+            "description": "Identifiant du run a appliquer.",
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "decisions": {
+            "additionalProperties": true,
+            "description": "Dict {row_id: {decision, ok, dest_override, locks, ...}} ou {} si aucun override.",
+            "title": "Decisions",
+            "type": "object"
+          },
+          "dry_run": {
+            "default": true,
+            "description": "True = simulation (aucun deplacement filesystem reel).",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "quarantine_unapproved": {
+            "default": false,
+            "description": "True = deplacer les rows non-approuvees dans `_review/_unapproved/`.",
+            "title": "Quarantine Unapproved",
+            "type": "boolean"
+          },
+          "apply_atomic": {
+            "default": false,
+            "description": "Vague P / VP-A : True declenche un rollback FS+DB forward sur exception.",
+            "title": "Apply Atomic",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "ApplyRequest",
+        "type": "object"
+      },
+      "response": {
+        "$defs": {
+          "ApplyOperationError": {
+            "additionalProperties": true,
+            "description": "Erreur d'une operation d'apply individuelle (entry dans `errors[]`).",
+            "properties": {
+              "row_id": {
+                "minLength": 1,
+                "title": "Row Id",
+                "type": "string"
+              },
+              "code": {
+                "description": "Code d'erreur stable (cf BUG-* / quality codes).",
+                "minLength": 1,
+                "title": "Code",
+                "type": "string"
+              },
+              "message": {
+                "default": "",
+                "description": "Message lisible (peut etre i18n-resolu cote front).",
+                "title": "Message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "row_id",
+              "code"
+            ],
+            "title": "ApplyOperationError",
+            "type": "object"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Sortie de `RunFacade.apply`.\n\nChamps structurants : `applied`, `errors`, `undo_token`. La shape reelle\ncontient bien d'autres cles (`batch_id`, `apply_atomic_rolled_back`,\n`dry_run`, `quarantine_destinations`, ...) — toutes acceptees via\n`extra=\"allow\"` pour preserver la backward compat.",
+        "properties": {
+          "ok": {
+            "default": true,
+            "description": "True si le batch a abouti (ou rollback complet).",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "applied": {
+            "default": 0,
+            "description": "Nombre d'operations effectivement appliquees (ou simulees en dry-run).",
+            "minimum": 0,
+            "title": "Applied",
+            "type": "integer"
+          },
+          "errors": {
+            "description": "Liste des erreurs par row (vide si tout est OK).",
+            "items": {
+              "$ref": "#/$defs/ApplyOperationError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "undo_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Token opaque consommable par `undo_last_apply` (None si dry_run ou rollback complet).",
+            "title": "Undo Token"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Identifiant du batch apply (pour traversal apply_operations).",
+            "title": "Batch Id"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Echo de l'argument d'entree pour rappel cote UI.",
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "ApplyResponse",
+        "type": "object"
+      }
+    }
+  },
+  "reports": {
+    "$defs": {
+      "PerceptualReport": {
+        "additionalProperties": true,
+        "description": "Rapport PERCEPTUEL (analyse visuelle/audio multi-frames).\n\nStocke dans la table `perceptual_reports`. Source : `cinesort.domain.perceptual.*`.\nNE PAS confondre avec QualityReport (table separee).",
+        "properties": {
+          "row_id": {
+            "description": "Identifiant de la row du run associee.",
+            "minLength": 1,
+            "title": "Row Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Identifiant du run (None si rapport orphelin / pre-persistance).",
+            "title": "Run Id"
+          },
+          "generated_ts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Timestamp UNIX (s) de generation du rapport.",
+            "title": "Generated Ts"
+          },
+          "kind": {
+            "const": "perceptual",
+            "default": "perceptual",
+            "title": "Kind",
+            "type": "string"
+          },
+          "visual_score": {
+            "default": 0,
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Visual Score",
+            "type": "integer"
+          },
+          "visual_tier": {
+            "default": "degrade",
+            "description": "Tier visuel canonique (excellent / bon / moyen / degrade).",
+            "title": "Visual Tier",
+            "type": "string"
+          },
+          "blockiness_mean": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Blockiness Mean",
+            "type": "number"
+          },
+          "blur_mean": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Blur Mean",
+            "type": "number"
+          },
+          "banding_mean": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Banding Mean",
+            "type": "number"
+          },
+          "ssim_self_ref": {
+            "default": -1.0,
+            "title": "Ssim Self Ref",
+            "type": "number"
+          },
+          "upscale_verdict": {
+            "default": "unknown",
+            "title": "Upscale Verdict",
+            "type": "string"
+          },
+          "upscale_confidence": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Upscale Confidence",
+            "type": "number"
+          },
+          "fake_4k_verdict_combined": {
+            "default": "unknown",
+            "title": "Fake 4K Verdict Combined",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_id"
+        ],
+        "title": "PerceptualReport",
+        "type": "object"
+      },
+      "QualityReport": {
+        "additionalProperties": true,
+        "description": "Rapport QUALITE (score derive metadata + probe, sans frames).\n\nStocke dans la table `quality_reports`. Source : `cinesort.domain.quality_score`,\n`cinesort.domain.probe_models`. NE PAS confondre avec PerceptualReport.",
+        "properties": {
+          "row_id": {
+            "description": "Identifiant de la row du run associee.",
+            "minLength": 1,
+            "title": "Row Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Identifiant du run (None si rapport orphelin / pre-persistance).",
+            "title": "Run Id"
+          },
+          "generated_ts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Timestamp UNIX (s) de generation du rapport.",
+            "title": "Generated Ts"
+          },
+          "kind": {
+            "const": "quality",
+            "default": "quality",
+            "title": "Kind",
+            "type": "string"
+          },
+          "quality_score": {
+            "default": 0,
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Quality Score",
+            "type": "integer"
+          },
+          "quality_tier": {
+            "default": "degrade",
+            "description": "Tier qualite canonique (excellent / bon / moyen / degrade).",
+            "title": "Quality Tier",
+            "type": "string"
+          },
+          "codec_rank": {
+            "default": 0,
+            "title": "Codec Rank",
+            "type": "integer"
+          },
+          "resolution_rank": {
+            "default": 0,
+            "title": "Resolution Rank",
+            "type": "integer"
+          },
+          "audio_rank": {
+            "default": 0,
+            "title": "Audio Rank",
+            "type": "integer"
+          },
+          "bitrate_score": {
+            "default": 0,
+            "title": "Bitrate Score",
+            "type": "integer"
+          },
+          "probe_quality": {
+            "default": "FULL",
+            "title": "Probe Quality",
+            "type": "string"
+          },
+          "anomalies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Anomalies",
+            "type": "array"
+          }
+        },
+        "required": [
+          "row_id"
+        ],
+        "title": "QualityReport",
+        "type": "object"
+      }
+    },
+    "discriminator": {
+      "mapping": {
+        "perceptual": "#/$defs/PerceptualReport",
+        "quality": "#/$defs/QualityReport"
+      },
+      "propertyName": "kind"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/PerceptualReport"
+      },
+      {
+        "$ref": "#/$defs/QualityReport"
+      }
+    ]
+  }
+}

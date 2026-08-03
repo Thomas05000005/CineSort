@@ -2,8 +2,8 @@
 
 Migration #85 phase B2 (2026-05-16) : meme pattern que phase B1 ProbeRepository :
 - Code metier vit DANS AnomalyRepository
-- _AnomalyMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance de _AnomalyMixin
+- B8 CLOSE (2026-05, commit 482f3e6) : _AnomalyMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.anomaly (plus d'heritage _AnomalyMixin)
 
 Methodes exposees :
     get_anomaly_counts_for_runs, get_anomaly_stats, get_top_anomaly_codes,

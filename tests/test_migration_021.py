@@ -29,7 +29,6 @@ from cinesort.infra.db.connection import connect_sqlite
 from cinesort.infra.db.migration_manager import MigrationManager
 from cinesort.infra.db.sqlite_store import SQLiteStore
 
-
 _REAL_MIG_DIR = Path("cinesort/infra/db/migrations")
 
 

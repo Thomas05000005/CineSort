@@ -29,11 +29,19 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/uv.lock
+
       - name: Install build dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-build.txt
+          uv pip install --system -r requirements-build.txt
 
       - name: Build PyInstaller EXE
         shell: pwsh

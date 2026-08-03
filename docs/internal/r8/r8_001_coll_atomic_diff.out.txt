@@ -1,0 +1,20 @@
+=== R8-001 DIFFERENTIEL (apply_collection_item) ===
+--- BASELINE (casse, fige v9_coll_atomic_repro.out.txt) : half_applied=true, dedup_poisoned=true, no_rollback=true ---
+
+--- (A) ATOMICITE intra-row : RUN 1 (video verrouillee) ---
+  exception re-levee (per-row handler)     : '[simule] verrouille: Film.2020.1080p.mkv'
+  video toujours en source (non perdue)    : True
+  sidecars dans sub_dir (=PARTIEL si non[]) : []
+  sidecars RESTAURES en source (rollback)   : ['Film.2020.1080p.srt', 'Film.2020.1080p.nfo']
+  ops ROLLBACK emises                       : 2 (baseline=0)
+  => etat COHERENT apres echec (tout-ou-rien): True
+
+--- (B) LEDGER non empoisonne + RETRY re-traite : RUN 2 (video deverrouillee, meme dedup) ---
+  ledger avait marque la video 'vue'        : False (baseline=true => retry skippait)
+  RETRY a deplace la video                  : True
+  sidecars dans sub_dir apres retry         : ['Film.2020.1080p.mkv', 'Film.2020.1080p.nfo', 'Film.2020.1080p.srt']
+  source videe                              : True
+  => RETRY a COMPLETE l'item                : True
+
+VERDICT : CORRIGE (A atomicite + B retry re-traite, differentiel casse->correct prouve)
+RESUME: {"A_coherent_apres_echec": true, "A_rollback_ops": 2, "B_dedup_non_poisonne": true, "B_retry_complete_item": true, "fixed": true}

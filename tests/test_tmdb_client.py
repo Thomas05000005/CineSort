@@ -80,6 +80,22 @@ class TmdbClientHostileTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Erreur reseau", message)
 
+    def test_validate_key_network_error_message_ne_leak_pas_la_cle(self) -> None:
+        # LOTD-INT-03 : l'exception requests embarque l'URL ?api_key=<cle en
+        # clair> et le message part au FRONT (non scrubbe, contrairement aux
+        # logs). Le diagnostic doit rester : type d'erreur + host.
+        exc = requests.ConnectionError(
+            "HTTPSConnectionPool(host='api.themoviedb.org', port=443): "
+            "Max retries exceeded with url: /3/authentication?api_key=demo_key"
+        )
+        with mock.patch.object(self.client._session, "get", side_effect=exc):
+            ok, message = self.client.validate_key()
+        self.assertFalse(ok)
+        self.assertNotIn("demo_key", message, "cle API en clair dans le message front")
+        self.assertNotIn("api_key=", message)
+        self.assertIn("ConnectionError", message)
+        self.assertIn("api.themoviedb.org", message)
+
     def test_validate_key_returns_status_message_on_401(self) -> None:
         response = _FakeResponse(status_code=401, payload={"status_message": "Invalid API key"}, text="bad key")
         with mock.patch.object(self.client._session, "get", return_value=response):

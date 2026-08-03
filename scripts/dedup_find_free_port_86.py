@@ -17,7 +17,6 @@ import ast
 import sys
 from pathlib import Path
 
-
 TARGET_FUNC = "_find_free_port"
 
 IMPORT_LINE = "from tests._helpers import find_free_port as _find_free_port\n"
