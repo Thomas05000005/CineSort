@@ -34,7 +34,7 @@ from cinesort.infra.db.repositories.decisions import (
     to_legacy_ok_bool,
 )
 from cinesort.infra.db.repositories.field_locks import FieldLocksRepository
-from tests._helpers import _project_migrations_dir, existing_db_fixture
+from tests._helpers import _project_migrations_dir
 
 
 def _apply_migration(conn: sqlite3.Connection, version: int) -> None:
@@ -217,9 +217,7 @@ class DecisionsRepositoryCrudTests(unittest.TestCase):
         self.repo.set_decision("tmdb:2", "run-1", DECISION_DEFERRED)
         self.repo.set_decision("tmdb:3", "run-1", DECISION_DEFERRED)
 
-        deferred_only = self.repo.list_decisions_for_run(
-            "run-1", decision_filter=DECISION_DEFERRED
-        )
+        deferred_only = self.repo.list_decisions_for_run("run-1", decision_filter=DECISION_DEFERRED)
         self.assertEqual(len(deferred_only), 2)
         for entry in deferred_only:
             self.assertEqual(entry["decision"], DECISION_DEFERRED)
@@ -264,9 +262,7 @@ class TransitionDeferredToAcceptedTests(unittest.TestCase):
         locked_fields = [lk["field_name"] for lk in locks]
 
         # Etape 3 : upgrade
-        res = self.decisions_repo.upgrade_deferred_to_accepted(
-            "tmdb:603", "run-1", locked_fields=locked_fields
-        )
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=locked_fields)
         self.assertTrue(res["ok"])
         self.assertEqual(res["previous_decision"], DECISION_DEFERRED)
         self.assertEqual(res["new_decision"], DECISION_ACCEPTED)
@@ -287,9 +283,7 @@ class TransitionDeferredToAcceptedTests(unittest.TestCase):
         locked_fields = [lk["field_name"] for lk in locks]
         self.assertCountEqual(locked_fields, ["title", "year"])
 
-        res = self.decisions_repo.upgrade_deferred_to_accepted(
-            "tmdb:603", "run-1", locked_fields=locked_fields
-        )
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=locked_fields)
         self.assertTrue(res["ok"])
         self.assertCountEqual(res["respected_locks"], ["title", "year"])
 
@@ -300,18 +294,14 @@ class TransitionDeferredToAcceptedTests(unittest.TestCase):
     def test_upgrade_warns_if_locks_not_consulted(self):
         """Si le caller passe locked_fields=None, on log un warning."""
         self.decisions_repo.set_decision("tmdb:603", "run-1", DECISION_DEFERRED)
-        res = self.decisions_repo.upgrade_deferred_to_accepted(
-            "tmdb:603", "run-1", locked_fields=None
-        )
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=None)
         self.assertTrue(res["ok"])
         self.assertIsNotNone(res["warning"])
         self.assertIn("field_locks", res["warning"])
 
     def test_upgrade_without_previous_decision(self):
         """Upgrade sans decision prealable doit creer accepted (idempotent)."""
-        res = self.decisions_repo.upgrade_deferred_to_accepted(
-            "tmdb:603", "run-1", locked_fields=[]
-        )
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=[])
         self.assertTrue(res["ok"])
         self.assertIsNone(res["previous_decision"])
         self.assertEqual(res["new_decision"], DECISION_ACCEPTED)

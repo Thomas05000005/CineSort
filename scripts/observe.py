@@ -70,6 +70,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -228,25 +229,22 @@ def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
         try:
             for p in target.rglob("*"):
                 if p.is_file():
-                    try:
+                    with contextlib.suppress(OSError):
                         total += p.stat().st_size
-                    except OSError:
-                        pass
         except OSError:
             pass
         result["bytes_freed"] = total
         # Best effort kill des process WebView2 lies (silencieux).
-        try:
+        with contextlib.suppress(FileNotFoundError, subprocess.TimeoutExpired, OSError):
             subprocess.run(
                 ["taskkill", "/F", "/IM", "msedgewebview2.exe"],
                 capture_output=True,
                 timeout=10,
                 check=False,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
         # Suppression recursive.
         import shutil
+
         shutil.rmtree(target, ignore_errors=True)
         result["purged"] = not target.exists()
         if not result["purged"]:
@@ -302,9 +300,7 @@ def _reset_test_library_state(
             if "test_library" in str(lib_abs).lower():
                 scope_marker = str(lib_abs)
             else:
-                result["skipped_reasons"].append(
-                    "library hors scope test_library, donnees utilisateur PROTEGEES"
-                )
+                result["skipped_reasons"].append("library hors scope test_library, donnees utilisateur PROTEGEES")
         except OSError as exc:
             result["skipped_reasons"].append(f"library non resolvable: {exc}")
 
@@ -312,9 +308,11 @@ def _reset_test_library_state(
     if db_path.is_file() and scope_marker:
         try:
             import sqlite3
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup = db_path.with_suffix(f".sqlite.bak_BEFORE_FRESH_{ts}")
             import shutil
+
             shutil.copy2(db_path, backup)
             result["backup"] = str(backup)
             conn = sqlite3.connect(str(db_path))
@@ -324,16 +322,14 @@ def _reset_test_library_state(
                 # (run.root LIKE OU plan.jsonl evoque le scope).
                 cur.execute(
                     "SELECT run_id FROM runs WHERE LOWER(root) LIKE ?",
-                    (f"%test_library%",),
+                    ("%test_library%",),
                 )
                 run_ids = [r[0] for r in cur.fetchall()]
                 deleted: dict[str, int] = {}
                 if run_ids:
                     placeholders = ",".join("?" for _ in run_ids)
                     # Inventorier tables avec colonne run_id.
-                    cur.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    )
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
                     tables = [r[0] for r in cur.fetchall()]
                     for tbl in tables:
                         try:
@@ -352,7 +348,7 @@ def _reset_test_library_state(
                 try:
                     cur.execute(
                         "DELETE FROM probe_cache WHERE LOWER(path) LIKE ?",
-                        (f"%test_library%",),
+                        ("%test_library%",),
                     )
                     if cur.rowcount > 0:
                         deleted["probe_cache_by_path"] = cur.rowcount
@@ -371,6 +367,7 @@ def _reset_test_library_state(
     if runs_dir.is_dir() and scope_marker:
         try:
             import shutil
+
             deleted_runs = 0
             for run_dir in runs_dir.glob("tri_films_*"):
                 if not run_dir.is_dir():
@@ -423,12 +420,8 @@ def _rebuild_exe_if_needed() -> dict[str, Any]:
         "action": "force_dev_mode",
     }
     if DIST_EXE.is_file():
-        try:
-            result["exe_mtime"] = datetime.fromtimestamp(
-                DIST_EXE.stat().st_mtime
-            ).isoformat(timespec="seconds")
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            result["exe_mtime"] = datetime.fromtimestamp(DIST_EXE.stat().st_mtime).isoformat(timespec="seconds")
     try:
         out = subprocess.run(
             ["git", "log", "-1", "--format=%cI"],
@@ -537,8 +530,7 @@ def run_freshness_gate(
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
     print(
-        f"[observe.fresh] [OPERATIONNEL] gate localappdata={local_appdata} "
-        f"library={library}",
+        f"[observe.fresh] [OPERATIONNEL] gate localappdata={local_appdata} library={library}",
         file=sys.stderr,
     )
 
@@ -777,11 +769,13 @@ def observe_dashboard(
                         _bucket.append(rec)
                         # [FIGE 0.7.1] Capture explicite des requetes poster.
                         if _is_poster_url(resp.url):
-                            _img.append({
-                                "url": url,
-                                "status": resp.status,
-                                "ok": 200 <= resp.status < 400,
-                            })
+                            _img.append(
+                                {
+                                    "url": url,
+                                    "status": resp.status,
+                                    "ok": 200 <= resp.status < 400,
+                                }
+                            )
                     except Exception:
                         pass
 
@@ -796,12 +790,14 @@ def observe_dashboard(
                             failure = f.get("errorText", "") if isinstance(f, dict) else str(f or "")
                         except Exception:
                             failure = "<unknown>"
-                        _img.append({
-                            "url": scrub(req.url),
-                            "status": None,
-                            "ok": False,
-                            "failure": scrub(failure),
-                        })
+                        _img.append(
+                            {
+                                "url": scrub(req.url),
+                                "status": None,
+                                "ok": False,
+                                "failure": scrub(failure),
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -824,10 +820,8 @@ def observe_dashboard(
                         pass
 
                 def _on_pageerror(err, _bucket=console_records):
-                    try:
+                    with contextlib.suppress(Exception):
                         _bucket.append({"type": "pageerror", "text": scrub(str(err))})
-                    except Exception:
-                        pass
 
                 page.on("response", _on_response)
                 page.on("requestfailed", _on_requestfailed)
@@ -856,10 +850,8 @@ def observe_dashboard(
                     return true;
                 }
                 """
-                try:
+                with contextlib.suppress(Exception):
                     page.evaluate(csp_init_snippet)
-                except Exception:
-                    pass
 
                 # Verdict par vue [FIGE 0.7.1]
                 posters_expected = 0
@@ -935,19 +927,19 @@ def observe_dashboard(
                     """
                     try:
                         probe = page.evaluate(poster_probe_snippet) or {}
-                        posters_expected = int(probe.get("posterImgsCount") or 0) \
-                            + int(probe.get("bgExpected") or 0)
-                        posters_rendered = int(probe.get("renderedImgsCount") or 0) \
-                            + int(probe.get("bgRendered") or 0)
+                        posters_expected = int(probe.get("posterImgsCount") or 0) + int(probe.get("bgExpected") or 0)
+                        posters_rendered = int(probe.get("renderedImgsCount") or 0) + int(probe.get("bgRendered") or 0)
                         raw_csp = probe.get("csp") or []
                         if isinstance(raw_csp, list):
                             for ev in raw_csp:
                                 if isinstance(ev, dict):
-                                    csp_events_page.append({
-                                        "blockedURI": scrub(str(ev.get("blockedURI") or "")),
-                                        "violatedDirective": str(ev.get("violatedDirective") or ""),
-                                        "sourceFile": scrub(str(ev.get("sourceFile") or "")),
-                                    })
+                                    csp_events_page.append(
+                                        {
+                                            "blockedURI": scrub(str(ev.get("blockedURI") or "")),
+                                            "violatedDirective": str(ev.get("violatedDirective") or ""),
+                                            "sourceFile": scrub(str(ev.get("sourceFile") or "")),
+                                        }
+                                    )
                     except Exception as exc:
                         view_summary["poster_probe_error"] = scrub(str(exc))
 
@@ -991,7 +983,7 @@ def observe_dashboard(
                 try:
                     log_lines = []
                     for rec in console_records:
-                        log_lines.append(f"[{rec.get('type','?')}] {rec.get('text','')}")
+                        log_lines.append(f"[{rec.get('type', '?')}] {rec.get('text', '')}")
                     (view_dir / "console.log").write_text(
                         "\n".join(log_lines) + ("\n" if log_lines else ""),
                         encoding="utf-8",
@@ -1024,8 +1016,7 @@ def observe_dashboard(
                 # URLs non encore rendues (preload, retry) mais sont quand meme
                 # des signaux. On en augmente le compte sans doubler les img.
                 failed_requests = [
-                    r for r in image_requests
-                    if (r.get("ok") is False) or (r.get("status") and int(r["status"]) >= 400)
+                    r for r in image_requests if (r.get("ok") is False) or (r.get("status") and int(r["status"]) >= 400)
                 ]
                 # Raisons collectees pour traçabilite.
                 reasons: list[str] = []
@@ -1040,8 +1031,7 @@ def observe_dashboard(
                         reasons.append(f"console: {t[:200]}")
                 for fr in failed_requests:
                     reasons.append(
-                        f"image {fr.get('url','')} status={fr.get('status')} "
-                        f"failure={fr.get('failure','')}"
+                        f"image {fr.get('url', '')} status={fr.get('status')} failure={fr.get('failure', '')}"
                     )
 
                 if posters_expected == 0:
@@ -1071,7 +1061,7 @@ def observe_dashboard(
                 # Erreurs majeures (type "error" ou pageerror).
                 for rec in console_records:
                     if rec.get("type") in {"error", "pageerror"}:
-                        line = f"{label}: [{rec['type']}] {rec.get('text','')}"
+                        line = f"{label}: [{rec['type']}] {rec.get('text', '')}"
                         summary["console_errors_major"].append(line)
 
                 view_summary["counts"] = {

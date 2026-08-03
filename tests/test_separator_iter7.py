@@ -95,13 +95,9 @@ class SeparatorPipelineGuardTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _run_pipeline_and_get_preview(
-        self, *, separator: str, naming_movie_template: str
-    ) -> Dict[str, Any]:
+    def _run_pipeline_and_get_preview(self, *, separator: str, naming_movie_template: str) -> Dict[str, Any]:
         """Lance start_plan -> attend fin -> build_apply_preview, retourne preview."""
-        self._persist_settings(
-            separator=separator, naming_movie_template=naming_movie_template
-        )
+        self._persist_settings(separator=separator, naming_movie_template=naming_movie_template)
         api = CineSortApi()
         payload = {
             "library_path": str(self.root),
@@ -118,7 +114,7 @@ class SeparatorPipelineGuardTests(unittest.TestCase):
         plan_jsonl = run_dir / "plan.jsonl"
         self.assertTrue(plan_jsonl.exists(), f"plan.jsonl manquant: {plan_jsonl}")
         decisions: Dict[str, Dict[str, Any]] = {}
-        with open(plan_jsonl, "r", encoding="utf-8") as f:
+        with open(plan_jsonl, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -157,14 +153,10 @@ class SeparatorPipelineGuardTests(unittest.TestCase):
         choisi en ITER7 section 4 pour preserver MEMOIRE "FORK SEMANTIQUE CUSTOM
         TEMPLATE = STOP REMONTER".
         """
-        preview_under = self._run_pipeline_and_get_preview(
-            separator="_", naming_movie_template="{title} ({year})"
-        )
+        preview_under = self._run_pipeline_and_get_preview(separator="_", naming_movie_template="{title} ({year})")
         dst_under = self._extract_target_dst(preview_under)
 
-        preview_space = self._run_pipeline_and_get_preview(
-            separator=" ", naming_movie_template="{title} ({year})"
-        )
+        preview_space = self._run_pipeline_and_get_preview(separator=" ", naming_movie_template="{title} ({year})")
         dst_space = self._extract_target_dst(preview_space)
 
         self.assertEqual(
@@ -184,14 +176,10 @@ class SeparatorPipelineGuardTests(unittest.TestCase):
         sens attendu : `_` produit `..._(yyyy)`, espace produit `... (yyyy)`.
         """
         tpl = "{title}{sep}({year})"
-        preview_under = self._run_pipeline_and_get_preview(
-            separator="_", naming_movie_template=tpl
-        )
+        preview_under = self._run_pipeline_and_get_preview(separator="_", naming_movie_template=tpl)
         dst_under = self._extract_target_dst(preview_under)
 
-        preview_space = self._run_pipeline_and_get_preview(
-            separator=" ", naming_movie_template=tpl
-        )
+        preview_space = self._run_pipeline_and_get_preview(separator=" ", naming_movie_template=tpl)
         dst_space = self._extract_target_dst(preview_space)
 
         self.assertNotEqual(

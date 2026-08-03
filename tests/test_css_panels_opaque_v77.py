@@ -27,20 +27,20 @@ def _rule(css: str, selector: str) -> str:
 class CssPanelsOpaqueTests(unittest.TestCase):
     def test_advanced_drawer_opaque(self) -> None:
         body = _rule(_COMPONENTS.read_text(encoding="utf-8"), ".bibliotheque-drawer-advanced")
-        self.assertIn("background: var(--bg-raised)", body,
-                      "Le tiroir avance doit avoir un fond opaque (--bg-raised).")
-        self.assertNotIn("background: var(--surface-1)", body,
-                         "Le tiroir avance ne doit plus utiliser --surface-1 (quasi transparent).")
+        self.assertIn("background: var(--bg-raised)", body, "Le tiroir avance doit avoir un fond opaque (--bg-raised).")
+        self.assertNotIn(
+            "background: var(--surface-1)",
+            body,
+            "Le tiroir avance ne doit plus utiliser --surface-1 (quasi transparent).",
+        )
 
     def test_modal_card_has_background(self) -> None:
         body = _rule(_STYLES.read_text(encoding="utf-8"), ".modal-card")
-        self.assertIn("background:", body,
-                      "La modale showModal (.modal-card) doit avoir un background opaque.")
+        self.assertIn("background:", body, "La modale showModal (.modal-card) doit avoir un background opaque.")
 
     def test_v5_input_color_scheme_dark(self) -> None:
         body = _rule(_COMPONENTS.read_text(encoding="utf-8"), ".v5-input")
-        self.assertIn("color-scheme: dark", body,
-                      "Les inputs/selects v5 doivent forcer color-scheme: dark.")
+        self.assertIn("color-scheme: dark", body, "Les inputs/selects v5 doivent forcer color-scheme: dark.")
 
 
 if __name__ == "__main__":

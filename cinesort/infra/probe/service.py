@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sqlite3
@@ -19,7 +20,6 @@ from ._source_circuit_breaker import (
     get_default_breaker,
 )
 from .adaptive_timeout import (
-    AdaptiveTimeoutConfig,
     compute_adaptive_timeout,
     resolve_adaptive_timeout_config,
 )
@@ -262,10 +262,8 @@ class ProbeService:
         # passe en dict est souvent un snapshot non-persistable, on log juste).
         # La persistance reelle se fait via l'endpoint runtime/recheck_probe_tools
         # appele depuis l'UI au reload. Ici on invalide le cache in-memory.
-        try:
+        with contextlib.suppress(AttributeError, RuntimeError):
             self.invalidate_tools_status_cache()
-        except (AttributeError, RuntimeError):
-            pass
 
     def _cache_key(self, media_path: Path, backend: str) -> Optional[Dict[str, Any]]:
         try:
@@ -362,9 +360,7 @@ class ProbeService:
             ts=ts_now,
         )
 
-    def _degraded_source_payload(
-        self, media_path: Path, backend: str, exc: SourceDegradedError
-    ) -> Dict[str, Any]:
+    def _degraded_source_payload(self, media_path: Path, backend: str, exc: SourceDegradedError) -> Dict[str, Any]:
         """Payload retourne quand la source UNC est DEGRADED (Iter13 CIRCUIT_BREAKER).
 
         Le payload est `ok=true` (la route REST a fonctionne) mais
@@ -379,10 +375,7 @@ class ProbeService:
         cote probe (acquis iter4).
         """
         source = extract_network_source(media_path) or ""
-        message = (
-            f"Source reseau '{source}' degradee (circuit breaker ouvert) : probe non tente. "
-            f"Detail : {exc}"
-        )
+        message = f"Source reseau '{source}' degradee (circuit breaker ouvert) : probe non tente. Detail : {exc}"
         normalized_obj = normalize_probe(
             media_path=media_path,
             raw_mediainfo=None,

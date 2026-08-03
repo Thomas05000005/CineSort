@@ -31,8 +31,12 @@ class TmdbOverrideEffectiveTests(unittest.TestCase):
 
     def test_overlay_applies_override(self) -> None:
         self.store.film_modal.upsert_tmdb_override(
-            run_id="R1", row_id="r1", tmdb_id=999, new_confidence=88,
-            proposed_title="Chosen Title", proposed_year=2021,
+            run_id="R1",
+            row_id="r1",
+            tmdb_id=999,
+            new_confidence=88,
+            proposed_title="Chosen Title",
+            proposed_year=2021,
         )
         row = {"row_id": "r1", "tmdb_id": 111, "proposed_title": "Auto", "proposed_year": 1999, "confidence": 50}
         self.assertTrue(overlay_tmdb_override(self.store, "R1", row))
