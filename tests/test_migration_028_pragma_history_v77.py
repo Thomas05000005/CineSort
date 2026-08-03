@@ -123,12 +123,7 @@ class Migration028FreshDbTests(unittest.TestCase):
 
         conn = sqlite3.connect(str(self.db_path))
         try:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("pragma_history", tables)
 
             cur = conn.execute("PRAGMA table_info(pragma_history)")
@@ -147,8 +142,7 @@ class Migration028FreshDbTests(unittest.TestCase):
             indexes = {
                 row[0]
                 for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' "
-                    "AND tbl_name='pragma_history'"
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='pragma_history'"
                 )
             }
             self.assertIn("idx_pragma_history_applied_at", indexes)
@@ -166,22 +160,12 @@ class Migration028ExistingDbTests(unittest.TestCase):
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 27, "Pre-cond : DB doit etre v27")
 
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn("pragma_history", tables, "Pre-cond : table absente avant 028")
 
             _exec_migration_028(conn)
 
-            tables_after = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables_after = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("pragma_history", tables_after)
 
             cur = conn.execute("PRAGMA user_version")
@@ -195,17 +179,13 @@ class Migration028ExistingDbTests(unittest.TestCase):
         try:
             _exec_migration_028(conn)
             # Premier apply : la table doit etre vide.
-            count_first = conn.execute(
-                "SELECT COUNT(*) FROM pragma_history"
-            ).fetchone()[0]
+            count_first = conn.execute("SELECT COUNT(*) FROM pragma_history").fetchone()[0]
             self.assertEqual(count_first, 0)
 
             # Deuxieme apply : ne doit pas lever, et ne doit pas reinitialiser
             # la table existante (DROP TABLE absent du script).
             _exec_migration_028(conn)
-            count_second = conn.execute(
-                "SELECT COUNT(*) FROM pragma_history"
-            ).fetchone()[0]
+            count_second = conn.execute("SELECT COUNT(*) FROM pragma_history").fetchone()[0]
             self.assertEqual(count_second, 0, "Re-apply ne doit pas modifier les donnees")
         finally:
             conn.close()
@@ -230,8 +210,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
             self.assertIn("journal_mode", snapshot)
 
             rows = conn.execute(
-                "SELECT profile_name, db_path, storage_type_detected, "
-                "pragmas_json, source FROM pragma_history"
+                "SELECT profile_name, db_path, storage_type_detected, pragmas_json, source FROM pragma_history"
             ).fetchall()
             self.assertEqual(len(rows), 1, "Une ligne d'audit attendue apres apply_pragmas")
 
@@ -286,9 +265,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
                 source="auto",
                 record_history=False,
             )
-            count = conn.execute(
-                "SELECT COUNT(*) FROM pragma_history"
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM pragma_history").fetchone()[0]
             self.assertEqual(count, 0, "record_history=False doit court-circuiter l'insert")
         finally:
             conn.close()

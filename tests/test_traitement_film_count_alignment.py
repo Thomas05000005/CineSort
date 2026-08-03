@@ -97,9 +97,7 @@ class TraitementFilmCountAlignmentTests(unittest.TestCase):
         self.store.run.mark_run_running(run_id, started_ts=started)
         # Simule la mise a jour de progression avec total = discover_total
         try:
-            self.store.run.update_run_progress(
-                run_id, idx=total_snapshot, total=total_snapshot, current_folder=""
-            )
+            self.store.run.update_run_progress(run_id, idx=total_snapshot, total=total_snapshot, current_folder="")
         except (AttributeError, TypeError):
             # API legere : si pas de helper, on continue (le row total peut
             # rester a 0, le test verifie surtout que count_plan_rows prend
@@ -130,7 +128,8 @@ class TraitementFilmCountAlignmentTests(unittest.TestCase):
         status = self.api.run.get_status(run_id)
         self.assertTrue(status.get("ok"), status)
         self.assertEqual(
-            int(status.get("total") or 0), 853,
+            int(status.get("total") or 0),
+            853,
             "get_status.total doit etre aligne sur count_plan_rows(plan.jsonl) "
             "(853), pas sur discover_total stocke en DB (855).",
         )
@@ -151,7 +150,8 @@ class TraitementFilmCountAlignmentTests(unittest.TestCase):
         status_total = int(status.get("total") or 0)
         dashboard_total = int(dashboard.get("kpis", {}).get("total_movies") or 0)
         self.assertEqual(
-            status_total, dashboard_total,
+            status_total,
+            dashboard_total,
             f"get_status.total ({status_total}) doit egaler "
             f"dashboard.kpis.total_movies ({dashboard_total}). C'est exactement "
             f"le bug observe sur la vue Traitement etape Doublons.",
@@ -193,9 +193,7 @@ class TraitementFilmCountAlignmentTests(unittest.TestCase):
         self._insert_run_done(run_id, total_snapshot=855, planned_rows=855)
 
         status_total = int(self.api.run.get_status(run_id).get("total") or 0)
-        dashboard_total = int(
-            self.api._get_dashboard_impl(run_id).get("kpis", {}).get("total_movies") or 0
-        )
+        dashboard_total = int(self.api._get_dashboard_impl(run_id).get("kpis", {}).get("total_movies") or 0)
         plan_rows = self.api.run.get_plan(run_id).get("rows") or []
         plan_total = len(plan_rows)
 
@@ -204,7 +202,8 @@ class TraitementFilmCountAlignmentTests(unittest.TestCase):
         self.assertEqual(plan_total, 853, "get_plan.rows != 853")
         # Verification finale : ils sont tous egaux
         self.assertEqual(
-            {status_total, dashboard_total, plan_total}, {853},
+            {status_total, dashboard_total, plan_total},
+            {853},
             "Les 3 endpoints (get_status, get_dashboard, get_plan) doivent "
             "retourner le meme compteur (853). Le bug Vague J etait que "
             "get_status retournait 855 alors que les autres retournaient 853.",

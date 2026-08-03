@@ -232,7 +232,7 @@ function _renderRejectSection(stats) {
       <button type="button" class="qualite-reject-card" data-qualite-reject-card="${escapeHtml(rowId)}" data-qualite-reject-index="${idx}" aria-label="${escapeHtml(title)} (${year || "?"})">
         <div class="qualite-reject-poster">
           ${poster
-            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
+            ? `<img src="${escapeHtml(poster)}" alt="" loading="lazy" />`
             : `<div class="qualite-reject-poster-empty" aria-hidden="true">🎬</div>`}
           ${qualityUnavailable
             ? `<span class="qualite-reject-score qualite-reject-unavailable" title="Probe indisponible : qualite non mesuree">Indispo</span>`
@@ -584,8 +584,10 @@ function _renderQualite(stats) {
 /* --- Inspector content (spec §5) -------------------------------------- */
 
 function _dominantTier(dist) {
-  let max = -1;
-  let dom = null;
+  // LOTC-M3 : max init a 0 (comparaison stricte) -> tous compteurs a 0 =
+  // "—" au lieu d'un "Platinum" fictif (1er tier de _TIER_ORDER).
+  let max = 0;
+  let dom = "—";
   for (const t of _TIER_ORDER) {
     const v = dist[t] || 0;
     if (v > max) { max = v; dom = t; }
@@ -812,7 +814,20 @@ async function _loadHistory(signal, periodDays) {
 
 /* --- Events ----------------------------------------------------------- */
 
+// LOTC-C1 : la CSP (script-src 'self') bloque les 'onerror' inline -> filet
+// jaquettes Reject via listener 'error' delegue en phase capture (les events
+// error des <img> ne bouillonnent pas), meme pattern que la grille
+// Bibliotheque (R6-H). Fonction nommee -> re-bind apres re-render = no-op.
+function _onPosterError(ev) {
+  const img = ev.target;
+  if (!img || img.tagName !== "IMG" || typeof img.closest !== "function") return;
+  if (!img.closest(".qualite-reject-poster")) return;
+  img.style.display = "none";
+}
+
 function _bindEvents(container) {
+  container.addEventListener("error", _onPosterError, true); // LOTC-C1
+
   container.querySelectorAll("[data-qualite-action]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.preventDefault();

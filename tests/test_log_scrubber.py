@@ -220,6 +220,7 @@ class ScrubFilterIntegrationTests(unittest.TestCase):
         """GATE AUDIT 2026-06-10 : l'idiome logger.x('... : %s', exc) passe un
         OBJET non-str dont __str__ contient un secret (URL avec api_key=). Avant
         le fix, seuls les args str etaient scrubbes -> fuite en clair."""
+
         class _FakeHTTPError(Exception):
             def __str__(self) -> str:
                 return "401 Client Error for url: https://www.omdbapi.com/?apikey=leakedKey777"
@@ -259,9 +260,7 @@ class InstallReSyncTests(unittest.TestCase):
         late_handler = logging.StreamHandler(io.StringIO())
         self.root.addHandler(late_handler)
         # Avant re-sync : le handler tardif n'a pas le filtre
-        self.assertFalse(
-            any(isinstance(f, SecretsScrubFilter) for f in late_handler.filters)
-        )
+        self.assertFalse(any(isinstance(f, SecretsScrubFilter) for f in late_handler.filters))
         install_global_scrubber()  # re-sync (apres basicConfig)
         self.assertTrue(
             any(isinstance(f, SecretsScrubFilter) for f in late_handler.filters),
