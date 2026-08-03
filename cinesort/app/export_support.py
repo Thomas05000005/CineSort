@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
 
+from cinesort.infra.state import atomic_write_text
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -277,7 +279,12 @@ def export_nfo_for_run(
             continue
 
         try:
-            nfo_path.write_text(xml_content, encoding="utf-8")
+            # Fix #822 : `write_text` tronque le .nfo EN PLACE. Coupure secteur
+            # ou NAS qui decroche pendant l'ecriture -> l'utilisateur se
+            # retrouve avec un .nfo vide/tronque a la place de celui que
+            # Jellyfin/Kodi lisait tres bien avant l'export. `mkdir=False` :
+            # on n'a AUCUNE raison de recreer le dossier d'un film disparu.
+            atomic_write_text(nfo_path, xml_content, mkdir=False)
             written += 1
             details.append({"path": str(nfo_path), "status": "written"})
         except (OSError, PermissionError) as exc:

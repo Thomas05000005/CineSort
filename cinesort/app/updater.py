@@ -24,6 +24,8 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from cinesort.infra.state import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -125,7 +127,11 @@ def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
     if not cache_path:
         return
     try:
-        cache_path.write_text(json.dumps({"ts": time.time(), "payload": payload}), encoding="utf-8")
+        # Fix #787 : `write_text` tronque le fichier EN PLACE avant d'ecrire.
+        # Une coupure a cet instant laissait un `update_cache.json` vide ou
+        # partiel que `_read_cache` rejetait ensuite a chaque boot -> un appel
+        # GitHub par demarrage, jusqu'au rate limit 60/h.
+        atomic_write_json(cache_path, {"ts": time.time(), "payload": payload}, indent=None)
     except OSError as exc:
         logger.debug("Updater: ecriture cache impossible (%s)", exc)
 
