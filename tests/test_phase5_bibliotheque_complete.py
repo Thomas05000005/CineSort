@@ -15,6 +15,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from tests._jsexec import require_node, run_module_test
+
 _ROOT = Path(__file__).resolve().parents[1]
 _BIBLIOTHEQUE_JS = _ROOT / "web" / "dashboard" / "views" / "bibliotheque.js"
 _DRAWER_JS = _ROOT / "web" / "dashboard" / "components" / "library-advanced-drawer.js"
@@ -176,7 +178,7 @@ class DenseTableTests(unittest.TestCase):
 
 
 class InfiniteScrollTests(unittest.TestCase):
-    """Spec 07 §8 : scroll infini via IntersectionObserver, batch 60."""
+    """Spec 07 §8 : scroll infini via IntersectionObserver, batch 200."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -189,8 +191,8 @@ class InfiniteScrollTests(unittest.TestCase):
     def test_sentinel(self) -> None:
         self.assertIn("data-bibliotheque-sentinel", self.js)
 
-    def test_batch_size_60(self) -> None:
-        self.assertIn("PAGE_SIZE = 60", self.js)
+    def test_batch_size_200(self) -> None:
+        self.assertIn("PAGE_SIZE = 200", self.js)
 
     def test_local_cache_rowsByPage(self) -> None:
         self.assertIn("rowsByPage", self.js)
@@ -281,11 +283,13 @@ class BulkActionsWiringTests(unittest.TestCase):
         # progression done/total via get_perceptual_job_status), au lieu de
         # l'ancien appel BLOQUANT analyze_perceptual_batch.
         self.assertIn(
-            "quality/queue_perceptual_batch", self.js,
+            "quality/queue_perceptual_batch",
+            self.js,
             "L'action 'Analyser perceptuel' doit appeler quality/queue_perceptual_batch (async).",
         )
         self.assertIn(
-            "quality/get_perceptual_job_status", self.js,
+            "quality/get_perceptual_job_status",
+            self.js,
             "Le bulk perceptuel doit poller le statut du job (progression).",
         )
 
@@ -294,9 +298,140 @@ class BulkActionsWiringTests(unittest.TestCase):
         self.assertIn("dangerConfirmModal", self.js)
         self.assertNotIn("window.confirm(", self.js)
 
-    def test_countdown_3s_if_over_50(self) -> None:
-        # Phase 5 spec 07 : N > 50 -> countdown anti-clic-reflexe 3s
-        self.assertIn("countdownSeconds: n > 50 ? 3 : 0", self.js)
+
+# ---------------------------------------------------------------------------
+# 8bis. Suppression en masse : garde-fous verifies au RUNTIME
+# ---------------------------------------------------------------------------
+#
+# Historique : ce bloc contenait test_countdown_3s_if_over_50, qui cherchait la
+# chaine litterale "countdownSeconds: n > 50 ? 3 : 0" dans le source. Il est
+# passe au ROUGE quand le fix d'audit 2026-05-24 a RENFORCE la garde (countdown
+# de 3s systematique, y compris sous 50 elements) : le test punissait un
+# durcissement. Symetriquement il n'aurait rien vu si la modale avait cesse
+# d'etre appelee, si la liste des films avait disparu, ou si l'appel destructif
+# etait parti avant confirmation.
+#
+# Reecrit en test de comportement (harnais tests/_jsexec.py) : on execute le
+# vrai _confirmBulkDelete sous Node avec dangerConfirmModal et apiPost espionnes,
+# et on verifie les 4 garanties de la regle projet "actions dangereuses" :
+# confirmation prealable, liste des elements, consequence enoncee, delai
+# anti-clic-reflexe d'au moins 3s des que N > 50.
+
+_BULKDEL_STUBS = """
+const escapeHtml = (s) => String(s);
+const posterProxyUrl = (u) => u;
+globalThis.__calls = { modal: [], api: [], toast: [] };
+const apiPost = async (ep, params) => {
+  globalThis.__calls.api.push({ ep, params });
+  return { data: { ok: true, count: (params.row_ids || []).length, failed: [] } };
+};
+const getNavSignal = () => null;
+const dangerConfirmModal = (opts) => { globalThis.__calls.modal.push(opts); };
+const showModal = () => {};
+const closeModal = () => {};
+const renderFilmDetail = () => {};
+const openDuplicateComparatorModal = () => {};
+const showToast = (t) => { globalThis.__calls.toast.push(t); };
+const buildEmptyState = () => "";
+const bindEmptyStateCta = () => {};
+const openLibraryAdvancedDrawer = () => {};
+const ADVANCED_DRAWER_DEFAULTS = {};
+const rightPanel = { setSections: () => {}, setTitle: () => {} };
+"""
+
+# `_fetchLibrary` est neutralise : c'est une dependance de rechargement, pas la
+# fonction sous test (qui, elle, tourne bien avec son vrai corps).
+_BULKDEL_EXTRA = """
+export function __setup(nbRows) {
+  _fetchLibrary = async () => {};
+  _state = {
+    rows: Array.from({ length: nbRows }, (_, i) => ({
+      row_id: String(i + 1), title: `Film ${i + 1}`, year: 2000 + (i % 20),
+    })),
+    selected: new Set(),
+  };
+  return _state.rows.map((r) => r.row_id);
+}
+export { _confirmBulkDelete as __confirmBulkDelete };
+"""
+
+_BULKDEL_DRIVER = """
+async function scenario(nbRows) {
+  globalThis.__calls = { modal: [], api: [], toast: [] };
+  const ids = M.__setup(nbRows);
+  M.__confirmBulkDelete(ids);
+  const opts = globalThis.__calls.modal[0] || null;
+  const apiBeforeConfirm = globalThis.__calls.api.length;
+  if (opts && typeof opts.onConfirm === "function") await opts.onConfirm();
+  return {
+    modalCount: globalThis.__calls.modal.length,
+    opts: opts && {
+      title: String(opts.title || ""),
+      items: opts.items || [],
+      consequence: String(opts.consequence || ""),
+      countdownSeconds: opts.countdownSeconds,
+      confirmLabel: String(opts.confirmLabel || ""),
+    },
+    apiBeforeConfirm,
+    api: globalThis.__calls.api,
+  };
+}
+__emit({ small: await scenario(3), big: await scenario(51) });
+"""
+
+
+class BulkDeleteGuardRuntimeTests(unittest.TestCase):
+    """Regle projet 'actions dangereuses' verifiee en executant le code."""
+
+    _res: dict | None = None
+
+    def _run_or_skip(self) -> dict:
+        require_node(self)
+        if BulkDeleteGuardRuntimeTests._res is None:
+            BulkDeleteGuardRuntimeTests._res = run_module_test(
+                _BIBLIOTHEQUE_JS,
+                stubs=_BULKDEL_STUBS,
+                extra=_BULKDEL_EXTRA,
+                driver=_BULKDEL_DRIVER,
+            )
+        return BulkDeleteGuardRuntimeTests._res
+
+    def test_nothing_is_deleted_before_the_user_confirms(self) -> None:
+        res = self._run_or_skip()
+        for scale in ("small", "big"):
+            self.assertEqual(res[scale]["modalCount"], 1, f"{scale} : une modale de confirmation attendue")
+            self.assertEqual(
+                res[scale]["apiBeforeConfirm"],
+                0,
+                f"{scale} : aucun appel destructif ne doit partir avant onConfirm",
+            )
+
+    def test_confirm_dialog_lists_the_films_and_states_the_consequence(self) -> None:
+        res = self._run_or_skip()
+        opts = res["big"]["opts"]
+        self.assertEqual(len(opts["items"]), 51, "la modale doit recevoir la liste complete des films")
+        self.assertIn("Film 1 (2000)", opts["items"], "les items doivent etre lisibles (titre + annee)")
+        self.assertTrue(opts["consequence"].strip(), "la consequence doit etre enoncee")
+        self.assertIn("_user_marked_for_deletion", opts["consequence"])
+        self.assertIn("51", opts["title"], "le titre doit annoncer le nombre de films")
+
+    def test_countdown_at_least_3s_when_more_than_50(self) -> None:
+        # Regle projet : delai anti-clic-reflexe >= 3s au-dela de 50 elements.
+        # On borne par le BAS : un durcissement (countdown aussi sous 50) reste
+        # conforme, un affaiblissement echoue.
+        res = self._run_or_skip()
+        self.assertGreaterEqual(
+            res["big"]["opts"]["countdownSeconds"],
+            3,
+            "N > 50 : countdown anti-clic-reflexe d'au moins 3s exige",
+        )
+        self.assertGreaterEqual(res["small"]["opts"]["countdownSeconds"], 0)
+
+    def test_confirmation_actually_calls_the_bulk_endpoint(self) -> None:
+        res = self._run_or_skip()
+        calls = [c for c in res["big"]["api"] if c["ep"] == "library/mark_for_deletion_bulk"]
+        self.assertEqual(len(calls), 1, "onConfirm doit appeler library/mark_for_deletion_bulk une fois")
+        self.assertEqual(len(calls[0]["params"]["row_ids"]), 51)
 
 
 # ---------------------------------------------------------------------------

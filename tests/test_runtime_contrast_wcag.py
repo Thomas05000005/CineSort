@@ -49,7 +49,11 @@ _CRITICAL_PAIRS = (
 # JS injecte dans la page : convertit un token CSS (var()) en (r,g,b) via
 # canvas + getComputedStyle, puis calcule le ratio WCAG.
 _RATIO_JS = r"""
-(theme, fgToken, bgToken) => {
+([theme, fgToken, bgToken]) => {
+    // Lot C (verif totale 2026-07) : Playwright evaluate passe UN SEUL
+    // argument — l'ancienne signature (theme, fgToken, bgToken) recevait le
+    // tableau dans theme et undefined ailleurs : fg=None, bg=rgba(0,0,0,0)
+    // -> le test n'a JAMAIS mesure un vrai ratio. Destructuring obligatoire.
     // Bascule le theme sur body, attends repaint.
     document.body.setAttribute('data-theme', theme);
     const style = getComputedStyle(document.body);

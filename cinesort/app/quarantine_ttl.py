@@ -62,6 +62,13 @@ TTL_SUBDIRS = (
     "_leftovers",
 )
 
+# Sous-dossiers du bucket <root>/_review explicitement PRESERVES par TOUTES les
+# purges (TTL + "Vider maintenant") : les decisions doublons UI. Le compteur
+# `purge_scope_files_count` (perimetre reellement purge, expose au front pour
+# gonfler correctement la modale de confirmation) doit donc les exclure, comme
+# le font purge_review_bucket[_all] (cf `excluded` dans ces fonctions).
+PURGE_PRESERVED_SUBDIRS = frozenset({"_duplicates_user_decided"})
+
 # Defaut TTL (jours). Aligne avec UI : settings.quarantaine_ttl_days = 30.
 DEFAULT_TTL_DAYS = 30
 
@@ -84,6 +91,62 @@ _INITIAL_DELAY_S = 60.0
 def review_root(cfg: "Config") -> Path:
     """Chemin canonique du bucket `_review` pour une cfg donnee."""
     return Path(cfg.root) / REVIEW_FOLDER_NAME
+
+
+# ---------------------------------------------------------------------------
+# LOTD-DUP-BUCKET-VIEWER : buckets quarantaine sous <state_dir>/runs/
+# ---------------------------------------------------------------------------
+# L'apply route ses buckets (_conflicts/_duplicates_user_decided/_leftovers/...)
+# sous <run_dir>/_review (decision R8-002 : ces ecritures restent la, protegees
+# par la retention via runs/_preserved_review/ — on n'y touche PAS). Le viewer,
+# lui, ne lisait que <root>/_review -> les losers de doublons etaient invisibles
+# dans l'UI. On elargit donc le VIEWER : les emplacements runs/ connus sont
+# enregistres ici (par l'apply et par le cron au boot) puis scannes en LECTURE
+# SEULE par list_review_bucket_files. Les purges TTL/manuelles restent scoping
+# <root>/_review uniquement (jamais de purge destructive d'une quarantaine run,
+# cf gouvernance R8-002).
+_RUNS_ROOTS_LOCK = threading.Lock()
+_KNOWN_RUNS_ROOTS: set = set()
+
+
+def register_runs_root(runs_root: Any) -> None:
+    """Enregistre un dossier `<state_dir>/runs` pour le scan viewer (idempotent)."""
+    try:
+        path = Path(runs_root)
+    except (TypeError, ValueError):
+        return
+    if not str(path):
+        return
+    with _RUNS_ROOTS_LOCK:
+        _KNOWN_RUNS_ROOTS.add(str(path))
+
+
+def _known_runs_roots() -> List[Path]:
+    with _RUNS_ROOTS_LOCK:
+        return [Path(p) for p in sorted(_KNOWN_RUNS_ROOTS)]
+
+
+def _run_review_roots() -> List[Path]:
+    """Buckets quarantaine cote runs : `runs/tri_films_*/_review` existants +
+    `runs/_preserved_review/<run_id>` (quarantaines preservees par la retention,
+    cf infra/state.clean_old_runs / R8-002)."""
+    out: List[Path] = []
+    for runs_root in _known_runs_roots():
+        try:
+            if not runs_root.is_dir():
+                continue
+            for child in sorted(runs_root.iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.name == "_preserved_review":
+                    out.extend(sorted(p for p in child.iterdir() if p.is_dir()))
+                else:
+                    rr = child / REVIEW_FOLDER_NAME
+                    if rr.is_dir():
+                        out.append(rr)
+        except (OSError, PermissionError) as exc:
+            _log.warning("run review roots: scan %s echec : %s", runs_root, exc)
+    return out
 
 
 def _ttl_manifest_path(root: Path) -> Path:
@@ -130,13 +193,53 @@ def _save_ttl_manifest(root: Path, manifest: Dict[str, float]) -> None:
                 tmp.unlink()
 
 
-def _sync_arrival_manifest(root: Path, *, persist: bool, now: Optional[float] = None) -> Dict[str, float]:
+def _stable_arrival_ts(fp: Path, default: float, *, anchor: Optional[Path] = None) -> float:
+    """Timestamp d'arrivee en quarantaine STABLE (best-effort) derive du FS.
+
+    Utilise pour les buckets runs (lecture seule, sans manifest persiste, cf
+    R8-002). On NE PEUT PAS y ancrer une "1re observation = now" persistee : sans
+    manifest, chaque appel reancrerait a `now` et `age_days` resterait fige a 0,
+    faussant le tri (FIX #7). On derive donc l'arrivee du FS : st_ctime du fichier
+    (moment ou l'apply l'a route dans le bucket), repli st_mtime puis `default`.
+
+    `anchor` (R2, nuance Windows) : sur un move same-volume, le ctime FICHIER
+    peut refleter la creation source ; le ctime du DOSSIER de run peut etre un
+    meilleur proxy de la mise en quarantaine. On l'utilise en REPLI seulement
+    (le fichier reste prioritaire : c'est ce que verrouille le test de
+    stabilite), pour ne pas dependre d'une semantique ctime variable.
+    """
+    for target in (fp, anchor):
+        if target is None:
+            continue
+        try:
+            st = target.stat()
+        except (OSError, PermissionError):
+            continue
+        for attr in ("st_ctime", "st_mtime"):
+            raw = getattr(st, attr, None)
+            if raw:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    continue
+    return default
+
+
+def _sync_arrival_manifest(
+    root: Path, *, persist: bool, stable_arrival: bool = False, now: Optional[float] = None
+) -> Dict[str, float]:
     """Synchronise le manifest avec le contenu reel du bucket.
 
-    - Tout fichier present mais absent du manifest recoit `first_seen = now`
-      (1re observation -> son TTL commence ici, pas a son mtime).
+    Deux axes INDEPENDANTS (R2 revue round 2 : ils etaient confondus, ce qui
+    faisait diverger le dry-run du purge reel sur les fichiers non manifestes) :
+    - `persist` : ecrire (ou non) le manifest sur disque. Dry-run -> False.
+    - `stable_arrival` : comment dater un fichier ABSENT du manifest.
+        * False (defaut, <root>/_review) : `first_seen = now` (1re observation,
+          TTL demarre ici, cf AUDIT 2026-06-10) -> identique en dry-run et reel.
+        * True (buckets runs, lecture seule, jamais persistes R8-002) : arrivee
+          FS STABLE via `_stable_arrival_ts` (FIX #7 : sinon age_days=0 permanent
+          car `now` serait reancre a chaque appel non persiste).
     - Les entrees pointant vers des fichiers disparus sont retirees.
-    - `persist=False` (dry_run / lecture) : calcule en memoire sans ecrire.
 
     Retourne le mapping {rel_posix: first_seen_ts} a jour.
     """
@@ -148,7 +251,12 @@ def _sync_arrival_manifest(root: Path, *, persist: bool, now: Optional[float] = 
             rel = fp.relative_to(root).as_posix()
         except ValueError:
             continue
-        present[rel] = manifest.get(rel, ts_now)
+        if rel in manifest:
+            present[rel] = manifest[rel]
+        elif stable_arrival:
+            present[rel] = _stable_arrival_ts(fp, ts_now, anchor=root)
+        else:
+            present[rel] = ts_now
     changed = present.keys() != manifest.keys()
     if persist and changed:
         _save_ttl_manifest(root, present)
@@ -195,57 +303,77 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
                 ...
             }
         }
-    Sortie tronquee a `limit` entrees triees par mtime DESC (plus recents en haut).
+    Sortie tronquee a `limit` entrees triees par arrivee DESC (recents en haut).
+
+    LOTD-DUP-BUCKET-VIEWER : en plus de `<root>/_review`, les buckets
+    quarantaine cote runs (`<state_dir>/runs/tri_films_*/_review` +
+    `runs/_preserved_review/<run_id>`, enregistres via `register_runs_root`)
+    sont scannes en LECTURE SEULE — c'est la que l'apply route reellement les
+    losers de doublons (decision R8-002 : on elargit le viewer, on ne deplace
+    pas les ecritures). Ces entrees portent `source_root`, et les champs additifs
+    `purge_scope_files_count` / `purge_scope_size_bytes` isolent ce que "Vider
+    maintenant"/TTL peuvent reellement purger : <root>/_review uniquement, MOINS
+    les sous-dossiers preserves (`_duplicates_user_decided`). Le total agrege
+    (`files_count` / `total_size_bytes`) reste informatif pour le viewer.
     """
     root = review_root(cfg)
+    root_exists = bool(root.exists() and root.is_dir())
+    run_roots = _run_review_roots()
     payload: Dict[str, Any] = {
         "ok": True,
         "review_root": str(root),
-        "exists": bool(root.exists() and root.is_dir()),
+        "exists": root_exists,
         "files_count": 0,
         "total_size_bytes": 0,
         "files": [],
         "by_subdir": {},
+        "run_review_roots": [str(p) for p in run_roots],
+        "purge_scope_files_count": 0,
+        "purge_scope_size_bytes": 0,
     }
-    if not payload["exists"]:
+    if not root_exists and not run_roots:
         return payload
 
     now = time.time()
-    files = _iter_review_files(root)
-    payload["files_count"] = len(files)
-
-    # Ancre la date d'entree en quarantaine de chaque fichier (1re observation).
-    # Le viewer est un point d'entree naturel : on persiste pour que le TTL
-    # parte de l'ouverture de l'ecran et pas du 1er cron.
-    arrivals = _sync_arrival_manifest(root, persist=True, now=now)
-
     by_subdir: Dict[str, Dict[str, int]] = {}
     entries: List[Dict[str, Any]] = []
     total_size = 0
-    for fp in files:
-        try:
-            st = fp.stat()
-        except (OSError, PermissionError):
-            continue
-        size = int(st.st_size)
-        mtime = float(st.st_mtime)
-        total_size += size
-        try:
-            rel = fp.relative_to(root).as_posix()
-        except ValueError:
-            rel = fp.name
-        # age_days = temps passe EN QUARANTAINE (depuis l'arrivee), pas l'age
-        # du fichier (mtime, preserve par move) — voir AUDIT 2026-06-10.
-        arrival = arrivals.get(rel, mtime)
-        # Le premier composant identifie le sous-dossier (ou "_top_quarantine"
-        # si le fichier est directement sous _review/).
-        parts = rel.split("/", 1)
-        subdir = parts[0] if len(parts) > 1 else "_top_quarantine"
-        bucket = by_subdir.setdefault(subdir, {"count": 0, "size": 0})
-        bucket["count"] += 1
-        bucket["size"] += size
-        entries.append(
-            {
+
+    def _collect(scan_root: Path, *, persist_manifest: bool, source_root: Optional[str]) -> int:
+        nonlocal total_size
+        files = _iter_review_files(scan_root)
+        # Ancre la date d'entree en quarantaine (1re observation). Persiste
+        # UNIQUEMENT pour <root>/_review : ecrire un manifest dans un bucket
+        # run polluerait la preservation R8-002 (clean_old_runs preserverait
+        # des _review ne contenant que le manifest).
+        # R2 : buckets runs (persist_manifest=False) -> dating FS stable
+        # (age_days non fige), <root>/_review -> "1re observation = now".
+        arrivals = _sync_arrival_manifest(
+            scan_root, persist=persist_manifest, stable_arrival=not persist_manifest, now=now
+        )
+        for fp in files:
+            try:
+                st = fp.stat()
+            except (OSError, PermissionError):
+                continue
+            size = int(st.st_size)
+            mtime = float(st.st_mtime)
+            total_size += size
+            try:
+                rel = fp.relative_to(scan_root).as_posix()
+            except ValueError:
+                rel = fp.name
+            # age_days = temps passe EN QUARANTAINE (depuis l'arrivee), pas
+            # l'age du fichier (mtime, preserve par move) — AUDIT 2026-06-10.
+            arrival = arrivals.get(rel, mtime)
+            # Le premier composant identifie le sous-dossier (ou
+            # "_top_quarantine" si le fichier est directement sous _review/).
+            parts = rel.split("/", 1)
+            subdir = parts[0] if len(parts) > 1 else "_top_quarantine"
+            bucket = by_subdir.setdefault(subdir, {"count": 0, "size": 0})
+            bucket["count"] += 1
+            bucket["size"] += size
+            entry: Dict[str, Any] = {
                 "path": str(fp),
                 "rel": rel,
                 "size": size,
@@ -254,9 +382,46 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
                 "age_days": max(0.0, (now - arrival) / 86400.0),
                 "subdir": subdir,
             }
-        )
+            if source_root is not None:
+                entry["source_root"] = source_root
+            entries.append(entry)
+        return len(files)
+
+    if root_exists:
+        _collect(root, persist_manifest=True, source_root=None)
+    for run_root in run_roots:
+        _collect(run_root, persist_manifest=False, source_root=str(run_root))
+
+    payload["files_count"] = len(entries)
+    payload["exists"] = bool(root_exists or entries)
     payload["total_size_bytes"] = total_size
     payload["by_subdir"] = by_subdir
+
+    # FIX #8 : `purge_scope_*` doit decrire le perimetre REELLEMENT purge par
+    # "Vider maintenant"/TTL, pas le retour brut de `_collect` (qui incluait
+    # `_duplicates_user_decided`, que les purges EXCLUENT -> l'utilisateur
+    # confirmait N et obtenait deleted << N). On le derive des entries deja
+    # collectees : <root>/_review (source_root is None) MOINS les sous-dossiers
+    # preserves. Les buckets runs (source_root != None) ne sont jamais purges.
+    purge_scope_count = 0
+    purge_scope_size = 0
+    purge_scope_sample: List[str] = []
+    for entry in entries:
+        if entry.get("source_root") is not None:
+            continue
+        if entry["subdir"] in PURGE_PRESERVED_SUBDIRS:
+            continue
+        purge_scope_count += 1
+        purge_scope_size += int(entry["size"])
+        if len(purge_scope_sample) < 10:
+            purge_scope_sample.append(entry["rel"])
+    payload["purge_scope_files_count"] = purge_scope_count
+    payload["purge_scope_size_bytes"] = purge_scope_size
+    # R2 (revue round 2) : echantillon aligne sur le PERIMETRE PURGEABLE — la
+    # modale "Vider maintenant" affichait un echantillon tire de `files` (trie
+    # toutes buckets confondues), qui pouvait etre vide alors que
+    # purge_scope_files_count > 0 (top-N domine par des entrees runs non purgees).
+    payload["purge_scope_sample"] = purge_scope_sample
 
     # Tri par arrivee DESC (entre le plus recemment en quarantaine en haut),
     # tronque a `limit`.
@@ -393,9 +558,7 @@ def purge_review_bucket(
     # 1) Sous-dossiers cible (TTL_SUBDIRS)
     for sub in TTL_SUBDIRS:
         target = root / sub
-        sub_stats = _purge_dir_recursive(
-            target, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
-        )
+        sub_stats = _purge_dir_recursive(target, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of)
         payload["by_subdir"][sub] = sub_stats
         payload["deleted"] += sub_stats["deleted"]
         payload["bytes_freed"] += sub_stats["bytes_freed"]
@@ -410,9 +573,7 @@ def purge_review_bucket(
     try:
         for child in root.iterdir():
             if child.is_dir() and child.name not in excluded:
-                sub_stats = _purge_dir_recursive(
-                    child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
-                )
+                sub_stats = _purge_dir_recursive(child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of)
                 top_stats["deleted"] += sub_stats["deleted"]
                 top_stats["bytes_freed"] += sub_stats["bytes_freed"]
                 top_stats["errors"] += sub_stats["errors"]
@@ -516,7 +677,13 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
                 if not dry_run:
                     with contextlib.suppress(OSError):
                         child.rmdir()
-            elif child.is_file():
+            # Le manifest TTL interne n'est PAS du contenu quarantaine : on ne le
+            # supprime pas ici (comme purge_review_bucket) et surtout on ne le
+            # compte pas dans `deleted`, sinon le retour ("N fichiers supprimes")
+            # divergerait de purge_scope_files_count et de ce que l'UI a annonce
+            # a l'utilisateur (FIX #8). Le resync final (_sync_arrival_manifest)
+            # le remet a jour tout seul.
+            elif child.is_file() and child.name != _TTL_MANIFEST_NAME:
                 try:
                     top_stats["considered"] += 1
                     size = int(child.stat().st_size)
@@ -602,6 +769,16 @@ def start_quarantine_ttl_cron(
     Returns:
         Le `threading.Thread` demarre, ou None si TTL desactive.
     """
+    # LOTD-DUP-BUCKET-VIEWER : enregistrer le state_dir du boot AVANT le
+    # early-return TTL, pour que le viewer voie les buckets runs/ meme apres
+    # un redemarrage sans apply (et meme TTL desactive).
+    try:
+        state_dir = api._get_state_dir()
+        if state_dir:
+            register_runs_root(Path(state_dir) / "runs")
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+
     try:
         days = int(ttl_days)
     except (TypeError, ValueError):
@@ -650,6 +827,7 @@ __all__ = [
     "TTL_SUBDIRS",
     "DEFAULT_TTL_DAYS",
     "review_root",
+    "register_runs_root",
     "list_review_bucket_files",
     "purge_review_bucket",
     "purge_review_bucket_all",

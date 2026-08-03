@@ -22,12 +22,19 @@ class AudioTrackIndexTests(unittest.TestCase):
             captured["idx"] = idx
             return None
 
-        with patch.object(audio_perceptual, "analyze_loudnorm", side_effect=_fake_loudnorm), \
-             patch.object(audio_perceptual, "analyze_astats", return_value=None), \
-             patch.object(audio_perceptual, "analyze_clipping_segments", return_value=None):
+        with (
+            patch.object(audio_perceptual, "analyze_loudnorm", side_effect=_fake_loudnorm),
+            patch.object(audio_perceptual, "analyze_astats", return_value=None),
+            patch.object(audio_perceptual, "analyze_clipping_segments", return_value=None),
+        ):
             audio_perceptual.analyze_audio_perceptual(
-                "ffmpeg", "movie.mkv", audio_tracks,
-                audio_deep=False, enable_fingerprint=False, enable_spectral=False, enable_mel=False,
+                "ffmpeg",
+                "movie.mkv",
+                audio_tracks,
+                audio_deep=False,
+                enable_fingerprint=False,
+                enable_spectral=False,
+                enable_mel=False,
             )
         return captured.get("idx")
 
@@ -46,12 +53,19 @@ class AudioTrackIndexTests(unittest.TestCase):
         self.assertEqual(idx, 1)
 
     def test_track_index_attribute_keeps_absolute(self) -> None:
-        with patch.object(audio_perceptual, "analyze_loudnorm", return_value=None), \
-             patch.object(audio_perceptual, "analyze_astats", return_value=None), \
-             patch.object(audio_perceptual, "analyze_clipping_segments", return_value=None):
+        with (
+            patch.object(audio_perceptual, "analyze_loudnorm", return_value=None),
+            patch.object(audio_perceptual, "analyze_astats", return_value=None),
+            patch.object(audio_perceptual, "analyze_clipping_segments", return_value=None),
+        ):
             res = audio_perceptual.analyze_audio_perceptual(
-                "ffmpeg", "movie.mkv", [{"index": 1, "codec": "aac", "channels": 2}],
-                audio_deep=False, enable_fingerprint=False, enable_spectral=False, enable_mel=False,
+                "ffmpeg",
+                "movie.mkv",
+                [{"index": 1, "codec": "aac", "channels": 2}],
+                audio_deep=False,
+                enable_fingerprint=False,
+                enable_spectral=False,
+                enable_mel=False,
             )
         self.assertEqual(res.track_index, 1, "track_index garde l'index absolu (identite)")
 

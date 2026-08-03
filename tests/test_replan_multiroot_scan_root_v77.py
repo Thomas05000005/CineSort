@@ -107,9 +107,7 @@ class ResolveScanRootTests(unittest.TestCase):
         sub = self.r2 / "Movie (2010)"
         sub.mkdir()
         api = _FakeApi(str(self.r1), {"roots": [str(self.r1)]})  # DB ignore R2
-        got = _resolve_scan_root_for_replan(
-            api, "run1", sub, priority_candidates=[str(self.r2)]
-        )
+        got = _resolve_scan_root_for_replan(api, "run1", sub, priority_candidates=[str(self.r2)])
         self.assertIsNotNone(got)
         self.assertEqual(Path(got).resolve(), self.r2.resolve())
 
@@ -133,9 +131,7 @@ class ResolveScanRootTests(unittest.TestCase):
         sub = self.r1 / "Movie (2010)"
         sub.mkdir()
         api = _FakeApi(str(self.r1), {"roots": [str(self.r1)]})
-        got = _resolve_scan_root_for_replan(
-            api, "run1", sub, priority_candidates=[None, "", str(self.r2)]
-        )
+        got = _resolve_scan_root_for_replan(api, "run1", sub, priority_candidates=[None, "", str(self.r2)])
         self.assertEqual(Path(got).resolve(), self.r1.resolve())
 
 
@@ -159,9 +155,7 @@ class ReplanEffectMultiRootTests(unittest.TestCase):
         scan_root = _resolve_scan_root_for_replan(api, "run1", self.r2)
         # Caller reel : cfg.root = folder (dossier du film) = R2 ici.
         cfg = core.Config(root=self.r2, enable_tmdb=False)
-        row = replan_single_row(
-            cfg, self.r2, self.video, kind="single", library_root=scan_root
-        )
+        row = replan_single_row(cfg, self.r2, self.video, kind="single", library_root=scan_root)
         self.assertIsNotNone(row)
         # folder == root resolu -> _folder_is_root True -> stem ('Inception 2010'),
         # PAS le nom du dossier racine ('SecondRoot') comme avec roots[0]=R1.
@@ -172,9 +166,7 @@ class ReplanEffectMultiRootTests(unittest.TestCase):
         """Documente le bug d'origine : avec roots[0]=R1 force (l'ancien caller),
         le titre herite du nom du dossier racine secondaire."""
         cfg = core.Config(root=self.r2, enable_tmdb=False)
-        row = replan_single_row(
-            cfg, self.r2, self.video, kind="single", library_root=self.r1
-        )
+        row = replan_single_row(cfg, self.r2, self.video, kind="single", library_root=self.r1)
         self.assertIsNotNone(row)
         # folder_name = 'SecondRoot' (nom du dossier racine) contamine le titre
         # propose ; l'annee reste extraite du nom de FICHIER (infer_name_year

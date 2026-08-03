@@ -24,10 +24,7 @@ def run_mediainfo_json(
         # ITER13 RETRY_BACKOFF : meme symetrie que `ffprobe_backend`. Apres
         # epuisement des retries (`default_runner`), TimeoutExpired surface
         # ici plutot que d'exploser jusqu'au REST handler.
-        messages.append(
-            f"MediaInfo timeout apres {getattr(exc, 'timeout', timeout_s):.0f}s "
-            f"(retries epuises): {exc}"
-        )
+        messages.append(f"MediaInfo timeout apres {getattr(exc, 'timeout', timeout_s):.0f}s (retries epuises): {exc}")
         return None, messages
     except (ImportError, OSError, TypeError, ValueError) as exc:
         messages.append(f"MediaInfo echec execution: {exc}")

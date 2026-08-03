@@ -9,7 +9,6 @@ toujours sagas:[] (feature 'sagas incompletes' 100% morte).
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cinesort.ui.api import library_audit_support
@@ -27,10 +26,12 @@ class LibraryAuditSagasTests(unittest.TestCase):
     def test_fetch_collection_parts_builds_client_with_cache_path(self) -> None:
         api = _FakeApi({"tmdb_api_key": "REAL_key", "state_dir": "/tmp/x"})
         resp = MagicMock()
-        resp.json.return_value = {"parts": [
-            {"id": 1, "title": "Part 1", "release_date": "2010-01-01"},
-            {"id": 2, "title": "Part 2", "release_date": "2014-01-01"},
-        ]}
+        resp.json.return_value = {
+            "parts": [
+                {"id": 1, "title": "Part 1", "release_date": "2010-01-01"},
+                {"id": 2, "title": "Part 2", "release_date": "2014-01-01"},
+            ]
+        }
         client = MagicMock()
         client.api_key = "REAL_key"
         client._http_get.return_value = resp

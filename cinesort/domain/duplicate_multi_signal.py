@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy as _normalize_for_fuzzy
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,13 @@ def _index_token(norm_title: str) -> str:
 
 def _strict_key(candidate: MultiSignalCandidate, *, norm_for_tokens) -> str:
     """Cle Phase A: identique a `duplicate_support.movie_key`."""
-    base = f"{norm_for_tokens(candidate.title)}|{int(candidate.year or 0)}"
+    # R2 (revue round 2) : realigne sur movie_key qui strippe desormais l'annee
+    # de queue == annee du couple ("Titre 2005"|2005 == "Titre"|2005). Sans ce
+    # strip, la Phase A multi-signal et movie_key divergeaient (invariant
+    # docstring "identique a movie_key" casse).
+    year = int(candidate.year or 0)
+    key_title = strip_trailing_year_if_equal(candidate.title, year)
+    base = f"{norm_for_tokens(key_title)}|{year}"
     edition = (candidate.edition or "").strip().lower()
     if edition:
         return f"{base}|{edition}"
@@ -159,9 +166,7 @@ def _phase_a_strict_metadata(
     remaining: List[MultiSignalCandidate] = []
 
     # Ajouter aussi les candidats avec year invalide (ils n'ont pas ete buckets)
-    invalid_year_ids = {
-        c.item_id for c in candidates if not (1900 <= int(c.year or 0) <= 2100)
-    }
+    invalid_year_ids = {c.item_id for c in candidates if not (1900 <= int(c.year or 0) <= 2100)}
     for c in candidates:
         if c.item_id in invalid_year_ids:
             remaining.append(c)
@@ -209,9 +214,7 @@ def _phase_b_fuzzy_title(
         return [], []
 
     # Normalise pour matching
-    norm_titles: Dict[str, str] = {
-        c.item_id: _normalize_title_for_fuzzy(c.title) for c in candidates
-    }
+    norm_titles: Dict[str, str] = {c.item_id: _normalize_title_for_fuzzy(c.title) for c in candidates}
 
     new_groups: List[MultiSignalGroup] = []
     remaining: List[MultiSignalCandidate] = []
@@ -228,9 +231,7 @@ def _phase_b_fuzzy_title(
             if not rep_norm:
                 continue
             token = _index_token(rep_norm)
-            idx.setdefault((token, int(g.representative_year)), []).append(
-                (rep_norm, g)
-            )
+            idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, g))
         return idx
 
     a_index = _phase_a_index()
@@ -381,9 +382,7 @@ def _phase_c_audio_fingerprint(
                 if pair in seen_pairs:
                     continue
                 seen_pairs.add(pair)
-                sim = compare_audio_fingerprints(
-                    c.audio_fingerprint, other.audio_fingerprint
-                )
+                sim = compare_audio_fingerprints(c.audio_fingerprint, other.audio_fingerprint)
                 if sim is None:
                     continue
                 if sim >= min_similarity:
@@ -466,9 +465,7 @@ def group_by_multi_signal(
     remaining = cand_list
 
     if PHASE_STRICT_METADATA in phases:
-        groups_a, remaining = _phase_a_strict_metadata(
-            remaining, norm_for_tokens=norm_for_tokens
-        )
+        groups_a, remaining = _phase_a_strict_metadata(remaining, norm_for_tokens=norm_for_tokens)
         all_groups.extend(groups_a)
         phase_counts[PHASE_STRICT_METADATA] = len(groups_a)
 
@@ -550,9 +547,7 @@ def candidates_from_rows(
             try:
                 fp = fingerprint_lookup(row.row_id)
             except (OSError, KeyError, AttributeError, ValueError) as exc:
-                logger.debug(
-                    "fingerprint_lookup error for row %s: %s", row.row_id, exc
-                )
+                logger.debug("fingerprint_lookup error for row %s: %s", row.row_id, exc)
                 fp = None
         out.append(
             MultiSignalCandidate(
@@ -595,9 +590,7 @@ def augment_groups_with_multi_signal(
         Liste enrichie de groupes (les avis multi-signal sont marques par
         `advisory=True` et `detection_phase`).
     """
-    candidates = candidates_from_rows(
-        rows, decisions, fingerprint_lookup=fingerprint_lookup
-    )
+    candidates = candidates_from_rows(rows, decisions, fingerprint_lookup=fingerprint_lookup)
     if not candidates:
         return list(base_groups)
 
@@ -619,9 +612,7 @@ def augment_groups_with_multi_signal(
     for g in result.groups:
         # Filtrer : si TOUS les membres sont deja groupes par base, on saute
         new_members = [m for m in g.members if m not in existing_ids]
-        if len(new_members) < 2 and not (
-            len(g.members) >= 2 and any(m not in existing_ids for m in g.members)
-        ):
+        if len(new_members) < 2 and not (len(g.members) >= 2 and any(m not in existing_ids for m in g.members)):
             continue
         # Skip Phase A (deja gere par base_groups identique)
         if g.phase == PHASE_STRICT_METADATA:
@@ -630,9 +621,7 @@ def augment_groups_with_multi_signal(
             {
                 "title": g.representative_title,
                 "year": g.representative_year,
-                "rows": [
-                    {"row_id": rid, "kind": "advisory"} for rid in g.members
-                ],
+                "rows": [{"row_id": rid, "kind": "advisory"} for rid in g.members],
                 "existing_paths": [],
                 "plan_conflict": False,
                 "advisory": True,

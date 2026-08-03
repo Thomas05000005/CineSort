@@ -13,9 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
-    try:
-        settings = api.settings.get_settings()
-        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        store, _ = api._get_or_create_infra(state_dir)
-        runs = store.run.list_runs(limit=1)
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("library_audit cannot resolve latest run: %s", exc)
-        return None
-    if not runs:
-        return None
-    return str(runs[0].get("run_id") or "") or None
+    # B1-bis (revue Lot C-fix) : jumeau de library_support._resolve_run_id —
+    # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
+    # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
+    # corrige (skip des runs utilitaires).
+    from cinesort.ui.api import library_support
+
+    return library_support._resolve_run_id(api, None)
 
 
 def _decade_from_year(year: int) -> Optional[str]:
@@ -280,9 +274,9 @@ def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[
             # _fetch_collection_parts retournait toujours None ->
             # get_incomplete_sagas retournait toujours sagas:[] (feature morte).
             # On construit le client correctement, avec cle dé-masquee + cache_path.
+            import cinesort.infra.state as _state
             from cinesort.infra.tmdb_client import TmdbClient
             from cinesort.ui.api.settings_support import normalize_user_path
-            import cinesort.infra.state as _state
 
             settings = api._internal_settings()
             api_key = str(settings.get("tmdb_api_key") or "").strip()

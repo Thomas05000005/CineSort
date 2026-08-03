@@ -48,6 +48,7 @@ class _FakeStore:
         def _ctx():
             with closing(self._connect()) as conn, conn:
                 yield conn
+
         return _ctx()
 
     def _ensure_schema_group(self, group_name, *, min_user_version=None):

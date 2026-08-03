@@ -5,13 +5,12 @@ from pathlib import Path
 
 
 class SkeletonStatesTests(unittest.TestCase):
-    # V5C-01 : retire library/, runs.js, review.js, quality.js (vues v4 supprimees).
-    # Les vues v5 (library-v5, processing, qij-v5) sont couvertes par les tests v5
-    # dedies (test_v5b_activation, test_processing_v5_ported, etc.).
+    # Phase 5 (purge verif totale) : jellyfin/plex/radarr.js supprimes (vues
+    # mortes). On verifie desormais les VUES VIVANTES critiques (chargement > 1s).
     EXPECTED_VIEWS_WITH_SKELETON = [
-        "web/dashboard/views/jellyfin.js",
-        "web/dashboard/views/plex.js",
-        "web/dashboard/views/radarr.js",
+        "web/dashboard/views/bibliotheque.js",
+        "web/dashboard/views/processing.js",
+        "web/dashboard/views/qualite.js",
     ]
 
     def test_views_have_skeleton_or_aria_busy(self):

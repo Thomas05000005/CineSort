@@ -86,8 +86,7 @@ def _verify(path: Path, expected_line: int, needle: str) -> int:
         return expected_line
     for i, line in enumerate(raw, start=1):
         if needle in line:
-            print(f"    [DRIFT] {rel}: attendu '{needle}' L{expected_line}, "
-                  f"trouve L{i}")
+            print(f"    [DRIFT] {rel}: attendu '{needle}' L{expected_line}, trouve L{i}")
             return i
     print(f"    [ABSENT] {rel}: '{needle}' introuvable (attendu L{expected_line})")
     return -1
@@ -128,10 +127,12 @@ def _hr(title: str) -> None:
 # --------------------------------------------------------------------------- #
 def cap_loser_atomic() -> None:
     _hr("F-V10-LOSER-ATOMIC : move losers/marked HORS du try/except par-row")
-    print("Mecanisme : move_duplicate_losers_to_user_decided + "
-          "move_marked_for_deletion_to_bucket sont appeles AVANT la boucle\n"
-          "for-row et EN DEHORS du try/except par-row -> si un move loser\n"
-          "echoue a mi-parcours, aucune compensation/rollback intra-batch.\n")
+    print(
+        "Mecanisme : move_duplicate_losers_to_user_decided + "
+        "move_marked_for_deletion_to_bucket sont appeles AVANT la boucle\n"
+        "for-row et EN DEHORS du try/except par-row -> si un move loser\n"
+        "echoue a mi-parcours, aucune compensation/rollback intra-batch.\n"
+    )
 
     l_loser = _verify(APPLY_CORE, 1303, "move_duplicate_losers_to_user_decided(")
     l_marked = _verify(APPLY_CORE, 1320, "move_marked_for_deletion_to_bucket(")
@@ -150,10 +151,10 @@ def cap_loser_atomic() -> None:
     _show(APPLY_CORE, l_except, "1er except par-row")
 
     outside = (l_loser < l_for) and (l_marked < l_for) and (l_loser < l_try) and (l_marked < l_try)
-    print(f"\n  appel_loser({l_loser}) et appel_marked({l_marked}) < for-row({l_for}) "
-          f"< try-par-row({l_try}) : {outside}")
-    print(f"  => les moves losers/marked ne sont JAMAIS dans le try par-row "
-          f"[{l_try}..{l_except}] : {outside}")
+    print(
+        f"\n  appel_loser({l_loser}) et appel_marked({l_marked}) < for-row({l_for}) < try-par-row({l_try}) : {outside}"
+    )
+    print(f"  => les moves losers/marked ne sont JAMAIS dans le try par-row [{l_try}..{l_except}] : {outside}")
 
     RESUME["F-V10-LOSER-ATOMIC"] = {
         "call_move_losers": l_loser,
@@ -170,13 +171,17 @@ def cap_loser_atomic() -> None:
 # F-V10-LOSER-COUNTER                                                          #
 # --------------------------------------------------------------------------- #
 def cap_loser_counter() -> None:
-    _hr("F-V10-LOSER-COUNTER : losers incrementent duplicates_identical_moved_count "
-        "(lockstep _deleted_count), aucun compteur loser dedie")
-    print("Mecanisme : move_duplicate_losers_to_user_decided incremente le\n"
-          "MEME compteur (duplicates_identical_moved_count) que la suppression\n"
-          "DUPLICATE_IDENTICAL, lequel est increment lockstep avec\n"
-          "duplicates_identical_deleted_count -> un loser deplace gonfle le\n"
-          "compteur de doublons 'supprimes', il n'existe aucun compteur loser.\n")
+    _hr(
+        "F-V10-LOSER-COUNTER : losers incrementent duplicates_identical_moved_count "
+        "(lockstep _deleted_count), aucun compteur loser dedie"
+    )
+    print(
+        "Mecanisme : move_duplicate_losers_to_user_decided incremente le\n"
+        "MEME compteur (duplicates_identical_moved_count) que la suppression\n"
+        "DUPLICATE_IDENTICAL, lequel est increment lockstep avec\n"
+        "duplicates_identical_deleted_count -> un loser deplace gonfle le\n"
+        "compteur de doublons 'supprimes', il n'existe aucun compteur loser.\n"
+    )
 
     inc_690 = _verify(APPLY_CORE, 690, "res.duplicates_identical_moved_count += 1")
     inc_691 = _verify(APPLY_CORE, 691, "res.duplicates_identical_deleted_count += 1")
@@ -191,8 +196,7 @@ def cap_loser_counter() -> None:
 
     # Preuve negative : aucun compteur 'loser' dedie dans ApplyResult / apply_core.
     loser_counter_hits = [
-        (n, line) for n, line in _grep(APPLY_CORE, "_count")
-        if "loser" in line.lower() and "+= 1" in line
+        (n, line) for n, line in _grep(APPLY_CORE, "_count") if "loser" in line.lower() and "+= 1" in line
     ]
     # Le chemin 'marked' a SON propre compteur (contraste) :
     marked_counter = [n for n, _ in _grep(APPLY_CORE, "res.marked_for_deletion_moved_count += 1")]
@@ -200,8 +204,7 @@ def cap_loser_counter() -> None:
     print("\n  Contraste : le chemin 'marked_for_deletion' a SON compteur dedie :")
     for ln in marked_counter[:3]:
         _show(APPLY_CORE, ln, "marked path (compteur dedie)")
-    print(f"\n  compteur loser dedie incremente dans apply_core : "
-          f"{len(loser_counter_hits)} (attendu 0)")
+    print(f"\n  compteur loser dedie incremente dans apply_core : {len(loser_counter_hits)} (attendu 0)")
 
     RESUME["F-V10-LOSER-COUNTER"] = {
         "lockstep_moved_line": inc_690,
@@ -217,26 +220,24 @@ def cap_loser_counter() -> None:
 # F-V4B-RB1                                                                    #
 # --------------------------------------------------------------------------- #
 def cap_rb1() -> None:
-    _hr("F-V4B-RB1 : mark_apply_operation_undo_status JAMAIS appele dans "
-        "apply_rollback.py")
-    print("Mecanisme : rollback_forward ne met a jour QUE "
-          "apply_batch_modes.rollback_status (via mark_rollback_status).\n"
-          "Il n'appelle jamais mark_apply_operation_undo_status -> les ops\n"
-          "revertees gardent undo_status='PENDING' en base (etat incoherent).\n")
+    _hr("F-V4B-RB1 : mark_apply_operation_undo_status JAMAIS appele dans apply_rollback.py")
+    print(
+        "Mecanisme : rollback_forward ne met a jour QUE "
+        "apply_batch_modes.rollback_status (via mark_rollback_status).\n"
+        "Il n'appelle jamais mark_apply_operation_undo_status -> les ops\n"
+        "revertees gardent undo_status='PENDING' en base (etat incoherent).\n"
+    )
 
     n_in_rollback = _count(APPLY_ROLLBACK, "mark_apply_operation_undo_status")
     hits_support = _grep(APPLY_SUPPORT, "mark_apply_operation_undo_status(")
     # Ce que rollback_forward appelle reellement a la place :
     mark_rb = _grep(APPLY_ROLLBACK, "mark_rollback_status(")
 
-    print(f"  apply_rollback.py : occurrences de "
-          f"mark_apply_operation_undo_status = {n_in_rollback} (attendu 0)")
-    print(f"  apply_support.py  : occurrences = {len(hits_support)} "
-          f"(prouve que l'API existe et est utilisee ailleurs)")
+    print(f"  apply_rollback.py : occurrences de mark_apply_operation_undo_status = {n_in_rollback} (attendu 0)")
+    print(f"  apply_support.py  : occurrences = {len(hits_support)} (prouve que l'API existe et est utilisee ailleurs)")
     for n, _ in hits_support[:3]:
         _show(APPLY_SUPPORT, n, "usage cote support")
-    print("\n  Ce que rollback_forward met a jour A LA PLACE "
-          "(rollback_status seulement) :")
+    print("\n  Ce que rollback_forward met a jour A LA PLACE (rollback_status seulement) :")
     for n, _ in mark_rb[:4]:
         _show(APPLY_ROLLBACK, n, "rollback_status only")
 
@@ -252,12 +253,16 @@ def cap_rb1() -> None:
 # F-V4B-RB2                                                                    #
 # --------------------------------------------------------------------------- #
 def cap_rb2() -> None:
-    _hr("F-V4B-RB2 : reconcile scanne WHERE status='PENDING' seulement ; "
-        "un batch reverti est FAILED -> jamais reconcilie")
-    print("Mecanisme : _list_pending_batches filtre status='PENDING'. Or\n"
-          "le chemin d'echec apply fige apply_batches.status='FAILED' AVANT\n"
-          "rollback_forward, et rollback_forward ne retouche jamais\n"
-          "apply_batches.status -> un batch FAILED echappe a la reconciliation.\n")
+    _hr(
+        "F-V4B-RB2 : reconcile scanne WHERE status='PENDING' seulement ; "
+        "un batch reverti est FAILED -> jamais reconcilie"
+    )
+    print(
+        "Mecanisme : _list_pending_batches filtre status='PENDING'. Or\n"
+        "le chemin d'echec apply fige apply_batches.status='FAILED' AVANT\n"
+        "rollback_forward, et rollback_forward ne retouche jamais\n"
+        "apply_batches.status -> un batch FAILED echappe a la reconciliation.\n"
+    )
 
     l_where = _verify(APPLY_RECON, 77, "WHERE status = 'PENDING'")
     _show(APPLY_RECON, l_where, "filtre PENDING-only")
@@ -268,20 +273,20 @@ def cap_rb2() -> None:
     _show(APPLY_SUPPORT, l_failed, "close_apply_batch(FAILED)")
     _show(APPLY_SUPPORT, l_rbfwd, "rollback_forward (apres)")
     # rollback_forward ne touche que rollback_status, pas apply_batches.status :
-    touches_status = _count(APPLY_ROLLBACK, "apply_batches") + \
-        _count(APPLY_ROLLBACK, "close_apply_batch")
-    print(f"\n  apply_rollback.py touche apply_batches.status/close_apply_batch : "
-          f"{touches_status} fois (attendu 0 -> statut reste FAILED)")
+    touches_status = _count(APPLY_ROLLBACK, "apply_batches") + _count(APPLY_ROLLBACK, "close_apply_batch")
+    print(
+        f"\n  apply_rollback.py touche apply_batches.status/close_apply_batch : "
+        f"{touches_status} fois (attendu 0 -> statut reste FAILED)"
+    )
 
-    failed_before_rb = (l_failed != -1 and l_rbfwd != -1 and l_failed < l_rbfwd)
+    failed_before_rb = l_failed != -1 and l_rbfwd != -1 and l_failed < l_rbfwd
     RESUME["F-V4B-RB2"] = {
         "reconcile_where_pending_line": l_where,
         "close_failed_line": l_failed,
         "rollback_forward_call_line": l_rbfwd,
         "failed_frozen_before_rollback": failed_before_rb,
         "rollback_touches_batch_status": touches_status,
-        "verdict": "CONFIRME" if (l_where != -1 and failed_before_rb and touches_status == 0)
-                   else "non-reproduit",
+        "verdict": "CONFIRME" if (l_where != -1 and failed_before_rb and touches_status == 0) else "non-reproduit",
     }
 
 
@@ -289,12 +294,13 @@ def cap_rb2() -> None:
 # [4]/[5][7]                                                                   #
 # --------------------------------------------------------------------------- #
 def cap_close_done_hardcoded() -> None:
-    _hr("[4]/[5][7] : close_apply_batch(status='DONE') hardcode malgre erreurs ; "
-        "FAILED fige avant rollback_forward")
-    print("Mecanisme : le chemin de cloture normal hardcode status='DONE'\n"
-          "independamment de result.errors (l'auditeur distingue pourtant\n"
-          "DONE/PARTIAL juste au-dessus). Le chemin d'echec fige FAILED avant\n"
-          "rollback_forward (cf RB2).\n")
+    _hr("[4]/[5][7] : close_apply_batch(status='DONE') hardcode malgre erreurs ; FAILED fige avant rollback_forward")
+    print(
+        "Mecanisme : le chemin de cloture normal hardcode status='DONE'\n"
+        "independamment de result.errors (l'auditeur distingue pourtant\n"
+        "DONE/PARTIAL juste au-dessus). Le chemin d'echec fige FAILED avant\n"
+        "rollback_forward (cf RB2).\n"
+    )
 
     l_close = _verify(APPLY_SUPPORT, 1565, "store.apply.close_apply_batch(")
     l_status_done = _verify(APPLY_SUPPORT, 1567, 'status="DONE"')
@@ -319,22 +325,21 @@ def cap_close_done_hardcoded() -> None:
 # [18] 025 self-heal SELECT NULL -> paused_at                                  #
 # --------------------------------------------------------------------------- #
 def cap_025_null_paused() -> None:
-    _hr("[18] 025 (run_pause_status) : INSERT INTO runs_new ... SELECT ... NULL "
-        "pour paused_at")
-    print("Mecanisme : la recreation de table 'runs' reinjecte les rows via\n"
-          "SELECT, mais hardcode NULL pour la colonne paused_at -> tout\n"
-          "paused_at pre-existant est ecrase a NULL au self-heal/migration.\n")
+    _hr("[18] 025 (run_pause_status) : INSERT INTO runs_new ... SELECT ... NULL pour paused_at")
+    print(
+        "Mecanisme : la recreation de table 'runs' reinjecte les rows via\n"
+        "SELECT, mais hardcode NULL pour la colonne paused_at -> tout\n"
+        "paused_at pre-existant est ecrase a NULL au self-heal/migration.\n"
+    )
 
     raw = _lines(MIG_025)
-    insert_idx = next((i for i, l in enumerate(raw, start=1)
-                       if "INSERT INTO runs_new" in l), -1)
-    select_idx = next((i for i, l in enumerate(raw, start=1)
-                       if l.strip() == "SELECT"), -1)
+    insert_idx = next((i for i, l in enumerate(raw, start=1) if "INSERT INTO runs_new" in l), -1)
+    select_idx = next((i for i, l in enumerate(raw, start=1) if l.strip() == "SELECT"), -1)
     # Derniere ligne de la projection SELECT : termine par 'NULL' avant FROM runs.
-    null_idx = next((i for i, l in enumerate(raw, start=1)
-                     if l.strip().rstrip(",").endswith("NULL") and i > select_idx), -1)
-    from_idx = next((i for i, l in enumerate(raw, start=1)
-                     if "FROM runs" in l and i > select_idx), -1)
+    null_idx = next(
+        (i for i, l in enumerate(raw, start=1) if l.strip().rstrip(",").endswith("NULL") and i > select_idx), -1
+    )
+    from_idx = next((i for i, l in enumerate(raw, start=1) if "FROM runs" in l and i > select_idx), -1)
     print("  Bloc INSERT ... SELECT (paused_at force a NULL) :")
     if insert_idx != -1:
         _show(MIG_025, insert_idx, "INSERT INTO runs_new")
@@ -363,14 +368,15 @@ def cap_025_null_paused() -> None:
 # --------------------------------------------------------------------------- #
 def cap_bootstrap_no_schema_migrations() -> None:
     _hr("[19] _bootstrap_schema_latest : aucun insert dans schema_migrations")
-    print("Mecanisme : le fallback bootstrap commit user_version mais n'appelle\n"
-          "jamais _record_migration / n'INSERT pas dans schema_migrations ->\n"
-          "apres un self-heal bootstrap, schema_migrations est incoherent avec\n"
-          "l'etat reel du schema.\n")
+    print(
+        "Mecanisme : le fallback bootstrap commit user_version mais n'appelle\n"
+        "jamais _record_migration / n'INSERT pas dans schema_migrations ->\n"
+        "apres un self-heal bootstrap, schema_migrations est incoherent avec\n"
+        "l'etat reel du schema.\n"
+    )
 
     raw = _lines(SQLITE_STORE)
-    def_idx = next((i for i, l in enumerate(raw, start=1)
-                    if "def _bootstrap_schema_latest(self)" in l), -1)
+    def_idx = next((i for i, l in enumerate(raw, start=1) if "def _bootstrap_schema_latest(self)" in l), -1)
     # Borne de fin : prochaine def au meme indent (4 espaces).
     end_idx = len(raw)
     if def_idx != -1:
@@ -379,13 +385,11 @@ def cap_bootstrap_no_schema_migrations() -> None:
             if line.startswith("    def ") and i + 1 != def_idx:
                 end_idx = i
                 break
-    body = raw[def_idx - 1:end_idx] if def_idx != -1 else []
+    body = raw[def_idx - 1 : end_idx] if def_idx != -1 else []
     has_record = any("_record_migration" in l for l in body)
     has_insert_sm = any("schema_migrations" in l for l in body)
-    has_uv = next((j for j, l in enumerate(body, start=def_idx)
-                   if "PRAGMA user_version" in l), -1)
-    print(f"  def _bootstrap_schema_latest -> ligne {def_idx} "
-          f"(corps L{def_idx}..{end_idx})")
+    has_uv = next((j for j, l in enumerate(body, start=def_idx) if "PRAGMA user_version" in l), -1)
+    print(f"  def _bootstrap_schema_latest -> ligne {def_idx} (corps L{def_idx}..{end_idx})")
     if has_uv != -1:
         _show(SQLITE_STORE, has_uv, "commit user_version (mais...)")
     print(f"  '_record_migration' present dans le corps   : {has_record} (attendu False)")
@@ -412,23 +416,23 @@ def cap_bootstrap_no_schema_migrations() -> None:
 # --------------------------------------------------------------------------- #
 def cap_idempotent_operational_only() -> None:
     _hr("[20] _is_idempotent_error : ne couvre que sqlite3.OperationalError")
-    print("Mecanisme : _is_idempotent_error type son parametre en\n"
-          "sqlite3.OperationalError, et il n'est attrape que dans des blocs\n"
-          "`except sqlite3.OperationalError` -> une migration partielle qui\n"
-          "leve IntegrityError/DatabaseError n'est PAS toleree en idempotence.\n")
+    print(
+        "Mecanisme : _is_idempotent_error type son parametre en\n"
+        "sqlite3.OperationalError, et il n'est attrape que dans des blocs\n"
+        "`except sqlite3.OperationalError` -> une migration partielle qui\n"
+        "leve IntegrityError/DatabaseError n'est PAS toleree en idempotence.\n"
+    )
 
-    l_def = _verify(MIG_MANAGER, 23,
-                    "def _is_idempotent_error(exc: sqlite3.OperationalError)")
+    l_def = _verify(MIG_MANAGER, 23, "def _is_idempotent_error(exc: sqlite3.OperationalError)")
     _show(MIG_MANAGER, l_def, "signature OperationalError-only")
     # Sites d'appel : tous gardes par except sqlite3.OperationalError.
     callers = _grep(MIG_MANAGER, "_is_idempotent_error(stmt_exc)")
     print("\n  Sites d'appel (tous sous except sqlite3.OperationalError) :")
     for n, _ in callers:
         _show(MIG_MANAGER, n, "appel")
-        enc = _enclosing_def(MIG_MANAGER, n)
+        _enclosing_def(MIG_MANAGER, n)
         # Cherche le except le plus proche au-dessus.
-        above = [m for m, line in _grep(MIG_MANAGER, "except sqlite3.OperationalError")
-                 if m < n]
+        above = [m for m, line in _grep(MIG_MANAGER, "except sqlite3.OperationalError") if m < n]
         if above:
             _show(MIG_MANAGER, max(above), "  garde par")
     # Idem dans le bootstrap (sqlite_store).
@@ -437,13 +441,11 @@ def cap_idempotent_operational_only() -> None:
         print("\n  Idem dans _bootstrap_schema_latest (sqlite_store.py) :")
         for n, _ in boot_callers:
             _show(SQLITE_STORE, n, "appel bootstrap")
-            above = [m for m, line in _grep(SQLITE_STORE, "except sqlite3.OperationalError")
-                     if m < n]
+            above = [m for m, line in _grep(SQLITE_STORE, "except sqlite3.OperationalError") if m < n]
             if above:
                 _show(SQLITE_STORE, max(above), "  garde par")
     # Fragments tolERES (preuve : que des messages 'duplicate column'/'already exists').
-    frags = _grep(MIG_MANAGER, '"duplicate column name"') + \
-        _grep(MIG_MANAGER, '"already exists"')
+    frags = _grep(MIG_MANAGER, '"duplicate column name"') + _grep(MIG_MANAGER, '"already exists"')
     print("\n  Fragments tolERES (whitelist statique) :")
     for n, line in frags:
         print(f"    {MIG_MANAGER.relative_to(REPO)}:{n}  {line.strip()}")
@@ -461,20 +463,21 @@ def cap_idempotent_operational_only() -> None:
 # F-V6-SCHEMA-IRC / F-V8-SCHEMA-REGISTRY                                       #
 # --------------------------------------------------------------------------- #
 def cap_schema_registry() -> None:
-    _hr("F-V6-SCHEMA-IRC / F-V8-SCHEMA-REGISTRY : incremental_row_cache (mig 008) "
-        "+ vec_films_hash (mig 032) absents du registry")
-    print("Mecanisme : REQUIRED_SCHEMA_TABLES + SCHEMA_GROUPS sont la liste de\n"
-          "verite du self-heal de schema. La table incremental_row_cache (mig\n"
-          "008) et vec_films_hash (mig 032) n'y figurent pas -> le filet\n"
-          "self-healing ne se declenche jamais pour ces tables.\n")
+    _hr(
+        "F-V6-SCHEMA-IRC / F-V8-SCHEMA-REGISTRY : incremental_row_cache (mig 008) "
+        "+ vec_films_hash (mig 032) absents du registry"
+    )
+    print(
+        "Mecanisme : REQUIRED_SCHEMA_TABLES + SCHEMA_GROUPS sont la liste de\n"
+        "verite du self-heal de schema. La table incremental_row_cache (mig\n"
+        "008) et vec_films_hash (mig 032) n'y figurent pas -> le filet\n"
+        "self-healing ne se declenche jamais pour ces tables.\n"
+    )
 
     raw = _lines(SQLITE_STORE)
-    req_start = next((i for i, l in enumerate(raw, start=1)
-                      if "REQUIRED_SCHEMA_TABLES = (" in l), -1)
-    grp_start = next((i for i, l in enumerate(raw, start=1)
-                      if "SCHEMA_GROUPS:" in l), -1)
-    print(f"  REQUIRED_SCHEMA_TABLES debute L{req_start} ; "
-          f"SCHEMA_GROUPS debute L{grp_start}")
+    req_start = next((i for i, l in enumerate(raw, start=1) if "REQUIRED_SCHEMA_TABLES = (" in l), -1)
+    grp_start = next((i for i, l in enumerate(raw, start=1) if "SCHEMA_GROUPS:" in l), -1)
+    print(f"  REQUIRED_SCHEMA_TABLES debute L{req_start} ; SCHEMA_GROUPS debute L{grp_start}")
 
     def _in_registry(table: str) -> dict:
         in_req = any(f'"{table}"' in l for l in raw)
@@ -502,9 +505,11 @@ def cap_schema_registry() -> None:
 
     # Note honnete : migration 030 (film_field_locks) EST, elle, dans le registry.
     ffl_in_reg = any('"film_field_locks"' in l for l in raw)
-    print(f"\n  NOTE (anti-faux-positif) : film_field_locks (mig 030) present "
-          f"dans le registry : {ffl_in_reg} (=> le gap concerne 008 et 032, "
-          f"PAS 030)")
+    print(
+        f"\n  NOTE (anti-faux-positif) : film_field_locks (mig 030) present "
+        f"dans le registry : {ffl_in_reg} (=> le gap concerne 008 et 032, "
+        f"PAS 030)"
+    )
 
     RESUME["F-V6/F-V8-SCHEMA-REGISTRY"] = {
         "required_schema_tables_line": req_start,
