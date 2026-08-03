@@ -30,12 +30,15 @@ class HydrateSecretsMaskTests(unittest.TestCase):
         self._tmp = tempfile.mkdtemp(prefix="cinesort_hydrate_")
         self.state_dir = Path(self._tmp)
         # On-disk : vraies cles dechiffrees
-        _write_settings(self.state_dir, {
-            "tmdb_api_key": "REAL_tmdb_key_123",
-            "omdb_api_key": "REAL_omdb_key_456",
-            "tmdb_enabled": True,
-            "library_path": "C:/old",
-        })
+        _write_settings(
+            self.state_dir,
+            {
+                "tmdb_api_key": "REAL_tmdb_key_123",
+                "omdb_api_key": "REAL_omdb_key_456",
+                "tmdb_enabled": True,
+                "library_path": "C:/old",
+            },
+        )
         self.api = SimpleNamespace(
             _resolve_payload_state_dir=lambda s: (self.state_dir, True),
         )

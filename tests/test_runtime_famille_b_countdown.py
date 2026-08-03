@@ -30,9 +30,6 @@ Strategie :
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict
-
 import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright requis pour runtime countdown")
@@ -165,16 +162,14 @@ def test_countdown_lifecycle_present_tick_enabled(dashboard_page, countdown_s: i
     assert s0["disabled"] is True, "Bouton confirm devrait etre disabled initial."
     assert s0["spanPresent"] is True, "Span countdown absent initial."
     assert s0["countdownText"] == f"({countdown_s}s)", (
-        f"Texte countdown initial inattendu : {s0['countdownText']!r} "
-        f"(attendu '({countdown_s}s)')"
+        f"Texte countdown initial inattendu : {s0['countdownText']!r} (attendu '({countdown_s}s)')"
     )
     assert s0["timerActive"] is True, "Timer countdown devrait etre actif."
 
     # Sanity FIGE 1c : 1 nouveau setInterval cree apres open.
     after_open = dashboard_page.evaluate(_JS_PROBE_COUNTERS)
     assert after_open["created"] >= baseline["created"] + 1, (
-        "Aucun setInterval cree apres open dangerConfirmModal — countdown "
-        "ne tourne pas (regression)."
+        "Aucun setInterval cree apres open dangerConfirmModal — countdown ne tourne pas (regression)."
     )
 
     # 3) Probe a mi-parcours : decrement visible (text != initial).
@@ -194,18 +189,12 @@ def test_countdown_lifecycle_present_tick_enabled(dashboard_page, countdown_s: i
     dashboard_page.wait_for_timeout(remaining_after_mid * 1000 + 800)
     s_end = dashboard_page.evaluate(_JS_PROBE_MODAL_STATE)
     assert s_end["present"] is True, (
-        "Modale fermee toute seule a la fin du countdown (interdit : "
-        "l'utilisateur doit decider)."
+        "Modale fermee toute seule a la fin du countdown (interdit : l'utilisateur doit decider)."
     )
-    assert s_end["disabled"] is False, (
-        "Bouton confirm toujours disabled apres expiration countdown."
-    )
-    assert s_end["spanPresent"] is False, (
-        "Span countdown toujours present apres expiration (devrait etre retire)."
-    )
+    assert s_end["disabled"] is False, "Bouton confirm toujours disabled apres expiration countdown."
+    assert s_end["spanPresent"] is False, "Span countdown toujours present apres expiration (devrait etre retire)."
     assert s_end["timerActive"] is False, (
-        "Timer countdown toujours actif apres expiration "
-        "(regression FIGE 1c : clearInterval manque a l'expiration)."
+        "Timer countdown toujours actif apres expiration (regression FIGE 1c : clearInterval manque a l'expiration)."
     )
 
     # 5) Cleanup : annuler la modale pour ne pas polluer les autres tests.
@@ -277,8 +266,7 @@ def test_countdown_zero_no_disabled_no_span(dashboard_page) -> None:
     assert s["disabled"] is False, "Bouton confirm devrait etre enabled (countdown=0)."
     assert s["spanPresent"] is False, "Span countdown ne devrait pas exister (countdown=0)."
     assert s["timerActive"] is False, (
-        "Timer countdown actif alors que countdownSeconds=0 "
-        "(setInterval inutile -> fuite potentielle)."
+        "Timer countdown actif alors que countdownSeconds=0 (setInterval inutile -> fuite potentielle)."
     )
 
     after_open = dashboard_page.evaluate(_JS_PROBE_COUNTERS)
@@ -286,8 +274,7 @@ def test_countdown_zero_no_disabled_no_span(dashboard_page) -> None:
     # peut bouger d'autres parts du code asynchrone, on tolere un delta <=1).
     created_delta = after_open["created"] - baseline["created"]
     assert created_delta <= 1, (
-        f"setInterval cree alors que countdown=0 (delta={created_delta}). "
-        f"Regression performance / fuite handler."
+        f"setInterval cree alors que countdown=0 (delta={created_delta}). Regression performance / fuite handler."
     )
 
     # Cleanup pour ne pas polluer.
@@ -318,7 +305,7 @@ def test_countdown_undo_unmount_cleanup_runtime(dashboard_page) -> None:
     dashboard_page.wait_for_timeout(800)
 
     # 2) Baseline juste apres mount.
-    baseline = dashboard_page.evaluate(_JS_PROBE_COUNTERS)
+    dashboard_page.evaluate(_JS_PROBE_COUNTERS)
 
     # Laisser tourner ~1s pour que les setInterval mount-time se stabilisent.
     dashboard_page.wait_for_timeout(1000)

@@ -15,13 +15,15 @@ Aucun effet de bord hors tempdir.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/v9_coll_atomic_repro.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
 
-import cinesort.domain.core as core
 import cinesort.app.apply_core as apply_core
+import cinesort.domain.core as core
 from cinesort.app.apply_core import apply_collection_item
 
 
@@ -53,27 +55,39 @@ def run():
     logs, ops = [], []
     dedup = set()
 
-    def log(level, msg): logs.append((level, msg))
-    def record_op(op): ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
+    def log(level, msg):
+        logs.append((level, msg))
+
+    def record_op(op):
+        ops.append(dict(op) if isinstance(op, dict) else {"raw": str(op)})
 
     # Patch : sidecars OK (move reel), video .mkv -> PermissionError (mkv verrouille)
     orig = apply_core.move_file_with_collision_policy
+
     def patched(cfg_, src_file, dst_file, **kw):
         if Path(src_file).suffix.lower() in {".mkv", ".mp4"}:
             raise PermissionError(f"[simule] fichier verrouille: {src_file.name}")
         return orig(cfg_, src_file, dst_file, **kw)
+
     apply_core.move_file_with_collision_policy = patched
 
     sub_dir = folder / "Film (2020)"
     raised = None
     try:
         apply_collection_item(
-            cfg, folder, f"{stem}.mkv", title="Film", year=2020,
-            dry_run=False, log=log, res=res,
+            cfg,
+            folder,
+            f"{stem}.mkv",
+            title="Film",
+            year=2020,
+            dry_run=False,
+            log=log,
+            res=res,
             conflicts_root=root / "_review" / "_conflicts",
             conflicts_sidecars_root=root / "_review" / "_conflicts_sidecars",
             duplicates_identical_root=root / "_review" / "_dups",
-            dedup_seen_ops=dedup, record_op=record_op,
+            dedup_seen_ops=dedup,
+            record_op=record_op,
         )
     except (PermissionError, OSError) as e:
         raised = str(e)
@@ -96,10 +110,22 @@ def run():
     print(f"  ledger dedup marque la video 'vue'       : {video_dedup_marked} (=> retry skipperait la video)")
     print(f"  op de ROLLBACK compensatoire emise       : {len(rollback_ops)} (attendu 0)")
     half_applied = src_video_still and sidecars_moved and len(rollback_ops) == 0
-    print(f"\nVERDICT : {'CONFIRME (item collection a moitie applique: sidecars deplaces, video bloquee, aucun rollback)' if half_applied else 'non reproduit'}")
-    print("RESUME:", json.dumps({"half_applied": half_applied, "sidecars_moved": sidecars_moved,
-                                 "video_stuck": src_video_still, "no_rollback": len(rollback_ops) == 0,
-                                 "dedup_poisoned": video_dedup_marked}, ensure_ascii=False))
+    print(
+        f"\nVERDICT : {'CONFIRME (item collection a moitie applique: sidecars deplaces, video bloquee, aucun rollback)' if half_applied else 'non reproduit'}"
+    )
+    print(
+        "RESUME:",
+        json.dumps(
+            {
+                "half_applied": half_applied,
+                "sidecars_moved": sidecars_moved,
+                "video_stuck": src_video_still,
+                "no_rollback": len(rollback_ops) == 0,
+                "dedup_poisoned": video_dedup_marked,
+            },
+            ensure_ascii=False,
+        ),
+    )
 
 
 if __name__ == "__main__":

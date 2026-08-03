@@ -7,7 +7,9 @@ répond ensuite. Fix : ne pas cacher une liste vide -> re-fetch au prochain appe
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_tmdb_cache_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
@@ -43,17 +45,17 @@ def run():
         def fake_http_get(url, *, params=None):
             calls["n"] += 1
             if calls["n"] == 1:
-                return _FakeResp({"results": []})          # hoquet TMDb : 200 mais vide
-            return _FakeResp({"results": [movie]})          # TMDb répond ensuite
+                return _FakeResp({"results": []})  # hoquet TMDb : 200 mais vide
+            return _FakeResp({"results": [movie]})  # TMDb répond ensuite
 
         # ===== APRÈS (code corrigé) =====
         c = _mk_client(tmp)
         c._http_get = fake_http_get  # type: ignore[assignment]
         key = "search|fr-FR|inception|2010"
 
-        r1 = c.search_movie("Inception", 2010)             # 1er : vide
+        r1 = c.search_movie("Inception", 2010)  # 1er : vide
         cached_after_empty = c._cache_get(key)
-        r2 = c.search_movie("Inception", 2010)             # 2e : doit RE-FETCH
+        r2 = c.search_movie("Inception", 2010)  # 2e : doit RE-FETCH
 
         apres_empty_not_cached = cached_after_empty is None
         apres_refetch_ok = len(r2) == 1 and r2[0].id == 27205
@@ -64,14 +66,18 @@ def run():
         print("=== APRÈS (R8-041 corrigé) ===")
         print(f"  1er search (TMDb 200 vide)        : {len(r1)} résultats")
         print(f"  cache après vide                  : {cached_after_empty}  (attendu None -> non empoisonné)")
-        print(f"  2e search (TMDb répond)           : {len(r2)} résultats, id={r2[0].id if r2 else None}  (RE-FETCH ok)")
-        print(f"  appels HTTP totaux                : {apres_http_calls}  (2 = re-fetch, pas servi depuis le cache vide)")
+        print(
+            f"  2e search (TMDb répond)           : {len(r2)} résultats, id={r2[0].id if r2 else None}  (RE-FETCH ok)"
+        )
+        print(
+            f"  appels HTTP totaux                : {apres_http_calls}  (2 = re-fetch, pas servi depuis le cache vide)"
+        )
 
         # ===== AVANT (réplique du bug : cacher la liste vide) =====
         c2 = _mk_client(tmp)
-        c2._cache_set(key, [])                              # AVANT : la réponse vide était cachée
-        avant_served = c2._cache_get(key)                  # `cached is not None` vrai pour []
-        avant_poisons = avant_served == []                 # servi [] -> film figé non identifié
+        c2._cache_set(key, [])  # AVANT : la réponse vide était cachée
+        avant_served = c2._cache_get(key)  # `cached is not None` vrai pour []
+        avant_poisons = avant_served == []  # servi [] -> film figé non identifié
         results["R8041_avant_poisons"] = avant_poisons
         print("\n=== AVANT (réplique : _cache_set(key, [])) ===")
         print(f"  cache après vide                  : {avant_served!r}  (servi [] -> EMPOISONNÉ 7 jours)")

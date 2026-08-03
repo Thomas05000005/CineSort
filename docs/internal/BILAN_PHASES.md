@@ -346,3 +346,24 @@ a CineSort. Le projet integre TMDb, Jellyfin, Plex, Radarr et OMDb, mais pas Tra
 ---
 
 *Last updated : 2026-06-05 (note Trakt non concerne — verification grep complete, deadline 30 juin 2026 non applicable). Precedent : 2026-06-04 (post-tag vague-r-complete + ajout Phase Q.5 Hotfix6/7 stabilisation).*
+
+---
+
+## Campagne « Vérification totale » — juillet 2026
+
+Campagne A→Z sur `verif/totale-2026-07` (base `650d162` = origin/main, ~76 commits, jamais poussée).
+Détail : `verif_totale_2026_07/RAPPORT_VERIF_TOTALE.md` + `SYNTHESE_LOT_A..E` + `LOT_C/D_FIX`.
+
+- **Lot A** : assainissement + 8 matrices de câblage rejouables (M1 UI→API … M8 timers).
+- **Lot B** : 5 tests de contrat CI (`tests/test_contract_*.py`) verrouillant UI↔API/settings/i18n/CSS/façades.
+- **Lot E** : 5 boutons UI cassés + fuite token DEBUG + 12 bugs de revue.
+- **Lot C** : runtime Playwright 13 vues, 17 findings (dont la course racine dedup+abort de core/api.js),
+  6 sweeps permanents.
+- **Lot D** : 7 chaînes métier bout-en-bout, 18 findings (exports UI morts, crash get_quality_report,
+  R8-080, régression titre « Blade Runner 2049 » corrigée).
+- **Phases 5/6/7** : purge ~4160 l. JS mort + i18n qij.* + CSS omdb mort ; cloud-sync par segment ;
+  docstrings B8/6-façades ; tiers délégués ; wip/b4 réconcilié ; a11y ; docs de clôture.
+
+**Méthodo** : multi-agents en worktrees + 2-3 rounds de revue adversaire par vague (bugs réels attrapés
+DANS les fixes à chaque round). Sécurité → Opus (`SECURITE_POUR_OPUS.md`), arbitrages produit + push +
+tag → Thomas (`PHASE5_ARBITRAGES.md`). ~52 findings corrigés, chacun avec GATE, import-linter 3/3.

@@ -1,0 +1,5479 @@
+{
+ "meta": {
+  "mission": "M2 chaine facade->support->impl",
+  "generated_by": "docs/internal/verif_totale_2026_07/scripts_matrices/m2_facades_impl.py",
+  "repo": "C:\\Users\\blanc\\projects\\CineSort",
+  "files_analyzed": {
+   "god": "cinesort/ui/api/cinesort_api.py",
+   "facades": [
+    "cinesort/ui/api/facades/integrations_facade.py",
+    "cinesort/ui/api/facades/library_facade.py",
+    "cinesort/ui/api/facades/quality_facade.py",
+    "cinesort/ui/api/facades/run_facade.py",
+    "cinesort/ui/api/facades/runtime_facade.py",
+    "cinesort/ui/api/facades/settings_facade.py",
+    "cinesort/ui/api/similar_films_facade.py"
+   ],
+   "support_modules": [
+    "apply_support",
+    "dashboard_cache_support",
+    "dashboard_support",
+    "demo_support",
+    "diagnostics_support",
+    "export_support",
+    "film_history_support",
+    "film_support",
+    "history_support",
+    "library_actions_support",
+    "library_audit_support",
+    "library_podiums_support",
+    "library_support",
+    "library_timeline_support",
+    "notifications_support",
+    "perceptual_support",
+    "probe_support",
+    "profiles_support",
+    "profiles_support_crud",
+    "profiles_support_import_export",
+    "quality_audit_support",
+    "quality_internal_support",
+    "quality_profile_support",
+    "quality_report_support",
+    "quality_simulator_support",
+    "quality_support",
+    "reset_support",
+    "run_control_support",
+    "run_data_support",
+    "run_flow_support",
+    "run_read_support",
+    "runtime_support",
+    "settings_support",
+    "tmdb_support"
+   ]
+  }
+ },
+ "stats": {
+  "facade_methods_total": 176,
+  "facade_verdicts": {
+   "PROPRE": 155,
+   "DUPLIQUE": 11,
+   "DOUBLE_CHEMIN": 6,
+   "ORPHELIN": 4
+  },
+  "facade_depths": {
+   "2": 111,
+   "1": 49,
+   "3": 12,
+   "0": 4
+  },
+  "god_impl_total": 147,
+  "god_impl_verdicts": {
+   "PROPRE": 135,
+   "DUPLIQUE": 11,
+   "DOUBLE_CHEMIN": 1
+  },
+  "homonyms_god_and_support": 11,
+  "support_only_impls": 5,
+  "multi_facade_methods": 3,
+  "orphan_facade_classes": [
+   "SimilarFilmsFacade"
+  ]
+ },
+ "facade_matrix": [
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_tmdb_key",
+   "line": 32,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_test_tmdb_key_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_tmdb_key (L32)",
+    "CineSortApi._test_tmdb_key_impl (L1252)",
+    "settings_support.test_tmdb_key"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_tmdb_posters",
+   "line": 39,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_tmdb_posters_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_tmdb_posters (L39)",
+    "CineSortApi._get_tmdb_posters_impl (L2304)",
+    "tmdb_support.get_tmdb_posters"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "enrich_tmdb_ids_by_title",
+   "line": 46,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_enrich_tmdb_ids_by_title_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.enrich_tmdb_ids_by_title (L46)",
+    "CineSortApi._enrich_tmdb_ids_by_title_impl (L2308)",
+    "tmdb_support.enrich_tmdb_ids_by_title"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_jellyfin_connection",
+   "line": 56,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_test_jellyfin_connection_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_jellyfin_connection (L56)",
+    "CineSortApi._test_jellyfin_connection_impl (L1267)",
+    "settings_support.test_jellyfin_connection"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_jellyfin_libraries",
+   "line": 68,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_jellyfin_libraries_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_jellyfin_libraries (L68)",
+    "CineSortApi._get_jellyfin_libraries_impl (L1276)",
+    "settings_support.read_settings"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_jellyfin_sync_report",
+   "line": 75,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_jellyfin_sync_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_jellyfin_sync_report (L75)",
+    "CineSortApi._get_jellyfin_sync_report_impl (L1327)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "refresh_jellyfin_library_now",
+   "line": 82,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_refresh_jellyfin_library_now_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.refresh_jellyfin_library_now (L82)",
+    "CineSortApi._refresh_jellyfin_library_now_impl (L1518)",
+    "apply_support.refresh_jellyfin_library_now"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_plex_connection",
+   "line": 91,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_test_plex_connection_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_plex_connection (L91)",
+    "CineSortApi._test_plex_connection_impl (L1435)",
+    "CineSortApi._unmask_or_stored (L1237)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_plex_libraries",
+   "line": 103,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_plex_libraries_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_plex_libraries (L103)",
+    "CineSortApi._get_plex_libraries_impl (L1447)",
+    "CineSortApi._internal_settings (L733)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_plex_sync_report",
+   "line": 115,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_plex_sync_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_plex_sync_report (L115)",
+    "CineSortApi._get_plex_sync_report_impl (L1467)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "refresh_plex_library_now",
+   "line": 122,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_refresh_plex_library_now_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.refresh_plex_library_now (L122)",
+    "CineSortApi._refresh_plex_library_now_impl (L1528)",
+    "apply_support.refresh_plex_library_now"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_radarr_connection",
+   "line": 131,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_test_radarr_connection_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_radarr_connection (L131)",
+    "CineSortApi._test_radarr_connection_impl (L1536)",
+    "CineSortApi._unmask_or_stored (L1237)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "get_radarr_status",
+   "line": 143,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_radarr_status_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.get_radarr_status (L143)",
+    "CineSortApi._get_radarr_status_impl (L1547)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "request_radarr_upgrade",
+   "line": 150,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_request_radarr_upgrade_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.request_radarr_upgrade (L150)",
+    "CineSortApi._request_radarr_upgrade_impl (L1605)",
+    "CineSortApi._internal_settings (L733)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_omdb_connection",
+   "line": 159,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_test_omdb_connection_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_omdb_connection (L159)",
+    "CineSortApi._test_omdb_connection_impl (L1625)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "IntegrationsFacade",
+   "file": "cinesort/ui/api/facades/integrations_facade.py",
+   "method": "test_email_report",
+   "line": 168,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_test_email_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "IntegrationsFacade.test_email_report (L168)",
+    "CineSortApi._test_email_report_impl (L1307)",
+    "CineSortApi._internal_settings (L733)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_library_filtered",
+   "line": 43,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_library_filtered_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.get_library_filtered (L43)",
+    "CineSortApi._get_library_filtered_impl (L2059)",
+    "library_support.get_library_filtered"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_library_filtered_impl homonyme god-class ET support (library_support.py:847)"
+   ]
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_smart_playlists",
+   "line": 63,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_smart_playlists_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.get_smart_playlists (L63)",
+    "CineSortApi._get_smart_playlists_impl (L2074)",
+    "library_support.get_smart_playlists"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "save_smart_playlist",
+   "line": 70,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_smart_playlist_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.save_smart_playlist (L70)",
+    "CineSortApi._save_smart_playlist_impl (L2078)",
+    "library_support.save_smart_playlist"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "delete_smart_playlist",
+   "line": 82,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_delete_smart_playlist_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.delete_smart_playlist (L82)",
+    "CineSortApi._delete_smart_playlist_impl (L2087)",
+    "library_support.delete_smart_playlist"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_scoring_rollup",
+   "line": 89,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_scoring_rollup_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.get_scoring_rollup (L89)",
+    "CineSortApi._get_scoring_rollup_impl (L2091)",
+    "library_support.get_scoring_rollup"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "set_film_tmdb_candidate",
+   "line": 103,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_film_tmdb_candidate_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.set_film_tmdb_candidate (L103)",
+    "CineSortApi._set_film_tmdb_candidate_impl (L2140)",
+    "library_support.set_film_tmdb_candidate"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "search_tmdb",
+   "line": 115,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_search_tmdb_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.search_tmdb (L115)",
+    "CineSortApi._search_tmdb_impl (L2313)",
+    "tmdb_support.search_tmdb"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "clear_tmdb_override",
+   "line": 122,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_clear_tmdb_override_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.clear_tmdb_override (L122)",
+    "CineSortApi._clear_tmdb_override_impl (L2161)",
+    "library_support.clear_tmdb_override"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "unmark_for_deletion",
+   "line": 126,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_unmark_for_deletion_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.unmark_for_deletion (L126)",
+    "CineSortApi._unmark_for_deletion_impl (L2165)",
+    "library_support.unmark_for_deletion"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "mark_for_deletion",
+   "line": 130,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_mark_for_deletion_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.mark_for_deletion (L130)",
+    "CineSortApi._mark_for_deletion_impl (L2153)",
+    "library_support.mark_for_deletion"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _mark_for_deletion_impl homonyme god-class ET support (library_support.py:1566)"
+   ]
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "mark_alert_ignored",
+   "line": 137,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_mark_alert_ignored_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.mark_alert_ignored (L137)",
+    "CineSortApi._mark_alert_ignored_impl (L2169)",
+    "library_support.mark_alert_ignored"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _mark_alert_ignored_impl homonyme god-class ET support (library_support.py:1629)"
+   ]
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_film_full",
+   "line": 146,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_film_full_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.get_film_full (L146)",
+    "CineSortApi._get_film_full_impl (L2131)",
+    "film_support.get_film_full"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_film_full_impl homonyme god-class ET support (film_support.py:257)"
+   ]
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_film_history",
+   "line": 153,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_film_history_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.get_film_history (L153)",
+    "CineSortApi._get_film_history_impl (L2185)",
+    "film_history_support.get_film_history"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "list_films_with_history",
+   "line": 160,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_list_films_with_history_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.list_films_with_history (L160)",
+    "CineSortApi._list_films_with_history_impl (L2189)",
+    "film_history_support.list_films_with_history"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "export_full_library",
+   "line": 169,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_export_full_library_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "LibraryFacade.export_full_library (L169)",
+    "CineSortApi._export_full_library_impl (L2210)",
+    "export_support.export_full_library"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_library_podiums",
+   "line": 178,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_podiums_support.get_library_podiums"
+   ],
+   "chain": [
+    "LibraryFacade.get_library_podiums (L178)",
+    "library_podiums_support.get_library_podiums"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_library_timeline",
+   "line": 185,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_timeline_support.get_library_timeline"
+   ],
+   "chain": [
+    "LibraryFacade.get_library_timeline (L185)",
+    "library_timeline_support.get_library_timeline"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_library_counters_by_chip",
+   "line": 194,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_support.get_library_counters_by_chip"
+   ],
+   "chain": [
+    "LibraryFacade.get_library_counters_by_chip (L194)",
+    "library_support.get_library_counters_by_chip"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "mark_for_deletion_bulk",
+   "line": 205,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_actions_support.mark_for_deletion_bulk"
+   ],
+   "chain": [
+    "LibraryFacade.mark_for_deletion_bulk (L205)",
+    "library_actions_support.mark_for_deletion_bulk"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "export_films",
+   "line": 216,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_actions_support.export_films"
+   ],
+   "chain": [
+    "LibraryFacade.export_films (L216)",
+    "library_actions_support.export_films"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_films_by_decade",
+   "line": 230,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_audit_support.get_films_by_decade"
+   ],
+   "chain": [
+    "LibraryFacade.get_films_by_decade (L230)",
+    "library_audit_support.get_films_by_decade"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "get_incomplete_sagas",
+   "line": 237,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_audit_support.get_incomplete_sagas"
+   ],
+   "chain": [
+    "LibraryFacade.get_incomplete_sagas (L237)",
+    "library_audit_support.get_incomplete_sagas"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "set_field_lock",
+   "line": 250,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_support.set_field_lock"
+   ],
+   "chain": [
+    "LibraryFacade.set_field_lock (L250)",
+    "library_support.set_field_lock"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "clear_field_lock",
+   "line": 269,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_support.clear_field_lock"
+   ],
+   "chain": [
+    "LibraryFacade.clear_field_lock (L269)",
+    "library_support.clear_field_lock"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "LibraryFacade",
+   "file": "cinesort/ui/api/facades/library_facade.py",
+   "method": "list_field_locks",
+   "line": 280,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_support.list_field_locks"
+   ],
+   "chain": [
+    "LibraryFacade.list_field_locks (L280)",
+    "library_support.list_field_locks"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_quality_profile",
+   "line": 40,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_quality_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_quality_profile (L40)",
+    "CineSortApi._get_quality_profile_impl (L1859)",
+    "quality_profile_support.get_quality_profile"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "save_quality_profile",
+   "line": 47,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_quality_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.save_quality_profile (L47)",
+    "CineSortApi._save_quality_profile_impl (L1910)",
+    "quality_profile_support.save_quality_profile"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "reset_quality_profile",
+   "line": 54,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_reset_quality_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.reset_quality_profile (L54)",
+    "CineSortApi._reset_quality_profile_impl (L1939)",
+    "quality_profile_support.reset_quality_profile"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "export_quality_profile",
+   "line": 61,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_export_quality_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.export_quality_profile (L61)",
+    "CineSortApi._export_quality_profile_impl (L1943)",
+    "quality_profile_support.export_quality_profile"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "import_quality_profile",
+   "line": 68,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_import_quality_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.import_quality_profile (L68)",
+    "CineSortApi._import_quality_profile_impl (L1947)",
+    "quality_profile_support.import_quality_profile"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_quality_presets",
+   "line": 75,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_quality_presets_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_quality_presets (L75)",
+    "CineSortApi._get_quality_presets_impl (L1863)",
+    "quality_profile_support.get_quality_presets"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "apply_quality_preset",
+   "line": 82,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_apply_quality_preset_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.apply_quality_preset (L82)",
+    "CineSortApi._apply_quality_preset_impl (L1867)",
+    "quality_simulator_support.clear_cache",
+    "quality_profile_support.apply_quality_preset"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "simulate_quality_preset",
+   "line": 89,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_simulate_quality_preset_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.simulate_quality_preset (L89)",
+    "CineSortApi._simulate_quality_preset_impl (L1873)",
+    "quality_simulator_support.run_simulation"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_quality_report",
+   "line": 106,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_quality_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_quality_report (L106)",
+    "CineSortApi._get_quality_report_impl (L1951)",
+    "quality_report_support.get_quality_report"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "analyze_quality_batch",
+   "line": 113,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_analyze_quality_batch_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.analyze_quality_batch (L113)",
+    "CineSortApi._analyze_quality_batch_impl (L1957)",
+    "quality_support.analyze_quality_batch"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "save_custom_quality_preset",
+   "line": 122,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_custom_quality_preset_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.save_custom_quality_preset (L122)",
+    "CineSortApi._save_custom_quality_preset_impl (L1884)",
+    "quality_simulator_support.save_custom_preset"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_custom_rules_templates",
+   "line": 129,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_custom_rules_templates_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_custom_rules_templates (L129)",
+    "CineSortApi._get_custom_rules_templates_impl (L1889)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_custom_rules_catalog",
+   "line": 136,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_custom_rules_catalog_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_custom_rules_catalog (L136)",
+    "CineSortApi._get_custom_rules_catalog_impl (L1894)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "validate_custom_rules",
+   "line": 145,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_validate_custom_rules_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.validate_custom_rules (L145)",
+    "CineSortApi._validate_custom_rules_impl (L1904)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_perceptual_report",
+   "line": 154,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_perceptual_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_perceptual_report (L154)",
+    "CineSortApi._get_perceptual_report_impl (L1965)",
+    "perceptual_support.get_perceptual_report"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_perceptual_details",
+   "line": 163,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_perceptual_details_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_perceptual_details (L163)",
+    "CineSortApi._get_perceptual_details_impl (L1971)",
+    "perceptual_support.get_perceptual_details"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "analyze_perceptual_batch",
+   "line": 170,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_analyze_perceptual_batch_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.analyze_perceptual_batch (L170)",
+    "CineSortApi._analyze_perceptual_batch_impl (L1981)",
+    "perceptual_support.analyze_perceptual_batch"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "compare_perceptual",
+   "line": 179,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_compare_perceptual_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.compare_perceptual (L179)",
+    "CineSortApi._compare_perceptual_impl (L1987)",
+    "perceptual_support.compare_perceptual"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_perceptual_compare_frames",
+   "line": 188,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_perceptual_compare_frames_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_perceptual_compare_frames (L188)",
+    "CineSortApi._get_perceptual_compare_frames_impl (L1993)",
+    "perceptual_support.get_perceptual_compare_frames"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_perceptual_compare_audio",
+   "line": 197,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_perceptual_compare_audio_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_perceptual_compare_audio (L197)",
+    "CineSortApi._get_perceptual_compare_audio_impl (L2004)",
+    "perceptual_support.get_perceptual_compare_audio"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "queue_perceptual_analyses",
+   "line": 208,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_queue_perceptual_analyses_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.queue_perceptual_analyses (L208)",
+    "CineSortApi._queue_perceptual_analyses_impl (L2014)",
+    "perceptual_support.queue_perceptual_analyses"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "queue_perceptual_batch",
+   "line": 220,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_queue_perceptual_batch_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.queue_perceptual_batch (L220)",
+    "CineSortApi._queue_perceptual_batch_impl (L2022)",
+    "perceptual_support.queue_perceptual_batch"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_perceptual_job_status",
+   "line": 230,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_perceptual_job_status_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_perceptual_job_status (L230)",
+    "CineSortApi._get_perceptual_job_status_impl (L2032)",
+    "perceptual_support.get_perceptual_job_status"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "submit_score_feedback",
+   "line": 236,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_submit_score_feedback_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.submit_score_feedback (L236)",
+    "CineSortApi._submit_score_feedback_impl (L2503)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "delete_score_feedback",
+   "line": 250,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_delete_score_feedback_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.delete_score_feedback (L250)",
+    "CineSortApi._delete_score_feedback_impl (L2568)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_calibration_report",
+   "line": 257,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_calibration_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_calibration_report (L257)",
+    "CineSortApi._get_calibration_report_impl (L2586)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_profiles",
+   "line": 268,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_profiles_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.get_profiles (L268)",
+    "CineSortApi._get_profiles_impl (L2779)",
+    "profiles_support.get_profiles"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "save_profile",
+   "line": 275,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.save_profile (L275)",
+    "CineSortApi._save_profile_impl (L2784)",
+    "profiles_support.save_profile"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "set_active_profile",
+   "line": 282,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_active_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.set_active_profile (L282)",
+    "CineSortApi._set_active_profile_impl (L2789)",
+    "profiles_support.set_active_profile"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_films_by_tier",
+   "line": 291,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "quality_audit_support.get_films_by_tier"
+   ],
+   "chain": [
+    "QualityFacade.get_films_by_tier (L291)",
+    "quality_audit_support.get_films_by_tier"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_history",
+   "line": 298,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "quality_audit_support.get_history"
+   ],
+   "chain": [
+    "QualityFacade.get_history (L298)",
+    "quality_audit_support.get_history"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "recompute_all_scores",
+   "line": 305,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "quality_audit_support.recompute_all_scores"
+   ],
+   "chain": [
+    "QualityFacade.recompute_all_scores (L305)",
+    "quality_audit_support.recompute_all_scores"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_recompute_job_status",
+   "line": 312,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "quality_audit_support.get_recompute_job_status"
+   ],
+   "chain": [
+    "QualityFacade.get_recompute_job_status (L312)",
+    "quality_audit_support.get_recompute_job_status"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "export_shareable_profile",
+   "line": 324,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_export_shareable_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.export_shareable_profile (L324)",
+    "CineSortApi._export_shareable_profile_impl (L2397)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "import_shareable_profile",
+   "line": 336,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_import_shareable_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "QualityFacade.import_shareable_profile (L336)",
+    "CineSortApi._import_shareable_profile_impl (L2441)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "export_recyclarr_yaml",
+   "line": 347,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.export_recyclarr_yaml"
+   ],
+   "chain": [
+    "QualityFacade.export_recyclarr_yaml (L347)",
+    "profiles_support_import_export.export_recyclarr_yaml"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "import_recyclarr_yaml",
+   "line": 358,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.import_recyclarr_yaml"
+   ],
+   "chain": [
+    "QualityFacade.import_recyclarr_yaml (L358)",
+    "profiles_support_import_export.import_recyclarr_yaml"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_embedded_presets",
+   "line": 373,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.get_embedded_presets"
+   ],
+   "chain": [
+    "QualityFacade.get_embedded_presets (L373)",
+    "profiles_support_import_export.get_embedded_presets"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_upgrade_until_score",
+   "line": 385,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.get_upgrade_until_score"
+   ],
+   "chain": [
+    "QualityFacade.get_upgrade_until_score (L385)",
+    "profiles_support_import_export.get_upgrade_until_score"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "set_upgrade_until_score",
+   "line": 392,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.set_upgrade_until_score"
+   ],
+   "chain": [
+    "QualityFacade.set_upgrade_until_score (L392)",
+    "profiles_support_import_export.set_upgrade_until_score"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "QualityFacade",
+   "file": "cinesort/ui/api/facades/quality_facade.py",
+   "method": "get_breakdown_5_axes",
+   "line": 401,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "profiles_support_import_export.get_breakdown_5_axes"
+   ],
+   "chain": [
+    "QualityFacade.get_breakdown_5_axes (L401)",
+    "profiles_support_import_export.get_breakdown_5_axes"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "start_plan",
+   "line": 95,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_start_plan_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.start_plan (L95)",
+    "CineSortApi._start_plan_impl (L2194)",
+    "run_flow_support.start_plan"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _start_plan_impl homonyme god-class ET support (run_flow_support.py:833)"
+   ]
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_status",
+   "line": 143,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_status_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_status (L143)",
+    "CineSortApi._get_status_impl (L2198)",
+    "run_flow_support.get_status"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_status_impl homonyme god-class ET support (run_flow_support.py:973)"
+   ]
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_plan",
+   "line": 150,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_plan_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_plan (L150)",
+    "CineSortApi._get_plan_impl (L2202)",
+    "history_support.get_plan"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_plan_impl homonyme god-class ET support (history_support.py:40)"
+   ]
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "export_run_report",
+   "line": 157,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_export_run_report_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.export_run_report (L157)",
+    "CineSortApi._export_run_report_impl (L2206)",
+    "dashboard_support.export_run_report"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "cancel_run",
+   "line": 164,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_cancel_run_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.cancel_run (L164)",
+    "CineSortApi._cancel_run_impl (L2660)",
+    "history_support.cancel_run"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "build_apply_preview",
+   "line": 171,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_build_apply_preview_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.build_apply_preview (L171)",
+    "CineSortApi._build_apply_preview_impl (L2641)",
+    "apply_support.build_apply_preview"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "list_apply_history",
+   "line": 178,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_list_apply_history_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.list_apply_history (L178)",
+    "CineSortApi._list_apply_history_impl (L2368)",
+    "apply_support.list_apply_history"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _list_apply_history_impl homonyme god-class ET support (apply_support.py:907)"
+   ]
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "pause_run",
+   "line": 186,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_pause_run_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.pause_run (L186)",
+    "CineSortApi._pause_run_impl (L2665)",
+    "run_control_support.pause_run"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "resume_run",
+   "line": 193,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_resume_run_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.resume_run (L193)",
+    "CineSortApi._resume_run_impl (L2669)",
+    "run_control_support.resume_run"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "save_for_later",
+   "line": 200,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_for_later_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.save_for_later (L200)",
+    "CineSortApi._save_for_later_impl (L2673)",
+    "run_control_support.save_for_later"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "list_pending_runs",
+   "line": 207,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_list_pending_runs_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.list_pending_runs (L207)",
+    "CineSortApi._list_pending_runs_impl (L2677)",
+    "run_control_support.list_pending_runs"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "rescan_rows_bulk",
+   "line": 216,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "library_actions_support.rescan_rows_bulk"
+   ],
+   "chain": [
+    "RunFacade.rescan_rows_bulk (L216)",
+    "library_actions_support.rescan_rows_bulk"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_history_stats",
+   "line": 224,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_history_stats_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_history_stats (L224)",
+    "CineSortApi._get_history_stats_impl (L2682)",
+    "history_support.get_history_stats"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_history_stats_impl homonyme god-class ET support (history_support.py:192)"
+   ]
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "delete_run",
+   "line": 237,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_delete_run_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.delete_run (L237)",
+    "CineSortApi._delete_run_impl (L2686)",
+    "history_support.delete_run"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "cleanup_old_runs",
+   "line": 248,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_cleanup_old_runs_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.cleanup_old_runs (L248)",
+    "CineSortApi._cleanup_old_runs_impl (L2690)",
+    "history_support.cleanup_old_runs"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "purge_quarantine_bucket",
+   "line": 260,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_purge_quarantine_bucket_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.purge_quarantine_bucket (L260)",
+    "CineSortApi._purge_quarantine_bucket_impl (L2710)",
+    "CineSortApi._build_quarantine_cfg (L2695)",
+    "settings_support.normalize_user_path"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "purge_quarantine_bucket_all",
+   "line": 272,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_purge_quarantine_bucket_all_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.purge_quarantine_bucket_all (L272)",
+    "CineSortApi._purge_quarantine_bucket_all_impl (L2728)",
+    "CineSortApi._build_quarantine_cfg (L2695)",
+    "settings_support.normalize_user_path"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "list_quarantine_bucket",
+   "line": 280,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_list_quarantine_bucket_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.list_quarantine_bucket (L280)",
+    "CineSortApi._list_quarantine_bucket_impl (L2743)",
+    "CineSortApi._build_quarantine_cfg (L2695)",
+    "settings_support.normalize_user_path"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "rescan_row",
+   "line": 288,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_rescan_row_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.rescan_row (L288)",
+    "CineSortApi._rescan_row_impl (L2177)",
+    "run_flow_support.rescan_row"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "mark_duplicate_winner",
+   "line": 295,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_mark_duplicate_winner_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.mark_duplicate_winner (L295)",
+    "CineSortApi._mark_duplicate_winner_impl (L2036)",
+    "run_flow_support.mark_duplicate_winner"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_dashboard",
+   "line": 315,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_dashboard_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_dashboard (L315)",
+    "CineSortApi._get_dashboard_impl (L2046)",
+    "dashboard_support.get_dashboard"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_global_stats",
+   "line": 319,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_global_stats_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_global_stats (L319)",
+    "CineSortApi._get_global_stats_impl (L2050)",
+    "dashboard_support.get_global_stats"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_sidebar_counters",
+   "line": 323,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_sidebar_counters_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_sidebar_counters (L323)",
+    "CineSortApi._get_sidebar_counters_impl (L2054)",
+    "dashboard_support.get_sidebar_counters"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "apply",
+   "line": 327,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_apply_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.apply (L327)",
+    "CineSortApi._apply_impl (L2372)",
+    "apply_support.apply_changes"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "save_validation",
+   "line": 370,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_validation_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.save_validation (L370)",
+    "CineSortApi._save_validation_impl (L2239)",
+    "run_flow_support.save_validation"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "load_validation",
+   "line": 387,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_load_validation_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.load_validation (L387)",
+    "CineSortApi._load_validation_impl (L2235)",
+    "history_support.load_validation"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "check_duplicates",
+   "line": 391,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_check_duplicates_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.check_duplicates (L391)",
+    "CineSortApi._check_duplicates_impl (L2249)",
+    "run_flow_support.check_duplicates"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "check_duplicates_fusion",
+   "line": 415,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_check_duplicates_fusion_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.check_duplicates_fusion (L415)",
+    "CineSortApi._check_duplicates_fusion_impl (L2253)",
+    "run_flow_support.check_duplicates_fusion"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_cleanup_residual_preview",
+   "line": 446,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_cleanup_residual_preview_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_cleanup_residual_preview (L446)",
+    "CineSortApi._get_cleanup_residual_preview_impl (L2277)",
+    "run_read_support.get_cleanup_residual_preview"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "undo_last_apply",
+   "line": 450,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_undo_last_apply_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.undo_last_apply (L450)",
+    "CineSortApi._undo_last_apply_impl (L2335)",
+    "apply_support.undo_last_apply"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "export_run_nfo",
+   "line": 454,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_export_run_nfo_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.export_run_nfo (L454)",
+    "CineSortApi._export_run_nfo_impl (L2220)",
+    "dashboard_support.build_run_report_payload",
+    "export_support.export_nfo_for_run"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "export_apply_audit",
+   "line": 458,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_export_apply_audit_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.export_apply_audit (L458)",
+    "CineSortApi._export_apply_audit_impl (L2629)",
+    "apply_support.export_apply_audit"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "import_watchlist",
+   "line": 467,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_import_watchlist_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.import_watchlist (L467)",
+    "CineSortApi._import_watchlist_impl (L1384)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "get_auto_approved_summary",
+   "line": 473,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_auto_approved_summary_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.get_auto_approved_summary (L473)",
+    "CineSortApi._get_auto_approved_summary_impl (L2281)",
+    "run_read_support.get_auto_approved_summary"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "undo_last_apply_preview",
+   "line": 491,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_undo_last_apply_preview_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.undo_last_apply_preview (L491)",
+    "CineSortApi._undo_last_apply_preview_impl (L2331)",
+    "apply_support.undo_last_apply_preview"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "undo_by_row_preview",
+   "line": 498,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_undo_by_row_preview_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.undo_by_row_preview (L498)",
+    "CineSortApi._undo_by_row_preview_impl (L2343)",
+    "apply_support.build_undo_by_row_preview"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RunFacade",
+   "file": "cinesort/ui/api/facades/run_facade.py",
+   "method": "undo_selected_rows",
+   "line": 505,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_undo_selected_rows_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RunFacade.undo_selected_rows (L505)",
+    "CineSortApi._undo_selected_rows_impl (L2347)",
+    "apply_support.undo_selected_rows"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_diagnostic",
+   "line": 52,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_diagnostic_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_diagnostic (L52)",
+    "CineSortApi._get_diagnostic_impl (L2948)",
+    "runtime_support.get_diagnostic"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_diagnostic_impl homonyme god-class ET support (runtime_support.py:702)"
+   ]
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_recent_logs",
+   "line": 59,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_recent_logs_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_recent_logs (L59)",
+    "CineSortApi._get_recent_logs_impl (L2955)",
+    "runtime_support.get_recent_logs"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_doc",
+   "line": 66,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_doc_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_doc (L66)",
+    "CineSortApi._get_doc_impl (L2959)",
+    "runtime_support.get_doc"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "search_docs",
+   "line": 74,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_search_docs_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.search_docs (L74)",
+    "CineSortApi._search_docs_impl (L2967)",
+    "runtime_support.search_docs"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_app_version",
+   "line": 81,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_app_version_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_app_version (L81)",
+    "CineSortApi._get_app_version_impl (L2971)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_update_info",
+   "line": 93,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_update_info_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_update_info (L93)",
+    "CineSortApi._get_update_info_impl (L1013)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "check_for_updates",
+   "line": 104,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_check_for_updates_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.check_for_updates (L104)",
+    "CineSortApi._check_for_updates_impl (L987)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_log_paths",
+   "line": 113,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_log_paths_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_log_paths (L113)",
+    "CineSortApi._get_log_paths_impl (L2858)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "open_logs_folder",
+   "line": 117,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_open_logs_folder_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.open_logs_folder (L117)",
+    "CineSortApi._open_logs_folder_impl (L2869)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "open_external_url",
+   "line": 124,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_open_external_url_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.open_external_url (L124)",
+    "CineSortApi._open_external_url_impl (L2905)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "is_demo_mode_active",
+   "line": 136,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_is_demo_mode_active_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.is_demo_mode_active (L136)",
+    "CineSortApi._is_demo_mode_active_impl (L887)",
+    "demo_support.is_demo_active"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "start_demo_mode",
+   "line": 140,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_start_demo_mode_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.start_demo_mode (L140)",
+    "CineSortApi._start_demo_mode_impl (L873)",
+    "demo_support.start_demo_mode"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "stop_demo_mode",
+   "line": 144,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_stop_demo_mode_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.stop_demo_mode (L144)",
+    "CineSortApi._stop_demo_mode_impl (L880)",
+    "demo_support.stop_demo_mode"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_notifications",
+   "line": 150,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_notifications_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_notifications (L150)",
+    "CineSortApi._get_notifications_impl (L2101)",
+    "notifications_support.get_notifications"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "dismiss_notification",
+   "line": 159,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_dismiss_notification_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.dismiss_notification (L159)",
+    "CineSortApi._dismiss_notification_impl (L2110)",
+    "notifications_support.dismiss_notification"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "mark_notification_read",
+   "line": 163,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_mark_notification_read_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.mark_notification_read (L163)",
+    "CineSortApi._mark_notification_read_impl (L2114)",
+    "notifications_support.mark_read"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "mark_all_notifications_read",
+   "line": 167,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_mark_all_notifications_read_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.mark_all_notifications_read (L167)",
+    "CineSortApi._mark_all_notifications_read_impl (L2118)",
+    "notifications_support.mark_all_read"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "clear_notifications",
+   "line": 171,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_clear_notifications_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.clear_notifications (L171)",
+    "CineSortApi._clear_notifications_impl (L2122)",
+    "notifications_support.clear_all_notifications"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_notifications_unread_count",
+   "line": 175,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_notifications_unread_count_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_notifications_unread_count (L175)",
+    "CineSortApi._get_notifications_unread_count_impl (L2126)",
+    "notifications_support.get_unread_count"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "validate_dropped_path",
+   "line": 181,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_validate_dropped_path_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.validate_dropped_path (L181)",
+    "CineSortApi._validate_dropped_path_impl (L1705)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_probe_tools_status",
+   "line": 190,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_probe_tools_status_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_probe_tools_status (L190)",
+    "CineSortApi._get_probe_tools_status_impl (L1778)",
+    "probe_support.get_probe_tools_status"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_tools_status",
+   "line": 194,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_tools_status_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_tools_status (L194)",
+    "CineSortApi._get_tools_status_impl (L1774)",
+    "CineSortApi._get_probe_tools_status_impl (L1778)",
+    "probe_support.get_probe_tools_status"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "recheck_probe_tools",
+   "line": 198,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_recheck_probe_tools_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.recheck_probe_tools (L198)",
+    "CineSortApi._recheck_probe_tools_impl (L1782)",
+    "probe_support.recheck_probe_tools"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "set_probe_tool_paths",
+   "line": 205,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_probe_tool_paths_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.set_probe_tool_paths (L205)",
+    "CineSortApi._set_probe_tool_paths_impl (L1786)",
+    "probe_support.set_probe_tool_paths"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "install_probe_tools",
+   "line": 212,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_install_probe_tools_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.install_probe_tools (L212)",
+    "CineSortApi._install_probe_tools_impl (L1795)",
+    "probe_support.install_probe_tools"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "update_probe_tools",
+   "line": 219,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_update_probe_tools_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.update_probe_tools (L219)",
+    "CineSortApi._update_probe_tools_impl (L1804)",
+    "probe_support.update_probe_tools"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "auto_install_probe_tools",
+   "line": 226,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_auto_install_probe_tools_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.auto_install_probe_tools (L226)",
+    "CineSortApi._auto_install_probe_tools_impl (L1813)",
+    "probe_support.auto_install_probe_tools"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "purge_probe_cache",
+   "line": 230,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_purge_probe_cache_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.purge_probe_cache (L230)",
+    "CineSortApi._purge_probe_cache_impl (L1817)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_probe",
+   "line": 241,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_probe_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_probe (L241)",
+    "CineSortApi._get_probe_impl (L1855)",
+    "probe_support.get_probe"
+   ],
+   "depth": 2,
+   "verdict": "DUPLIQUE",
+   "reasons": [
+    "cible _get_probe_impl homonyme god-class ET support (probe_support.py:407)"
+   ]
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "get_event_ts",
+   "line": 250,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_event_ts_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.get_event_ts (L250)",
+    "CineSortApi._get_event_ts_impl (L908)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "reset_incremental_cache",
+   "line": 258,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_reset_incremental_cache_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.reset_incremental_cache (L258)",
+    "CineSortApi._reset_incremental_cache_impl (L1079)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "RuntimeFacade",
+   "file": "cinesort/ui/api/facades/runtime_facade.py",
+   "method": "run_nas_benchmark",
+   "line": 268,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_run_nas_benchmark_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "RuntimeFacade.run_nas_benchmark (L268)",
+    "CineSortApi._run_nas_benchmark_impl (L1148)",
+    "CineSortApi._get_state_dir (L323)"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_settings",
+   "line": 30,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_settings_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_settings (L30)",
+    "CineSortApi._get_settings_impl (L721)",
+    "settings_support.get_settings_payload"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "save_settings",
+   "line": 37,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_settings_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.save_settings (L37)",
+    "CineSortApi._save_settings_impl (L750)",
+    "CineSortApi._save_settings_impl_locked (L756)",
+    "settings_support.save_settings_payload"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "set_locale",
+   "line": 44,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_set_locale_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.set_locale (L44)",
+    "CineSortApi._set_locale_impl (L828)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "restart_api_server",
+   "line": 51,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_restart_api_server_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.restart_api_server (L51)",
+    "CineSortApi._restart_api_server_impl (L1031)",
+    "CineSortApi._internal_settings (L733)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "reset_all_user_data",
+   "line": 58,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_reset_all_user_data_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.reset_all_user_data (L58)",
+    "CineSortApi._reset_all_user_data_impl (L2758)",
+    "reset_support.reset_all_user_data"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_user_data_size",
+   "line": 65,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_user_data_size_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_user_data_size (L65)",
+    "CineSortApi._get_user_data_size_impl (L2763)",
+    "reset_support.get_user_data_size"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "reset_settings",
+   "line": 73,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_reset_settings_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.reset_settings (L73)",
+    "CineSortApi._reset_settings_impl (L2769)",
+    "reset_support.reset_settings"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "reset_database",
+   "line": 80,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_reset_database_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.reset_database (L80)",
+    "CineSortApi._reset_database_impl (L2774)",
+    "reset_support.reset_database"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_profiles",
+   "line": 87,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_profiles_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_profiles (L87)",
+    "CineSortApi._get_profiles_impl (L2779)",
+    "profiles_support.get_profiles"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "save_profile",
+   "line": 94,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_save_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.save_profile (L94)",
+    "CineSortApi._save_profile_impl (L2784)",
+    "profiles_support.save_profile"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "set_active_profile",
+   "line": 101,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_active_profile_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.set_active_profile (L101)",
+    "CineSortApi._set_active_profile_impl (L2789)",
+    "profiles_support.set_active_profile"
+   ],
+   "depth": 2,
+   "verdict": "DOUBLE_CHEMIN",
+   "reasons": [
+    "methode exposee sur 2 facades: QualityFacade, SettingsFacade"
+   ]
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_server_info",
+   "line": 109,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_server_info_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_server_info (L109)",
+    "CineSortApi._get_server_info_impl (L919)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_dashboard_qr",
+   "line": 116,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_dashboard_qr_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_dashboard_qr (L116)",
+    "CineSortApi._get_dashboard_qr_impl (L951)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "reveal_rest_token",
+   "line": 123,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_reveal_rest_token_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.reveal_rest_token (L123)",
+    "CineSortApi._reveal_rest_token_impl (L931)",
+    "CineSortApi._internal_settings (L733)",
+    "settings_support.read_settings"
+   ],
+   "depth": 3,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_naming_presets",
+   "line": 131,
+   "delegation_kind": "inline_god",
+   "god_targets": [
+    "_get_naming_presets_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_naming_presets (L131)",
+    "CineSortApi._get_naming_presets_impl (L1649)"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "preview_naming_template",
+   "line": 138,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_preview_naming_template_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.preview_naming_template (L138)",
+    "CineSortApi._preview_naming_template_impl (L1664)",
+    "settings_support.read_settings"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_advanced_pragma_settings",
+   "line": 147,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_advanced_pragma_settings_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_advanced_pragma_settings (L147)",
+    "CineSortApi._get_advanced_pragma_settings_impl (L2795)",
+    "settings_support.get_advanced_pragma_settings_payload"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "set_advanced_pragma_settings",
+   "line": 168,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_advanced_pragma_settings_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.set_advanced_pragma_settings (L168)",
+    "CineSortApi._set_advanced_pragma_settings_impl (L2805)",
+    "settings_support.set_advanced_pragma_settings_payload"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_scan_max_workers",
+   "line": 197,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_get_scan_max_workers_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.get_scan_max_workers (L197)",
+    "CineSortApi._get_scan_max_workers_impl (L2823)",
+    "settings_support.get_scan_max_workers_payload"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "set_scan_max_workers",
+   "line": 218,
+   "delegation_kind": "support",
+   "god_targets": [
+    "_set_scan_max_workers_impl"
+   ],
+   "support_targets": [],
+   "chain": [
+    "SettingsFacade.set_scan_max_workers (L218)",
+    "CineSortApi._set_scan_max_workers_impl (L2833)",
+    "settings_support.set_scan_max_workers_payload"
+   ],
+   "depth": 2,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SettingsFacade",
+   "file": "cinesort/ui/api/facades/settings_facade.py",
+   "method": "get_confidence_thresholds",
+   "line": 242,
+   "delegation_kind": "support_direct",
+   "god_targets": [],
+   "support_targets": [
+    "settings_support.get_confidence_thresholds_payload"
+   ],
+   "chain": [
+    "SettingsFacade.get_confidence_thresholds (L242)",
+    "settings_support.get_confidence_thresholds_payload"
+   ],
+   "depth": 1,
+   "verdict": "PROPRE",
+   "reasons": []
+  },
+  {
+   "facade": "SimilarFilmsFacade",
+   "file": "cinesort/ui/api/similar_films_facade.py",
+   "method": "get_similar_films_status",
+   "line": 58,
+   "delegation_kind": "inline_facade",
+   "god_targets": [],
+   "support_targets": [],
+   "chain": [
+    "SimilarFilmsFacade.get_similar_films_status (L58)"
+   ],
+   "depth": 0,
+   "verdict": "ORPHELIN",
+   "reasons": [
+    "classe SimilarFilmsFacade jamais instanciee dans cinesort/"
+   ]
+  },
+  {
+   "facade": "SimilarFilmsFacade",
+   "file": "cinesort/ui/api/similar_films_facade.py",
+   "method": "find_similar_films",
+   "line": 76,
+   "delegation_kind": "inline_facade",
+   "god_targets": [],
+   "support_targets": [],
+   "chain": [
+    "SimilarFilmsFacade.find_similar_films (L76)"
+   ],
+   "depth": 0,
+   "verdict": "ORPHELIN",
+   "reasons": [
+    "classe SimilarFilmsFacade jamais instanciee dans cinesort/"
+   ]
+  },
+  {
+   "facade": "SimilarFilmsFacade",
+   "file": "cinesort/ui/api/similar_films_facade.py",
+   "method": "compute_film_embedding",
+   "line": 103,
+   "delegation_kind": "inline_facade",
+   "god_targets": [],
+   "support_targets": [],
+   "chain": [
+    "SimilarFilmsFacade.compute_film_embedding (L103)"
+   ],
+   "depth": 0,
+   "verdict": "ORPHELIN",
+   "reasons": [
+    "classe SimilarFilmsFacade jamais instanciee dans cinesort/"
+   ]
+  },
+  {
+   "facade": "SimilarFilmsFacade",
+   "file": "cinesort/ui/api/similar_films_facade.py",
+   "method": "batch_compute_embeddings",
+   "line": 129,
+   "delegation_kind": "inline_facade",
+   "god_targets": [],
+   "support_targets": [],
+   "chain": [
+    "SimilarFilmsFacade.batch_compute_embeddings (L129)"
+   ],
+   "depth": 0,
+   "verdict": "ORPHELIN",
+   "reasons": [
+    "classe SimilarFilmsFacade jamais instanciee dans cinesort/"
+   ]
+  }
+ ],
+ "god_impls": [
+  {
+   "name": "_analyze_perceptual_batch_impl",
+   "line": 1981,
+   "delegates_to": [
+    "perceptual_support.analyze_perceptual_batch"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.analyze_perceptual_batch"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_analyze_quality_batch_impl",
+   "line": 1957,
+   "delegates_to": [
+    "quality_support.analyze_quality_batch"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.analyze_quality_batch"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_apply_impl",
+   "line": 2372,
+   "delegates_to": [
+    "apply_support.apply_changes"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.apply"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_apply_quality_preset_impl",
+   "line": 1867,
+   "delegates_to": [
+    "quality_profile_support.apply_quality_preset",
+    "quality_simulator_support.clear_cache"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.apply_quality_preset"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_auto_install_probe_tools_impl",
+   "line": 1813,
+   "delegates_to": [
+    "probe_support.auto_install_probe_tools"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.auto_install_probe_tools"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_build_apply_preview_impl",
+   "line": 2641,
+   "delegates_to": [
+    "apply_support.build_apply_preview"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.build_apply_preview"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_cancel_run_impl",
+   "line": 2660,
+   "delegates_to": [
+    "history_support.cancel_run"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.cancel_run"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_check_duplicates_fusion_impl",
+   "line": 2253,
+   "delegates_to": [
+    "run_flow_support.check_duplicates_fusion"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.check_duplicates_fusion"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_check_duplicates_impl",
+   "line": 2249,
+   "delegates_to": [
+    "run_flow_support.check_duplicates"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.check_duplicates"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_check_for_updates_impl",
+   "line": 987,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.check_for_updates"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [
+    "cinesort/ui/api/cinesort_api.py:1026"
+   ],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_cleanup_old_runs_impl",
+   "line": 2690,
+   "delegates_to": [
+    "history_support.cleanup_old_runs"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.cleanup_old_runs"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_clear_notifications_impl",
+   "line": 2122,
+   "delegates_to": [
+    "notifications_support.clear_all_notifications"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.clear_notifications"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_clear_tmdb_override_impl",
+   "line": 2161,
+   "delegates_to": [
+    "library_support.clear_tmdb_override"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.clear_tmdb_override"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_compare_perceptual_impl",
+   "line": 1987,
+   "delegates_to": [
+    "perceptual_support.compare_perceptual"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.compare_perceptual"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_delete_run_impl",
+   "line": 2686,
+   "delegates_to": [
+    "history_support.delete_run"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.delete_run"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_delete_score_feedback_impl",
+   "line": 2568,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.delete_score_feedback"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_delete_smart_playlist_impl",
+   "line": 2087,
+   "delegates_to": [
+    "library_support.delete_smart_playlist"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.delete_smart_playlist"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_dismiss_notification_impl",
+   "line": 2110,
+   "delegates_to": [
+    "notifications_support.dismiss_notification"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.dismiss_notification"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_enrich_tmdb_ids_by_title_impl",
+   "line": 2308,
+   "delegates_to": [
+    "tmdb_support.enrich_tmdb_ids_by_title"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.enrich_tmdb_ids_by_title"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_apply_audit_impl",
+   "line": 2629,
+   "delegates_to": [
+    "apply_support.export_apply_audit"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.export_apply_audit"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_full_library_impl",
+   "line": 2210,
+   "delegates_to": [
+    "export_support.export_full_library"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.export_full_library"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_quality_profile_impl",
+   "line": 1943,
+   "delegates_to": [
+    "quality_profile_support.export_quality_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.export_quality_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_run_nfo_impl",
+   "line": 2220,
+   "delegates_to": [
+    "dashboard_support.build_run_report_payload",
+    "export_support.export_nfo_for_run"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.export_run_nfo"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_run_report_impl",
+   "line": 2206,
+   "delegates_to": [
+    "dashboard_support.export_run_report"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.export_run_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_export_shareable_profile_impl",
+   "line": 2397,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.export_shareable_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_advanced_pragma_settings_impl",
+   "line": 2795,
+   "delegates_to": [
+    "settings_support.get_advanced_pragma_settings_payload"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.get_advanced_pragma_settings"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_app_version_impl",
+   "line": 2971,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_app_version"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_auto_approved_summary_impl",
+   "line": 2281,
+   "delegates_to": [
+    "run_read_support.get_auto_approved_summary"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_auto_approved_summary"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_calibration_report_impl",
+   "line": 2586,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.get_calibration_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_cleanup_residual_preview_impl",
+   "line": 2277,
+   "delegates_to": [
+    "run_read_support.get_cleanup_residual_preview"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_cleanup_residual_preview"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_custom_rules_catalog_impl",
+   "line": 1894,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.get_custom_rules_catalog"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_custom_rules_templates_impl",
+   "line": 1889,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.get_custom_rules_templates"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_dashboard_impl",
+   "line": 2046,
+   "delegates_to": [
+    "dashboard_support.get_dashboard"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_dashboard"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_dashboard_qr_impl",
+   "line": 951,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.get_dashboard_qr"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_diagnostic_impl",
+   "line": 2948,
+   "delegates_to": [
+    "runtime_support.get_diagnostic"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_diagnostic"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/runtime_support.py:691"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_doc_impl",
+   "line": 2959,
+   "delegates_to": [
+    "runtime_support.get_doc"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_doc"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_event_ts_impl",
+   "line": 908,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_event_ts"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_film_full_impl",
+   "line": 2131,
+   "delegates_to": [
+    "film_support.get_film_full"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.get_film_full"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/film_support.py:243"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_film_history_impl",
+   "line": 2185,
+   "delegates_to": [
+    "film_history_support.get_film_history"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.get_film_history"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_global_stats_impl",
+   "line": 2050,
+   "delegates_to": [
+    "dashboard_support.get_global_stats"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_global_stats"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_history_stats_impl",
+   "line": 2682,
+   "delegates_to": [
+    "history_support.get_history_stats"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_history_stats"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/history_support.py:178"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_jellyfin_libraries_impl",
+   "line": 1276,
+   "delegates_to": [
+    "settings_support.read_settings"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_jellyfin_libraries"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_jellyfin_sync_report_impl",
+   "line": 1327,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_jellyfin_sync_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_library_filtered_impl",
+   "line": 2059,
+   "delegates_to": [
+    "library_support.get_library_filtered"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.get_library_filtered"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/library_support.py:825"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_log_paths_impl",
+   "line": 2858,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_log_paths"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_naming_presets_impl",
+   "line": 1649,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.get_naming_presets"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_notifications_impl",
+   "line": 2101,
+   "delegates_to": [
+    "notifications_support.get_notifications"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_notifications"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_notifications_unread_count_impl",
+   "line": 2126,
+   "delegates_to": [
+    "notifications_support.get_unread_count"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_notifications_unread_count"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_perceptual_compare_audio_impl",
+   "line": 2004,
+   "delegates_to": [
+    "perceptual_support.get_perceptual_compare_audio"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_perceptual_compare_audio"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_perceptual_compare_frames_impl",
+   "line": 1993,
+   "delegates_to": [
+    "perceptual_support.get_perceptual_compare_frames"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_perceptual_compare_frames"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_perceptual_details_impl",
+   "line": 1971,
+   "delegates_to": [
+    "perceptual_support.get_perceptual_details"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_perceptual_details"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_perceptual_job_status_impl",
+   "line": 2032,
+   "delegates_to": [
+    "perceptual_support.get_perceptual_job_status"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_perceptual_job_status"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_perceptual_report_impl",
+   "line": 1965,
+   "delegates_to": [
+    "perceptual_support.get_perceptual_report"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_perceptual_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_plan_impl",
+   "line": 2202,
+   "delegates_to": [
+    "history_support.get_plan"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_plan"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/history_support.py:27"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_plex_libraries_impl",
+   "line": 1447,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_plex_libraries"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_plex_sync_report_impl",
+   "line": 1467,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_plex_sync_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_probe_impl",
+   "line": 1855,
+   "delegates_to": [
+    "probe_support.get_probe"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_probe"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/probe_support.py:393"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_probe_tools_status_impl",
+   "line": 1778,
+   "delegates_to": [
+    "probe_support.get_probe_tools_status"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_probe_tools_status"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [
+    "cinesort/ui/api/cinesort_api.py:1776"
+   ],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_profiles_impl",
+   "line": 2779,
+   "delegates_to": [
+    "profiles_support.get_profiles"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_profiles",
+    "SettingsFacade.get_profiles"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_quality_presets_impl",
+   "line": 1863,
+   "delegates_to": [
+    "quality_profile_support.get_quality_presets"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_quality_presets"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_quality_profile_impl",
+   "line": 1859,
+   "delegates_to": [
+    "quality_profile_support.get_quality_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_quality_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_quality_report_impl",
+   "line": 1951,
+   "delegates_to": [
+    "quality_report_support.get_quality_report"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.get_quality_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_radarr_status_impl",
+   "line": 1547,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_radarr_status"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_recent_logs_impl",
+   "line": 2955,
+   "delegates_to": [
+    "runtime_support.get_recent_logs"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_recent_logs"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_scan_max_workers_impl",
+   "line": 2823,
+   "delegates_to": [
+    "settings_support.get_scan_max_workers_payload"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.get_scan_max_workers"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_scoring_rollup_impl",
+   "line": 2091,
+   "delegates_to": [
+    "library_support.get_scoring_rollup"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.get_scoring_rollup"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_server_info_impl",
+   "line": 919,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.get_server_info"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [
+    "cinesort/ui/api/cinesort_api.py:957"
+   ],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_settings_impl",
+   "line": 721,
+   "delegates_to": [
+    "settings_support.get_settings_payload"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.get_settings"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [
+    "cinesort/ui/api/cinesort_api.py:743",
+    "cinesort/ui/api/cinesort_api.py:994",
+    "cinesort/ui/api/cinesort_api.py:2706",
+    "cinesort/ui/api/cinesort_api.py:262",
+    "cinesort/ui/api/cinesort_api.py:764"
+   ],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_sidebar_counters_impl",
+   "line": 2054,
+   "delegates_to": [
+    "dashboard_support.get_sidebar_counters"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_sidebar_counters"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_smart_playlists_impl",
+   "line": 2074,
+   "delegates_to": [
+    "library_support.get_smart_playlists"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.get_smart_playlists"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_status_impl",
+   "line": 2198,
+   "delegates_to": [
+    "run_flow_support.get_status"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.get_status"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/run_flow_support.py:959"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_get_tmdb_posters_impl",
+   "line": 2304,
+   "delegates_to": [
+    "tmdb_support.get_tmdb_posters"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.get_tmdb_posters"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_tools_status_impl",
+   "line": 1774,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_tools_status"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_update_info_impl",
+   "line": 1013,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.get_update_info"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_get_user_data_size_impl",
+   "line": 2763,
+   "delegates_to": [
+    "reset_support.get_user_data_size"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.get_user_data_size"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_import_quality_profile_impl",
+   "line": 1947,
+   "delegates_to": [
+    "quality_profile_support.import_quality_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.import_quality_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_import_shareable_profile_impl",
+   "line": 2441,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.import_shareable_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_import_watchlist_impl",
+   "line": 1384,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RunFacade.import_watchlist"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_install_probe_tools_impl",
+   "line": 1795,
+   "delegates_to": [
+    "probe_support.install_probe_tools"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.install_probe_tools"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_is_demo_mode_active_impl",
+   "line": 887,
+   "delegates_to": [
+    "demo_support.is_demo_active"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.is_demo_mode_active"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_list_apply_history_impl",
+   "line": 2368,
+   "delegates_to": [
+    "apply_support.list_apply_history"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.list_apply_history"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/apply_support.py:896"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_list_films_with_history_impl",
+   "line": 2189,
+   "delegates_to": [
+    "film_history_support.list_films_with_history"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.list_films_with_history"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_list_pending_runs_impl",
+   "line": 2677,
+   "delegates_to": [
+    "run_control_support.list_pending_runs"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.list_pending_runs"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_list_quarantine_bucket_impl",
+   "line": 2743,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RunFacade.list_quarantine_bucket"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_load_validation_impl",
+   "line": 2235,
+   "delegates_to": [
+    "history_support.load_validation"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.load_validation"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_mark_alert_ignored_impl",
+   "line": 2169,
+   "delegates_to": [
+    "library_support.mark_alert_ignored"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.mark_alert_ignored"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/library_support.py:1618"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_mark_all_notifications_read_impl",
+   "line": 2118,
+   "delegates_to": [
+    "notifications_support.mark_all_read"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.mark_all_notifications_read"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_mark_duplicate_winner_impl",
+   "line": 2036,
+   "delegates_to": [
+    "run_flow_support.mark_duplicate_winner"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.mark_duplicate_winner"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_mark_for_deletion_impl",
+   "line": 2153,
+   "delegates_to": [
+    "library_support.mark_for_deletion"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.mark_for_deletion"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/library_support.py:1555"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_mark_notification_read_impl",
+   "line": 2114,
+   "delegates_to": [
+    "notifications_support.mark_read"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.mark_notification_read"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_open_external_url_impl",
+   "line": 2905,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.open_external_url"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_open_logs_folder_impl",
+   "line": 2869,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.open_logs_folder"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_pause_run_impl",
+   "line": 2665,
+   "delegates_to": [
+    "run_control_support.pause_run"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.pause_run"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_preview_naming_template_impl",
+   "line": 1664,
+   "delegates_to": [
+    "settings_support.read_settings"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.preview_naming_template"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_purge_probe_cache_impl",
+   "line": 1817,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.purge_probe_cache"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_purge_quarantine_bucket_all_impl",
+   "line": 2728,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RunFacade.purge_quarantine_bucket_all"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_purge_quarantine_bucket_impl",
+   "line": 2710,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RunFacade.purge_quarantine_bucket"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_queue_perceptual_analyses_impl",
+   "line": 2014,
+   "delegates_to": [
+    "perceptual_support.queue_perceptual_analyses"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.queue_perceptual_analyses"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_queue_perceptual_batch_impl",
+   "line": 2022,
+   "delegates_to": [
+    "perceptual_support.queue_perceptual_batch"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.queue_perceptual_batch"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_recheck_probe_tools_impl",
+   "line": 1782,
+   "delegates_to": [
+    "probe_support.recheck_probe_tools"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.recheck_probe_tools"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/probe_support.py:218"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DOUBLE_CHEMIN"
+  },
+  {
+   "name": "_refresh_jellyfin_library_now_impl",
+   "line": 1518,
+   "delegates_to": [
+    "apply_support.refresh_jellyfin_library_now"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.refresh_jellyfin_library_now"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_refresh_plex_library_now_impl",
+   "line": 1528,
+   "delegates_to": [
+    "apply_support.refresh_plex_library_now"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.refresh_plex_library_now"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_request_radarr_upgrade_impl",
+   "line": 1605,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.request_radarr_upgrade"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_rescan_row_impl",
+   "line": 2177,
+   "delegates_to": [
+    "run_flow_support.rescan_row"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.rescan_row"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reset_all_user_data_impl",
+   "line": 2758,
+   "delegates_to": [
+    "reset_support.reset_all_user_data"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.reset_all_user_data"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reset_database_impl",
+   "line": 2774,
+   "delegates_to": [
+    "reset_support.reset_database"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.reset_database"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reset_incremental_cache_impl",
+   "line": 1079,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.reset_incremental_cache"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reset_quality_profile_impl",
+   "line": 1939,
+   "delegates_to": [
+    "quality_profile_support.reset_quality_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.reset_quality_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reset_settings_impl",
+   "line": 2769,
+   "delegates_to": [
+    "reset_support.reset_settings"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.reset_settings"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_restart_api_server_impl",
+   "line": 1031,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.restart_api_server"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_resume_run_impl",
+   "line": 2669,
+   "delegates_to": [
+    "run_control_support.resume_run"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.resume_run"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_reveal_rest_token_impl",
+   "line": 931,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.reveal_rest_token"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_run_nas_benchmark_impl",
+   "line": 1148,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.run_nas_benchmark"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_custom_quality_preset_impl",
+   "line": 1884,
+   "delegates_to": [
+    "quality_simulator_support.save_custom_preset"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.save_custom_quality_preset"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_for_later_impl",
+   "line": 2673,
+   "delegates_to": [
+    "run_control_support.save_for_later"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.save_for_later"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_profile_impl",
+   "line": 2784,
+   "delegates_to": [
+    "profiles_support.save_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.save_profile",
+    "SettingsFacade.save_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_quality_profile_impl",
+   "line": 1910,
+   "delegates_to": [
+    "quality_profile_support.save_quality_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.save_quality_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_settings_impl",
+   "line": 750,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.save_settings"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [
+    "cinesort/ui/api/cinesort_api.py:1008",
+    "cinesort/ui/api/cinesort_api.py:865"
+   ],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_smart_playlist_impl",
+   "line": 2078,
+   "delegates_to": [
+    "library_support.save_smart_playlist"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.save_smart_playlist"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_save_validation_impl",
+   "line": 2239,
+   "delegates_to": [
+    "run_flow_support.save_validation"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.save_validation"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_search_docs_impl",
+   "line": 2967,
+   "delegates_to": [
+    "runtime_support.search_docs"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.search_docs"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_search_tmdb_impl",
+   "line": 2313,
+   "delegates_to": [
+    "tmdb_support.search_tmdb"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.search_tmdb"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_active_profile_impl",
+   "line": 2789,
+   "delegates_to": [
+    "profiles_support.set_active_profile"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.set_active_profile",
+    "SettingsFacade.set_active_profile"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_advanced_pragma_settings_impl",
+   "line": 2805,
+   "delegates_to": [
+    "settings_support.set_advanced_pragma_settings_payload"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.set_advanced_pragma_settings"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_film_tmdb_candidate_impl",
+   "line": 2140,
+   "delegates_to": [
+    "library_support.set_film_tmdb_candidate"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.set_film_tmdb_candidate"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_locale_impl",
+   "line": 828,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "SettingsFacade.set_locale"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_probe_tool_paths_impl",
+   "line": 1786,
+   "delegates_to": [
+    "probe_support.set_probe_tool_paths"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.set_probe_tool_paths"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_set_scan_max_workers_impl",
+   "line": 2833,
+   "delegates_to": [
+    "settings_support.set_scan_max_workers_payload"
+   ],
+   "referenced_by_facades": [
+    "SettingsFacade.set_scan_max_workers"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_simulate_quality_preset_impl",
+   "line": 1873,
+   "delegates_to": [
+    "quality_simulator_support.run_simulation"
+   ],
+   "referenced_by_facades": [
+    "QualityFacade.simulate_quality_preset"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_start_demo_mode_impl",
+   "line": 873,
+   "delegates_to": [
+    "demo_support.start_demo_mode"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.start_demo_mode"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_start_plan_impl",
+   "line": 2194,
+   "delegates_to": [
+    "run_flow_support.start_plan"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.start_plan"
+   ],
+   "external_refs_outside_facades": [
+    "cinesort/ui/api/run_flow_support.py:705"
+   ],
+   "internal_god_refs": [],
+   "verdict": "DUPLIQUE"
+  },
+  {
+   "name": "_stop_demo_mode_impl",
+   "line": 880,
+   "delegates_to": [
+    "demo_support.stop_demo_mode"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.stop_demo_mode"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_submit_score_feedback_impl",
+   "line": 2503,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.submit_score_feedback"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_email_report_impl",
+   "line": 1307,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_email_report"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_jellyfin_connection_impl",
+   "line": 1267,
+   "delegates_to": [
+    "settings_support.test_jellyfin_connection"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_jellyfin_connection"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_omdb_connection_impl",
+   "line": 1625,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_omdb_connection"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_plex_connection_impl",
+   "line": 1435,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_plex_connection"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_radarr_connection_impl",
+   "line": 1536,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_radarr_connection"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_test_tmdb_key_impl",
+   "line": 1252,
+   "delegates_to": [
+    "settings_support.test_tmdb_key"
+   ],
+   "referenced_by_facades": [
+    "IntegrationsFacade.test_tmdb_key"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_undo_by_row_preview_impl",
+   "line": 2343,
+   "delegates_to": [
+    "apply_support.build_undo_by_row_preview"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.undo_by_row_preview"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_undo_last_apply_impl",
+   "line": 2335,
+   "delegates_to": [
+    "apply_support.undo_last_apply"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.undo_last_apply"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_undo_last_apply_preview_impl",
+   "line": 2331,
+   "delegates_to": [
+    "apply_support.undo_last_apply_preview"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.undo_last_apply_preview"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_undo_selected_rows_impl",
+   "line": 2347,
+   "delegates_to": [
+    "apply_support.undo_selected_rows"
+   ],
+   "referenced_by_facades": [
+    "RunFacade.undo_selected_rows"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_unmark_for_deletion_impl",
+   "line": 2165,
+   "delegates_to": [
+    "library_support.unmark_for_deletion"
+   ],
+   "referenced_by_facades": [
+    "LibraryFacade.unmark_for_deletion"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_update_probe_tools_impl",
+   "line": 1804,
+   "delegates_to": [
+    "probe_support.update_probe_tools"
+   ],
+   "referenced_by_facades": [
+    "RuntimeFacade.update_probe_tools"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_validate_custom_rules_impl",
+   "line": 1904,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "QualityFacade.validate_custom_rules"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  },
+  {
+   "name": "_validate_dropped_path_impl",
+   "line": 1705,
+   "delegates_to": [],
+   "referenced_by_facades": [
+    "RuntimeFacade.validate_dropped_path"
+   ],
+   "external_refs_outside_facades": [],
+   "internal_god_refs": [],
+   "verdict": "PROPRE"
+  }
+ ],
+ "homonyms": [
+  {
+   "name": "_get_diagnostic_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2948",
+   "support_defs": [
+    "runtime_support.py:702"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "runtime_support.get_diagnostic -> runtime_support._get_diagnostic_impl"
+  },
+  {
+   "name": "_get_film_full_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2131",
+   "support_defs": [
+    "film_support.py:257"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "film_support.get_film_full -> film_support._get_film_full_impl"
+  },
+  {
+   "name": "_get_history_stats_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2682",
+   "support_defs": [
+    "history_support.py:192"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "history_support.get_history_stats -> history_support._get_history_stats_impl"
+  },
+  {
+   "name": "_get_library_filtered_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2059",
+   "support_defs": [
+    "library_support.py:847"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "library_support.get_library_filtered -> library_support._get_library_filtered_impl"
+  },
+  {
+   "name": "_get_plan_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2202",
+   "support_defs": [
+    "history_support.py:40"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "history_support.get_plan -> history_support._get_plan_impl"
+  },
+  {
+   "name": "_get_probe_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:1855",
+   "support_defs": [
+    "probe_support.py:407"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "probe_support.get_probe -> probe_support._get_probe_impl"
+  },
+  {
+   "name": "_get_status_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2198",
+   "support_defs": [
+    "run_flow_support.py:973"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "run_flow_support.get_status -> run_flow_support._get_status_impl"
+  },
+  {
+   "name": "_list_apply_history_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2368",
+   "support_defs": [
+    "apply_support.py:907"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "apply_support.list_apply_history -> apply_support._list_apply_history_impl"
+  },
+  {
+   "name": "_mark_alert_ignored_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2169",
+   "support_defs": [
+    "library_support.py:1629"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "library_support.mark_alert_ignored -> library_support._mark_alert_ignored_impl"
+  },
+  {
+   "name": "_mark_for_deletion_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2153",
+   "support_defs": [
+    "library_support.py:1566"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "library_support.mark_for_deletion -> library_support._mark_for_deletion_impl"
+  },
+  {
+   "name": "_start_plan_impl",
+   "god_line": "cinesort/ui/api/cinesort_api.py:2194",
+   "support_defs": [
+    "run_flow_support.py:833"
+   ],
+   "god_delegates_to_support_twin": false,
+   "twin_reachable_via_wrapper": "run_flow_support.start_plan -> run_flow_support._start_plan_impl"
+  }
+ ],
+ "support_only_impls": [
+  {
+   "name": "_get_films_by_decade_impl",
+   "defs": [
+    "library_audit_support.py:111"
+   ],
+   "internal_callers": [
+    "library_audit_support.get_films_by_decade"
+   ]
+  },
+  {
+   "name": "_get_films_by_tier_impl",
+   "defs": [
+    "quality_audit_support.py:99"
+   ],
+   "internal_callers": [
+    "quality_audit_support.get_films_by_tier"
+   ]
+  },
+  {
+   "name": "_get_library_podiums_impl",
+   "defs": [
+    "library_podiums_support.py:90"
+   ],
+   "internal_callers": [
+    "library_podiums_support.get_library_podiums"
+   ]
+  },
+  {
+   "name": "_get_library_timeline_impl",
+   "defs": [
+    "library_timeline_support.py:178"
+   ],
+   "internal_callers": [
+    "library_timeline_support.get_library_timeline"
+   ]
+  },
+  {
+   "name": "_recompute_all_scores_impl",
+   "defs": [
+    "quality_audit_support.py:435"
+   ],
+   "internal_callers": [
+    "quality_audit_support.recompute_all_scores"
+   ]
+  }
+ ],
+ "multi_facade_methods": {
+  "get_profiles": [
+   "QualityFacade",
+   "SettingsFacade"
+  ],
+  "save_profile": [
+   "QualityFacade",
+   "SettingsFacade"
+  ],
+  "set_active_profile": [
+   "QualityFacade",
+   "SettingsFacade"
+  ]
+ },
+ "facade_instantiations": {
+  "IntegrationsFacade": [
+   "cinesort/ui/api/cinesort_api.py:250"
+  ],
+  "LibraryFacade": [
+   "cinesort/ui/api/cinesort_api.py:251"
+  ],
+  "QualityFacade": [
+   "cinesort/ui/api/cinesort_api.py:249"
+  ],
+  "RunFacade": [
+   "cinesort/ui/api/cinesort_api.py:247"
+  ],
+  "RuntimeFacade": [
+   "cinesort/ui/api/cinesort_api.py:253"
+  ],
+  "SettingsFacade": [
+   "cinesort/ui/api/cinesort_api.py:248"
+  ],
+  "SimilarFilmsFacade": []
+ }
+}

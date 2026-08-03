@@ -24,11 +24,10 @@ import io
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 from unittest import mock
 
 from cinesort.infra.integrations import poster_proxy
-
 
 # ---------------------------------------------------------------------------
 # Fake HTTP handler (interface minimale exigee par serve_poster)
@@ -181,9 +180,10 @@ class PosterProxyCacheTests(unittest.TestCase):
         fake_session = mock.MagicMock()
         fake_session.get.return_value = fake_response
 
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -225,13 +225,12 @@ class PosterProxyCacheTests(unittest.TestCase):
         fake_client = _FakeTmdbClient(poster_path="/should-not-be-called.jpg")
         fake_session = mock.MagicMock()
         # Si appele, on leve pour prouver le no-outbound.
-        fake_session.get.side_effect = AssertionError(
-            "session.get NE DOIT PAS etre appele en cas de cache hit"
-        )
+        fake_session.get.side_effect = AssertionError("session.get NE DOIT PAS etre appele en cas de cache hit")
 
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -266,13 +265,12 @@ class PosterProxyCacheTests(unittest.TestCase):
         # primer (la session ne devrait meme pas etre invoquee).
         import requests as _requests
 
-        fake_session.get.side_effect = _requests.ConnectionError(
-            "Simule reseau coupe / DNS fail"
-        )
+        fake_session.get.side_effect = _requests.ConnectionError("Simule reseau coupe / DNS fail")
 
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,

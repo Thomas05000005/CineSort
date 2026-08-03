@@ -24,7 +24,6 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from typing import Optional
 
 from cinesort.app.job_runner import JobRunner
 from cinesort.domain.run_models import RunStatus
@@ -272,6 +271,7 @@ class CancelClearsPauseEventTests(unittest.TestCase):
         """Cancel sur un run RUNNING (pas en pause) doit etre idempotent
         sur pause_event (pas de clear inutile).
         """
+
         def long_job(should_cancel):
             while not should_cancel():
                 time.sleep(0.02)
