@@ -1626,6 +1626,28 @@ def _decisions_by_row_id_set(decisions: List[Dict[str, Any]]) -> Dict[frozenset,
     return index
 
 
+def _apply_decision_to_group(group: Dict[str, Any], dec: Dict[str, Any], *, stale_key: bool) -> None:
+    """Pose `winner_decided`/`winner_row_id`/`winner_side` sur UN groupe."""
+    winner_row_id = str(dec.get("winner_row_id") or "")
+    group["winner_decided"] = True
+    group["winner_row_id"] = winner_row_id
+    if stale_key:
+        # Additif et diagnostique. NE JAMAIS nommer ce champ `group_key` /
+        # `id` / `signature` : `_group_key_for` (et son miroir `_groupKey` de
+        # doublons.js) les lit EN PRIORITÉ, l'UI reposterait alors la clé
+        # morte et mark_duplicate_winner refuserait la reprise
+        # (« liste périmée »). L'UI garde donc la clé COURANTE : redécider
+        # écrit une nouvelle ligne, que la réconciliation par récence de
+        # l'apply fait gagner sur la décision périmée.
+        group["winner_decision_stale_key"] = True
+        group["winner_decision_group_key"] = str(dec.get("group_key") or "")
+    rows = group.get("rows") or []
+    for idx, item in enumerate(rows[:2]):
+        if str((item or {}).get("row_id") or "") == winner_row_id and winner_row_id:
+            group["winner_side"] = "a" if idx == 0 else "b"
+            break
+
+
 def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: Any) -> None:
     """R8-057 (F5) : joint les décisions doublons PERSISTÉES (table duplicate_decisions)
     au payload check_duplicates -> `winner_decided`/`winner_side`/`winner_row_id`.
@@ -1667,24 +1689,7 @@ def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: An
             stale_key = dec is not None
         if not dec:
             continue
-        winner_row_id = str(dec.get("winner_row_id") or "")
-        group["winner_decided"] = True
-        group["winner_row_id"] = winner_row_id
-        if stale_key:
-            # Additif et diagnostique. NE JAMAIS nommer ce champ `group_key` /
-            # `id` / `signature` : `_group_key_for` (et son miroir `_groupKey` de
-            # doublons.js) les lit EN PRIORITÉ, l'UI reposterait alors la clé
-            # morte et mark_duplicate_winner refuserait la reprise
-            # (« liste périmée »). L'UI garde donc la clé COURANTE : redécider
-            # écrit une nouvelle ligne, que la réconciliation par récence de
-            # l'apply fait gagner sur la décision périmée.
-            group["winner_decision_stale_key"] = True
-            group["winner_decision_group_key"] = str(dec.get("group_key") or "")
-        rows = group.get("rows") or []
-        for idx, item in enumerate(rows[:2]):
-            if str((item or {}).get("row_id") or "") == winner_row_id and winner_row_id:
-                group["winner_side"] = "a" if idx == 0 else "b"
-                break
+        _apply_decision_to_group(group, dec, stale_key=stale_key)
 
 
 def _compute_size_savings_total(data: Dict[str, Any]) -> int:
