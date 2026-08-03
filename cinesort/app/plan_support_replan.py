@@ -23,6 +23,7 @@ from cinesort.app.plan_support_core import (
     plan_row_to_jsonable,
     resolve_incremental_quick_hash,
 )
+from cinesort.domain.confidence_thresholds import confidence_label
 from cinesort.domain.edition_helpers import extract_edition
 from cinesort.domain.integrity_check import check_header
 from cinesort.domain.runtime_matching import score_runtime_delta
@@ -377,10 +378,22 @@ def _build_resolved_row(
                 edition_label=detected_edition,
             )
             confidence = max(0, min(100, confidence + bonus))
-            if bonus >= 10:
-                label = "high" if confidence >= 85 else label
-            elif bonus < 0:
-                label = "low" if confidence < 60 else label
+            if bonus:
+                # `label` et la 1re phrase de `notes` (construite juste apres par
+                # build_plan_note) sont des champs STOCKES, jamais recalcules en
+                # aval : le front recalcule son bucket depuis la valeur NUMERIQUE
+                # et n'utilise jamais `confidence_label`, qui part tel quel dans
+                # plan.jsonl, l'export HTML/CSV/JSON et le resume de run.
+                # Les deux gardes precedentes ("high" si >= 85, "low" si < 60) ne
+                # couvraient QUE les sauts vers les extremes et laissaient la zone
+                # med (60..84) perimee : une row 97/'high' penalisee a 72 par
+                # -25 gardait un badge 'high' mensonger sur la ligne meme qui
+                # porte runtime_mismatch_likely_wrong_film, et une row 59/'low'
+                # remontee a 79 par +20 restait 'low'. Meme resynchro que les deux
+                # autres call sites qui mutent la confiance (omdb_cross_check.
+                # resync_confidence_fields, runtime_probe_check). La faire AVANT
+                # build_plan_note aligne la note du meme coup.
+                label = confidence_label(confidence)
     note = core_mod.build_plan_note(
         confidence=confidence,
         label=label,
