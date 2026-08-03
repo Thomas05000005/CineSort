@@ -179,8 +179,8 @@ class TestRemapPath(unittest.TestCase):
                 }
             ]
         )
-        # "dune 2" n'est PAS sous "dune" : le chemin doit rester intact.
-        self.assertEqual(_remap_path("c:/films/dune 2/dune2.mkv", seq), "c:/films/dune 2/dune2.mkv")
+        # "dune 2" n'est PAS sous "dune" : le media n'est pas touche.
+        self.assertIsNone(_remap_path("c:/films/dune 2/dune2.mkv", seq))
 
     def test_dir_move_matching_the_media_path_itself(self):
         """Jellyfin peut indexer un rip BDMV par son DOSSIER."""
@@ -220,11 +220,29 @@ class TestRemapPath(unittest.TestCase):
             "c:/films/_collection/matrix (1999)/matrix.mkv",
         )
 
-    def test_untouched_path_is_returned_unchanged(self):
+    def test_untouched_path_returns_none(self):
         seq = _build_move_sequence(
             [{"op_type": "MOVE_DIR", "src_path": "c:/films/a", "dst_path": "c:/films/b", "undo_status": "PENDING"}]
         )
-        self.assertEqual(_remap_path("c:/autre/film.mkv", seq), "c:/autre/film.mkv")
+        self.assertIsNone(_remap_path("c:/autre/film.mkv", seq))
+
+    def test_case_only_rename_is_still_a_touch(self):
+        """`apply_core._case_only_rename_with_rollback` emet un MOVE_DIR dont src
+        et dst se normalisent a l'identique. Le film a pourtant ete renomme :
+        filtrer sur « chemin different » l'aurait laisse tomber, alors qu'un
+        partage sensible a la casse peut le ré-indexer comme un nouvel item."""
+        seq = _build_move_sequence(
+            [
+                {
+                    "op_type": "MOVE_DIR",
+                    "src_path": r"C:\Films\inception (2010)",
+                    "dst_path": r"C:\Films\Inception (2010)",
+                    "undo_status": "PENDING",
+                }
+            ]
+        )
+        old = _normalize_path(r"C:\Films\inception (2010)\Inception.mkv")
+        self.assertEqual(_remap_path(old, seq), old)
 
 
 # ── snapshot_watched ─────────────────────────────────────────────────
@@ -356,6 +374,38 @@ class TestRestoreWatched(unittest.TestCase):
         self.assertEqual(result.skipped, 0)
         self.assertEqual(result.not_found, 0)
         client.mark_played.assert_called_once_with("uid", "jf-inception")
+
+    @patch("cinesort.app.jellyfin_sync.time.sleep")
+    def test_case_only_rename_reasserts_watched_status(self, mock_sleep):
+        """#680 — bout en bout : un renommage de casse seule doit rester suivi."""
+        path = r"C:\Films\Inception (2010)\Inception.mkv"
+        snapshot = {_normalize_path(r"C:\Films\inception (2010)\Inception.mkv"): WatchedInfo(True, 1, "")}
+        operations = [
+            {
+                "op_type": "MOVE_DIR",
+                "src_path": r"C:\Films\inception (2010)",
+                "dst_path": r"C:\Films\Inception (2010)",
+                "undo_status": "PENDING",
+            }
+        ]
+
+        client = MagicMock()
+        client.get_all_movies_from_all_libraries.return_value = [
+            {"id": "jf-1", "path": path, "played": False, "play_count": 0, "last_played_date": ""},
+        ]
+        client.mark_played.return_value = True
+
+        result = restore_watched(
+            client,
+            "uid",
+            snapshot,
+            operations,
+            initial_delay_s=0,
+            retry_delay_s=0,
+            max_retries=1,
+        )
+        self.assertEqual(result.restored, 1)
+        self.assertEqual(result.skipped, 0)
 
     @patch("cinesort.app.jellyfin_sync.time.sleep")
     def test_movie_not_found_after_retries(self, mock_sleep):

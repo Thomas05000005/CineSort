@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from cinesort.app._path_utils import normalize_path as _normalize_path
 
@@ -135,23 +135,33 @@ def _build_move_sequence(operations: List[Dict[str, Any]]) -> List[_MoveOp]:
     return sequence
 
 
-def _remap_path(path: str, sequence: List[_MoveOp]) -> str:
-    """Rejoue `sequence` sur un chemin de media Jellyfin et rend le chemin final.
+def _remap_path(path: str, sequence: List[_MoveOp]) -> Optional[str]:
+    """Rejoue `sequence` sur un chemin de media Jellyfin.
 
-    Rend le chemin INCHANGE si aucune operation ne le concerne (le film n'a pas
-    bouge, ou il vit hors des racines touchees par l'apply).
+    Rend le chemin FINAL si au moins une operation a touche ce media, sinon
+    None (le film n'a pas bouge, ou il vit hors des racines de l'apply).
+
+    Le critere est « touche », PAS « chemin different » : un renommage de
+    casse seule (`apply_core._case_only_rename_with_rollback`) produit un
+    MOVE_DIR dont src et dst se normalisent a l'identique. Le film a pourtant
+    bien ete renomme sur disque, et sur un partage sensible a la casse Jellyfin
+    peut le ré-indexer comme un NOUVEL item. On re-affirme donc son statut vu —
+    `mark_played` est idempotent, le re-affirmer ne coute rien.
     """
     current = path
+    touched = False
     for move in sequence:
         if current == move.src:
             # Deplacement direct du media (fichier, ou dossier quand Jellyfin
             # indexe un rip BDMV/VIDEO_TS par son dossier).
             current = move.dst
+            touched = True
         elif move.is_dir and current.startswith(move.src + "/"):
             # Le media est SOUS un dossier deplace : re-prefixation. Le '/' de
             # garde evite qu'un dossier "…/inception" capture "…/inception 2".
             current = move.dst + current[len(move.src) :]
-    return current
+            touched = True
+    return current if touched else None
 
 
 # -- API publique ------------------------------------------------------
@@ -224,7 +234,7 @@ def restore_watched(
     watched_moves: Dict[str, str] = {}  # new_path -> old_path
     for old_norm in snapshot:
         new_norm = _remap_path(old_norm, move_sequence)
-        if new_norm != old_norm:
+        if new_norm is not None:
             watched_moves[new_norm] = old_norm
 
     if not watched_moves:
