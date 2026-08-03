@@ -227,6 +227,17 @@ class RuntimeFacade(_BaseFacade):
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return self._api._auto_install_probe_tools_impl()
 
+    def purge_probe_cache(self) -> Dict[str, Any]:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utile en cas de pollution (paths obsoletes -> FAILED massif). Apres
+        purge, le prochain scan relance les probes proprement. A exposer sous
+        Parametres > Outils > "Purger le cache probe".
+
+        Cf CineSortApi._purge_probe_cache_impl pour la doc complete.
+        """
+        return self._api._purge_probe_cache_impl()
+
     def get_probe(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run.
 
@@ -251,3 +262,21 @@ class RuntimeFacade(_BaseFacade):
         Cf CineSortApi._reset_incremental_cache_impl pour la doc complete.
         """
         return self._api._reset_incremental_cache_impl()
+
+    # ---------- VO-A-NAS : benchmark perf SQLite sur stockage cible ----------
+
+    def run_nas_benchmark(
+        self,
+        n_writes: int = 1000,
+        n_reads: int = 10000,
+    ) -> Dict[str, Any]:
+        """VO-A-NAS : declenche un benchmark perf SQLite sur le stockage cible.
+
+        Cree une table dediee, INSERT n_writes lignes + SELECT n_reads
+        lectures, mesure p50/p95/p99 et sauve un rapport JSON dans
+        ``<state_dir>/diagnostics/``. Operation non destructive (DROP TABLE
+        garanti dans finally).
+
+        Cf CineSortApi._run_nas_benchmark_impl pour la doc complete.
+        """
+        return self._api._run_nas_benchmark_impl(n_writes=n_writes, n_reads=n_reads)

@@ -52,7 +52,7 @@ class SidebarCountersBackendTests(unittest.TestCase):
             self.assertEqual(out[key], 0)
 
     def test_returns_zero_dict_on_error(self) -> None:
-        """Si get_settings explose, on retourne {0,0,0} (pas une exception)."""
+        """Si get_settings explose, on retourne un dict de 0 (pas une exception)."""
         from cinesort.ui.api.dashboard_support import get_sidebar_counters
 
         class BrokenSettingsFacade:
@@ -64,7 +64,8 @@ class SidebarCountersBackendTests(unittest.TestCase):
                 self.settings = BrokenSettingsFacade()
 
         out = get_sidebar_counters(BrokenApi())
-        self.assertEqual(out, {"validation": 0, "application": 0, "quality": 0})
+        # AUDIT 2026-06-13 (R5-E) : ajout du compteur "duplicates" (badge menu Doublons).
+        self.assertEqual(out, {"validation": 0, "application": 0, "quality": 0, "duplicates": 0})
 
     def test_row_needs_review_heuristic(self) -> None:
         from cinesort.ui.api.dashboard_support import _row_needs_review

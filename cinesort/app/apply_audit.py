@@ -40,7 +40,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-
 _log = logging.getLogger(__name__)
 
 AUDIT_FILENAME = "apply_audit.jsonl"

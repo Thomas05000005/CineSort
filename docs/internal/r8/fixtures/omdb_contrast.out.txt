@@ -1,0 +1,13 @@
+R8-076 — Contraste WCAG AA de .omdb-status--error (Playwright getComputedStyle + compositing alpha)
+Fixture : docs/internal/r8/fixtures/omdb_contrast.html (servie sur http://127.0.0.1:8765, port éphémère)
+Mesure des 5 thèmes (tous sombres : studio/cinema/luxe/neon/aaa).
+
+AVANT (color #b91c1c) :
+  studio 2.79 | cinema 2.83 | luxe 2.79 | neon 2.83 | aaa 2.91   -> TOUS < AA 4.5 (FAIL)
+APRÈS (color #f87171) :
+  studio 6.52 | cinema 6.63 | luxe 6.51 | neon 6.61 | aaa 6.80   -> TOUS >= AA 4.5 (PASS)
+
+Sibling statuses (même composant, mesure approchée sur fond aaa #0A0A0A) :
+  ok #16a34a = 6.01 (PASS) | warning #b45309 = 3.94 (< AA, > AA-large 3.0) | info #2563eb = 3.83 (< AA)
+  -> warning/info sont sous AA 4.5 (mais au-dessus de AA-large 3.0). NON flaggés par R8-076 (error-only).
+     Signalés comme siblings a11y borderline (candidat filet/F6 ou décision Thomas).

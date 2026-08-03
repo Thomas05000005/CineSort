@@ -67,10 +67,15 @@ class GenerateMonthRangeTests(unittest.TestCase):
 class GetLibraryTimelineTests(unittest.TestCase):
     def setUp(self):
         self.mock_api = MagicMock()
-        self.mock_api.settings.get_settings.return_value = {
+        # AUDIT 2026-06-10 : get_library_timeline lit desormais _internal_settings
+        # (jellyfin_api_key en clair). On mock cette methode (et get_settings pour
+        # retro-compat de tout autre chemin).
+        _settings = {
             "state_dir": "/tmp/test",
             "jellyfin_enabled": False,
         }
+        self.mock_api._internal_settings.return_value = _settings
+        self.mock_api.settings.get_settings.return_value = _settings
         self.mock_store = MagicMock()
         self.mock_api._get_or_create_infra.return_value = (self.mock_store, None)
         self.mock_store.run.get_runs_summary.return_value = [{"run_id": "run-test"}]

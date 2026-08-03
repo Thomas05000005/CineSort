@@ -37,9 +37,27 @@ def _runner_platform_kwargs() -> dict:
     return kwargs
 
 
+# R8-033 (F3) : noms de binaire ffprobe attendus. Defini localement car
+# domain/ ne peut pas importer infra/probe/tooling (contrat domain_pure).
+# Coherent avec EXPECTED_BINARY_NAMES['ffprobe'] (infra/probe/tooling.py).
+_ALLOWED_FFPROBE_NAMES = frozenset({"ffprobe.exe", "ffprobe"})
+
+
 def resolve_ffmpeg_path(ffprobe_path: str) -> Optional[str]:
-    """Trouve ffmpeg comme sibling de ffprobe (meme dossier, meme package)."""
+    """Trouve ffmpeg comme sibling de ffprobe (meme dossier, meme package).
+
+    R8-033 (F3) : ne derive le sibling QUE si `ffprobe_path` porte un nom de
+    binaire ffprobe attendu. Sinon (chemin arbitraire / non-ffprobe), on ne fait
+    PAS confiance au dossier parent et on retombe sur le ffmpeg du PATH systeme —
+    evite d'executer le `ffmpeg.exe` voisin d'un binaire arbitraire configure.
+    """
     if not ffprobe_path:
+        return shutil.which("ffmpeg")
+    try:
+        probe_name = Path(ffprobe_path).name.lower()
+    except (OSError, ValueError):
+        return shutil.which("ffmpeg")
+    if probe_name not in _ALLOWED_FFPROBE_NAMES:
         return shutil.which("ffmpeg")
     parent = Path(ffprobe_path).parent
     for name in ("ffmpeg.exe", "ffmpeg"):
