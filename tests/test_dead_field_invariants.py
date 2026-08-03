@@ -87,15 +87,22 @@ class _PlanRowCanary(dict):
     """PlanRow serialisee qui refuse d'etre interrogee sur une clef fantome.
 
     En production ces lectures renvoient `None` en silence ; ici elles levent.
+
+    `strict=False` passe en mode ENREGISTREUR : la lecture fantome est notee
+    dans `seen` mais ne leve pas. Ce mode sert au ratchet des consommateurs
+    de PlanRow situes HORS du perimetre de ce correctif (cf
+    `PlanRowConsumerRatchetTests`) : on veut mesurer leur dette sans faire
+    echouer la barriere sur un fichier qu'on n'a pas le droit de corriger.
     """
 
-    def __init__(self, data: Dict[str, Any], seen: Set[str]):
+    def __init__(self, data: Dict[str, Any], seen: Set[str], strict: bool = True):
         super().__init__(data)
         self._seen = seen
+        self._strict = strict
 
     def _check(self, key: Any) -> None:
         self._seen.add(str(key))
-        if key not in _ALLOWED_PLAN_ROW_KEYS:
+        if key not in _ALLOWED_PLAN_ROW_KEYS and self._strict:
             raise _PhantomKeyError(
                 f"lecture de la clef fantome {key!r} sur une PlanRow serialisee. "
                 f"PlanRow ne declare pas ce champ et aucun enrichissement ne le pose : "
@@ -321,6 +328,72 @@ class PlanRowKeyContractTests(unittest.TestCase):
 
         self.assertEqual(sizes, [10, 11, 12])
         self.assertEqual(list(cache), [str(folder)])
+
+
+# ---------------------------------------------------------------------------
+# 1 bis. Ratchet sur les AUTRES consommateurs de PlanRow serialisees
+# ---------------------------------------------------------------------------
+# `_build_library_rows` n'est pas le seul a consommer `api.run.get_plan()`.
+# Le canari strict ci-dessus ne couvre que lui ; la famille peut donc se
+# reconstituer chez un voisin. Ce ratchet fait passer le MEME canari (en mode
+# enregistreur) chez les autres consommateurs et fige leur dette exacte : une
+# clef fantome NOUVELLE fait echouer, une clef fantome CORRIGEE fait echouer
+# aussi (il faut alors resserrer la constante — c'est voulu).
+#
+# Dette figee au 2026-08-03, hors perimetre de ce correctif :
+#   library_actions_support._plan_source_paths:195 lit `r.get("source_path")`
+#   — meme clef fantome que celle corrigee ici. Le `or r.get("folder")` qui
+#   suit masque l'absence, donc la fonction n'est pas morte : elle rend
+#   TOUJOURS le dossier, jamais le chemin du fichier video. Ce que ca degrade :
+#   la valeur alimente `source_path=` des marques de suppression (L239, L340).
+#   Pour un kind "collection"/"extra" le dossier est PARTAGE entre plusieurs
+#   films, donc la marque designe un conteneur au lieu du media. Le correctif
+#   est d'appeler `library_support.plan_row_media_path(r)` — le helper partage
+#   introduit par ce meme PR — mais library_actions_support.py est hors du
+#   perimetre de fichiers autorise ici.
+_KNOWN_PHANTOM_PLAN_ROW_KEYS = {
+    "library_actions_support._plan_source_paths": {"source_path"},
+}
+
+
+class PlanRowConsumerRatchetTests(unittest.TestCase):
+    """#447 / #730 : figer la dette des autres lecteurs de PlanRow serialisees."""
+
+    def _phantom_keys_read_by(self, fn, *args, **kwargs) -> Set[str]:
+        seen: Set[str] = set()
+        row = _PlanRowCanary(_make_plan_row(r"C:\Films\Dune (2021)", "Dune.2021.mkv"), seen, strict=False)
+        fn(_FakeApi([row], "state"), *args, **kwargs)
+        self.assertIn("row_id", seen, "canari non sollicite — collecteur casse")
+        return {k for k in seen if k not in _ALLOWED_PLAN_ROW_KEYS}
+
+    def test_plan_source_paths_phantom_keys_are_frozen(self):
+        from cinesort.ui.api import library_actions_support
+
+        phantom = self._phantom_keys_read_by(library_actions_support._plan_source_paths, "RUN1")
+        expected = _KNOWN_PHANTOM_PLAN_ROW_KEYS["library_actions_support._plan_source_paths"]
+        self.assertEqual(
+            phantom,
+            expected,
+            "la dette de _plan_source_paths a change. Si une clef a ete AJOUTEE : "
+            "c'est la famille #447/#730 qui repousse, corriger via "
+            "library_support.plan_row_media_path(). Si une clef a ete CORRIGEE : "
+            "retirer l'entree de _KNOWN_PHANTOM_PLAN_ROW_KEYS.",
+        )
+
+    def test_plan_source_paths_currently_returns_the_folder_not_the_video(self):
+        """Preuve du symptome, pas seulement de la lecture fantome.
+
+        Ce test documente le comportement ACTUEL (degrade). Quand
+        `_plan_source_paths` passera a `plan_row_media_path`, il deviendra
+        rouge et devra etre retourne en `assertEqual(..., video_path)`.
+        """
+        from cinesort.ui.api import library_actions_support
+
+        folder = r"C:\Films\Dune (2021)"
+        api = _FakeApi([_make_plan_row(folder, "Dune.2021.mkv")], "state")
+        out = library_actions_support._plan_source_paths(api, "RUN1")
+        self.assertEqual(out, {"ROW1": folder})
+        self.assertNotIn("Dune.2021.mkv", out["ROW1"])
 
 
 # ---------------------------------------------------------------------------
