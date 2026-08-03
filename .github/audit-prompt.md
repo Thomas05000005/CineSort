@@ -66,13 +66,15 @@ CONTEXTE PROJET (mis a jour le 2026-08-02) :
 CONTEXTE PROJET (structure, toujours valable) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
   * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
-  * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
-  * app ne peut PAS importer ui (contract `app_no_ui`)
+  * infra ne peut PAS importer app, ui (contract `infra_bounded`)
+  * app ne peut PAS importer ui (contract `app_bounded`)
 - Cycle historique `domain -> app` BRISE en mai 2026 (issue #83 closed).
   Toute regression sur ce point est bloquee par CI - ne pas reintroduire.
 - Repository pattern installe sur SQLiteStore : store.probe, store.scan,
-  store.quality, store.run, store.apply, store.perceptual, store.anomaly.
-  Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
+  store.quality, store.run, store.apply, store.perceptual, store.anomaly
+  (7 Repository agreges par composition, cf infra/db/repositories/).
+  Phase B8 CLOSE : les `_XxxMixin` legacy et l'heritage MRO ont ete SUPPRIMES
+  (verifie le 2026-08-03 : 0 occurrence). Ne pas reintroduire de mixin SQL.
 - Strangler Fig + Facade pattern : CineSortApi expose 6 facades
   (api.run, api.settings, api.quality, api.integrations, api.library,
   api.runtime). Les anciennes methodes directes sont privatisees en
@@ -87,8 +89,10 @@ CONTEXTE PROJET (structure, toujours valable) :
 
 Analyse transverse (si target=transverse) :
 1) Liste les fonctions > 100L restantes par ROI de refactor (complexite vs gain).
-2) Liste les composants JS dupliques desktop/dashboard (web/dashboard/views/*.js
-   vs web/views/*.js post-V6 ESM migration) et propose strategie de mutualisation.
+2) [OBSOLETE — cf issue #484] La duplication desktop/dashboard N'EXISTE PLUS :
+   il ne reste qu'un arbre JS unique sous web/dashboard/ (views/, components/,
+   core/). Ni web/views/ ni web/components/ de premier niveau (verifie le
+   2026-08-03). Ne cherche PAS de doublons desktop/dashboard : il n'y en a pas.
 3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
    depuis le dernier audit (cross-check avec `lint-imports`).
 4) Audit du Repository pattern : usages residuels de la couche mixin
@@ -1465,6 +1469,14 @@ REGLES :
 - Constante amelioration : meme sur des modules deja audites,
   cherche si quelque chose a evolue ou pourrait etre mieux.
 
-Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune. (si target=transverse)
+Pour la couche transverse (si target=transverse) — les inventaires ci-dessous sont
+DEJA SUIVIS par des issues OUVERTES : ENRICHIS-les, ne recree PAS d'issue.
+Les chiffres du prompt d'origine (49 fonctions / 22 composants JS / 161 imports
+lazy) sont PERIMES — cf issue #484.
+1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue OUVERTE #215.
+2) Duplication JS desktop/dashboard : SANS OBJET, elle n'existe plus (cf ci-dessus).
+3) Imports lazy et decouplage -> issue OUVERTE #779. Le cycle domain<->app est
+   BRISE (issue #83 close) ; le reliquat est INTRA-ui/api (cycles entre modules
+   *_support), pas un cycle inter-couches.
 
 ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.
