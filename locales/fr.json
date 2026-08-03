@@ -530,6 +530,7 @@
     "payload_tmdb_ids_invalid": "Payload invalide: 'tmdb_ids' doit être une liste.",
     "row_ids_required": "Liste de row_ids requise.",
     "no_reversible_apply": "Aucun apply réel réversible à annuler.",
+    "undo_unavailable_after_apply": "Les fichiers ont bien été rangés, mais le journal d'annulation n'a pas pu être finalisé (base de données indisponible) : cet apply N'EST PAS annulable. Vérifiez le journal d'application avant toute autre opération.",
     "preview_undo_ready": "Preview undo prêt.",
     "no_reversible_op_available": "Aucune opération réversible disponible.",
     "no_reversible_op_pending": "Aucune opération réversible en attente pour les films sélectionnés.",

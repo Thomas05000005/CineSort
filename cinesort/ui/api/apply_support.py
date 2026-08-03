@@ -2152,7 +2152,16 @@ def _cleanup_apply(
     run_id: str,
     dry_run: bool,
     rows: List[Any],
-) -> Tuple[Dict[str, int], int, int, Dict[str, Any]]:
+) -> Tuple[Dict[str, int], int, int, Dict[str, Any], bool]:
+    """Finalise le batch et resume l'apply.
+
+    Le 5e element du tuple, `journal_finalized`, dit si `close_apply_batch(DONE)`
+    a REELLEMENT abouti. Il vaut False des que la finalisation a echoue : le
+    batch reste alors `PENDING`, donc `get_last_reversible_apply_batch`
+    (filtre `status='DONE'`) ne le verra pas et l'undo de cet apply est perdu.
+    Le caller doit le remonter dans la reponse — un apply destructif dont le
+    filet de securite a disparu ne peut pas etre annonce comme un succes muet.
+    """
     cleanup_diag = result.cleanup_residual_diagnostic if isinstance(result.cleanup_residual_diagnostic, dict) else {}
     skip_reason_order = [
         core.SKIP_REASON_NON_VALIDE,
@@ -2167,6 +2176,7 @@ def _cleanup_apply(
     skip_counts = {reason: int((result.skip_reasons or {}).get(reason, 0)) for reason in skip_reason_order}
     applied_count = int(result.applied_count or 0)
     total_rows = int(result.considered_rows or len(rows))
+    journal_finalized = True
     if apply_batch_id is not None:
         try:
             store.apply.close_apply_batch(
@@ -2193,6 +2203,7 @@ def _cleanup_apply(
             # fond concurrents, disque plein, disk I/O error) s'echappait de
             # _cleanup_apply, faisait remonter un apply REUSSI en HTTP 500 et — en
             # mode atomique — declenchait un rollback destructif.
+            journal_finalized = False
             log_fn(
                 "WARN",
                 f"Journal apply non finalise ({type(exc).__name__}, batch_id={apply_batch_id}) : {exc} "
@@ -2211,6 +2222,12 @@ def _cleanup_apply(
             # public API du module repositories) et on log un WARN explicite :
             # le batch est peut-etre deja finalise ailleurs, l'apply reel a
             # reussi, on preserve la backward compat.
+            #
+            # REVUE ADVERSAIRE PR#852 : ce chemin non plus n'a pas abouti a un
+            # batch `DONE` (transition refusee = batch absent, ou deja dans un
+            # etat terminal non reversible). L'undo n'est donc pas plus arme
+            # ici que dans l'except ci-dessus -> meme drapeau.
+            journal_finalized = False
             log_fn(
                 "WARN",
                 f"Journal apply non finalise (transition d'etat refusee, batch_id={apply_batch_id}) : {exc}",
@@ -2260,7 +2277,7 @@ def _cleanup_apply(
             f"video_blocked={int(cleanup_diag.get('has_video_count') or 0)} "
             f"ambiguous={int(cleanup_diag.get('ambiguous_count') or 0)}",
         )
-    return skip_counts, applied_count, total_rows, cleanup_diag
+    return skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized
 
 
 def _summarize_apply(
@@ -2786,7 +2803,7 @@ def _apply_changes_body(
         op_index = ops
         apply_execution_completed = True
 
-        skip_counts, applied_count, total_rows, cleanup_diag = _cleanup_apply(
+        skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized = _cleanup_apply(
             result,
             apply_batch_id,
             op_index,
@@ -2878,7 +2895,35 @@ def _apply_changes_body(
                 rs.apply_end(error=None)
             except Exception:
                 _log.debug("apply_end OK a echoue", exc_info=True)
-        return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
+        # REVUE ADVERSAIRE PR#852 — le silence etait le vrai defaut.
+        #
+        # Rendre `close_apply_batch` tolerante aux erreurs SQLite (F11) evite de
+        # transformer un apply reussi en HTTP 500 et de declencher un rollback
+        # destructif a tort. Mais elle transforme aussi un apply DONT L'UNDO EST
+        # MORT en un `{"ok": True}` totalement muet : le batch reste `PENDING`,
+        # `get_last_reversible_apply_batch` filtre `status='DONE'`, et
+        # l'utilisateur ne l'apprend qu'en cliquant « Annuler » (message
+        # generique « aucun apply annulable », sans lien avec l'apply qu'on
+        # vient de lui annoncer comme reussi). Un WARN dans le log technique
+        # n'est ni une information utilisateur ni une donnee exploitable par
+        # l'UI. Sur le chemin destructif, perdre l'annulation de 500 films DOIT
+        # etre une donnee de la reponse.
+        #
+        # `undo_available` couvre aussi le cas ou `insert_apply_batch` a echoue
+        # (OSError/TypeError/ValueError -> apply_batch_id None, apply poursuivi
+        # sans journal) et le dry-run (rien a annuler).
+        undo_available = bool(not dry_run and apply_batch_id is not None and journal_finalized)
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "result": result.__dict__,
+            "apply_batch_id": apply_batch_id,
+            "journal_finalized": bool(journal_finalized),
+            "undo_available": undo_available,
+        }
+        if not dry_run and not undo_available:
+            payload["journal_warning"] = t("errors.undo_unavailable_after_apply")
+            log_fn("WARN", payload["journal_warning"])
+        return payload
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
