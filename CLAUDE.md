@@ -159,3 +159,29 @@ produit un backlog de 177 PR et 248 issues.
 
 Detail et historique : `docs/internal/CLAUDE.md` et
 `docs/internal/CLAUDE_HISTORY.md`.
+
+## Dette technique connue
+
+Les chiffres ci-dessous ne se recopient pas : ils se **remesurent**.
+
+```bash
+# Sur Windows, PYTHONIOENCODING=utf-8 est OBLIGATOIRE : le script plante sinon
+# en ecrivant son propre rapport (UnicodeEncodeError cp1252 sur un caractere
+# non-ASCII).
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/measure_codebase_health.py
+```
+
+Mesure du 2026-08-03 : **230 fichiers Python, 91 224 LOC**. Les regles ruff
+tolerees (hors barriere CI) donnent la forme de la dette : `PLR2004` 394
+(constantes magiques), `RUF100` 185 (noqa devenus inutiles), `C901` 168
+(complexite), `PLR0913` 153 (trop de parametres), `BLE001` 41 (except nu).
+Neuf modules depassent 1 000 lignes, tous dans `ui/api/` et `app/` — c'est la
+que la refonte paie le plus. Le plan associe est
+`docs/internal/audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md`.
+
+`tests/test_doc_consistency.py` verifie que cette section reste presente et que
+ce fichier ne revendique pas de note de sante inventee. Il lit **`/CLAUDE.md`**,
+pas `docs/internal/CLAUDE.md` : une refonte de ce fichier qui supprime ces
+references fait echouer la CI — c'est arrive le 2026-08-03, ou la creation de ce
+fichier a transforme 4 tests jusque-la **skippes** (la racine n'avait pas de
+`CLAUDE.md`) en 4 echecs sur `main`.
