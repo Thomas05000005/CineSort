@@ -104,9 +104,7 @@ def test_countdown_3_2_1_lifecycle_three_instants(dashboard_page) -> None:
     assert s_t0["present"] is True, "Modale danger absente apres open."
     assert s_t0["disabled"] is True, "t=0 : bouton confirm devrait etre disabled."
     assert s_t0["spanPresent"] is True, "t=0 : span countdown devrait etre present."
-    assert s_t0["countdownText"] == "(3s)", (
-        f"t=0 : countdown attendu '(3s)', vu {s_t0['countdownText']!r}"
-    )
+    assert s_t0["countdownText"] == "(3s)", f"t=0 : countdown attendu '(3s)', vu {s_t0['countdownText']!r}"
 
     # INSTANT t=1.1s : decrement vers "(2s)".
     dashboard_page.wait_for_timeout(1100)
@@ -114,9 +112,7 @@ def test_countdown_3_2_1_lifecycle_three_instants(dashboard_page) -> None:
     assert s_t1["present"] is True, "t=1 : modale fermee prematurement."
     assert s_t1["disabled"] is True, "t=1 : bouton confirm enabled trop tot."
     assert s_t1["spanPresent"] is True, "t=1 : span countdown disparu trop tot."
-    assert "2" in (s_t1["countdownText"] or ""), (
-        f"t=1 : countdown attendu contient '2', vu {s_t1['countdownText']!r}"
-    )
+    assert "2" in (s_t1["countdownText"] or ""), f"t=1 : countdown attendu contient '2', vu {s_t1['countdownText']!r}"
 
     # INSTANT t=2.1s : decrement vers "(1s)".
     dashboard_page.wait_for_timeout(1000)
@@ -124,27 +120,17 @@ def test_countdown_3_2_1_lifecycle_three_instants(dashboard_page) -> None:
     assert s_t2["present"] is True, "t=2 : modale fermee prematurement."
     assert s_t2["disabled"] is True, "t=2 : bouton confirm enabled trop tot."
     assert s_t2["spanPresent"] is True, "t=2 : span countdown disparu trop tot."
-    assert "1" in (s_t2["countdownText"] or ""), (
-        f"t=2 : countdown attendu contient '1', vu {s_t2['countdownText']!r}"
-    )
+    assert "1" in (s_t2["countdownText"] or ""), f"t=2 : countdown attendu contient '1', vu {s_t2['countdownText']!r}"
 
     # AFTER t=3.3s : countdown atteint 0, bouton enabled, span retire.
     dashboard_page.wait_for_timeout(1200)
     s_end = dashboard_page.evaluate(_JS_PROBE_STATE)
-    assert s_end["present"] is True, (
-        "AFTER : modale fermee toute seule (interdit : l'humain doit decider)."
-    )
-    assert s_end["disabled"] is False, (
-        "AFTER : bouton confirm toujours disabled apres countdown=0."
-    )
-    assert s_end["spanPresent"] is False, (
-        "AFTER : span countdown toujours present apres expiration."
-    )
+    assert s_end["present"] is True, "AFTER : modale fermee toute seule (interdit : l'humain doit decider)."
+    assert s_end["disabled"] is False, "AFTER : bouton confirm toujours disabled apres countdown=0."
+    assert s_end["spanPresent"] is False, "AFTER : span countdown toujours present apres expiration."
 
     # Cleanup : cancel pour fermer la modale et nettoyer l'overlay.
     dashboard_page.evaluate(_JS_CANCEL)
     dashboard_page.wait_for_timeout(150)
     s_closed = dashboard_page.evaluate(_JS_PROBE_STATE)
-    assert s_closed["present"] is False, (
-        "Cleanup : modale toujours presente apres click Annuler (FIGE 1c)."
-    )
+    assert s_closed["present"] is False, "Cleanup : modale toujours presente apres click Annuler (FIGE 1c)."

@@ -174,8 +174,7 @@ def existing_db_fixture(
     src_migrations = (migrations_dir or _project_migrations_dir()).resolve()
     if not src_migrations.is_dir():
         raise FileNotFoundError(
-            f"Migrations dir introuvable: {src_migrations}. "
-            "Specifier migrations_dir explicitement."
+            f"Migrations dir introuvable: {src_migrations}. Specifier migrations_dir explicitement."
         )
 
     tmp_root = Path(tmp_path) if tmp_path is not None else Path(tempfile.mkdtemp(prefix="cinesort_existing_db_"))
@@ -232,8 +231,7 @@ def existing_db_fixture(
         # grace au filtre ci-dessus.
         if final_version > target_schema_version:
             raise AssertionError(
-                f"existing_db_fixture: schema cible {target_schema_version} mais "
-                f"DB est a {final_version} apres apply"
+                f"existing_db_fixture: schema cible {target_schema_version} mais DB est a {final_version} apres apply"
             )
 
     conn = sqlite3.connect(str(db_path))

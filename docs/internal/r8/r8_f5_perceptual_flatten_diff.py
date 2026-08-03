@@ -8,11 +8,15 @@ APRÈS : _flatten_perceptual_for_modal les lève + dérive breakdown des categor
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f5_perceptual_flatten_diff.py
 """
+
 from cinesort.ui.api.perceptual_support import _flatten_perceptual_for_modal
 
 # Rapport DB réaliste (forme _parse_perceptual_row : tout imbriqué).
 report = {
-    "run_id": "r1", "row_id": "x1", "global_tier_v2": "gold", "global_score_v2": 82.0,
+    "run_id": "r1",
+    "row_id": "x1",
+    "global_tier_v2": "gold",
+    "global_score_v2": 82.0,
     "metrics": {
         "grain_analysis": {"verdict_label": "Grain naturel préservé", "verdict": "natural"},
         "video_perceptual": {"resolution": {"width": 3840, "height": 2160}},
@@ -26,6 +30,7 @@ report = {
     },
 }
 
+
 # Ce que la modale lit AVANT le flatten (sur le rapport brut)
 def modal_reads(d):
     return {
@@ -35,20 +40,28 @@ def modal_reads(d):
         "breakdown_len": len(d.get("breakdown") or []),
     }
 
+
 avant = modal_reads(dict(report))  # copie : pas encore aplati
 apres = modal_reads(_flatten_perceptual_for_modal(report))
 
 print("=== Ce que la modale obtient ===")
-print(f"  champ            AVANT                          APRÈS")
+print("  champ            AVANT                          APRÈS")
 print(f"  grain_verdict    {avant['grain']!r:30} {apres['grain']!r}")
 print(f"  width            {avant['width']!r:30} {apres['width']!r}")
 print(f"  display_tier     {avant['display_tier']!r:30} {apres['display_tier']!r}")
 print(f"  breakdown rows   {avant['breakdown_len']!r:30} {apres['breakdown_len']!r}")
-ok = (avant["grain"] == "—" and apres["grain"] != "—"
-      and avant["width"] == 0 and apres["width"] == 3840
-      and avant["breakdown_len"] == 0 and apres["breakdown_len"] == 3)
+ok = (
+    avant["grain"] == "—"
+    and apres["grain"] != "—"
+    and avant["width"] == 0
+    and apres["width"] == 3840
+    and avant["breakdown_len"] == 0
+    and apres["breakdown_len"] == 3
+)
 # Vérifie la forme d'une ligne breakdown (contrat modale : component/weight/value_label/status/points)
 row0 = (_flatten_perceptual_for_modal(report).get("breakdown") or [{}])[0]
 contract_ok = all(k in row0 for k in ("component", "weight", "value_label", "status", "points"))
 print(f"\n  1re ligne breakdown : {row0}")
-print(f"  VERDICT : {'CORRIGE' if ok and contract_ok else 'INCOMPLET'} (codec reste « — » : non stocké dans le rapport perceptuel)")
+print(
+    f"  VERDICT : {'CORRIGE' if ok and contract_ok else 'INCOMPLET'} (codec reste « — » : non stocké dans le rapport perceptuel)"
+)

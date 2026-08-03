@@ -10,7 +10,6 @@ Couvre :
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 import time
@@ -421,9 +420,7 @@ class RateLimitHttpTests(unittest.TestCase):
                 429,
                 f"facade path doit renvoyer 429 quand 10.0.0.42 est sature, got {status_429}",
             )
-            self.assertEqual(
-                retry_after, "60", f"Retry-After=60 attendu (RFC 7231), got {retry_after!r}"
-            )
+            self.assertEqual(retry_after, "60", f"Retry-After=60 attendu (RFC 7231), got {retry_after!r}")
             self.assertIsNotNone(xreq, "X-Request-ID doit etre present sur 429")
         finally:
             _CineSortHandler._client_ip = original_client_ip  # type: ignore[assignment]
