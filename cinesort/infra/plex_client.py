@@ -271,7 +271,16 @@ class PlexClient:
             try:
                 resp = self._get(
                     f"/library/sections/{lid}/all",
-                    params={"type": "1"},
+                    # `includeGuids=1` est INDISPENSABLE : le parsing lit
+                    # `item["Guid"]` pour en extraire le tmdb_id, mais Plex ne
+                    # joint le tableau Guid a un listing de section QUE si ce
+                    # parametre est passe. Sans lui le tmdb_id remontait
+                    # TOUJOURS None et le rapport de sync appariait les films
+                    # sur le seul chemin de fichier.
+                    # Cout mesure : ~+4 % de payload. C'est la pagination
+                    # ci-dessous qui rend cet ajout sans risque — sans elle il
+                    # rapprochait la reponse de la borne des 10 Mo.
+                    params={"type": "1", "includeGuids": "1"},
                     headers={
                         "X-Plex-Container-Start": str(start),
                         "X-Plex-Container-Size": str(_MOVIES_PAGE_SIZE),

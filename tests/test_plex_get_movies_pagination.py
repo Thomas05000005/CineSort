@@ -247,6 +247,26 @@ class PlexLargeLibraryPaginationTests(unittest.TestCase):
         self.assertEqual(starts, sorted(starts), "l'offset doit progresser")
         self.assertEqual(len(set(starts)), len(starts), "aucun offset ne doit etre rejoue")
 
+    def test_include_guids_is_sent_on_every_request(self) -> None:
+        """Sans `includeGuids=1`, Plex ne joint PAS le tableau Guid a un listing.
+
+        Le parsing lit `item["Guid"]` pour en extraire le tmdb_id : sans ce
+        parametre, le champ remontait TOUJOURS None et le rapport de sync
+        appariait les films sur le seul chemin de fichier. C'est un query
+        PARAMETRE (pas un en-tete, contrairement a la pagination).
+        """
+        with patch.object(self.client._session, "get", side_effect=self.server):
+            self.client.get_movies("1")
+        self.assertTrue(self.server.requests)
+        for req in self.server.requests:
+            self.assertEqual(
+                req["params"].get("includeGuids"),
+                "1",
+                f"includeGuids absent de la requete : {req['params']}",
+            )
+            # C'est bien un query param, pas un en-tete.
+            self.assertNotIn("includeGuids", req["headers"])
+
     def test_content_is_complete_and_ordered(self) -> None:
         """La pagination ne doit ni perdre, ni dupliquer, ni desordonner les films."""
         with patch.object(self.client._session, "get", side_effect=self.server):
