@@ -39,8 +39,19 @@ class StaticReadCapTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._tmp = tempfile.mkdtemp(prefix="cinesort_static_cap_")
-        cls.web_root = Path(cls._tmp) / "dashboard"
+        # `.resolve()` obligatoire, pas cosmetique : `_resolve_static_path`
+        # compare `(root / relative).resolve()` a `root` via `relative_to()`, et
+        # les DEUX productions de `_resolve_dashboard_root` renvoient un chemin
+        # deja resolu. Un fixture qui fournirait un chemin non canonique ferait
+        # echouer cette comparaison et rendrait TOUT en 403 — c'est ce qui est
+        # arrive sur le runner Windows de la CI, ou `tempfile` rend un nom court
+        # 8.3 (`C:\Users\RUNNER~1\...`) que `resolve()` reecrit en nom long.
+        cls.web_root = Path(cls._tmp).resolve() / "dashboard"
         cls.web_root.mkdir(parents=True)
+        assert cls.web_root == cls.web_root.resolve(), (
+            "la racine servie doit etre canonique, comme celle que produit "
+            "_resolve_dashboard_root — sinon les 403 masqueraient le plafond teste"
+        )
         cls.small = cls.web_root / "petit.js"
         cls.small.write_bytes(b"// contenu normal\n" * 8)
         cls.big = cls.web_root / "enorme.js"
