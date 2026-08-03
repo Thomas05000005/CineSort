@@ -195,8 +195,7 @@ def _extract_entry_bounded(zf: zipfile.ZipFile, entry: str, dest: Path) -> None:
     info = zf.getinfo(entry)
     if info.file_size > _MAX_UNCOMPRESSED_BYTES:
         raise IntegrityError(
-            f"entree '{entry}' trop volumineuse ({info.file_size} octets decompresses, "
-            f"cap {_MAX_UNCOMPRESSED_BYTES})"
+            f"entree '{entry}' trop volumineuse ({info.file_size} octets decompresses, cap {_MAX_UNCOMPRESSED_BYTES})"
         )
     with zf.open(entry) as src, open(dest, "wb") as dst:
         shutil.copyfileobj(src, dst, length=1 << 20)
