@@ -108,7 +108,20 @@ export function navigateTo(hash) {
 function resolve() {
   const hash = currentHash();
   // Support fragment : /library#step-analyse => base route = /library, fragment = step-analyse
-  const hashBaseLookup = hash.includes("#") ? hash.split("#")[0] : hash;
+  const hashNoFragment = hash.includes("#") ? hash.split("#")[0] : hash;
+  // LOTC-R1 : la query fait partie du hash ("/bibliotheque?filter=x") — sans
+  // strip le lookup echouait -> route inconnue -> rebond /accueil. On matche
+  // SANS la query et on la transmet a init() via opts.query.
+  const queryIdx = hashNoFragment.indexOf("?");
+  const hashBaseLookup = queryIdx >= 0 ? hashNoFragment.slice(0, queryIdx) : hashNoFragment;
+  const queryString = queryIdx >= 0 ? hashNoFragment.slice(queryIdx + 1) : "";
+  let queryParams = null;
+  if (queryString) {
+    queryParams = {};
+    try {
+      for (const [k, v] of new URLSearchParams(queryString)) queryParams[k] = v;
+    } catch { /* query malformee : opts.queryString reste disponible brut */ }
+  }
   let route = _routes.get(hashBaseLookup);
   let routeParams = null;
 
@@ -173,7 +186,8 @@ function resolve() {
   }
 
   // Mettre a jour la nav active (matching par prefixe pour les sous-hash comme /library#step-validation)
-  const hashBase = hash.split("#")[0];
+  // LOTC-R1 : base sans fragment NI query, sinon titre topbar + bouton nav actifs rates.
+  const hashBase = hashBaseLookup;
   $$(".nav-btn").forEach((btn) => {
     const routeAttr = btn.dataset.route || "";
     const isExact = routeAttr === hash;
@@ -224,8 +238,13 @@ function resolve() {
   if (route.init) {
     try {
       const viewEl = $(route.view);
-      const result = routeParams
-        ? route.init(viewEl, { params: routeParams })
+      // LOTC-R1 : opts.query (objet) + opts.queryString (brut) transmis aux
+      // vues cibles (ex: /bibliotheque?filter=... depuis les suggestions accueil).
+      const initOpts = {};
+      if (routeParams) initOpts.params = routeParams;
+      if (queryParams) { initOpts.query = queryParams; initOpts.queryString = queryString; }
+      const result = (routeParams || queryParams)
+        ? route.init(viewEl, initOpts)
         : route.init(viewEl);
       // V2-C R4-MEM-4 : si init retourne une fonction (sync ou async), c'est
       // le cleanup. On le sauvegarde pour appel au prochain navigate. Pour les

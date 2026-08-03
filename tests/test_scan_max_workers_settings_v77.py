@@ -70,9 +70,7 @@ class ScanMaxWorkersSetManualTests(unittest.TestCase):
     def test_set_manual_8_persists(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_manual_") as tmp:
             state_dir = Path(tmp)
-            result = settings_support.set_scan_max_workers_payload(
-                state_dir, mode="manual", value=8
-            )
+            result = settings_support.set_scan_max_workers_payload(state_dir, mode="manual", value=8)
             self.assertTrue(result["ok"])
             self.assertEqual(result["mode"], "manual")
             self.assertEqual(result["value"], 8)
@@ -90,9 +88,7 @@ class ScanMaxWorkersSetManualTests(unittest.TestCase):
     def test_set_manual_max_64_passes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_manual_max_") as tmp:
             state_dir = Path(tmp)
-            result = settings_support.set_scan_max_workers_payload(
-                state_dir, mode="manual", value=64
-            )
+            result = settings_support.set_scan_max_workers_payload(state_dir, mode="manual", value=64)
             self.assertTrue(result["ok"])
             self.assertEqual(result["value"], 64)
 
@@ -114,47 +110,35 @@ class ScanMaxWorkersValidationErrorTests(unittest.TestCase):
 
     def test_invalid_mode_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_inv_mode_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="cluster", value=4
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="cluster", value=4)
             self.assertFalse(result.get("ok"))
             self.assertIn("invalide", result.get("message", "").lower())
 
     def test_manual_without_value_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_no_val_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="manual", value=None
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="manual", value=None)
             self.assertFalse(result.get("ok"))
 
     def test_manual_value_too_low_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_low_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="manual", value=0
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="manual", value=0)
             self.assertFalse(result.get("ok"))
 
     def test_manual_value_too_high_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_high_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="manual", value=100
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="manual", value=100)
             self.assertFalse(result.get("ok"))
 
     def test_manual_value_non_numeric_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_nonint_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="manual", value="abc"
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="manual", value="abc")
             self.assertFalse(result.get("ok"))
 
     def test_manual_value_bool_rejected(self) -> None:
         """bool est sous-classe d'int : on rejette explicitement pour eviter
         True -> 1 silencieux."""
         with tempfile.TemporaryDirectory(prefix="vob_cfg_bool_") as tmp:
-            result = settings_support.set_scan_max_workers_payload(
-                Path(tmp), mode="manual", value=True
-            )
+            result = settings_support.set_scan_max_workers_payload(Path(tmp), mode="manual", value=True)
             self.assertFalse(result.get("ok"))
 
 
@@ -164,9 +148,7 @@ class ScanMaxWorkersAutoSynergyVOATests(unittest.TestCase):
     def test_auto_local_ssd_returns_8_workers(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_synergy_ssd_") as tmp:
             state_dir = Path(tmp)
-            with mock.patch.object(
-                settings_support, "_detect_storage_profile", return_value="local_ssd"
-            ):
+            with mock.patch.object(settings_support, "_detect_storage_profile", return_value="local_ssd"):
                 payload = settings_support.get_scan_max_workers_payload(state_dir)
                 self.assertEqual(payload["mode"], "auto")
                 self.assertEqual(payload["storage_detected"], "local_ssd")
@@ -176,9 +158,7 @@ class ScanMaxWorkersAutoSynergyVOATests(unittest.TestCase):
     def test_auto_nas_smb_returns_4_workers(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_cfg_synergy_nas_") as tmp:
             state_dir = Path(tmp)
-            with mock.patch.object(
-                settings_support, "_detect_storage_profile", return_value="nas_smb"
-            ):
+            with mock.patch.object(settings_support, "_detect_storage_profile", return_value="nas_smb"):
                 payload = settings_support.get_scan_max_workers_payload(state_dir)
                 self.assertEqual(payload["mode"], "auto")
                 self.assertEqual(payload["storage_detected"], "nas_smb")
@@ -190,9 +170,7 @@ class ScanMaxWorkersAutoSynergyVOATests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="vob_cfg_resolve_") as tmp:
             state_dir = Path(tmp)
             # Pas de settings.json ecrit -> defaut auto
-            with mock.patch.object(
-                settings_support, "_detect_storage_profile", return_value="local_ssd"
-            ):
+            with mock.patch.object(settings_support, "_detect_storage_profile", return_value="local_ssd"):
                 effective = settings_support.resolve_effective_scan_max_workers(state_dir)
                 self.assertEqual(effective, 8)
 
@@ -263,9 +241,7 @@ class ScanMaxWorkersBuildCfgIntegrationTests(unittest.TestCase):
             "scan_max_workers_mode": "auto",
             "scan_max_workers_value": 1,
         }
-        with mock.patch.object(
-            settings_support, "_detect_storage_profile", return_value="local_ssd"
-        ):
+        with mock.patch.object(settings_support, "_detect_storage_profile", return_value="local_ssd"):
             cfg = settings_support.build_cfg_from_settings(
                 settings,
                 root=Path("/tmp/library"),
@@ -276,9 +252,7 @@ class ScanMaxWorkersBuildCfgIntegrationTests(unittest.TestCase):
             )
         self.assertEqual(cfg.scan_max_workers, 8)
 
-        with mock.patch.object(
-            settings_support, "_detect_storage_profile", return_value="nas_smb"
-        ):
+        with mock.patch.object(settings_support, "_detect_storage_profile", return_value="nas_smb"):
             cfg = settings_support.build_cfg_from_settings(
                 settings,
                 root=Path("/tmp/library"),

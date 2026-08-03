@@ -17,6 +17,7 @@ Chaque bloc imprime :
   - le SET en ecart (manquantes cote producer)
   - une GATE de falsifiabilite : si la cle existait cote producer, l'ecart serait vide
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -224,7 +225,7 @@ top_level_film = set(_toplevel_dict_keys(_slice("cinesort/ui/api/film_support.py
 emit(
     "F-V8-FILMVIEW-DIR",
     consumer={"director(candidates[0])"},
-    producer={f"director(top-level)" if "director" in top_level_film else "director(ABSENT)"},
+    producer={"director(top-level)" if "director" in top_level_film else "director(ABSENT)"},
     mismatch={"candidates[0].director != data.director"},
     broken=(
         "Hero fiche film lit candidates[0]?.director (L137) — toujours undefined "
@@ -361,6 +362,7 @@ emit(
     extra={"backend_files_with_winner_decided": winner_decided_hits},
 )
 
+
 # ===========================================================================
 # F-V9-DUP-UNITS : 3 formatters de taille divergents (labels Mo/Go vs Mio/Gio
 # vs delegation core/format).
@@ -371,8 +373,14 @@ def _grab_fmt(rel: str, anchor_line: int):
     labels = re.findall(r'`?\$\{[^}]*\}\s*(Mi?o|Gi?o)`|"(Mi?o|Gi?o)"|(Mi?o|Gi?o)`', chunk)
     flat = sorted({x for tup in labels for x in tup if x})
     deleg = "fmtBytes" in chunk or "_fmtBytesShared" in chunk
-    return {"anchor": f"{rel}:{anchor_line}", "labels": flat, "delegates_to_shared": deleg,
-            "snippet": ls[anchor_line - 1].strip()[:80]}
+    return {
+        "anchor": f"{rel}:{anchor_line}",
+        "labels": flat,
+        "delegates_to_shared": deleg,
+        "snippet": ls[anchor_line - 1].strip()[:80],
+    }
+
+
 fmt1 = _grab_fmt(DB, 100)
 fmt2 = _grab_fmt("web/dashboard/components/duplicate-comparator-modal.js", 57)
 fmt3 = _grab_fmt("web/dashboard/views/library/lib-duplicates.js", 215)
@@ -506,8 +514,11 @@ emit(
         _verify("cinesort/domain/librarian.py", 168, '"id": "missing_subtitles"'),
         _verify("cinesort/domain/librarian.py", 189, '"id": "unidentified"'),
     ],
-    extra={"librarian_ids": sorted(lib_ids), "front_route_keys": sorted(route_keys),
-           "intersection": sorted(route_keys & lib_ids)},
+    extra={
+        "librarian_ids": sorted(lib_ids),
+        "front_route_keys": sorted(route_keys),
+        "intersection": sorted(route_keys & lib_ids),
+    },
 )
 
 # ===========================================================================
@@ -535,8 +546,7 @@ emit(
         _verify("cinesort/ui/api/dashboard_support.py", 1726, "emit_from_insights"),
         _verify("cinesort/ui/api/dashboard_support.py", 1711, "_compute_active_insights"),
     ],
-    extra={"insights_emit_code_literal": insight_has_code,
-           "insights_emit_type": sorted(insight_types)},
+    extra={"insights_emit_code_literal": insight_has_code, "insights_emit_type": sorted(insight_types)},
 )
 
 # ===========================================================================
@@ -546,8 +556,14 @@ emit(
 snap_src = _slice("cinesort/app/plan_support_core.py", 168, 182)
 snap_keys = set(re.findall(r'"([a-z_]+)":', snap_src))
 stats_fields = {f.name for f in dataclasses.fields(core.Stats)}
-expected_diag = {"films_rejected_ext", "films_rejected_size", "films_rejected_name",
-                 "root_level_films_seen", "tv_episodes_seen", "folders_rejected_scandir_error"}
+expected_diag = {
+    "films_rejected_ext",
+    "films_rejected_size",
+    "films_rejected_name",
+    "root_level_films_seen",
+    "tv_episodes_seen",
+    "folders_rejected_scandir_error",
+}
 omitted = expected_diag - snap_keys
 # tous existent bien sur le dataclass ?
 on_dataclass = expected_diag & stats_fields
@@ -638,11 +654,18 @@ emit(
 # ===========================================================================
 summary = {fid: {"mismatch": b["mismatch_consumer_minus_producer"]} for fid, b in results.items()}
 print("=" * 78)
-print("RESUME:", json.dumps({
-    "findings": list(results.keys()),
-    "all_have_nonempty_mismatch": all(
-        b["mismatch_consumer_minus_producer"] for fid, b in results.items()
-        if fid not in ("F-V9-DUP-SCALE", "F-V9-DUP-UNITS", "F-V8-FILMVIEW-DIR")
+print(
+    "RESUME:",
+    json.dumps(
+        {
+            "findings": list(results.keys()),
+            "all_have_nonempty_mismatch": all(
+                b["mismatch_consumer_minus_producer"]
+                for fid, b in results.items()
+                if fid not in ("F-V9-DUP-SCALE", "F-V9-DUP-UNITS", "F-V8-FILMVIEW-DIR")
+            ),
+            "per_finding_mismatch": summary,
+        },
+        ensure_ascii=False,
     ),
-    "per_finding_mismatch": summary,
-}, ensure_ascii=False))
+)

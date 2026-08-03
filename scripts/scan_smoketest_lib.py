@@ -6,6 +6,7 @@ brackets {tmdb-...} / [imdbid-...], long path).
 Pour eviter de cogner avec l'instance CineSort deja lancee qui tient le
 state_dir par defaut, on utilise un state_dir isole sous %TEMP%.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ from pathlib import Path
 # fallback errors="replace" garantit qu'un caractere non encodable ne fait
 # pas planter le script (cas observe L96 avec "—").
 for _stream in (sys.stdout, sys.stderr):
-    try:
+    try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
         _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     except (AttributeError, ValueError):
         pass
@@ -31,6 +32,8 @@ sys.path.insert(0, str(ROOT))
 
 # Avant import : activer mode E2E pour pouvoir baisser MIN_VIDEO_BYTES.
 os.environ["CINESORT_E2E"] = "1"
+
+import contextlib
 
 import cinesort.domain.core as _core  # noqa: E402
 from cinesort.ui.api.cinesort_api import CineSortApi  # noqa: E402
@@ -111,9 +114,21 @@ elapsed = time.monotonic() - t0
 print("[smoketest] ====== DASHBOARD ======")
 dash = api.run.get_dashboard(run_id)
 # Print only KPI-ish fields
-keep_keys = ["ok", "mode", "kpis", "summary", "tier_counts", "anomaly_counts",
-             "quality_counts", "validated_count", "rejected_count", "total",
-             "scan_root", "run_id", "run_status"]
+keep_keys = [
+    "ok",
+    "mode",
+    "kpis",
+    "summary",
+    "tier_counts",
+    "anomaly_counts",
+    "quality_counts",
+    "validated_count",
+    "rejected_count",
+    "total",
+    "scan_root",
+    "run_id",
+    "run_status",
+]
 slim = {k: dash.get(k) for k in keep_keys if k in dash}
 print(json.dumps(slim, ensure_ascii=False, indent=2, default=str)[:4000])
 
@@ -122,14 +137,12 @@ run_dir = resp.get("run_dir")
 plan_jsonl = Path(run_dir) / "plan.jsonl" if run_dir else None
 if plan_jsonl and plan_jsonl.exists():
     plan_rows = []
-    with open(plan_jsonl, "r", encoding="utf-8") as f:
+    with open(plan_jsonl, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
-                try:
+                with contextlib.suppress(Exception):
                     plan_rows.append(json.loads(line))
-                except Exception:
-                    pass
     print(f"[smoketest] plan.jsonl rows: {len(plan_rows)}")
     # Sample 5 paths to detect unicode handling
     print("[smoketest] sample film paths from plan:")
