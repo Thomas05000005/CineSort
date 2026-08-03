@@ -140,9 +140,7 @@ def _check_status(status: int, op: str) -> None:
     """Convertit un SECURITY_STATUS != 0 en exception lisible."""
     if status != 0:
         # SECURITY_STATUS est un HRESULT-like ; on l'expose tel quel.
-        raise DpapiNgOperationError(
-            f"{op} a echoue (NTSTATUS=0x{status & 0xFFFFFFFF:08X})"
-        )
+        raise DpapiNgOperationError(f"{op} a echoue (NTSTATUS=0x{status & 0xFFFFFFFF:08X})")
 
 
 def protect_dpapi_ng(plaintext: bytes) -> bytes:
@@ -169,9 +167,7 @@ def protect_dpapi_ng(plaintext: bytes) -> bytes:
     ncrypt, kernel32 = _load_ncrypt()
 
     descriptor = ctypes.c_void_p()
-    status = ncrypt.NCryptCreateProtectionDescriptor(
-        _NCRYPT_DESCRIPTOR_LOCAL_USER, 0, ctypes.byref(descriptor)
-    )
+    status = ncrypt.NCryptCreateProtectionDescriptor(_NCRYPT_DESCRIPTOR_LOCAL_USER, 0, ctypes.byref(descriptor))
     _check_status(status, "NCryptCreateProtectionDescriptor")
 
     try:
@@ -227,13 +223,12 @@ def unprotect_dpapi_ng(ciphertext: bytes) -> bytes:
         raise TypeError("ciphertext doit etre bytes")
     if not is_dpapi_ng_blob(ciphertext):
         raise ValueError(
-            "Blob non-NG : magic CINESORT_DPAPI_NG absent, "
-            "utiliser local_secret_store.unprotect_secret() pour legacy."
+            "Blob non-NG : magic CINESORT_DPAPI_NG absent, utiliser local_secret_store.unprotect_secret() pour legacy."
         )
 
     ncrypt, kernel32 = _load_ncrypt()
 
-    payload = bytes(ciphertext[len(CINESORT_DPAPI_NG_MAGIC):])
+    payload = bytes(ciphertext[len(CINESORT_DPAPI_NG_MAGIC) :])
     if payload:
         buf = (ctypes.c_ubyte * len(payload)).from_buffer_copy(payload)
         in_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte))

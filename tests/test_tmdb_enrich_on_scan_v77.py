@@ -47,9 +47,7 @@ class TmdbEnrichOnScanTests(unittest.TestCase):
 
         with mock.patch.object(tmdb_support, "enrich_tmdb_ids_by_title", side_effect=fake_enrich):
             api = CineSortApi()
-            st = api.run.start_plan(
-                {"root": str(self.root), "state_dir": str(self.sd), "tmdb_enabled": tmdb_enabled}
-            )
+            st = api.run.start_plan({"root": str(self.root), "state_dir": str(self.sd), "tmdb_enabled": tmdb_enabled})
             self.assertTrue(st.get("ok"), st)
             _wait_done(api, str(st["run_id"]))
             # Le hook tourne en thread daemon : laisser converger.

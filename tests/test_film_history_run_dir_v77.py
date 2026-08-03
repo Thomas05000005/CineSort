@@ -76,10 +76,19 @@ class FilmHistoryRunDirTests(unittest.TestCase):
         )
 
     def test_timeline_found_in_prefixed_dir(self) -> None:
-        self._write_prefixed_plan("run1", [{
-            "row_id": "S|1", "proposed_title": "Inception", "proposed_year": 2010,
-            "candidates": [{"tmdb_id": 27205}], "confidence": 90, "proposed_source": "tmdb",
-        }])
+        self._write_prefixed_plan(
+            "run1",
+            [
+                {
+                    "row_id": "S|1",
+                    "proposed_title": "Inception",
+                    "proposed_year": 2010,
+                    "candidates": [{"tmdb_id": 27205}],
+                    "confidence": 90,
+                    "proposed_source": "tmdb",
+                }
+            ],
+        )
         store = _FakeStore(runs=[{"run_id": "run1", "status": "DONE", "start_ts": 1000, "created_ts": 1000}])
         result = get_film_timeline("tmdb:27205", self.state_dir, store)
         self.assertEqual(result["scan_count"], 1, "le plan.jsonl du dossier tri_films_ doit etre trouve")

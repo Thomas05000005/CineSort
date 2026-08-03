@@ -29,13 +29,13 @@ class BibliothequeCompareActionTests(unittest.TestCase):
         body = m.group(1)
         self.assertIn("openDuplicateComparatorModal(", body)
         self.assertIn("readOnly: true", body)
-        self.assertNotIn('window.location.hash = "#/doublons"', body,
-                         "compare ne doit plus se limiter a naviguer vers #/doublons.")
+        self.assertNotIn(
+            'window.location.hash = "#/doublons"', body, "compare ne doit plus se limiter a naviguer vers #/doublons."
+        )
 
     def test_compare_guards_min_two(self) -> None:
         m = re.search(r'if \(action === "compare"\) \{(.+?)\n  \}', self.js, re.DOTALL)
-        self.assertIn("selectedRows.length < 2", m.group(1),
-                      "garde : au moins 2 films requis pour comparer.")
+        self.assertIn("selectedRows.length < 2", m.group(1), "garde : au moins 2 films requis pour comparer.")
 
 
 if __name__ == "__main__":

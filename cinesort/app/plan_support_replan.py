@@ -28,6 +28,7 @@ from cinesort.domain.integrity_check import check_header
 from cinesort.domain.runtime_matching import score_runtime_delta
 from cinesort.domain.scan_helpers import _NOT_A_MOVIE_THRESHOLD, not_a_movie_score
 from cinesort.domain.subtitle_helpers import build_subtitle_report
+from cinesort.domain.title_helpers import strip_provider_tags
 from cinesort.domain.tv_helpers import parse_tv_info
 from cinesort.infra.tmdb_client import TmdbClient
 
@@ -230,7 +231,16 @@ def _build_unresolved_row(
     # Alerte "Annee introuvable" DETERMINISTE au plan : proposed_year = name_year or 0.
     _apply_year_missing_flag(warning_flags, name_year or 0)
     note = f"{note} Impossible de determiner un titre+annee fiables."
-    fallback_title = (core_mod.clean_title_guess(video.name) or video.stem) if is_collection else folder_name
+    # F02 (revue adversaire R1) : le repli sur le nom de dossier BRUT laissait
+    # fuiter les tags providers ("Avatar {tmdb-19995}") dans proposed_title, donc
+    # dans la cle d'identite/dedup ET dans le nom de dossier propose a l'apply.
+    # Cette voie est devenue nominale depuis que l'annee n'est plus extraite des
+    # chiffres d'un tag : sans annee fiable, la row bascule ici.
+    fallback_title = (
+        (core_mod.clean_title_guess(video.name) or video.stem)
+        if is_collection
+        else (strip_provider_tags(folder_name).strip() or folder_name)
+    )
     return core_mod.PlanRow(
         row_id=row_id,
         kind=kind,
@@ -468,6 +478,104 @@ def _apply_subtitle_detection(
         result_row.warning_flags.append("subtitle_duplicate_lang")
 
 
+# F09 (revue post-merge 2026-07-18) : flags DERIVES du rapport sous-titres, en
+# plus du prefixe `subtitle_missing_*`. Recenses par grep exhaustif : seul
+# _apply_subtitle_detection (juste au-dessus) les POSE au stade plan ; les
+# consommateurs aval (run_read_support, duplicate_support, history_support) ne
+# font qu'en RETIRER a la lecture. La purge de refresh est donc bornee a ces 3
+# familles et ne peut pas effacer le flag d'un autre producteur.
+_SUBTITLE_DERIVED_FLAGS = frozenset({"subtitle_orphan", "subtitle_duplicate_lang"})
+
+# F09 / revue adverse : flags que le chemin de SCAN A FROID pose APRES les flags
+# sous-titres (_plan_item : _apply_subtitle_detection puis _apply_not_a_movie_detection
+# puis _apply_integrity_check). Ils servent d'ancre pour reinserer les flags
+# recalcules a leur position d'origine : sans cela une meme row n'a pas la meme
+# serialisation selon qu'elle vient du cache row ou d'un scan a froid
+# (plan.jsonl non idempotent, chips d'alerte dans un ordre different — le
+# dashboard fait un '|'.join sans tri).
+_POST_SUBTITLE_FLAGS = ("not_a_movie", "integrity_header_invalid")
+
+
+def _is_subtitle_flag(flag: Any) -> bool:
+    """True pour les flags produits par `_apply_subtitle_detection`."""
+    text = str(flag)
+    return text.startswith("subtitle_missing_") or text in _SUBTITLE_DERIVED_FLAGS
+
+
+def _refresh_subtitle_detection(
+    folder: Path,
+    video: Path,
+    cached_row: "PlanRow",
+    *,
+    subtitle_expected_languages: Optional[List[str]],
+) -> None:
+    """Recalcule les infos sous-titres d'une row servie par le cache row v2.
+
+    F09 : la cle de validite du cache row (taille/mtime/hash video + nfo_sig +
+    kind + cfg_sig) ne reflete AUCUN fichier .srt voisin. Ajouter ou retirer un
+    sous-titre externe laissait donc la row cachee avec ses anciens
+    `subtitle_missing_*` / `subtitle_languages` — et persist_folder_cache
+    refigeait ensuite cette row perimee sous la nouvelle folder_sig, rendant la
+    staleness PERMANENTE.
+
+    On ne touche PAS a la cle du cache (cela forcerait un recalcul NFO/TMDb
+    complet, donc du reseau, pour un simple .srt ajoute) : on recalcule
+    uniquement la partie sous-titres, qui ne coute qu'un `iterdir()` local.
+
+    La purge des anciens flags AVANT recalcul est obligatoire :
+    `_apply_subtitle_detection` ne fait qu'APPEND, un flag perime resterait
+    colle. Si `subtitle_expected_languages is None` (detection desactivee), on
+    ne touche a rien — parite exacte avec le chemin de scan.
+
+    Revue adverse : purger puis laisser re-APPEND en fin de liste donnait a une
+    meme row deux serialisations differentes selon qu'elle venait du cache row
+    ou d'un scan a froid (['integrity_header_invalid', 'subtitle_missing_fr']
+    contre ['subtitle_missing_fr', 'integrity_header_invalid']). On reinsere
+    donc les flags recalcules a leur POSITION D'ORIGINE.
+    """
+    if subtitle_expected_languages is None:
+        return
+    existing_flags = list(getattr(cached_row, "warning_flags", None) or [])
+
+    # Position, dans la liste PURGEE, ou le scan a froid aurait pose les flags
+    # sous-titres : celle qu'ils occupaient deja, sinon juste avant le premier
+    # flag que le scan a froid pose apres eux.
+    insert_at: Optional[int] = None
+    kept: List[Any] = []
+    for flag in existing_flags:
+        if _is_subtitle_flag(flag):
+            if insert_at is None:
+                insert_at = len(kept)
+        else:
+            kept.append(flag)
+    if insert_at is None:
+        insert_at = next(
+            (idx for idx, flag in enumerate(kept) if str(flag) in _POST_SUBTITLE_FLAGS),
+            len(kept),
+        )
+
+    # `list(kept)` et non `kept` : _apply_subtitle_detection append IN PLACE, et
+    # un alias fausserait la decoupe `[kept_len:]` ci-dessous.
+    kept_len = len(kept)
+    cached_row.warning_flags = list(kept)
+    cached_row.subtitle_count = 0
+    cached_row.subtitle_languages = []
+    cached_row.subtitle_formats = []
+    cached_row.subtitle_missing_langs = []
+    cached_row.subtitle_orphans = 0
+    _apply_subtitle_detection(
+        folder,
+        video,
+        cached_row,
+        subtitle_expected_languages=subtitle_expected_languages,
+    )
+    # `_apply_subtitle_detection` n'a fait qu'APPEND (aucun flag sous-titre ne
+    # restait dans `kept`) : la queue de la liste est exactement le recalcul.
+    new_flags = cached_row.warning_flags[kept_len:]
+    if new_flags:
+        cached_row.warning_flags = kept[:insert_at] + new_flags + kept[insert_at:]
+
+
 def _apply_not_a_movie_detection(video: Path, result_row: "PlanRow") -> None:
     """Pose le flag 'not_a_movie' si l'heuristique depasse le seuil."""
 
@@ -603,6 +711,15 @@ def _plan_item(
         row_cache_stats=row_cache_stats,
     )
     if cached_row is not None:
+        # F09 : la row cachee est un objet FRAIS (plan_row_from_jsonable), donc
+        # cette mutation n'est partagee avec personne. Voir
+        # _refresh_subtitle_detection pour le detail du defaut corrige.
+        _refresh_subtitle_detection(
+            folder,
+            video,
+            cached_row,
+            subtitle_expected_languages=subtitle_expected_languages,
+        )
         return [cached_row]
 
     # AUDIT 2026-06-11 (R3e, gap[3]) : si une racine biblio explicite est

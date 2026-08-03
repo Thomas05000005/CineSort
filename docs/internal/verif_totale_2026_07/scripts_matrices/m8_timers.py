@@ -339,8 +339,7 @@ def analyze():
                 once = re.search(r"\bonce\s*:\s*true", zone) is not None
                 signal = re.search(r"\bsignal\s*[:,]", zone) is not None
                 removed = [
-                    r for r in removes
-                    if r[1] == event and (anon or r[2].split(".")[-1] == handler.split(".")[-1])
+                    r for r in removes if r[1] == event and (anon or r[2].split(".")[-1] == handler.split(".")[-1])
                 ]
                 boot = (not chain) or (top_fn and is_boot_once(top_fn, defs, sites))
                 guarded = has_guard(jsf, chain, i)
@@ -367,7 +366,10 @@ def analyze():
                     note = ["garde idempotente detectee dans %s() (flag/singleton)" % ctx_fn]
                 elif removed and anon:
                     verdict = "PROPRE"
-                    note = ["removeEventListener '%s' @ L%s (handler stocke)" % (event, ",".join(str(r[3]) for r in removed))]
+                    note = [
+                        "removeEventListener '%s' @ L%s (handler stocke)"
+                        % (event, ",".join(str(r[3]) for r in removed))
+                    ]
                 elif ckind in ("vue", "composant") and any(MOUNT_FN.match(c[0]) for c in chain):
                     verdict = "EMPILEMENT"
                     note = ["ajoute via %s() a chaque mount, aucun removeEventListener '%s' ni garde" % (ctx_fn, event)]
@@ -376,15 +378,23 @@ def analyze():
                     note = ["pose dans %s(), jamais retire (handler %s)" % (ctx_fn, "anonyme" if anon else handler)]
                 if dead:
                     note.append("CODE MORT : fichier non importe (jamais charge en runtime)")
-                entries.append({
-                    "fichier": "web/dashboard/" + rel, "ligne": lineno,
-                    "type": "addEventListener", "cible": target, "evenement": event,
-                    "contexte": ckind, "fonction": ctx_fn,
-                    "handle": None if anon else handler,
-                    "boot_once": bool(boot), "code_mort": dead,
-                    "cleanup": "; ".join(note), "verdict": verdict,
-                    "code": ln.strip()[:160],
-                })
+                entries.append(
+                    {
+                        "fichier": "web/dashboard/" + rel,
+                        "ligne": lineno,
+                        "type": "addEventListener",
+                        "cible": target,
+                        "evenement": event,
+                        "contexte": ckind,
+                        "fonction": ctx_fn,
+                        "handle": None if anon else handler,
+                        "boot_once": bool(boot),
+                        "code_mort": dead,
+                        "cleanup": "; ".join(note),
+                        "verdict": verdict,
+                        "code": ln.strip()[:160],
+                    }
+                )
 
             # ---------- timers ----------
             for m in RE_TIMER.finditer(ln):
@@ -407,14 +417,15 @@ def analyze():
                 if handle:
                     tok = handle_token(handle)
                     cleared = [c for c in clears if handle_token(c[1]) == tok]
-                cleared_in_unmount = any(
-                    any(span <= c[2] <= span + 40 for span in unmount_spans.values()) for c in cleared
-                )
+                any(any(span <= c[2] <= span + 40 for span in unmount_spans.values()) for c in cleared)
                 boot = (not chain) or (top_fn and is_boot_once(top_fn, defs, sites))
                 guarded = has_guard(jsf, chain, i)
                 self_guard = bool(re.search(r"==\s*null\s*\)\s*return|\.isConnected", zone))
-                raf_self_clear = kind == "requestAnimationFrame" and handle and re.search(
-                    re.escape(handle_token(handle)) + r"\s*=\s*null", zone)
+                raf_self_clear = (
+                    kind == "requestAnimationFrame"
+                    and handle
+                    and re.search(re.escape(handle_token(handle)) + r"\s*=\s*null", zone)
+                )
                 revoke_only = "revokeObjectURL" in zone and kind == "setTimeout"
 
                 verdict, note = None, []
@@ -422,7 +433,9 @@ def analyze():
                     verdict, note = "PROPRE", ["fichier de test, hors bundle runtime"]
                 elif registry:
                     verdict = "PROPRE"
-                    note = ["handle stocke dans un registre central + clear via le registre (stopPolling/stopAllPolling)"]
+                    note = [
+                        "handle stocke dans un registre central + clear via le registre (stopPolling/stopAllPolling)"
+                    ]
                 elif kind == "setInterval":
                     if handle and cleared:
                         verdict = "PROPRE"
@@ -481,16 +494,20 @@ def analyze():
                             note = ["clear @ L%s" % ",".join(str(c[2]) for c in cleared)]
                         elif "localStorage.setItem" in zone8 and not touches_state:
                             verdict = "PROPRE"
-                            note = ["debounce cleare avant re-set (L%s) ; le callback persiste en localStorage "
-                                    "(ecriture voulue meme apres unmount), aucun acces DOM"
-                                    % ",".join(str(c[2]) for c in cleared)]
+                            note = [
+                                "debounce cleare avant re-set (L%s) ; le callback persiste en localStorage "
+                                "(ecriture voulue meme apres unmount), aucun acces DOM"
+                                % ",".join(str(c[2]) for c in cleared)
+                            ]
                         elif ckind in ("vue", "composant") and not touches_state and delay is not None and delay <= 500:
                             verdict = "PROPRE"
                             note = ["debounce court (%dms) idempotent, sans acces a l'etat de vue" % delay]
                         elif ckind in ("vue", "composant"):
                             verdict = "RACE"
-                            note = ["debounce cleare avant re-set (L%s) mais pas au unmount -> le callback peut ecrire apres unmount"
-                                    % ",".join(str(c[2]) for c in cleared)]
+                            note = [
+                                "debounce cleare avant re-set (L%s) mais pas au unmount -> le callback peut ecrire apres unmount"
+                                % ",".join(str(c[2]) for c in cleared)
+                            ]
                         else:
                             verdict = "PROPRE"
                             note = ["debounce module page-lifetime (contexte %s)" % ckind]
@@ -506,7 +523,10 @@ def analyze():
                             note = ["one-shot, delai non detecte (probablement court)"]
                         else:
                             verdict = "RACE"
-                            note = ["one-shot %dms non stocke/cleare : le callback peut toucher DOM/etat apres unmount" % delay]
+                            note = [
+                                "one-shot %dms non stocke/cleare : le callback peut toucher DOM/etat apres unmount"
+                                % delay
+                            ]
                     else:
                         verdict = "PROPRE"
                         note = ["one-shot contexte %s (page-lifetime)" % ckind]
@@ -519,19 +539,29 @@ def analyze():
                         note.append("gravite moyenne : le callback touche l'etat module/rendu de la vue")
                     else:
                         gravite = "faible"
-                        note.append("gravite faible : ecrit seulement du texte/classe sur un noeud (detache apres unmount, sans crash)")
+                        note.append(
+                            "gravite faible : ecrit seulement du texte/classe sur un noeud (detache apres unmount, sans crash)"
+                        )
 
                 # Escalade : le seul vrai teardown vit dans un unmount jamais cable au router
                 if verdict == "PROPRE" and cleared and unwired and (recursive or kind == "setInterval"):
                     in_unwired = [
-                        c for c in cleared
-                        if any(unmount_spans.get(u, -10 ** 9) <= c[2] <= unmount_spans.get(u, -10 ** 9) + 40 for u in unwired)
+                        c
+                        for c in cleared
+                        if any(
+                            unmount_spans.get(u, -(10**9)) <= c[2] <= unmount_spans.get(u, -(10**9)) + 40
+                            for u in unwired
+                        )
                     ]
                     resets = [c for c in cleared if c not in in_unwired]
-                    resets_are_local = all(
-                        (jsf.enclosing_chain(c[2] - 1) and top_fn in {x[0] for x in jsf.enclosing_chain(c[2] - 1)})
-                        for c in resets
-                    ) if resets else True
+                    resets_are_local = (
+                        all(
+                            (jsf.enclosing_chain(c[2] - 1) and top_fn in {x[0] for x in jsf.enclosing_chain(c[2] - 1)})
+                            for c in resets
+                        )
+                        if resets
+                        else True
+                    )
                     if in_unwired and resets_are_local:
                         verdict = "FUITE"
                         note.append(
@@ -541,20 +571,28 @@ def analyze():
                 if dead:
                     note.append("CODE MORT : fichier non importe (jamais charge en runtime)")
 
-                entries.append({
-                    "fichier": "web/dashboard/" + rel, "ligne": lineno,
-                    "type": kind, "cible": None, "evenement": None,
-                    "contexte": ckind, "fonction": ctx_fn,
-                    "handle": handle, "delai_ms": delay, "recursif": recursive,
-                    "boot_once": bool(boot), "code_mort": dead, "gravite": gravite,
-                    "cleanup": "; ".join(note), "verdict": verdict,
-                    "code": ln.strip()[:160],
-                })
+                entries.append(
+                    {
+                        "fichier": "web/dashboard/" + rel,
+                        "ligne": lineno,
+                        "type": kind,
+                        "cible": None,
+                        "evenement": None,
+                        "contexte": ckind,
+                        "fonction": ctx_fn,
+                        "handle": handle,
+                        "delai_ms": delay,
+                        "recursif": recursive,
+                        "boot_once": bool(boot),
+                        "code_mort": dead,
+                        "gravite": gravite,
+                        "cleanup": "; ".join(note),
+                        "verdict": verdict,
+                        "code": ln.strip()[:160],
+                    }
+                )
 
-    all_dead = sorted(
-        "web/dashboard/" + rel for rel in files
-        if not rel.startswith("tests/") and rel not in reachable
-    )
+    all_dead = sorted("web/dashboard/" + rel for rel in files if not rel.startswith("tests/") and rel not in reachable)
     return entries, all_dead, unmounts_wired
 
 
@@ -581,14 +619,14 @@ def main():
         "R8-083_poll_processing": {
             "statut": "CONFIRME (toujours present)",
             "detail": "app.js:287 registre la route /processing avec init: initProcessing (async, ne "
-                      "retourne pas de cleanup) et sans opts.unmount. unmountProcessing "
-                      "(processing.js:878, clear du pollTimer L879) n'est importe nulle part : le poll "
-                      "recursif get_status 2s (processing.js:487) survit a la navigation.",
+            "retourne pas de cleanup) et sans opts.unmount. unmountProcessing "
+            "(processing.js:878, clear du pollTimer L879) n'est importe nulle part : le poll "
+            "recursif get_status 2s (processing.js:487) survit a la navigation.",
         },
         "R8-084_saveTimer_parametres": {
             "statut": "CORRIGE pour saveTimer (clear au unmount parametres.js:3430 + debounce reset "
-                      "L1797) ; reste le debounce de recherche L2111 (timer local jamais cleare au "
-                      "unmount) et les timers de messages L1775/L2276.",
+            "L1797) ; reste le debounce de recherche L2111 (timer local jamais cleare au "
+            "unmount) et les timers de messages L1775/L2276.",
         },
     }
 

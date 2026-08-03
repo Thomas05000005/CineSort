@@ -24,14 +24,10 @@ qu'aucun seuil de confiance brute ne subsiste pour le pre-cochage.
 
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 
-_JS = (
-    Path(__file__).resolve().parents[1]
-    / "web" / "dashboard" / "views" / "traitement.js"
-)
+_JS = Path(__file__).resolve().parents[1] / "web" / "dashboard" / "views" / "traitement.js"
 
 
 def _read_source() -> str:

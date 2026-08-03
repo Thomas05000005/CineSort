@@ -409,6 +409,7 @@ def _resolve_db_path(api: Any) -> Optional[Path]:
     if state_path is None:
         return None
     from cinesort.infra.db import db_path_for_state_dir  # noqa: PLC0415
+
     return db_path_for_state_dir(state_path)
 
 

@@ -31,6 +31,7 @@ Usage (depuis la racine repo) :
     docs/internal/baseline_r8/captures/cap_tv_parity.py \
     > docs/internal/baseline_r8/captures/cap_tv_parity.out.txt 2>&1
 """
+
 from __future__ import annotations
 
 import inspect
@@ -140,9 +141,7 @@ def run():
     src_stem = "Showname.S01E01.1080p.HDTV.x264-GRP"
     (folder / f"{src_stem}.mkv").write_bytes(b"video-bytes" * 100)
     (folder / f"{src_stem}.srt").write_text("1\n00:00 --> 00:01\nhello\n", encoding="utf-8")
-    (folder / f"{src_stem}.nfo").write_text(
-        "<episodedetails><title>Pilot</title></episodedetails>", encoding="utf-8"
-    )
+    (folder / f"{src_stem}.nfo").write_text("<episodedetails><title>Pilot</title></episodedetails>", encoding="utf-8")
 
     cfg = Cfg(root)
     row = Row(
@@ -174,7 +173,7 @@ def run():
     drift["F-V4B-TV1"] = (2253, ln, ok)
     tv1 = video_stem is not None and len(orphaned) > 0
     resume["F-V4B-TV1"] = tv1
-    print(f"[F-V4B-TV1] sidecars orphelins (gardent le nom source)")
+    print("[F-V4B-TV1] sidecars orphelins (gardent le nom source)")
     print(f"  ancre apply_core.py L{ln} (cite 2253, verifie={ok}): {txt.strip()}")
     print(f"  stem video cible : {video_stem!r}")
     print(f"  sidecars ORPHELINS (stem != video) : {[p.name for p in orphaned]}")
@@ -187,7 +186,7 @@ def run():
     any_hash = any(o.get("src_sha1") for o in ops)
     tv2 = len(move_ops) > 0 and not any_hash
     resume["F-V4B-TV2"] = tv2
-    print(f"[F-V4B-TV2] ops MOVE_FILE sans src_sha1/src_size")
+    print("[F-V4B-TV2] ops MOVE_FILE sans src_sha1/src_size")
     print(f"  ancre apply_core.py L{ln} (cite 2241, verifie={ok}): {txt.strip()}")
     for o in ops:
         keys = sorted(o.keys())
@@ -204,7 +203,7 @@ def run():
     target_dir_created = any(p.is_dir() for p in root.rglob("Saison*"))
     mkdir_broken = target_dir_created and len(mkdir_ops) == 0
     resume["F-V6-TV-MKDIR"] = mkdir_broken
-    print(f"[F-V6-TV-MKDIR] target_dir.mkdir brut, aucune op MKDIR journalisee")
+    print("[F-V6-TV-MKDIR] target_dir.mkdir brut, aucune op MKDIR journalisee")
     print(f"  ancre apply_core.py L{ln} (cite 2239, verifie={ok}): {txt.strip()}")
     print(f"  dossier Saison cree : {target_dir_created} | ops MKDIR journalisees : {len(mkdir_ops)}")
     print(f"  => CASSE={mkdir_broken}\n")
@@ -248,7 +247,7 @@ def run():
     tv3 = skipped_noop and src_still_there and target_unchanged and sizes_differ
     resume["F-V5-TV3"] = tv3
     print("--- BLOC COMPORTEMENTAL #2 : NOOP sur target.exists() ---")
-    print(f"[F-V5-TV3] skip NOOP sans comparaison de contenu (source meilleure ignoree)")
+    print("[F-V5-TV3] skip NOOP sans comparaison de contenu (source meilleure ignoree)")
     print(f"  ancre apply_core.py L{ln} (cite 2232, verifie={ok}): {txt.strip()}")
     print(f"  res.skipped={res2.skipped} skip_reasons={dict(res2.skip_reasons)}")
     print(f"  source NEUVE encore en place : {src_still_there} (taille {src_video.stat().st_size})")
@@ -298,13 +297,13 @@ def run():
     sidecoll = src_srt_orphan and dst_srt_unchanged
     resume["F-V6-TV-SIDECOLL"] = sidecoll
     print("--- BLOC COMPORTEMENTAL #3 : sidecar droppe si dst existe ---")
-    print(f"[F-V6-TV-SIDECOLL] le .srt source est abandonne, aucun keep-both")
+    print("[F-V6-TV-SIDECOLL] le .srt source est abandonne, aucun keep-both")
     print(f"  ancre apply_core.py L{ln} (cite 2253/2254, verifie={ok}): {txt.strip()}")
     print(f"  dst_side attendu (nom SOURCE)          : {src3}.srt")
     print(f"  .srt source orphelin (reste en _inbox) : {src_srt_orphan}")
     print(f"  .srt cible DESYNC conserve tel quel    : {dst_srt_unchanged}")
     print(f"  un seul MOVE journalise (video, pas le sidecar) : {no_keepboth}")
-    print(f"  (chemin film: keep-both via conflicts_sidecars_root -> ici aucun bucket)")
+    print("  (chemin film: keep-both via conflicts_sidecars_root -> ici aucun bucket)")
     print(f"  => CASSE={sidecoll}\n")
 
     # ----------------------------------------------------------------------
@@ -339,7 +338,7 @@ def run():
     dryrun_broken = no_ops_in_dry and counter_bumped
     resume["F-V6-TV-DRYRUN"] = dryrun_broken
     print("--- BLOC COMPORTEMENTAL #4 : dry_run ---")
-    print(f"[F-V6-TV-DRYRUN] atomic_move + record_op tous deux sous `if not dry_run`")
+    print("[F-V6-TV-DRYRUN] atomic_move + record_op tous deux sous `if not dry_run`")
     print(f"  ancre apply_core.py L{ln} (cite 2238, verifie={ok}): {txt.strip()}")
     print(f"  ops journalisees en dry_run : {len(ops4)} (FS inchange : {fs_untouched})")
     print(f"  res.moves bumpe meme en dry_run : {counter_bumped} (res.moves={res4.moves})")
@@ -349,9 +348,7 @@ def run():
     # BLOC STRUCTUREL — F-V6-TV-MAXPATH : killswitch only target_file vs film (inner)
     # ----------------------------------------------------------------------
     print("--- BLOC STRUCTUREL ---")
-    ln_tv, ok_tv, txt_tv = _verify_anchor(
-        APPLY_CORE, 2222, "check_path_length_killswitch(str(target_file))"
-    )
+    ln_tv, ok_tv, txt_tv = _verify_anchor(APPLY_CORE, 2222, "check_path_length_killswitch(str(target_file))")
     # Chemin film: double check dst + chemin interne le plus long.
     film_ln = _find_line(APPLY_CORE, "_candidate_inner_path = str(dst")
     film_check_ln = _find_line(APPLY_CORE, "check_path_length_killswitch(_candidate_inner_path)")
@@ -360,7 +357,7 @@ def run():
     film_double_check = film_check_ln > 0
     maxpath_broken = tv_single_check and film_double_check
     resume["F-V6-TV-MAXPATH"] = maxpath_broken
-    print(f"[F-V6-TV-MAXPATH] killswitch TV ne couvre pas le chemin interne le plus long")
+    print("[F-V6-TV-MAXPATH] killswitch TV ne couvre pas le chemin interne le plus long")
     print(f"  TV   apply_core.py L{ln_tv} (cite 2222, verifie={ok_tv}): {txt_tv.strip()}")
     print(f"  FILM apply_core.py L{film_ln}: {_read_line(APPLY_CORE, film_ln).strip()}")
     print(f"  FILM apply_core.py L{film_check_ln}: {_read_line(APPLY_CORE, film_check_ln).strip()}")
@@ -378,19 +375,15 @@ def run():
     loop_src = inspect.getsource(apply_core._apply_loop) if hasattr(apply_core, "_apply_loop") else ""
     if not loop_src:
         # fallback : lire le bloc dispatch autour de la ligne TV.
-        block = "\n".join(
-            APPLY_CORE.read_text(encoding="utf-8").splitlines()[ln_disp - 1 : ln_disp + 40]
-        )
+        block = "\n".join(APPLY_CORE.read_text(encoding="utf-8").splitlines()[ln_disp - 1 : ln_disp + 40])
         loop_src = block
     tv_call = re.search(r"apply_tv_episode\((.*?)\)", loop_src, re.S)
     single_call = re.search(r"apply_single\((.*?)\)", loop_src, re.S)
     tv_passes_no_override = bool(tv_call) and "new_title" not in (tv_call.group(1) if tv_call else "")
-    single_passes_override = bool(single_call) and "new_title" in (
-        single_call.group(1) if single_call else ""
-    )
+    single_passes_override = bool(single_call) and "new_title" in (single_call.group(1) if single_call else "")
     uiedit_broken = reads_proposed and ignores_new and tv_passes_no_override and single_passes_override
     resume["F-V6-TV-UIEDIT"] = uiedit_broken
-    print(f"[F-V6-TV-UIEDIT] apply TV lit row.proposed_* et ignore l'override UI new_title/new_year")
+    print("[F-V6-TV-UIEDIT] apply TV lit row.proposed_* et ignore l'override UI new_title/new_year")
     print(f"  dispatch apply_core.py L{ln_disp} (cite 1567, verifie={ok_disp}): {txt_disp.strip()}")
     print(f"  apply_tv_episode lit row.proposed_* : {reads_proposed} | ignore new_*: {ignores_new}")
     print(f"  dispatch -> apply_tv_episode sans new_title : {tv_passes_no_override}")
@@ -408,9 +401,11 @@ def run():
     has_leftovers_param = "leftovers_root" in sig.parameters
     single_sig = inspect.signature(apply_core.apply_single)
     single_has_leftovers = "leftovers_root" in single_sig.parameters
-    leftovers_broken = (not has_leftovers) and (not has_source_cleanup) and (not has_leftovers_param) and single_has_leftovers
+    leftovers_broken = (
+        (not has_leftovers) and (not has_source_cleanup) and (not has_leftovers_param) and single_has_leftovers
+    )
     resume["F-V7-TV-LEFTOVERS"] = leftovers_broken
-    print(f"[F-V7-TV-LEFTOVERS] le chemin TV n'a ni leftovers_root ni nettoyage source")
+    print("[F-V7-TV-LEFTOVERS] le chemin TV n'a ni leftovers_root ni nettoyage source")
     print(f"  apply_tv_episode signature params : {list(sig.parameters)}")
     print(f"  param leftovers_root present (TV)   : {has_leftovers_param}")
     print(f"  param leftovers_root present (FILM) : {single_has_leftovers}")
@@ -422,14 +417,13 @@ def run():
     # cite tv_helpers.py:92 (commentaire) ; vrai assignement = ligne suivante.
     cited_anime = 92
     real_anime = _find_line(TV_HELPERS, "season = None")
-    anime_ok = (real_anime == cited_anime)
+    anime_ok = real_anime == cited_anime
     drift["F-V6-TV-ANIME"] = (cited_anime, real_anime, anime_ok)
     # Verifie aussi le rendu S00 dans apply_tv_episode (season tombe a 0 -> S00 / Saison 00).
     renders_s00 = 'f"Saison {season:02d}" if season else "Saison 00"' in tv_src
-    renders_se = ('S{season:02d}E{episode:02d}' in tv_src) or ("S{season:02d}E{episode:02d}" in tv_src)
     anime_broken = real_anime > 0 and renders_s00
     resume["F-V6-TV-ANIME"] = anime_broken
-    print(f"[F-V6-TV-ANIME] 'Episode N' sans saison -> season=None -> Saison 00 / S00")
+    print("[F-V6-TV-ANIME] 'Episode N' sans saison -> season=None -> Saison 00 / S00")
     print(f"  tv_helpers.py cite L{cited_anime} (commentaire): {_read_line(TV_HELPERS, cited_anime).strip()}")
     print(f"  tv_helpers.py REEL L{real_anime} (assignement) : {_read_line(TV_HELPERS, real_anime).strip()}")
     print(f"  apply_tv_episode rend 'Saison 00' si season falsy : {renders_s00}")
@@ -439,14 +433,12 @@ def run():
     ln_undo, ok_undo, txt_undo = _verify_anchor(APPLY_SUPPORT, 442, "if target_path.exists():")
     drift["F-V6-UNDO-CASE"] = (442, ln_undo, ok_undo)
     # Le bloc CONFLIT marque FAILED + deplace vers undo_conflicts_root, pas de garde case-only.
-    block = "\n".join(
-        APPLY_SUPPORT.read_text(encoding="utf-8").splitlines()[ln_undo - 1 : ln_undo + 40]
-    )
+    block = "\n".join(APPLY_SUPPORT.read_text(encoding="utf-8").splitlines()[ln_undo - 1 : ln_undo + 40])
     marks_conflict = "Conflit cible existante" in block and 'undo_status="FAILED"' in block
     no_caseonly_guard = "casefold" not in block and ".lower()" not in block and "name_eq_fs" not in block
     undo_case_broken = (ln_undo > 0) and marks_conflict and no_caseonly_guard
     resume["F-V6-UNDO-CASE"] = undo_case_broken
-    print(f"[F-V6-UNDO-CASE] undo case-only classe CONFLIT (pas de garde insensible a la casse)")
+    print("[F-V6-UNDO-CASE] undo case-only classe CONFLIT (pas de garde insensible a la casse)")
     print(f"  apply_support.py L{ln_undo} (cite 442, verifie={ok_undo}): {txt_undo.strip()}")
     print(f"  bloc marque FAILED + 'Conflit cible existante' : {marks_conflict}")
     print(f"  aucune garde case-only dans le bloc : {no_caseonly_guard}")
@@ -463,7 +455,7 @@ def run():
     no_warn_logged = 'log("WARN"' not in sidecar_block and "log('WARN'" not in sidecar_block
     h3_broken = is_bare_pass and no_warn_logged
     resume["F-H3-02"] = h3_broken
-    print(f"[F-H3-02] except sidecar avale PermissionError/OSError sans WARN (pass nu)")
+    print("[F-H3-02] except sidecar avale PermissionError/OSError sans WARN (pass nu)")
     print(f"  apply_core.py L{ln_h3} (cite 2263, verifie={ok_h3}): {txt_h3.strip()}")
     print(f"  ligne suivante == 'pass' nu : {is_bare_pass} ({next_line!r})")
     print(f"  aucun log WARN dans le bloc sidecar : {no_warn_logged}")
@@ -472,9 +464,7 @@ def run():
     # ----------------------------------------------------------------------
     # RESUME
     # ----------------------------------------------------------------------
-    drift_report = {
-        k: {"cited": c, "real": r, "verified": ok} for k, (c, r, ok) in drift.items() if not ok
-    }
+    drift_report = {k: {"cited": c, "real": r, "verified": ok} for k, (c, r, ok) in drift.items() if not ok}
     print("=" * 74)
     print("RESUME:", json.dumps(resume, ensure_ascii=False, sort_keys=True))
     print("DRIFT (lignes citees != reelles):", json.dumps(drift_report, ensure_ascii=False))
