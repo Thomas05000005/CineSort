@@ -149,7 +149,14 @@ class DeuxEcransUnSeulMotTests(unittest.TestCase):
 
     def test_pastille_daccueil_rouge_pour_un_run_plante(self):
         """Le mot ne suffit pas : la couleur doit suivre (l'infobulle demande un
-        survol, la pastille se voit d'un coup d'oeil)."""
+        survol, la pastille se voit d'un coup d'oeil).
+
+        Anti-faux-vert : on lit la classe DE LA PASTILLE DU RUN (le `<button>`
+        porteur de `data-run-id`), pas un `includes` sur tout le HTML. La legende
+        de la timeline (accueil.js:793-800) contient en permanence un
+        `accueil-timeline-bullet--error` decoratif : un `includes` serait vrai
+        quelle que soit la couleur reellement donnee au run.
+        """
         res = run_module_test(
             ACCUEIL_JS,
             stubs=ACCUEIL_STUBS,
@@ -158,10 +165,23 @@ class DeuxEcransUnSeulMotTests(unittest.TestCase):
             + r"""
 const runs = [__mk("failed_muet", { status: "FAILED" })];
 const html = M.__t.renderRecentActivity(runs);
-__emit({ html, error: html.includes("accueil-timeline-bullet--error") });
+const m = html.match(/class="accueil-timeline-bullet ([^"]+)"\s+data-run-id="failed_muet"/);
+__emit({ cls: m ? m[1] : null, legende: html.includes("accueil-timeline-bullet--error") });
 """,
         )
-        self.assertTrue(res["error"], "un run FAILED doit porter la pastille rouge, pas le gris des runs sains")
+        # Ancre du piege, verifiee AVANT l'assertion utile : tant que ceci est
+        # vrai, un `includes` sur tout le HTML serait vert quelle que soit la
+        # couleur donnee au run — c'est ce faux vert que l'assertion suivante
+        # remplace.
+        self.assertTrue(
+            res["legende"],
+            "la legende ne porte plus --error : l'ancre du piege est perimee",
+        )
+        self.assertEqual(
+            res["cls"],
+            "accueil-timeline-bullet--error",
+            "un run FAILED doit porter la pastille rouge, pas le gris des runs sains",
+        )
 
     def test_en_validation_porte_la_meme_teinte_sur_les_deux_ecrans(self):
         """AWAITING_VALIDATION attend une action : teinte warning des deux cotes.
