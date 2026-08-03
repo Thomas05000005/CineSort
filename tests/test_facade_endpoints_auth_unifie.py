@@ -25,7 +25,6 @@ commun), il rougira ici en premier.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -37,7 +36,6 @@ from pathlib import Path
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.infra.rest_server import RestApiServer
 from tests._helpers import find_free_port as _find_free_port
-
 
 # 5 endpoints facade NON destructifs / NON state-mutating, choisis pour couvrir
 # les 5 facades distinctes. Chacun est un getter simple (pas de side-effect
@@ -163,8 +161,7 @@ class FacadeEndpointsAuthUnifieTests(unittest.TestCase):
                 self.assertNotEqual(
                     status,
                     410,
-                    f"{endpoint} renvoie 410 -> le path n'est pas reconnu comme facade "
-                    f"(body={body!r})",
+                    f"{endpoint} renvoie 410 -> le path n'est pas reconnu comme facade (body={body!r})",
                 )
 
 

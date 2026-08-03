@@ -11,10 +11,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from cinesort.infra.probe.auto_install import (
-    _resolve_expected_sha256,
     IntegrityError,
     _assert_https,
     _find_in_zip,
+    _resolve_expected_sha256,
     _sha256_file,
     _verify_archive,
     get_tools_dir,
@@ -217,9 +217,7 @@ class TestSha256Verification(unittest.TestCase):
         env = "CINESORT_TEST_SHA256_XYZ"
         # 1. override kwarg gagne sur tout
         with patch.dict(os.environ, {env: "from_env"}):
-            self.assertEqual(
-                _resolve_expected_sha256(env, "from_override", "from_const"), "from_override"
-            )
+            self.assertEqual(_resolve_expected_sha256(env, "from_override", "from_const"), "from_override")
         # 2. sans override, la variable d'env gagne sur la constante
         with patch.dict(os.environ, {env: "from_env"}):
             self.assertEqual(_resolve_expected_sha256(env, None, "from_const"), "from_env")

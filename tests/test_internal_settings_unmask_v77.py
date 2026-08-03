@@ -25,13 +25,15 @@ class InternalSettingsUnmaskTests(unittest.TestCase):
         self.state_dir = Path(self._tmp) / "state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / "settings.json").write_text(
-            json.dumps({
-                "jellyfin_api_key": "REAL_jf_key",
-                "plex_token": "REAL_plex_token",
-                "radarr_api_key": "REAL_radarr_key",
-                "email_smtp_password": "REAL_smtp_pwd",
-                "tmdb_api_key": "REAL_tmdb_key",
-            }),
+            json.dumps(
+                {
+                    "jellyfin_api_key": "REAL_jf_key",
+                    "plex_token": "REAL_plex_token",
+                    "radarr_api_key": "REAL_radarr_key",
+                    "email_smtp_password": "REAL_smtp_pwd",
+                    "tmdb_api_key": "REAL_tmdb_key",
+                }
+            ),
             encoding="utf-8",
         )
         self.api = backend.CineSortApi()

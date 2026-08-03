@@ -129,8 +129,7 @@ class DuplicatesEditionKeyAlignmentTests(unittest.TestCase):
         self.assertEqual(
             data["total_groups"],
             1,
-            "Deux editions visant le meme dossier (template sans {edition}) "
-            "doivent former un conflit.",
+            "Deux editions visant le meme dossier (template sans {edition}) doivent former un conflit.",
         )
         grp = data["groups"][0]
         self.assertEqual(len(grp["rows"]), 2)
@@ -160,8 +159,7 @@ class DuplicatesEditionKeyAlignmentTests(unittest.TestCase):
         self.assertEqual(
             data["total_groups"],
             0,
-            "Template avec {edition} : deux editions distinctes ne doivent pas "
-            "etre fusionnees en doublon.",
+            "Template avec {edition} : deux editions distinctes ne doivent pas etre fusionnees en doublon.",
         )
 
     def test_edition_template_same_edition_still_conflicts(self) -> None:

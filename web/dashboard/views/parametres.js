@@ -379,8 +379,19 @@ const _state = {
   activeCategory: "sources",
   searchQuery: "",
   saveTimer: null,
+  // F04 (revue post-merge 2026-07-18) : promesse du POST save_settings en vol.
+  // Permet a _loadSettings d'attendre la fin d'un flush declenche par
+  // unmountParametres avant de relire l'etat serveur (sinon on relit un etat
+  // pre-save et on ecrase l'edition de l'utilisateur au remontage).
+  saveInFlight: null,
   savedAt: null,
   saveError: null,
+  // F04 (revue adversaire R1) : `saveError` est de l'etat de VUE (remis a null
+  // par unmountParametres), or le flush part justement AU demontage : un refus
+  // backend (ok:false, 401, 5xx apres les 3 retries de core/api.js) arrivait
+  // donc quand la vue etait deja partie et ne laissait AUCUNE trace. Ce champ-ci
+  // survit au demontage et est re-affiche au prochain montage de la vue.
+  lastFlushError: null,
   // Profils qualite
   profilesList: [],
   activeProfileId: "",
@@ -1795,25 +1806,72 @@ function _readFieldValue(field, fieldEl) {
   }
 }
 
-function _scheduleSave() {
-  if (_state.saveTimer) clearTimeout(_state.saveTimer);
-  _state.saveTimer = setTimeout(async () => {
-    try {
-      const res = await apiPost("settings/save_settings", { settings: _state.settings });
-      if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+// F04 (revue adversaire R1) : borne d'attente du flush au montage de la vue
+// (cf. _loadSettings). Un save local repond en < 100 ms ; au-dela, mieux vaut
+// afficher les parametres que geler l'ecran sur son skeleton.
+const FLUSH_WAIT_MAX_MS = 1500;
+
+// F04 (revue post-merge 2026-07-18) : corps du save extrait du setTimeout pour
+// pouvoir etre declenche AUSSI hors debounce (flush au demontage de la vue).
+// Aucun `opts.signal` volontairement : le flush doit survivre a
+// `abortCurrentNav()` que le router appelle juste apres `_currentCleanup()`.
+async function _saveSettingsNow() {
+  // Seul `savedAt` est garde par `_state.containerRef` : c'est lui qui produisait
+  // le badge fantome « ✓ Sauvegarde a HH:MM » au remontage de la vue.
+  // F04 (revue adversaire R1) : l'ECHEC, lui, doit etre pose INCONDITIONNELLEMENT
+  // (etat module, pas du DOM) et memorise dans `lastFlushError` qui survit au
+  // demontage — sinon un flush refuse par le backend perdait l'edition en
+  // silence, exactement comme avant le correctif.
+  try {
+    const res = await apiPost("settings/save_settings", { settings: _state.settings });
+    if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+      _state.lastFlushError = null;
+      if (_state.containerRef) {
         _state.savedAt = new Date();
         _state.saveError = null;
-        invalidateSettingsCache();
-        _updateSavedIndicator();
-      } else {
-        _state.saveError = res?.data?.message || "Erreur inconnue";
-        _updateSavedIndicator();
       }
-    } catch (err) {
-      _state.saveError = err?.message || "Erreur réseau";
+      invalidateSettingsCache();
+      _updateSavedIndicator();
+    } else {
+      const msg = res?.data?.message || "Erreur inconnue";
+      _state.saveError = msg;
+      _state.lastFlushError = msg;
       _updateSavedIndicator();
     }
+  } catch (err) {
+    const msg = err?.message || "Erreur réseau";
+    _state.saveError = msg;
+    _state.lastFlushError = msg;
+    _updateSavedIndicator();
+  }
+}
+
+// F04 (revue adversaire R1) : re-affiche au montage l'echec d'un flush survenu
+// pendant que la vue etait demontee. Sans ce rappel, l'utilisateur retrouvait
+// son ANCIEN reglage (ecrase par _loadSettings) sans aucun message.
+function _surfacePendingFlushError() {
+  if (!_state.lastFlushError) return;
+  _state.savedAt = null;
+  _state.saveError = `Dernière modification NON enregistrée (${_state.lastFlushError}) — vérifiez la valeur et ressaisissez-la.`;
+  _updateSavedIndicator();
+}
+
+function _scheduleSave() {
+  if (_state.saveTimer) clearTimeout(_state.saveTimer);
+  _state.saveTimer = setTimeout(() => {
+    _state.saveTimer = null;
+    _state.saveInFlight = _saveSettingsNow();
   }, 500);
+}
+
+// F04 : envoie immediatement le save en attente (debounce non echu). Appele par
+// unmountParametres — sans lui, quitter la vue < 500 ms apres une frappe perdait
+// silencieusement l'edition (clearTimeout nu, aucun beforeunload dans le dashboard).
+function _flushPendingSave() {
+  if (!_state.saveTimer) return;
+  clearTimeout(_state.saveTimer);
+  _state.saveTimer = null;
+  _state.saveInFlight = _saveSettingsNow();
 }
 
 function _updateSavedIndicator() {
@@ -1838,6 +1896,27 @@ function _updateSavedIndicator() {
 }
 
 async function _loadSettings() {
+  // F04 : si un flush de sauvegarde est encore en vol (quitte puis revenu sur
+  // la vue en moins d'un aller-retour reseau), on l'attend avant de relire le
+  // serveur — sinon on recharge un etat pre-save et l'edition est perdue.
+  //
+  // F04 (revue adversaire R1) : attente BORNEE. Cet await est sur le chemin de
+  // MONTAGE de la vue (initParametres, bloc aria-busy) et l'apiPost du flush
+  // part sans `timeoutMs`, avec jusqu'a 3 retries + backoff (core/api.js) : sans
+  // borne, l'ecran Parametres restait fige sur son skeleton tant que le POST
+  // n'avait pas repondu. Au-dela de la borne on relit le serveur sans attendre ;
+  // un echec tardif reste signale par `lastFlushError`.
+  const pendingSave = _state.saveInFlight;
+  if (pendingSave) {
+    let waitTimer = null;
+    const bound = new Promise((resolve) => { waitTimer = setTimeout(resolve, FLUSH_WAIT_MAX_MS); });
+    try {
+      await Promise.race([Promise.resolve(pendingSave).catch(() => {}), bound]);
+    } finally {
+      if (waitTimer) clearTimeout(waitTimer);
+    }
+    if (_state.saveInFlight === pendingSave) _state.saveInFlight = null;
+  }
   const res = await apiPost("settings/get_settings", {});
   // BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est
   // un objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
@@ -3439,6 +3518,34 @@ function _uninstallCtrlK() {
   }
 }
 
+/* Ctrl+S — la table de raccourcis de core/keyboard.js (ligne 44) annonce
+ * « Enregistrer » a l'utilisateur, et le handler global fait bien un
+ * preventDefault() puis emet `cinesort:save-request`. Mais AUCUNE vue n'ecoutait
+ * cet evenement : le raccourci bloquait le « Enregistrer » natif du navigateur
+ * et ne faisait rien — une promesse affichee mais jamais tenue.
+ *
+ * Les Parametres sont le seul ecran ou « Enregistrer » a un sens : on y branche
+ * le flush du debounce, exactement ce que fait deja la sortie de vue. Ailleurs
+ * l'evenement reste sans effet (comportement inchange). */
+let _saveRequestHandler = null;
+
+function _installSaveRequest() {
+  if (_saveRequestHandler || typeof window === "undefined") return;
+  _saveRequestHandler = () => {
+    // Pas de save en vol et rien en attente -> ne rien faire (pas de POST inutile).
+    if (!_state.saveTimer) return;
+    _flushPendingSave();
+  };
+  window.addEventListener("cinesort:save-request", _saveRequestHandler);
+}
+
+function _uninstallSaveRequest() {
+  if (_saveRequestHandler && typeof window !== "undefined") {
+    window.removeEventListener("cinesort:save-request", _saveRequestHandler);
+  }
+  _saveRequestHandler = null;
+}
+
 /* =============================================================
  * 15) ENTRY POINTS
  * ============================================================= */
@@ -3470,7 +3577,11 @@ export async function initParametres(container) {
   }
 
   _refreshAll();
+  // F04 (revue adversaire R1) : APRES _refreshAll (qui (re)cree l'indicateur
+  // dans le DOM), on re-affiche l'echec d'un flush parti au demontage.
+  _surfacePendingFlushError();
   _installCtrlK();
+  _installSaveRequest();
   _flushPendingScroll();
 
   // Listener hashchange : si on est deja sur /parametres et que l'utilisateur
@@ -3492,8 +3603,12 @@ export async function initParametres(container) {
 }
 
 export function unmountParametres() {
-  if (_state.saveTimer) { clearTimeout(_state.saveTimer); _state.saveTimer = null; }
+  // F04 : NE PAS annuler le debounce sans l'envoyer. Quitter la vue < 500 ms
+  // apres une frappe partait sinon sans jamais POSTer settings/save_settings,
+  // et _loadSettings ecrasait l'edition au retour (perte silencieuse).
+  _flushPendingSave();
   _uninstallCtrlK();
+  _uninstallSaveRequest();
   if (_state.hashChangeHandler && typeof window !== "undefined") {
     window.removeEventListener("hashchange", _state.hashChangeHandler);
     _state.hashChangeHandler = null;
@@ -3502,5 +3617,9 @@ export function unmountParametres() {
   _state.containerRef = null;
   _state.searchQuery = "";
   _state.savedAt = null;
+  // savedAt/saveError sont de l'etat de VUE : ils repartent a zero.
+  // F04 (revue adversaire R1) : `lastFlushError` N'EST PAS remis a zero ici —
+  // c'est lui qui porte l'echec du flush declenche par ce demontage meme, et il
+  // doit survivre pour etre affiche au prochain montage.
   _state.saveError = null;
 }
