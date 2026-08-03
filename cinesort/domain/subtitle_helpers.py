@@ -157,6 +157,32 @@ def _lang_from_filename_token(token: str) -> str:
     return _FILENAME_LANG_MAP.get(token, "")
 
 
+def _normalize_expected_language(raw: str) -> str:
+    """Normalise une langue ATTENDUE **saisie par l'utilisateur** vers ISO 639-1.
+
+    Jumelle de `_normalize_iso639`, deliberement DISTINCTE d'elle : les deux
+    normalisent une langue, mais pas la meme population d'entrees.
+
+      * `_normalize_iso639` lit ce que produit un DEMUXEUR (ffprobe/MediaInfo).
+        `vf`/`vostfr` n'y existent pas — les y remettre est exactement le
+        partage de table qui a efface le hindi (#679) et fabrique un faux
+        anglais (#610).
+      * ici l'entree est du TEXTE LIBRE tape dans « Langues attendues »
+        (`settings_support._normalize_lang_list` n'applique aucune liste
+        blanche), sur une application francophone : `vf` et `vostfr` sont des
+        saisies parfaitement normales, et le vocabulaire a lire est donc celui
+        des conventions de nom de fichier.
+
+    Regression que cette fonction evite (revue adverse PR #856) : brancher la
+    saisie utilisateur sur `_ISO639_MAP` rendait `vf`/`vostfr` non resolvables,
+    donc jamais egaux au `fr` reellement detecte -> `subtitle_missing_vf` sur
+    100 % de la bibliotheque. Et cela A LA LECTURE (`generate_suggestions`
+    normalise les attendues a chaque appel), donc sans re-scan : l'ecran vire
+    au rouge tout seul au redemarrage.
+    """
+    return _lang_from_filename_token((raw or "").strip().lower())
+
+
 # F12 (revue post-merge 2026-07-18) — tags de VARIANTE places APRES le code
 # langue par les conventions Plex (`.fr.forced`, `.en.sdh`) et Jellyfin
 # (`.fr.default`, `.en.forced`, `.fr.cc`). Ces tokens ne sont PAS des langues :
@@ -168,7 +194,11 @@ _SUBTITLE_FLAG_TOKENS = frozenset({"forced", "sdh", "cc", "hi", "default", "fore
 
 # `hi` est le seul token a la fois code ISO (hindi) et tag de variante
 # (« hearing impaired » chez Jellyfin) — cf. `_classify_subtitle_suffix`.
-_HI_TOKEN = "hi"
+# Nomme `_HI_CODE` et pas `_HI_TOKEN` : un nom finissant par `_TOKEN` declenche
+# S105/bandit B105 (« hardcoded password ») chez Codacy, qui faisait echouer un
+# check sur un faux positif. `_CODE` est de toute facon plus juste — c'est le
+# code ISO 639-1, pas un token de nom de fichier.
+_HI_CODE = "hi"
 
 
 def _subtitle_suffix_tokens(filename: str, video_stem: Optional[str] = None) -> Tuple[List[str], bool]:
@@ -254,13 +284,13 @@ def _classify_subtitle_suffix(filename: str, video_stem: Optional[str] = None) -
     if not bounded:
         last = tokens[-1].strip().lower()
         language = _lang_from_filename_token(last)
-        hi_is_the_language = last == _HI_TOKEN and bool(language)
+        hi_is_the_language = last == _HI_CODE and bool(language)
     else:
         for raw in reversed(tokens):
             token = raw.strip().lower()
             if not token:
                 continue
-            if token == _HI_TOKEN:
+            if token == _HI_CODE:
                 # Ambigu : arbitre apres la marche arriere, quand on sait si un
                 # autre code langue le precedait.
                 continue
@@ -268,16 +298,24 @@ def _classify_subtitle_suffix(filename: str, video_stem: Optional[str] = None) -
             if lang:
                 language = lang
                 break
-            if token in _SUBTITLE_FLAG_TOKENS:
+            if token in _SUBTITLE_FLAG_TOKENS or token in _NON_LANGUAGE_TOKENS:
+                # Tokens CONNUS pour ne porter aucune langue : on les traverse.
+                # `_NON_LANGUAGE_TOKENS` ajoute ici `vo`/`multi`/`und`, qui ne
+                # sont pas des tags de variante (ils restent donc hors de
+                # `tags`) mais arretaient quand meme la marche arriere :
+                # 'Film.fr.vo.srt' rendait '' alors que le sous-titre est
+                # explicitement 'fr'. Traverser est sans risque ici — on est
+                # dans la branche BORNEE, ou tout token vient APRES le nom de
+                # la video et ne peut donc pas etre un mot du titre.
                 continue
             # Token inconnu (mot du titre, resolution, groupe...) : on s'arrete.
             break
-        if not language and _HI_TOKEN in tags:
-            language = _ISO639_MAP[_HI_TOKEN]
+        if not language and _HI_CODE in tags:
+            language = _ISO639_MAP[_HI_CODE]
             hi_is_the_language = True
 
     if hi_is_the_language:
-        tags.discard(_HI_TOKEN)
+        tags.discard(_HI_CODE)
     return language, tags
 
 
@@ -374,6 +412,13 @@ def detect_language_from_suffix(filename: str, *, video_stem: Optional[str] = No
     `hi` : 'Film.hi.srt' rend 'hi' (HINDI) et 'Film.en.hi.srt' rend 'en' — voir
     l'arbitrage complet dans `_classify_subtitle_suffix`. `vo` ne rend plus 'en'
     (#610) : « version originale » n'est pas une langue.
+
+    LIMITE connue, SANS `video_stem` : le dernier token etant lu seul,
+    'Film.en.hi.srt' rend 'hi' (hindi) la ou le mode borne rend 'en'. C'est le
+    prix de la borne historique — sans le nom de la video, rien ne dit que `en`
+    est un tag de langue et pas le dernier mot du titre. Le chemin de
+    production (`build_subtitle_report` -> `match_subtitles_to_video`) fournit
+    toujours `video_stem` ; passer ce parametre est donc recommande.
     """
     return _classify_subtitle_suffix(filename, video_stem)[0]
 
@@ -527,12 +572,19 @@ def build_subtitle_report(
     # _LANG_MAP. Donc une attente saisie en ISO 639-2 ou en nom courant
     # ('french'/'francais'/'fra'/'fre') ne matchait JAMAIS les langues detectees
     # (deja normalisees en 'fr') -> tous les films flagges "manquant" a tort.
-    # Maintenant : on normalise les DEUX cotes via _normalize_iso639, et on
-    # compare des codes ISO 639-1 canoniques. On garde le code original dans la
-    # liste `missing` quand il n'est pas resolvable (pour ne pas masquer une
-    # saisie utilisateur erronee).
+    # Maintenant : on normalise les DEUX cotes, et on compare des codes ISO
+    # 639-1 canoniques. On garde le code original dans la liste `missing` quand
+    # il n'est pas resolvable (pour ne pas masquer une saisie utilisateur
+    # erronee).
+    #
+    # Le normaliseur est `_normalize_expected_language`, PAS `_normalize_iso639` :
+    # ce cote-ci de la comparaison est de la SAISIE UTILISATEUR (texte libre,
+    # sans liste blanche), pas une sortie de demuxeur. Un francophone qui tape
+    # `vf` ou `vostfr` doit continuer a matcher son `fr` detecte.
     expected_pairs = [
-        (raw, _normalize_iso639(raw)) for raw in (lang.strip() for lang in (expected_languages or []) if lang) if raw
+        (raw, _normalize_expected_language(raw))
+        for raw in (lang.strip() for lang in (expected_languages or []) if lang)
+        if raw
     ]
     missing = [(norm or raw) for raw, norm in expected_pairs if (norm or raw.lower()) not in all_languages]
 

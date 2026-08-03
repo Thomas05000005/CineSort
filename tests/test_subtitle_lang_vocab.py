@@ -26,8 +26,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+from cinesort.domain.librarian import generate_suggestions
 from cinesort.domain.subtitle_helpers import (
+    _normalize_expected_language,
     _normalize_iso639,
     build_subtitle_report,
     detect_language_from_suffix,
@@ -43,6 +46,26 @@ def _report(video_name, sub_names, expected=None, embedded=None):
         for name in sub_names:
             (folder / name).write_text("", encoding="utf-8")
         return build_subtitle_report(folder, video, expected, embedded_subtitles=embedded)
+
+
+def _plan_row(row_id, subtitle_languages):
+    """PlanRow-like tel que `generate_suggestions` le lit (via getattr)."""
+    return SimpleNamespace(
+        row_id=row_id,
+        proposed_title=f"Film {row_id}",
+        warning_flags=[],
+        subtitle_languages=list(subtitle_languages),
+        subtitle_missing_langs=[],
+    )
+
+
+def _films_flagges_sans_sous_titres(expected, rows):
+    """Nombre de films que l'ecran Bibliothecaire annonce « sous-titres manquants »."""
+    out = generate_suggestions(rows, [], {"subtitle_expected_languages": list(expected)})
+    for suggestion in out["suggestions"]:
+        if suggestion["id"] == "missing_subtitles":
+            return int(suggestion["count"])
+    return 0
 
 
 class HindiNestPasUnTagMalentendant(unittest.TestCase):
@@ -132,6 +155,95 @@ class VoNestPasLAnglais(unittest.TestCase):
         report = _report("Film.mkv", ["Film.vostfr.srt"], ["fr"])
         self.assertEqual(report.languages, ["fr"])
         self.assertEqual(report.missing_languages, [])
+
+    def test_vo_ne_bloque_plus_la_lecture_du_code_langue_qui_le_precede(self) -> None:
+        """`vo` n'est pas une langue, mais il n'est pas non plus un mot de titre.
+
+        Il n'etait ni dans `_SUBTITLE_FLAG_TOKENS` (traversables) ni porteur de
+        langue : la marche arriere s'arretait dessus et perdait le code juste
+        avant. `Film.fr.vo.srt` rendait donc '' alors que le nom dit
+        explicitement 'fr'. Idem pour `multi` et `und`.
+
+        La borne F12 n'est pas relachee : on ne traverse que dans le mode
+        BORNE (stem de la video connu), ou aucun token ne peut etre un mot du
+        titre. Sans stem, rien ne change.
+        """
+        self.assertEqual(detect_language_from_suffix("Film.fr.vo.srt", video_stem="Film"), "fr")
+        self.assertEqual(detect_language_from_suffix("Film.fr.multi.srt", video_stem="Film"), "fr")
+        self.assertEqual(detect_language_from_suffix("Film.fr.und.srt", video_stem="Film"), "fr")
+        # ... sans jamais inventer de langue quand `vo` est seul (#610).
+        self.assertEqual(detect_language_from_suffix("Film.vo.srt", video_stem="Film"), "")
+        # ... et la borne du mode NON borne reste intacte (mot de titre).
+        self.assertEqual(detect_language_from_suffix("Dr.No.forced.srt"), "")
+
+
+class LanguesAttenduesSaisiesParLUtilisateur(unittest.TestCase):
+    """Regression de la revue adverse : `vf`/`vostfr` cotes ATTENDUES.
+
+    Separer les tables (#679/#610) a retire `vostfr`/`vf` de `_ISO639_MAP`, la
+    seule table que lit `_normalize_iso639`. Or `_normalize_iso639` ne servait
+    pas qu'aux pistes ffprobe : il normalisait aussi les langues ATTENDUES
+    SAISIES PAR L'UTILISATEUR. Le champ « Langues attendues » est du texte
+    libre sans liste blanche, sur une application francophone dont la table
+    d'alias code `vostfr`/`vf` en dur precisement parce que ce sont les
+    conventions FR courantes.
+
+    Sans normaliseur dedie, un utilisateur ayant saisi `vf` passait de 0 % a
+    100 % de sa bibliotheque en « sous-titres manquants » — a la LECTURE, donc
+    sans re-scan : il rouvrait l'ecran et tout etait rouge.
+    """
+
+    def test_vf_et_vostfr_attendus_matchent_le_fr_detecte(self) -> None:
+        """Chemin SCAN (`build_subtitle_report`) — un vrai dossier avec un
+        vrai `Film.fr.srt` a cote.
+        """
+        for saisie in ("vf", "vostfr", "VOSTFR", "  Vf  "):
+            with self.subTest(saisie=saisie):
+                report = _report("Film.mkv", ["Film.fr.srt"], [saisie])
+                self.assertEqual(report.languages, ["fr"])
+                self.assertEqual(
+                    report.missing_languages,
+                    [],
+                    f"La saisie {saisie!r} doit matcher le 'fr' detecte, pas lever un faux manquant.",
+                )
+
+    def test_vf_attendu_ne_repeint_pas_la_bibliotheque_en_rouge(self) -> None:
+        """Chemin LECTURE (`librarian.generate_suggestions`) — le plus expose :
+        il normalise les attendues a CHAQUE appel, sur des donnees deja
+        calculees. Une regression ici n'attend meme pas un re-scan.
+        """
+        rows = [_plan_row("a", ["fr"]), _plan_row("b", ["fr"])]
+        for saisie in ("fr", "french", "fra", "vf", "vostfr"):
+            with self.subTest(saisie=saisie):
+                self.assertEqual(
+                    _films_flagges_sans_sous_titres([saisie], rows),
+                    0,
+                    f"La saisie {saisie!r} doit reconnaitre les 2 films qui ONT leur sous-titre FR.",
+                )
+
+    # --- NON-REGRESSION -----------------------------------------------------
+
+    def test_une_attente_reellement_absente_reste_signalee(self) -> None:
+        """La garde ne doit pas devenir « tout matche ». Une langue vraiment
+        absente, et une saisie non resolvable, restent signalees telles quelles.
+        """
+        self.assertEqual(_report("Film.mkv", ["Film.fr.srt"], ["en"]).missing_languages, ["en"])
+        self.assertEqual(_report("Film.mkv", ["Film.fr.srt"], ["zzz"]).missing_languages, ["zzz"])
+        rows = [_plan_row("a", ["fr"]), _plan_row("b", ["fr"])]
+        self.assertEqual(_films_flagges_sans_sous_titres(["en"], rows), 2)
+
+    def test_le_normaliseur_iso_reste_ferme_aux_tags_de_nom_de_fichier(self) -> None:
+        """Le fond du correctif d'origine est preserve : la table ISO ignore
+        toujours `vostfr`/`vf`/`vo`. Les deux besoins sont distincts, d'ou deux
+        fonctions — pas une table reouverte.
+        """
+        for tag in ("vostfr", "vf", "vo"):
+            with self.subTest(tag=tag):
+                self.assertEqual(_normalize_iso639(tag), "")
+        self.assertEqual(_normalize_expected_language("vostfr"), "fr")
+        self.assertEqual(_normalize_expected_language("vf"), "fr")
+        # `vo` n'est une langue pour PERSONNE (#610), pas meme cote saisie.
+        self.assertEqual(_normalize_expected_language("vo"), "")
 
 
 class PaireVobSubEstUnSeulSousTitre(unittest.TestCase):
