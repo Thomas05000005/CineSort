@@ -186,13 +186,22 @@ def extract_single_frame(
     bit_depth: int = 8,
     timeout_s: float = _FRAME_EXTRACT_TIMEOUT_S,
 ) -> bytes:
-    """Extrait une frame Y brute via ffmpeg.
+    """Extrait une frame Y brute via ffmpeg, forcee en ``width`` x ``height``.
 
-    Si ``width`` > FRAME_DOWNSCALE_THRESHOLD, un filtre ``scale=1920:-1`` est
-    applique pour reduire la charge d'analyse pixel (les filtres ffmpeg Phase 2-B
-    tourneront sur la resolution native).
+    Le buffer retourne doit faire exactement ``width * height`` octets (x2 en
+    10-bit) : c'est avec ces dimensions que les appelants le relisent via
+    ``parse_raw_frame``. Un filtre ``scale=width:height`` est donc TOUJOURS
+    applique (cf issue #559 : il ne l'etait que si ``width`` depassait
+    FRAME_DOWNSCALE_THRESHOLD, donc ffmpeg sortait la frame a la resolution
+    NATIVE du fichier et les pixels relus etaient decales — comparaison de deux
+    fichiers de resolutions differentes silencieusement fausse).
+
+    La politique de downscale 4K reste chez les appelants, qui sont les seuls a
+    connaitre la resolution native (cf ``extract_representative_frames`` et
+    ``extract_aligned_frames``).
     """
     pix_fmt = "gray16le" if bit_depth >= 10 else "gray"
+    out_w, out_h = int(width), int(height)
 
     cmd = [
         ffmpeg_path,
@@ -202,9 +211,10 @@ def extract_single_frame(
         str(media_path),
     ]
 
-    # Downscale 4K+ pour l'analyse pixel
-    if int(width) > FRAME_DOWNSCALE_THRESHOLD:
-        cmd += ["-vf", "scale=1920:-1"]
+    # Resolution de sortie forcee (dimensions invalides : laisser ffmpeg sortir
+    # le natif, parse_raw_frame rejettera de toute facon la frame).
+    if out_w > 0 and out_h > 0:
+        cmd += ["-vf", f"scale={out_w}:{out_h}"]
 
     cmd += [
         "-frames:v",

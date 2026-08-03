@@ -180,21 +180,30 @@ class ExtractSingleFrameTests(unittest.TestCase):
     """Tests de l'extraction d'une frame unique via ffmpeg."""
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
-    def test_downscale_4k(self, mock_run) -> None:
-        """Width > 1920 → commande contient scale=1920:-1."""
+    def test_scale_forced_to_requested_dims(self, mock_run) -> None:
+        """Issue #559 : la resolution demandee est forcee, quelle qu'elle soit."""
         mock_run.return_value = (0, b"\x80" * 100, "")
-        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 3840, 2160, 8)
+        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 1280, 720, 8)
         cmd = mock_run.call_args[0][0]
         # Chercher le filtre scale
         self.assertIn("-vf", cmd)
         vf_idx = cmd.index("-vf")
-        self.assertIn("scale=1920:-1", cmd[vf_idx + 1])
+        self.assertEqual(cmd[vf_idx + 1], "scale=1280:720")
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
-    def test_no_downscale_1080p(self, mock_run) -> None:
-        """Width <= 1920 → pas de filtre scale."""
+    def test_scale_forced_1080p(self, mock_run) -> None:
+        """Meme a 1920x1080 le filtre est pose (le natif peut differer)."""
         mock_run.return_value = (0, b"\x80" * 100, "")
         extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 1920, 1080, 8)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("-vf", cmd)
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=1920:1080")
+
+    @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
+    def test_no_scale_when_dims_invalid(self, mock_run) -> None:
+        """Dimensions inconnues (0) → pas de filtre bidon dans la commande."""
+        mock_run.return_value = (0, b"", "")
+        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 0, 0, 8)
         cmd = mock_run.call_args[0][0]
         self.assertNotIn("-vf", cmd)
 
@@ -257,6 +266,33 @@ class ExtractRepresentativeFramesTests(unittest.TestCase):
             self.assertIsInstance(f["pixels"], np.ndarray)
             self.assertEqual(f["width"], w)
             self.assertEqual(f["height"], h)
+
+    @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
+    def test_4k_downscale_reaches_ffmpeg(self, mock_run) -> None:
+        """Issue #559 : la politique de downscale 4K arrive jusqu'a ffmpeg.
+
+        Avant le correctif, l'orchestrateur calculait eff_w=1920 puis
+        extract_single_frame re-testait cette valeur contre le seuil
+        (1920 > 1920 = faux) : aucun filtre n'etait pose et ffmpeg sortait du
+        3840x2160 relu comme du 1920x1080.
+        """
+        mock_run.return_value = (0, b"", "")
+        extract_representative_frames(
+            "/usr/bin/ffmpeg",
+            "film.mkv",
+            7200.0,
+            3840,
+            2160,
+            8,
+            frames_count=5,
+            skip_percent=5,
+            scene_detection_enabled=False,
+        )
+        self.assertGreater(mock_run.call_count, 0)
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            self.assertIn("-vf", cmd)
+            self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=1920:1080")
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
     def test_black_frames_skipped_and_replaced(self, mock_run) -> None:
