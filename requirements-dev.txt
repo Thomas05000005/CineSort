@@ -6,7 +6,7 @@ playwright>=1.60.0,<2
 Pillow>=12.3
 # Epingle exactement : cf. justification dans pyproject.toml (une borne
 # flottante a mis la CI au rouge sur main le 2026-08-02).
-ruff==0.15.22
+ruff==0.16.1
 coverage>=7.14.0,<8
 pre-commit>=4.6.0,<5
 # v1.0.0-beta : pytest est invoque par check_project.bat (quality gate windows-ci)
