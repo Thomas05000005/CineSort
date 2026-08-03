@@ -337,10 +337,12 @@ export const PARAMETRES_GROUPS = [
           hint: "Force un appel à GitHub Releases pour détecter une nouvelle version." },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
+        // "retention_days" RETIRE (2026-08-03) : le champ promettait une purge des
+        // "analyses perceptuelles et scores qualité" qui n'existe nulle part cote
+        // backend (aucun lecteur du reglage). Il ne restait que le seul reglage
+        // reellement branche, sur le cron de purge des runs.
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
           hint: "Au-delà, les runs sont purgés automatiquement.", advanced: true },
-        { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
-          hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
       // VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review + viewer + bouton vider.
       // Cron 24h cote backend purge _review/_conflicts, _conflicts_sidecars,
