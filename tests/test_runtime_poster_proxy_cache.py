@@ -319,9 +319,7 @@ class TestAtomicWriteConcurrency(unittest.TestCase):
                 except BaseException as exc:  # noqa: BLE001
                     errors.append(exc)
 
-            threads = [
-                threading.Thread(target=_worker, args=(p,)) for p in payloads
-            ]
+            threads = [threading.Thread(target=_worker, args=(p,)) for p in payloads]
             for t in threads:
                 t.start()
             for t in threads:
