@@ -181,7 +181,11 @@ def should_propose_upgrade(
     # On lit desormais les flags CANONIQUES recalcules depuis metrics.detected
     # (meme fonction pure que celle utilisee au scoring) : la detection ne
     # depend plus du libelle, ni de sa langue, ni de sa ponctuation.
-    if _UPGRADE_ENCODE_FLAGS.intersection(analyze_encode_quality(detected)):
+    # `analyze_encode_quality` ne lit que `video_codec` (encode_analysis.py:54) :
+    # on lui reinjecte le codec DEJA normalise ci-dessus, sans quoi le fallback
+    # legacy `codec` serait honore pour la branche codec obsolete et ignore ici
+    # — le meme rapport ancien donnerait deux verdicts contradictoires.
+    if _UPGRADE_ENCODE_FLAGS.intersection(analyze_encode_quality({**detected, "video_codec": codec})):
         return True
 
     return False

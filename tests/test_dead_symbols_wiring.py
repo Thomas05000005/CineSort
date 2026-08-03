@@ -28,17 +28,53 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from cinesort.app._fuzzy_utils import find_best_fuzzy_match
-from cinesort.app.radarr_sync import _UPGRADE_ENCODE_FLAGS, should_propose_upgrade
+from cinesort.app.radarr_sync import _OBSOLETE_CODECS, _UPGRADE_ENCODE_FLAGS, should_propose_upgrade
 from cinesort.domain.encode_analysis import analyze_encode_quality
+from cinesort.domain.quality_score import _apply_encode_warnings_helper
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _reasons_for(detected: Dict[str, Any]) -> List[str]:
+    """Les libelles humains EXACTEMENT tels que le scoring les persiste.
+
+    Le fixture ne doit surtout pas figer `reasons=[]` : ce sont ces libelles
+    que l'ANCIENNE detection par sous-chaine lisait. Avec une liste vide,
+    aucun test ne reproduirait le bug corrige ("Re-encode degrade" ne contient
+    pas la sous-chaine "reencode"), et le test estampille "non-regression"
+    serait rouge sous l'ancienne implementation — donc il ne prouverait rien
+    d'autre que le correctif lui-meme.
+
+    Les libelles viennent du producteur reel (`_apply_encode_warnings_helper`,
+    quality_score.py) : ni copie, ni paraphrase, donc pas de derive possible.
+    """
+    reasons: List[str] = []
+    _apply_encode_warnings_helper(
+        encode_warnings=analyze_encode_quality(detected),
+        video_sub=0.0,
+        factors=[],
+        reasons=reasons,
+    )
+    return reasons
+
+
 def _report(**detected: Any) -> Dict[str, Any]:
-    """Rapport qualite minimal : seul `metrics.detected` compte ici."""
-    base = {"height": 1080, "bitrate_kbps": 12000, "video_codec": "hevc"}
+    """Rapport qualite realiste : `metrics.detected` ET les `reasons` associees."""
+    base: Dict[str, Any] = {"height": 1080, "bitrate_kbps": 12000, "video_codec": "hevc"}
     base.update(detected)
-    return {"score": 70, "tier": "Silver", "reasons": [], "metrics": {"detected": base}}
+    return {"score": 70, "tier": "Silver", "reasons": _reasons_for(base), "metrics": {"detected": base}}
+
+
+def _legacy_report(**detected: Any) -> Dict[str, Any]:
+    """Rapport persiste par une ANCIENNE version : codec sous la cle `codec`.
+
+    Les `reasons` restent celles calculees a l'epoque par le scoring, qui
+    disposait du vrai codec — seule la cle de persistance differe.
+    """
+    rep = _report(**detected)
+    det = rep["metrics"]["detected"]
+    det["codec"] = det.pop("video_codec")
+    return rep
 
 
 MONITORED = {"monitored": True, "row_id": "r1"}
@@ -58,16 +94,29 @@ class UpgradeEncodeFlagsTests(unittest.TestCase):
         En SD (height < 680) `analyze_encode_quality` n'ajoute pas
         `upscale_suspect` : `reencode_degraded` est seul, et son libelle
         "Re-encode degrade" ne contenait pas la sous-chaine "reencode" cherchee.
+        Le rapport porte ici le VRAI libelle, donc ce test est rouge sous
+        l'ancienne detection a cause du trait d'union — pas d'un fixture vide.
         """
         detected = {"height": 480, "bitrate_kbps": 250, "video_codec": "h264"}
         self.assertEqual(analyze_encode_quality(detected), ["reencode_degraded"])
-        self.assertTrue(should_propose_upgrade(MONITORED, _report(**detected)))
+        rep = _report(**detected)
+        # La racine du bug, rendue explicite : le libelle persiste ne contient
+        # aucune des deux sous-chaines que l'ancienne detection cherchait.
+        self.assertTrue(rep["reasons"])
+        self.assertFalse(any("upscale" in r.lower() or "reencode" in r.lower() for r in rep["reasons"]))
+        self.assertTrue(should_propose_upgrade(MONITORED, rep))
 
     def test_upscale_1080p_propose_toujours_un_upgrade(self) -> None:
-        """Non-regression : le cas qui marchait AVANT marche toujours."""
+        """Non-regression : le cas qui marchait AVANT marche toujours.
+
+        Verte des DEUX cotes : le rapport porte "Upscale suspect", que
+        l'ancienne detection par sous-chaine attrapait deja.
+        """
         detected = {"height": 1080, "bitrate_kbps": 900, "video_codec": "hevc"}
         self.assertIn("upscale_suspect", analyze_encode_quality(detected))
-        self.assertTrue(should_propose_upgrade(MONITORED, _report(**detected)))
+        rep = _report(**detected)
+        self.assertTrue(any("upscale" in r.lower() for r in rep["reasons"]))
+        self.assertTrue(should_propose_upgrade(MONITORED, rep))
 
     def test_fichier_sain_ne_propose_pas_d_upgrade(self) -> None:
         """Non-regression : pas de faux positif sur un fichier propre."""
@@ -87,9 +136,25 @@ class UpgradeEncodeFlagsTests(unittest.TestCase):
 
     def test_codec_obsolete_cle_legacy_toujours_acceptee(self) -> None:
         """Rapports persistes par d'anciennes versions : fallback sur `codec`."""
-        rep = _report(bitrate_kbps=12000)
-        rep["metrics"]["detected"].pop("video_codec")
-        rep["metrics"]["detected"]["codec"] = "divx"
+        rep = _legacy_report(video_codec="divx", bitrate_kbps=12000)
+        self.assertNotIn("video_codec", rep["metrics"]["detected"])
+        self.assertTrue(should_propose_upgrade(MONITORED, rep))
+
+    def test_flags_d_encode_lus_aussi_sur_la_cle_legacy(self) -> None:
+        """Le fallback legacy doit couvrir les DEUX branches, pas seulement le codec.
+
+        `analyze_encode_quality` ne lit que `video_codec` : sans reinjection du
+        codec normalise, le meme rapport ancien serait honore pour "codec
+        obsolete" et ignore pour les flags d'encode. Ce cas (1080p h264 a
+        900 kbps) proposait un upgrade avant le PR ET doit le proposer apres.
+        """
+        rep = _legacy_report(video_codec="h264", height=1080, bitrate_kbps=900)
+        det = rep["metrics"]["detected"]
+        self.assertEqual(det["codec"], "h264")
+        self.assertNotIn("video_codec", det)
+        # Le codec n'est pas obsolete : seule la branche flags d'encode peut repondre.
+        self.assertNotIn(det["codec"], _OBSOLETE_CODECS)
+        self.assertEqual(analyze_encode_quality(det), [])
         self.assertTrue(should_propose_upgrade(MONITORED, rep))
 
     def test_film_non_monitored_jamais_propose(self) -> None:
