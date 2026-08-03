@@ -18,7 +18,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 OUTPUT_PATH = Path("assets/models/lpips_alexnet.onnx")
 INPUT_SIZE = 256
 OPSET_VERSION = 17
@@ -40,8 +39,8 @@ def _build_wrapper(lpips_model, torch):
 
 def main() -> int:
     try:
-        import torch
         import lpips
+        import torch
     except ImportError as exc:
         print(f"[ERREUR] Dependance manquante : {exc}", file=sys.stderr)
         print("Installer avec : pip install torch lpips onnx", file=sys.stderr)

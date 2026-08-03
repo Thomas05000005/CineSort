@@ -1,17 +1,21 @@
 """Tests V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) — toggle Composite Score V1/V2.
 
-Decision actee : V1 reste le defaut, V2 est activable via le setting
-`composite_score_version` (1 | 2). Pas de re-scoring automatique : les anciens
-scores restent V1 jusqu'a un nouveau scan/analyse perceptuelle.
+VN-B.1 (Vague N batch 2) : V2 devient le defaut. V1 reste accepte comme
+kill-switch de rollback explicite (`composite_score_version=1`). Cf
+audit Vague N : avoir 2 sources de verite paralleles (v1+v2) faisait fuiter
+2 vocabulaires tiers cote UI (reference/excellent vs platinum/gold).
 
 Couvre :
-- Defaut V1 : `apply_settings_defaults` injecte 1 si setting absent.
-- Switch V2 : payload UI int=2 ou string "2" -> normalise a 2.
-- Fallback : valeurs invalides (None, 99, "abc", True, [], {}) -> 1.
-- Backward compat : config existante sans `composite_score_version` n'erreur pas.
+- Defaut V2 : `apply_settings_defaults` injecte 2 si setting absent
+  (vocabulaire Platinum/Gold/Silver/Bronze/Reject).
+- Kill-switch V1 : payload UI int=1 ou string "1" -> normalise a 1
+  (rollback explicite vers vocabulaire reference/excellent/bon).
+- Fallback : valeurs invalides (None, 99, "abc", True, [], {}) -> 2.
+- Backward compat : config existante sans `composite_score_version` migre
+  silencieusement vers V2 (la cle composite reste lisible apres re-scan).
 - Backend dispatch : enrich_quality_report_with_perceptual respecte le toggle.
 - Coexistence : V1 et V2 cohabitent en BDD (le perceptual report contient
-  global_score V1 + global_score_v2 separe), le toggle choisit lequel sert
+  global_score legacy + global_score_v2), le toggle choisit lequel sert
   comme score principal expose.
 """
 
@@ -33,7 +37,6 @@ from cinesort.ui.api.settings_support import (
     _save_section_perceptual,
     apply_settings_defaults,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,11 +63,11 @@ def _defaults_kwargs(state_dir: Path) -> Dict[str, Any]:
 
 
 class TestNormalizeCompositeScoreVersion(unittest.TestCase):
-    """Validation/clamp du toggle. Defaut = 1 (V1 reste defaut, decision actee)."""
+    """Validation/clamp du toggle. VN-B.1 : defaut bascule sur V2."""
 
-    def test_default_is_v1(self) -> None:
-        """V1 reste defaut documente."""
-        self.assertEqual(DEFAULT_COMPOSITE_SCORE_VERSION, 1)
+    def test_default_is_v2(self) -> None:
+        """V2 est defaut documente (Vague N batch 2)."""
+        self.assertEqual(DEFAULT_COMPOSITE_SCORE_VERSION, 2)
         self.assertIn(1, COMPOSITE_SCORE_VERSIONS)
         self.assertIn(2, COMPOSITE_SCORE_VERSIONS)
 
@@ -87,40 +90,40 @@ class TestNormalizeCompositeScoreVersion(unittest.TestCase):
         self.assertEqual(_normalize_composite_score_version("V1"), 1)
 
     def test_none_returns_default(self) -> None:
-        """Setting absent -> defaut V1 (backward compat)."""
-        self.assertEqual(_normalize_composite_score_version(None), 1)
+        """Setting absent -> defaut V2 (VN-B.1 : migration silencieuse)."""
+        self.assertEqual(_normalize_composite_score_version(None), 2)
 
     def test_empty_string_returns_default(self) -> None:
-        self.assertEqual(_normalize_composite_score_version(""), 1)
-        self.assertEqual(_normalize_composite_score_version("   "), 1)
+        self.assertEqual(_normalize_composite_score_version(""), 2)
+        self.assertEqual(_normalize_composite_score_version("   "), 2)
 
     def test_invalid_int_returns_default(self) -> None:
-        """Hors domaine {1,2} -> fallback V1."""
-        self.assertEqual(_normalize_composite_score_version(0), 1)
-        self.assertEqual(_normalize_composite_score_version(3), 1)
-        self.assertEqual(_normalize_composite_score_version(99), 1)
-        self.assertEqual(_normalize_composite_score_version(-1), 1)
+        """Hors domaine {1,2} -> fallback V2 (defaut)."""
+        self.assertEqual(_normalize_composite_score_version(0), 2)
+        self.assertEqual(_normalize_composite_score_version(3), 2)
+        self.assertEqual(_normalize_composite_score_version(99), 2)
+        self.assertEqual(_normalize_composite_score_version(-1), 2)
 
     def test_invalid_string_returns_default(self) -> None:
-        self.assertEqual(_normalize_composite_score_version("abc"), 1)
-        self.assertEqual(_normalize_composite_score_version("v3"), 1)
+        self.assertEqual(_normalize_composite_score_version("abc"), 2)
+        self.assertEqual(_normalize_composite_score_version("v3"), 2)
 
     def test_bool_returns_default(self) -> None:
         """bool est sous-classe d'int en Python : on rejette pour eviter
-        True->1 silencieux qui masquerait un bug de payload UI."""
-        self.assertEqual(_normalize_composite_score_version(True), 1)
-        self.assertEqual(_normalize_composite_score_version(False), 1)
+        True->1 silencieux qui masquerait un bug de payload UI. Defaut V2."""
+        self.assertEqual(_normalize_composite_score_version(True), 2)
+        self.assertEqual(_normalize_composite_score_version(False), 2)
 
     def test_unhashable_returns_default(self) -> None:
-        self.assertEqual(_normalize_composite_score_version([]), 1)
-        self.assertEqual(_normalize_composite_score_version({}), 1)
-        self.assertEqual(_normalize_composite_score_version([2]), 1)
+        self.assertEqual(_normalize_composite_score_version([]), 2)
+        self.assertEqual(_normalize_composite_score_version({}), 2)
+        self.assertEqual(_normalize_composite_score_version([2]), 2)
 
     def test_float_int_like_returns_clamped(self) -> None:
         """1.0 / 2.0 acceptes (float convertibles), 1.5 tronque a 1 -> valide."""
         self.assertEqual(_normalize_composite_score_version(1.0), 1)
         self.assertEqual(_normalize_composite_score_version(2.0), 2)
-        # 1.9 -> int(1.9)=1 -> dans le domaine -> 1 (fallback indirect)
+        # 1.9 -> int(1.9)=1 -> dans le domaine -> 1 (kill-switch rollback)
         self.assertEqual(_normalize_composite_score_version(1.9), 1)
 
 
@@ -131,25 +134,31 @@ class TestNormalizeCompositeScoreVersion(unittest.TestCase):
 
 class TestApplySettingsDefaults(unittest.TestCase):
     """Verifie que les configs existantes (sans `composite_score_version`)
-    continuent a fonctionner avec V1 par defaut."""
+    migrent silencieusement vers V2 (VN-B.1)."""
 
     def test_default_injected_when_missing(self) -> None:
-        """Config legacy sans le setting -> V1 injecte (pas de KeyError)."""
+        """Config legacy sans le setting -> V2 injecte (pas de KeyError)."""
         with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
             payload = apply_settings_defaults({}, **_defaults_kwargs(Path(".")))
+        self.assertEqual(payload["composite_score_version"], 2)
+
+    def test_existing_v1_preserved(self) -> None:
+        """Kill-switch V1 explicite : on preserve la valeur utilisateur."""
+        with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
+            payload = apply_settings_defaults({"composite_score_version": 1}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 1)
 
     def test_existing_v2_preserved(self) -> None:
-        """Si l'utilisateur a deja activate V2, on preserve."""
+        """V2 explicite : on preserve (idempotent vs defaut)."""
         with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
             payload = apply_settings_defaults({"composite_score_version": 2}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 2)
 
     def test_invalid_value_falls_back(self) -> None:
-        """Settings.json corrompu/manuel -> V1 silencieux (pas de crash)."""
+        """Settings.json corrompu/manuel -> V2 silencieux (pas de crash)."""
         with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
             payload = apply_settings_defaults({"composite_score_version": "garbage"}, **_defaults_kwargs(Path(".")))
-        self.assertEqual(payload["composite_score_version"], 1)
+        self.assertEqual(payload["composite_score_version"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -171,13 +180,13 @@ class TestSaveSectionPerceptual(unittest.TestCase):
         self.assertEqual(section["composite_score_version"], 1)
 
     def test_save_missing_persists_default(self) -> None:
-        """Payload UI sans le champ (vue legacy) -> defaut V1."""
+        """Payload UI sans le champ (vue legacy) -> defaut V2 (VN-B.1)."""
         section = _save_section_perceptual({})
-        self.assertEqual(section["composite_score_version"], 1)
+        self.assertEqual(section["composite_score_version"], 2)
 
     def test_save_invalid_persists_default(self) -> None:
         section = _save_section_perceptual({"composite_score_version": "v99"})
-        self.assertEqual(section["composite_score_version"], 1)
+        self.assertEqual(section["composite_score_version"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +197,14 @@ class TestSaveSectionPerceptual(unittest.TestCase):
 class TestBuildSettingsDictDispatch(unittest.TestCase):
     """Le settings_dict perceptuel embarque le toggle pour le dispatch."""
 
-    def test_default_dispatch_v1(self) -> None:
-        """Settings sans toggle -> dispatch V1."""
+    def test_default_dispatch_v2(self) -> None:
+        """Settings sans toggle -> dispatch V2 (VN-B.1, source de verite unique)."""
         d = _build_settings_dict({"perceptual_enabled": True})
+        self.assertEqual(d["composite_score_version"], 2)
+
+    def test_explicit_v1_killswitch(self) -> None:
+        """Kill-switch rollback explicite vers V1."""
+        d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": 1})
         self.assertEqual(d["composite_score_version"], 1)
 
     def test_explicit_v2(self) -> None:
@@ -201,9 +215,9 @@ class TestBuildSettingsDictDispatch(unittest.TestCase):
         d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": "2"})
         self.assertEqual(d["composite_score_version"], 2)
 
-    def test_invalid_falls_back_v1(self) -> None:
+    def test_invalid_falls_back_v2(self) -> None:
         d = _build_settings_dict({"perceptual_enabled": True, "composite_score_version": 99})
-        self.assertEqual(d["composite_score_version"], 1)
+        self.assertEqual(d["composite_score_version"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -227,15 +241,15 @@ class TestEnrichQualityReportDispatch(unittest.TestCase):
         }
         return store
 
-    def test_default_uses_v1(self) -> None:
-        """Pas de kwarg -> V1 (defaut backward-compat avec call sites legacy)."""
+    def test_default_uses_v2(self) -> None:
+        """Pas de kwarg -> V2 (VN-B.1 : source de verite unique)."""
         store = self._store_with_v1_and_v2()
         result: Dict[str, Any] = {}
         enrich_quality_report_with_perceptual(store, "run1", "row1", result)
         self.assertIn("perceptual", result)
-        self.assertEqual(result["perceptual"]["global_score"], 72)
-        self.assertEqual(result["perceptual"]["global_tier"], "bon")
-        self.assertEqual(result["perceptual"]["composite_score_version"], 1)
+        self.assertEqual(result["perceptual"]["global_score"], 88)
+        self.assertEqual(result["perceptual"]["global_tier"], "gold")
+        self.assertEqual(result["perceptual"]["composite_score_version"], 2)
 
     def test_explicit_v1(self) -> None:
         store = self._store_with_v1_and_v2()

@@ -318,6 +318,33 @@ et la procédure de résolution. Chaque section référence les chemins de logs 
 
 ## 8. Base de données SQLite
 
+### Symptôme : « DB SQLite détectée dans un dossier de synchronisation cloud » au démarrage
+
+- **Cause** : la base SQLite est posée dans un dossier synchronisé par OneDrive, Dropbox, Google
+  Drive, iCloud Drive, Box, pCloud ou Mega. CineSort utilise SQLite en mode **WAL** : trois
+  fichiers cohabitent (`cinesort.sqlite`, `cinesort.sqlite-wal`, `cinesort.sqlite-shm`). Le moteur
+  de synchronisation cloud peut copier le `.sqlite` alors que des pages sont encore dans le
+  `-wal` ou `-shm`, ce qui produit une **corruption silencieuse** détectée plus tard par
+  `PRAGMA integrity_check` (cf. symptôme suivant).
+- **Détection** : au boot, `sqlite_store.py:_detect_cloud_sync_folder()` matche case-insensitive
+  les marqueurs `OneDrive`, `Dropbox`, `GoogleDrive`, `Google Drive`, `iCloudDrive`,
+  `iCloud Drive`, `Box`, `pCloud`, `Mega` dans le chemin. Si trouvé → `logger.warning(...)`.
+- **Logs** : `cinesort.log` →
+  `WARNING DB SQLite detectee dans un dossier de synchronisation cloud (<provider>). Chemin: ...`.
+- **Solutions** (par ordre de préférence) :
+  1. **Déplacer la DB hors du dossier synchronisé** vers l'emplacement par défaut
+     `%LOCALAPPDATA%\CineSort\db\cinesort.sqlite` (jamais synchronisé) :
+     - Fermer CineSort proprement.
+     - Copier `cinesort.sqlite`, `cinesort.sqlite-wal`, `cinesort.sqlite-shm` et le dossier
+       `backups/` vers le nouveau chemin.
+     - Mettre à jour `state_dir` dans `settings.json` ou reset au défaut.
+  2. **Exclure les fichiers SQLite de la synchronisation** (si déplacement impossible) :
+     - **OneDrive** : `Get-ChildItem <db_dir>\*.sqlite*, <db_dir>\backups | ForEach-Object { attrib +U $_.FullName }` (marque `Toujours conserver sur cet appareil`), puis ajouter les patterns dans Settings OneDrive → Sauvegarde → Choisir les dossiers.
+     - **Dropbox** : clic droit sur `cinesort.sqlite` → **Smart Sync → Local only** + ignorer les patterns `.sqlite-wal` / `.sqlite-shm` via `dropbox.py exclude add`.
+     - **Google Drive** : exclure le dossier complet via Drive for Desktop → Préférences → Google Drive → Dossiers de mon ordinateur.
+  3. **Si la corruption a déjà eu lieu** : l'app tente un auto-restore depuis le backup le plus
+     récent au boot suivant. Sinon : voir `Symptôme : « DB integrity check FAILED »` ci-dessous.
+
 ### Symptôme : « DB integrity check FAILED » au boot
 
 - **Cause** : corruption SQLite (coupure courant pendant écriture WAL, secteur disque défectueux).

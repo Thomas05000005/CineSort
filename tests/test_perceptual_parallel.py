@@ -181,9 +181,15 @@ class TestPerceptualOrchestrationParallel(unittest.TestCase):
         from cinesort.ui.api import perceptual_support as ps
 
         ffmpeg_calls: list[str] = []
+        # R8-086 (F6-a) : preuve de parallelisme DETERMINISTE via threading.Barrier(2) au
+        # lieu d'une assertion de timing (time.sleep + elapsed<0.35s, flaky ~3/9). La barriere
+        # ne se libere QUE si video ET audio atteignent .wait() simultanement (= execution
+        # parallele). En serial, la 1re tache bloque -> timeout -> BrokenBarrierError -> echec
+        # franc. En parallele, elle se libere instantanement (pas d'attente reelle).
+        parallel_barrier = threading.Barrier(2)
 
         def fake_extract(*args, **kwargs):
-            time.sleep(0.1)
+            parallel_barrier.wait(timeout=2.0)
             ffmpeg_calls.append("video")
             return []
 
@@ -199,7 +205,7 @@ class TestPerceptualOrchestrationParallel(unittest.TestCase):
             return MagicMock()
 
         def fake_audio(*args, **kwargs):
-            time.sleep(0.1)
+            parallel_barrier.wait(timeout=2.0)
             ffmpeg_calls.append("audio")
             return MagicMock()
 
@@ -239,15 +245,13 @@ class TestPerceptualOrchestrationParallel(unittest.TestCase):
             patch.object(ps, "analyze_audio_perceptual", fake_audio),
             patch.object(ps, "build_perceptual_result", return_value=fake_result),
         ):
-            t0 = time.time()
             out = ps._execute_perceptual_analysis(api, "run1", "row1", ctx)
-            elapsed = time.time() - t0
 
         self.assertTrue(out.get("ok"))
-        # Les 2 taches sommees feraient 0.2s en serial, parallele attendu ~0.1s.
-        # Marge 0.35s pour absorber le bruit CI (threadpool startup + ffmpeg mock
-        # overhead). Si parallelisme casse, elapsed >= 0.2s + overhead ~0.5s+.
-        self.assertLess(elapsed, 0.35, f"parallelisme casse, elapsed={elapsed:.3f}s")
+        # R8-086 : parallelisme prouve de facon deterministe. Les 2 append n'ont lieu
+        # QUE si la barriere s'est liberee, donc QUE si video et audio se sont executes
+        # en parallele (sinon BrokenBarrierError au timeout -> append jamais atteint).
+        self.assertFalse(parallel_barrier.broken, "barriere cassee = pas de parallelisme")
         self.assertIn("video", ffmpeg_calls)
         self.assertIn("audio", ffmpeg_calls)
 

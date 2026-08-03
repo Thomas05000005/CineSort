@@ -1,0 +1,10 @@
+=== R8-002 F-QTN-GOV — gouvernance TTL quarantaine vs retention-runs ===
+  keep_last                                 : 2
+  original quarantine AVANT (taille)        : True (280 o)
+  run_dir vieux encore present apres clean  : False
+  original encore a son emplacement d'origine: False
+  copie PRESERVEE ailleurs sous state_dir   : []
+
+VERDICT : CASSE (PERTE DE DONNEES) — l'original quarantine est DETRUIT par la retention-runs,
+          sans preservation, quel que soit le TTL configure.
+RESUME: {"data_lost": true, "qfile_at_origin": false, "preserved_copies": 0, "old_run_dir_removed": true}

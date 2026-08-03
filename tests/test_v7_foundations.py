@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from contextlib import closing
 import shutil
 import sqlite3
 import tempfile
 import threading
 import unittest
-from unittest import mock
+from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.infra.run_id import RUN_ID_PATTERN, normalize_or_generate_run_id

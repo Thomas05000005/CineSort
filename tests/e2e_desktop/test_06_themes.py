@@ -5,9 +5,8 @@ Lancer : pytest tests/e2e_desktop/test_06_themes.py -v
 
 from __future__ import annotations
 
-
-from .pages.parametres_page import ParametresPage
 from .pages.base_page import BasePage
+from .pages.parametres_page import ParametresPage
 
 
 class TestThemes:

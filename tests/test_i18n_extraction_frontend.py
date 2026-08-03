@@ -19,7 +19,6 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, Set
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = PROJECT_ROOT / "locales"
 DASHBOARD_DIR = PROJECT_ROOT / "web" / "dashboard"
@@ -58,8 +57,9 @@ V6_02_FILES = [
     DASHBOARD_DIR / "components" / "top-bar-v5.js",
     # settings.js renomme en parametres.js + i18n inline supprime au profit
     # du schema declaratif PARAMETRES_GROUPS (Phase 5 spec 11). Plus d'import
-    # i18n a verifier ici. qij.js reste pertinent.
-    DASHBOARD_DIR / "views" / "qij.js",
+    # i18n a verifier ici.
+    # R8-046 (F5) : views/qij.js SUPPRIMÉ (vue morte, split QIJ->qualite ;
+    # qualite.js n'utilise pas t()). Retiré de la liste de scan i18n.
 ]
 
 

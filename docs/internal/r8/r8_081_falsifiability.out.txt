@@ -1,0 +1,6 @@
+=== R8-081 FALSIFIABILITE (rejouable, sans edit prod) ===
+  etat1_vert_honnete      : PASS
+  etat2_rouge_sur_bug     : RED OK (assertion levee) : get_tools_dir() doit creer le dossier tools/
+  etat3_vert_apres_revert : PASS
+
+VERDICT : FALSIFIABLE PROUVEE (vert/rouge/vert)
