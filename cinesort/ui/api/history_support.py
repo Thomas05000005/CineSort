@@ -93,7 +93,11 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
     try:
         from cinesort.domain.conversions import to_int
         from cinesort.domain.title_helpers import strip_trailing_year_if_equal
-        from cinesort.ui.api.film_support import overlay_tmdb_override
+        from cinesort.ui.api.film_support import (
+            apply_tmdb_override,
+            list_tmdb_overrides_bulk,
+            overlay_tmdb_override,
+        )
         from cinesort.ui.api.library_support import _get_store
         from cinesort.ui.api.run_read_support import (
             _AUTO_CRITICAL_WARNINGS,
@@ -113,6 +117,13 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
         except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
             threshold = 85
         blocking = _CONFLICT_FLAGS | _AUTO_CRITICAL_WARNINGS | _AUTO_INTEGRITY_WARNINGS
+        # PERF (ultra-audit 2026-08, CRITICAL) : les overrides TMDb du run sont
+        # lus en UNE requete au lieu de 2 connexions SQLite PAR ROW (2N pour un
+        # plan de N films : 40 s / 2002 connexions mesurees a N=1000, meme table
+        # vide). `None` = lecture bulk indisponible -> on retombe sur le chemin
+        # par row, lent mais correct : jamais un plan silencieusement privé de
+        # ses overrides. `{}` = run réellement sans override -> rien à faire.
+        overrides = list_tmdb_overrides_bulk(store, run_id)
 
         for row in payload_rows:
             if not isinstance(row, dict):
@@ -122,7 +133,10 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
             # confiance (traitement.js lit r.proposed_year) et que l'apply voie le
             # même titre que le modal fiche film / que l'overlay _validate_apply.
             with contextlib.suppress(Exception):
-                overlay_tmdb_override(store, run_id, row)
+                if overrides is None:
+                    overlay_tmdb_override(store, run_id, row)
+                else:
+                    apply_tmdb_override(row, overrides.get(str(row.get("row_id") or "")))
             try:
                 # 1) titre d'affichage sans année dupliquée (helper testé, protège "Blade Runner 2049")
                 with contextlib.suppress(Exception):
@@ -167,13 +181,17 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
         }
 
 
-def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
-    logger.debug("api: get_plan run_id=%s", run_id)
+def _load_plan_rows(api: Any, run_id: str, *, normalize_user_path: Any) -> Tuple[Any, Dict[str, Any] | None]:
+    """Charge les PlanRow d'un run : memoire d'abord, puis plan.jsonl.
+
+    Retourne ``(rows, None)`` ou ``(None, reponse_erreur)``. Extrait de
+    ``_get_plan_impl`` pour que ``get_plan_row`` (fiche film) partage EXACTEMENT
+    les memes regles de resolution et les memes messages d'erreur.
+    """
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+            return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
         rows = rs.rows
         if not rows:
             try:
@@ -183,35 +201,76 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
                 # legitime (run cleanup orphelin, run FAILED dont le plan.jsonl
                 # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
                 # eviter la pollution des logs.
-                return _err_response(str(exc), category="state", level="debug", log_module=__name__)
-        return {
-            "ok": True,
-            "rows": _enrich_plan_payload(
-                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
-            ),
-        }
+                return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+        return rows, None
 
     found = api._find_run_row(run_id)
     if not found:
-        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
+        return None, _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     row, _store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+        return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir), run_id, ensure_exists=False
     )
     try:
-        rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {
-            "ok": True,
-            "rows": _enrich_plan_payload(
-                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
-            ),
-        }
+        return api._load_rows_from_plan_jsonl(run_paths), None
     except (OSError, KeyError, TypeError, ValueError) as exc:
         # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
+        return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+
+
+def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
+    logger.debug("api: get_plan run_id=%s", run_id)
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None:
+        return err
+    try:
+        payload = api._serialize_rows_for_payload(rows)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="state", level="debug", log_module=__name__)
+    return {"ok": True, "rows": _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))}
+
+
+def _row_id_of(row: Any) -> str:
+    """row_id d'une PlanRow (dataclass) ou d'une row deja serialisee (dict)."""
+    if isinstance(row, dict):
+        return str(row.get("row_id") or "")
+    return str(getattr(row, "row_id", "") or "")
+
+
+def get_plan_row(api: Any, run_id: str, row_id: str, *, normalize_user_path: Any) -> Dict[str, Any] | None:
+    """UNE row de plan enrichie, sans serialiser NI enrichir tout le plan.
+
+    PERF (ultra-audit 2026-08, HIGH) : la fiche film passait par
+    ``run/get_plan``, qui serialise les N rows du run et les enrichit toutes
+    (2 connexions SQLite par row pour l'override TMDb), pour ensuite jeter les
+    N-1 autres : 9,2 s et ~2000 connexions mesurees a N=1000 pour renvoyer une
+    seule ligne. On filtre desormais la PlanRow AVANT la serialisation et on ne
+    fait passer qu'elle dans la MEME chaine (alertes ignorees, override TMDb,
+    reconciliation des sous-titres, display_title, auto_approvable) : memes
+    champs en sortie, cout independant de la taille du plan.
+
+    Retourne ``None`` si le run, le plan ou la row sont introuvables — c'est le
+    contrat attendu par les appelants (fiche film), qui rendent alors leur
+    propre erreur "Film introuvable".
+    """
+    wanted = str(row_id or "")
+    if not wanted:
+        return None
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None or not rows:
+        return None
+    match = next((r for r in rows if _row_id_of(r) == wanted), None)
+    if match is None:
+        return None
+    payload = api._serialize_rows_for_payload([match])
+    if not payload:
+        return None
+    enriched = _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))
+    return enriched[0] if enriched else None
 
 
 @requires_valid_run_id

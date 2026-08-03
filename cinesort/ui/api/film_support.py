@@ -42,16 +42,23 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
 
 
 def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
+    """Retourne LA row de plan demandee, sans materialiser tout le plan.
+
+    PERF (ultra-audit 2026-08, HIGH) : cette fonction appelait
+    `api.run.get_plan(run_id)`, qui serialise ET enrichit les N rows du run
+    (dont 2 connexions SQLite par row pour l'override TMDb), puis jetait les
+    N-1 autres. Mesure : 9,2 s et ~2000 connexions SQLite pour renvoyer UNE
+    ligne sur un plan de 1000 films. `history_support.get_plan_row` fait passer
+    la seule row voulue dans la MEME chaine d'enrichissement (alertes ignorees,
+    override TMDb, reconciliation des sous-titres, display_title,
+    auto_approvable) : memes champs en sortie, cout constant.
+    """
+    from cinesort.ui.api.history_support import get_plan_row  # noqa: PLC0415 — import tardif (cycle)
+
     try:
-        plan = api.run.get_plan(run_id)
+        return get_plan_row(api, str(run_id), str(row_id), normalize_user_path=normalize_user_path)
     except (OSError, AttributeError, KeyError, TypeError, ValueError):
         return None
-    if not plan or not plan.get("ok"):
-        return None
-    for r in plan.get("rows") or []:
-        if str(r.get("row_id") or "") == str(row_id):
-            return r
-    return None
 
 
 def _fetch_poster_url(api: Any, tmdb_id: int, size: str = "w500") -> Optional[str]:
@@ -234,20 +241,90 @@ def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]
         ov = store.film_modal.get_tmdb_override(run_id=rid, row_id=row_id)
     except (AttributeError, OSError, TypeError, ValueError):
         return False
-    if not ov:
+    return apply_tmdb_override(row, ov)
+
+
+def apply_tmdb_override(row: Dict[str, Any], override: Optional[Dict[str, Any]]) -> bool:
+    """Applique un override DEJA LU sur une row dict. Fonction pure (zero I/O).
+
+    Extraite de `overlay_tmdb_override` (dont elle garde la semantique champ
+    pour champ) pour que les appelants qui traitent un LOT de rows puissent
+    lire les overrides en une seule requete (`list_tmdb_overrides_bulk`) au
+    lieu d'ouvrir 2 connexions SQLite par row.
+    """
+    if not isinstance(row, dict) or not override:
         return False
-    tid = int(ov.get("tmdb_id") or 0)
+    tid = int(override.get("tmdb_id") or 0)
     if tid > 0:
         row["tmdb_id"] = tid
         row["chosen_tmdb_id"] = tid
-    if ov.get("proposed_title"):
-        row["proposed_title"] = str(ov["proposed_title"])
-    if int(ov.get("proposed_year") or 0) > 0:
-        row["proposed_year"] = int(ov["proposed_year"])
-    conf = int(ov.get("new_confidence") or 0)
+    if override.get("proposed_title"):
+        row["proposed_title"] = str(override["proposed_title"])
+    if int(override.get("proposed_year") or 0) > 0:
+        row["proposed_year"] = int(override["proposed_year"])
+    conf = int(override.get("new_confidence") or 0)
     if conf > 0:
         row["confidence"] = conf
     return True
+
+
+def list_tmdb_overrides_bulk(store: Any, run_id: Optional[str]) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Tous les overrides TMDb d'un run, en UNE requete. Cf `apply_tmdb_override`.
+
+    PERF (ultra-audit 2026-08, CRITICAL) : `film_modal.get_tmdb_override`
+    enchaine `_ensure_tables()` (1 connexion) puis `_managed_conn()` (2e
+    connexion), soit EXACTEMENT 2 ouvertures de connexion SQLite par appel.
+    Applique par row sur un plan entier, cela donnait 2N connexions : 40 s et
+    2002 connexions mesurees pour 1000 films, meme quand la table est vide.
+    Le cout n'est pas le SELECT (~0,003 ms) mais l'ouverture de connexion
+    (~14 ms : `apply_pragmas` ecrit dans `pragma_history` a chaque ouverture).
+
+    Retour :
+      - `{}`   : run sans aucun override (cas normal, rien a appliquer) ;
+      - dict   : {row_id: override} au meme format que `get_tmdb_override` ;
+      - `None` : lecture bulk indisponible (store/table/repo hors service).
+        Les deux cas sont volontairement distincts pour que l'appelant puisse
+        retomber sur le chemin par row plutot que de servir un plan
+        silencieusement prive de ses overrides.
+    """
+    rid = str(run_id or "")
+    repo = getattr(store, "film_modal", None) if store is not None else None
+    if repo is None or not rid:
+        return None
+    # Acces aux helpers du repository : `film_tmdb_overrides` n'expose pas de
+    # lecture par run, et ces helpers sont precisement le contrat documente de
+    # `_BaseRepository` (delegation vers le SQLiteStore parent).
+    try:
+        repo._ensure_tables()  # noqa: SLF001
+        with repo._managed_conn() as conn:  # noqa: SLF001
+            cur = conn.execute(
+                """
+                SELECT row_id, tmdb_id, new_confidence, proposed_title, proposed_year, chosen_at
+                FROM film_tmdb_overrides
+                WHERE run_id=?
+                """,
+                (rid,),
+            )
+            fetched = cur.fetchall()
+    # sqlite3.Error n'herite PAS d'OSError (regle projet) : sans lui, un
+    # 'database is locked' pendant un apply concurrent remonterait au lieu de
+    # rendre la main au chemin par row.
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+        logger.debug("list_tmdb_overrides_bulk unavailable: %s", exc)
+        return None
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in fetched:
+        try:
+            out[str(r["row_id"])] = {
+                "tmdb_id": int(r["tmdb_id"]),
+                "new_confidence": int(r["new_confidence"]),
+                "proposed_title": str(r["proposed_title"] or ""),
+                "proposed_year": int(r["proposed_year"] or 0),
+                "chosen_at": float(r["chosen_at"]),
+            }
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("list_tmdb_overrides_bulk row skipped: %s", exc)
+    return out
 
 
 def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
