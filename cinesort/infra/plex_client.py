@@ -29,6 +29,28 @@ _PLEX_HEADERS = {
 # avant interpolation dans /library/sections/{lid}/...
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
+# Pagination de get_movies (regression signalee sur la PR #756).
+#
+# Mesure sur un item realiste du listing /library/sections/{id}/all?type=1
+# (blocs Media/Part/Guid imbriques, JSON compact) :
+#   - minimal (sans Guid ni people)                    ~1 926 octets/film
+#   - defaut PMS + Guid                                ~2 001 octets/film
+#   - complet (Guid + Genre/Country/Director/.../Role) ~2 580 octets/film
+#   - complet + resume long                            ~2 860 octets/film
+# La borne anti-OOM de 10 Mo appliquee dans _get etait donc franchie par une
+# bibliotheque LEGITIME de ~3 500 a ~5 200 films : le sync Plex serait passe
+# d'un succes a un echec dur « Reponse Plex trop volumineuse ».
+#
+# Plex expose la pagination via DEUX en-tetes HTTP a envoyer ensemble
+# (X-Plex-Container-Start + X-Plex-Container-Size) — ce sont bien des
+# en-tetes et pas des query params, cf le fix Vague H sur get_movies_count.
+# 500 films/page = ~1,3 Mo dans le pire cas mesure, soit une marge x7 sous la
+# borne, qui redevient valable PAR PAGE.
+_MOVIES_PAGE_SIZE = 500
+# Garde-fou anti-boucle : 400 pages = 200 000 films, trois ordres de grandeur
+# au-dessus d'une bibliotheque personnelle.
+_MOVIES_MAX_PAGES = 400
+
 
 from cinesort.infra.integration_errors import IntegrationError
 
@@ -192,54 +214,130 @@ class PlexClient:
             )
         return result
 
+    @staticmethod
+    def _parse_movie(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Convertit un Metadata Plex en dict CineSort {id, name, year, path, tmdb_id, played}."""
+        # Extraire le chemin depuis Media.Part.file
+        path = ""
+        for media in item.get("Media") or []:
+            for part in media.get("Part") or []:
+                p = str(part.get("file") or "").strip()
+                if p:
+                    path = p
+                    break
+            if path:
+                break
+        # Extraire tmdb_id depuis Guid
+        tmdb_id: Optional[str] = None
+        for guid in item.get("Guid") or []:
+            gid = str(guid.get("id") or "")
+            if gid.startswith("tmdb://"):
+                tmdb_id = gid[7:]
+                break
+        return {
+            "id": str(item.get("ratingKey") or ""),
+            "name": str(item.get("title") or ""),
+            "year": int(item.get("year") or 0),
+            "path": path,
+            "tmdb_id": tmdb_id,
+            "played": bool(item.get("viewCount") and int(item.get("viewCount", 0)) > 0),
+        }
+
     def get_movies(self, library_id: str) -> List[Dict[str, Any]]:
-        """Retourne tous les films d'une section avec path, year, tmdb_id."""
+        """Retourne tous les films d'une section avec path, year, tmdb_id.
+
+        Pagine via les en-tetes X-Plex-Container-Start / X-Plex-Container-Size
+        (cf _MOVIES_PAGE_SIZE) : la reponse non paginee depassait la borne
+        anti-OOM de 10 Mo de `_get` des ~4 000 films, transformant le sync
+        d'une grosse bibliotheque en echec dur.
+
+        Un serveur peut ignorer la pagination (la doc Plex previent que la
+        reponse « might not be paginated at all ») : on le detecte et on
+        s'arrete apres la premiere page plutot que de rejouer le meme offset.
+        """
         lid = str(library_id or "").strip()
         if not lid:
             raise PlexError("library_id requis")
         if not _SAFE_ID_RE.match(lid):
             raise PlexError(f"Invalid library section id: {lid!r}")
-        try:
-            resp = self._get(f"/library/sections/{lid}/all", params={"type": "1"})
-            data = resp.json()
-        except PlexError:
-            raise
-        except (ValueError, KeyError) as exc:
-            raise PlexError(f"Reponse films invalide : {exc}") from exc
 
-        mc = data.get("MediaContainer") or {}
-        items = mc.get("Metadata") or []
         result: List[Dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            # Extraire le chemin depuis Media.Part.file
-            path = ""
-            for media in item.get("Media") or []:
-                for part in media.get("Part") or []:
-                    p = str(part.get("file") or "").strip()
-                    if p:
-                        path = p
-                        break
-                if path:
-                    break
-            # Extraire tmdb_id depuis Guid
-            tmdb_id: Optional[str] = None
-            for guid in item.get("Guid") or []:
-                gid = str(guid.get("id") or "")
-                if gid.startswith("tmdb://"):
-                    tmdb_id = gid[7:]
-                    break
-            result.append(
-                {
-                    "id": str(item.get("ratingKey") or ""),
-                    "name": str(item.get("title") or ""),
-                    "year": int(item.get("year") or 0),
-                    "path": path,
-                    "tmdb_id": tmdb_id,
-                    "played": bool(item.get("viewCount") and int(item.get("viewCount", 0)) > 0),
-                }
+        start = 0
+        page_num = 0
+        total_size: Optional[int] = None
+
+        while True:
+            page_num += 1
+            try:
+                resp = self._get(
+                    f"/library/sections/{lid}/all",
+                    params={"type": "1"},
+                    headers={
+                        "X-Plex-Container-Start": str(start),
+                        "X-Plex-Container-Size": str(_MOVIES_PAGE_SIZE),
+                    },
+                )
+                data = resp.json()
+            except PlexError:
+                raise
+            except (ValueError, KeyError) as exc:
+                raise PlexError(f"Reponse films invalide : {exc}") from exc
+
+            mc = data.get("MediaContainer") or {}
+            items = mc.get("Metadata") or []
+            if total_size is None:
+                try:
+                    total_size = int(mc.get("totalSize") or 0) or None
+                except (TypeError, ValueError):
+                    total_size = None
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                result.append(self._parse_movie(item))
+
+            page_count = len(items)
+            _log.debug(
+                "plex pagination page=%d start=%d recu=%d total=%s (cumule=%d)",
+                page_num,
+                start,
+                page_count,
+                total_size,
+                len(result),
             )
+
+            if page_count == 0:
+                break
+            # Serveur qui ignore les en-tetes : il a renvoye TOUTE la section.
+            # Redemander une page produirait des doublons a l'infini.
+            if page_count > _MOVIES_PAGE_SIZE:
+                _log.warning(
+                    "plex pagination ignoree par le serveur (recu %d > demande %d) : arret apres la premiere page",
+                    page_count,
+                    _MOVIES_PAGE_SIZE,
+                )
+                break
+            start += page_count
+            if total_size and start >= total_size:
+                break
+            # Page incomplete = derniere page (fallback quand totalSize est absent).
+            if page_count < _MOVIES_PAGE_SIZE:
+                break
+            if page_num >= _MOVIES_MAX_PAGES:
+                _log.warning(
+                    "plex pagination : garde-fou atteint (page=%d start=%d), arret",
+                    page_num,
+                    start,
+                )
+                break
+
+        _log.info(
+            "plex get_movies : %d/%s films en %d page(s) (section=%s)",
+            len(result),
+            total_size if total_size is not None else "?",
+            page_num,
+            lid,
+        )
         return result
 
     def get_movies_count(self, library_id: str) -> int:

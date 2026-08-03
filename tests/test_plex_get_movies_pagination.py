@@ -110,10 +110,7 @@ def _fake_movie(i: int) -> Dict[str, Any]:
                         "id": 50000 + i,
                         "key": f"/library/parts/{50000 + i}/1731000000/file.mkv",
                         "duration": 8181000,
-                        "file": (
-                            f"/mnt/media/Films/{title} ({year})/"
-                            f"{title} ({year}) - 2160p HDR TrueHD Atmos.mkv"
-                        ),
+                        "file": (f"/mnt/media/Films/{title} ({year})/{title} ({year}) - 2160p HDR TrueHD Atmos.mkv"),
                         "size": 61234567890,
                         "audioProfile": "",
                         "container": "mkv",
@@ -284,8 +281,7 @@ class PlexPaginationRobustnessTests(unittest.TestCase):
             mc: Dict[str, Any] = {
                 "size": total,
                 "Metadata": [
-                    {"ratingKey": str(i), "title": f"F{i}", "year": 2000, "Media": [], "Guid": []}
-                    for i in range(total)
+                    {"ratingKey": str(i), "title": f"F{i}", "year": 2000, "Media": [], "Guid": []} for i in range(total)
                 ],
             }
             if announce_total:
