@@ -801,11 +801,13 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     _carry_over_scan_only_fields(target, new_row_json)
 
     all_rows[target_idx] = new_row_json
-    tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as fp:
-        for r in all_rows:
-            fp.write(json.dumps(r, ensure_ascii=False) + "\n")
-    tmp_path.replace(plan_jsonl)
+    # Le `.tmp` etait NOMME EN DUR (`plan_jsonl.suffix + ".tmp"`) ici ET dans
+    # `tmdb_support.enrich_tmdb_ids_by_title` : deux ecrivains reellement
+    # concurrents sur le MEME chemin intermediaire (#732), sans fsync, sur le
+    # fichier que l'apply relit pour renommer les dossiers. Cf write_plan_jsonl.
+    from cinesort.ui.api.run_data_support import write_plan_jsonl  # noqa: PLC0415
+
+    write_plan_jsonl(plan_jsonl, all_rows)
 
     # AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : plan.jsonl vient de changer, mais le
     # snapshot memoire RunState.rows (prefere par get_plan ET par l'apply) date
@@ -1267,11 +1269,15 @@ def export_films(
             }
 
         # NDJSON : 1 ligne JSON par film (newline-delimited JSON), streamable.
-        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8", newline="\n") as fp:
-            for row in export_rows:
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
-        tmp_path.replace(file_path)
+        # Meme `.tmp` en dur que le reste de la famille #732 : deux exports
+        # concurrents (ThreadingHTTPServer) visaient le meme intermediaire, et
+        # aucun fsync ne protegeait la promotion d'un fichier tronque. Le
+        # helper fait les deux. `newline="\n"` etait deja explicite : l'ecriture
+        # binaire du helper produit exactement les memes octets.
+        state.atomic_write_text(
+            file_path,
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in export_rows),
+        )
         return {
             "ok": True,
             "file_path": str(file_path),

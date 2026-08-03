@@ -220,11 +220,13 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
             posters[rid] = url
 
     if changed:
-        tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as fp:
-            for r in all_rows:
-                fp.write(json.dumps(r, ensure_ascii=False) + "\n")
-        tmp_path.replace(plan_jsonl)
+        # Cette fonction tourne dans le thread daemon `tmdb-enrich-<run_id>`
+        # lance en fin de scan (run_flow_support.py:634) : son `.tmp` en dur
+        # etait le MEME chemin que celui de `_rematch_tmdb_and_update_plan`,
+        # declenchable au meme instant depuis l'UI (#732). Cf write_plan_jsonl.
+        from cinesort.ui.api.run_data_support import write_plan_jsonl  # noqa: PLC0415
+
+        write_plan_jsonl(plan_jsonl, all_rows)
 
         # AUDIT 2026-07-13 (HIGH-17) : toute reecriture de plan.jsonl doit
         # resynchroniser le snapshot memoire (prefere au fichier par get_plan /

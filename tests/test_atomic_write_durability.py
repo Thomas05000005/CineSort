@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from cinesort.app import export_support, updater
+from cinesort.app import export_support, plan_support, quarantine_ttl, updater
 from cinesort.infra import tmdb_client
 from cinesort.infra.integrations import poster_proxy
 from cinesort.infra.probe import disk_cache
@@ -41,7 +41,9 @@ from cinesort.infra.state import (
     atomic_write_bytes,
     atomic_write_json,
     atomic_write_text,
+    sweep_atomic_tmp_orphans,
 )
+from cinesort.ui.api import library_actions_support, run_data_support, tmdb_support
 
 
 @contextlib.contextmanager
@@ -245,6 +247,19 @@ class TestHelperCanonique(_AtomicAssertions):
         )
         self.assertEqual([p.name for p in self.root.iterdir()], ["cible.txt"], "un .tmp orphelin subsiste")
 
+    def test_ecrire_un_fichier_VIDE_est_legitime(self) -> None:
+        """Une taille nulle DEMANDEE n'est pas une troncature.
+
+        L'ancienne garde `written == 0 or ...` rendait impossible l'ecriture
+        d'un fichier vide. Ce n'est pas un cas d'ecole : l'export NDJSON d'une
+        selection de 0 film produit un contenu vide et echouait sur un
+        « ecriture atomique incomplete pour ... : 0/0 octets ».
+        """
+        target = self.root / "vide.ndjson"
+        atomic_write_text(target, "")
+        self.assertTrue(target.exists(), "un fichier vide DEMANDE doit pouvoir etre ecrit")
+        self.assertEqual(target.read_bytes(), b"")
+
     def test_no_tmp_left_behind_on_success(self) -> None:
         target = self.root / "ok.json"
         atomic_write_json(target, {"a": 1})
@@ -442,6 +457,344 @@ class TestDiskCacheOrphelins(unittest.TestCase):
         recent.write_text("{}", encoding="utf-8")
         self.assertEqual(disk_cache.prune_disk_cache(retention_days=90), 0)
         self.assertTrue(recent.exists())
+
+
+# ---------------------------------------------------------------------------
+# Ecrivains qui restaient HORS du helper (relecture adversaire, objection 1)
+# ---------------------------------------------------------------------------
+
+
+class TestEcrivainsRestantsRoutes(_AtomicAssertions):
+    """Les 4 ecrivains a `.tmp` FIXE que la 1re passe avait laisses derriere.
+
+    La « Reserve » de la PR affirmait qu'`omdb_client` etait le dernier `.tmp`
+    fixe du depot. C'etait faux : `library_actions_support` (x2),
+    `tmdb_support` et `quarantine_ttl` en portaient aussi. Les deux premiers
+    sont le defaut #732 applique au `plan.jsonl` de l'utilisateur — le fichier
+    que l'APPLY relit pour renommer les dossiers sur disque.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_reste_")
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_site_write_plan_jsonl(self) -> None:
+        """Ecrivain unique des reecritures de plan.jsonl (#732 sur plan.jsonl)."""
+        plan = self.root / "plan.jsonl"
+        plan.write_text("", encoding="utf-8")
+        rows = [{"row_id": "a", "proposed_title": "Inception"}, {"row_id": "b", "proposed_title": "Heat"}]
+        with capture_atomic_io() as journal:
+            run_data_support.write_plan_jsonl(plan, rows)
+        self.assert_both_invariants(journal, "run_data_support.write_plan_jsonl")
+        relu = [json.loads(x) for x in plan.read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertEqual(relu, rows, "le contenu du plan doit survivre au round-trip intact")
+
+    def test_site_export_films_ndjson(self) -> None:
+        """`export_films` format NDJSON (library_actions_support:1270)."""
+        exports = self.root / "exports"
+        exports.mkdir()
+        rows = [{"row_id": "a", "title": "Inception", "year": 2010}]
+        with (
+            mock.patch.object(library_actions_support, "_exports_dir", return_value=exports),
+            mock.patch.object(library_actions_support, "_resolve_run_id", return_value="run_42"),
+            mock.patch.object(library_actions_support, "_build_library_rows", return_value=rows),
+            capture_atomic_io() as journal,
+        ):
+            res = library_actions_support.export_films(object(), [], fmt="ndjson")
+        self.assertTrue(res["ok"])
+        self.assert_both_invariants(journal, "library_actions_support.export_films(ndjson)")
+        produit = Path(res["file_path"]).read_bytes()
+        self.assertNotIn(b"\r\n", produit, "l'export NDJSON etait explicitement en LF (newline='\\n')")
+
+    def test_site_quarantine_ttl_manifest(self) -> None:
+        """`_save_ttl_manifest` avait le tmp unique mais AUCUN fsync."""
+        root = self.root / "_review"
+        root.mkdir()
+        with capture_atomic_io() as journal:
+            quarantine_ttl._save_ttl_manifest(root, {"film.mkv": 1234.0})
+        self.assert_both_invariants(journal, "quarantine_ttl._save_ttl_manifest")
+
+
+class TestPlanJsonlDeuxEcrivainsIsoles(unittest.TestCase):
+    """#732 sur `plan.jsonl` : la pire instance de la grappe, restee ouverte.
+
+    `library_actions_support._rematch_tmdb_and_update_plan` et
+    `tmdb_support.enrich_tmdb_ids_by_title` derivaient tous les deux
+    `plan_jsonl.with_suffix(suffix + '.tmp')` du meme `run_id` — le meme chemin
+    au caractere pres. Et ils sont concurrents pour de vrai : l'enrichissement
+    tourne dans le thread daemon `tmdb-enrich-<run_id>` lance en fin de scan
+    pendant que le rematch part d'un handler `ThreadingHTTPServer`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_plan_race_")
+        self.root = Path(self._tmp.name)
+        self.run_dir = self.root / "runs" / "tri_films_run_42"
+        self.run_dir.mkdir(parents=True)
+        self.plan = self.run_dir / "plan.jsonl"
+
+        self.folder = self.root / "Inception (2010)"
+        self.folder.mkdir()
+        (self.folder / "film.mkv").write_bytes(b"x")
+
+        self._write_initial_plan()
+
+        run_paths = mock.Mock()
+        run_paths.plan_jsonl = self.plan
+        self.api = mock.Mock()
+        self.api._internal_settings.return_value = {"state_dir": str(self.root), "tmdb_api_key": "k"}
+        self.api._run_paths_for.return_value = run_paths
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write_initial_plan(self) -> None:
+        """Remet le plan dans son etat de depart (row SANS tmdb_id).
+
+        Necessaire entre les deux ecrivains : le rematch ecrit `tmdb_id`, apres
+        quoi l'enrichissement n'aurait plus rien a resoudre et n'ecrirait pas —
+        le test deviendrait vacant sans le dire.
+        """
+        self.plan.write_text(
+            json.dumps(
+                {
+                    "row_id": "r1",
+                    "kind": "single",
+                    "folder": str(self.folder),
+                    "video": "film.mkv",
+                    "proposed_title": "Inception",
+                    "proposed_year": 2010,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _run_rematch(self) -> Dict[str, Any]:
+        """Pilote le VRAI `_rematch_tmdb_and_update_plan` jusqu'a son ecriture.
+
+        Seul le pipeline de replanification (lourd, sans rapport avec la
+        durabilite) est neutralise : le corps de la fonction, y compris son
+        ecriture du plan, est bien execute.
+        """
+        new_row = {"row_id": "r1", "proposed_title": "Inception", "proposed_year": 2010, "tmdb_id": 27205}
+        with (
+            mock.patch.object(library_actions_support, "_build_cfg_for_row", return_value=object()),
+            mock.patch.object(library_actions_support, "_build_tmdb_client_optional", return_value=None),
+            mock.patch.object(library_actions_support, "_resolve_scan_root_for_replan", return_value=None),
+            mock.patch.object(library_actions_support, "_scan_subtitle_expected_languages", return_value=[]),
+            mock.patch.object(plan_support, "replan_single_row", return_value=object()),
+            mock.patch.object(plan_support, "plan_row_to_jsonable", return_value=dict(new_row)),
+            mock.patch.object(run_data_support, "resync_run_state_rows", return_value=True),
+            capture_atomic_io() as journal,
+        ):
+            out = library_actions_support._rematch_tmdb_and_update_plan(self.api, "run_42", "r1")
+        self.assertIsNotNone(out, "le rematch doit avoir abouti, sinon le test ne prouve rien")
+        return journal
+
+    def _run_enrich(self) -> Dict[str, Any]:
+        """Pilote le VRAI `enrich_tmdb_ids_by_title` jusqu'a son ecriture."""
+        best = mock.Mock()
+        best.id = 27205
+        best.poster_path = "/p.jpg"
+        fake_tmdb = mock.Mock()
+        fake_tmdb.search_movie.return_value = [best]
+        with (
+            mock.patch.object(tmdb_support, "_build_tmdb_client", return_value=(fake_tmdb, None)),
+            mock.patch.object(run_data_support, "resync_run_state_rows", return_value=True),
+            capture_atomic_io() as journal,
+        ):
+            res = tmdb_support.enrich_tmdb_ids_by_title(self.api, "run_42", ["r1"])
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("resolved"), 1, "l'enrichissement doit avoir ecrit, sinon le test est vacant")
+        return journal
+
+    def test_les_deux_ecrivains_du_plan_sont_durables(self) -> None:
+        journal_rematch = self._run_rematch()
+        self._write_initial_plan()
+        journal_enrich = self._run_enrich()
+        for label, journal in (("rematch", journal_rematch), ("enrich", journal_enrich)):
+            with self.subTest(ecrivain=label):
+                self.assertGreaterEqual(journal["fsync"], 1, f"{label} : plan.jsonl promu sans fsync")
+                self.assertLess(journal["order"].index("fsync"), journal["order"].index("replace"))
+
+    def test_les_deux_ecrivains_nutilisent_pas_le_meme_tmp(self) -> None:
+        rematch_tmps = set(self._run_rematch()["replace_sources"])
+        self._write_initial_plan()
+        enrich_tmps = set(self._run_enrich()["replace_sources"])
+
+        self.assertTrue(rematch_tmps and enrich_tmps, "les deux ecrivains doivent avoir promu un tmp")
+        legacy_fixed_tmp = str(self.plan.with_suffix(self.plan.suffix + ".tmp"))
+        self.assertNotIn(
+            legacy_fixed_tmp,
+            {Path(p).as_posix() for p in rematch_tmps | enrich_tmps} | (rematch_tmps | enrich_tmps),
+            "le .tmp fixe historique de plan.jsonl est de retour (#732)",
+        )
+        self.assertFalse(
+            rematch_tmps & enrich_tmps,
+            "rematch et enrichissement partagent encore un .tmp -> le thread "
+            "daemon tmdb-enrich peut promouvoir le plan partiel du rematch, sur "
+            "le fichier que l'apply relit pour renommer les dossiers (#732)",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fuite d'orphelins introduite par le nom de .tmp unique (objection 2)
+# ---------------------------------------------------------------------------
+
+
+class TestBalayageOrphelins(unittest.TestCase):
+    """Un `.tmp` UNIQUE n'est jamais reecrase : sans balayage, chaque crash
+    laisse un residu DEFINITIF. L'ancien `.tmp` FIXE bornait les orphelins a un
+    seul (le suivant le recyclait) : sans ce balayage la PR echangerait une
+    borne contre une accumulation — 20 a 100 Mo par kill pour le cache TMDb.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_sweep_")
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _orphan(self, directory: Path, target_name: str, *, age_s: float) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        p = directory / f"{target_name}{ATOMIC_TMP_INFIX}999.888.777.abcd1234"
+        p.write_text("{partiel", encoding="utf-8")
+        stamp = time.time() - age_s
+        os.utime(p, (stamp, stamp))
+        return p
+
+    def test_supprime_un_orphelin_ancien(self) -> None:
+        orphan = self._orphan(self.root, "tmdb_cache.json", age_s=7200)
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root), 1)
+        self.assertFalse(orphan.exists())
+
+    def test_epargne_le_tmp_d_un_ecrivain_VIVANT(self) -> None:
+        """La garde qui empeche le balayage de voler un fichier en cours.
+
+        C'est la seule chose qui separe ce nettoyage d'une corruption : entre
+        le `close()` et le `os.replace()`, le `.tmp` d'un ecrivain vivant n'a
+        plus de handle ouvert et ne se distingue d'un orphelin que par sa date.
+        """
+        vivant = self._orphan(self.root, "tmdb_cache.json", age_s=0)
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root), 0)
+        self.assertTrue(vivant.exists(), "le balayage a vole le .tmp d'une ecriture en cours")
+
+    def test_ne_touche_jamais_un_fichier_qui_nest_pas_un_tmp(self) -> None:
+        """Non-regression : ce balayage ne doit pas devenir un wipe de cache."""
+        vrai = self.root / "tmdb_cache.json"
+        vrai.write_text("{}", encoding="utf-8")
+        vieux = time.time() - 90 * 24 * 3600
+        os.utime(vrai, (vieux, vieux))
+        film = self.root / "film.mkv"
+        film.write_bytes(b"x")
+        os.utime(film, (vieux, vieux))
+
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root), 0)
+        self.assertTrue(vrai.exists(), "le cache REEL a ete supprime par le balayage")
+        self.assertTrue(film.exists(), "un fichier video a ete supprime par le balayage")
+
+    def test_target_name_restreint_a_une_seule_cible(self) -> None:
+        mien = self._orphan(self.root, "film.nfo", age_s=7200)
+        voisin = self._orphan(self.root, "autre.json", age_s=7200)
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root, target_name="film.nfo"), 1)
+        self.assertFalse(mien.exists())
+        self.assertTrue(voisin.exists(), "le balayage cible a debordé sur un voisin")
+
+    def test_recursif_atteint_le_cache_posters(self) -> None:
+        """`<state_dir>/cache/posters/` n'a AUCUN pruner : sans recursion, ses
+        orphelins ne sont balayes par personne."""
+        poster = self._orphan(self.root / "cache" / "posters" / "w185", "603.jpg", age_s=7200)
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root, recursive=False), 0)
+        self.assertTrue(poster.exists())
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root, recursive=True), 1)
+        self.assertFalse(poster.exists())
+
+
+class TestBalayageCable(unittest.TestCase):
+    """Le balayage doit etre CABLE, pas seulement disponible.
+
+    Avant, `is_atomic_tmp_name` n'avait que 2 usages, tous deux dans
+    `probe/disk_cache.py` : le cache TMDb (20-100 Mo, reecrit toutes les 2 s
+    pendant un scan), le cache posters et le `.nfo` depose a cote du `.mkv`
+    n'avaient aucun nettoyeur.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_sweep_cable_")
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _orphan(self, directory: Path, target_name: str) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        p = directory / f"{target_name}{ATOMIC_TMP_INFIX}999.888.777.abcd1234"
+        p.write_text("residu", encoding="utf-8")
+        vieux = time.time() - 7200
+        os.utime(p, (vieux, vieux))
+        return p
+
+    def test_export_nfo_balaie_le_residu_visible_dans_le_dossier_du_film(self) -> None:
+        """Cas le plus visible : le `.tmp` atterrit a cote du `.mkv`."""
+        folder = self.root / "Inception (2010)"
+        folder.mkdir()
+        (folder / "film.mkv").write_bytes(b"x")
+        orphan = self._orphan(folder, "film.nfo")
+
+        rows = [{"folder": str(folder), "video": "film.mkv", "proposed_title": "Inception", "proposed_year": 2010}]
+        res = export_support.export_nfo_for_run(rows, dry_run=False, overwrite=True)
+
+        self.assertEqual(res["written"], 1)
+        self.assertFalse(
+            orphan.exists(),
+            "un .tmp d'export interrompu reste a vie dans le dossier du film, "
+            "visible par l'utilisateur et scanne par Jellyfin/Kodi",
+        )
+        self.assertTrue((folder / "film.mkv").exists(), "le balayage a touche au fichier video")
+
+    def test_boot_balaie_le_state_dir_en_recursif(self) -> None:
+        """Le cache TMDb (20-100 Mo) et le cache posters vivent sous state_dir."""
+        cache_tmdb = self._orphan(self.root, "tmdb_cache.json")
+        poster = self._orphan(self.root / "cache" / "posters" / "w185", "603.jpg")
+        garde = self.root / "tmdb_cache.json"
+        garde.write_text("{}", encoding="utf-8")
+
+        api = mock.Mock()
+        api._state_dir = str(self.root)
+        app_entry = _load_app_entry()
+        app_entry._purge_tmdb_cache_in_background(api, {"tmdb_cache_ttl_days": 30})
+        _join_named_thread("cinesort-tmdb-purge")
+
+        self.assertFalse(cache_tmdb.exists(), "orphelin de 20-100 Mo jamais balaye -> un par kill, a vie")
+        self.assertFalse(poster.exists(), "le cache posters n'a aucun autre pruner")
+        self.assertTrue(garde.exists(), "le balayage au boot a supprime le VRAI cache")
+
+
+def _load_app_entry() -> Any:
+    """Charge `app.py` (racine du depot) sans l'ajouter a `sys.modules`."""
+    import importlib.util  # noqa: PLC0415
+
+    app_py = Path(__file__).resolve().parent.parent / "app.py"
+    spec = importlib.util.spec_from_file_location("cinesort_app_entry_test", app_py)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _join_named_thread(name: str, timeout: float = 20.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        alive = [t for t in threading.enumerate() if t.name == name]
+        if not alive:
+            return
+        alive[0].join(timeout=deadline - time.time())
+    raise AssertionError(f"le thread {name} n'a pas termine en {timeout}s")
 
 
 if __name__ == "__main__":

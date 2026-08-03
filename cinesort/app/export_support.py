@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
 
-from cinesort.infra.state import atomic_write_text
+from cinesort.infra.state import atomic_write_text, sweep_atomic_tmp_orphans
 
 _logger = logging.getLogger(__name__)
 
@@ -287,6 +287,13 @@ def export_nfo_for_run(
             atomic_write_text(nfo_path, xml_content, mkdir=False)
             written += 1
             details.append({"path": str(nfo_path), "status": "written"})
+            # Le `.tmp` unique n'est JAMAIS reecrase : un export interrompu
+            # laisse ici un residu DEFINITIF, dans le dossier du film, a cote
+            # du .mkv — visible par l'utilisateur et scanne par Jellyfin/Kodi.
+            # On balaie les orphelins de CE .nfo (et d'aucun autre fichier du
+            # dossier) a chaque export reussi : la borne « au plus un residu »
+            # qu'offrait l'ancien `.tmp` fixe est ainsi retablie.
+            sweep_atomic_tmp_orphans(nfo_path.parent, target_name=nfo_path.name)
         except (OSError, PermissionError) as exc:
             errors += 1
             details.append({"path": str(nfo_path), "status": f"error: {exc}"})

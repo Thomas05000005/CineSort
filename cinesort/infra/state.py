@@ -137,6 +137,77 @@ def is_atomic_tmp_name(name: str) -> bool:
     return ATOMIC_TMP_INFIX in name
 
 
+# Age au-dela duquel un `.tmp` d'ecriture atomique n'est plus le fichier
+# intermediaire d'un ecrivain VIVANT mais un ORPHELIN de crash.
+#
+# Un `.tmp` vivant n'existe qu'entre `open()` et `os.replace()`. Mesure sur le
+# plus gros ecrivain du depot (cache TMDb de 19,2 Mo) : 32 ms, plus au pire le
+# budget de `_replace_with_retry` (~0,41 s). Une heure laisse donc ~3 orders de
+# grandeur de marge avant qu'un balayage puisse voler le `.tmp` d'un ecrivain
+# en cours.
+ATOMIC_TMP_ORPHAN_MAX_AGE_S = 3600.0
+
+
+def sweep_atomic_tmp_orphans(
+    directory: Path,
+    *,
+    target_name: Optional[str] = None,
+    max_age_s: float = ATOMIC_TMP_ORPHAN_MAX_AGE_S,
+    recursive: bool = False,
+) -> int:
+    """Supprime les `.tmp` d'ecriture atomique ORPHELINS. Retourne le compte.
+
+    REGRESSION QUE CETTE FONCTION REPARE. Un `.tmp` de nom FIXE etait reecrase
+    a chaque ecriture : un crash en laissait au pire UN, et le suivant le
+    recyclait. Le nom UNIQUE (pid/thread/ns/uuid) qui supprime la course
+    CWE-362 supprime aussi ce recyclage : chaque crash laisse un residu
+    DEFINITIF. Sans balayage, on echange une borne contre une accumulation —
+    `tmdb_cache.json` pese 20 a 100 Mo et est reecrit toutes les 2 s pendant un
+    scan, `<state_dir>/cache/posters/` n'a aucun pruner, et l'export `.nfo`
+    depose son `.tmp` DANS LE DOSSIER DU FILM, a cote du `.mkv`, ou il est
+    visible par l'utilisateur et par Jellyfin/Kodi.
+
+    Deux filtres, tous les deux necessaires :
+
+    - `is_atomic_tmp_name` : ne jamais toucher un fichier qui n'est pas a nous ;
+    - `max_age_s` : ne jamais voler le `.tmp` d'un ecrivain VIVANT. C'est le
+      seul filtre possible — entre le `close()` et le `os.replace()` le
+      fichier n'a plus de handle ouvert, donc rien ne le distingue d'un
+      orphelin sinon sa date. Tester la vivacite du pid inscrit dans le nom
+      serait pire : les pids se recyclent.
+
+    `target_name` restreint aux temporaires d'UNE cible donnee (`plan.jsonl` ->
+    `plan.jsonl.tmp.*`), pour balayer un dossier partage sans toucher aux
+    voisins. Best-effort integral : ne leve jamais.
+    """
+    removed = 0
+    cutoff = time.time() - max(0.0, float(max_age_s))
+    prefix = f"{target_name}{ATOMIC_TMP_INFIX}" if target_name else None
+    try:
+        if not directory.is_dir():
+            return 0
+        entries = directory.rglob("*") if recursive else directory.iterdir()
+        for entry in entries:
+            name = entry.name
+            if not is_atomic_tmp_name(name):
+                continue
+            if prefix is not None and not name.startswith(prefix):
+                continue
+            try:
+                if not entry.is_file() or entry.stat().st_mtime >= cutoff:
+                    continue
+                entry.unlink()
+                removed += 1
+            except OSError:
+                # Verrou Windows, course avec un autre balayeur : on passe.
+                continue
+    except OSError:
+        # Repertoire disparu / illisible : le balayage est un bonus, jamais une
+        # condition de succes de l'appelant.
+        return removed
+    return removed
+
+
 def _replace_with_retry(tmp: Path, target: Path) -> None:
     """Bascule `tmp` -> `target`, en encaissant la contention Windows.
 
@@ -196,6 +267,19 @@ def atomic_write_bytes(p: Path, data: bytes, *, mkdir: bool = True) -> None:
 
     En cas d'echec, `p` est laisse INCHANGE et une `OSError` est levee
     (`AtomicWriteError` pour une taille incoherente). Le `.tmp` est nettoye.
+
+    PORTEE EXACTE DE LA GARANTIE — ce qui n'est PAS fait, et pourquoi.
+    Le fsync ci-dessous porte sur le CONTENU du fichier, pas sur l'entree de
+    REPERTOIRE creee par `os.replace`. En toute rigueur POSIX il faudrait aussi
+    `fsync` le descripteur du repertoire parent, sinon un crash noyau juste
+    apres le rename peut laisser le repertoire pointer sur l'ancienne entree.
+    C'est deliberement omis : `os.open(dir, O_RDONLY)` leve `PermissionError`
+    sur Windows, qui est la seule plateforme cible (application desktop
+    Windows), et NTFS journalise ses metadonnees — le rename est donc deja
+    ordonne par le journal du systeme de fichiers. La garantie reelle est donc
+    « jamais de contenu tronque promu », pas « rename durable au sens POSIX ».
+    Un futur ecrivain ne doit pas croire l'invariant plus fort qu'il ne l'est ;
+    un portage Linux devrait ajouter le fsync du repertoire ici.
     """
     if mkdir:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -206,7 +290,14 @@ def atomic_write_bytes(p: Path, data: bytes, *, mkdir: bool = True) -> None:
             f.flush()
             os.fsync(f.fileno())  # force l'ecriture sur disque AVANT le rename
         written = tmp.stat().st_size
-        if written == 0 or written != len(data):
+        # `written == 0` a ete RETIRE de cette garde : la clause etait subsumee
+        # par `written != len(data)` (0 != n des que data est non vide) et son
+        # seul effet propre etait de rendre l'ecriture d'un fichier VIDE
+        # toujours impossible. Ce n'etait pas theorique : l'export NDJSON d'une
+        # selection vide (0 film) est legitime et echouait sur un « ecriture
+        # atomique incomplete : 0/0 octets ». Une taille nulle DEMANDEE est
+        # valide ; une taille nulle SUBIE reste attrapee, car data ne l'est pas.
+        if written != len(data):
             raise AtomicWriteError(f"ecriture atomique incomplete pour {p.name}: {written}/{len(data)} octets")
         _replace_with_retry(tmp, p)
     finally:
