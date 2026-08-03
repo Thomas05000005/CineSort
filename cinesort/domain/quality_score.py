@@ -669,6 +669,9 @@ def _has_vf(langs: List[str]) -> bool:
 # sans cette table, "truehd atmos" ou "dts:x" retomberaient a 0 (sous AAC).
 # Les alias preservent EXACTEMENT le rang d'avant pour les variantes lossy
 # (atmos JOC reste au rang de son porteur eac3/ac3, HRA reste au rang dts).
+# Marqueurs d'une etiquette DEJA canonique : la derivation les laisse passer.
+_ALREADY_CANONICAL_AUDIO_TOKENS = ("atmos", "dts-hd", "dtshd", "dts:x", "dts-x")
+
 _AUDIO_CANONICAL_RANK_ALIAS = {
     "truehd atmos": "truehd",
     "eac3 atmos": "eac3",
@@ -710,26 +713,35 @@ def _canonical_audio_codec(track: Dict[str, Any]) -> str:
     if not isinstance(track, dict):
         return ""
     c = str(track.get("codec") or "").strip().lower()
-    if not c:
-        return ""
-    # Deja canonique (fallback par le nom de release, probe deja normalise).
-    if ("atmos" in c) or ("dts-hd" in c) or ("dtshd" in c) or ("dts:x" in c) or ("dts-x" in c):
+    # Vide, ou deja canonique (fallback par le nom de release, ou couche probe
+    # corrigee en amont) : valeur rendue telle quelle -> l'operation est idempotente.
+    if not c or any(token in c for token in _ALREADY_CANONICAL_AUDIO_TOKENS):
         return c
     prof = str(track.get("profile") or "").strip().lower()
-    prof_tokens = set(prof.replace("-", " ").replace("/", " ").split())
     if "truehd" in c:
         return "truehd atmos" if (bool(track.get("is_atmos")) or "atmos" in prof) else "truehd"
-    if "ac3" in c or "ac-3" in c:
+    if ("ac3" in c) or ("ac-3" in c):
         joc = bool(track.get("is_atmos")) or ("atmos" in prof) or ("joc" in prof)
         return f"{c} atmos" if joc else c
     if "dts" in c:
-        if bool(track.get("is_dts_x")):
-            return "dts:x"
-        if ("ma" in prof_tokens) or ("master" in prof_tokens):
-            return "dts-hd ma"
-        if ("hra" in prof_tokens) or ("high" in prof_tokens):
-            return "dts-hd hra"
+        return _canonical_dts_codec(c, prof, bool(track.get("is_dts_x")))
     return c
+
+
+def _canonical_dts_codec(codec: str, profile: str, is_dts_x: bool) -> str:
+    """Variante DTS deduite du `profile` ffprobe ('DTS-HD MA', 'DTS-HD HRA'...).
+
+    Le profil est tokenise (tirets et slashs remplaces par des espaces) pour ne
+    pas confondre le 'ma' de 'DTS-HD MA' avec une sous-chaine d'un autre mot.
+    """
+    if is_dts_x:
+        return "dts:x"
+    tokens = set(profile.replace("-", " ").replace("/", " ").split())
+    if ("ma" in tokens) or ("master" in tokens):
+        return "dts-hd ma"
+    if ("hra" in tokens) or ("high" in tokens):
+        return "dts-hd hra"
+    return codec
 
 
 def _audio_codec_rank(track: Dict[str, Any]) -> int:
@@ -834,12 +846,6 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
         if lossy is None:
             lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
         return int(lossy), "Audio Atmos (lossy)"
-    # Fix ultra-audit 2026-08-03 : DTS:X est porte par un flux DTS-HD MA
-    # (lossless + objets). Il tombait sur la branche `dts` generique (bonus
-    # lossy) alors que `_hierarchy_audio_codec_token` lui donne deja son propre
-    # token 'dts_x'. Cle de profil dediee optionnelle, sinon parite DTS-HD MA.
-    if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c):
-        return int(bonuses.get("dts_x_bonus", bonuses["dts_hd_ma_bonus"])), "Audio DTS:X"
     if "hra" in c and "dts" in c:
         # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
         # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
@@ -848,8 +854,20 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
     # BUG-3 (v7.8.0) : parentheses explicites. Avant : `... or "ma" in c and "dts" in c`
     # se lisait comme `or ("ma" in c and "dts" in c)` (precedence Python : and > or).
     # Comportement preserve, juste rendu lisible et resistant au refactor.
-    if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
-        return int(bonuses["dts_hd_ma_bonus"]), "Audio DTS-HD MA"
+    #
+    # Fix ultra-audit 2026-08-03 : DTS:X est porte par un flux DTS-HD MA
+    # (lossless + objets). Il tombait sur la branche `dts` generique (bonus
+    # lossy) alors que `_hierarchy_audio_codec_token` lui donne deja son propre
+    # token 'dts_x'. Cle de profil dediee optionnelle, sinon parite DTS-HD MA.
+    is_dts_x = ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c)
+    if is_dts_x or ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
+        if is_dts_x:
+            lossless = int(bonuses.get("dts_x_bonus", bonuses["dts_hd_ma_bonus"]))
+            lossless_label = "Audio DTS:X"
+        else:
+            lossless = int(bonuses["dts_hd_ma_bonus"])
+            lossless_label = "Audio DTS-HD MA"
+        return lossless, lossless_label
     if "dts" in c:
         return int(bonuses["dts_bonus"]), "Audio DTS"
     if "aac" in c:
@@ -1553,19 +1571,17 @@ def _apply_genre_adjustments_helper(
     extras_sub: float,
     factors: List[Dict[str, Any]],
     reasons: List[str],
-    effective_height: Optional[int] = None,
 ) -> Tuple[float, float, float, Optional[str]]:
     """Applique les ajustements genre-aware TMDb.
 
-    `effective_height` : hauteur CANONIQUE de la classe de resolution (cf.
-    `_effective_resolution_height`). Fix ultra-audit 2026-08-03 : `genre_rules`
-    ecrit `height < 1080` (:245, malus `low_resolution_malus`) sur la hauteur
-    recue ; en lui passant la hauteur BRUTE, tout 1080p scope (1920x800) prenait
-    un malus « resolution modeste » alors que `detected.resolution` affichait
-    '1080p'. Le defaut etait jusqu'ici invisible car le chemin genre etait mort
-    (client TMDb jamais construit, cf. quality_report_support). On le desamorce
-    AVANT de le rallumer. `None` = retombee sur la hauteur brute (appels directs
-    historiques, tests inclus).
+    `video["height"]` doit porter la hauteur CANONIQUE de la classe de
+    resolution (cf. `_effective_resolution_height`), pas la hauteur brute du
+    flux. Fix ultra-audit 2026-08-03 : `genre_rules` ecrit `height < 1080`
+    (:245, malus `low_resolution_malus`) sur la valeur recue ; avec la hauteur
+    BRUTE, tout 1080p scope (1920x800) prenait un malus « resolution modeste »
+    alors que `detected.resolution` affichait '1080p'. Le defaut etait jusqu'ici
+    invisible car le chemin genre etait mort (client TMDb jamais construit, cf.
+    quality_report_support) : on le desamorce AVANT de le rallumer.
 
     Modifie factors et reasons en place ; retourne (video_sub, audio_sub, extras_sub, primary_genre).
     """
@@ -1575,7 +1591,7 @@ def _apply_genre_adjustments_helper(
     primary_genre = _detect_pg(tmdb_genres)
     if not primary_genre:
         return video_sub, audio_sub, extras_sub, primary_genre
-    height_g = _to_int(effective_height, 0) if effective_height is not None else _to_int(video.get("height"), 0)
+    height_g = _to_int(video.get("height"), 0)
     codec_g = str(video.get("codec") or "")
     has_hdr_g = bool(video.get("hdr10") or video.get("hdr10_plus") or video.get("hdr_dolby_vision"))
     has_atmos_g = False
@@ -2301,8 +2317,10 @@ def compute_quality_score(
     # --- P4.2 : ajustements genre-aware TMDb ---
     video_sub, audio_sub, extras_sub, primary_genre = _apply_genre_adjustments_helper(
         tmdb_genres=tmdb_genres,
-        video=video,
-        effective_height=effective_height,
+        # `height` remplace par la hauteur CANONIQUE : genre_rules:245 teste
+        # `height < 1080` et collerait sinon un malus « resolution modeste » a
+        # tous les 1080p scope. Copie locale, le dict `video` n'est pas mute.
+        video={**video, "height": effective_height},
         audio_analysis=audio_analysis,
         encode_warnings=encode_warnings,
         video_sub=video_sub,

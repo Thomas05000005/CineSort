@@ -242,44 +242,48 @@ class GenreScoringIsReachableTests(unittest.TestCase):
         self.assertFalse(build.called)
         self.assertIsNone(score.call_args.kwargs.get("tmdb_genres"))
 
-    def test_genre_low_resolution_malus_uses_resolution_class(self) -> None:
-        # genre_rules teste `height < 1080` : avec la hauteur BRUTE, tout 1080p
-        # scope prenait un malus « resolution modeste ».
-        factors: List[Dict[str, Any]] = []
-        reasons: List[str] = []
-        video = {"height": 800, "width": 1920, "codec": "h264"}
-        video_sub, _a, _e, genre = _apply_genre_adjustments_helper(
+    @staticmethod
+    def _genre_score(width: int, height: int) -> Dict[str, Any]:
+        return compute_quality_score(
+            normalized_probe=_probe(width=width, height=height),
+            profile=default_quality_profile(),
+            folder_name="Film (2015)",
+            expected_title="Film",
+            expected_year=2015,
+            release_name="Film.mkv",
             tmdb_genres=["Action"],
-            video=video,
-            audio_analysis=None,
-            encode_warnings=None,
-            video_sub=60.0,
-            audio_sub=50.0,
-            extras_sub=50.0,
-            factors=factors,
-            reasons=reasons,
-            effective_height=1080,
         )
-        self.assertEqual(genre, "action")
-        self.assertNotIn("modeste", " || ".join(reasons))
+
+    def test_genre_low_resolution_malus_uses_resolution_class(self) -> None:
+        # genre_rules:245 teste `height < 1080` : avec la hauteur BRUTE, tout
+        # 1080p scope prenait un malus « resolution modeste » alors que
+        # detected.resolution affichait deja '1080p'.
+        res = self._genre_score(1920, 800)
+        self.assertEqual((res["metrics"]["detected"])["resolution"], "1080p")
+        self.assertEqual((res["metrics"]).get("primary_genre"), "action")
+        self.assertNotIn("modeste", _reasons(res))
 
     def test_genre_low_resolution_malus_still_fires_on_real_sd(self) -> None:
         """Non-regression : un vrai 720p garde bien son malus de genre."""
-        factors: List[Dict[str, Any]] = []
+        res = self._genre_score(1280, 720)
+        self.assertIn("modeste", _reasons(res))
+
+    def test_genre_helper_reads_the_height_it_is_given(self) -> None:
+        """Contrat du helper : il tranche sur `video["height"]` (que l'appelant
+        alimente avec la hauteur canonique)."""
         reasons: List[str] = []
         _apply_genre_adjustments_helper(
             tmdb_genres=["Action"],
-            video={"height": 720, "width": 1280, "codec": "h264"},
+            video={"height": 1080, "codec": "h264"},
             audio_analysis=None,
             encode_warnings=None,
             video_sub=60.0,
             audio_sub=50.0,
             extras_sub=50.0,
-            factors=factors,
+            factors=[],
             reasons=reasons,
-            effective_height=720,
         )
-        self.assertIn("modeste", " || ".join(reasons))
+        self.assertNotIn("modeste", " || ".join(reasons))
 
 
 _DTS_HD_MA = {"codec": "dts", "profile": "DTS-HD MA", "channels": 6, "language": "eng", "bitrate": 3_000_000}
