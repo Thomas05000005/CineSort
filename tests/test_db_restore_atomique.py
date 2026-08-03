@@ -60,11 +60,18 @@ _REAL_MIGRATIONS = Path(backup_module.__file__).resolve().parent / "migrations"
 # --------------------------------------------------------------------------- #
 
 
+# Un PRAGMA n'accepte pas de parametre lie : on passe donc par des instructions
+# ECRITES EN DUR plutot que par une interpolation (rien d'interpole ne part vers
+# SQLite, et l'analyse statique n'a pas a deviner que la valeur est sure).
+_PAGE_SIZE_SQL = {4096: "PRAGMA page_size=4096", 16384: "PRAGMA page_size=16384"}
+_JOURNAL_SQL = {True: "PRAGMA journal_mode=WAL", False: "PRAGMA journal_mode=DELETE"}
+
+
 def _seed(path: Path, marker: str, rows: int, *, wal: bool = False, page_size: Optional[int] = None) -> None:
     with closing(sqlite3.connect(str(path))) as conn:
         if page_size:
-            conn.execute(f"PRAGMA page_size={int(page_size)}")
-        conn.execute(f"PRAGMA journal_mode={'WAL' if wal else 'DELETE'}")
+            conn.execute(_PAGE_SIZE_SQL[page_size])
+        conn.execute(_JOURNAL_SQL[wal])
         conn.execute("CREATE TABLE films (id INTEGER PRIMARY KEY, titre TEXT)")
         conn.executemany(
             "INSERT INTO films (titre) VALUES (?)",
@@ -261,7 +268,7 @@ class SidecarsOrphelinsTests(_RestoreCaseMixin):
         source = self._tmp / "autre_generation.sqlite"
         conn = sqlite3.connect(str(source))
         try:
-            conn.execute(f"PRAGMA page_size={page_size}")
+            conn.execute(_PAGE_SIZE_SQL[page_size])
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA wal_autocheckpoint=0")
             conn.execute("CREATE TABLE films (id INTEGER PRIMARY KEY, titre TEXT)")
