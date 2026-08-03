@@ -6,7 +6,9 @@ flaguaient `mkv_title_mismatch` = faux signal qui noie les vrais conflits.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_mkvtitle_diff.py
 """
+
 from __future__ import annotations
+
 import json
 
 from cinesort.domain.mkv_title_check import check_container_title

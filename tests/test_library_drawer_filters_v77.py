@@ -15,8 +15,14 @@ from cinesort.ui.api.library_support import _media_source_label, _row_matches, _
 
 class DrawerFilterTests(unittest.TestCase):
     def _row(self, **kw):
-        base = {"codec": "hevc", "resolution": "1080p", "media_source": "bluray",
-                "audio_languages": ["eng"], "subtitle_languages": ["fre"], "title": "X"}
+        base = {
+            "codec": "hevc",
+            "resolution": "1080p",
+            "media_source": "bluray",
+            "audio_languages": ["eng"],
+            "subtitle_languages": ["fre"],
+            "title": "X",
+        }
         base.update(kw)
         return base
 

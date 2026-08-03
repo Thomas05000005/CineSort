@@ -30,7 +30,7 @@ from typing import Optional, Tuple
 
 # Reuse le set d'editions longues defini en runtime_matching pour rester
 # coherent : si on change la liste a un endroit, l'autre suit.
-from cinesort.domain.runtime_matching import _EXTENDED_EDITIONS, _is_extended_edition
+from cinesort.domain.runtime_matching import _is_extended_edition
 
 # Seuil par defaut : delta > 60 min est tres improbable meme pour une
 # Extended Edition non flaggee. Au-dela on considere que c'est un autre film.

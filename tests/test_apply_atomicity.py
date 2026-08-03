@@ -217,9 +217,7 @@ class AtomicMoveTests(unittest.TestCase):
         self.store.apply.insert_pending_move = _spy  # type: ignore[method-assign]
 
         recorded = []
-        outer = RecordOpWithJournal(
-            lambda payload: recorded.append(payload), store=self.store, batch_id="b1"
-        )
+        outer = RecordOpWithJournal(lambda payload: recorded.append(payload), store=self.store, batch_id="b1")
 
         # --- Construction identique a apply_core (boucle apply par-row) ---
         def _inject_row_id(payload, _rid="row-42", _ref=outer):

@@ -149,12 +149,18 @@ def extract_keyframes(
         cmd = [
             binary,
             "-hide_banner",
-            "-loglevel", "error",
-            "-ss", str(ts),
-            "-i", src,
-            "-frames:v", "1",
-            "-f", "image2pipe",
-            "-vcodec", "mjpeg",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(ts),
+            "-i",
+            src,
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
             "-",
         ]
         try:
@@ -166,9 +172,7 @@ def extract_keyframes(
                 **plat,
             )
         except FileNotFoundError as exc:
-            raise VisionEmbeddingUnavailableError(
-                f"ffmpeg introuvable: {binary}"
-            ) from exc
+            raise VisionEmbeddingUnavailableError(f"ffmpeg introuvable: {binary}") from exc
         except subprocess.TimeoutExpired:
             logger.warning("extract_keyframes: timeout sur ts=%.3f", ts)
             continue
@@ -222,9 +226,7 @@ def embed_frames(
     try:
         _session = model_loader()
     except Exception as exc:  # noqa: BLE001 - scaffold, contrat ouvert
-        raise VisionEmbeddingUnavailableError(
-            f"chargement modele vision impossible: {exc}"
-        ) from exc
+        raise VisionEmbeddingUnavailableError(f"chargement modele vision impossible: {exc}") from exc
 
     # Scaffold : retourner des vecteurs zeros de la bonne shape. Le runtime
     # V4.2 fera le decode + forward effectif.

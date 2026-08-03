@@ -8,6 +8,7 @@ groupes de doublons sur les destinations planifiees.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections import defaultdict
 from dataclasses import fields as dc_fields
@@ -20,9 +21,7 @@ from cinesort.domain import duplicate_support as _dup
 from cinesort.domain.edition_helpers import strip_edition
 from cinesort.domain.runtime_hard_filter import (
     DEFAULT_RUNTIME_HARD_THRESHOLD_MIN,
-    WARN_RUNTIME_HARD_EXCLUDED,
     WARN_RUNTIME_HARD_KEPT_DECLARED,
-    WARN_RUNTIME_HARD_KEPT_VIA_EDITION,
     evaluate_runtime_hard_filter,
 )
 from cinesort.domain.title_helpers import _norm_for_tokens, extract_provider_tags
@@ -438,9 +437,7 @@ def _augment_candidates_from_name_tags(
             )
 
     # --- Resolution via IMDb ID (si pas deja resolu via TMDb ID) ---
-    if imdb_id_tag and not any(
-        getattr(c, "source", "") == "name_tmdb" for c in nfo_cands
-    ):
+    if imdb_id_tag and not any(getattr(c, "source", "") == "name_tmdb" for c in nfo_cands):
         try:
             imdb_result = tmdb.find_by_imdb_id(imdb_id_tag)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -510,9 +507,7 @@ def _accept_name_tag_candidate(
         year_delta = abs(int(result.year) - int(name_year))
         if year_delta > 2:
             year_ok = False
-    accept = (sim_best >= 0.50) or (
-        year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35
-    )
+    accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
     if not accept:
         log(
             "WARN",
@@ -727,11 +722,7 @@ def _apply_runtime_hard_filter_to_tmdb_cands(
         )
         if excluded:
             any_excluded = True
-            delta = (
-                abs(float(file_runtime_min) - float(cand_runtime))
-                if cand_runtime is not None
-                else None
-            )
+            delta = abs(float(file_runtime_min) - float(cand_runtime)) if cand_runtime is not None else None
             delta_str = f"{delta:.0f}" if delta is not None else "?"
             log(
                 "INFO",
@@ -744,10 +735,8 @@ def _apply_runtime_hard_filter_to_tmdb_cands(
         if warning:
             existing_note = getattr(cand, "note", "") or ""
             if warning not in existing_note:
-                try:
+                with contextlib.suppress(AttributeError, TypeError):
                     cand.note = (existing_note + f" [{warning}]").strip()
-                except (AttributeError, TypeError):
-                    pass
             if warning == WARN_RUNTIME_HARD_KEPT_DECLARED:
                 reason = "duree DECLAREE (NFO) non-autoritaire, reconciliation probe attendue"
             else:

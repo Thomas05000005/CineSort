@@ -19,8 +19,6 @@ import unittest
 
 from cinesort.domain.tiers_helpers import (
     DEFAULT_HIERARCHY_DIMENSIONS_ORDER,
-    DEFAULT_HIERARCHY_RESOLUTION_CEILINGS,
-    DEFAULT_HIERARCHY_RESOLUTION_FLOORS,
     apply_tier_hierarchy,
     default_hierarchy_config,
     normalize_hierarchy_config,
@@ -268,9 +266,7 @@ class HierarchyNormalizationTests(unittest.TestCase):
     def test_invalid_tier_in_floor_is_dropped(self):
         cfg = default_hierarchy_config()
         cfg["enabled"] = True
-        normalized = normalize_hierarchy_config(
-            {"enabled": True, "resolution_floors": {"2160p_probe": "WTF_TIER"}}
-        )
+        normalized = normalize_hierarchy_config({"enabled": True, "resolution_floors": {"2160p_probe": "WTF_TIER"}})
         # Invalide -> retombe sur defaut TRaSH 2026 (Gold).
         self.assertEqual(normalized["resolution_floors"]["2160p_probe"], "Gold")
 

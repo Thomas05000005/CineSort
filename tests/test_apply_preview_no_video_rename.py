@@ -60,10 +60,7 @@ class ApplyPreviewNoVideoRenameTests(unittest.TestCase):
         identique en src/dst (ou vide pour MOVE_DIR), JAMAIS un renommage."""
         api, run_id, rows = self._make_single_film()
         self.assertTrue(rows)
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         preview = api.run.build_apply_preview(run_id, decisions)
         self.assertTrue(preview.get("ok"), preview)
         self.assertTrue(preview.get("films"))
@@ -102,16 +99,9 @@ class ApplyPreviewNoVideoRenameTests(unittest.TestCase):
         """Cas typique : un film dont seul le dossier est renomme doit
         produire au moins une op classifiee `folder_rename`."""
         api, run_id, rows = self._make_single_film()
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         preview = api.run.build_apply_preview(run_id, decisions)
-        all_summaries = [
-            op["action_summary"]
-            for film in preview["films"]
-            for op in film["ops"]
-        ]
+        all_summaries = [op["action_summary"] for film in preview["films"] for op in film["ops"]]
         # Au moins une operation doit etre un folder_rename
         self.assertIn(
             "folder_rename",
@@ -123,18 +113,13 @@ class ApplyPreviewNoVideoRenameTests(unittest.TestCase):
         """Re-verifier la garantie no-op : la preview ne doit modifier
         ni le fichier video ni son nom sur disque."""
         api, run_id, rows = self._make_single_film()
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         before = sorted(p.name for p in self.root.rglob("*"))
         _ = api.run.build_apply_preview(run_id, decisions)
         after = sorted(p.name for p in self.root.rglob("*"))
         self.assertEqual(before, after)
         # Le fichier .mkv original est toujours la, intact
-        self.assertTrue(
-            (self.root / "Inception.2010.1080p.BluRay" / "Inception.2010.1080p.BluRay.mkv").exists()
-        )
+        self.assertTrue((self.root / "Inception.2010.1080p.BluRay" / "Inception.2010.1080p.BluRay.mkv").exists())
 
 
 if __name__ == "__main__":

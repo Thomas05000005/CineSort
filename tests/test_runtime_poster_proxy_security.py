@@ -28,7 +28,6 @@ from unittest import mock
 
 from cinesort.infra.integrations import poster_proxy
 
-
 # ---------------------------------------------------------------------------
 # Fake HTTP handler
 # ---------------------------------------------------------------------------
@@ -167,9 +166,10 @@ class PosterProxySecurityTests(unittest.TestCase):
         """size=w999 (hors whitelist {w92,w185,w342,w500}) -> 400."""
         fake_client = _FakeTmdbClient()
         fake_session = mock.MagicMock()
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -192,9 +192,10 @@ class PosterProxySecurityTests(unittest.TestCase):
         """size=../etc/passwd (path traversal) -> 400 + aucun fetch."""
         fake_client = _FakeTmdbClient()
         fake_session = mock.MagicMock()
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -220,9 +221,10 @@ class PosterProxySecurityTests(unittest.TestCase):
         """
         fake_client = _FakeTmdbClient()
         fake_session = mock.MagicMock()
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -251,15 +253,18 @@ class PosterProxySecurityTests(unittest.TestCase):
         class _R:
             status_code = 200
             headers = {"Content-Type": "image/jpeg"}
+
             def iter_content(self, chunk_size: int = 8192):  # noqa: ARG002
                 yield b"OK"
+
             def close(self) -> None:
                 pass
 
         fake_session.get.return_value = _R()
-        with mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             handler = _FakeHandler()
             poster_proxy.serve_poster(
                 handler,
@@ -295,9 +300,11 @@ class PosterProxySecurityTests(unittest.TestCase):
         fake_client = _FakeTmdbClient()
         fake_session = mock.MagicMock()
 
-        with _LogCapture() as logs, mock.patch.object(
-            poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client
-        ), mock.patch.object(poster_proxy, "_get_session", return_value=fake_session):
+        with (
+            _LogCapture() as logs,
+            mock.patch.object(poster_proxy, "_build_or_get_tmdb_client", return_value=fake_client),
+            mock.patch.object(poster_proxy, "_get_session", return_value=fake_session),
+        ):
             # Cas 1: 400
             h1 = _FakeHandler()
             poster_proxy.serve_poster(

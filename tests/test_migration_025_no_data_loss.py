@@ -81,20 +81,17 @@ class Migration025NoDataLossTests(unittest.TestCase):
             )
             for i in range(3):
                 conn.execute(
-                    "INSERT INTO errors(run_id, ts, step, code, message) "
-                    "VALUES ('R25', ?, 'scan', ?, 'm')",
+                    "INSERT INTO errors(run_id, ts, step, code, message) VALUES ('R25', ?, 'scan', ?, 'm')",
                     (ts, f"E{i}"),
                 )
             for i in range(2):
                 conn.execute(
-                    "INSERT INTO quality_reports VALUES "
-                    "('R25', ?, ?, 'Gold', '[]', '{}', 'p1', 1, ?)",
+                    "INSERT INTO quality_reports VALUES ('R25', ?, ?, 'Gold', '[]', '{}', 'p1', 1, ?)",
                     (f"row{i}", 80 + i, ts),
                 )
             for i in range(2):
                 conn.execute(
-                    "INSERT INTO anomalies(run_id, severity, code, message, ts) "
-                    "VALUES ('R25', 'WARN', ?, 'm', ?)",
+                    "INSERT INTO anomalies(run_id, severity, code, message, ts) VALUES ('R25', 'WARN', ?, 'm', ?)",
                     (f"A{i}", ts),
                 )
             conn.commit()
@@ -151,8 +148,11 @@ class Migration025NoDataLossTests(unittest.TestCase):
                 )
             conn.commit()
             self.assertEqual(
-                int(conn.execute("SELECT COUNT(*) FROM runs WHERE status IN "
-                                 "('PAUSED', 'SAVED', 'AWAITING_VALIDATION')").fetchone()[0]),
+                int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM runs WHERE status IN ('PAUSED', 'SAVED', 'AWAITING_VALIDATION')"
+                    ).fetchone()[0]
+                ),
                 3,
             )
 
