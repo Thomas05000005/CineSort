@@ -2,8 +2,8 @@
 
 Migration #85 phase B6 (2026-05-16) : meme pattern que B1-B5 :
 - Code metier vit DANS RunRepository
-- _RunMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _RunMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.run (heritage MRO supprime en B8)
 
 Note specifique B6 : `insert_run_pending` appelle `initialize()` en fallback
 si la table runs n'existe pas. Dans RunRepository (_BaseRepository compose),
@@ -24,6 +24,14 @@ import time
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+
+# AUDIT 2026-07-13 (HIGH-8) : predicat partage pour EXCLURE les runs utilitaires
+# de bulk re-scan (library_actions_support.rescan_rows_bulk pose un marqueur
+# config_json {"rescan_run_id": ...}). Ces runs de tracking n'ont ni plan.jsonl
+# ni quality reports ; les resoudre comme "dernier run" ecroulait a 0 les KPI
+# Accueil + badges sidebar apres un re-scan groupe. Meme exclusion que
+# library_support._resolve_run_id (les deux surfaces convergent sur le run de SCAN).
+_NOT_RESCAN_TRACKING_SQL = "COALESCE(config_json, '') NOT LIKE '%\"rescan_run_id\"%'"
 
 
 class RunRepository(_BaseRepository):
@@ -302,13 +310,22 @@ class RunRepository(_BaseRepository):
             return [dict(r) for r in cur.fetchall()]
 
     def get_latest_run(self) -> Optional[Dict[str, Any]]:
-        """Retourne le run le plus recent (par started_ts/created_ts), ou None."""
+        """Retourne le dernier run de SCAN (par started_ts/created_ts), ou None.
+
+        AUDIT 2026-07-13 (HIGH-8) : exclut les runs utilitaires de bulk re-scan
+        (marqueur config_json rescan_run_id) via _NOT_RESCAN_TRACKING_SQL. Sans
+        ce filtre, get_dashboard / get_sidebar_counters / quality_simulator
+        resolvaient le run de tracking (sans plan ni reports) apres un re-scan
+        groupe -> KPI Accueil et badges sidebar a 0, en divergence avec la
+        Bibliotheque qui, elle, sautait deja ces runs.
+        """
         self._ensure_runs_table()
         with self._managed_conn() as conn:
             cur = conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM runs
+                WHERE {_NOT_RESCAN_TRACKING_SQL}
                 ORDER BY COALESCE(started_ts, created_ts) DESC, created_ts DESC
                 LIMIT 1
                 """

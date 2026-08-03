@@ -5,13 +5,13 @@ Parsing CSV (Letterboxd, IMDb), normalisation titres, matching titre+annee.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import logging
 import re
 import unicodedata
 from typing import Any, Dict, List
-import contextlib
 
 logger = logging.getLogger("cinesort.watchlist")
 
@@ -94,6 +94,13 @@ def compare_watchlist(
     # Index local par titre normalise + annee
     local_keys: set[str] = set()
     local_title_only: set[str] = set()
+    # AUDIT REAL 2/2 (watchlist.py:121) : titres locaux SANS annee connue
+    # (proposed_year == 0). Sert au fallback "titre seul" du pass 1 : un film
+    # watchlist AVEC annee ne doit matcher par titre seul que si le local n'a
+    # PAS d'annee — sinon Dune (2021) serait marque "owned" parce que la biblio
+    # contient Dune (1984), un remake different (faux positif -> couverture
+    # gonflee, films manquants jamais signales).
+    local_title_only_no_year: set[str] = set()
     for row in local_rows:
         title = str(getattr(row, "proposed_title", "") or "")
         year = int(getattr(row, "proposed_year", 0) or 0)
@@ -102,6 +109,8 @@ def compare_watchlist(
             local_title_only.add(norm)
             if year:
                 local_keys.add(f"{norm}|{year}")
+            else:
+                local_title_only_no_year.add(norm)
 
     owned: List[Dict[str, Any]] = []
     unmatched: List[Dict[str, Any]] = []
@@ -118,8 +127,10 @@ def compare_watchlist(
         elif norm and not year and norm in local_title_only:
             matched = True
         elif norm and year:
-            # Fallback : titre seul (sans annee) si la watchlist a une annee mais le local non
-            if norm in local_title_only:
+            # Fallback : titre seul SI la watchlist a une annee mais que le LOCAL
+            # n'en a pas (proposed_year inconnu). On matche alors le local
+            # sans-annee, sans confondre deux annees DIFFERENTES (remakes).
+            if norm in local_title_only_no_year:
                 matched = True
 
         entry = {"title": title, "year": year}

@@ -24,6 +24,9 @@
  * ============================================================================
  */
 
+/* V1.4 — typography utilities wrappees dans @layer utilities (cf tokens.css). */
+@layer utilities {
+
 /* ===========================================================
  * Titres hierarchiques (H1 -> H4)
  * =========================================================== */
@@ -191,3 +194,5 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+} /* end @layer utilities */

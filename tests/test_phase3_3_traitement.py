@@ -40,7 +40,9 @@ class FiveStepsTests(unittest.TestCase):
             self.assertIn(f'id: "{step}"', self.js, f"étape {step} manquante")
 
     def test_step_labels_french(self) -> None:
-        for label in ("Analyse", "Vérification", "Validation", "Doublons", "Apply"):
+        # Spec drift FR aligne sur traitement.js : "Application" (FR) au lieu de "Apply" (EN),
+        # coherent avec la memoire francisation et le rendu reel.
+        for label in ("Analyse", "Vérification", "Validation", "Doublons", "Application"):
             self.assertIn(f'label: "{label}"', self.js)
 
     def test_render_breadcrumb_function(self) -> None:

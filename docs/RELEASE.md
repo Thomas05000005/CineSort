@@ -93,6 +93,143 @@ Si une release contient un bug critique decouvert apres publication :
 6. Suivre le process complet a partir de l'etape 3 (tag + build + release)
 7. Communiquer aux utilisateurs (issue GitHub epinglee, message dans canaux externes)
 
+## Build hybride PyInstaller + Nuitka (V2.5)
+
+> V2.5 SCAFFOLDING — Le build officiel reste **PyInstaller** (CineSort.exe).
+> Nuitka est OPT-IN, additionnel, jamais substitutif. Backward compat ABSOLUE :
+> tout pipeline existant (ci.yml, build_windows.bat, scripts/sign_windows_release.ps1)
+> continue de fonctionner sans modification.
+
+### Quand utiliser quoi
+
+| Scenario | Backend | Commande / declencheur |
+|----------|---------|------------------------|
+| **PR / smoke test CI** | PyInstaller seul | `ci.yml` (pas de tag, rapide ~5 min) |
+| **Build local dev** | PyInstaller | `build_windows.bat` (officiel) |
+| **Benchmark startup / antivirus** | Nuitka | `.\scripts\build_nuitka.ps1` (local, ~30-60 min) |
+| **Release publiee (tag v*)** | **les deux** | `release.yml` (PyInstaller + Nuitka en parallele) |
+
+PyInstaller reste preferable au quotidien :
+- Compile : ~30s vs 30-60 min pour Nuitka (C compiler invoque).
+- Stack confirmee : 1.5.2-beta validee en prod, smoke tests verts.
+
+Nuitka offre :
+- Demarrage plus rapide (binaire C natif vs interpreteur Python embarque).
+- Moins de faux positifs antivirus (pas de bootloader PyInstaller suspect).
+- Tradeoff : compilation longue, debug plus difficile en cas d'echec.
+
+### Build local Nuitka
+
+```powershell
+# Pre-requis : .venv active avec requirements.txt + nuitka installes
+.\scripts\build_nuitka.ps1
+# Variantes :
+#   -SkipUpx       (UPX absent du PATH)
+#   -KeepBuildDir  (debug : garder dist-nuitka/ intermediaire)
+```
+
+Sortie : `dist-nuitka/CineSortNuitka.exe`. Le binaire **PyInstaller** dans
+`dist/CineSort.exe` reste le binaire de reference.
+
+### Build CI (tag release)
+
+Le workflow `.github/workflows/release.yml` se declenche sur `git push tag v*` :
+1. Job `build-pyinstaller` : build officiel, gate taille < 60 MB.
+2. Job `build-nuitka` : build alternatif, `continue-on-error: true` au niveau
+   job pour ne JAMAIS bloquer la release si Nuitka echoue.
+3. Job `publish-release` : cree un draft GitHub Release avec les deux EXE
+   attaches (`CineSort.exe` et `CineSortNuitka.exe`). Nuitka absent =
+   release publiee avec PyInstaller seul (continue-on-error sur le download).
+
+Le `nuitka.config.cfg` a la racine documente les exclusions (torch.cuda, nvidia,
+scipy, tkinter, etc.) alignees sur la section `excludes` de `CineSort.spec`.
+
+### Migration progressive
+
+- **Phase 1 (actuelle)** : PyInstaller officiel, Nuitka asset secondaire des
+  releases. Pas de communication utilisateur.
+- **Phase 2 (a evaluer)** : si Nuitka stable sur 3 releases consecutives,
+  promouvoir `CineSortNuitka.exe` en asset documente (changelog), garder
+  PyInstaller en officiel.
+- **Phase 3 (hypothetique)** : bascule eventuelle quand metriques (taille,
+  startup, faux positifs AV) le justifient. PyInstaller restera disponible
+  pendant 1 release pour fallback (cf principe backward compat ABSOLUE).
+
+## Bundle WebView2 (release seulement)
+
+> V3.1 SCAFFOLDING — Etape OPT-IN pour les releases qui doivent embarquer un
+> runtime WebView2 Fixed Version (independant du runtime Evergreen installe
+> sur le poste utilisateur). Non utilise par les builds standards.
+
+### Pourquoi ce mode existe
+
+- L'EXE CineSort utilise par defaut le **runtime WebView2 Evergreen** installe
+  par Microsoft Edge. Sur certaines machines (Windows LTSC, comptes admin
+  restreints, profils corrompus), ce runtime peut etre absent ou casse
+  -> ecran noir au boot.
+- En embarquant le runtime **Fixed Version** directement dans le `.exe`, on
+  s'assure que CineSort dispose d'un WebView2 fonctionnel meme sans Edge
+  recent installe. Le tradeoff est une taille `.exe` plus grande
+  (+120 MB acceptes, cf principes projet : qualite > optimisation taille).
+- Ce mode est OPT-IN : sans variable d'env `CINESORT_BUNDLE_WEBVIEW2=1`,
+  le build standard se comporte comme historiquement (backward-compat
+  ABSOLUE).
+
+### Preparer le bundle (manuel-only, jamais en CI)
+
+1. Telecharger le bundle Fixed Version depuis Microsoft :
+
+   ```bash
+   python scripts/download_webview2_fixed.py
+   ```
+
+   Par defaut le script affiche les instructions de telechargement manuel
+   (URL Microsoft, EULA a accepter, extraction `expand`). Pour les
+   mainteneurs ayant deja recupere un lien CDN direct, utiliser :
+
+   ```bash
+   python scripts/download_webview2_fixed.py --url <URL_CDN_DIRECTE>
+   ```
+
+2. Valider que le bundle est complet :
+
+   ```bash
+   python scripts/download_webview2_fixed.py --check-only
+   ```
+
+   Doit lister `webview2_fixed/msedgewebview2.exe` et
+   `webview2_fixed/EBWebView/x64/msedge.dll`.
+
+### Builder l'EXE avec le bundle embarque
+
+```bash
+set CINESORT_BUNDLE_WEBVIEW2=1
+build_windows.bat
+```
+
+Le `CineSort.spec` detecte la variable d'env et inclut tout le contenu de
+`webview2_fixed/` dans le bundle PyInstaller. Au demarrage, `app.py`
+(via `_configure_webview2_runtime()`) expose les chemins via les variables
+d'environnement standards `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` et
+`WEBVIEW2_USER_DATA_FOLDER` AVANT l'import de `webview`. Si la variable
+d'env n'est pas definie ou si le bundle est absent, le runtime Evergreen
+est utilise comme avant.
+
+### Verification post-build
+
+- Taille `dist/CineSort.exe` augmentee (~120-180 MB attendu, gate CI taille
+  a desactiver pour les builds bundle).
+- Smoke test sur une VM **sans Edge installe** : doit demarrer normalement
+  et afficher le dashboard sans ecran noir.
+- Verifier dans les logs `%LOCALAPPDATA%/CineSort/logs/` la presence de la
+  ligne `[WEBVIEW2] Runtime Fixed bundle actif: ...`.
+
+### Ne PAS commit `webview2_fixed/`
+
+Le repertoire `webview2_fixed/` doit etre dans `.gitignore`. Chaque
+mainteneur le regenere localement quand necessaire. Ne PAS distribuer le
+bundle Microsoft separement (EULA).
+
 ## Versions historiques
 
 Historique complet : voir [`CHANGELOG.md`](../CHANGELOG.md).

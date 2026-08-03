@@ -21,6 +21,7 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
+import { trapFocus } from "./modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 const DRAWER_ID = "libraryAdvancedDrawer";
 
@@ -89,16 +90,26 @@ function _renderMultiSelect(name, options, current) {
     .join("");
 }
 
-function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix) {
+function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix, nameMin, nameMax) {
+  // Fix audit 2026-05-26 (v1.5.6) Vague L (drawer-1) :
+  // Avant, le helper imposait `${name}_min` / `${name}_max` pour l'attribut name
+  // des inputs. Pour la section "Taille fichier (Go)" on passait name="size_gb",
+  // ce qui produisait size_gb_min / size_gb_max, alors que DEFAULTS / state /
+  // buildBackendFilters lisent size_min_gb / size_max_gb. Resultat : la valeur
+  // saisie par l'utilisateur n'arrivait JAMAIS au backend (perdue dans
+  // _collectValues car ecrasee par DEFAULTS lors du spread). On accepte
+  // desormais des noms explicites en option pour eviter le mismatch.
+  const minName = nameMin || `${name}_min`;
+  const maxName = nameMax || `${name}_max`;
   return `
     <div class="bibliotheque-drawer-range">
       <input type="number" class="v5-input bibliotheque-drawer-range-input"
-             name="${escapeHtml(name)}_min"
+             name="${escapeHtml(minName)}"
              min="${absMin}" max="${absMax}" step="${step}"
              value="${minVal}" aria-label="${escapeHtml(name)} min">
       <span class="bibliotheque-drawer-range-sep">—</span>
       <input type="number" class="v5-input bibliotheque-drawer-range-input"
-             name="${escapeHtml(name)}_max"
+             name="${escapeHtml(maxName)}"
              min="${absMin}" max="${absMax}" step="${step}"
              value="${maxVal}" aria-label="${escapeHtml(name)} max">
       ${suffix ? `<span class="bibliotheque-drawer-range-suffix">${escapeHtml(suffix)}</span>` : ""}
@@ -109,11 +120,18 @@ function _renderRange(name, minVal, maxVal, absMin, absMax, step, suffix) {
 function _renderDateRange(initial) {
   const after = initial.added_after || "";
   const before = initial.added_before || "";
+  // Fix audit 2026-05-25 (v1.5.3) Vague H : ajout label HTML pour a11y (aria-label seul ne suffit pas)
   return `
     <div class="bibliotheque-drawer-range bibliotheque-drawer-date-range">
-      <input type="date" class="v5-input" name="added_after" value="${escapeHtml(after)}" aria-label="Date d'ajout apres">
+      <label class="bibliotheque-drawer-range-field">
+        <span class="bibliotheque-drawer-range-field-label visually-hidden">Date d'ajout apres</span>
+        <input type="date" id="bibliotheque-added-after" class="v5-input" name="added_after" value="${escapeHtml(after)}" aria-label="Date d'ajout apres">
+      </label>
       <span class="bibliotheque-drawer-range-sep">—</span>
-      <input type="date" class="v5-input" name="added_before" value="${escapeHtml(before)}" aria-label="Date d'ajout avant">
+      <label class="bibliotheque-drawer-range-field">
+        <span class="bibliotheque-drawer-range-field-label visually-hidden">Date d'ajout avant</span>
+        <input type="date" id="bibliotheque-added-before" class="v5-input" name="added_before" value="${escapeHtml(before)}" aria-label="Date d'ajout avant">
+      </label>
     </div>
   `;
 }
@@ -140,7 +158,10 @@ function _buildHtml(initial) {
 
         <section class="bibliotheque-drawer-section">
           <h3>Taille fichier (Go)</h3>
-          ${_renderRange("size_gb", state.size_min_gb, state.size_max_gb, 0, 200, 0.5, "Go")}
+          ${/* Fix audit 2026-05-26 (v1.5.6) Vague L (drawer-1) : aligne les attributs name HTML
+              (size_min_gb/size_max_gb) avec les cles DEFAULTS lues par buildBackendFilters,
+              au lieu de produire size_gb_min/size_gb_max qui etaient ecrases par DEFAULTS. */ ""}
+          ${_renderRange("size_gb", state.size_min_gb, state.size_max_gb, 0, 200, 0.5, "Go", "size_min_gb", "size_max_gb")}
         </section>
 
         <section class="bibliotheque-drawer-section">
@@ -261,6 +282,7 @@ export function openLibraryAdvancedDrawer(opts) {
   host.className = "bibliotheque-drawer-host";
   host.innerHTML = _buildHtml(initial);
   document.body.appendChild(host);
+  trapFocus(host); // R8-078b : Tab/Shift+Tab piégés dans le drawer avancé (aria-modal)
   // Trigger transition next frame
   requestAnimationFrame(() => host.classList.add("is-open"));
 

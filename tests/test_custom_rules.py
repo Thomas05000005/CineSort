@@ -211,6 +211,9 @@ class TestApplyActions(unittest.TestCase):
         self.assertEqual(r["score"], 85)
 
     def test_force_tier(self):
+        # Le fix R6-Q01 normalise force_tier en forme canonique : l'alias
+        # legacy "Premium" devient "Platinum" pour eviter le bypass de
+        # _cap_tier downstream (chaine inconnue propagee = invariants casses).
         rules = [
             {
                 "id": "r1",
@@ -220,7 +223,7 @@ class TestApplyActions(unittest.TestCase):
         ]
         ctx2 = _make_context(year=1965)
         r = apply_custom_rules(70, ctx2, rules)
-        self.assertEqual(r["force_tier"], "Premium")
+        self.assertEqual(r["force_tier"], "Platinum")
 
     def test_cap_max_triggers(self):
         ctx = _make_context()
@@ -555,7 +558,8 @@ class TestInjectionScoring(unittest.TestCase):
             }
         ]
         result = compute_quality_score(normalized_probe=probe, profile=profile)
-        self.assertEqual(result["tier"], "Faible")
+        # Fix R6-Q01 : "Faible" (legacy) normalise en "Bronze" (canonique).
+        self.assertEqual(result["tier"], "Bronze")
 
 
 if __name__ == "__main__":
