@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -57,6 +59,30 @@ def detect_nfo_runtime_mismatch(
         "delta_minutes": round(delta_min, 1),
         "delta_pct": round(delta_pct * 100.0, 1),
     }
+
+
+def profile_fingerprint(profile_json: Any) -> str:
+    """Empreinte stable du CONTENU d'un profil qualite.
+
+    Ultra-audit 2026-08 (N30) : le detecteur de rapport perime comparait le
+    triplet (engine_version, profile_id, profile_version), qui est CONTENT-BLIND.
+    `save_quality_profile` fait un `ON CONFLICT(id) DO UPDATE` qui ecrase
+    `profile_json` en GARDANT la version (infra/db/repositories/quality.py:91) :
+    un utilisateur qui modifie ses seuils sans changer id/version obtenait un
+    triplet identique, donc un rapport perime servi comme frais.
+
+    L'empreinte porte sur le JSON canonique (cles triees) -> insensible a
+    l'ordre des cles, sensible a toute valeur. Retourne "" si le profil est
+    inserialisable : l'appelant traite alors le rapport comme perime
+    (fail-closed = on recalcule, on ne sert jamais un score douteux).
+    """
+    if not isinstance(profile_json, dict):
+        return ""
+    try:
+        canonical = json.dumps(profile_json, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha1(canonical.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324
 
 
 def _extract_confidence_and_explanation(metrics_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -156,6 +182,12 @@ def _probe_and_score(
     embedded_subs_raw = normalized.get("subtitles") if isinstance(normalized, dict) else None
     if isinstance(embedded_subs_raw, list):
         metrics_out["subtitles_embedded"] = list(embedded_subs_raw)
+    # Ultra-audit 2026-08 (N30) : empreinte du CONTENU du profil, pour que le
+    # detecteur de rapport perime cesse d'etre content-blind (cf
+    # `profile_fingerprint`). Purement additif dans metrics.
+    fingerprint = profile_fingerprint(profile_json)
+    if fingerprint:
+        metrics_out["profile_fingerprint"] = fingerprint
     store.quality.upsert_quality_report(
         run_id=run_id,
         row_id=row_id,
@@ -210,6 +242,8 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         active_profile_version = int(active.get("version") or profile_json.get("version") or 1)
         active_engine_version = str(profile_json.get("engine_version") or "CinemaLux_v1")
 
+        active_fingerprint = profile_fingerprint(profile_json)
+
         if reuse_existing:
             existing = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
             if existing:
@@ -217,10 +251,19 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 existing_engine = str(existing_metrics.get("engine_version") or "")
                 existing_profile_id = str(existing.get("profile_id") or "")
                 existing_profile_version = int(existing.get("profile_version") or 0)
+                # Ultra-audit 2026-08 (N30) : le triplet
+                # (engine_version, profile_id, profile_version) ne voit PAS un
+                # profil edite sans changement de version. On exige en plus
+                # l'empreinte du contenu. Rapport sans empreinte (anterieur au
+                # correctif) ou profil inserialisable -> considere PERIME, donc
+                # recalcule : fail-closed, jamais un score douteux servi.
+                existing_fingerprint = str(existing_metrics.get("profile_fingerprint") or "")
                 if (
                     existing_engine == active_engine_version
                     and existing_profile_id == active_profile_id
                     and existing_profile_version == active_profile_version
+                    and bool(active_fingerprint)
+                    and existing_fingerprint == active_fingerprint
                 ):
                     probe_quality = str(existing_metrics.get("probe_quality") or "UNKNOWN")
                     confidence, explanation = _extract_confidence_and_explanation(existing_metrics)

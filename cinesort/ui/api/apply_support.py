@@ -912,10 +912,27 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     except (FileNotFoundError, OSError):
         pass
 
+    # Ultra-audit 2026-08 (N25) : cette boucle appelait
+    # `list_apply_operations_by_row` PAR ROW. Chaque appel repo ouvre 2
+    # connexions SQLite neuves (_ensure_apply_journal_tables -> _existing_tables,
+    # puis la requete), soit 2N connexions pour N films. Mesure sur un batch de
+    # 5000 films : 165 s, contre 88 ms pour la requete unique + regroupement
+    # Python. `list_apply_operations` selectionne les MEMES colonnes avec le
+    # MEME `ORDER BY op_index ASC, id ASC` (repositories/apply.py:314-346 vs
+    # :460-489), donc l'ordre et le contenu des `ops` sont inchanges.
+    # Seule la convention du row_id NULL differe : le repo serialise NULL en ""
+    # (:341) alors que `get_batch_rows_summary` groupe sur
+    # COALESCE(row_id, '__legacy__') (:433). On realigne donc "" -> "__legacy__".
+    # Aucune ambiguite : `record_apply_operation` ecrit `str(row_id) if row_id
+    # else None` (:176), une chaine vide est donc stockee NULL, jamais "".
+    ops_by_row: Dict[str, List[Dict[str, Any]]] = {}
+    for op in store.apply.list_apply_operations(batch_id=bid):
+        ops_by_row.setdefault(str(op.get("row_id") or "") or "__legacy__", []).append(op)
+
     rows_out: List[Dict[str, Any]] = []
     for summary in rows_summary:
         rid = str(summary["row_id"])
-        ops = store.apply.list_apply_operations_by_row(batch_id=bid, row_id=rid)
+        ops = ops_by_row.get(rid, [])
         reversible_pending = [
             op for op in ops if int(op.get("reversible") or 0) == 1 and str(op.get("undo_status")) == "PENDING"
         ]
@@ -1992,6 +2009,23 @@ def _execute_apply(
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
                 _r.proposed_year = int(_ov["proposed_year"])
+    # Ultra-audit 2026-08 (N31) — NE PAS ajouter sqlite3.Error ici, c'est
+    # DELIBERE (meme forme de decision que F11 ligne ~1903).
+    #
+    # Le finding proposait d'aligner ce tuple sur son voisin ligne 1973. Refuse
+    # apres analyse : cet overlay materialise « la DERNIERE volonte explicite de
+    # l'utilisateur » (cf. le bloc jumeau ligne 1487), et la boucle porte sur
+    # TOUTES les rows. Degrader une sqlite3.Error en WARN ferait continuer
+    # l'apply avec un overlay PARTIEL (rows 0..k-1 overridees, k..n non) et
+    # renommerait des dossiers sur disque avec le titre auto-matche, en ecrasant
+    # silencieusement le choix manuel.
+    #
+    # Laisser remonter est fail-closed et sans perte : ce bloc s'execute AVANT
+    # tout deplacement (_apply_rows_fn ligne ~2091) et DANS le try de
+    # `apply_changes` (ligne ~2741) ; la boundary ligne ~2863 clot le batch en
+    # FAILED et renvoie une erreur. Aucun fichier n'a bouge, rien n'est a
+    # annuler. Le mecanisme du finding ("database is locked") est de toute
+    # facon inatteignable : les 4 profils PRAGMA forcent journal_mode=WAL.
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
