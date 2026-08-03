@@ -350,7 +350,7 @@ class QualityRepository(_BaseRepository):
         with self._managed_conn() as conn:
             # _ensure tables perceptual_reports peut ne pas exister sur vieilles bases,
             # on tente d'assurer leur creation via le store si dispo.
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 self._ensure_tables("perceptual_reports")  # type: ignore[attr-defined]
             except Exception:
                 pass

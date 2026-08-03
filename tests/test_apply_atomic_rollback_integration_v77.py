@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, ".")
 
@@ -63,7 +63,9 @@ class RollbackForwardEmptyBatchTests(unittest.TestCase):
     def test_batch_with_no_ops_returns_done(self) -> None:
         """Batch existe mais aucune op journalisee : rollback success no-op."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         self.store.apply.upsert_atomic_mode(batch_id, True)
 
@@ -89,7 +91,9 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
     def test_rollback_reverts_move_file(self) -> None:
         """AC-3 : fichier au dst doit revenir au src apres rollback."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         self.store.apply.upsert_atomic_mode(batch_id, True)
 
@@ -128,7 +132,9 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         src). Avant le fix elles etaient SKIPPED 'non revert-able', laissant les
         fichiers en quarantaine tout en retournant ok=True (FS non restaure)."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=True,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=True,
         )
         self.store.apply.upsert_atomic_mode(batch_id, True)
 
@@ -143,12 +149,20 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         _create_file(dst_dir / "movie.mkv", size=128)
 
         self.store.apply.append_apply_operation(
-            batch_id=batch_id, op_index=1, op_type="QUARANTINE_FILE",
-            src_path=str(src_file), dst_path=str(dst_file), reversible=True,
+            batch_id=batch_id,
+            op_index=1,
+            op_type="QUARANTINE_FILE",
+            src_path=str(src_file),
+            dst_path=str(dst_file),
+            reversible=True,
         )
         self.store.apply.append_apply_operation(
-            batch_id=batch_id, op_index=2, op_type="QUARANTINE_DIR",
-            src_path=str(src_dir), dst_path=str(dst_dir), reversible=True,
+            batch_id=batch_id,
+            op_index=2,
+            op_type="QUARANTINE_DIR",
+            src_path=str(src_dir),
+            dst_path=str(dst_dir),
+            reversible=True,
         )
 
         result = rollback_forward(self.store, batch_id)
@@ -165,7 +179,9 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
     def test_rollback_skips_irreversible_ops(self) -> None:
         """Op avec reversible=False : skipped, pas FS touch."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         src = self.src_root / "irr.mkv"
         dst = self.dst_root / "irr.mkv"
@@ -189,7 +205,9 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
     def test_rollback_skips_when_dst_missing(self) -> None:
         """Si le fichier a dst a disparu (manuel, cleanup), skip + log audit."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         src = self.src_root / "ghost.mkv"
         dst = self.dst_root / "ghost.mkv"
@@ -204,6 +222,7 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         )
 
         audit_calls = []
+
         def audit_fn(level, msg):
             audit_calls.append((level, msg))
 
@@ -216,7 +235,9 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
     def test_rollback_skips_when_src_already_exists(self) -> None:
         """Si src existe deja (collision), skip + log."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         src = self.src_root / "exists.mkv"
         dst = self.dst_root / "exists.mkv"
@@ -259,7 +280,9 @@ class RollbackForwardMixedBatchTests(unittest.TestCase):
         done + 5 skipped.
         """
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         self.store.apply.upsert_atomic_mode(batch_id, True)
 
@@ -293,9 +316,10 @@ class RollbackForwardMixedBatchTests(unittest.TestCase):
     def test_rollback_reverse_order_execution(self) -> None:
         """Les ops sont revertes dans l'ordre inverse (LIFO) du journal."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
-        order_seen = []
 
         for i in range(3):
             src = self.src_root / f"m{i}.mkv"
@@ -333,7 +357,9 @@ class RollbackForwardDbFailureTests(unittest.TestCase):
         """Si mark_rollback_status final echoue, on retourne ROLLBACK_PARTIAL
         avec FS revert deja effectue (audit log emis)."""
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         src = self.src_root / "m.mkv"
         dst = self.dst_root / "m.mkv"
@@ -358,12 +384,11 @@ class RollbackForwardDbFailureTests(unittest.TestCase):
             return original_mark(*args, **kwargs)
 
         audit_calls = []
+
         def audit_fn(level, msg):
             audit_calls.append((level, msg))
 
-        with patch.object(
-            self.store.apply, "mark_rollback_status", side_effect=flaky_mark
-        ):
+        with patch.object(self.store.apply, "mark_rollback_status", side_effect=flaky_mark):
             result = rollback_forward(self.store, batch_id, audit_fn=audit_fn)
 
         # FS revert a quand meme eu lieu
@@ -405,7 +430,9 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
         # l'undo manuel : un batch rollback-atomique n'est pas status='DONE' donc jamais
         # propose a l'undo (cf test_get_last_reversible_apply_batch_not_impacted).
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         src = self.src_root / "m.mkv"
         dst = self.dst_root / "m.mkv"
@@ -434,7 +461,9 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
         Un batch rollback-atomique (status='FAILED') ne doit PAS apparaitre.
         """
         batch_id = self.store.apply.insert_apply_batch(
-            run_id="r1", dry_run=False, quarantine_unapproved=False,
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
         )
         # Le batch reste PENDING -> get_last_reversible doit NE PAS le voir
         result = self.store.apply.get_last_reversible_apply_batch("r1")

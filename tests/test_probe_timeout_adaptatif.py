@@ -46,9 +46,7 @@ class TestTimeoutBornePiloteParTaille(unittest.TestCase):
 
     def test_petit_fichier_donne_petit_timeout(self) -> None:
         """200 MB -> timeout ~ base, JAMAIS le ceiling 300s."""
-        cfg = AdaptiveTimeoutConfig(
-            base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         with patch("pathlib.Path.stat", return_value=_FakeStat(200 * 1024 * 1024)):
             t = compute_adaptive_timeout(Path("/fake/small.mp4"), config=cfg)
         # base 30 + 5 * 0.195 ~ 31s
@@ -59,9 +57,7 @@ class TestTimeoutBornePiloteParTaille(unittest.TestCase):
 
     def test_gros_fichier_donne_gros_timeout(self) -> None:
         """80 GB -> ceiling (gros NAS lent doit avoir le temps de lire moov+sidx)."""
-        cfg = AdaptiveTimeoutConfig(
-            base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         with patch("pathlib.Path.stat", return_value=_FakeStat(80 * 1024 * 1024 * 1024)):
             t = compute_adaptive_timeout(Path("/fake/4k_hevc.mkv"), config=cfg)
         # 30 + 5 * 80 = 430s -> clamp ceiling 300s
@@ -69,9 +65,7 @@ class TestTimeoutBornePiloteParTaille(unittest.TestCase):
 
     def test_borne_observee_jamais_au_dessus_ceiling(self) -> None:
         """Quel que soit la taille extreme, le timeout est plafonne par ceiling."""
-        cfg = AdaptiveTimeoutConfig(
-            base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         # 1000 TB hypothetique (impossible mais defense in depth).
         with patch("pathlib.Path.stat", return_value=_FakeStat(10**15)):
             t = compute_adaptive_timeout(Path("/fake/absurde.mkv"), config=cfg)
@@ -79,9 +73,7 @@ class TestTimeoutBornePiloteParTaille(unittest.TestCase):
 
     def test_borne_observee_jamais_sous_floor(self) -> None:
         """Quel que soit la taille minuscule, le timeout est >= floor."""
-        cfg = AdaptiveTimeoutConfig(
-            base_s=5.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=5.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         with patch("pathlib.Path.stat", return_value=_FakeStat(1)):
             t = compute_adaptive_timeout(Path("/fake/tiny.mkv"), config=cfg)
         self.assertGreaterEqual(t, cfg.floor_s)
@@ -94,9 +86,7 @@ class TestTimeoutBornePiloteParTaille(unittest.TestCase):
 
     def test_progressivite_monotone(self) -> None:
         """Le timeout doit croitre (ou rester egal) quand la taille croit."""
-        cfg = AdaptiveTimeoutConfig(
-            base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         sizes_gb = [0.1, 1, 5, 10, 20, 40, 80]
         prev = -1.0
         for gb in sizes_gb:
@@ -119,9 +109,7 @@ class TestTempsObserveRespecteLaBorne(unittest.TestCase):
     """
 
     def test_temps_simule_court_passe_sous_borne(self) -> None:
-        cfg = AdaptiveTimeoutConfig(
-            base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0
-        )
+        cfg = AdaptiveTimeoutConfig(base_s=30.0, per_gb_s=5.0, floor_s=10.0, ceiling_s=300.0)
         with patch("pathlib.Path.stat", return_value=_FakeStat(1 * 1024 * 1024 * 1024)):
             borne = compute_adaptive_timeout(Path("/fake/1gb.mkv"), config=cfg)
         # Simulation : un probe qui prendrait 0.1s passe largement sous la borne.
