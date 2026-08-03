@@ -34,13 +34,7 @@ import pytest
 # Constantes
 # ---------------------------------------------------------------------------
 
-_CAPTURES_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "docs"
-    / "internal"
-    / "verif_totale_2026_07"
-    / "captures_runtime"
-)
+_CAPTURES_DIR = Path(__file__).resolve().parents[2] / "docs" / "internal" / "verif_totale_2026_07" / "captures_runtime"
 
 # 15 films mock (tests/e2e/create_test_data.py::build_plan_rows)
 _TOTAL_FILMS = 15
@@ -109,11 +103,7 @@ class _ConsoleWatch:
 
     def errors(self) -> list[str]:
         """Entrees non couvertes par la liste blanche."""
-        return [
-            e
-            for e in self.entries
-            if not any(w in e for w in _CONSOLE_WHITELIST)
-        ]
+        return [e for e in self.entries if not any(w in e for w in _CONSOLE_WHITELIST)]
 
 
 def _assert_console_clean(watch: _ConsoleWatch, context: str) -> None:
@@ -226,9 +216,7 @@ class TestLotCSweepBibliotheque:
         # Vue montee dans #view-library (route /bibliotheque, cf app.js)
         assert page.locator("#view-library .bibliotheque-view").count() == 1
 
-        assert _cards_count(page) == _TOTAL_FILMS, (
-            f"Grille attendue avec {_TOTAL_FILMS} cartes"
-        )
+        assert _cards_count(page) == _TOTAL_FILMS, f"Grille attendue avec {_TOTAL_FILMS} cartes"
         summary = page.locator(".bibliotheque-summary").inner_text()
         assert str(_TOTAL_FILMS) in summary, f"Header summary inattendu : {summary!r}"
 
@@ -276,11 +264,7 @@ class TestLotCSweepBibliotheque:
         # -- Tri via le select (score meilleur -> pire, col idx 5 "NN/100")
         page.select_option("[data-bibliotheque-sort]", "score_desc")
         _wait_stable(page)
-        scores = [
-            int(m.group(1))
-            for m in (re.match(r"(\d+)/100", s) for s in col_values(5))
-            if m
-        ]
+        scores = [int(m.group(1)) for m in (re.match(r"(\d+)/100", s) for s in col_values(5)) if m]
         assert len(scores) >= 2, "Colonne Score illisible (aucun 'NN/100')"
         assert scores == sorted(scores, reverse=True), f"Tri score desc casse : {scores}"
 
@@ -313,25 +297,19 @@ class TestLotCSweepBibliotheque:
         # Coherence globale : "Tous" == somme des 6 tiers == 15.
         assert chip_count('[data-bibliotheque-tier="all"]') == _TOTAL_FILMS
         tier_counts = {t: chip_count(f'[data-bibliotheque-tier="{t}"]') for t in _TIERS}
-        assert sum(tier_counts.values()) == _TOTAL_FILMS, (
-            f"Somme des compteurs tier != {_TOTAL_FILMS} : {tier_counts}"
-        )
+        assert sum(tier_counts.values()) == _TOTAL_FILMS, f"Somme des compteurs tier != {_TOTAL_FILMS} : {tier_counts}"
 
         for tier, expected in tier_counts.items():
             page.click(f'[data-bibliotheque-tier="{tier}"]')
             _wait_stable(page)
-            assert "is-active" in (
-                page.locator(f'[data-bibliotheque-tier="{tier}"]').get_attribute("class") or ""
-            ), f"Chip tier {tier} pas active apres clic"
-            got = _cards_count(page)
-            assert got == expected, (
-                f"Tier {tier} : {got} cartes rendues vs compteur chip {expected}"
+            assert "is-active" in (page.locator(f'[data-bibliotheque-tier="{tier}"]').get_attribute("class") or ""), (
+                f"Chip tier {tier} pas active apres clic"
             )
+            got = _cards_count(page)
+            assert got == expected, f"Tier {tier} : {got} cartes rendues vs compteur chip {expected}"
             if expected == 0:
                 # Reaction visible attendue : empty state "Aucun resultat".
-                assert page.locator(".bibliotheque-empty").count() == 1, (
-                    f"Tier {tier} vide sans empty state"
-                )
+                assert page.locator(".bibliotheque-empty").count() == 1, f"Tier {tier} vide sans empty state"
             else:
                 # Toutes les cartes portent le badge du tier filtre.
                 badges = page.evaluate(
@@ -339,9 +317,7 @@ class TestLotCSweepBibliotheque:
                         document.querySelectorAll('.bibliotheque-tier-badge'))
                         .map((b) => b.className)"""
                 )
-                assert all(f"--{tier}" in c for c in badges), (
-                    f"Tier {tier} : badge etranger dans la grille : {badges}"
-                )
+                assert all(f"--{tier}" in c for c in badges), f"Tier {tier} : badge etranger dans la grille : {badges}"
 
         # Retour "Tous"
         page.click('[data-bibliotheque-tier="all"]')
@@ -353,9 +329,7 @@ class TestLotCSweepBibliotheque:
         page.click('[data-bibliotheque-chip="subs_missing_fr"]')
         _wait_stable(page)
         got = _cards_count(page)
-        assert got == n_subs, (
-            f"Chip subs_missing_fr : {got} cartes vs compteur {n_subs}"
-        )
+        assert got == n_subs, f"Chip subs_missing_fr : {got} cartes vs compteur {n_subs}"
         page.click('[data-bibliotheque-chip="subs_missing_fr"]')
         _wait_stable(page)
         assert _cards_count(page) == _TOTAL_FILMS, "Untoggle chip ne restaure pas la grille"
@@ -412,9 +386,7 @@ class TestLotCSweepBibliotheque:
             "Inspecteur : film-detail en etat d'erreur apres selection"
         )
         panel_text = page.locator(panel).inner_text()
-        assert first_title in panel_text, (
-            f"Inspecteur : titre {first_title!r} absent du panneau : {panel_text[:200]!r}"
-        )
+        assert first_title in panel_text, f"Inspecteur : titre {first_title!r} absent du panneau : {panel_text[:200]!r}"
         _screenshot(page, "bibliotheque_inspecteur.png")
         _assert_console_clean(watch, "selection film -> inspecteur")
 
@@ -438,11 +410,7 @@ class TestLotCSweepBibliotheque:
 
         # Ouverture (action m4 : data-bibliotheque-action="filters")
         open_drawer()
-        assert (
-            page.locator("#libraryAdvancedDrawer .bibliotheque-drawer-advanced")
-            .get_attribute("role")
-            == "dialog"
-        )
+        assert page.locator("#libraryAdvancedDrawer .bibliotheque-drawer-advanced").get_attribute("role") == "dialog"
         page.wait_for_timeout(300)  # fin de la transition translateX (0.22s)
         _screenshot(page, "bibliotheque_drawer_avance.png")
 
@@ -479,9 +447,7 @@ class TestLotCSweepBibliotheque:
             # le tiroir (formulaire inutilisable a la souris). On verifie que
             # la fermeture backdrop marche puis on marque le bug.
             page.click("#libraryAdvancedDrawer [data-drawer-backdrop]")
-            page.wait_for_selector(
-                "#libraryAdvancedDrawer", state="detached", timeout=10000
-            )
+            page.wait_for_selector("#libraryAdvancedDrawer", state="detached", timeout=10000)
             assert _cards_count(page) == _TOTAL_FILMS
             _assert_console_clean(watch, "drawer filtres avances (bug backdrop)")
             pytest.xfail(
@@ -527,12 +493,8 @@ class TestLotCSweepBibliotheque:
             assert counts["views"] == 1, f"A/R {i + 1} : empilement de vues : {counts}"
             assert counts["grids"] == 1, f"A/R {i + 1} : empilement de grilles : {counts}"
             assert counts["panels"] == 1, f"A/R {i + 1} : empilement right-panel : {counts}"
-            assert counts["drawers"] == 0 and counts["modals"] == 0, (
-                f"A/R {i + 1} : overlay residuel : {counts}"
-            )
-            assert _cards_count(page) == _TOTAL_FILMS, (
-                f"A/R {i + 1} : grille incomplete apres retour"
-            )
+            assert counts["drawers"] == 0 and counts["modals"] == 0, f"A/R {i + 1} : overlay residuel : {counts}"
+            assert _cards_count(page) == _TOTAL_FILMS, f"A/R {i + 1} : grille incomplete apres retour"
 
         _assert_console_clean(watch, "navigation aller-retour x3")
 
@@ -589,9 +551,9 @@ class TestLotCSweepBibliotheque:
         page.click("#dashDangerModal [data-danger-cancel]")  # ANNULER — jamais confirmer
         page.wait_for_selector("#dashDangerModal", state="detached", timeout=10000)
         # Aucun marquage ne doit avoir eu lieu.
-        assert not any(
-            "marqué" in t["text"] for t in _toasts(page)
-        ), "Toast de marquage apres ANNULATION de la modale de suppression"
+        assert not any("marqué" in t["text"] for t in _toasts(page)), (
+            "Toast de marquage apres ANNULATION de la modale de suppression"
+        )
         # Le verrou bulkInFlight doit etre relache apres annulation (fix 2026-06-07).
         assert page.locator('[data-bibliotheque-bulk="delete"]').is_enabled(), (
             "Boutons bulk restes disabled apres annulation de la modale"
@@ -601,9 +563,7 @@ class TestLotCSweepBibliotheque:
         #    Re-scanner -> toast (succes attendu : "Re-scan lancé (job ...)")
         page.click('[data-bibliotheque-bulk="rescan"]')
         toast = _wait_toast(page, r"scan")
-        assert "toast--error" not in toast["cls"], (
-            f"Re-scan bulk en erreur : {toast['text']!r}"
-        )
+        assert "toast--error" not in toast["cls"], f"Re-scan bulk en erreur : {toast['text']!r}"
 
         # -- Action SURE : Analyser perceptuel (job async, en dernier car il
         #    disable perceptuel/rescan le temps du job)

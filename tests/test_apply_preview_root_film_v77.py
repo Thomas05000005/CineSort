@@ -47,17 +47,14 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
         # Film posé DIRECTEMENT à la racine (pas de sous-dossier).
         (self.root / "Inception 2010.mkv").write_bytes(b"x" * 4096)
         api = CineSortApi()
-        start = api.run.start_plan(
-            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
-        )
+        start = api.run.start_plan({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
         self.assertTrue(start.get("ok"), start)
         run_id = str(start["run_id"])
         _wait_done(api, run_id)
         rows = api.run.get_plan(run_id).get("rows", [])
         self.assertTrue(rows, "le scan doit produire au moins 1 row pour le film à la racine")
         decisions = {
-            r["row_id"]: {"ok": True, "title": r.get("proposed_title"), "year": r.get("proposed_year")}
-            for r in rows
+            r["row_id"]: {"ok": True, "title": r.get("proposed_title"), "year": r.get("proposed_year")} for r in rows
         }
         return api, run_id, rows, decisions
 
@@ -80,7 +77,7 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
         #     jamais un simple folder_rename de la racine.
         move_ops = []
         for f in films:
-            for op in (f.get("ops") or []):
+            for op in f.get("ops") or []:
                 move_ops.append(op)
         self.assertTrue(
             any(op.get("action_summary") in ("video_move", "folder_rename_and_video_move") for op in move_ops),
@@ -88,7 +85,8 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
             f"actions={[op.get('action_summary') for op in move_ops]}",
         )
         self.assertGreaterEqual(
-            int(totals.get("moves") or 0), 1,
+            int(totals.get("moves") or 0),
+            1,
             f"totals.moves doit compter le déplacement (UI ne doit plus afficher 0 déplacement) : {totals}",
         )
 
@@ -98,7 +96,7 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
         preview = api.run.build_apply_preview(run_id, decisions)
         root_resolved = str(self.root.resolve())
         for f in preview.get("films") or []:
-            for op in (f.get("ops") or []):
+            for op in f.get("ops") or []:
                 src = str(op.get("src_path") or "")
                 if not src:
                     continue
@@ -107,7 +105,8 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
                 except (OSError, ValueError):
                     src_resolved = src
                 self.assertNotEqual(
-                    src_resolved, root_resolved,
+                    src_resolved,
+                    root_resolved,
                     f"op qui renomme/déplace la RACINE elle-même : {op!r} (catastrophe données)",
                 )
 
@@ -117,7 +116,7 @@ class ApplyPreviewRootFilmTests(unittest.TestCase):
         preview = api.run.build_apply_preview(run_id, decisions)
         dsts = []
         for f in preview.get("films") or []:
-            for op in (f.get("ops") or []):
+            for op in f.get("ops") or []:
                 if op.get("dst_path"):
                     dsts.append(str(op["dst_path"]))
         self.assertTrue(dsts, "au moins une op avec destination attendue")

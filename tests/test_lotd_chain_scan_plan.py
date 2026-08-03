@@ -55,8 +55,7 @@ INCEPTION_TMDB_ID = 27205
 def _write_nfo(path: Path, title: str, year: int, tmdbid: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"<movie><title>{title}</title><year>{year}</year>"
-        f"<tmdbid>{tmdbid}</tmdbid><runtime>148</runtime></movie>",
+        f"<movie><title>{title}</title><year>{year}</year><tmdbid>{tmdbid}</tmdbid><runtime>148</runtime></movie>",
         encoding="utf-8",
     )
 
@@ -219,9 +218,7 @@ class TestLotDChainScanPlan:
                 f"source_root inattendu {sr!r} pour row {r.get('row_id')} ({r.get('folder')})"
             )
             folder = Path(str(r.get("folder") or "")).resolve()
-            assert folder.is_relative_to(Path(sr).resolve()), (
-                f"folder {folder} hors de son source_root {sr}"
-            )
+            assert folder.is_relative_to(Path(sr).resolve()), f"folder {folder} hors de son source_root {sr}"
             seen_roots.add(os.path.normcase(os.path.normpath(sr)))
         assert len(seen_roots) == 2, f"les 2 roots doivent etre representes : {seen_roots}"
 
@@ -249,9 +246,7 @@ class TestLotDChainScanPlan:
                 f"fichier non-video planifie : {video} (row {r.get('row_id')})"
             )
         # Dossier sans aucune video -> aucune row.
-        assert not _rows_of_folder(chain.rows1, "Bruit.Only"), (
-            "le dossier bruit (txt+jpg) ne doit generer aucune row"
-        )
+        assert not _rows_of_folder(chain.rows1, "Bruit.Only"), "le dossier bruit (txt+jpg) ne doit generer aucune row"
         # Le sample est exclu par IGNORE_VIDEO_NAME_RE : 1 seule row Interstellar.
         inter = _rows_of_folder(chain.rows1, "Interstellar (2014)")
         assert len(inter) == 1, f"attendu 1 row Interstellar (sample exclu), obtenu {len(inter)}"
@@ -336,17 +331,14 @@ class TestLotDChainScanPlan:
         film_rows = [
             r
             for r in chain.rows1
-            if str(r.get("proposed_title") or "").strip().lower() == "film"
-            and int(r.get("proposed_year") or 0) == 2020
+            if str(r.get("proposed_title") or "").strip().lower() == "film" and int(r.get("proposed_year") or 0) == 2020
         ]
         assert len(film_rows) == 2, f"attendu 2 rows 'Film (2020)' (1 par root) : {film_rows}"
         roots = {os.path.normcase(os.path.normpath(str(r.get("source_root") or ""))) for r in film_rows}
         assert len(roots) == 2, f"la collision doit venir de 2 roots distincts : {roots}"
         for r in film_rows:
             flags = r.get("warning_flags") or []
-            assert "duplicate_cross_root" in flags, (
-                f"flag duplicate_cross_root absent sur {r.get('folder')} : {flags}"
-            )
+            assert "duplicate_cross_root" in flags, f"flag duplicate_cross_root absent sur {r.get('folder')} : {flags}"
 
     # ------------------------------------------------------------- plan.jsonl
     def test_08_plan_jsonl_ecrit_et_relisible(self, chain):
@@ -384,15 +376,11 @@ class TestLotDChainScanPlan:
         folders2 = int(s2.get("folders_scanned") or 0)
         assert hits2 > 0, f"aucun hit cache au re-scan : {s2}"
         assert hits2 == folders2, f"hits={hits2} != folders_scanned={folders2} : {s2}"
-        assert reused2 == len(chain.rows2), (
-            f"rows_reused={reused2} != {len(chain.rows2)} rows du run 2 (cache partiel)"
-        )
+        assert reused2 == len(chain.rows2), f"rows_reused={reused2} != {len(chain.rows2)} rows du run 2 (cache partiel)"
         assert int(s2.get("incremental_cache_row_hits") or 0) == 0
         assert int(s2.get("incremental_cache_row_misses") or 0) == 0
         # Les metriques sont aussi exposees dans l'artefact summary.txt du run.
-        summary = (chain.state_dir / "runs" / f"tri_films_{chain.rid2}" / "summary.txt").read_text(
-            encoding="utf-8"
-        )
+        summary = (chain.state_dir / "runs" / f"tri_films_{chain.rid2}" / "summary.txt").read_text(encoding="utf-8")
         assert "Cache incremental (dossiers)" in summary and f"hits={hits2}" in summary
 
     def test_09b_metrique_misses_fantome_au_rescan(self, chain):
@@ -421,10 +409,7 @@ class TestLotDChainScanPlan:
         assert hits2 > 0 and reused2 == len(chain.rows2)
         if misses2 > 0:
             # Symptome exact fige : chaque hit rejoue le miss du run 1.
-            assert misses2 == hits2, (
-                f"symptome différent du connu (misses={misses2}, hits={hits2}) : "
-                "a requalifier"
-            )
+            assert misses2 == hits2, f"symptome différent du connu (misses={misses2}, hits={hits2}) : a requalifier"
             pytest.xfail(
                 "[LOTD-41-01] metrique incremental_cache_misses fantome : re-scan "
                 f"100% cache mais stats du run 2 = hits={hits2} misses={misses2} "

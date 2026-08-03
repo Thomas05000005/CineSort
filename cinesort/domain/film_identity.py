@@ -70,7 +70,7 @@ def extract_tmdb_id(film_id: str) -> int:
     """Extrait l'id TMDb d'un film_id `tmdb:<id>`. Retourne 0 si invalide."""
     if not is_tmdb_film_id(film_id):
         return 0
-    raw = film_id[len("tmdb:"):]
+    raw = film_id[len("tmdb:") :]
     try:
         return int(raw)
     except (TypeError, ValueError):

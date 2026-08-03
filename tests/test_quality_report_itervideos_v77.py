@@ -55,9 +55,7 @@ def test_fallback_passes_min_video_bytes_kwarg(tmp_path):
     cfg = _cfg(tmp_path, min_video_bytes=1)
     row = _row(folder, "disparu.mkv")  # fichier renomme/supprime apres le plan
 
-    result = resolve_media_path_for_row(
-        SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF
-    )
+    result = resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF)
 
     assert result == folder / "present.mkv"
 
@@ -68,9 +66,7 @@ def test_fallback_threshold_comes_from_cfg(tmp_path):
     cfg = _cfg(tmp_path, min_video_bytes=1024)
     row = _row(folder, "disparu.mkv")
 
-    result = resolve_media_path_for_row(
-        SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF
-    )
+    result = resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF)
 
     assert result is None
 
@@ -83,15 +79,10 @@ def test_fallback_defaults_to_core_min_video_bytes(tmp_path, monkeypatch):
     row = _row(folder, "disparu.mkv")
 
     monkeypatch.setattr(core, "MIN_VIDEO_BYTES", 1)
-    assert resolve_media_path_for_row(
-        SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF
-    ) == folder / "present.mkv"
+    assert resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF) == folder / "present.mkv"
 
     monkeypatch.setattr(core, "MIN_VIDEO_BYTES", 1024)
-    assert (
-        resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF)
-        is None
-    )
+    assert resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF) is None
 
 
 def test_fallback_invalid_min_video_bytes_degrades_to_none(tmp_path):
@@ -101,8 +92,6 @@ def test_fallback_invalid_min_video_bytes_degrades_to_none(tmp_path):
     cfg = _cfg(tmp_path, min_video_bytes="pas-un-nombre")
     row = _row(folder, "disparu.mkv")
 
-    result = resolve_media_path_for_row(
-        SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF
-    )
+    result = resolve_media_path_for_row(SimpleNamespace(), cfg, row, env_truthy_fn=_ENV_OFF)
 
     assert result is None

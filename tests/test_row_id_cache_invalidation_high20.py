@@ -95,9 +95,10 @@ class RowIdCacheInvalidationTests(unittest.TestCase):
         ET incremental_scan_cache avec des row_id tronques, sous l'ancien cfg_sig.
         Retourne le row_id legacy attendu pour la video de test.
         """
-        with mock.patch.object(
-            plan_support_core, "_PLAN_CACHE_VERSION", _LEGACY_PLAN_CACHE_VERSION
-        ), mock.patch.object(plan_support_replan, "_compute_row_id", _legacy_row_id):
+        with (
+            mock.patch.object(plan_support_core, "_PLAN_CACHE_VERSION", _LEGACY_PLAN_CACHE_VERSION),
+            mock.patch.object(plan_support_replan, "_compute_row_id", _legacy_row_id),
+        ):
             rows = self._run_plan("legacy_seed")
 
         self.assertEqual(len(rows), 1, "le seed doit produire exactement 1 row")
@@ -119,9 +120,7 @@ class RowIdCacheInvalidationTests(unittest.TestCase):
         )
 
     def _legacy_cfg_sig(self) -> str:
-        with mock.patch.object(
-            plan_support_core, "_PLAN_CACHE_VERSION", _LEGACY_PLAN_CACHE_VERSION
-        ):
+        with mock.patch.object(plan_support_core, "_PLAN_CACHE_VERSION", _LEGACY_PLAN_CACHE_VERSION):
             return plan_support_core.cfg_signature_for_incremental(self._cfg().normalized())
 
     # --- Gate 1 : le bump doit exister (les deux caches n'ont pas d'autre levier) ---

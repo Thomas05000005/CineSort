@@ -67,8 +67,7 @@ class HistoriqueDecisionPrimeTierTests(unittest.TestCase):
 
     def test_deferred_tri_state_handled(self) -> None:
         # Le tri-état « deferred » exposé par le backend doit avoir un libellé.
-        self.assertIn('dec === "deferred"', self.body,
-                      "le tri-état 'deferred' doit être géré")
+        self.assertIn('dec === "deferred"', self.body, "le tri-état 'deferred' doit être géré")
 
     def test_empty_decision_falls_back_to_tier(self) -> None:
         # Fallback conservé : décision vide -> le tier `reject` produit « Rejeté ».

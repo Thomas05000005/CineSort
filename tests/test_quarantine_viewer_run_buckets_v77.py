@@ -93,7 +93,8 @@ class RunBucketViewerTests(unittest.TestCase):
         qt.list_review_bucket_files(self.cfg)
         manifests = list(self.runs.rglob(qt._TTL_MANIFEST_NAME))
         self.assertEqual(
-            manifests, [],
+            manifests,
+            [],
             "manifest TTL ecrit dans un bucket runs : clean_old_runs preserverait "
             "des _review vides (pollution gouvernance R8-002)",
         )

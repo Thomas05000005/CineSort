@@ -80,7 +80,10 @@ class Medi28PlannedTargetFolderTests(unittest.TestCase):
             return dup.is_under_collection_root(cfg_, folder, norm_win_path=core._norm_win_path)
 
         return dup.planned_target_folder(
-            cfg, row, title, year,
+            cfg,
+            row,
+            title,
+            year,
             is_under_collection_root=_is_under,
             windows_safe=core.windows_safe,
         )
@@ -192,9 +195,7 @@ class Medi31DoublonsWarningFlagsTests(unittest.TestCase):
     def test_warning_flags_reconciled_drops_false_subtitle_missing(self) -> None:
         # subtitle_missing_fr FAUX (la row connait deja une piste 'fr') -> retire ;
         # integrity_header_invalid conserve. Prouve RECONCILIES != bruts.
-        rows, decisions = self._two_flagged(
-            ["subtitle_missing_fr", "integrity_header_invalid"], subs=["fr"]
-        )
+        rows, decisions = self._two_flagged(["subtitle_missing_fr", "integrity_header_invalid"], subs=["fr"])
         data = plan_support.find_duplicate_targets(self._cfg(), rows, decisions)
         items = data["groups"][0]["rows"]
         self.assertEqual(
@@ -206,9 +207,7 @@ class Medi31DoublonsWarningFlagsTests(unittest.TestCase):
     def test_find_duplicate_targets_does_not_mutate_row_flags(self) -> None:
         # La row est PARTAGEE (endpoint de lecture) : la serialisation ne doit pas
         # muter row.warning_flags (cf. H12 / test_duplicates_no_row_mutation_v77).
-        rows, decisions = self._two_flagged(
-            ["subtitle_missing_fr", "integrity_header_invalid"], subs=["fr"]
-        )
+        rows, decisions = self._two_flagged(["subtitle_missing_fr", "integrity_header_invalid"], subs=["fr"])
         before = list(rows[0].warning_flags)
         plan_support.find_duplicate_targets(self._cfg(), rows, decisions)
         self.assertEqual(

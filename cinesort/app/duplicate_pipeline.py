@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from cinesort.domain.fusion_score import (
     DEFAULT_AUDIO_WEIGHT,

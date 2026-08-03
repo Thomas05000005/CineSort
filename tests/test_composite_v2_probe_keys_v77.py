@@ -55,7 +55,15 @@ class FakeLosslessAudioTracksTests(unittest.TestCase):
     def test_fake_lossless_fires_with_audio_tracks_key(self) -> None:
         probe = {"audio_tracks": [{"codec": "flac"}]}
         _v, audio_out, _trace = apply_contextual_adjustments(
-            [], self._audio_subs(), None, probe, None, None, [], False, "modern",
+            [],
+            self._audio_subs(),
+            None,
+            probe,
+            None,
+            None,
+            [],
+            False,
+            "modern",
         )
         sub = next(s for s in audio_out if s.name == "spectral_cutoff")
         # Le malus fake-lossless a ete applique -> value < 40 (valeur initiale).
@@ -65,7 +73,15 @@ class FakeLosslessAudioTracksTests(unittest.TestCase):
         # Avec l'ancienne cle `audio`, audio_tracks serait vide -> pas de malus.
         probe = {"audio": [{"codec": "flac"}]}
         _v, audio_out, _trace = apply_contextual_adjustments(
-            [], self._audio_subs(), None, probe, None, None, [], False, "modern",
+            [],
+            self._audio_subs(),
+            None,
+            probe,
+            None,
+            None,
+            [],
+            False,
+            "modern",
         )
         sub = next(s for s in audio_out if s.name == "spectral_cutoff")
         self.assertEqual(sub.value, 40.0, "pas de malus si la cle audio_tracks est absente")

@@ -127,9 +127,7 @@ def _build_virtual_library(root: Path, count: int) -> None:
         folder = root / f"Film Test {i:03d} ({year})"
         folder.mkdir()
         # Magic bytes EBML + padding : fichier factice, jamais probe (probe none).
-        (folder / f"Film.Test.{i:03d}.{year}.1080p.mkv").write_bytes(
-            b"\x1a\x45\xdf\xa3" + bytes(2048)
-        )
+        (folder / f"Film.Test.{i:03d}.{year}.1080p.mkv").write_bytes(b"\x1a\x45\xdf\xa3" + bytes(2048))
         (folder / f"Film.Test.{i:03d}.fr.srt").write_text(
             "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8"
         )
@@ -187,9 +185,7 @@ def chain():
 
     saved_min_video_bytes = domain_core.MIN_VIDEO_BYTES
 
-    tmp = tempfile.TemporaryDirectory(
-        prefix="cinesort_lotd_rest_", ignore_cleanup_errors=True
-    )
+    tmp = tempfile.TemporaryDirectory(prefix="cinesort_lotd_rest_", ignore_cleanup_errors=True)
     base = Path(tmp.name)
     root = base / "root"
     state_dir = base / "state"
@@ -327,15 +323,11 @@ def test_03_auth_401_sans_token_200_avec(chain):
     assert body.get("message") == "Cle d'acces invalide ou manquante."
     assert headers.get("X-Request-ID")
 
-    status, body, _ = _request(
-        port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN
-    )
+    status, body, _ = _request(port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN)
     assert status == 401
     assert body.get("ok") is False
 
-    status, body, _ = _request(
-        port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN
-    )
+    status, body, _ = _request(port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN)
     assert status == 200
     assert isinstance(body, dict)
     # get_settings renvoie le payload settings canonique (root/state_dir presents).
@@ -357,9 +349,7 @@ def test_03b_bug_guard_401_rst_body_non_draine(chain):
     aborts = 0
     for _ in range(30):
         try:
-            status, _, _ = _request(
-                port, "POST", "/api/settings/get_settings", body={}, token=_WRONG_TOKEN
-            )
+            status, _, _ = _request(port, "POST", "/api/settings/get_settings", body={}, token=_WRONG_TOKEN)
             assert status == 401
         except (ConnectionAbortedError, ConnectionResetError):
             aborts += 1
@@ -392,9 +382,7 @@ def test_04_legacy_post_410(chain):
         assert body.get("message") == "Use /api/<facade>/<method> instead"
 
     # Methode inconnue AVEC prefixe facade valide -> 404 "Methode inconnue".
-    status, body, _ = _request(
-        port, "POST", "/api/run/methode_inconnue_xyz", token=_TOKEN
-    )
+    status, body, _ = _request(port, "POST", "/api/run/methode_inconnue_xyz", token=_TOKEN)
     assert status == 404
     assert body.get("message") == "Methode inconnue"
 
@@ -419,9 +407,7 @@ def test_05_run_active_run_id_et_409_double_start(chain):
     # run se terminerait avant l'arrivee de la 2e requete.
     conflict = None
     for _ in range(3):
-        status, body, _ = _request(
-            port, "POST", "/api/run/start_plan", body=payload, token=_TOKEN
-        )
+        status, body, _ = _request(port, "POST", "/api/run/start_plan", body=payload, token=_TOKEN)
         if status == 409:
             conflict = body
             break
@@ -450,17 +436,14 @@ def test_05_run_active_run_id_et_409_double_start(chain):
             break
         time.sleep(0.02)
     assert seen_active == active_run, (
-        f"health n'a pas expose active_run_id={active_run} pendant le run "
-        f"(vu: {seen_active})"
+        f"health n'a pas expose active_run_id={active_run} pendant le run (vu: {seen_active})"
     )
 
     # Attendre la fin du run (get_status facade).
     final_status = None
     deadline = time.monotonic() + 120.0
     while time.monotonic() < deadline:
-        status, rs, _ = _request(
-            port, "POST", "/api/run/get_status", body={"run_id": active_run}, token=_TOKEN
-        )
+        status, rs, _ = _request(port, "POST", "/api/run/get_status", body={"run_id": active_run}, token=_TOKEN)
         assert status == 200
         if isinstance(rs, dict) and rs.get("done"):
             final_status = rs
@@ -499,9 +482,7 @@ def test_06_bug_guard_quality_iter_videos_kwarg(chain):
         pytest.skip("run du test_05 indisponible (test precedent en echec)")
     port = chain["port"]
 
-    status, plan, _ = _request(
-        port, "POST", "/api/run/get_plan", body={"run_id": run_id}, token=_TOKEN
-    )
+    status, plan, _ = _request(port, "POST", "/api/run/get_plan", body={"run_id": run_id}, token=_TOKEN)
     assert status == 200 and plan.get("ok") is True
     rows = plan.get("rows") or []
     assert rows, "plan vide : la bibliotheque virtuelle n'a produit aucune row"
@@ -570,9 +551,7 @@ def test_07_rate_limit_429_seuils_reels(chain):
         statuses = []
         retry_after = None
         for _ in range(rest_mod._RATE_LIMIT_MAX_FAILURES + 1):
-            status, _, headers = _request(
-                port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN
-            )
+            status, _, headers = _request(port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN)
             statuses.append(status)
             if status == 429:
                 retry_after = headers.get("Retry-After")
@@ -581,9 +560,7 @@ def test_07_rate_limit_429_seuils_reels(chain):
         assert retry_after == "60"  # ITER14 : Retry-After = window_s
 
         # Le blocage persiste tant que la fenetre n'est pas expiree.
-        status, body, _ = _request(
-            port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN
-        )
+        status, body, _ = _request(port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN)
         assert status == 429
         assert "Trop de tentatives" in str(body.get("message") or "")
 
@@ -592,18 +569,13 @@ def test_07_rate_limit_429_seuils_reels(chain):
         with server._rate_limiter._lock:
             for ip in list(server._rate_limiter._failures):
                 server._rate_limiter._failures[ip] = [
-                    t - (rest_mod._RATE_LIMIT_WINDOW_S + 1.0)
-                    for t in server._rate_limiter._failures[ip]
+                    t - (rest_mod._RATE_LIMIT_WINDOW_S + 1.0) for t in server._rate_limiter._failures[ip]
                 ]
-        status, _, _ = _request(
-            port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN
-        )
+        status, _, _ = _request(port, "POST", "/api/settings/get_settings", token=_WRONG_TOKEN)
         assert status == 401, "apres expiration de la fenetre, retour a 401 (pas 429)"
 
         # Auth reussie -> record_success purge le compteur de l'IP.
-        status, _, _ = _request(
-            port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN
-        )
+        status, _, _ = _request(port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN)
         assert status == 200
         with server._rate_limiter._lock:
             assert server._rate_limiter._failures == {}
@@ -689,7 +661,5 @@ def test_08_max_body_size_17mo_rejet_propre(chain):
     # Le serveur repond toujours, y compris sur un POST metier authentifie.
     status, body, _ = _request(port, "GET", "/api/health")
     assert status == 200 and body.get("ok") is True
-    status, body, _ = _request(
-        port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN
-    )
+    status, body, _ = _request(port, "POST", "/api/settings/get_settings", body={}, token=_TOKEN)
     assert status == 200
