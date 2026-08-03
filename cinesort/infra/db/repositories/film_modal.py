@@ -61,6 +61,31 @@ class FilmModalRepository(_BaseRepository):
             )
             return [str(r["alert_code"]) for r in cur.fetchall()]
 
+    def list_ignored_alerts_bulk(self, row_ids: List[str]) -> Dict[str, List[str]]:
+        """Alertes ignorees pour un lot de row_ids, en une requete par chunk.
+
+        E2-bis (revue Lot E) : consomme par run/get_plan pour filtrer les
+        warning_flags de tout le plan sans N requetes.
+        """
+        self._ensure_tables()
+        rids = [str(r or "").strip() for r in (row_ids or [])]
+        rids = [r for r in rids if r]
+        out: Dict[str, List[str]] = {}
+        if not rids:
+            return out
+        with self._managed_conn() as conn:
+            for start in range(0, len(rids), 500):
+                chunk = rids[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT row_id, alert_code FROM ignored_alerts WHERE row_id IN ({placeholders}) "  # noqa: S608 — placeholders generes, valeurs parametrees
+                    "ORDER BY ignored_at ASC",
+                    tuple(chunk),
+                )
+                for r in cur.fetchall():
+                    out.setdefault(str(r["row_id"]), []).append(str(r["alert_code"]))
+        return out
+
     def is_alert_ignored(self, row_id: str, alert_code: str) -> bool:
         self._ensure_tables()
         rid = str(row_id or "").strip()

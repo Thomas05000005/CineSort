@@ -18,8 +18,7 @@ class TitlePreservationTests(unittest.TestCase):
     def test_number_titles_not_mutilated(self) -> None:
         self.assertEqual(parse_scene_title("21 Jump Street (2012)"), "21 Jump Street")
         self.assertEqual(parse_scene_title("50 First Dates"), "50 First Dates")
-        self.assertEqual(parse_scene_title("20 000 Leagues Under the Sea (1954)"),
-                         "20 000 Leagues Under the Sea")
+        self.assertEqual(parse_scene_title("20 000 Leagues Under the Sea (1954)"), "20 000 Leagues Under the Sea")
 
     def test_ma_titlecase_word_preserved(self) -> None:
         self.assertEqual(parse_scene_title("Ma Vie de Courgette"), "Ma Vie de Courgette")

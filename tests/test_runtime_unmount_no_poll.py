@@ -70,9 +70,7 @@ def test_unmount_traitement_stops_polling_runtime(dashboard_page) -> None:
     baseline_start = time.monotonic()
     dashboard_page.wait_for_timeout(3000)
     baseline_end = time.monotonic()
-    baseline_polls = [
-        (ts, url) for (ts, url) in captured if baseline_start <= ts <= baseline_end
-    ]
+    baseline_polls = [(ts, url) for (ts, url) in captured if baseline_start <= ts <= baseline_end]
 
     # Sanity check : la vue Traitement DOIT poller au moins une fois pendant 3s.
     # Si elle ne polle pas, le test n'est pas pertinent (faux negatif possible).
@@ -81,7 +79,7 @@ def test_unmount_traitement_stops_polling_runtime(dashboard_page) -> None:
     has_active_polling = len(baseline_polls) > 0
 
     # 3) Naviguer vers /accueil -> declenche unmountTraitement via cleanup callback router.
-    captured_before_unmount = len(captured)
+    len(captured)
     dashboard_page.evaluate("window.location.hash = '#/accueil'")
     dashboard_page.wait_for_timeout(500)  # 500ms pour que le cleanup s'execute.
 
@@ -90,19 +88,14 @@ def test_unmount_traitement_stops_polling_runtime(dashboard_page) -> None:
     dashboard_page.wait_for_timeout(5000)
     post_unmount_end = time.monotonic()
 
-    post_unmount_polls = [
-        (ts, url) for (ts, url) in captured
-        if post_unmount_start <= ts <= post_unmount_end
-    ]
+    post_unmount_polls = [(ts, url) for (ts, url) in captured if post_unmount_start <= ts <= post_unmount_end]
 
     # Tolerance fine : 1 requete peut etre en vol au moment exact du unmount
     # (race entre setInterval tick et clearInterval). On accepte au max 1 requete
     # dans les premieres 500ms post-unmount (deja couvertes par wait_for_timeout(500)).
     # Apres ces 500ms, ZERO requete polling tolereee.
     grace_period_end = post_unmount_start + 0.7
-    leaked_polls = [
-        (ts, url) for (ts, url) in post_unmount_polls if ts > grace_period_end
-    ]
+    leaked_polls = [(ts, url) for (ts, url) in post_unmount_polls if ts > grace_period_end]
 
     if has_active_polling:
         assert len(leaked_polls) == 0, (
@@ -177,8 +170,5 @@ def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None
         )
     else:
         if len(post_unmount_polls) > 0:
-            pytest.fail(
-                f"INCOHERENCE : 0 polling avant unmount Accueil, mais "
-                f"{len(post_unmount_polls)} polling apres."
-            )
+            pytest.fail(f"INCOHERENCE : 0 polling avant unmount Accueil, mais {len(post_unmount_polls)} polling apres.")
         pytest.skip("Pas de polling actif sur Accueil dans cette config — non pertinent.")

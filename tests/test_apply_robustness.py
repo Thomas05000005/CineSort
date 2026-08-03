@@ -221,9 +221,10 @@ class RollbackTmpRenameTests(unittest.TestCase):
                     raise OSError("simulated rollback failure")
                 return original_rename(self_path, target)
 
-            with mock.patch.object(Path, "rename", _flaky_rename), self.assertLogs(
-                apply_core_mod.__name__, level=logging.WARNING
-            ) as caplog:
+            with (
+                mock.patch.object(Path, "rename", _flaky_rename),
+                self.assertLogs(apply_core_mod.__name__, level=logging.WARNING) as caplog,
+            ):
                 # On invoque directement le helper interne qui contient le bloc
                 # rollback : _move_folder_with_case_rename (chemin folder.name.lower()
                 # == dst.name.lower()). On attend qu'il leve in fine (le 2e rename

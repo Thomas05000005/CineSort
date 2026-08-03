@@ -96,10 +96,7 @@ def run_filter_graph(
     # blurdetect POSENT des métadonnées de frame (lavfi.*) mais n'écrivent RIEN sur
     # stderr sans ce filtre final. AVANT : 0 ligne -> blockiness_mean=blur_mean=0
     # -> _score_blockiness(0)=95 et _score_blur(0)=95 (perceptuel fabriqué).
-    vf = (
-        f"select='not(mod(n\\,{step}))',"
-        "signalstats=stat=tout+vrep,blockdetect,blurdetect,metadata=mode=print"
-    )
+    vf = f"select='not(mod(n\\,{step}))',signalstats=stat=tout+vrep,blockdetect,blurdetect,metadata=mode=print"
 
     cmd = [
         ffmpeg_path,

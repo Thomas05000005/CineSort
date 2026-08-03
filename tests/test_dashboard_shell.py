@@ -172,14 +172,18 @@ class DashboardShellHttpTests(unittest.TestCase):
         """L'index contient les placeholder de chaque vue."""
         _, body, _ = self._get("/dashboard/index.html")
         html = body.decode("utf-8")
+        # Verif totale 2026-07 (Phase 5) : conteneurs orphelins retirés
+        # (view-home/quality/jellyfin/plex/radarr/logs — aucune route ne les
+        # activait). On vérifie les placeholders des vues VIVANTES.
         for view_id in (
             "view-login",
             "view-status",
             "view-library",
-            "view-jellyfin",
-            "view-logs",
-            "view-quality",
+            "view-processing",
+            "view-qij",
             "view-settings",
+            "view-help",
+            "view-film-detail",
         ):
             self.assertIn(f'id="{view_id}"', html, f"Vue {view_id} manquante")
 
@@ -233,16 +237,12 @@ class DashboardShellHttpTests(unittest.TestCase):
         self.assertFalse(data_none.get("ok", True), f"ok devait etre False, data={data_none}")
 
         # --- 2. wrong-token -> 401 (hmac.compare_digest False) ---------------
-        status_wrong, data_wrong = self._post(
-            "/api/settings/get_settings", body={}, token="wrong-token"
-        )
+        status_wrong, data_wrong = self._post("/api/settings/get_settings", body={}, token="wrong-token")
         self.assertEqual(status_wrong, 401, f"wrong-token attendu 401, obtenu {status_wrong}")
         self.assertFalse(data_wrong.get("ok", True), f"ok devait etre False, data={data_wrong}")
 
         # --- 3. valid-token -> 200 (dispatch facade reussi) ------------------
-        status_ok, data_ok = self._post(
-            "/api/settings/get_settings", body={}, token=self.token
-        )
+        status_ok, data_ok = self._post("/api/settings/get_settings", body={}, token=self.token)
         self.assertEqual(status_ok, 200, f"valid-token attendu 200, obtenu {status_ok}")
         self.assertIn("root", data_ok, f"reponse facade incomplete, data={data_ok}")
 
@@ -251,9 +251,7 @@ class DashboardShellHttpTests(unittest.TestCase):
         # Preuve que BYPASS LOOPBACK CONSERVE est intact cote code de prod.
         saved_env = os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
         try:
-            status_bypass, data_bypass = self._post(
-                "/api/settings/get_settings", body={}, token="wrong-token"
-            )
+            status_bypass, data_bypass = self._post("/api/settings/get_settings", body={}, token="wrong-token")
             self.assertEqual(
                 status_bypass,
                 200,

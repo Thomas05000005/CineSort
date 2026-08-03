@@ -39,6 +39,12 @@ DEFAULT_RUNTIME_HARD_THRESHOLD_MIN = 60
 # Warning pose quand un candidat est conserve uniquement grace a son edition flag.
 WARN_RUNTIME_HARD_KEPT_VIA_EDITION = "runtime_hard_kept_via_edition_flag"
 
+# Warning pose quand un candidat serait exclu par le delta MAIS la duree fichier
+# vient d'une source DECLAREE (NFO), pas MESUREE (probe). Une duree declaree n'a
+# pas autorite pour une exclusion dure (le NFO peut annoncer un autre cut que le
+# fichier reel) : on conserve + on signale, la reconciliation probe tranchera.
+WARN_RUNTIME_HARD_KEPT_DECLARED = "runtime_hard_kept_declared_runtime"
+
 # Warning pose sur la PlanRow quand au moins un candidat a ete exclu par le
 # filtre HARD (utile pour debug user en UI : "Pourquoi mon film n'a pas matche ?").
 WARN_RUNTIME_HARD_EXCLUDED = "runtime_hard_filter_excluded_candidate"
@@ -51,6 +57,7 @@ def evaluate_runtime_hard_filter(
     *,
     enabled: bool = True,
     threshold_min: int = DEFAULT_RUNTIME_HARD_THRESHOLD_MIN,
+    runtime_measured: bool = True,
 ) -> Tuple[bool, Optional[str]]:
     """Decide si un candidat TMDb doit etre EXCLU au regard de sa duree.
 
@@ -64,13 +71,21 @@ def evaluate_runtime_hard_filter(
         enabled: Si False, filtre completement desactive (rollback rapide).
         threshold_min: Seuil au-dela duquel le delta est considere comme
             franc mismatch (default 60 min). Configurable via settings.
+        runtime_measured: True si `file_runtime_min` a ete MESURE (cache probe)
+            -> fait autorite, une divergence franche EXCLUT. False si la duree
+            est DECLAREE (NFO) : le NFO peut annoncer un autre cut que le
+            fichier reel, donc une divergence ne doit JAMAIS exclure durement
+            -> conserve + warning, reconcilie plus tard par le probe (H5).
 
     Returns:
         (excluded, warning_flag) :
         - (False, None) : candidat conserve, pas de warning particulier
         - (False, WARN_RUNTIME_HARD_KEPT_VIA_EDITION) : delta > threshold
           MAIS edition longue detectee -> conserve avec warning
-        - (True, None) : candidat EXCLU (delta > threshold et pas d'edition)
+        - (False, WARN_RUNTIME_HARD_KEPT_DECLARED) : delta > threshold, pas
+          d'edition, MAIS duree seulement DECLAREE (NFO) -> conserve + warning
+        - (True, None) : candidat EXCLU (delta > threshold, pas d'edition, et
+          duree MESUREE qui fait autorite)
 
     Note: ne touche pas a la confidence score. Le caller compose ce filtre
     avec `score_runtime_delta` (bonus +20 / penalty -25) pour les candidats
@@ -106,13 +121,19 @@ def evaluate_runtime_hard_filter(
         # Edition longue declare -> on conserve mais on signale au user
         return False, WARN_RUNTIME_HARD_KEPT_VIA_EDITION
 
-    # Pas d'edition longue -> EXCLU
+    # H5 : une duree seulement DECLAREE (NFO) ne fait pas autorite pour une
+    # exclusion dure. On conserve + signale ; le probe (mesure) reconciliera.
+    if not runtime_measured:
+        return False, WARN_RUNTIME_HARD_KEPT_DECLARED
+
+    # Duree MESUREE + pas d'edition longue -> EXCLU
     return True, None
 
 
 __all__ = [
     "DEFAULT_RUNTIME_HARD_THRESHOLD_MIN",
     "WARN_RUNTIME_HARD_EXCLUDED",
+    "WARN_RUNTIME_HARD_KEPT_DECLARED",
     "WARN_RUNTIME_HARD_KEPT_VIA_EDITION",
     "evaluate_runtime_hard_filter",
 ]

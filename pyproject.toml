@@ -56,8 +56,14 @@ dependencies = [
 # pytest (+ hypothesis + import-linter pour les contracts).
 dev = [
     "playwright>=1.60.0,<2",
-    "Pillow>=12.2",
-    "ruff>=0.15.14,<0.16",
+    "Pillow>=12.3",
+    # EPINGLE EXACTEMENT (2026-08-02) : la borne flottante `>=0.15.14,<0.16`
+    # laissait la CI resoudre le dernier patch. Un formateur legerement different
+    # arrive, et les 930 fichiers du depot deviennent non conformes du jour au
+    # lendemain sans qu'aucun commit n'ait bouge — c'est ce qui a mis la CI au
+    # rouge sur `main` lui-meme et bloque ~180 PR. Toute montee de version doit
+    # etre DELIBEREE, avec le reformatage dans le meme commit.
+    "ruff==0.15.22",
     "coverage>=7.14.0,<8",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.0.3,<10",
@@ -75,7 +81,7 @@ dev = [
 # build : pyinstaller + Pillow (alignement avec requirements-build.txt).
 build = [
     "pyinstaller>=6.20.0",
-    "pillow>=12.2",
+    "pillow>=12.3",
 ]
 
 [project.urls]
@@ -92,6 +98,15 @@ include-package-data = false
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+# Phase 0.4 vérif totale : le périmètre de test vit ici, plus seulement dans ci.yml.
+# Pas d'addopts pour ne pas changer le comportement CI (--ignore=tests/e2e --timeout=60
+# restent explicites dans .github/workflows/ci.yml).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "runtime: tests qui démarrent l'app ou le serveur réel (exclus des sweeps rapides)",
+]
 
 [tool.ruff]
 target-version = "py313"
@@ -140,6 +155,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Modules de RE-EXPORT : ils importent des symboles (dont des helpers prives
+# consommes par les tests) pour les republier sous un chemin stable. Ces imports
+# sont volontairement "inutilises" dans le module lui-meme ; les supprimer casse
+# l API (mesure le 2026-08-02 : un ruff --fix a retire 37 re-exports de
+# plan_support.py, 2 fichiers de tests ne collectaient plus).
+"cinesort/app/plan_support.py" = ["F401"]
+"cinesort/domain/probe_models.py" = ["F401"]
+
 # Les tests E2E Playwright instancient des page objects en variables locales
 # que Python garde en vie par ref au frame ; l'analyse statique F841 ne voit
 # pas l'usage. On whitelist F841 pour ces fichiers.

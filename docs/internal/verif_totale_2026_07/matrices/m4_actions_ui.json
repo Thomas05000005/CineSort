@@ -1,0 +1,6315 @@
+{
+  "matrix": "M4 - Actions UI bouton -> feedback",
+  "generated_by": "docs/internal/verif_totale_2026_07/scripts_matrices/m4_actions_ui.py",
+  "scope": "web/dashboard/**/*.js (hors tests/)",
+  "verdict_definitions": {
+    "OK": "handler + (si API) feedback succes + gestion erreur effective + (si destructif) confirmation",
+    "MUET_SUCCES": "appel API sans aucun feedback visible en cas de succes",
+    "MUET_ERREUR": "appel API sans gestion d'erreur effective (ni check .ok ni catch qui affiche)",
+    "SANS_CONFIRMATION": "action destructrice (delete/reset/apply/cancel-run/...) avec API sans confirmation",
+    "SANS_HANDLER": "attribut emis mais aucune branche/listener ne traite cette valeur",
+    "CASSE": "branche sans effet observable, ou check res.ok mort sur retour apiPost {status,data}"
+  },
+  "api_contract_note": {
+    "core/api.js": "apiPost -> {status,data} ; throw uniquement sur erreur reseau ; res.ok N'EXISTE PAS",
+    "views/_v5_helpers.js": "apiPost -> {ok,data,status} ; ne throw JAMAIS ; un catch seul est mort"
+  },
+  "totals": {
+    "unique_actions": 109,
+    "emission_sites": 121,
+    "families": 25
+  },
+  "stats_by_verdict": {
+    "OK": 106,
+    "SANS_CONFIRMATION": 3
+  },
+  "actions": [
+    {
+      "family": "data-film-action",
+      "action": "refresh-poster",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 188
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "integrations/get_tmdb_posters"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 807,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "rescan",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 228
+        },
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 643
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/rescan_row"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 762,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "open-analysis",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 240
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 727,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-alert-action",
+      "action": "${escapeHtml(a.action.kind)}",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 305
+        }
+      ],
+      "dynamic_value": true,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "handler": {
+        "found": true,
+        "mode": "dynamic-dispatch"
+      },
+      "analysis": null,
+      "verdict": "OK",
+      "flags": [
+        "valeur dynamique : dispatch present, branche non tracee statiquement"
+      ]
+    },
+    {
+      "family": "data-film-action",
+      "action": "choose-candidate",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 356
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/set_film_tmdb_candidate"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 742,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "expand-candidates",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 397
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 732,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "collapse-candidates",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 399
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 737,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "search-tmdb",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 401
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/search_tmdb"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 792,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "analyze-perceptual",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 468
+        },
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 641
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 753,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "open-perceptual-modal",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 479
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 754,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "delete-score-feedback",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 512
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/delete_score_feedback"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 803,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "SANS_CONFIRMATION",
+      "flags": [
+        "action destructrice avec appel API sans confirmation"
+      ]
+    },
+    {
+      "family": "data-film-action",
+      "action": "submit-score-feedback",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 529
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/submit_score_feedback"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 796,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "clear-override",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 633
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/clear_tmdb_override"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_film_full"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 781,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "unmark-delete",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 636
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/unmark_for_deletion"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_film_full"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 770,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "mark-delete",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 637
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/mark_for_deletion"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 766,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "validate",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 640
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 749,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-film-action",
+      "action": "open-folder",
+      "views": [
+        "component:film-detail"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/film-detail.js",
+          "line": 642
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/film-detail.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "open_path"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/film-detail.js",
+        "line": 758,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-insight-action",
+      "action": "${idx}",
+      "views": [
+        "component:home-widgets"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/home-widgets.js",
+          "line": 77
+        }
+      ],
+      "dynamic_value": true,
+      "family_read_in": [
+        "web/dashboard/components/home-widgets.js"
+      ],
+      "handler": {
+        "found": true,
+        "mode": "dynamic-dispatch"
+      },
+      "analysis": null,
+      "verdict": "OK",
+      "flags": [
+        "valeur dynamique : dispatch present, branche non tracee statiquement"
+      ]
+    },
+    {
+      "family": "data-drawer-action",
+      "action": "reset",
+      "views": [
+        "component:library-advanced-drawer"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/library-advanced-drawer.js",
+          "line": 204
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/library-advanced-drawer.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": true
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/library-advanced-drawer.js",
+        "line": 321,
+        "mode": "selector-bind",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-drawer-action",
+      "action": "apply",
+      "views": [
+        "component:library-advanced-drawer"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/library-advanced-drawer.js",
+          "line": 205
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/library-advanced-drawer.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": true
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/library-advanced-drawer.js",
+        "line": 310,
+        "mode": "selector-bind",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-modal-action",
+      "action": "${i}",
+      "views": [
+        "component:modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/modal.js",
+          "line": 84
+        }
+      ],
+      "dynamic_value": true,
+      "family_read_in": [
+        "web/dashboard/components/modal.js"
+      ],
+      "handler": {
+        "found": true,
+        "mode": "dynamic-dispatch"
+      },
+      "analysis": null,
+      "verdict": "OK",
+      "flags": [
+        "valeur dynamique : dispatch present, branche non tracee statiquement"
+      ]
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "complete",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 99
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_report"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_details"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 762,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "toggle-width",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 129
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 771,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "relaunch",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 145
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_report"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_details"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 761,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "launch",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 167
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_report"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_details"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 760,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "open-settings",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 180
+        },
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 198
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 777,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "toggle-breakdown",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 379
+        },
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 395
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 764,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-perceptual-action",
+      "action": "load-frames",
+      "views": [
+        "component:perceptual-modal"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/components/perceptual-modal.js",
+          "line": 446
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/components/perceptual-modal.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_compare_frames"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/components/perceptual-modal.js",
+        "line": 763,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "start-scan",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 119
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1197,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "resume-validation",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 153
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1209,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "view-run-detail",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 154
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1213,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "open-traitement",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 402
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1230,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "start-scan-direct",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 426
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/start_plan"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1201,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "open-scan-options",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 427
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/start_plan"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1226,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "view-qualite",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 501
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1220,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "open-insight",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 631
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1223,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "view-all-suggestions",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 636
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1205,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-accueil-action",
+      "action": "view-history",
+      "views": [
+        "accueil"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/accueil.js",
+          "line": 769
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/accueil.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/accueil.js",
+        "line": 1217,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-aide-action",
+      "action": "copy-diagnostic",
+      "views": [
+        "aide"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/aide.js",
+          "line": 237
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/aide.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/aide.js",
+        "line": 858,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-aide-action",
+      "action": "report-bug",
+      "views": [
+        "aide"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/aide.js",
+          "line": 238
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/aide.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/aide.js",
+        "line": 864,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-aide-action",
+      "action": "open-logs",
+      "views": [
+        "aide"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/aide.js",
+          "line": 251
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/aide.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "runtime/open_logs_folder"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/aide.js",
+        "line": 868,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-aide-action",
+      "action": "copy-recent-logs",
+      "views": [
+        "aide"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/aide.js",
+          "line": 252
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/aide.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "runtime/get_recent_logs"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/aide.js",
+        "line": 882,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-aide-action",
+      "action": "drawer-expand",
+      "views": [
+        "aide"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/aide.js",
+          "line": 523
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/aide.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/aide.js",
+        "line": 546,
+        "mode": "selector-bind",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-bibliotheque-action",
+      "action": "filters",
+      "views": [
+        "bibliotheque"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/bibliotheque.js",
+          "line": 269
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/bibliotheque.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_library_filtered"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_library_counters_by_chip"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/bibliotheque.js",
+        "line": 1219,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-action",
+      "action": "refresh",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 258
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/check_duplicates"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1205,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-action",
+      "action": "bulk-perceptual",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 266
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/queue_perceptual_analyses"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_perceptual_job_status"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1206,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-action",
+      "action": "auto-decide-all",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 269
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/mark_duplicate_winner"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/check_duplicates"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1208,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-card-action",
+      "action": "keep",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 408
+        },
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 415
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/mark_duplicate_winner"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/check_duplicates"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1244,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-card-action",
+      "action": "compare",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 421
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1234,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-card-action",
+      "action": "perceptual",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 425
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1236,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-card-action",
+      "action": "detail",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 428
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1240,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-action",
+      "action": "go-apply",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 528
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 1209,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-inspector-action",
+      "action": "compare",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 642
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 685,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-inspector-action",
+      "action": "perceptual",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 647
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 687,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-doublons-inspector-action",
+      "action": "skip",
+      "views": [
+        "doublons"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/doublons.js",
+          "line": 653
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/doublons.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/doublons.js",
+        "line": 691,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-historique-action",
+      "action": "view-report",
+      "views": [
+        "historique"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 619
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/historique.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/historique.js",
+        "line": 1243,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-historique-action",
+      "action": "resume",
+      "views": [
+        "historique"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 620
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/historique.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/historique.js",
+        "line": 1247,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-historique-action",
+      "action": "undo-apply",
+      "views": [
+        "historique"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 621
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/historique.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/undo_last_apply"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/historique.js",
+        "line": 1250,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-historique-action",
+      "action": "delete-run",
+      "views": [
+        "historique"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 622
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/historique.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/delete_run"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/historique.js",
+        "line": 1268,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-historique-action",
+      "action": "reload-log",
+      "views": [
+        "historique"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 785
+        },
+        {
+          "file": "web/dashboard/views/historique.js",
+          "line": 793
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/historique.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_history_stats"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/historique.js",
+        "line": 1281,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-probe-tool-action",
+      "action": "test",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 787
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2957,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-probe-tool-action",
+      "action": "reinstall",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 788
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "runtime/install_probe_tools"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2961,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-probe-tools-action",
+      "action": "recheck",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 954
+        },
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 983
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2877,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-probe-tools-action",
+      "action": "auto_install",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 984
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "runtime/auto_install_probe_tools"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2881,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-probe-tools-action",
+      "action": "update",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 985
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "runtime/update_probe_tools"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2911,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-action",
+      "action": "${_esc(field.action)}",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1166
+        }
+      ],
+      "dynamic_value": true,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "handler": {
+        "found": true,
+        "mode": "dynamic-dispatch"
+      },
+      "analysis": null,
+      "verdict": "OK",
+      "flags": [
+        "valeur dynamique : dispatch present, branche non tracee statiquement"
+      ]
+    },
+    {
+      "family": "data-parametres-profils-action",
+      "action": "save",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1328
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/save_profile"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/get_profiles"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": true
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3089,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-parametres-profils-action",
+      "action": "recompute",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1331
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/recompute_all_scores"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3090,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-parametres-profils-action",
+      "action": "reset",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1334
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3091,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-vpf-action",
+      "action": "export-yaml",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1351
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/export_recyclarr_yaml"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3130,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-vpf-action",
+      "action": "import-yaml",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1355
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/import_recyclarr_yaml"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/get_profiles"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3132,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-vpf-action",
+      "action": "show-presets",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1359
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_embedded_presets"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3134,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-vpf-action",
+      "action": "save-upgrade-until",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1383
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/set_upgrade_until_score"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 3226,
+        "mode": "selector-bind",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-parametres-action",
+      "action": "reset",
+      "views": [
+        "parametres"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/parametres.js",
+          "line": 1454
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/reset_database"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/reset_settings"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/get_settings"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/get_profiles"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/parametres.js",
+        "line": 2141,
+        "mode": "selector-bind-named",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-inspector-action",
+      "action": "accepted",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 227
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 250,
+        "mode": "delegated-read",
+        "confidence": "low"
+      },
+      "verdict": "OK",
+      "flags": [
+        "confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"
+      ]
+    },
+    {
+      "family": "data-inspector-action",
+      "action": "rejected",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 228
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 250,
+        "mode": "delegated-read",
+        "confidence": "low"
+      },
+      "verdict": "OK",
+      "flags": [
+        "confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"
+      ]
+    },
+    {
+      "family": "data-action",
+      "action": "cancel-run",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 390
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/cancel_run"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": false,
+          "toast": false,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": true
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 811,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "SANS_CONFIRMATION",
+      "flags": [
+        "action destructrice avec appel API sans confirmation"
+      ]
+    },
+    {
+      "family": "data-action",
+      "action": "start-scan",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 397
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "settings/get_settings"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/start_plan"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 810,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-action",
+      "action": "goto-review",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 401
+        },
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 748
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 813,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-action",
+      "action": "goto-scan",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 518
+        },
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 799
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 812,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-action",
+      "action": "goto-apply",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 520
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 814,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-row-action",
+      "action": "accepted",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 672
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 634,
+        "mode": "delegated-read",
+        "confidence": "low"
+      },
+      "verdict": "OK",
+      "flags": [
+        "confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"
+      ]
+    },
+    {
+      "family": "data-row-action",
+      "action": "rejected",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 676
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 634,
+        "mode": "delegated-read",
+        "confidence": "low"
+      },
+      "verdict": "OK",
+      "flags": [
+        "confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"
+      ]
+    },
+    {
+      "family": "data-action",
+      "action": "run-apply",
+      "views": [
+        "processing"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/processing.js",
+          "line": 749
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/parametres.js",
+        "web/dashboard/views/processing.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/apply"
+          }
+        ],
+        "api_flavor": "v5_helpers",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/processing.js",
+        "line": 815,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "SANS_CONFIRMATION",
+      "flags": [
+        "action destructrice avec appel API sans confirmation"
+      ]
+    },
+    {
+      "family": "data-qualite-action",
+      "action": "filters",
+      "views": [
+        "qualite"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/qualite.js",
+          "line": 157
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/qualite.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_films_by_decade"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_history"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/get_films_by_tier"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "library/get_incomplete_sagas"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/qualite.js",
+        "line": 821,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-qualite-action",
+      "action": "recompute",
+      "views": [
+        "qualite"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/qualite.js",
+          "line": 160
+        },
+        {
+          "file": "web/dashboard/views/qualite.js",
+          "line": 721
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/qualite.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "quality/recompute_all_scores"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": false,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/qualite.js",
+        "line": 824,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-qualite-action",
+      "action": "configure-subs",
+      "views": [
+        "qualite"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/qualite.js",
+          "line": 351
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/qualite.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/qualite.js",
+        "line": 827,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-qualite-action",
+      "action": "open-film",
+      "views": [
+        "qualite"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/qualite.js",
+          "line": 656
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/qualite.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/qualite.js",
+        "line": 830,
+        "mode": "case",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "pause",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 579
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/pause_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/resume_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_for_later"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/cancel_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2347,
+        "mode": "includes",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "resume",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 580
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/pause_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/resume_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_for_later"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/cancel_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2347,
+        "mode": "includes",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "save",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 581
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/pause_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/resume_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_for_later"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/cancel_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2347,
+        "mode": "includes",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "cancel",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 582
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/pause_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/resume_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_for_later"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/cancel_run"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2347,
+        "mode": "includes",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "start-scan",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 752
+        },
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1620
+        },
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1630
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/start_plan"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_status"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2349,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "view-logs",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 753
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": false,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2351,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-verif-action",
+      "action": "rescan",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 802
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/rescan_row"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_plan"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2485,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-verif-action",
+      "action": "rename",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 803
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2495,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-verif-action",
+      "action": "ignore",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 804
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/mark_alert_ignored"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_plan"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2497,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "go-validation",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 846
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2355,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "reload-plan",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 847
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_plan"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": false,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2427,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-validation-action",
+      "action": "toggle-reasons",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 996
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2519,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-validation-action",
+      "action": "inspect",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1002
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2517,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "bulk-approve-sure",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1057
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2431,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "preset-no-alert",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1060
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2433,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "preset-platinum-gold",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1068
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2435,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "save-validation",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1111
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": false,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": false,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2429,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "go-doublons",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1112
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/save_validation"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": false
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2359,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "go-apply",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1127
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [],
+        "api_flavor": null,
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": false,
+          "render": true,
+          "navigation": true,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": false,
+          "has_catch": false,
+          "catch_displays": false,
+          "effective": false,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2395,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "undo-preview",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1190
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/undo_last_apply_preview"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/undo_last_apply"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": false,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": false,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2439,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    },
+    {
+      "family": "data-traitement-action",
+      "action": "apply-now",
+      "views": [
+        "traitement"
+      ],
+      "emit_sites": [
+        {
+          "file": "web/dashboard/views/traitement.js",
+          "line": 1588
+        }
+      ],
+      "dynamic_value": false,
+      "family_read_in": [
+        "web/dashboard/views/traitement.js"
+      ],
+      "analysis": {
+        "endpoints": [
+          {
+            "fn": "apiPost",
+            "endpoint": "run/apply"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_dashboard"
+          },
+          {
+            "fn": "apiPost",
+            "endpoint": "run/get_auto_approved_summary"
+          }
+        ],
+        "api_flavor": "core",
+        "pending_state": true,
+        "success_feedback": {
+          "any": true,
+          "toast": true,
+          "render": true,
+          "navigation": false,
+          "modal_or_drawer": true,
+          "callback": false
+        },
+        "error_handling": {
+          "ok_check": true,
+          "has_catch": true,
+          "catch_displays": true,
+          "effective": true,
+          "dead_res_ok_check": false,
+          "dead_catch_v5": false
+        },
+        "confirmation": {
+          "present": true,
+          "countdown": true
+        },
+        "destructive": true,
+        "any_effect": true
+      },
+      "handler": {
+        "found": true,
+        "file": "web/dashboard/views/traitement.js",
+        "line": 2437,
+        "mode": "if-eq",
+        "confidence": "high"
+      },
+      "verdict": "OK",
+      "flags": []
+    }
+  ]
+}

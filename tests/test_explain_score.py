@@ -149,6 +149,34 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(r["baseline"]["tier_thresholds"]["Platinum"], 90)
         self.assertEqual(r["baseline"]["tier_thresholds"]["Gold"], 70)
 
+    # --- BUG-EXPLAIN-BASELINE-CAP (Lot D 2026-07) : baseline vs tier affiché ---
+
+    def test_capped_tier_yields_next_tier_above_displayed(self):
+        # Score 90 >= Platinum (85) mais tier plafonné Silver (probe FAILED) :
+        # la progression proposée doit partir du tier AFFICHÉ, pas du score.
+        r = _call(90, "Silver")
+        self.assertEqual(r["baseline"]["next_tier"], "Gold")
+        # distance 0 : le score dépasse déjà le seuil, le blocage est la garde.
+        self.assertEqual(r["baseline"]["distance_to_next_tier"], 0)
+
+    def test_promoted_tier_yields_next_tier_above_displayed(self):
+        # Tier promu au-dessus du score (hierarchy floor) : Gold affiché avec
+        # score 50 → prochain palier = Platinum (85), distance 35.
+        r = _call(50, "Gold")
+        self.assertEqual(r["baseline"]["next_tier"], "Platinum")
+        self.assertEqual(r["baseline"]["distance_to_next_tier"], 35)
+
+    def test_tier_case_insensitive(self):
+        r = _call(82, "gold")
+        self.assertEqual(r["baseline"]["next_tier"], "Platinum")
+        self.assertEqual(r["baseline"]["distance_to_next_tier"], 3)
+
+    def test_unknown_tier_falls_back_to_score_based(self):
+        # Tier non canonique : comportement historique basé sur le score seul.
+        r = _call(82, "Premium")
+        self.assertEqual(r["baseline"]["next_tier"], "Platinum")
+        self.assertEqual(r["baseline"]["distance_to_next_tier"], 3)
+
 
 class SuggestionsTests(unittest.TestCase):
     def test_upscale_triggers_suggestion(self):
@@ -169,6 +197,14 @@ class SuggestionsTests(unittest.TestCase):
         r = _call(66, "Silver")  # à 2 points de Gold (68)
         self.assertTrue(r["suggestions"])
         self.assertTrue(any("gold" in s.lower() or "2 point" in s.lower() for s in r["suggestions"]))
+
+    def test_no_generic_suggestion_when_tier_capped_distance_zero(self):
+        # BUG-EXPLAIN-BASELINE-CAP : distance 0 = tier plafonné par une garde
+        # sécurité, une "légère amélioration" ne changerait rien → pas de
+        # suggestion générique trompeuse.
+        r = _call(90, "Silver")  # score >= Platinum (85) mais cap Silver
+        self.assertEqual(r["baseline"]["distance_to_next_tier"], 0)
+        self.assertEqual(r["suggestions"], [])
 
     def test_suggestions_are_unique(self):
         factors = [

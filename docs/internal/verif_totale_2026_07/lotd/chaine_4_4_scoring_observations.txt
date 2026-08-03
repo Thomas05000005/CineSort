@@ -1,0 +1,48 @@
+=== Lot D chaine 4.4 QUALITE/SCORING — preuve rejouable (2026-07-08) ===
+Script: reproduit par tests/test_lotd_chain_scoring.py (biblio virtuelle jetable, probe_backend=none)
+
+save_settings ok: True 
+settings state_dir: C:\Users\blanc\AppData\Local\Temp\cinesort_lotd_scoring_14x640zt\state | probe_backend: none
+start_plan: True 
+run done, error: None
+rows: 3
+  row: S|45461900 | Interstellar.2014.2160p.UHD.BluRay.REMUX.HDR10.x265.TrueHD.Atmos.7.1-LOTD.mkv | title: Interstellar 2014 7
+  row: S|312a267b | Old.Boy.2003.720p.HDTV.XviD.AC3.2.0-LOTD.mkv | title: Old Boy 2003 2
+  row: S|d61d6d98 | The.Matrix.1999.1080p.BluRay.x264.DTS.5.1-LOTD.mkv | title: The Matrix 1999 5
+[uhd] ok=True score=74 tier=Silver probe_quality=FAILED applied_rules=[]
+   narrative: Score 74/100 (Silver). La vidéo est le point fort (80/100), la audio le point à surveiller (62/100). Atouts : Resolution
+   baseline: {"distance_to_next_tier": null, "next_tier": null, "tier_thresholds": {"Bronze": 40, "Gold": 66, "Platinum": 70, "Silver": 55}}
+   name fallback reasons: ['+0 Specs deduites du nom de release: width, height, codec, bit_depth, hdr10, audio_track_synth']
+[hd] ok=True score=36 tier=Reject probe_quality=FAILED applied_rules=[]
+   narrative: Score 36/100 (Reject). La extras est le point fort (76/100), la audio le point à surveiller (20/100). Atouts : Resolutio
+   baseline: {"distance_to_next_tier": 4, "next_tier": "Bronze", "tier_thresholds": {"Bronze": 40, "Gold": 66, "Platinum": 70, "Silver": 55}}
+   name fallback reasons: ['+0 Specs deduites du nom de release: width, height, codec, audio_track_synth']
+[fhd] ok=True score=53 tier=Bronze probe_quality=FAILED applied_rules=[]
+   narrative: Score 53/100 (Bronze). La extras est le point fort (76/100), la audio le point à surveiller (36/100). Atouts : Resolutio
+   baseline: {"distance_to_next_tier": 2, "next_tier": "Silver", "tier_thresholds": {"Bronze": 40, "Gold": 66, "Platinum": 70, "Silver": 55}}
+   name fallback reasons: ['+0 Specs deduites du nom de release: width, height, codec, audio_track_synth']
+[uhd] score=74 determine_tier=Platinum pq=FAILED expected=Silver got=Silver
+[hd] score=36 determine_tier=Reject pq=FAILED expected=Reject got=Reject
+[fhd] score=53 determine_tier=Bronze pq=FAILED expected=Bronze got=Bronze
+global_stats ok: True
+tier_distribution: {"bronze": 1, "reject": 1, "silver": 1}
+total_scored: 3
+summary: {"total_runs": 1, "total_films": 3, "avg_score": 54.3, "premium_pct": 0.0, "trend": "→", "unscored_films": 0}
+get_quality_profile ok: True id: CinemaLux_v1 v: 1
+save_quality_profile: {'ok': True, 'profile_id': 'CinemaLux_v1', 'profile_version': 1}
+UHD after rule: score 79 tier Silver applied: ['lotd_uhd_bonus'] delta: 5
+HD after rule: score 36 applied: [] delta: 0
+UHD rule reasons: ['+5 Bonus UHD LotD']
+tier_distribution after rule: {"bronze": 1, "reject": 1, "silver": 1}
+
+--- domain direct (probe={}) ---
+[uhd] score=50 tier=Bronze determine=Bronze pq=UNKNOWN
+[fhd] score=33 tier=Reject determine=Reject pq=UNKNOWN
+[hd] score=18 tier=Reject determine=Reject pq=UNKNOWN
+normalize_tiers({}): {'platinum': 70, 'gold': 66, 'silver': 55, 'bronze': 40}
+normalize_tiers(legacy): {'platinum': 85, 'gold': 70, 'silver': 50, 'bronze': 30}
+determine_tier bounds: [(100, 'Platinum'), (70, 'Platinum'), (69, 'Gold'), (66, 'Gold'), (65, 'Silver'), (55, 'Silver'), (54, 'Bronze'), (40, 'Bronze'), (39, 'Reject'), (0, 'Reject')]
+
+=== pytest (2 runs consecutifs identiques) ===
+.........x.......xxx                                                     [100%]
+16 passed, 4 xfailed in 3.73s

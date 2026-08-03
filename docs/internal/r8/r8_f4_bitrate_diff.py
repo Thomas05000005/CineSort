@@ -7,7 +7,9 @@ per_channel=8000 -> bonus +4 « débit élevé » AU LIEU du malus -3 (inversion
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_bitrate_diff.py [ffprobe] [a8k.m4a]
 """
+
 from __future__ import annotations
+
 import json
 import subprocess
 import sys
@@ -46,32 +48,45 @@ def run(ffprobe=None, real_file=None):
     ap = _normalize_audio_bitrate_kbps(raw_bps)
     av_score, av_lbl = _per_channel_score(av, 1)
     ap_score, ap_lbl = _per_channel_score(ap, 1)
-    results["R8038_value_corrected"] = (av == 8000 and ap == 8)
-    results["R8038_score_inversion_fixed"] = (av_score == 4 and ap_score == -3)
+    results["R8038_value_corrected"] = av == 8000 and ap == 8
+    results["R8038_score_inversion_fixed"] = av_score == 4 and ap_score == -3
     print("=== R8-038 : flux mono 8000 bps (= 8 kbps dégradé) ===")
     print(f"  _normalize_audio_bitrate_kbps(8000) : AVANT={av} (lu 8000 kbps)  APRÈS={ap} (8 kbps)")
     print(f"  per_channel score (1 canal)         : AVANT={av_score:+d} '{av_lbl}'  APRÈS={ap_score:+d} '{ap_lbl}'")
-    print(f"  -> inversion de signe corrigée : +4 (bonus fabriqué) -> -3 (malus réel)")
+    print("  -> inversion de signe corrigée : +4 (bonus fabriqué) -> -3 (malus réel)")
 
     # Cohérence sur un débit élevé légitime (8 Mbps lossless en bps) : inchangé.
     hi = 8_000_000
     print("\n=== cohérence : 8 Mbps lossless (8000000 bps) ===")
     print(f"  AVANT={_avant(hi)} kbps  APRÈS={_normalize_audio_bitrate_kbps(hi)} kbps (les deux = 8000, inchangé)")
-    results["R8038_high_unchanged"] = (_avant(hi) == _normalize_audio_bitrate_kbps(hi) == 8000)
+    results["R8038_high_unchanged"] = _avant(hi) == _normalize_audio_bitrate_kbps(hi) == 8000
 
     # Valeur RÉELLE ffprobe (PLAN A) si fournie.
     if ffprobe and real_file:
         out = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "a:0",
-             "-show_entries", "stream=bit_rate", "-of", "default=noprint_wrappers=1:nokey=1", real_file],
-            capture_output=True, text=True,
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=bit_rate",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                real_file,
+            ],
+            capture_output=True,
+            text=True,
         )
         raw = out.stdout.strip()
         print(f"\n=== valeur RÉELLE ffprobe ({real_file}) ===")
         print(f"  bit_rate brut = {raw} bps  -> _normalize = {_normalize_audio_bitrate_kbps(raw)} kbps")
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (bps->kbps inconditionnel, inversion réparée, débits élevés inchangés)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (bps->kbps inconditionnel, inversion réparée, débits élevés inchangés)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 
