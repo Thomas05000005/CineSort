@@ -1746,6 +1746,30 @@ function _showProfilMessage(msg, level) {
  * 8) QR DASHBOARD
  * ============================================================= */
 
+/**
+ * Transforme le SVG renvoye par le backend en URL `data:` affichable par <img>.
+ *
+ * Cf issue #555. Le SVG etait interpole tel quel dans `host.innerHTML`, alors
+ * que l'URL voisine passait deja par `_esc()` — asymetrie dans le meme
+ * template. Le rendu en <img> supprime la classe entiere du probleme plutot
+ * que de la filtrer :
+ *
+ *  - un SVG charge en contexte IMAGE ne peut ni executer de script (<script>,
+ *    on*, javascript:) ni charger de ressource externe : c'est la specification
+ *    SVG, pas une liste noire de balises qu'il faudrait maintenir ;
+ *  - `encodeURIComponent` percent-encode `<`, `>`, `"`, `'` et `&`, donc la
+ *    chaine ne peut pas non plus sortir de l'attribut `src` pour injecter du
+ *    HTML dans la page.
+ *
+ * Le CSP du dashboard autorise deja `img-src 'self' data:`.
+ * Retourne "" si l'entree est vide, pour que l'appelant n'affiche rien.
+ */
+function _qrSvgToDataUri(svg) {
+  const raw = String(svg == null ? "" : svg).trim();
+  if (!raw) return "";
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(raw)}`;
+}
+
 async function _loadQrDashboard(container) {
   const host = container.querySelector("[data-qr-dashboard]");
   if (!host) return;
@@ -1769,8 +1793,9 @@ async function _loadQrDashboard(container) {
       if (si?.data?.ok) url = si.data.dashboard_url || "";
     } catch (_e) { /* noop */ }
   }
+  const qrDataUri = _qrSvgToDataUri(qrSvg);
   host.innerHTML = `
-    ${qrSvg ? `<div class="parametres-qr-svg">${qrSvg}</div>` : ""}
+    ${qrDataUri ? `<div class="parametres-qr-svg"><img src="${qrDataUri}" alt="QR code d'accès au dashboard" decoding="async"></div>` : ""}
     <div class="parametres-qr-info">
       <div class="parametres-muted parametres-qr-label">URL d'accès LAN</div>
       <code class="parametres-qr-url">${_esc(url || "(serveur arrêté)")}</code>

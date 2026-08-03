@@ -35,6 +35,22 @@ DEFAULT_CACHE_TTL_S = 3600  # 1h — respecte le rate limit GitHub 60/h non auth
 USER_AGENT = "CineSort-UpdateChecker/1.0"
 CACHE_FILENAME = "update_cache.json"
 
+# Cf issue #516 : plafond du corps de reponse GitHub accepte.
+#
+# `resp.read()` sans argument lit le flux jusqu'a EOF : n'importe quoi qui
+# reponde a la place de api.github.com (MITM, portail captif, proxy
+# d'entreprise) fait allouer autant de memoire qu'il envoie d'octets.
+#
+# La borne est appliquee PAR l'appel de lecture — `resp.read(n)` demande n
+# octets au socket et s'arrete la. C'est ce qui distingue ce motif du faux
+# garde `if len(reponse_entiere) > N`, ou le corps est deja integralement
+# alloue au moment ou la comparaison s'evalue : le mal est fait avant le test.
+#
+# 2 Mio : trois ordres de grandeur au-dessus du besoin reel. Une release
+# GitHub verbeuse (corps limite a 125 000 caracteres cote GitHub) accompagnee
+# de plusieurs dizaines d'assets pese quelques dizaines de Kio.
+MAX_RELEASE_PAYLOAD_BYTES = 2 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class UpdateInfo:
@@ -150,14 +166,28 @@ def _fetch_latest_release(github_repo: str, timeout_s: int) -> Optional[dict]:
     )
     try:
         with urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+            # Cf issue #516 : on demande UN octet de plus que le plafond. Si on
+            # le recoit, c'est que le corps depasse — et on l'apprend sans
+            # jamais avoir alloue plus que le plafond + 1.
+            raw = resp.read(MAX_RELEASE_PAYLOAD_BYTES + 1)
+        if len(raw) > MAX_RELEASE_PAYLOAD_BYTES:
+            logger.warning(
+                "Updater: reponse GitHub au-dela de %d octets — abandon du check (reponse suspecte).",
+                MAX_RELEASE_PAYLOAD_BYTES,
+            )
+            return None
+        payload = json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         if exc.code == 404:
             logger.info("Updater: aucune release publiee (404 sur %s)", github_repo)
         else:
             logger.warning("Updater: GitHub API HTTP %d sur %s", exc.code, github_repo)
         return None
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError (issue #516, meme scenario) : un serveur hostile
+        # qui repond des octets non-UTF-8 faisait remonter l'exception jusqu'a
+        # l'appelant. `UnicodeDecodeError` derive de ValueError, pas de
+        # json.JSONDecodeError : elle n'etait donc pas rattrapee.
         logger.warning("Updater: erreur %s: %s", type(exc).__name__, exc)
         return None
     return payload if isinstance(payload, dict) else None

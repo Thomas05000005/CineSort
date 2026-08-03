@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import time
@@ -41,11 +42,35 @@ def _fake_payload(
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict):
-        self._data = json.dumps(payload).encode("utf-8")
+    """Reponse HTTP de test, calquee sur `http.client.HTTPResponse`.
 
-    def read(self) -> bytes:
-        return self._data
+    Issue #516 : la version precedente exposait `read()` SANS argument, ce qui
+    figeait le seul motif de lecture non borne. Elle est desormais adossee a un
+    vrai `io.BytesIO` : `read(amt)` rend au plus `amt` octets et avance le
+    curseur, exactement comme le flux reel. Le fake ne peut donc plus valider
+    une lecture illimitee, et il permet de MESURER ce qui a ete alloue
+    (`max_amt_requested`, `total_bytes_yielded`).
+    """
+
+    def __init__(self, payload: dict | None = None, *, raw: bytes | None = None):
+        if raw is None:
+            raw = json.dumps(payload or {}).encode("utf-8")
+        self._stream = io.BytesIO(raw)
+        self.max_amt_requested: int | None = None
+        self.total_bytes_yielded = 0
+
+    def read(self, amt: int | None = None) -> bytes:
+        if amt is None:
+            self.max_amt_requested = None
+            chunk = self._stream.read()
+        else:
+            if self.max_amt_requested is not None:
+                self.max_amt_requested = max(self.max_amt_requested, amt)
+            else:
+                self.max_amt_requested = amt
+            chunk = self._stream.read(amt)
+        self.total_bytes_yielded += len(chunk)
+        return chunk
 
     def __enter__(self) -> "_FakeResponse":
         return self
