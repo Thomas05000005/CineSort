@@ -6,7 +6,8 @@ symbols = [
     "core_apply_support",
     "core_duplicate_support",
     "_collect_non_video_extensions",
-    "_stream_scan_targets",
+    # VN-F.3 (2026-06-01) : _stream_scan_targets supprime de scan_helpers
+    # apres migration des 2 tests vers discover_candidate_folders.
     "iter_videos",
     "_apply_rows_support",
     "_move_empty_top_level_dirs",

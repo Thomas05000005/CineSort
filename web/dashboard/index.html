@@ -29,19 +29,9 @@
   <link rel="stylesheet" href="./styles.css">
   <!-- ../themes.css retire (P0 #233) : fichier inexistant (404 garanti) — themes definis dans /shared/themes.css L21 -->
   <link rel="stylesheet" href="./depth-effects.css">
-  <!-- V5B-01 : layout shell v5 minimal (sidebar mount + main flex + right panel) -->
-  <style>
-    .v5-shell { display: flex; min-height: 100vh; align-items: stretch; }
-    .v5-sidebar-mount { flex-shrink: 0; }
-    .v5-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .v5-topbar-mount { flex-shrink: 0; }
-    .v5-breadcrumb-mount { flex-shrink: 0; padding: var(--sp-2) var(--sp-4) 0; }
-    .v5-content { flex: 1; min-width: 0; padding: var(--sp-4); overflow-y: auto; }
-    .v5-content > .view { display: none; }
-    .v5-content > .view.active { display: block; }
-    /* Phase 2 : inspecteur droit (right panel) — spec 04 Shell 3 zones */
-    .v5-right-panel-mount { flex-shrink: 0; }
-  </style>
+  <!-- Bug Console #3 (CSP style-src 'self') : ex-bloc <style> inline et
+       ex-attribut style="..." du #loginBtn extraits vers ce fichier dedie. -->
+  <link rel="stylesheet" href="./inline-overrides.css">
 </head>
 <body data-theme="luxe">
 
@@ -51,7 +41,12 @@
   <!-- ============ LOGIN (plein ecran, pas de shell) ============ -->
   <div id="view-login" class="view login-wrap">
     <div class="card login-card">
-      <h1>CineSort <span class="text-accent">Dashboard</span></h1>
+      <!-- Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-007 : un seul
+           H1 par page (semantique). L'accueil porte le H1 "Bonjour Thomas"
+           donc le titre login devient un div.login-brand (visuel uniquement,
+           pas un titre de section). Le texte reste lisible par les SR via
+           le label/aria-label du formulaire (autour de loginForm). -->
+      <div class="login-brand">CineSort <span class="text-accent">Dashboard</span></div>
       <p class="subtitle">Entrez la clé d'accès fournie par CineSort (Paramètres → API REST → Clé d'accès, ou carte « Accès distant » de l'accueil).</p>
       <form id="loginForm" autocomplete="off">
         <div class="field">
@@ -63,7 +58,7 @@
           Rester connecté
         </label>
         <div id="loginMsg" class="status-msg"></div>
-        <button id="loginBtn" data-testid="login-btn" type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+        <button id="loginBtn" data-testid="login-btn" type="submit" class="btn btn-primary">
           <span id="loginSpinner" class="spinner hidden"></span>
           Connexion
         </button>
@@ -88,16 +83,14 @@
       <!-- Mount points pour les vues. La classe .main est preservee pour compat
            router.js (querySelector('.main .view') pour toggle .active). -->
       <main id="main-content" class="main v5-content">
-        <!-- Vues v5 ESM (V5bis-portees) -->
-        <section id="view-home" class="view"></section>
+        <!-- Vues v5 ESM. Purge verif totale 2026-07 (Phase 5) : conteneurs
+             orphelins supprimes (view-home/quality/jellyfin/plex/radarr/logs)
+             — aucune route ne les active (les anciennes URLs redirigent). -->
         <section id="view-library" class="view">
           <div id="libraryContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
         </section>
         <section id="view-processing" class="view">
-          <!-- Note : /processing route vers initLibraryWorkflow (vue v4 unifiee). -->
-        </section>
-        <section id="view-quality" class="view">
-          <div id="qualityContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+          <!-- R8-048 (F5) : /processing route vers initTraitement (views/traitement.js). -->
         </section>
         <!-- V7-fusion Phase 3 : vue QIJ consolidee (Quality + Integrations + Journal) -->
         <section id="view-qij" class="view" aria-live="polite" aria-atomic="true" aria-busy="false"></section>
@@ -109,26 +102,8 @@
         </section>
         <section id="view-film-detail" class="view"></section>
 
-        <!-- Vues v4 conservees temporairement (V5C les portera ou supprimera) -->
-        <section id="view-jellyfin" class="view">
-          <div id="jellyfinContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
-        </section>
-        <section id="view-plex" class="view">
-          <div id="plexContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
-        </section>
-        <section id="view-radarr" class="view">
-          <div id="radarrContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
-        </section>
-        <section id="view-logs" class="view">
-          <div id="logsContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
-        </section>
-
-        <!-- V7-fix CRIT-5 : sections runs/review supprimees (orphelines, sans
-             registerRoute correspondant). Les fonctionnalites runs sont dans
-             QIJ tab Journal, et review est dans Library workflow Validation. -->
-
-
-        <!-- Status legacy redirige vers /home (alias) — conteneur present pour compat -->
+        <!-- Status legacy redirige vers /accueil — conteneur present pour compat
+             (route /accueil et /status utilisent view:"view-status"). -->
         <section id="view-status" class="view">
           <div id="statusContent" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
         </section>
@@ -145,7 +120,6 @@
        Persiste dans localStorage pour inspection meme apres crash. -->
   <script src="./bootstrap-debug.js"></script>
   <!-- Bisect : test chaque module individuellement pour identifier celui qui hang/throw -->
-  <script type="module" src="./bootstrap-bisect.js"></script>
   <script type="module" src="./app.js"></script>
   <!-- Modale "A propos" (V1-12) — auto-init via DOMContentLoaded -->
   <script type="module" src="./views/about.js"></script>

@@ -1,0 +1,17 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\blanc\projects\CineSort\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: C:\Users\blanc\projects\CineSort
+configfile: pyproject.toml
+plugins: hypothesis-6.152.9, asyncio-1.3.0, base-url-2.1.0, playwright-0.8.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 5 items
+
+tests/test_lotd_chain_apply_undo.py::test_dry_run_makes_no_disk_change PASSED [ 20%]
+tests/test_lotd_chain_apply_undo.py::test_apply_undo_reapply_full_chain PASSED [ 40%]
+tests/test_lotd_chain_apply_undo.py::test_locked_file_fails_cleanly_without_half_state PASSED [ 60%]
+tests/test_lotd_chain_apply_undo.py::test_r8_085_saga_conform_film_creates_orphan_collection_dir XFAIL [ 80%]
+tests/test_lotd_chain_apply_undo.py::test_r8_085_saga_move_undo_leaves_orphan_dirs XFAIL [100%]
+
+======================== 3 passed, 2 xfailed in 8.62s =========================
