@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+
 from tests._helpers import find_free_port as _find_free_port
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -73,14 +74,25 @@ class PyInstallerSmokeTests(unittest.TestCase):
                 creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW
             )
             try:
-                health = _wait_for_health(f"http://127.0.0.1:{port}/api/health", timeout_s=15.0)
-                self.assertIsNotNone(
-                    health,
-                    f"L'exe n'a pas repondu sur /api/health en 15s. "
-                    f"Verifier hiddenimports + runtime hooks.\n"
-                    f"stdout: {proc.stdout.read(2000) if proc.stdout else b''}\n"
-                    f"stderr: {proc.stderr.read(2000) if proc.stderr else b''}",
-                )
+                # AUDIT 2026-06-11 (R4) : 15s ne suffisent PAS au 1er boot d'un
+                # onefile ~60 MB (extraction %TEMP% + imports onnxruntime) ->
+                # faux negatif systematique sur extraction froide. 60s couvre le
+                # boot froid ; un boot chaud repond en ~3-5s.
+                health = _wait_for_health(f"http://127.0.0.1:{port}/api/health", timeout_s=60.0)
+                if health is None:
+                    # AUDIT 2026-06-11 (R4) : lire proc.stdout d'un process VIVANT
+                    # bloque indefiniment (deadlock pipe) — c'est ce qui gelait la
+                    # suite entiere via pytest-timeout. On tue AVANT de lire.
+                    proc.kill()
+                    try:
+                        out, err = proc.communicate(timeout=10.0)
+                    except subprocess.TimeoutExpired:
+                        out, err = b"<communicate timeout>", b""
+                    self.fail(
+                        "L'exe n'a pas repondu sur /api/health en 60s. "
+                        "Verifier hiddenimports + runtime hooks.\n"
+                        f"stdout: {out[:2000]!r}\nstderr: {err[:2000]!r}"
+                    )
                 self.assertIn("ok", health or {})
             finally:
                 proc.terminate()

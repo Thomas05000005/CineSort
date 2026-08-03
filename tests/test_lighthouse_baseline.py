@@ -12,7 +12,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 # Seuils baseline (inferieurs aux scores observes pour servir de garde-fou
 # anti-regression). V4-09 a corrige les a11y/BP differes (aria-current,
 # nav-badge role, topbarAvatar mismatch, favicon SVG inline, CSP frame-ancestors

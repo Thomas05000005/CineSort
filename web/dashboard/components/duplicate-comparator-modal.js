@@ -36,6 +36,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+import { formatBytes } from "../core/format.js"; // R8-058 (F5) : helper taille central
 import { showToast } from "./toast.js";
 // Fix audit 2026-05-24 a11y : focus trap pour eviter que Tab/Shift+Tab sorte
 // du modal vers le DOM dessous. trapFocus est exporte par modal.js.
@@ -55,10 +56,12 @@ let _focusTrapTarget = null;
 /* --- Helpers --- */
 
 function _fmtSize(bytes) {
+  // R8-058 (F5) : TODO résolu — délègue au helper central core/format.js (base 1024,
+  // unités localisées o/Ko/Mo/Go/To). Unifie doublons.js + ce comparateur (formatage
+  // identique partout ; avant : "Mio/Gio" ici, "Mo/Go" là, "Mo/Go" décimal ailleurs).
   const b = Number(bytes) || 0;
   if (b <= 0) return "—";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+  return formatBytes(b);
 }
 
 function _fmtPercent(num) {
@@ -245,10 +248,17 @@ function _criteriaList(comparison) {
 
 function _renderApercu() {
   const { comparison } = _state;
+  // Fix bug "fichier B score 0/100 alors que data complete" : en mode readOnly
+  // (compare ad-hoc depuis Modal Perceptuelle), comparison peut etre null.
+  // Plutot que d'afficher "Score 0/100 · —" qui est trompeur, on masque le
+  // bloc score/taille quand on n'a pas les donnees.
+  const hasComparison = comparison && typeof comparison === "object";
   const c = comparison || {};
   const winner = String(c.winner || "").toLowerCase();
   const scoreA = Math.round(Number(c.total_score_a) || 0);
   const scoreB = Math.round(Number(c.total_score_b) || 0);
+  const hasSizeA = c.file_a_size != null && Number(c.file_a_size) > 0;
+  const hasSizeB = c.file_b_size != null && Number(c.file_b_size) > 0;
   const sizeA = _fmtSize(c.file_a_size);
   const sizeB = _fmtSize(c.file_b_size);
   const fileA = c.file_a_name || "Fichier A";
@@ -256,6 +266,8 @@ function _renderApercu() {
   const reco = c.recommendation || "";
   const savings = _fmtSize(c.size_savings);
   const criteria = _criteriaList(comparison);
+  const showScoreA = hasComparison && (c.total_score_a != null || hasSizeA);
+  const showScoreB = hasComparison && (c.total_score_b != null || hasSizeB);
 
   return `
     <div class="duplicate-modal-tab-content" data-tab="apercu">
@@ -266,7 +278,7 @@ function _renderApercu() {
             ${winner === "a" ? `<span class="duplicate-decision-badge duplicate-decision-badge--reco">🏆 Recommandé</span>` : ""}
           </h3>
           <p class="duplicate-apercu-side-filename"><code>${escapeHtml(fileA)}</code></p>
-          <p class="duplicate-apercu-side-meta">Score ${scoreA}/100 · ${escapeHtml(sizeA)}</p>
+          ${showScoreA ? `<p class="duplicate-apercu-side-meta">Score ${scoreA}/100 · ${escapeHtml(sizeA)}</p>` : ""}
         </div>
         <div class="duplicate-apercu-side${winner === "b" ? " is-winner" : ""}">
           <h3 class="duplicate-apercu-side-title">
@@ -274,7 +286,7 @@ function _renderApercu() {
             ${winner === "b" ? `<span class="duplicate-decision-badge duplicate-decision-badge--reco">🏆 Recommandé</span>` : ""}
           </h3>
           <p class="duplicate-apercu-side-filename"><code>${escapeHtml(fileB)}</code></p>
-          <p class="duplicate-apercu-side-meta">Score ${scoreB}/100 · ${escapeHtml(sizeB)}</p>
+          ${showScoreB ? `<p class="duplicate-apercu-side-meta">Score ${scoreB}/100 · ${escapeHtml(sizeB)}</p>` : ""}
         </div>
       </div>
       ${reco ? `<p class="duplicate-apercu-reco">💡 ${escapeHtml(reco)}${c.size_savings ? ` — Économie disque : ${escapeHtml(savings)}` : ""}</p>` : ""}
@@ -329,7 +341,7 @@ function _renderFramesPayload(payload) {
   }
   return `
     <div class="duplicate-modal-tab-content" data-tab="frames">
-      <p class="duplicate-modal-hint">${frames.length} paire${frames.length > 1 ? "s" : ""} de frames extraites. Les frames sont en luminance (Y plane).</p>
+      <p class="duplicate-modal-hint">${frames.length} paire${frames.length > 1 ? "s" : ""} d'images extraites aux mêmes instants. Images comparées en niveaux de gris (luminance) : <strong>Δ moyen</strong> = écart de luminosité moyen pixel à pixel (0 = identiques, 255 = totalement différentes ; &lt; 10 ≈ même image).</p>
       <div class="duplicate-frames-grid">
         ${frames.map((f, i) => `
           <div class="duplicate-frames-row">
@@ -357,10 +369,16 @@ async function _loadFramesTab() {
   const pairKey = pair ? pair.key : "default";
   // Cache par paire (cas 3+ fichiers).
   if (!_state.framesLoadedByPair) _state.framesLoadedByPair = {};
-  if (_state.framesLoadedByPair[pairKey]) return;
-  _state.framesLoadedByPair[pairKey] = true;
+  if (!_state.framesLoadingByPair) _state.framesLoadingByPair = {};
+  if (!_state.framesHtmlByPair) _state.framesHtmlByPair = {};
+  if (_state.framesLoadedByPair[pairKey]) return; // deja charge avec succes
+  if (_state.framesLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="frames"]');
+  // AUDIT 2026-06-14 (R6-D) : si le DOM n'est pas pret, on NE marque RIEN (ni
+  // loaded ni loading) pour permettre un nouvel essai — sinon le flag restait
+  // bloque a true et l'onglet ne se chargeait jamais (placeholder fige).
   if (!tabContent) return;
+  _state.framesLoadingByPair[pairKey] = true;
   const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_frames", {
@@ -371,15 +389,19 @@ async function _loadFramesTab() {
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.framesLoadedByPair[pairKey] = false;
       const msg = data.message || data.error || "Échec extraction frames";
-      _replaceTabContent("frames", _renderFramesError(msg));
-      return;
+      _replaceTabContent("frames", _renderFramesError(msg), pairKey);
+      return; // pas de cache -> reessayable
     }
-    _replaceTabContent("frames", _renderFramesPayload(data));
+    _state.framesLoadedByPair[pairKey] = true; // succes uniquement -> cache
+    // F21 : on memorise le HTML AVANT de tenter l'ecriture. Si le garde la
+    // refuse (onglet/paire change), _renderTabContent le retrouvera au retour.
+    _state.framesHtmlByPair[pairKey] = _renderFramesPayload(data);
+    _replaceTabContent("frames", _state.framesHtmlByPair[pairKey], pairKey);
   } catch (err) {
-    _state.framesLoadedByPair[pairKey] = false;
-    _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)));
+    _replaceTabContent("frames", _renderFramesError(err && err.message ? err.message : String(err)), pairKey);
+  } finally {
+    _state.framesLoadingByPair[pairKey] = false;
   }
 }
 
@@ -434,10 +456,15 @@ async function _loadAudioTab() {
   const pair = _currentPair();
   const pairKey = pair ? pair.key : "default";
   if (!_state.audioLoadedByPair) _state.audioLoadedByPair = {};
-  if (_state.audioLoadedByPair[pairKey]) return;
-  _state.audioLoadedByPair[pairKey] = true;
+  if (!_state.audioLoadingByPair) _state.audioLoadingByPair = {};
+  if (!_state.audioHtmlByPair) _state.audioHtmlByPair = {};
+  if (_state.audioLoadedByPair[pairKey]) return; // deja charge avec succes
+  if (_state.audioLoadingByPair[pairKey]) return; // AUDIT 2026-06-14 (R6-D) : garde anti-concurrence
   const tabContent = _modalEl && _modalEl.querySelector('[data-tab="audio"]');
+  // AUDIT 2026-06-14 (R6-D) : DOM pas pret -> on ne marque rien (reessayable),
+  // sinon le placeholder "Extraction audio en cours" restait fige a vie.
   if (!tabContent) return;
+  _state.audioLoadingByPair[pairKey] = true;
   const { rowA, rowB } = _currentRowIds();
   try {
     const res = await apiPost("quality/get_perceptual_compare_audio", {
@@ -448,36 +475,53 @@ async function _loadAudioTab() {
     });
     const data = _payload(res);
     if (data.ok === false) {
-      _state.audioLoadedByPair[pairKey] = false;
-      _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"));
-      return;
+      _replaceTabContent("audio", _renderAudioError(data.message || data.error || "Échec extraction audio"), pairKey);
+      return; // pas de cache -> reessayable
     }
-    _replaceTabContent("audio", _renderAudioPayload(data));
+    _state.audioLoadedByPair[pairKey] = true; // succes uniquement -> cache
+    // F21 : cf. _loadFramesTab — memorisation avant ecriture.
+    _state.audioHtmlByPair[pairKey] = _renderAudioPayload(data);
+    _replaceTabContent("audio", _state.audioHtmlByPair[pairKey], pairKey);
   } catch (err) {
-    _state.audioLoadedByPair[pairKey] = false;
-    _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)));
+    _replaceTabContent("audio", _renderAudioError(err && err.message ? err.message : String(err)), pairKey);
+  } finally {
+    _state.audioLoadingByPair[pairKey] = false;
   }
 }
 
 /* --- Tabs management --- */
 
+// F21 (revue post-merge 2026-07-18) : le HTML deja calcule est memorise PAR
+// PAIRE. Sans ce cache, le garde de _replaceTabContent transformerait le bug en
+// regression : `framesLoadedByPair[pairKey]` est pose avant l'ecriture, donc un
+// retour sur l'onglet re-rendrait le placeholder sans jamais recharger.
 function _renderTabContent() {
+  const pk = _currentPair() ? _currentPair().key : "default";
   switch (_state.activeTab) {
     case "frames":
-      return _renderFramesPlaceholder();
+      return (_state.framesHtmlByPair && _state.framesHtmlByPair[pk]) || _renderFramesPlaceholder();
     case "audio":
-      return _renderAudioPlaceholder();
+      return (_state.audioHtmlByPair && _state.audioHtmlByPair[pk]) || _renderAudioPlaceholder();
     default:
       return _renderApercu();
   }
 }
 
-function _replaceTabContent(tab, html) {
-  if (!_modalEl) return;
+// F21 : le wrapper [data-duplicate-tabbody] est UNIQUE et partage par les 3
+// onglets. Une reponse tardive (frames ffmpeg lent) ecrivait donc son contenu
+// sous le libelle de l'onglet — ou de la paire — devenu actif entre-temps.
+// `tab` et `pairKey` sont desormais verifies contre l'etat courant.
+// Retourne true si l'ecriture a eu lieu.
+function _replaceTabContent(tab, html, pairKey) {
+  if (!_modalEl || !_state) return false;
+  if (tab && _state.activeTab !== tab) return false;
+  const curKey = _currentPair() ? _currentPair().key : "default";
+  if (pairKey != null && pairKey !== curKey) return false;
   const wrapper = _modalEl.querySelector("[data-duplicate-tabbody]");
-  if (!wrapper) return;
+  if (!wrapper) return false;
   wrapper.innerHTML = html;
   _bindTabContentEvents();
+  return true;
 }
 
 function _switchTab(tabId) {
@@ -658,7 +702,10 @@ function _bindTabContentEvents() {
       const pair = _currentPair();
       const pairKey = pair ? pair.key : "default";
       if (_state.framesLoadedByPair) _state.framesLoadedByPair[pairKey] = false;
-      _replaceTabContent("frames", _renderFramesPlaceholder());
+      // F21 : purger aussi le HTML memorise, sinon _renderTabContent re-servirait
+      // l'ancien rendu au lieu du placeholder « chargement ».
+      if (_state.framesHtmlByPair) delete _state.framesHtmlByPair[pairKey];
+      _replaceTabContent("frames", _renderFramesPlaceholder(), pairKey);
       void _loadFramesTab();
     }, opts);
   }
@@ -668,7 +715,9 @@ function _bindTabContentEvents() {
       const pair = _currentPair();
       const pairKey = pair ? pair.key : "default";
       if (_state.audioLoadedByPair) _state.audioLoadedByPair[pairKey] = false;
-      _replaceTabContent("audio", _renderAudioPlaceholder());
+      // F21 : cf. retry frames.
+      if (_state.audioHtmlByPair) delete _state.audioHtmlByPair[pairKey];
+      _replaceTabContent("audio", _renderAudioPlaceholder(), pairKey);
       void _loadAudioTab();
     }, opts);
   }
@@ -763,6 +812,12 @@ export function openDuplicateComparatorModal(opts) {
     activeTab: "apercu",
     framesLoadedByPair: {},
     audioLoadedByPair: {},
+    // F21 : HTML rendu memorise par paire (cf. _renderTabContent).
+    framesHtmlByPair: {},
+    audioHtmlByPair: {},
+    // R6-D : gardes anti-concurrence (chargement en vol) distinctes du cache succes.
+    framesLoadingByPair: {},
+    audioLoadingByPair: {},
     decisionInFlight: false,
   };
   _ensureOverlay();

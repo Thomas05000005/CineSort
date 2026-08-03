@@ -1,0 +1,14 @@
+=== S1 (R8-017 isolation : loser verrouille n'avorte pas le batch) ===
+  exception PROPAGEE par le helper : None (AVANT = PermissionError ; APRES attendu None)
+  loser 1 (verrouille) reste source : True
+  loser 2 TRAITE (deplace bucket)   : True (AVANT non atteint car batch avorte)
+  res.errors                        : 1 (>=1 attendu)
+
+=== S2 (R8-017 rollback : video collection echoue apres sidecars) ===
+  exception propagee        : None (attendu None)
+  sidecars laisses au bucket : [] (attendu [] = rollback)
+  sidecars revenus en source : ['Film.2020.1080p.srt', 'Film.2020.1080p.nfo'] (attendu 2)
+  video restee en source     : True
+
+VERDICT : CORRIGE (isolation + rollback, batch non avorte)
+RESUME: {"S1_isolation_batch_non_avorte": true, "S2_rollback_collection_coherent": true}

@@ -28,12 +28,17 @@ class ProfilQualiteEditorTests(unittest.TestCase):
             self.assertIn(tier, self.js, f"tier {tier} manquant")
 
     def test_default_tiers_values(self) -> None:
-        """Defaults alignes avec cinesort/domain/quality_score.py."""
+        """Defaults alignes avec cinesort/domain/quality_score.py.
+
+        Audit ultra 2026-07-13 (M5) : recalibre sur la grille backend CANONIQUE
+        v1.5.7 (70/66/55/40). L'ancienne assertion 85/68/54/30 codifiait la
+        grille legacy pre-v1.5.5 qui divergeait du scoring reellement applique.
+        """
         self.assertIn("_DEFAULT_TIERS", self.js)
-        self.assertIn("platinum: 85", self.js)
-        self.assertIn("gold: 68", self.js)
-        self.assertIn("silver: 54", self.js)
-        self.assertIn("bronze: 30", self.js)
+        self.assertIn("platinum: 70", self.js)
+        self.assertIn("gold: 66", self.js)
+        self.assertIn("silver: 55", self.js)
+        self.assertIn("bronze: 40", self.js)
 
     def test_save_uses_settings_endpoints(self) -> None:
         self.assertIn("settings/get_settings", self.js)

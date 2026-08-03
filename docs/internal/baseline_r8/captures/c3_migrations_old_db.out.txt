@@ -1,0 +1,80 @@
+db: migration 007_undo_v5_row_id.sql — instruction 0 ignoree (idempotence): duplicate column name: row_id
+db: migration 013_apply_ops_checksum.sql — instruction 0 ignoree (idempotence): duplicate column name: src_sha1
+db: migration 013_apply_ops_checksum.sql — instruction 1 ignoree (idempotence): duplicate column name: src_size
+db: migration 015_audio_fingerprint.sql — instruction 1 ignoree (idempotence): duplicate column name: audio_fingerprint
+db: migration 016_audio_spectral.sql — instruction 1 ignoree (idempotence): duplicate column name: spectral_cutoff_hz
+db: migration 016_audio_spectral.sql — instruction 2 ignoree (idempotence): duplicate column name: lossy_verdict
+db: migration 017_ssim_self_ref.sql — instruction 1 ignoree (idempotence): duplicate column name: ssim_self_ref
+db: migration 017_ssim_self_ref.sql — instruction 2 ignoree (idempotence): duplicate column name: upscale_verdict
+db: migration 018_global_score_v2.sql — instruction 1 ignoree (idempotence): duplicate column name: global_score_v2
+db: migration 018_global_score_v2.sql — instruction 2 ignoree (idempotence): duplicate column name: global_tier_v2
+db: migration 018_global_score_v2.sql — instruction 3 ignoree (idempotence): duplicate column name: global_score_v2_json
+{
+  "real_db_exists": true,
+  "version_initiale": 31,
+  "tables_avant": 23,
+  "T4_ordre_ascendant": {
+    "versions": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "VERDICT": "ASCENDANT OK"
+  },
+  "T5_032_dash_absente": {
+    "032_dans_liste": false,
+    "VERDICT": "032 tirets IGNOREE (confirme latent)"
+  },
+  "T1_apply": {
+    "version_finale": 31,
+    "tables_apres": 23,
+    "tables_perdues_ou_reduites": {},
+    "VERDICT": "OK (aucune perte)"
+  },
+  "T2_idempotence": {
+    "version_2e_run": 31,
+    "VERDICT": "no-op OK"
+  },
+  "T3_vieux_schema_replay": {
+    "version_finale": 31,
+    "tables_perdues_ou_reduites": {},
+    "VERDICT": "self-healing IDEMPOTENT OK (aucune perte)"
+  },
+  "T6_vrai_vieux_schema_v162": {
+    "version_avant": 27,
+    "version_apres": 31,
+    "idempotent_run2": true,
+    "tables_avant": 19,
+    "tables_apres": 23,
+    "tables_perdues_ou_reduites": {},
+    "VERDICT": "UPGRADE vieux schema OK (lossless + idempotent)"
+  }
+}

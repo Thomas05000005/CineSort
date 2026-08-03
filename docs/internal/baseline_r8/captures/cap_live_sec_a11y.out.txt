@@ -1,0 +1,56 @@
+========================================================================
+F-SEC-01 / F-SEC-02 � Forge CORS/CSRF (rest_server.py:404-442, 1027)
+========================================================================
+  token (masque)              : <REDACTED: rest_api_token, len=32>
+  CSRF guard appele dans      : do_POST seulement (rest_server.py:1027)
+  do_GET (ligne 873) garde ?  : NON  -> /api/poster (ligne 921) non garde
+
+  [F-SEC-01] POST /api/run/get_status  Origin=http://evil.example
+             -> HTTP 403   (attendu 403 : POST cross-site refuse)
+  [F-SEC-01] GET  /api/poster?id=550&size=w500  Origin=http://evil.example
+             -> HTTP 200   (attendu 200 : GET NON garde = trou CSRF lecture)
+
+  [F-SEC-02] Le PORT de l'Origin est ignore (seul le host compte)
+  [F-SEC-02] POST /api/run/get_status  Origin=http://localhost:9999
+             -> HTTP 200   (attendu 200 : port 9999 ignore, host=localhost OK)
+  [F-SEC-02] POST /api/run/get_status  Origin=http://evil.example
+             -> HTTP 403   (attendu 403 : host externe refuse)
+
+  VERDICT F-SEC-01 : CONFIRME (POST 403 garde / GET 200 NON garde -> asymetrie)
+  VERDICT F-SEC-02 : CONFIRME (port ignore : localhost:9999 -> 200, evil -> 403)
+
+========================================================================
+F-V4B-I18N � 'sidebar.nav.doublons' absente des locales, hardcodee en fallback
+========================================================================
+  locales/fr.json feuilles    : 746
+  locales/en.json feuilles    : 746
+  'sidebar.nav.doublons' dans fr.json     : False
+  'sidebar.nav.doublons' dans en.json     : False
+  sidebar.nav.* dans fr.json  : ['sidebar.nav.help', 'sidebar.nav.history', 'sidebar.nav.home', 'sidebar.nav.library', 'sidebar.nav.processing', 'sidebar.nav.qij', 'sidebar.nav.quality', 'sidebar.nav.settings']
+  'sidebar.nav.doublons' dans _FALLBACK_FR : OUI  (i18n.js:38)
+                                "sidebar.nav.doublons": "Doublons",
+
+  VERDICT F-V4B-I18N : CONFIRME (746/746, absente des 2 locales, hardcodee fallback FR -> onglet Doublons non traduisible en EN)
+
+========================================================================
+[13] OMDb contrast � .omdb-status--error (components.css:7634-7638)
+========================================================================
+  Source CSS (verifiee) :
+    .omdb-status--error { background: rgba(185, 28, 28, 0.12);
+                          color: #b91c1c;
+                          border-color: rgba(185, 28, 28, 0.30); }
+
+  STATUT : TODO 'a instrumenter' (NON mesure ici).
+    Raison : le ratio WCAG depend du compositing reel (texte #b91c1c
+    sur le background semi-transparent compose sur le fond de page) et
+    de getComputedStyle -> requiert Playwright en runtime, PAS une lecture
+    de source. Valeur NON inventee.
+    Ratio documente attendu : 2.94:1  (< 4.5:1 WCAG AA texte normal).
+    Selecteur a instrumenter : .omdb-status--error
+    A faire : naviguer la page Parametres, declencher l'etat erreur OMDb,
+    lire window.getComputedStyle(el).color + couleur de fond composee,
+    calculer le ratio de luminance relative (WCAG 2.x).
+
+========================================================================
+FIN capture cap_live_sec_a11y � serveur laisse UP, aucune ecriture biblio.
+========================================================================
