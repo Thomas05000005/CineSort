@@ -62,11 +62,9 @@ class TestDegradationApresN(unittest.TestCase):
         nas_path = Path(r"\\nas\films\f1.mkv")
         breaker.record_failure(nas_path)
         breaker.record_failure(nas_path)
-        self.assertFalse(breaker.is_degraded(nas_path),
-                         "Pas encore DEGRADED apres 2/3 echecs")
+        self.assertFalse(breaker.is_degraded(nas_path), "Pas encore DEGRADED apres 2/3 echecs")
         breaker.record_failure(nas_path)
-        self.assertTrue(breaker.is_degraded(nas_path),
-                        "DEGRADED apres 3/3 echecs")
+        self.assertTrue(breaker.is_degraded(nas_path), "DEGRADED apres 3/3 echecs")
 
     def test_check_or_raise_leve_apres_seuil(self) -> None:
         """En mode DEGRADED, check_or_raise leve immediat."""
@@ -85,11 +83,9 @@ class TestDegradationApresN(unittest.TestCase):
         breaker = SourceCircuitBreaker(failure_threshold=2, recovery_timeout=60.0)
         nas_path = Path(r"\\nas\films\f1.mkv")
         self.assertFalse(breaker.record_failure(nas_path), "1er echec n'est pas basculement")
-        self.assertTrue(breaker.record_failure(nas_path),
-                        "2eme echec = basculement DEGRADED")
+        self.assertTrue(breaker.record_failure(nas_path), "2eme echec = basculement DEGRADED")
         # Echecs suivants pendant la fenetre DEGRADED ne re-basculent pas.
-        self.assertFalse(breaker.record_failure(nas_path),
-                         "Pendant DEGRADED, pas de re-basculement")
+        self.assertFalse(breaker.record_failure(nas_path), "Pendant DEGRADED, pas de re-basculement")
 
 
 class TestResetApresDelay(unittest.TestCase):
@@ -108,8 +104,7 @@ class TestResetApresDelay(unittest.TestCase):
             # check_or_raise auto-reset si le timeout expire.
             breaker.check_or_raise(nas_path)
             # is_degraded retourne False apres expiration.
-            self.assertFalse(breaker.is_degraded(nas_path),
-                             "Apres recovery_timeout, source revient CLOSED")
+            self.assertFalse(breaker.is_degraded(nas_path), "Apres recovery_timeout, source revient CLOSED")
 
 
 class TestSuccesResetCompteur(unittest.TestCase):
@@ -124,8 +119,7 @@ class TestSuccesResetCompteur(unittest.TestCase):
         # Apres reset, faudrait 3 NOUVEAUX echecs pour DEGRADER.
         breaker.record_failure(nas_path)
         breaker.record_failure(nas_path)
-        self.assertFalse(breaker.is_degraded(nas_path),
-                         "Compteur doit avoir ete reset par le succes")
+        self.assertFalse(breaker.is_degraded(nas_path), "Compteur doit avoir ete reset par le succes")
 
     def test_succes_referme_breaker_ouvert(self) -> None:
         breaker = SourceCircuitBreaker(failure_threshold=2, recovery_timeout=60.0)
@@ -134,8 +128,7 @@ class TestSuccesResetCompteur(unittest.TestCase):
         breaker.record_failure(nas_path)
         self.assertTrue(breaker.is_degraded(nas_path))
         breaker.record_success(nas_path)
-        self.assertFalse(breaker.is_degraded(nas_path),
-                         "Succes referme aussi le breaker en DEGRADED")
+        self.assertFalse(breaker.is_degraded(nas_path), "Succes referme aussi le breaker en DEGRADED")
 
 
 class TestPathLocauxNoOp(unittest.TestCase):
@@ -163,8 +156,7 @@ class TestGranulariteParSource(unittest.TestCase):
         breaker.record_failure(nas1)
         breaker.record_failure(nas1)
         self.assertTrue(breaker.is_degraded(nas1))
-        self.assertFalse(breaker.is_degraded(nas2),
-                         "Une source en panne ne doit pas affecter l'autre")
+        self.assertFalse(breaker.is_degraded(nas2), "Une source en panne ne doit pas affecter l'autre")
         # Probe sur nas2 doit passer.
         breaker.check_or_raise(nas2)
 

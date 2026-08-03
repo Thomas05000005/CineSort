@@ -26,6 +26,7 @@ Usage (depuis la racine du repo) :
     docs/internal/baseline_r8/captures/cap_phantom_config.py \
     > docs/internal/baseline_r8/captures/cap_phantom_config.py.out.txt 2>&1
 """
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,9 @@ WEB = REPO / "web"
 # --- Classement des sites : un hit est-il un VRAI consommateur ? --------------
 # On marque "non-consommateur" tout chemin/contexte qui n'est que :
 #   persist (save section), definition UI, reset, tests, artefacts de build.
-_PERSIST_FILE = "settings_support.py"   # echo/save d'une section de settings
+_PERSIST_FILE = "settings_support.py"  # echo/save d'une section de settings
 _DEF_FILES = ("parametres.js", "app.js")  # definition de champ UI / styling pur
-_RESET_FILE = "reset_support.py"        # liste des cles a reset
+_RESET_FILE = "reset_support.py"  # liste des cles a reset
 _NONCONSUMER_DIR_HINTS = (
     "/tests/",
     "\\tests\\",
@@ -211,8 +212,9 @@ def capture(
 def main() -> None:
     print("CAPTURE PHANTOM CONFIG — baseline_r8 (READ-ONLY, 0 effet de bord)")
     print(f"REPO    = {REPO}")
-    print(f"fichiers scannes: {len(_PY)} .py (cinesort) + {len(_JS)} .js (web) "
-          f"+ {len(_EXTRA)} tests = {len(ALL_FILES)}")
+    print(
+        f"fichiers scannes: {len(_PY)} .py (cinesort) + {len(_JS)} .js (web) + {len(_EXTRA)} tests = {len(ALL_FILES)}"
+    )
     print()
 
     # === F-PROM-02 : cleanup_orphans + cleanup_empty_folders =================
@@ -225,17 +227,20 @@ def main() -> None:
         "F-PROM-02",
         "cleanup_orphans / cleanup_empty_folders : toggles inertes",
         phantom_pattern=r"cleanup_orphans|cleanup_empty_folders",
-        anchor=("parametres.js", 151, 'cleanup_orphans'),
+        anchor=("parametres.js", 151, "cleanup_orphans"),
         note="absents de Config dataclass (core.py:208-274) et de "
-             "build_cfg_from_settings->core.Config (settings_support.py:1054-1085)",
+        "build_cfg_from_settings->core.Config (settings_support.py:1054-1085)",
     )
     # Preuve d'absence dans la dataclass Config : grep des attributs exacts dans
     # le constructeur core.Config(...) de build_cfg_from_settings -> 0.
-    cfg_attr = grep(r"cleanup_orphans\s*=|cleanup_empty_folders\s*=",
-                    [CINESORT / "domain" / "core.py",
-                     CINESORT / "ui" / "api" / "settings_support.py"])
-    print(f"    [sous-preuve] attribut Config 'cleanup_orphans=/cleanup_empty_folders=' "
-          f"dans core.py/settings_support.py = {len(cfg_attr)} (attendu 0)")
+    cfg_attr = grep(
+        r"cleanup_orphans\s*=|cleanup_empty_folders\s*=",
+        [CINESORT / "domain" / "core.py", CINESORT / "ui" / "api" / "settings_support.py"],
+    )
+    print(
+        f"    [sous-preuve] attribut Config 'cleanup_orphans=/cleanup_empty_folders=' "
+        f"dans core.py/settings_support.py = {len(cfg_attr)} (attendu 0)"
+    )
     print()
 
     # === F-PROM-01 : auto_approve_enabled =====================================
@@ -245,21 +250,22 @@ def main() -> None:
     # run/get_auto_approved_summary ni ne lit auto_approved_summary).
     capture(
         "F-PROM-01",
-        "auto_approve_enabled : consomme uniquement par get_auto_approved_summary "
-        "(0 appelant UI)",
+        "auto_approve_enabled : consomme uniquement par get_auto_approved_summary (0 appelant UI)",
         phantom_pattern=r"auto_approve_enabled",
         anchor=("parametres.js", 105, "auto_approve_enabled"),
         note="real key consommee dans run_read_support.get_auto_approved_summary, "
-             "mais 0 caller UI -> feature de fait morte",
+        "mais 0 caller UI -> feature de fait morte",
     )
     # Le consommateur indirect (la methode) existe-t-il, et a-t-il un caller front ?
-    method_def = grep(r"def get_auto_approved_summary",
-                      [CINESORT / "ui" / "api" / "run_read_support.py"])
+    method_def = grep(r"def get_auto_approved_summary", [CINESORT / "ui" / "api" / "run_read_support.py"])
     front_caller = grep(r"get_auto_approved_summary|auto_approved_summary", _JS)
-    print(f"    [sous-preuve] def get_auto_approved_summary (run_read_support.py) "
-          f"= {len(method_def)} (la methode existe)")
-    print(f"    [sous-preuve] appelant FRONT (web/*.js) de get_auto_approved_summary "
-          f"= {len(front_caller)} (attendu 0 -> feature morte)")
+    print(
+        f"    [sous-preuve] def get_auto_approved_summary (run_read_support.py) = {len(method_def)} (la methode existe)"
+    )
+    print(
+        f"    [sous-preuve] appelant FRONT (web/*.js) de get_auto_approved_summary "
+        f"= {len(front_caller)} (attendu 0 -> feature morte)"
+    )
     print()
 
     # === F-PROM-03a : separator inerte dans les presets =======================
@@ -272,23 +278,28 @@ def main() -> None:
     naming = (CINESORT / "domain" / "naming.py").read_text(encoding="utf-8", errors="replace")
     # Extraire les movie_template/tv_template des PRESETS et compter ceux qui
     # contiennent {sep}.
-    tmpl_lines = [ln.strip() for ln in naming.splitlines()
-                  if re.search(r"(movie_template|tv_template)\s*=", ln)]
+    tmpl_lines = [ln.strip() for ln in naming.splitlines() if re.search(r"(movie_template|tv_template)\s*=", ln)]
     sep_in_tmpl = [ln for ln in tmpl_lines if "{sep}" in ln]
     print(f"    templates de preset trouves (movie/tv) : {len(tmpl_lines)}")
     for ln in tmpl_lines:
         print(f"      {ln[:120]}")
-    print(f"    => templates referencant {{sep}} = {len(sep_in_tmpl)} "
-          f"[{'FANTOME en preset' if not sep_in_tmpl else 'actif'}]")
-    print(f"    note: {{sep}} est injecte dans le contexte (naming.py ~L332) mais "
-          f"opt-in uniquement -> inerte tant qu'un template custom ne l'ecrit pas")
-    RESUME.append({
-        "id": "F-PROM-03a",
-        "title": "separator {sep} dans presets",
-        "real_consumers": len(sep_in_tmpl),
-        "phantom": len(sep_in_tmpl) == 0,
-        "real_sites": [],
-    })
+    print(
+        f"    => templates referencant {{sep}} = {len(sep_in_tmpl)} "
+        f"[{'FANTOME en preset' if not sep_in_tmpl else 'actif'}]"
+    )
+    print(
+        "    note: {sep} est injecte dans le contexte (naming.py ~L332) mais "
+        "opt-in uniquement -> inerte tant qu'un template custom ne l'ecrit pas"
+    )
+    RESUME.append(
+        {
+            "id": "F-PROM-03a",
+            "title": "separator {sep} dans presets",
+            "real_consumers": len(sep_in_tmpl),
+            "phantom": len(sep_in_tmpl) == 0,
+            "real_sites": [],
+        }
+    )
     print()
 
     # === F-PROM-03b : subtitle_lang_priority FANTOME (vraie cle = expected) ====
@@ -297,8 +308,7 @@ def main() -> None:
     # (run_flow_support.py:425, librarian.py:50).
     capture(
         "F-PROM-03b",
-        "subtitle_lang_priority : fantome ; la vraie cle est "
-        "subtitle_expected_languages",
+        "subtitle_lang_priority : fantome ; la vraie cle est subtitle_expected_languages",
         phantom_pattern=r"subtitle_lang_priority",
         anchor=("parametres.js", 100, "subtitle_lang_priority"),
         note="0 consommateur backend ; cf F-PROM-03b-bis pour la vraie cle",
@@ -306,8 +316,7 @@ def main() -> None:
     # Falsifiabilite : la VRAIE cle, elle, DOIT avoir des consommateurs reels.
     real_key = capture(
         "F-PROM-03b-bis",
-        "[FALSIFIABILITE] subtitle_expected_languages : la VRAIE cle a des "
-        "consommateurs",
+        "[FALSIFIABILITE] subtitle_expected_languages : la VRAIE cle a des consommateurs",
         phantom_pattern=r"subtitle_expected_languages",
         persist_ok=True,
         note="doit etre >0 sinon le harnais ne distingue pas vrai/faux",
@@ -336,13 +345,14 @@ def main() -> None:
         "worker_count (= 'workers globaux', PAS global_workers) : 0 consommateur",
         phantom_pattern=r"worker_count",
         anchor=("parametres.js", 315, "worker_count"),
-        note="cle REELLE = worker_count ; 'global_workers' n'existe PAS dans le code "
-             "(seulement dans les docs d'audit)",
+        note="cle REELLE = worker_count ; 'global_workers' n'existe PAS dans le code (seulement dans les docs d'audit)",
     )
     # Preuve que 'global_workers' est un nom fantome cote audit, absent du code.
     gw = grep(r"global_workers", _PY + _JS)
-    print(f"    [sous-preuve] 'global_workers' dans cinesort/+web/ = {len(gw)} "
-          f"(attendu 0 ; nom utilise par l'audit, pas par le code)")
+    print(
+        f"    [sous-preuve] 'global_workers' dans cinesort/+web/ = {len(gw)} "
+        f"(attendu 0 ; nom utilise par l'audit, pas par le code)"
+    )
     print()
 
     # === [29] desktop_notifications_enabled : 0 consommateur ==================
@@ -355,10 +365,11 @@ def main() -> None:
         anchor=("parametres.js", 215, "desktop_notifications_enabled"),
         note="real notif key = notifications_enabled (notify_service.py:67)",
     )
-    real_notif = grep(r"notifications_enabled",
-                      [CINESORT / "app" / "notify_service.py"])
-    print(f"    [sous-preuve] notifications_enabled lu dans notify_service.py = "
-          f"{len(real_notif)} (la VRAIE cle a un consommateur)")
+    real_notif = grep(r"notifications_enabled", [CINESORT / "app" / "notify_service.py"])
+    print(
+        f"    [sous-preuve] notifications_enabled lu dans notify_service.py = "
+        f"{len(real_notif)} (la VRAIE cle a un consommateur)"
+    )
     print()
 
     # === [30] retention_days : seul consommateur prune_disk_cache, jamais appele
@@ -375,10 +386,11 @@ def main() -> None:
     print("-" * 78)
     # (a) lectures settings.get('retention_days') HORS persist (settings_support.py)
     rd_reads_all = grep(r"\.get\(\s*['\"]retention_days['\"]", _PY)
-    rd_reads_real = [h for h in rd_reads_all
-                     if not h[0].endswith("settings_support.py")]
-    print(f"    settings.get('retention_days') hors persist = {len(rd_reads_real)} "
-          f"(attendu 0 ; total avec persist = {len(rd_reads_all)})")
+    rd_reads_real = [h for h in rd_reads_all if not h[0].endswith("settings_support.py")]
+    print(
+        f"    settings.get('retention_days') hors persist = {len(rd_reads_real)} "
+        f"(attendu 0 ; total avec persist = {len(rd_reads_all)})"
+    )
     for rel, ln, line in rd_reads_all[:5]:
         flag = "PERSIST" if rel.endswith("settings_support.py") else "READ"
         print(f"      [{flag}] {rel}:{ln}  |  {line[:100]}")
@@ -386,22 +398,30 @@ def main() -> None:
     prune_def = grep(r"def prune_disk_cache", _PY)
     prune_calls = grep(r"prune_disk_cache\s*\(", _PY)
     real_prune_calls = [h for h in prune_calls if "def prune_disk_cache" not in h[2]]
-    print(f"    def prune_disk_cache = {len(prune_def)} (disk_cache.py) ; "
-          f"APPELS prune_disk_cache(...) = {len(real_prune_calls)} (attendu 0 -> mort)")
+    print(
+        f"    def prune_disk_cache = {len(prune_def)} (disk_cache.py) ; "
+        f"APPELS prune_disk_cache(...) = {len(real_prune_calls)} (attendu 0 -> mort)"
+    )
     for rel, ln, line in real_prune_calls[:5]:
         print(f"      appel: {rel}:{ln}  |  {line[:110]}")
     rd_real = len(rd_reads_real) + len(real_prune_calls)
-    print(f"    => CONSOMMATEUR REEL de la cle settings retention_days = {rd_real} "
-          f"[{'FANTOME' if rd_real == 0 else 'actif'}]")
-    print("    note: retention_cleanup.py/cleanup_old_runs lisent history_retention_days "
-          "(cle distincte), PAS settings['retention_days']")
-    RESUME.append({
-        "id": "[30]",
-        "title": "retention_days : cle settings sans lecteur (prune_disk_cache jamais appele)",
-        "real_consumers": rd_real,
-        "phantom": rd_real == 0,
-        "real_sites": [f"{r}:{n}" for r, n, _ in rd_reads_real + real_prune_calls][:4],
-    })
+    print(
+        f"    => CONSOMMATEUR REEL de la cle settings retention_days = {rd_real} "
+        f"[{'FANTOME' if rd_real == 0 else 'actif'}]"
+    )
+    print(
+        "    note: retention_cleanup.py/cleanup_old_runs lisent history_retention_days "
+        "(cle distincte), PAS settings['retention_days']"
+    )
+    RESUME.append(
+        {
+            "id": "[30]",
+            "title": "retention_days : cle settings sans lecteur (prune_disk_cache jamais appele)",
+            "real_consumers": rd_real,
+            "phantom": rd_real == 0,
+            "real_sites": [f"{r}:{n}" for r, n, _ in rd_reads_real + real_prune_calls][:4],
+        }
+    )
     print()
 
     # === [31] naming_template : persiste mais jamais relu dans Config ==========
@@ -417,29 +437,29 @@ def main() -> None:
     # (apply_core, plan_support_replan, core, duplicate_support) concernent le
     # PARAMETRE de fonction naming_template= aliment par cfg.naming_movie_template,
     # PAS la cle settings 'naming_template'.
-    settings_read_all = grep(r"(settings|payload|cfg_json|raw_settings)\.get\(\s*['\"]naming_template['\"]",
-                             _PY)
+    settings_read_all = grep(r"(settings|payload|cfg_json|raw_settings)\.get\(\s*['\"]naming_template['\"]", _PY)
     # Exclure la persist (settings_support.py : payload.get('naming_template') du
     # save section) -> il ne reste que les VRAIES lectures vers Config/moteur.
-    settings_read = [h for h in settings_read_all
-                     if not h[0].endswith("settings_support.py")]
+    settings_read = [h for h in settings_read_all if not h[0].endswith("settings_support.py")]
     print(f"    references 'naming_template' (param/persist confondus) : {len(nt_hits)}")
     for rel, ln, line in nt_hits[:10]:
         print(f"      {rel}:{ln}  |  {line[:110]}")
-    print(f"    lectures .get('naming_template') TOTAL = {len(settings_read_all)} "
-          f"(dont persist settings_support.py)")
-    print(f"    => LECTURES HORS PERSIST (vraie conso vers Config/moteur) = "
-          f"{len(settings_read)} (attendu 0)")
-    print("    note: les autres hits sont le PARAMETRE de fonction naming_template= "
-          "des helpers _single_folder_is_conform, aliment par cfg.naming_movie_template "
-          "(PAS la cle settings 'naming_template')")
-    RESUME.append({
-        "id": "[31]",
-        "title": "naming_template persiste non relu",
-        "real_consumers": len(settings_read),
-        "phantom": len(settings_read) == 0,
-        "real_sites": [f"{r}:{n}" for r, n, _ in settings_read][:6],
-    })
+    print(f"    lectures .get('naming_template') TOTAL = {len(settings_read_all)} (dont persist settings_support.py)")
+    print(f"    => LECTURES HORS PERSIST (vraie conso vers Config/moteur) = {len(settings_read)} (attendu 0)")
+    print(
+        "    note: les autres hits sont le PARAMETRE de fonction naming_template= "
+        "des helpers _single_folder_is_conform, aliment par cfg.naming_movie_template "
+        "(PAS la cle settings 'naming_template')"
+    )
+    RESUME.append(
+        {
+            "id": "[31]",
+            "title": "naming_template persiste non relu",
+            "real_consumers": len(settings_read),
+            "phantom": len(settings_read) == 0,
+            "real_sites": [f"{r}:{n}" for r, n, _ in settings_read][:6],
+        }
+    )
     print()
 
     # === [32] effects_mode : applique par app.js, aucun controle dans parametres
@@ -455,16 +475,17 @@ def main() -> None:
     print(f"    application dans app.js : {len(eff_app)}")
     for rel, ln, line in eff_app[:3]:
         print(f"      {rel}:{ln}  |  {line[:110]}")
-    print(f"    CONTROLE (champ) dans parametres.js : {len(eff_param)} (attendu 0 -> "
-          f"non modifiable par l'UI)")
+    print(f"    CONTROLE (champ) dans parametres.js : {len(eff_param)} (attendu 0 -> non modifiable par l'UI)")
     print(f"    persist settings_support.py : {len(eff_persist)} (echo seul)")
-    RESUME.append({
-        "id": "[32]",
-        "title": "effects_mode sans controle UI",
-        "real_consumers": len(eff_param),  # ici 0 = pas de controle = fantome UI
-        "phantom": len(eff_param) == 0,
-        "real_sites": [f"{r}:{n}" for r, n, _ in eff_app][:3],
-    })
+    RESUME.append(
+        {
+            "id": "[32]",
+            "title": "effects_mode sans controle UI",
+            "real_consumers": len(eff_param),  # ici 0 = pas de controle = fantome UI
+            "phantom": len(eff_param) == 0,
+            "real_sites": [f"{r}:{n}" for r, n, _ in eff_app][:3],
+        }
+    )
     print()
 
     # === [21] traitement.js k.duplicates_groups absent des kpis dashboard ======
@@ -476,25 +497,31 @@ def main() -> None:
     print("[21] traitement.js k.duplicates_groups : absent du payload kpis dashboard")
     print("-" * 78)
     front_read = grep(r"duplicates_groups", [WEB / "dashboard" / "views" / "traitement.js"])
-    dash_emit = grep(r"['\"]duplicates_groups['\"]\s*:",
-                     [CINESORT / "ui" / "api" / "dashboard_support.py"])
-    hist_emit = grep(r"['\"]duplicates_groups['\"]\s*:",
-                     [CINESORT / "ui" / "api" / "history_support.py",
-                      CINESORT / "ui" / "api" / "facades" / "run_facade.py"])
+    dash_emit = grep(r"['\"]duplicates_groups['\"]\s*:", [CINESORT / "ui" / "api" / "dashboard_support.py"])
+    hist_emit = grep(
+        r"['\"]duplicates_groups['\"]\s*:",
+        [CINESORT / "ui" / "api" / "history_support.py", CINESORT / "ui" / "api" / "facades" / "run_facade.py"],
+    )
     print(f"    lecture front (traitement.js) : {len(front_read)}")
     for rel, ln, line in front_read[:3]:
         print(f"      {rel}:{ln}  |  {line[:110]}")
-    print(f"    EMISSION dans dashboard_support kpis : {len(dash_emit)} "
-          f"(attendu 0 -> k.duplicates_groups toujours undefined cote Traitement)")
-    print(f"    emission ailleurs (history_support / run_facade) : {len(hist_emit)} "
-          f"(la cle existe, mais hors get_dashboard)")
-    RESUME.append({
-        "id": "[21]",
-        "title": "k.duplicates_groups absent des kpis dashboard",
-        "real_consumers": len(dash_emit),  # 0 emetteur cote dashboard => lecture morte
-        "phantom": len(dash_emit) == 0,
-        "real_sites": [f"{r}:{n}" for r, n, _ in hist_emit][:4],
-    })
+    print(
+        f"    EMISSION dans dashboard_support kpis : {len(dash_emit)} "
+        f"(attendu 0 -> k.duplicates_groups toujours undefined cote Traitement)"
+    )
+    print(
+        f"    emission ailleurs (history_support / run_facade) : {len(hist_emit)} "
+        f"(la cle existe, mais hors get_dashboard)"
+    )
+    RESUME.append(
+        {
+            "id": "[21]",
+            "title": "k.duplicates_groups absent des kpis dashboard",
+            "real_consumers": len(dash_emit),  # 0 emetteur cote dashboard => lecture morte
+            "phantom": len(dash_emit) == 0,
+            "real_sites": [f"{r}:{n}" for r, n, _ in hist_emit][:4],
+        }
+    )
     print()
 
     # === F-DEAD-01 : quality-simulator.js / custom-rules-editor.js morts =======
@@ -507,10 +534,13 @@ def main() -> None:
     print("-" * 78)
     hosts = grep(r"quality-simulator\.js|custom-rules-editor\.js", _JS)
     # Distinguer les hosts (qij.js/quality.js) et les non-vivants connus.
-    host_files = sorted({rel for rel, _, _ in hosts
-                         if rel.endswith(("qij.js", "quality.js",
-                                          "quality-simulator.js",
-                                          "custom-rules-editor.js"))})
+    sorted(
+        {
+            rel
+            for rel, _, _ in hosts
+            if rel.endswith(("qij.js", "quality.js", "quality-simulator.js", "custom-rules-editor.js"))
+        }
+    )
     print("    fichiers important quality-simulator/custom-rules-editor :")
     for rel, ln, line in hosts:
         print(f"      {rel}:{ln}  |  {line[:100]}")
@@ -525,22 +555,23 @@ def main() -> None:
         [WEB / "dashboard" / "app.js"],
     )
     # Les redirections legacy /qij et /quality
-    redirects = grep(r"_legacyRedirect\(\s*['\"](qij|quality)['\"]",
-                     [WEB / "dashboard" / "app.js"])
-    print(f"    app.js importe-t-il qij.js/quality.js (hosts) ? = {len(app_imports_host)} "
-          f"(attendu 0 -> hosts non montes)")
-    print(f"    app.js importe la vue VIVANTE qualite.js ? = {len(app_imports_live)} "
-          f"(attendu >=1)")
+    redirects = grep(r"_legacyRedirect\(\s*['\"](qij|quality)['\"]", [WEB / "dashboard" / "app.js"])
+    print(
+        f"    app.js importe-t-il qij.js/quality.js (hosts) ? = {len(app_imports_host)} (attendu 0 -> hosts non montes)"
+    )
+    print(f"    app.js importe la vue VIVANTE qualite.js ? = {len(app_imports_live)} (attendu >=1)")
     print(f"    redirections legacy _legacyRedirect('qij'/'quality') : {len(redirects)}")
     for rel, ln, line in redirects[:4]:
         print(f"      {rel}:{ln}  |  {line[:110]}")
-    RESUME.append({
-        "id": "F-DEAD-01",
-        "title": "quality-simulator/custom-rules hosts (qij.js/quality.js) morts",
-        "real_consumers": len(app_imports_host),  # 0 = hosts jamais montes
-        "phantom": len(app_imports_host) == 0,
-        "real_sites": [f"{r}:{n}" for r, n, _ in app_imports_live][:2],
-    })
+    RESUME.append(
+        {
+            "id": "F-DEAD-01",
+            "title": "quality-simulator/custom-rules hosts (qij.js/quality.js) morts",
+            "real_consumers": len(app_imports_host),  # 0 = hosts jamais montes
+            "phantom": len(app_imports_host) == 0,
+            "real_sites": [f"{r}:{n}" for r, n, _ in app_imports_live][:2],
+        }
+    )
     print()
 
     # === [37] index.html:92 commentaire trompeur =============================
@@ -557,15 +588,19 @@ def main() -> None:
     print(f"    references /processing dans app.js : {len(proc_route)}")
     for rel, ln, line in proc_route[:4]:
         print(f"      {rel}:{ln}  |  {line[:110]}")
-    print("    note: le commentaire evoque 'initLibraryWorkflow (vue v4 unifiee)' ; "
-          "verifier que /processing ne pointe plus sur cette fonction.")
-    RESUME.append({
-        "id": "[37]",
-        "title": "index.html:92 commentaire /processing trompeur",
-        "real_consumers": 0,
-        "phantom": True,
-        "real_sites": [f"web/dashboard/index.html:92"],
-    })
+    print(
+        "    note: le commentaire evoque 'initLibraryWorkflow (vue v4 unifiee)' ; "
+        "verifier que /processing ne pointe plus sur cette fonction."
+    )
+    RESUME.append(
+        {
+            "id": "[37]",
+            "title": "index.html:92 commentaire /processing trompeur",
+            "real_consumers": 0,
+            "phantom": True,
+            "real_sites": ["web/dashboard/index.html:92"],
+        }
+    )
     print()
 
     # === RESUME JSON FINAL ====================================================

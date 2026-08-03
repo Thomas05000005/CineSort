@@ -249,4 +249,5 @@ class SettingsFacade(_BaseFacade):
         module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
         """
         from cinesort.ui.api.settings_support import get_confidence_thresholds_payload  # noqa: PLC0415
+
         return get_confidence_thresholds_payload()

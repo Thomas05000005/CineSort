@@ -5,12 +5,12 @@ Migration #85 phase B1 : le code metier vit maintenant DANS ce Repository
 a `self.probe.X()` (instance de ProbeRepository creee dans `SQLiteStore.__init__`).
 
 Pourquoi cette structure transitoire :
-- SQLiteStore conserve son inheritance de _ProbeMixin -> backward-compat 100%
+- SQLiteStore expose store.probe (les mixins MRO ont ete supprimes en B8) -> backward-compat 100%
   pour les call sites `store.get_probe_cache(...)`.
 - ProbeRepository devient testable en isolation (mock FakeStore qui implemente
   _managed_conn / _ensure_schema_group / _decode_row_json).
-- Phase B8 future : SQLiteStore arretera d'heriter de _ProbeMixin, les
-  callers migreront vers `store.probe.get_probe_cache(...)`.
+- B8 CLOSE (2026-05, commit 482f3e6) : SQLiteStore n'herite plus des
+  mixins (heritage MRO supprime) ; les appels passent par store.<repo>.X().
 
 Methodes exposees :
     get_probe_cache, upsert_probe_cache, prune_probe_cache
