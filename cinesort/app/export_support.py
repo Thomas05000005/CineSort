@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -214,9 +215,103 @@ def export_html_report(report: Dict[str, Any]) -> str:
 
 _NFO_XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 
+# Identifiants providers — formats acceptes par Kodi et Jellyfin.
+# TMDb : entier positif. IMDb : "tt" + 7 a 12 chiffres.
+# Un identifiant hors format n'est PAS ecrit : un imdb_id invalide empeche
+# Jellyfin de telecharger les jaquettes (jellyfin/jellyfin#7174), ce qui est
+# pire qu'un NFO sans identifiant.
+_TMDB_ID_RE = re.compile(r"^[1-9][0-9]{0,9}$")
+_IMDB_ID_RE = re.compile(r"^tt[0-9]{7,12}$")
+
+
+class _RowDataError(ValueError):
+    """Donnee de row inexploitable : la row est ISOLEE et signalee, l'export continue.
+
+    Issue #720 : avant, un `int(year)` non garde sur une seule row (annee "N/A",
+    "?"...) faisait remonter un ValueError qui avortait l'export NFO ENTIER.
+    """
+
+
+def _coerce_year(*candidates: Any) -> int:
+    """Retourne la premiere annee exploitable parmi `candidates`, ou 0 si toutes sont vides.
+
+    Leve `_RowDataError` si une annee est PRESENTE mais non numerique. On ne
+    retombe alors pas sur le candidat suivant : une annee de decision fautive
+    doit etre signalee a l'utilisateur, pas remplacee en douce par la valeur
+    proposee (un echec ne devient jamais un succes silencieux).
+    """
+    for raw in candidates:
+        if raw is None:
+            continue
+        if isinstance(raw, bool):
+            # bool est un sous-type de int : `True` donnerait l'annee 1.
+            raise _RowDataError(f"annee non numerique ({raw!r})")
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                return int(text)
+            except ValueError:
+                raise _RowDataError(f"annee non numerique ({raw!r})") from None
+        elif isinstance(raw, (int, float)):
+            if raw == 0:
+                continue
+            try:
+                return int(raw)
+            except (OverflowError, ValueError):
+                # float("nan") / float("inf")
+                raise _RowDataError(f"annee non numerique ({raw!r})") from None
+        else:
+            raise _RowDataError(f"annee non numerique ({raw!r})")
+    return 0
+
+
+def _clean_provider_id(raw: Any, pattern: re.Pattern[str], label: str) -> str:
+    """Normalise un identifiant provider, ou "" s'il est absent ou hors format."""
+    text = str(raw if raw is not None else "").strip()
+    # 0 / "0" est la valeur sentinelle "absent" du payload amont, pas une erreur.
+    if not text or text == "0":
+        return ""
+    if not pattern.fullmatch(text):
+        _logger.warning("export nfo: %s ignore, format invalide (%r)", label, text)
+        return ""
+    return text
+
+
+def _resolve_nfo_path(folder: str, video: str) -> Path:
+    """Retourne le chemin du .nfo, garanti A L'INTERIEUR du dossier du film.
+
+    Issue #564 (CWE-22) : `video` vient d'un PlanRow qui peut avoir ete altere
+    (base modifiee, plan.jsonl importe). Un `..` ou un chemin absolu faisait
+    ecrire le .nfo hors du dossier cible. Le containment est verifie sur les
+    chemins RESOLUS, ce qui couvre aussi l'echappement par lien symbolique.
+    """
+    base = Path(folder)
+    nfo_path = (base / video).with_suffix(".nfo")
+    try:
+        base_resolved = base.resolve()
+        nfo_resolved = nfo_path.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _RowDataError(f"chemin illisible ({exc})") from None
+    if nfo_resolved == base_resolved or not nfo_resolved.is_relative_to(base_resolved):
+        raise _RowDataError("chemin .nfo hors du dossier du film")
+    return nfo_path
+
 
 def _build_nfo_xml(title: str, year: int, original_title: str = "", tmdb_id: str = "", imdb_id: str = "") -> str:
-    """Construit le XML NFO pour un film (format Kodi/Jellyfin)."""
+    """Construit le XML NFO pour un film (format Kodi/Jellyfin).
+
+    Schema verifie sur les deux consommateurs (2026-08-03) :
+    - Kodi lit `<uniqueid type="..." default="true">` ; l'ancien `<id>` est
+      deprecie. `CVideoInfoTag::ParseNative` ne retient l'identifiant par
+      defaut que si un `uniqueid` porte `default="true"` — sinon
+      `m_strDefaultUniqueID` reste "unknown" et le scrape perd l'appariement.
+      D'ou l'invariant : EXACTEMENT un `uniqueid` porte `default="true"`.
+    - Jellyfin (`MediaBrowser.XbmcMetadata/Parsers/BaseNfoParser.cs`) lit le
+      meme `<uniqueid>` via son attribut `type` et resout les noms de provider
+      sans tenir compte de la casse ; l'attribut `default` lui est indifferent.
+    """
     root = ET.Element("movie")
 
     ET.SubElement(root, "title").text = title
@@ -224,12 +319,16 @@ def _build_nfo_xml(title: str, year: int, original_title: str = "", tmdb_id: str
         ET.SubElement(root, "originaltitle").text = original_title
     if year:
         ET.SubElement(root, "year").text = str(year)
-    if tmdb_id:
-        uid = ET.SubElement(root, "uniqueid", type="tmdb", default="true")
-        uid.text = str(tmdb_id)
-    if imdb_id:
-        uid = ET.SubElement(root, "uniqueid", type="imdb")
-        uid.text = str(imdb_id)
+
+    tmdb = str(tmdb_id or "").strip()
+    imdb = str(imdb_id or "").strip()
+    if tmdb:
+        # TMDb est la source d'identification primaire de CineSort.
+        ET.SubElement(root, "uniqueid", {"type": "tmdb", "default": "true"}).text = tmdb
+    if imdb:
+        # A defaut de TMDb, IMDb endosse le role d'identifiant par defaut.
+        imdb_attrs = {"type": "imdb"} if tmdb else {"type": "imdb", "default": "true"}
+        ET.SubElement(root, "uniqueid", imdb_attrs).text = imdb
 
     ET.indent(root, space="  ")
     return _NFO_XML_HEADER + ET.tostring(root, encoding="unicode") + "\n"
@@ -255,21 +354,36 @@ def export_nfo_for_run(
         folder = str(row.get("folder") or "").strip()
         video = str(row.get("video") or "").strip()
         title = str(row.get("decision_title") or row.get("proposed_title") or "").strip()
-        year = int(row.get("decision_year") or row.get("proposed_year") or 0)
 
         if not folder or not video or not title:
             skipped_no_data += 1
             continue
 
-        video_path = Path(folder) / video
-        nfo_path = video_path.with_suffix(".nfo")
+        # Issues #720 / #564 : une row porteuse d'une donnee fautive est ISOLEE
+        # et comptee en erreur — elle n'avorte plus l'export des autres films.
+        try:
+            year = _coerce_year(row.get("decision_year"), row.get("proposed_year"))
+            nfo_path = _resolve_nfo_path(folder, video)
+        except _RowDataError as exc:
+            errors += 1
+            details.append({"path": str(Path(folder) / video), "status": f"error: {exc}"})
+            _logger.warning("export nfo: row ignoree (%s) — %s", title, exc)
+            continue
 
         if nfo_path.exists() and not overwrite:
             skipped_existing += 1
             details.append({"path": str(nfo_path), "status": "skipped_existing"})
             continue
 
-        xml_content = _build_nfo_xml(title, year)
+        # Issue #612 : sans uniqueid, Jellyfin/Kodi ne peuvent pas relier le
+        # film a TMDb/IMDb et re-scrapent tout — le .nfo perd son interet.
+        xml_content = _build_nfo_xml(
+            title,
+            year,
+            original_title=str(row.get("original_title") or "").strip(),
+            tmdb_id=_clean_provider_id(row.get("tmdb_id"), _TMDB_ID_RE, "tmdb_id"),
+            imdb_id=_clean_provider_id(row.get("imdb_id"), _IMDB_ID_RE, "imdb_id"),
+        )
 
         if dry_run:
             written += 1

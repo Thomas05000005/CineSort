@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from cinesort.ui.api._responses import err as _err_response
 
@@ -79,6 +79,54 @@ def _load_plan_rows(plan_jsonl_path: Path) -> List[Dict[str, Any]]:
     except OSError as exc:
         logger.warning("export: lecture %s echouee (%s)", plan_jsonl_path, exc)
     return rows
+
+
+class _UnsafeRunId(ValueError):
+    """`last_done_run_id` viole un invariant de nommage ou de containment.
+
+    Issue #427 (CWE-22) : cette valeur sort de la base (`get_runs_summary`),
+    elle n'etait soumise a aucune validation ici alors que l'invariant
+    `requires_valid_run_id` est applique 7 fois dans `apply_support.py`.
+    Defense en profondeur : l'exploitation exige une ECRITURE en base.
+    """
+
+
+def _is_valid_run_id(run_id: Any) -> bool:
+    """Valide un run_id contre l'invariant PARTAGE `cinesort_api.RUN_ID_RE`.
+
+    L'import est tardif a dessein : `cinesort_api` importe ce module au
+    chargement (son bloc `from cinesort.ui.api import (..., export_support)`),
+    un import de module a module creerait un cycle. Le regex n'est pas
+    recopie ici : une copie deriverait le jour ou l'invariant bouge.
+    """
+    from cinesort.ui.api.cinesort_api import RUN_ID_RE
+
+    return bool(RUN_ID_RE.fullmatch(str(run_id or "").strip()))
+
+
+def _resolve_run_dir(state_dir: Path, run_id: str) -> Optional[Path]:
+    """Resout le dossier d'un run sous `state_dir/runs`, ou None s'il n'existe pas.
+
+    Deuxieme garde de l'issue #427, independante de `_is_valid_run_id` : meme
+    un run_id bien forme ne doit pas pouvoir designer un dossier hors de
+    `state_dir/runs` (echappement par lien symbolique). Leve `_UnsafeRunId`
+    dans ce cas — un refus doit rester visible, pas devenir un export vide.
+    """
+    try:
+        runs_root = (state_dir / "runs").resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.warning("export: resolution de state_dir/runs echouee (%s)", exc)
+        return None
+    for candidate in (runs_root / f"tri_films_{run_id}", runs_root / run_id):
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved == runs_root or not resolved.is_relative_to(runs_root):
+            raise _UnsafeRunId("dossier de run hors de state_dir/runs")
+        if resolved.is_dir():
+            return resolved
+    return None
 
 
 def _load_decisions(validation_json_path: Path) -> Dict[str, Dict[str, Any]]:
@@ -146,11 +194,31 @@ def export_full_library(api: Any) -> Dict[str, Any]:
         # 3. Films du dernier run DONE (pour le portable detail) avec scores
         films: List[Dict[str, Any]] = []
         if last_done_run_id and store is not None:
-            run_dir = state_dir / "runs" / f"tri_films_{last_done_run_id}"
-            if not run_dir.is_dir():
-                run_dir = state_dir / "runs" / last_done_run_id
-            plan_rows = _load_plan_rows(run_dir / "plan.jsonl")
-            decisions = _load_decisions(run_dir / "validation.json")
+            # Issue #427 : `last_done_run_id` construisait `run_dir` sans aucune
+            # validation. On refuse bruyamment plutot que de rendre un export
+            # ampute en silence — le run_id fautif n'est PAS renvoye a l'UI
+            # (il est logge), pour ne pas reflechir une valeur alteree.
+            if not _is_valid_run_id(last_done_run_id):
+                logger.warning("export: run_id invalide en base (%r)", last_done_run_id)
+                return _err_response(
+                    "Export refuse : identifiant de run invalide en base.",
+                    category="validation",
+                    level="error",
+                    log_module=__name__,
+                )
+            try:
+                run_dir = _resolve_run_dir(state_dir, last_done_run_id)
+            except _UnsafeRunId as exc:
+                logger.warning("export: run_dir refuse pour %r (%s)", last_done_run_id, exc)
+                return _err_response(
+                    "Export refuse : dossier de run hors du repertoire d'etat.",
+                    category="validation",
+                    level="error",
+                    log_module=__name__,
+                )
+            # run_dir None = run purge du disque : cas normal, films reste vide.
+            plan_rows = _load_plan_rows(run_dir / "plan.jsonl") if run_dir else []
+            decisions = _load_decisions(run_dir / "validation.json") if run_dir else {}
 
             for row in plan_rows:
                 row_id = str(row.get("row_id") or "")

@@ -12,7 +12,9 @@ from unittest.mock import MagicMock
 from cinesort.ui.api.export_support import (
     _SECRET_KEYS,
     EXPORT_FORMAT_VERSION,
+    _resolve_run_dir,
     _sanitize_settings,
+    _UnsafeRunId,
     export_full_library,
 )
 
@@ -166,6 +168,66 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
             json.dumps(out, ensure_ascii=False)
         except (TypeError, ValueError) as e:
             self.fail(f"Payload pas serializable: {e}")
+
+
+class RunIdValidationTests(unittest.TestCase):
+    """Issue #427 (CWE-22) — `last_done_run_id` sort de la base et doit etre valide.
+
+    Les deux gardes sont eprouvees SEPAREMENT : un run_id hors format qui reste
+    lexicalement sous state_dir/runs n'active que la premiere ; un run_id qui
+    s'echappe du repertoire n'active que la seconde.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_runid_"))
+        self.state_dir = self._tmp / "state"
+        (self.state_dir / "runs").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _api_with_run_id(self, run_id: str) -> MagicMock:
+        api = MagicMock()
+        api._state_dir = self.state_dir
+        api.settings.get_settings.return_value = {"data": {}}
+        store = MagicMock()
+        store.run.get_runs_summary.return_value = [
+            {"run_id": run_id, "status": "DONE", "start_ts": 0.0, "duration_s": 1.0, "total_rows": 0}
+        ]
+        api._get_or_create_infra.return_value = (store, MagicMock())
+        return api
+
+    def test_malformed_run_id_in_db_is_refused(self) -> None:
+        """Garde 1 : hors format. `ab` reste sous runs/, seul le regex peut le rejeter."""
+        out = export_full_library(self._api_with_run_id("ab"))
+        self.assertFalse(out["ok"])
+
+    def test_run_id_with_forbidden_characters_is_refused(self) -> None:
+        out = export_full_library(self._api_with_run_id("run id!"))
+        self.assertFalse(out["ok"])
+
+    def test_legitimate_run_id_formats_still_export(self) -> None:
+        """Garde-fou anti-regression : les formats reellement produits passent."""
+        for run_id in ("20260803_141500_123", "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "demo_1754200000_ab12cd"):
+            with self.subTest(run_id=run_id):
+                out = export_full_library(self._api_with_run_id(run_id))
+                self.assertTrue(out["ok"], f"{run_id} refuse a tort")
+                self.assertEqual(out["last_done_run_id"], run_id)
+
+    def test_resolve_run_dir_refuses_directory_outside_runs(self) -> None:
+        """Garde 2 : containment, eprouvee directement sur le helper."""
+        outside = self._tmp / "outside"
+        outside.mkdir()
+        with self.assertRaises(_UnsafeRunId):
+            _resolve_run_dir(self.state_dir, "../../outside")
+
+    def test_resolve_run_dir_returns_none_when_run_purged(self) -> None:
+        self.assertIsNone(_resolve_run_dir(self.state_dir, "20260803_141500_123"))
+
+    def test_resolve_run_dir_finds_prefixed_directory(self) -> None:
+        run_dir = self.state_dir / "runs" / "tri_films_20260803_141500_123"
+        run_dir.mkdir()
+        self.assertEqual(_resolve_run_dir(self.state_dir, "20260803_141500_123"), run_dir.resolve())
 
 
 class ExportFullLibraryEdgeCasesTests(unittest.TestCase):
