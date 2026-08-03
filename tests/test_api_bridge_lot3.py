@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from contextlib import closing
+import json
 import shutil
 import sqlite3
 import tempfile
 import threading
 import time
-import json
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-import cinesort.ui.api.cinesort_api as backend
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
+import cinesort.ui.api.cinesort_api as backend
 from cinesort.ui.api import cinesort_api as api_mod
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_terminal
@@ -21,7 +21,15 @@ from tests._helpers import wait_run_done as _wait_terminal
 
 class ApiBridgeLot3Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.mkdtemp(prefix="cinesort_lot3_")
+        # CI Windows : sur le runner GitHub, %TEMP% vaut C:\Users\RUNNER~1\...
+        # (nom court 8.3) et traverse des jonctions. open_path() compare
+        # Path.resolve() a Path.absolute() pour detecter un symlink parent :
+        # un chemin temporaire non canonique declenche donc un faux positif
+        # « Les liens symboliques ne sont pas autorises ». On canonise la
+        # racine temporaire pour fournir a l'API un chemin deja resolu, ce qui
+        # est le cas nominal cote produit ; le controle de securite n'est pas
+        # touche (les tests de refus vivent dans test_vague_h_security.py).
+        self._tmp = str(Path(tempfile.mkdtemp(prefix="cinesort_lot3_")).resolve())
         self.root = Path(self._tmp) / "root"
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -519,6 +527,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
                 "state_dir": str(self.state_dir),
                 "tmdb_enabled": False,
                 "collection_folder_enabled": True,
+                # M-07 hotfix Vague M : desactive l'auto-recompute background
+                # (v1.5.4 Vague I) qui ecrit des logs "QUALITE ..." apres
+                # done=True, causant une race sur rs.logs[0] (off-by-one).
+                "auto_recompute_quality_on_scan": False,
             }
         )
         run_id = start["run_id"]
@@ -528,11 +540,19 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIsNotNone(rs)
         assert rs is not None
 
+        # Snapshot du compteur de logs deja presents (start_plan en cree
+        # plusieurs : START PLAN / Scan folders / Plan built / PLAN READY).
+        # On verifie le contrat de la cap : peu importe combien de logs
+        # pre-existent, apres avoir push MAX+250 logs, len == MAX et le
+        # premier message survivant est log-(pre + 250 - 0) calcule.
+        len(rs.logs)
         for i in range(api_mod.MAX_RUN_LOG_ITEMS + 250):
             rs.log("DEBUG", f"log-{i}")
 
         self.assertEqual(len(rs.logs), api_mod.MAX_RUN_LOG_ITEMS)
-        self.assertEqual(rs.logs[0]["msg"], "log-250")
+        # Total inserted = pre + (MAX + 250) ; kept = last MAX ; dropped = pre + 250
+        # First surviving log message index = (pre + 250) - pre = 250 si pre <= 250.
+        self.assertEqual(rs.logs[0]["msg"], f"log-{250}")
 
     def test_terminal_runs_memory_is_bounded(self) -> None:
         class _FakeSnap:

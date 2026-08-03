@@ -83,3 +83,12 @@ Suivre `docs/internal/design/14-design-to-code-implementation-plan.md` adapté :
 - Lot G : Écrans clés (un par sous-lot, dans l'ordre de cette spec)
 - Lot H : États secondaires et feedback
 - Lot I : QA visuelle et polish
+
+## MAJ session courante (2026-06-04)
+
+Hotfix6/7 stabilisation, R6 bug hunt en cours, audit 2026 a venir.
+
+- Hotfix6 : 92% postfix (11/12), 1 revert auto, retests 0/4 (sequence cassee).
+- Hotfix7 EN COURS dans worktree `w4yqqdf25` : BugHunt R6 sur 10 angles + sequence corrigee.
+- Tests biblio virtuelle : 11 bugs candidats -> 3 reels confirmes (8 false positives).
+- Audit 2026 complet a venir une fois Hotfix7 cloture. Specs de refonte (12 ecrans) restent intactes : pas de code avant validation complete, principes transverses (actions dangereuses, tier hex invariantes, perceptual != quality) preserves.

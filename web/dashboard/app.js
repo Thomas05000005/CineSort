@@ -13,7 +13,7 @@
 window.__APP_JS_LOADED = "parse-start";
 
 import { $$ } from "./core/dom.js";
-import { hasToken, setToken, onClearToken } from "./core/state.js";
+import { hasToken, setToken, onClearToken, markTokenReady, markTokenAbsent } from "./core/state.js";
 
 window.__APP_JS_LOADED = "imports-done";
 
@@ -25,16 +25,26 @@ window.__APP_JS_LOADED = "imports-done";
     if (_errorBannerShown) return;
     _errorBannerShown = true;
     try {
-      // Cf issue #67 : construction DOM safe (createElement + textContent)
-      // au lieu de innerHTML — empeche XSS via msg quand window.onerror
-      // recoit un Error.message contenant du HTML/JS arbitraire.
+      // Fix audit 2026-06-07 UX : message generique francais actionable a la place
+      // du brut technique (TypeError, NetworkError...). Details internes restent
+      // logges console + data-attribute pour copy-debug. Memoire user : pas de
+      // jargon, pas d'Error 500, action explicite (recharger).
       const banner = document.createElement("div");
       banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:#DC2626;color:#fff;padding:8px 16px;z-index:99999;font-family:sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
+      banner.dataset.cinesortErrorDetails = String(msg || "").substring(0, 400);
 
       const label = document.createElement("strong");
-      label.textContent = "Erreur JS :";
+      label.textContent = "Une erreur inattendue est survenue.";
       banner.appendChild(label);
-      banner.appendChild(document.createTextNode(" " + String(msg || "Erreur inconnue").substring(0, 200) + " "));
+      banner.appendChild(document.createTextNode(" Recharger la page ? "));
+
+      const reloadBtn = document.createElement("button");
+      reloadBtn.style.cssText = "margin-left:8px;background:#fff;border:1px solid #fff;color:#DC2626;padding:2px 10px;border-radius:4px;cursor:pointer;font-weight:600";
+      reloadBtn.textContent = "Recharger";
+      reloadBtn.addEventListener("click", () => {
+        try { window.location.reload(); } catch (e) { /* noop */ }
+      });
+      banner.appendChild(reloadBtn);
 
       const closeBtn = document.createElement("button");
       closeBtn.style.cssText = "float:right;background:transparent;border:1px solid #fff;color:#fff;padding:2px 8px;border-radius:4px;cursor:pointer";
@@ -51,13 +61,42 @@ window.__APP_JS_LOADED = "imports-done";
       setTimeout(() => { _errorBannerShown = false; }, 5000);
     } catch (e) { /* dernier recours : console */ console.error("[error-banner failed]", e); }
   }
+  // Fix audit 2026-05-25 (v1.5.4) Vague I : enrichir la banniere avec
+  // filename:line:col (et 1ere frame de stack quand dispo). En mode natif
+  // pywebview, DevTools est inaccessible, donc le seul moyen de pinpoint
+  // le site coupable d'une erreur est de l'inscrire dans la banniere.
+  function _formatLocation(ev) {
+    try {
+      const stackFirstFrame = (ev && ev.error && typeof ev.error.stack === "string")
+        ? (ev.error.stack.split("\n").find((l) => l && l.trim() && !/^Error/i.test(l)) || "").trim()
+        : "";
+      if (stackFirstFrame) return stackFirstFrame.substring(0, 180);
+      const file = (ev && ev.filename) ? String(ev.filename).split("/").pop() : "?";
+      const line = (ev && ev.lineno != null) ? ev.lineno : "?";
+      const col = (ev && ev.colno != null) ? ev.colno : "?";
+      return `${file}:${line}:${col}`;
+    } catch (_e) { return ""; }
+  }
   window.addEventListener("error", (ev) => {
     console.error("[window.onerror]", ev.message, ev.filename, ev.lineno, ev.colno, ev.error);
-    _showErrorBanner(ev.message);
+    // Fix audit 2026-06-07 UX critical : details internes (loc, message brut)
+    // restent en console + data-attribute du banner pour copy-debug, banner
+    // affiche un message generique francais actionable.
+    const loc = _formatLocation(ev);
+    _showErrorBanner(loc ? `${ev.message} | ${loc}` : ev.message);
   });
   window.addEventListener("unhandledrejection", (ev) => {
     console.error("[unhandledrejection]", ev.reason);
-    _showErrorBanner(String(ev.reason));
+    const reason = ev.reason;
+    let loc = "";
+    try {
+      if (reason && typeof reason.stack === "string") {
+        const frame = reason.stack.split("\n").find((l) => l && l.trim() && !/^Error/i.test(l)) || "";
+        loc = frame.trim().substring(0, 180);
+      }
+    } catch (_e) { /* noop */ }
+    const msg = String(reason && reason.message ? reason.message : reason);
+    _showErrorBanner(loc ? `${msg} | ${loc}` : msg);
   });
 })();
 
@@ -87,7 +126,7 @@ const NATIVE_FLAG_KEY = "cinesort.native";
       try { localStorage.setItem(NATIVE_FLAG_KEY, "1"); } catch { /* no-op */ }
     }
     if (ntoken) {
-      setToken(ntoken, true);  // persist
+      setToken(ntoken, true);  // persist (setToken appelle markTokenReady en interne)
       // Purger le token de l'URL pour ne pas le laisser dans l'historique.
       const url = new URL(window.location.href);
       url.searchParams.delete("ntoken");
@@ -105,9 +144,39 @@ const NATIVE_FLAG_KEY = "cinesort.native";
         : currentHash;
       // Garder ?native=1 si present
       window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + targetHash);
+    } else {
+      // V1.5.0 fix bug #1 : pas de ntoken dans l'URL. Soit on a deja un
+      // token en storage (boot natif sur reload WebView2 cache, ou mode
+      // web avec token persiste "Rester connecte"), soit on n'en aura
+      // jamais (mode web pre-login). Dans tous les cas, on debloque les
+      // requetes apiPost/apiGet pour qu'elles partent avec le token
+      // actuel (ou sans, et echouent proprement avec 401 -> redirect
+      // login en mode web).
+      try {
+        const hasStored = !!(sessionStorage.getItem("cinesort.dashboard.token")
+                          || (localStorage.getItem("cinesort.dashboard.persist") === "1"
+                              && localStorage.getItem("cinesort.dashboard.token")));
+        if (hasStored) {
+          markTokenReady();
+        } else {
+          // FIX 2026-06-05 : en mode natif sans token, on differe le deblocage
+          // pour eviter la salve 401 sur les 4 fetchs initiaux (un retry de
+          // setToken peut arriver via pywebview entre temps). En mode web,
+          // c'est immediat (la 401 redirige vers /login normalement).
+          const _nativeBoot = !!(window.__CINESORT_NATIVE__
+                              || (window.chrome && window.chrome.webview)
+                              || (window.location && (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost")));
+          markTokenAbsent({ native: _nativeBoot });
+        }
+      } catch {
+        markTokenAbsent();
+      }
     }
   } catch (e) {
     console.warn("[dash-boot] detection native echouee", e);
+    // En cas d'erreur de detection, on debloque les requetes pour eviter
+    // un hang. Le deadline 2s dans state.js sert de filet de secours.
+    try { markTokenAbsent(); } catch { /* no-op */ }
   }
 })();
 
@@ -131,7 +200,7 @@ import { initAccueil, unmountAccueil } from "./views/accueil.js";        // /acc
 // V7-fix : vue Processing v5 dediee (separe Bibliotheque "consulter" de
 // Traitement "agir : scan/review/apply"). /processing reste fonctionnelle :
 // elle est utilisee en INTERNE par traitement.js et qij.js comme etape stepper.
-import { initProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
+import { initProcessing, unmountProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
 // Phase 3.1-D (spec 11-parametres.md) : nouvelle vue Paramètres avec sub-sidebar
 // 10 categories. Active sur /parametres ; /settings redirige vers /parametres
 // (preservation du fragment de section).
@@ -158,7 +227,11 @@ import { initTraitement, unmountTraitement } from "./views/traitement.js"; // /t
 import { initBibliotheque, unmountBibliotheque } from "./views/bibliotheque.js"; // /bibliotheque
 
 // === Vues v5 conservees pour features uniques sans equivalent v4 ===
-import { initFilmDetail } from "./views/film-detail.js"; // /film/:id (pas de page v4)
+// D1 (R8 seam #3) : la vue standalone views/film-detail.js (jumeau buggé R8-053/054/055)
+// est SUPPRIMÉE. La route /film/:id est servie par le COMPOSANT (mode B = page standalone,
+// conçu pour /film/:id) — flux d'id identique (route id -> row_id -> library/get_film_full),
+// donc 0 lien mort et 0 changement d'appelant (home-widgets/qualite/historique).
+import { renderFilmDetail } from "./components/film-detail.js";
 
 // === Helpers UI legacy preserves ===
 import { initKeyboard } from "./core/keyboard.js";
@@ -168,6 +241,10 @@ import { initCopyToClipboard } from "./components/copy-to-clipboard.js";
 import { initAutoTooltip } from "./components/auto-tooltip.js";
 import { initGlossaryTooltips } from "./components/glossary-tooltip.js";
 import { decorateMainButtons } from "./components/shortcut-tooltip.js";
+// mega-hotfix frontend_ui_polish (#6) : banniere globale "scan en cours" pour
+// que l'utilisateur ne perde plus de vue qu'un scan tourne quand il navigue
+// hors de la vue Traitement.
+import { initScanBanner } from "./components/scan-banner.js";
 // Confetti : side-effect import (expose window.launchConfetti)
 import "./components/confetti.js";
 
@@ -199,13 +276,25 @@ function _legacyRedirect(legacyName, canonicalRoute) {
 registerRoute("/film/:id", {
   view: "view-film-detail",
   guard: requireAuth,
-  init: (el, opts) => initFilmDetail(el, { filmId: opts && opts.params ? opts.params.id : undefined }),
+  // D1 : rendu par le composant (mode B), plus la vue standalone supprimée.
+  init: (el, opts) =>
+    renderFilmDetail({ mode: "B", rowId: opts && opts.params ? opts.params.id : undefined, container: el }),
 });
 // /processing reste fonctionnelle : utilisee en INTERNE par traitement.js et
 // qij.js comme etape stepper du workflow (scan -> review -> apply). Mount
 // dedie #view-processing (vide dans index.html, initProcessing fait
 // container.innerHTML lui-meme).
-registerRoute("/processing", { view: "view-processing", guard: requireAuth, init: initProcessing });
+// E7-ter (revue Lot E) : cleanup retourne en SYNCHRONE (pattern des routes
+// canoniques) — le .then du router sur un init async pouvait ecraser le
+// cleanup d'une autre vue si l'utilisateur naviguait avant la resolution.
+registerRoute("/processing", {
+  view: "view-processing",
+  guard: requireAuth,
+  init: (el, opts) => {
+    initProcessing(el, opts).catch((e) => console.error("[processing] init:", e));
+    return unmountProcessing;
+  },
+});
 
 // === Alias rétrocompat : redirections vers routes canoniques FR ===========
 // Les anciennes URLs (/home /status /library /quality /help /logs /jellyfin
@@ -278,6 +367,7 @@ const SIDEBAR_ROUTE_ALIAS = {
   home: "/accueil",
   processing: "/traitement",
   library: "/bibliotheque",
+  doublons: "/doublons",  // AUDIT 2026-06-13 (R5-E) : entree menu Doublons.
   quality: "/qualite",
   history: "/historique",
   settings: "/parametres",
@@ -297,6 +387,7 @@ const _ROUTE_TO_SIDEBAR_ID = {
   accueil: "home", home: "home", status: "home",
   traitement: "processing", processing: "processing",
   bibliotheque: "library", library: "library",
+  doublons: "doublons",  // AUDIT 2026-06-13 (R5-E) : highlight l'entree Doublons.
   qualite: "quality", quality: "quality",
   historique: "history", logs: "history",
   parametres: "settings", settings: "settings",
@@ -353,12 +444,22 @@ async function _mountV5Shell() {
   } catch (e) { console.warn("[shell] cachedGetSettings", e); }
 
   // Top-bar v5 (search + notif + theme switcher)
+  // FIX 2026-06-07 : fetch unread count AVANT render pour eviter le flash
+  // "cloche sans badge" pendant ~3s (delai anti-avalanche de startNotificationPolling).
+  // En cas d'echec (backend KO, 401 token), on retombe sur 0 — le polling
+  // mettra a jour le badge au prochain tick.
+  let initialNotifCount = 0;
+  try {
+    if (typeof notifCenter.getUnreadCount === "function") {
+      initialNotifCount = await notifCenter.getUnreadCount().catch(() => 0);
+    }
+  } catch (e) { console.warn("[shell] notifCenter.getUnreadCount", e); }
   try {
     topBarV5.render(topBarMount, {
       title: "CineSort",
       subtitle: "",
       theme,
-      notificationCount: 0,
+      notificationCount: initialNotifCount,
       onSearchClick: () => window.dispatchEvent(new CustomEvent("cinesort:command-palette")),
       onNotifClick: () => notifCenter.toggleNotifications(),
       onThemeChange: _applyTheme,
@@ -523,6 +624,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   try { initAutoTooltip(); } catch (e) { console.warn("[boot] initAutoTooltip", e); }
   try { initGlossaryTooltips(); } catch (e) { console.warn("[boot] initGlossaryTooltips", e); }
   try { decorateMainButtons(); } catch (e) { console.warn("[boot] decorateMainButtons", e); }
+  // mega-hotfix frontend_ui_polish (#6) : banniere persistante "scan en cours".
+  try { initScanBanner(); } catch (e) { console.warn("[boot] initScanBanner", e); }
   // V2-C R4-MEM-5 : purge drafts review.js expires (TTL 30j) — cleanup global au boot.
   try { cleanupExpiredDrafts(); } catch (e) { console.warn("[boot] cleanupExpiredDrafts", e); }
 
@@ -543,14 +646,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Charge fr.json + locale stockee, sans bloquer >500ms.
   // Promise.race avec timeout : si initI18n hang (network/file), on continue
   // sans bloquer le rendu du shell.
+  // Fix audit 2026-05-25 (v1.5.5) Vague J : meme si on continue apres timeout
+  // 1500ms, on garde la reference a la promesse pour qu'elle resolve en
+  // arriere-plan et notify les observers (sidebar re-render avec les vrais
+  // labels FR). Sans ca, en cas de boot lent, la sidebar restait avec les
+  // cles brutes (sidebar.brand_name) jusqu'a un refresh manuel.
+  const _i18nBoot = initI18n();
   try {
     await Promise.race([
-      initI18n(),
+      _i18nBoot,
       new Promise((resolve) => setTimeout(resolve, 1500)),
     ]);
   } catch (e) {
     console.warn("[boot] initI18n", e);
   }
+  // Continue en arriere-plan : si timeout 1500ms expire mais le fetch finit
+  // par reussir, _notifyObservers() dans initI18n re-render les composants.
+  _i18nBoot.catch((e) => console.warn("[boot] initI18n background", e));
 
   // Si on est authentifie OU en mode natif desktop, monter le shell v5.
   // Le mode natif n'a pas besoin de token UI : le bridge pywebview garantit
@@ -577,6 +689,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     await _initNotificationPolling();
     await _initDemoModeIfNeeded();
     await _checkUpdateBadge();
+    // Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 3) : detecter ffprobe absent
+    // au boot et afficher un banner persistant. Sans ffprobe le scoring est
+    // casse -> l'utilisateur doit le savoir AVANT de lancer un scan qui sera
+    // 100% en FAILED. Best-effort : try/catch silent.
+    try { await _checkProbeToolsBoot(); } catch (e) { console.warn("[boot] probe tools check", e); }
   }
 });
 
@@ -593,6 +710,25 @@ async function _initSidebarFeatures() {
   await _loadSidebarCounters();
   if (_sidebarCountersInterval == null) {
     _sidebarCountersInterval = setInterval(_loadSidebarCounters, 30000);
+  }
+  // Fix bug "polling sidebar 30s tourne meme onglet cache" :
+  // BILAN_CORRECTIONS.md:846 annoncait visibility toggle, jamais implemente.
+  // Pause le polling quand document.hidden, reprend au focus + reload immediat.
+  if (!window.__cinesort_sidebar_visibility_bound__) {
+    window.__cinesort_sidebar_visibility_bound__ = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (_sidebarCountersInterval != null) {
+          clearInterval(_sidebarCountersInterval);
+          _sidebarCountersInterval = null;
+        }
+      } else {
+        _loadSidebarCounters();
+        if (_sidebarCountersInterval == null) {
+          _sidebarCountersInterval = setInterval(_loadSidebarCounters, 30000);
+        }
+      }
+    });
   }
   await _checkIntegrationNav();
   await _checkUpdateBadge();
@@ -622,6 +758,64 @@ async function _checkIntegrationNav() {
   } catch { /* silencieux */ }
 }
 
+/** Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 3) : banner persistant si
+ * ffprobe est introuvable au boot. Sans ffprobe, le scoring est casse :
+ * probe.duration_s manquant -> tous les films en confidence basse -> UX HS.
+ *
+ * Le banner est non bloquant (icone + texte + bouton Paramètres) et se
+ * dissimule des qu'on quitte la page ou via la croix. Idempotent : si deja
+ * affiche, on ne re-cree pas.
+ */
+async function _checkProbeToolsBoot() {
+  if (!hasToken() && !window.__CINESORT_NATIVE__) return;
+  if (document.getElementById("ffprobe-missing-banner")) return; // deja affiche
+  let payload = null;
+  try {
+    const res = await apiPost("runtime/get_probe_tools_status", {});
+    payload = (res && res.data) || {};
+  } catch { return; /* silencieux : si l'endpoint est KO on ne bloque rien */ }
+  const tools = (payload && payload.tools) || {};
+  const ffprobe = tools.ffprobe || {};
+  if (ffprobe.available) return; // tout va bien
+  try {
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-005 : utilise une
+    // classe CSS dediee (.ffprobe-banner) avec tokens du design system
+    // (--sev-warning-*, --radius-sm, --sp-3) au lieu de styles inline en dur.
+    // Icone alignee dans .ffprobe-banner__icon, variante sev-warning.
+    // DV-001 z-index 150 conserve (entre contenu et chrome).
+    const banner = document.createElement("div");
+    banner.id = "ffprobe-missing-banner";
+    banner.className = "ffprobe-banner ffprobe-banner--warning";
+    banner.setAttribute("role", "alert");
+    const icon = document.createElement("span");
+    icon.className = "ffprobe-banner__icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "⚠";
+    banner.appendChild(icon);
+    const title = document.createElement("strong");
+    title.className = "ffprobe-banner__title";
+    title.textContent = "ffprobe introuvable.";
+    banner.appendChild(title);
+    const msg = document.createElement("span");
+    msg.className = "ffprobe-banner__msg";
+    msg.textContent = "Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Paramètres > Outils > Auto-install.";
+    banner.appendChild(msg);
+    const settingsBtn = document.createElement("a");
+    settingsBtn.className = "ffprobe-banner__action";
+    settingsBtn.href = "#/parametres";
+    settingsBtn.textContent = "Ouvrir Paramètres";
+    banner.appendChild(settingsBtn);
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "ffprobe-banner__close";
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Fermer le bandeau");
+    closeBtn.textContent = "Fermer";
+    closeBtn.addEventListener("click", () => { banner.remove(); });
+    banner.appendChild(closeBtn);
+    document.body.appendChild(banner);
+  } catch (e) { console.warn("[ffprobe banner] failed", e); }
+}
+
 /** V1-13 : badge "•" sur item Settings si MAJ disponible (cache backend). */
 async function _checkUpdateBadge() {
   if (!hasToken()) return;
@@ -641,7 +835,16 @@ _updateBadgeInterval = setInterval(_checkUpdateBadge, 3600000);
 /* === V7.6.0 Notification center — polling 30s ============= */
 
 async function _initNotificationPolling() {
+  // FIX 2026-06-05 (avalanche boot natif) : exclusion mutuelle stricte.
+  // Si notifCenter.startNotificationPolling existe, on l'utilise EXCLUSIVEMENT
+  // et on early-return AVANT toute condition pour empecher le fallback de
+  // se demarrer en parallele (sinon : double polling sur l'unread_count -> 429).
   if (typeof notifCenter.startNotificationPolling === "function") {
+    // S'assurer qu'aucun fallback precedemment cree ne survive.
+    if (_notificationFallbackInterval != null) {
+      clearInterval(_notificationFallbackInterval);
+      _notificationFallbackInterval = null;
+    }
     notifCenter.startNotificationPolling(30000);
     return;
   }
@@ -705,9 +908,16 @@ async function _loadDashTheme() {
       const s = res.data;
       document.body.dataset.theme = s.theme || "luxe";
       document.body.dataset.animation = s.animation_level || "moderate";
-      document.documentElement.dataset.effects = s.effects_mode || "restraint";
+      // R8-072 (F5) : data-effects RETIRÉ — aucun CSS ne consommait dataset.effects
+      // (effects_mode = fantôme cosmétique sans effet visuel ni contrôle UI).
       const root = document.documentElement;
-      const _map = (v, lo, hi) => lo + ((v || 50) - 0) * (hi - lo) / 100;
+      // Fix audit 2026-05-26 (v1.5.6) Vague L (theme-1) :
+      // Avant : v||50 traitait 0 comme "valeur absente" et le remplacait par 50.
+      // Du coup, l'utilisateur qui voulait DESACTIVER un effet (glow=0,
+      // animation=0, light=0) voyait quand meme une intensite a 50% appliquee.
+      // v??50 garde 0 (valeur legitime de l'utilisateur) et ne replace que les
+      // null/undefined (valeur reellement absente) par 50.
+      const _map = (v, lo, hi) => lo + ((v ?? 50) - 0) * (hi - lo) / 100;
       root.style.setProperty("--animation-speed", _map(s.effect_speed, 0.3, 3));
       root.style.setProperty("--glow-intensity", _map(s.glow_intensity, 0, 0.5));
       root.style.setProperty("--light-intensity", _map(s.light_intensity, 0, 0.3));

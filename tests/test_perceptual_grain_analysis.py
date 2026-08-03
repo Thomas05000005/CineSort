@@ -11,17 +11,16 @@ from __future__ import annotations
 
 import unittest
 
-from cinesort.domain.perceptual.grain_analysis import (
-    analyze_grain,
-    classify_film_era,
-    estimate_grain,
-)
 from cinesort.domain.perceptual.constants import (
     GRAIN_MODERATE,
     GRAIN_UNIFORMITY_ARTIFICIAL,
     GRAIN_UNIFORMITY_NATURAL,
 )
-
+from cinesort.domain.perceptual.grain_analysis import (
+    analyze_grain,
+    classify_film_era,
+    estimate_grain,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

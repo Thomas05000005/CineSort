@@ -1,0 +1,17 @@
+{
+  "T1_first_seen_mtime100j": {
+    "deleted": 0,
+    "considered": 1,
+    "VERDICT": "FIX OK (non purge)"
+  },
+  "T2_manifest_first_seen_100j_POSITIF": {
+    "deleted": 1,
+    "considered": 1,
+    "VERDICT": "harnais FALSIFIABLE OK (purge quand TTL vrai)"
+  },
+  "T3_ttl0_noop": {
+    "deleted": 0,
+    "ok": true,
+    "VERDICT": "no-op OK"
+  }
+}

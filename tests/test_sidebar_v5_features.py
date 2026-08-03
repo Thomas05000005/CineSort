@@ -1,6 +1,7 @@
 """V5A-01 — Verifie que sidebar-v5 contient les 5 features V1-V4 portees."""
 
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

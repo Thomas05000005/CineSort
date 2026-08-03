@@ -1,36 +1,30 @@
-"""Utilitaires fuzzy matching pour les modules de synchronisation."""
+"""Utilitaires fuzzy matching pour les modules de synchronisation.
+
+Note (refactor iter4b 2026-06-09): `normalize_for_fuzzy` a ete deplacee vers
+`cinesort.domain._fuzzy_normalize` (logique de string pure = domain). Le
+symbole reste re-exporte ici pour preserver la backward compat absolue
+(callers app/, tests existants).
+"""
 
 from __future__ import annotations
 
 import logging
-import unicodedata
 from typing import Iterable, Optional, Tuple
+
+# Backward compat: re-export depuis le bon etage architectural (domain).
+from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
 
 logger = logging.getLogger(__name__)
 
 # Seuil par defaut pour le fuzzy matching (0-100)
 DEFAULT_FUZZY_THRESHOLD = 85
 
-
-def normalize_for_fuzzy(title: str) -> str:
-    """Normalise un titre pour comparaison fuzzy.
-
-    - lowercase
-    - strip accents (NFD + strip combining marks)
-    - strip ponctuation courante
-    - strip whitespace multiple
-    """
-    if not title:
-        return ""
-    t = title.lower().strip()
-    # Strip accents via decomposition Unicode
-    t = "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
-    # Strip ponctuation courante
-    for ch in ":-.,'\"!?()[]{}":
-        t = t.replace(ch, " ")
-    # Normaliser les espaces
-    t = " ".join(t.split())
-    return t
+__all__ = [
+    "DEFAULT_FUZZY_THRESHOLD",
+    "normalize_for_fuzzy",
+    "fuzzy_title_match",
+    "find_best_fuzzy_match",
+]
 
 
 def fuzzy_title_match(local_title: str, remote_title: str, threshold: int = DEFAULT_FUZZY_THRESHOLD) -> bool:

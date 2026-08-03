@@ -10,10 +10,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from .constants import (
+    BUDGET_HIGH,
     DNR_BLUR_THRESHOLD,
     ERA_CLASSIC_FILM,
     ERA_TRANSITION,
-    BUDGET_HIGH,
     GRAIN_AV1_AFGS1_BONUS,
     GRAIN_LIGHT,
     GRAIN_MODERATE,
@@ -52,7 +52,9 @@ def estimate_grain(
     Retourne ``{grain_level, grain_uniformity, flat_zone_count}``.
     """
     w, h, bs = int(width), int(height), int(block_size)
-    if w < bs or h < bs or not pixels:
+    # AUDIT 2026-06-10 (CRITICAL) : pixels peut etre un np.ndarray (refactor B3),
+    # `not pixels` leverait ValueError ambiguous -> crash analyse grain. Check taille.
+    if w < bs or h < bs or pixels is None or np.size(pixels) == 0:
         return {"grain_level": 0.0, "grain_uniformity": 1.0, "flat_zone_count": 0}
 
     flat_thresh = _FLAT_VAR_THRESH_10BIT if bit_depth >= 10 else _FLAT_VAR_THRESH_8BIT
@@ -213,7 +215,7 @@ def analyze_grain(
         pixels = fd.get("pixels", [])
         fw = fd.get("width", 0)
         fh = fd.get("height", 0)
-        if not pixels:
+        if pixels is None or np.size(pixels) == 0:  # AUDIT 2026-06-10 (CRITICAL) : ndarray-safe
             continue
         ge = estimate_grain(pixels, fw, fh, bit_depth=bit_depth)
         grain_levels.append(ge["grain_level"])
@@ -489,10 +491,10 @@ def analyze_grain_v2(
         pixels = f.get("pixels")
         w = int(f.get("width") or 0)
         h = int(f.get("height") or 0)
-        if not pixels or w <= 0 or h <= 0:
+        if pixels is None or np.size(pixels) == 0 or w <= 0 or h <= 0:  # AUDIT 2026-06-10 (CRITICAL)
             continue
         expected = w * h
-        if len(pixels) < expected:
+        if np.size(pixels) < expected:
             continue
         try:
             arr = np.asarray(pixels[:expected], dtype=np.float64).reshape(h, w)

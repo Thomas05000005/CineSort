@@ -1,0 +1,336 @@
+CAPTURE PHANTOM CONFIG — baseline_r8 (READ-ONLY, 0 effet de bord)
+REPO    = C:\Users\blanc\projects\CineSort
+fichiers scannes: 230 .py (cinesort) + 86 .js (web) + 581 tests = 897
+
+==============================================================================
+[F-PROM-02] cleanup_orphans / cleanup_empty_folders : toggles inertes
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:151 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (6):
+      cinesort/ui/api/settings_support.py:1707  |  if "cleanup_orphans" in payload:
+      cinesort/ui/api/settings_support.py:1708  |  out["cleanup_orphans"] = to_bool(payload.get("cleanup_orphans"), False)
+      cinesort/ui/api/settings_support.py:1709  |  if "cleanup_empty_folders" in payload:
+      cinesort/ui/api/settings_support.py:1710  |  out["cleanup_empty_folders"] = to_bool(payload.get("cleanup_empty_folders"), False)
+      web/dashboard/views/parametres.js:151  |  { key: "cleanup_orphans", label: "Nettoyer les fichiers orphelins (sous-titres, .nfo, images)", type: "toggle" },
+      web/dashboard/views/parametres.js:152  |  { key: "cleanup_empty_folders", label: "Supprimer les dossiers vides après apply", type: "toggle" },
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: absents de Config dataclass (core.py:208-274) et de build_cfg_from_settings->core.Config (settings_support.py:1054-1085)
+    [sous-preuve] attribut Config 'cleanup_orphans=/cleanup_empty_folders=' dans core.py/settings_support.py = 0 (attendu 0)
+
+==============================================================================
+[F-PROM-01] auto_approve_enabled : consomme uniquement par get_auto_approved_summary (0 appelant UI)
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:105 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (7):
+      cinesort/ui/api/reset_support.py:163  |  "auto_approve_enabled",
+      cinesort/ui/api/settings_support.py:772  |  ("auto_approve_enabled", False),
+      cinesort/ui/api/settings_support.py:1407  |  "auto_approve_enabled": to_bool(payload.get("auto_approve_enabled"), False),
+      web/dashboard/views/parametres.js:105  |  { key: "auto_approve_enabled", label: "Approbation automatique", type: "toggle" },
+      tests/test_settings_section_helpers.py:158  |  self.assertEqual(result["auto_approve_enabled"], False)
+      tests/e2e_desktop/test_10_full_workflow.py:89  |  auto_approve_enabled: false,
+      tests/manual/pywebview_api_mock.js:130  |  auto_approve_enabled: true,
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: real key consommee dans run_read_support.get_auto_approved_summary, mais 0 caller UI -> feature de fait morte
+    [sous-preuve] def get_auto_approved_summary (run_read_support.py) = 1 (la methode existe)
+    [sous-preuve] appelant FRONT (web/*.js) de get_auto_approved_summary = 0 (attendu 0 -> feature morte)
+
+==============================================================================
+[F-PROM-03a] separator : variable {sep} absente de tout template de preset
+------------------------------------------------------------------------------
+    templates de preset trouves (movie/tv) : 10
+      movie_template="{title} ({year})",
+      tv_template="{series} ({year})",
+      movie_template="{title} ({year}) {tmdb_tag}",
+      tv_template="{series} ({year})",
+      movie_template="{title} ({year}) [{resolution}]",
+      tv_template="{series} ({year})",
+      movie_template="{title} ({year}) [{resolution} {video_codec}]",
+      tv_template="{series} ({year})",
+      movie_template=_DEFAULT_MOVIE_TEMPLATE,
+      tv_template=_DEFAULT_TV_TEMPLATE,
+    => templates referencant {sep} = 0 [FANTOME en preset]
+    note: {sep} est injecte dans le contexte (naming.py ~L332) mais opt-in uniquement -> inerte tant qu'un template custom ne l'ecrit pas
+
+==============================================================================
+[F-PROM-03b] subtitle_lang_priority : fantome ; la vraie cle est subtitle_expected_languages
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:100 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (5):
+      cinesort/ui/api/settings_support.py:1711  |  if "subtitle_lang_priority" in payload:
+      cinesort/ui/api/settings_support.py:1712  |  raw = payload.get("subtitle_lang_priority")
+      cinesort/ui/api/settings_support.py:1714  |  out["subtitle_lang_priority"] = [str(c).strip().lower()[:3] for c in raw if str(c).strip()]
+      cinesort/ui/api/settings_support.py:1716  |  out["subtitle_lang_priority"] = [c.strip().lower()[:3] for c in raw.split(",") if c.strip()]
+      web/dashboard/views/parametres.js:100  |  { key: "subtitle_lang_priority", label: "Priorité des langues", type: "text", placeholder: "fr;en;original",
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: 0 consommateur backend ; cf F-PROM-03b-bis pour la vraie cle
+==============================================================================
+[F-PROM-03b-bis] [FALSIFIABILITE] subtitle_expected_languages : la VRAIE cle a des consommateurs
+------------------------------------------------------------------------------
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (24):
+      cinesort/app/plan_support_core.py:402  |  subtitle_expected_languages: Optional[List[str]]
+      cinesort/app/plan_support_core.py:543  |  if ctx.subtitle_expected_languages is not None:
+      cinesort/app/plan_support_core.py:544  |  ctx.v2_kwargs["subtitle_expected_languages"] = ctx.subtitle_expected_languages
+      cinesort/app/plan_support_core.py:1005  |  subtitle_expected_languages: Optional[List[str]] = None,
+      cinesort/app/plan_support_core.py:1030  |  subtitle_expected_languages=subtitle_expected_languages,
+      cinesort/app/plan_support_dedup.py:790  |  subtitle_expected_languages: Optional[List[str]] = None,
+      cinesort/app/plan_support_dedup.py:848  |  subtitle_expected_languages=subtitle_expected_languages,
+      cinesort/app/plan_support_replan.py:400  |  subtitle_expected_languages: Optional[List[str]],
+      ... (+16 autres)
+    non-consommateurs (persist/def/reset/test/dist) (15):
+      cinesort/ui/api/reset_support.py:66  |  "subtitle_expected_languages",
+      cinesort/ui/api/settings_support.py:839  |  ("subtitle_expected_languages", ["fr"]),
+      cinesort/ui/api/settings_support.py:1521  |  "subtitle_expected_languages": _normalize_lang_list(payload.get("subtitle_expected_languages")),
+      web/dashboard/views/parametres.js:102  |  { key: "subtitle_expected_languages", label: "Langues attendues", type: "text", placeholder: "fr;en", hint: "Séparées par ;", a...
+      tests/test_librarian.py:101  |  r = generate_suggestions(rows, [], {"subtitle_expected_languages": ["fr"]})
+      tests/test_librarian.py:109  |  r = generate_suggestions(rows, [], {"subtitle_expected_languages": ["fr"]})
+      tests/test_pause_cooperative_v77.py:299  |  subtitle_expected_languages=None,
+      tests/test_settings_section_helpers.py:268  |  self.assertIsInstance(result["subtitle_expected_languages"], list)
+      ... (+7 autres)
+    => COMPTE CONSOMMATEUR REEL = 24  [24 consommateur(s) reel(s)]
+    note: doit etre >0 sinon le harnais ne distingue pas vrai/faux
+    [gate falsifiabilite] real_key consumers = 24 (doit etre > 0)
+
+==============================================================================
+[27] animations_enabled : 0 consommateur DOM/CSS
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:277 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (3):
+      cinesort/ui/api/settings_support.py:1705  |  if "animations_enabled" in payload:
+      cinesort/ui/api/settings_support.py:1706  |  out["animations_enabled"] = to_bool(payload.get("animations_enabled"), True)
+      web/dashboard/views/parametres.js:277  |  { key: "animations_enabled", label: "Activer les animations", type: "toggle",
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: aucun toggle DOM/CSS ; coupure uniquement via prefers-reduced-motion (OS)
+
+==============================================================================
+[28] worker_count (= 'workers globaux', PAS global_workers) : 0 consommateur
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:315 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (3):
+      cinesort/ui/api/settings_support.py:1698  |  if "worker_count" in payload:
+      cinesort/ui/api/settings_support.py:1699  |  out["worker_count"] = max(1, min(32, to_int(payload.get("worker_count"), 4)))
+      web/dashboard/views/parametres.js:315  |  { key: "worker_count", label: "Nombre de workers globaux", type: "number", min: 1, max: 32, default: 4,
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: cle REELLE = worker_count ; 'global_workers' n'existe PAS dans le code (seulement dans les docs d'audit)
+    [sous-preuve] 'global_workers' dans cinesort/+web/ = 0 (attendu 0 ; nom utilise par l'audit, pas par le code)
+
+==============================================================================
+[29] desktop_notifications_enabled : fantome ; vraie cle = notifications_enabled
+------------------------------------------------------------------------------
+    [ANCRE] web/dashboard/views/parametres.js:215 OK
+    CONSOMMATEURS REELS (hors persist/def/reset/test/dist) (0):
+      <aucun>
+    non-consommateurs (persist/def/reset/test/dist) (3):
+      cinesort/ui/api/settings_support.py:1703  |  if "desktop_notifications_enabled" in payload:
+      cinesort/ui/api/settings_support.py:1704  |  out["desktop_notifications_enabled"] = to_bool(payload.get("desktop_notifications_enabled"), False)
+      web/dashboard/views/parametres.js:215  |  { key: "desktop_notifications_enabled", label: "Activer les notifications desktop", type: "toggle" },
+    => COMPTE CONSOMMATEUR REEL = 0  [FANTOME (0 consommateur)]
+    note: real notif key = notifications_enabled (notify_service.py:67)
+    [sous-preuve] notifications_enabled lu dans notify_service.py = 2 (la VRAIE cle a un consommateur)
+
+==============================================================================
+[30] retention_days : cle settings sans lecteur (prune_disk_cache jamais appele)
+------------------------------------------------------------------------------
+    settings.get('retention_days') hors persist = 0 (attendu 0 ; total avec persist = 1)
+      [PERSIST] cinesort/ui/api/settings_support.py:1683  |  out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    def prune_disk_cache = 1 (disk_cache.py) ; APPELS prune_disk_cache(...) = 0 (attendu 0 -> mort)
+    => CONSOMMATEUR REEL de la cle settings retention_days = 0 [FANTOME]
+    note: retention_cleanup.py/cleanup_old_runs lisent history_retention_days (cle distincte), PAS settings['retention_days']
+
+==============================================================================
+[31] naming_template : persiste mais jamais lu (moteur lit movie/tv)
+------------------------------------------------------------------------------
+    references 'naming_template' (param/persist confondus) : 14
+      cinesort/app/apply_core.py:1920  |  if core_mod._single_folder_is_conform(folder.name, title, year, naming_template=cfg.naming_movie_template):
+      cinesort/app/plan_support_replan.py:320  |  naming_template=str(getattr(cfg, "naming_movie_template", "") or ""),
+      cinesort/domain/core.py:1465  |  def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_template: str = "") -> bool:
+      cinesort/domain/core.py:1474  |  naming_template=naming_template,
+      cinesort/domain/duplicate_support.py:66  |  naming_template: str = "",
+      cinesort/domain/duplicate_support.py:69  |  if naming_template:
+      cinesort/domain/duplicate_support.py:72  |  if _folder_matches_template(folder_name, naming_template, title, year):
+      cinesort/ui/api/cinesort_api.py:1664  |  def _preview_naming_template_impl(self, template: str = "", sample_row_id: str = "") -> Dict[str, Any]:
+      cinesort/ui/api/settings_support.py:1621  |  6 champs (`naming_template`, `windows_safe`, `lowercase_extensions`, `separator`,
+      cinesort/ui/api/settings_support.py:1629  |  if "naming_template" in payload:
+    lectures .get('naming_template') TOTAL = 1 (dont persist settings_support.py)
+    => LECTURES HORS PERSIST (vraie conso vers Config/moteur) = 0 (attendu 0)
+    note: les autres hits sont le PARAMETRE de fonction naming_template= des helpers _single_folder_is_conform, aliment par cfg.naming_movie_template (PAS la cle settings 'naming_template')
+
+==============================================================================
+[32] effects_mode : applique par app.js mais AUCUN controle dans parametres.js
+------------------------------------------------------------------------------
+    application dans app.js : 1
+      web/dashboard/app.js:895  |  document.documentElement.dataset.effects = s.effects_mode || "restraint";
+    CONTROLE (champ) dans parametres.js : 0 (attendu 0 -> non modifiable par l'UI)
+    persist settings_support.py : 1 (echo seul)
+
+==============================================================================
+[21] traitement.js k.duplicates_groups : absent du payload kpis dashboard
+------------------------------------------------------------------------------
+    lecture front (traitement.js) : 1
+      web/dashboard/views/traitement.js:245  |  duplicatesGroups: Number(k.duplicates_groups || 0),
+    EMISSION dans dashboard_support kpis : 0 (attendu 0 -> k.duplicates_groups toujours undefined cote Traitement)
+    emission ailleurs (history_support / run_facade) : 1 (la cle existe, mais hors get_dashboard)
+
+==============================================================================
+[F-DEAD-01] quality-simulator.js / custom-rules-editor.js : hosts morts
+------------------------------------------------------------------------------
+    fichiers important quality-simulator/custom-rules-editor :
+      web/dashboard/views/custom-rules-editor.js:1  |  /* views/custom-rules-editor.js — Editeur de regles custom (G6) dashboard ES module.
+      web/dashboard/views/custom-rules-editor.js:2  |  * Parite avec web/views/custom-rules-editor.js (desktop).
+      web/dashboard/views/custom-rules-editor.js:10  |  import { openQualitySimulator } from "./quality-simulator.js";
+      web/dashboard/views/qij.js:36  |  import { openQualitySimulator } from "./quality-simulator.js";
+      web/dashboard/views/qij.js:37  |  import { openCustomRulesEditor } from "./custom-rules-editor.js";
+      web/dashboard/views/quality-simulator.js:1  |  /* views/quality-simulator.js — Simulateur de preset qualite dashboard (G5 parite)
+      web/dashboard/views/quality-simulator.js:3  |  * Port ES module de web/views/quality-simulator.js (desktop).
+      web/dashboard/views/quality.js:7  |  import { openQualitySimulator } from "./quality-simulator.js";
+      web/dashboard/views/quality.js:8  |  import { openCustomRulesEditor } from "./custom-rules-editor.js";
+    app.js importe-t-il qij.js/quality.js (hosts) ? = 0 (attendu 0 -> hosts non montes)
+    app.js importe la vue VIVANTE qualite.js ? = 1 (attendu >=1)
+    redirections legacy _legacyRedirect('qij'/'quality') : 2
+      web/dashboard/app.js:291  |  registerRoute("/qij",      { view: "view-qij",      guard: requireAuth, init: _legacyRedirect("qij", "/accueil
+      web/dashboard/app.js:293  |  registerRoute("/quality",  { view: "view-qij",      guard: requireAuth, init: _legacyRedirect("quality", "/qua
+
+==============================================================================
+[37] index.html:92 commentaire /processing trompeur
+------------------------------------------------------------------------------
+    index.html:92  |  <!-- Note : /processing route vers initLibraryWorkflow (vue v4 unifiee). -->
+    references /processing dans app.js : 8
+      web/dashboard/app.js:201  |  // Traitement "agir : scan/review/apply"). /processing reste fonctionnelle :
+      web/dashboard/app.js:203  |  import { initProcessing } from "./views/processing.js"; // /processing (usage interne stepper)
+      web/dashboard/app.js:277  |  // /processing reste fonctionnelle : utilisee en INTERNE par traitement.js et
+      web/dashboard/app.js:281  |  registerRoute("/processing", { view: "view-processing", guard: requireAuth, init: initProcessing });
+    note: le commentaire evoque 'initLibraryWorkflow (vue v4 unifiee)' ; verifier que /processing ne pointe plus sur cette fonction.
+
+==============================================================================
+RESUME (JSON)
+==============================================================================
+{
+  "baseline": "r8",
+  "capture": "phantom_config",
+  "findings": 14,
+  "phantom_count": 13,
+  "items": [
+    {
+      "id": "F-PROM-02",
+      "title": "cleanup_orphans / cleanup_empty_folders : toggles inertes",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "F-PROM-01",
+      "title": "auto_approve_enabled : consomme uniquement par get_auto_approved_summary (0 appelant UI)",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "F-PROM-03a",
+      "title": "separator {sep} dans presets",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "F-PROM-03b",
+      "title": "subtitle_lang_priority : fantome ; la vraie cle est subtitle_expected_languages",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "F-PROM-03b-bis",
+      "title": "[FALSIFIABILITE] subtitle_expected_languages : la VRAIE cle a des consommateurs",
+      "real_consumers": 24,
+      "phantom": false,
+      "real_sites": [
+        "cinesort/app/plan_support_core.py:402",
+        "cinesort/app/plan_support_core.py:543",
+        "cinesort/app/plan_support_core.py:544",
+        "cinesort/app/plan_support_core.py:1005",
+        "cinesort/app/plan_support_core.py:1030",
+        "cinesort/app/plan_support_dedup.py:790"
+      ]
+    },
+    {
+      "id": "[27]",
+      "title": "animations_enabled : 0 consommateur DOM/CSS",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "[28]",
+      "title": "worker_count (= 'workers globaux', PAS global_workers) : 0 consommateur",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "[29]",
+      "title": "desktop_notifications_enabled : fantome ; vraie cle = notifications_enabled",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "[30]",
+      "title": "retention_days : cle settings sans lecteur (prune_disk_cache jamais appele)",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "[31]",
+      "title": "naming_template persiste non relu",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": []
+    },
+    {
+      "id": "[32]",
+      "title": "effects_mode sans controle UI",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": [
+        "web/dashboard/app.js:895"
+      ]
+    },
+    {
+      "id": "[21]",
+      "title": "k.duplicates_groups absent des kpis dashboard",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": [
+        "cinesort/ui/api/history_support.py:361"
+      ]
+    },
+    {
+      "id": "F-DEAD-01",
+      "title": "quality-simulator/custom-rules hosts (qij.js/quality.js) morts",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": [
+        "web/dashboard/app.js:219"
+      ]
+    },
+    {
+      "id": "[37]",
+      "title": "index.html:92 commentaire /processing trompeur",
+      "real_consumers": 0,
+      "phantom": true,
+      "real_sites": [
+        "web/dashboard/index.html:92"
+      ]
+    }
+  ]
+}

@@ -16,14 +16,14 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     DV_PROFILE_WARNINGS_FR,
     DV_QUALITY_SCORE,
     HDR_MAX_CLL_WARNING_THRESHOLD,
     HDR_QUALITY_SCORE,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)

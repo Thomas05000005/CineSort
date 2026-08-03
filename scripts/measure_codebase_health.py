@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import re
 import subprocess
@@ -22,7 +23,6 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
-import contextlib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_DIRS = {

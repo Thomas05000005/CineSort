@@ -11,12 +11,12 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import cinesort.domain.core as core
-from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.apply_support import preverify_undo_operations
+from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import wait_run_done as _wait_done
 
 
