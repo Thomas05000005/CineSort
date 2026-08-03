@@ -13,7 +13,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.core import windows_safe
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +204,6 @@ def _matching_candidates(row: Dict[str, Any]) -> List[Dict[str, Any]]:
     reellement resolue porte une annee — refuser 0 ne coute rien et ferme la
     porte a une revendication de possession sur une row non resolue.
     """
-    from cinesort.domain.core import windows_safe
 
     def _key(value: Any) -> str:
         return windows_safe(str(value or "")).strip().casefold()
@@ -257,8 +258,6 @@ def _plan_row_tmdb_id(row: Dict[str, Any]) -> Optional[int]:
     canonique du depot, `film_support._resolve_chosen_tmdb_id` : on ne duplique
     pas une variante, on lui restreint seulement les candidats offerts.
     """
-    from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
-
     resolved = _resolve_chosen_tmdb_id(row, _matching_candidates(row))
     return int(resolved) if resolved > 0 else None
 
