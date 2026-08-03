@@ -183,7 +183,12 @@ def detect_cross_verdicts(
         )
 
     # 2. Faux 4K
-    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and bits < 8.0 and blur > BLUR_THRESHOLD_FAKE_4K:
+    # `effective_bits_mean` vaut 0.0 quand la passe PIXEL n'a rendu aucune frame
+    # exploitable (cf video_analysis._apply_pixel_aggregates) : c'est une sentinelle
+    # "non mesure", pas une mesure de 0 bit. `blur` et `resolution_height` viennent
+    # de la passe FILTRE, un subprocess ffmpeg distinct qui peut, lui, avoir reussi
+    # -> `0.0 < 8.0` levait un verdict "Faux 4K" sur une metrique absente (issue #813).
+    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and 0.0 < bits < 8.0 and blur > BLUR_THRESHOLD_FAKE_4K:
         verdicts.append(
             {
                 "id": "fake_4k",

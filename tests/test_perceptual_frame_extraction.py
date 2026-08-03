@@ -5,7 +5,7 @@ Couvre :
 - parse_raw_frame : 8-bit, 10-bit, donnees tronquees
 - is_valid_frame : variance haute/basse, donnees tronquees
 - compute_inter_frame_diff : frames identiques, differentes
-- extract_single_frame : commande ffmpeg, downscale, pix_fmt
+- extract_single_frame : commande ffmpeg, geometrie de sortie forcee, pix_fmt
 - extract_representative_frames : orchestration, diversite, remplacement
 """
 
@@ -180,23 +180,29 @@ class ExtractSingleFrameTests(unittest.TestCase):
     """Tests de l'extraction d'une frame unique via ffmpeg."""
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
-    def test_downscale_4k(self, mock_run) -> None:
-        """Width > 1920 → commande contient scale=1920:-1."""
+    def test_scale_filter_matches_requested_geometry_uhd(self, mock_run) -> None:
+        """Issue #559 : la sortie est forcee a la geometrie DEMANDEE, pas au natif."""
         mock_run.return_value = (0, b"\x80" * 100, "")
         extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 3840, 2160, 8)
         cmd = mock_run.call_args[0][0]
-        # Chercher le filtre scale
         self.assertIn("-vf", cmd)
-        vf_idx = cmd.index("-vf")
-        self.assertIn("scale=1920:-1", cmd[vf_idx + 1])
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=3840:2160")
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
-    def test_no_downscale_1080p(self, mock_run) -> None:
-        """Width <= 1920 → pas de filtre scale."""
+    def test_scale_filter_matches_requested_geometry_1080p(self, mock_run) -> None:
+        """Meme contrat sous le seuil de downscale : ffmpeg doit rendre 1920x1080."""
         mock_run.return_value = (0, b"\x80" * 100, "")
         extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 1920, 1080, 8)
         cmd = mock_run.call_args[0][0]
-        self.assertNotIn("-vf", cmd)
+        self.assertIn("-vf", cmd)
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=1920:1080")
+
+    @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
+    def test_no_scale_filter_when_geometry_unusable(self, mock_run) -> None:
+        """Dimensions inexploitables : aucun filtre invalide n'est passe a ffmpeg."""
+        mock_run.return_value = (0, b"", "")
+        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 0, 0, 8)
+        self.assertNotIn("-vf", mock_run.call_args[0][0])
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
     def test_pix_fmt_by_bit_depth(self, mock_run) -> None:

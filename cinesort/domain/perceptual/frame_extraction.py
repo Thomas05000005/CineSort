@@ -186,11 +186,23 @@ def extract_single_frame(
     bit_depth: int = 8,
     timeout_s: float = _FRAME_EXTRACT_TIMEOUT_S,
 ) -> bytes:
-    """Extrait une frame Y brute via ffmpeg.
+    """Extrait une frame Y brute via ffmpeg, a EXACTEMENT ``width`` x ``height``.
 
-    Si ``width`` > FRAME_DOWNSCALE_THRESHOLD, un filtre ``scale=1920:-1`` est
-    applique pour reduire la charge d'analyse pixel (les filtres ffmpeg Phase 2-B
-    tourneront sur la resolution native).
+    Contrat (issue #559) : la sortie rawvideo doit contenir exactement
+    ``width * height`` echantillons Y (x2 octets en 10-bit), car c'est ce que
+    l'appelant passera a ``parse_raw_frame``. Un filtre ``scale={width}:{height}``
+    est donc TOUJOURS applique des que les deux dimensions sont exploitables.
+
+    Auparavant le filtre n'etait pose que si ``width`` depassait
+    FRAME_DOWNSCALE_THRESHOLD, et sous la forme ``scale=1920:-1`` : les dimensions
+    demandees ne servaient qu'au test de seuil, jamais a forcer la sortie. ffmpeg
+    rendait donc la resolution NATIVE, et tout appelant visant une resolution
+    commune plus petite (deep-compare de deux editions, cf ``extract_aligned_frames``)
+    recevait un nombre d'octets incoherent -> frame rejetee en silence.
+
+    La politique de downscale 4K+ n'est pas perdue : elle appartient aux appelants,
+    qui calculent les dimensions effectives (cf ``extract_representative_frames``
+    et ``extract_aligned_frames``, tous deux bornes a FRAME_DOWNSCALE_THRESHOLD).
     """
     pix_fmt = "gray16le" if bit_depth >= 10 else "gray"
 
@@ -202,9 +214,10 @@ def extract_single_frame(
         str(media_path),
     ]
 
-    # Downscale 4K+ pour l'analyse pixel
-    if int(width) > FRAME_DOWNSCALE_THRESHOLD:
-        cmd += ["-vf", "scale=1920:-1"]
+    # Resolution de sortie forcee = resolution attendue par le parsing.
+    req_w, req_h = int(width), int(height)
+    if req_w > 0 and req_h > 0:
+        cmd += ["-vf", f"scale={req_w}:{req_h}"]
 
     cmd += [
         "-frames:v",

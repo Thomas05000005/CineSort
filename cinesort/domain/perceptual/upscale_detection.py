@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .constants import (
+    FAKE_4K_CONFIDENCE_SINGLE_SIGNAL,
     FAKE_4K_FFT_HF_CUTOFF_RATIO,
     FAKE_4K_FFT_MIN_VARIANCE,
     FAKE_4K_FFT_MIN_Y_AVG,
@@ -198,10 +199,15 @@ def combine_fake_4k_verdicts(
         ssim_self_ref: score SSIM Y 0.0-1.0, None ou -1 si non calcule.
 
     Returns:
-        "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
-        "fake_4k_probable"  : un seul conclut fake (conf 0.70)
-        "4k_native"         : aucun ne conclut fake (conf 0.90)
-        "ambiguous"         : les 2 sont indisponibles (conf 0.30)
+        Les DEUX signaux consultes :
+          "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
+          "fake_4k_probable"  : un seul des 2 conclut fake (conf 0.70)
+          "4k_native"         : aucun des 2 ne conclut fake (conf 0.90)
+        UN SEUL signal disponible (issue #804) : meme verdict, mais confiance
+        rabaissee a FAKE_4K_CONFIDENCE_SINGLE_SIGNAL — un verdict rendu sur un
+        signal unique n'est pas un consensus et ne peut pas porter la meme
+        confiance qu'un accord a deux signaux.
+        "ambiguous" : les 2 sont indisponibles (conf 0.30)
     """
     # Normalise : SSIM peut etre None ou -1 (flag "non calcule")
     ssim_available = ssim_self_ref is not None and ssim_self_ref >= 0
@@ -212,6 +218,12 @@ def combine_fake_4k_verdicts(
 
     fft_says_fake = fft_available and fft_ratio < FAKE_4K_FFT_THRESHOLD_AMBIGUOUS
     ssim_says_fake = ssim_available and ssim_self_ref >= SSIM_SELF_REF_FAKE_THRESHOLD
+
+    # Un seul signal consulte : aucune corroboration possible, ni dans un sens
+    # ni dans l'autre. La categorie reste celle du signal disponible.
+    if not (fft_available and ssim_available):
+        verdict = "fake_4k_probable" if (fft_says_fake or ssim_says_fake) else "4k_native"
+        return (verdict, FAKE_4K_CONFIDENCE_SINGLE_SIGNAL)
 
     if fft_says_fake and ssim_says_fake:
         return ("fake_4k_confirmed", 0.95)

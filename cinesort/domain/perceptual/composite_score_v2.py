@@ -310,17 +310,25 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
 
 
 def _score_audio_drc(audio: Any) -> Tuple[float, float]:
-    """Score derive de la classification DRC §14."""
+    """Score derive de la classification DRC §14.
+
+    La confiance rendue par `classify_drc` fait AUTORITE quand elle existe : le
+    plancher (`max(conf, ...)`) ne sert que de valeur par defaut lorsque le
+    producteur n'a rien renseigne (0.0, cas d'un rapport ancien ou d'un objet
+    partiel). Avec un plancher inconditionnel, la confiance basse rendue sur une
+    seule metrique mesuree (issue #752) etait remontee a 0.70, et la penalite
+    `broadcast_compressed` pesait de tout son poids sur donnee partielle.
+    """
     if audio is None:
         return 50.0, 0.0
     category = str(getattr(audio, "drc_category", "unknown") or "unknown")
     conf = float(getattr(audio, "drc_confidence", 0) or 0)
     if category == "cinema":
-        return 100.0, max(conf, 0.7)
+        return 100.0, conf if conf > 0 else 0.7
     if category == "standard":
-        return 85.0, max(conf, 0.6)
+        return 85.0, conf if conf > 0 else 0.6
     if category == "broadcast_compressed":
-        return 60.0, max(conf, 0.7)
+        return 60.0, conf if conf > 0 else 0.7
     return 70.0, 0.0
 
 
