@@ -99,6 +99,46 @@ class StateDirRaceTests(_ConcurrencyBase):
 
 class MemoryStabilityTests(_ConcurrencyBase):
     # 21
+    # Payload de scan volontairement DEPOUILLE des travaux post-scan optionnels.
+    #
+    # Ce test ne mesure qu'une chose : la taille de JobRunner._runs apres N scans.
+    # Or `get_status().done` ne bascule qu'une fois le THREAD DE JOB rendu, pas
+    # quand le plan est pret : tout ce que job_fn fait apres "=== PLAN READY ==="
+    # (recalcul qualite auto, analyse perceptuelle auto) rentre dans l'attente.
+    #
+    # Mesure du 2026-08-03 (35 scans successifs sur le meme state_dir, meme
+    # machine) : avec auto_recompute_quality_on_scan=True la duree d'un scan
+    # passe de 0,26 s au run 1 a 9,98 s au run 35 (croissance lineaire : les
+    # jobs de recalcul lances par les scans precedents se marchent dessus sur
+    # la meme base SQLite). Avec le toggle a False : 0,16 s -> 1,39 s.
+    # C'est cette derive qui creve le timeout de 10 s de wait_run_done sur les
+    # runners GitHub (windows-ci run 30761763284 et CI run 30772061322 :
+    # "Timeout 10.0s ... 'running': True, 'status': 'RUNNING'" alors que les
+    # logs du run contenaient DEJA "=== PLAN READY rows=1 ==="). Le defaut est
+    # dans le code de production (cf. run_flow_support._build_plan_job_fn), pas
+    # dans ce test ; on le neutralise ici parce qu'il est hors sujet, et le
+    # commentaire sert de trace tant qu'il n'est pas corrige.
+    _SCAN_PAYLOAD_EXTRA = {
+        "auto_recompute_quality_on_scan": False,
+        "perceptual_auto_on_scan": False,
+        "perceptual_auto_on_quality": False,
+    }
+    # La croissance residuelle (0,16 s -> 1,39 s en local) reste, et un runner
+    # GitHub sous coverage est plusieurs fois plus lent : on se donne une marge
+    # franche. Ce test n'est PAS un test de latence, seule la borne memoire est
+    # verifiee ; un timeout serre n'y ajoute aucune couverture, il n'ajoute que
+    # du faux rouge.
+    _WAIT_TIMEOUT_S = 60.0
+
+    def _scan_payload(self) -> dict:
+        payload = {
+            "root": str(self.root),
+            "state_dir": str(self.state_dir),
+            "tmdb_enabled": False,
+        }
+        payload.update(self._SCAN_PAYLOAD_EXTRA)
+        return payload
+
     def test_100_runs_memory_stable(self) -> None:
         """Scans repetes : _runs reste borne grace au cleanup H6 (garantit pas de fuite lineaire)."""
         _create_file(self.root / "Single.2020" / "Single.2020.mkv")
@@ -107,26 +147,14 @@ class MemoryStabilityTests(_ConcurrencyBase):
 
         # Warmup + mesure via RSS si psutil dispo, sinon on se contente de la verification _runs
         for _ in range(5):
-            start = api.run.start_plan(
-                {
-                    "root": str(self.root),
-                    "state_dir": str(self.state_dir),
-                    "tmdb_enabled": False,
-                }
-            )
-            _wait_done(api, start["run_id"])
+            start = api.run.start_plan(self._scan_payload())
+            _wait_done(api, start["run_id"], timeout_s=self._WAIT_TIMEOUT_S)
         gc.collect()
 
         # Lancer 30 scans supplementaires
         for _ in range(30):
-            start = api.run.start_plan(
-                {
-                    "root": str(self.root),
-                    "state_dir": str(self.state_dir),
-                    "tmdb_enabled": False,
-                }
-            )
-            _wait_done(api, start["run_id"])
+            start = api.run.start_plan(self._scan_payload())
+            _wait_done(api, start["run_id"], timeout_s=self._WAIT_TIMEOUT_S)
         gc.collect()
 
         # Verification principale : _runs du JobRunner est bien cleanup (H6).

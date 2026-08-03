@@ -261,9 +261,7 @@ class GetPlanHardeningTests(unittest.TestCase):
             "_get_plan_impl",
             side_effect=RuntimeError("plan boom"),
         ):
-            res = history_support.get_plan(
-                api, "run_xyz", normalize_user_path=lambda *a, **kw: ""
-            )
+            res = history_support.get_plan(api, "run_xyz", normalize_user_path=lambda *a, **kw: "")
 
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("error"), "plan_load_failed")

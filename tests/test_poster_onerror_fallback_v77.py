@@ -3,7 +3,8 @@
 Le proxy /api/poster renvoie un corps JSON (404 poster indisponible / 503 cle
 TMDb absente), pas une image. Sans onerror, l'<img> affiche une icone cassee.
 - bibliotheque : handler 'error' delegue en phase capture -> placeholder.
-- film-detail : onerror inline -> placeholder.
+- film-detail : handler 'error' delegue (LOTC-C1, CSP script-src 'self' bloque
+  l'onerror inline) -> placeholder.
 """
 
 from __future__ import annotations
@@ -24,9 +25,16 @@ class PosterOnErrorFallbackTests(unittest.TestCase):
         self.assertIn("bibliotheque-card-poster-img", js)
         self.assertIn("bibliotheque-card-poster-placeholder", js)
 
-    def test_film_detail_has_onerror_fallback(self) -> None:
+    def test_film_detail_has_delegated_error_listener(self) -> None:
+        # LOTC-C1 : onerror inline remplacé par un listener 'error' délégué en
+        # phase capture (CSP script-src 'self' bloque les handlers inline).
         js = _FILM.read_text(encoding="utf-8")
-        self.assertIn("onerror=", js, "L'<img> poster film-detail doit avoir un onerror.")
+        self.assertIn(
+            'addEventListener("error", _onPosterError, true)',
+            js,
+            "film-detail doit avoir le listener 'error' délégué (capture).",
+        )
+        self.assertNotIn("onerror=", js, "Plus d'onerror inline (bloqué par la CSP).")
         self.assertIn("film-detail-poster--placeholder", js)
 
 

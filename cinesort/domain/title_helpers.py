@@ -12,7 +12,12 @@ from cinesort.domain.scene_parser import parse_scene_title
 logger = logging.getLogger(__name__)
 
 
-YEAR_RE = re.compile(r"(19\d{2}|20\d{2})")
+# F02 : lookarounds sur CHIFFRES uniquement (surtout PAS `\b`). Un id provider
+# ("tt1950186", "19995") ou tout nombre plus long ne doit plus livrer une fausse
+# annee par sous-chaine. `\b` casserait "Avatar2009.mkv" (lettre|chiffre est une
+# frontiere de mot) et ferait perdre une annee reelle : on borne donc uniquement
+# sur des chiffres adjacents. Limite assumee : "Film 1920x1080" rend encore 1920.
+YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(19\d{2}|20\d{2})\s*[\)\]\}]")
 
 # --- Provider tags (B02-TAGS-BRACKETS) ------------------------------------
@@ -75,6 +80,8 @@ def strip_provider_tags(name: str) -> str:
     cleaned = _TMDB_TAG_RE.sub(" ", name)
     cleaned = _IMDB_TAG_RE.sub(" ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
 REMASTER_HINT_RE = re.compile(
     r"\b("
     r"remaster(?:ed)?|restor(?:ed|ation)|restaure(?:e|es|ee|ees)?|"
@@ -195,6 +202,11 @@ def _last_parenthesized_year(text: str) -> Optional[int]:
 def infer_name_year(folder_name: str, video_name: str) -> Tuple[Optional[int], str, bool]:
     """Extract the most likely release year from folder/video names. Returns (year, reason, remaster_hint)."""
     logger.debug("infer_name_year: folder=%r video=%r", folder_name, video_name)
+    # F02 : les tags providers sont retires AVANT toute extraction d'annee.
+    # Sans ca, `{tmdb-19995}` livre 1999 et `[imdbid-tt1950186]` livre 1950.
+    # Idempotent avec les appelants qui strippent deja (core.py).
+    folder_name = strip_provider_tags(folder_name or "")
+    video_name = strip_provider_tags(video_name or "")
     combined = f"{folder_name} {video_name}"
     remaster_hint = bool(REMASTER_HINT_RE.search(combined))
 
@@ -415,9 +427,42 @@ def _expand_tmdb_queries(queries: List[str]) -> List[str]:
         no_paren = re.sub(r"\([^)]*\)", " ", q2)
         add_query(no_paren)
 
-        for sep in (" - ", " ? ", " ? ", ":", "/", "|"):
+        # F15 : les 2e/3e entrees etaient un mojibake (points d'interrogation
+        # ASCII 0x3F) de l'en-dash U+2013 et de l'em-dash U+2014, donc du code
+        # mort qui ne splittait plus les titres a tiret typographique
+        # ("Mission Impossible - Fallout" ecrit avec un en-dash).
+        # On ecrit les separateurs en ECHAPPEMENTS pour immuniser le fichier
+        # contre une nouvelle perte d'encodage. `break` -> seul le PREMIER
+        # separateur present declenche le split, ordre inchange.
+        for sep in (" - ", " \u2013 ", " \u2014 ", ":", "/", "|"):
             if sep in q2:
                 add_query(q2.split(sep, 1)[0])
                 break
 
     return out
+
+
+_IDENTITY_TRAILING_YEAR_RE = re.compile(r"^(?P<head>.+?)[\s._-]+(?P<yr>19\d{2}|20\d{2})$")
+
+
+def strip_trailing_year_if_equal(title: str, year: Optional[int]) -> str:
+    """Retire l'annee de QUEUE du titre UNIQUEMENT si elle egale `year`.
+
+    LOTD-DUP-TITLE-YEAR (revue round 1) : sert a NORMALISER la cle de
+    dedoublonnage/identite. Sans TMDb, "Titre 2005"|2005 et "Titre"|2005
+    (dossier "Titre (2005)") doivent matcher le meme film. Un film-annee comme
+    "Blade Runner 2049" sorti en 2017 garde son titre : 2049 != 2017 -> pas de
+    strip ; un titre-annee nu ("1984","2012") n'a pas de separateur -> preserve.
+    N'est JAMAIS applique au proposed_title stocke (cle dedup/seed torrents
+    intacte). Depuis le fix double-annee disque, ce helper est AUSSI applique au
+    titre/serie dans naming._apply_template UNIQUEMENT quand le template contient
+    {year} (evite "Titre 2005 (2005)") ; un template custom SANS {year} conserve
+    donc l'annee du titre.
+    """
+    if not title or not year:
+        return title
+    m = _IDENTITY_TRAILING_YEAR_RE.match(title.strip())
+    if not m or int(m.group("yr")) != int(year):
+        return title
+    head = m.group("head").strip(" -_.")
+    return head or title

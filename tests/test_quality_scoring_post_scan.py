@@ -31,16 +31,12 @@ class AutoRecomputeSettingDefaultsTests(unittest.TestCase):
         self.assertEqual(defaults["auto_recompute_quality_on_scan"], True)
 
     def test_save_section_subtitles_persists_toggle_true(self) -> None:
-        out = settings_support._save_section_subtitles(
-            {"auto_recompute_quality_on_scan": True}
-        )
+        out = settings_support._save_section_subtitles({"auto_recompute_quality_on_scan": True})
         self.assertIn("auto_recompute_quality_on_scan", out)
         self.assertEqual(out["auto_recompute_quality_on_scan"], True)
 
     def test_save_section_subtitles_persists_toggle_false(self) -> None:
-        out = settings_support._save_section_subtitles(
-            {"auto_recompute_quality_on_scan": False}
-        )
+        out = settings_support._save_section_subtitles({"auto_recompute_quality_on_scan": False})
         self.assertIn("auto_recompute_quality_on_scan", out)
         self.assertEqual(out["auto_recompute_quality_on_scan"], False)
 
@@ -61,9 +57,7 @@ class RecomputeAllScoresContractTests(unittest.TestCase):
 
     def test_no_run_returns_error_state(self) -> None:
         api = self._make_api()
-        with patch.object(
-            quality_audit_support, "_resolve_latest_run_id", return_value=None
-        ):
+        with patch.object(quality_audit_support, "_resolve_latest_run_id", return_value=None):
             res = quality_audit_support.recompute_all_scores(api)
         self.assertFalse(res.get("ok"))
         # _err_response retourne `message`, pas `user_message`. On verifie juste
@@ -73,9 +67,7 @@ class RecomputeAllScoresContractTests(unittest.TestCase):
     def test_no_rows_returns_error_state(self) -> None:
         api = self._make_api()
         api.run.get_plan.return_value = {"ok": True, "rows": []}
-        with patch.object(
-            quality_audit_support, "_resolve_latest_run_id", return_value="run_xyz"
-        ):
+        with patch.object(quality_audit_support, "_resolve_latest_run_id", return_value="run_xyz"):
             res = quality_audit_support.recompute_all_scores(api)
         self.assertFalse(res.get("ok"))
         self.assertTrue(res.get("message"))
@@ -90,9 +82,7 @@ class RecomputeAllScoresContractTests(unittest.TestCase):
         # vrai pipeline probe+score (necessite filesystem + ffprobe).
         api.quality.get_quality_report.return_value = {"ok": True}
 
-        with patch.object(
-            quality_audit_support, "_resolve_latest_run_id", return_value="run_xyz"
-        ):
+        with patch.object(quality_audit_support, "_resolve_latest_run_id", return_value="run_xyz"):
             res = quality_audit_support.recompute_all_scores(api)
 
         self.assertTrue(res.get("ok"), f"recompute_all_scores doit reussir: {res}")
@@ -136,17 +126,18 @@ class QualityReportPersistsEmbeddedSubtitlesTests(unittest.TestCase):
             "cache_hit": False,
         }
 
-        with patch.object(
-            quality_report_support, "ProbeService"
-        ) as mock_probe_cls, patch.object(
-            quality_report_support,
-            "compute_quality_score",
-            return_value={
-                "score": 75,
-                "tier": "Gold",
-                "reasons": [],
-                "metrics": {"video": {"width": 1920}},
-            },
+        with (
+            patch.object(quality_report_support, "ProbeService") as mock_probe_cls,
+            patch.object(
+                quality_report_support,
+                "compute_quality_score",
+                return_value={
+                    "score": 75,
+                    "tier": "Gold",
+                    "reasons": [],
+                    "metrics": {"video": {"width": 1920}},
+                },
+            ),
         ):
             mock_probe = MagicMock()
             mock_probe.probe_file.return_value = probe_result

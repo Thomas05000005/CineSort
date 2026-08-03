@@ -106,9 +106,23 @@ jobs:
         shell: pwsh
         run: lint-imports
 
-      # 7. Execution des tests avec mesure de couverture (unitaires
-      # uniquement — les E2E dashboard/desktop necessitent des navigateurs
-      # Playwright installes, traites apres le build).
+      # 6c. Navigateur Playwright pour les tests runtime de `tests/` (2026-08-03).
+      #
+      # Le commentaire ci-dessous supposait que TOUS les tests navigateur vivaient
+      # dans tests/e2e*. Ce n'est plus vrai : 46 tests parametres `[chromium]`
+      # (contraste WCAG, invariantes de couleurs de tier, libelles UTF-8, cycles
+      # de toast et de countdown, arret des pollers au unmount) vivent dans
+      # `tests/` et sont donc DANS le perimetre de ce job. Sans navigateur ils
+      # echouaient tous au setup — 46 ERROR qui faisaient echouer l'etape des
+      # tests, et masquaient les vrais echecs.
+      # `--only-shell` suffit : ces tests tournent en headless.
+      - name: Navigateur Playwright (tests runtime de tests/)
+        shell: pwsh
+        run: python -m playwright install chromium --only-shell
+
+      # 7. Execution des tests avec mesure de couverture (unitaires + tests
+      # runtime headless de `tests/` — les E2E dashboard/desktop restent
+      # exclus et sont traites apres le build).
       #
       # v1.0.0-beta : pollution inter-tests resolue (issue #4).
       # Cause root : test_import_cycle_guard manipulait sys.modules ce qui

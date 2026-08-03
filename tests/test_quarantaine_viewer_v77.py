@@ -13,6 +13,7 @@ Couvre `list_review_bucket_files` :
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -20,8 +21,6 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-
-import json
 
 from cinesort.app.quarantine_ttl import _TTL_MANIFEST_NAME, list_review_bucket_files
 
@@ -47,9 +46,7 @@ def _seed_arrival(root: Path, rel: str, days_ago: float) -> None:
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _write_file(
-    p: Path, content: bytes = b"x" * 100, days_ago: float = 0.0, *, root: Path = None
-) -> Path:
+def _write_file(p: Path, content: bytes = b"x" * 100, days_ago: float = 0.0, *, root: Path = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(content)
     if days_ago > 0:
@@ -154,12 +151,22 @@ class ListReviewBucketFilesTests(unittest.TestCase):
         self.assertIn("MyFilm (2020)", res["by_subdir"])
 
     def test_all_known_subdirs_recognized(self) -> None:
-        for sub in ("_conflicts", "_conflicts_sidecars", "_duplicates_identical",
-                    "_duplicates_user_decided", "_leftovers"):
+        for sub in (
+            "_conflicts",
+            "_conflicts_sidecars",
+            "_duplicates_identical",
+            "_duplicates_user_decided",
+            "_leftovers",
+        ):
             _write_file(self.root / "_review" / sub / "f.bin")
         res = list_review_bucket_files(self.cfg)
-        for sub in ("_conflicts", "_conflicts_sidecars", "_duplicates_identical",
-                    "_duplicates_user_decided", "_leftovers"):
+        for sub in (
+            "_conflicts",
+            "_conflicts_sidecars",
+            "_duplicates_identical",
+            "_duplicates_user_decided",
+            "_leftovers",
+        ):
             self.assertIn(sub, res["by_subdir"])
             self.assertEqual(res["by_subdir"][sub]["count"], 1)
 

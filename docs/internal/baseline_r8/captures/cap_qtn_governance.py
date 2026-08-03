@@ -18,7 +18,9 @@ APRES (R8-002 fixe) : l'original quarantine est PRESERVE (relocate hors retentio
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/baseline_r8/captures/cap_qtn_governance.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
@@ -66,12 +68,18 @@ def run():
         print("          sans preservation, quel que soit le TTL configure.")
     else:
         print("VERDICT : GOUVERNE — l'original quarantine est PRESERVE (pas de perte).")
-    print("RESUME:", json.dumps({
-        "data_lost": data_lost,
-        "qfile_at_origin": qfile_still_at_origin,
-        "preserved_copies": len(preserved),
-        "old_run_dir_removed": not old_dir_still,
-    }, ensure_ascii=False))
+    print(
+        "RESUME:",
+        json.dumps(
+            {
+                "data_lost": data_lost,
+                "qfile_at_origin": qfile_still_at_origin,
+                "preserved_copies": len(preserved),
+                "old_run_dir_removed": not old_dir_still,
+            },
+            ensure_ascii=False,
+        ),
+    )
 
 
 if __name__ == "__main__":

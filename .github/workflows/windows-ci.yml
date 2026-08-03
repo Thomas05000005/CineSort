@@ -38,8 +38,14 @@ jobs:
 
       - name: Install Playwright Chromium
         shell: pwsh
+        # `chromium` et `chromium-headless-shell` sont deux telechargements
+        # DISTINCTS depuis Playwright 1.49. Cette etape existait deja mais
+        # n'installait que le premier : les tests headless de `tests/` cherchent
+        # `chrome-headless-shell.exe` et echouaient tous AU SETUP
+        # (« Executable doesn't exist [...] Please run playwright install »),
+        # ce qui faisait echouer le quality gate sans rapport avec le code.
         run: |
-          python -m playwright install chromium
+          python -m playwright install chromium chromium-headless-shell
 
       - name: Standard quality gate
         shell: cmd
