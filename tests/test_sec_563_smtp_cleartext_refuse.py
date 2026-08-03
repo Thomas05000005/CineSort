@@ -283,6 +283,11 @@ class Garde2TransportTests(_SmtpServerCase):
         """Controle positif : sans lui, un predicat qui renvoie toujours False
         passerait le test precedent sans rien prouver."""
         ctx = ssl.create_default_context()
+        # TLS 1.2 minimum : CodeQL (py/insecure-protocol) signale a juste titre
+        # qu'un contexte par defaut laisse la porte ouverte a TLSv1/1.1 selon la
+        # politique OpenSSL locale. On ne handshake pas ici, mais un test de
+        # securite n'a aucune raison de montrer le mauvais exemple.
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         raw = socket.socket()
         self.addCleanup(raw.close)
         wrapped = ctx.wrap_socket(raw, do_handshake_on_connect=False, server_hostname="example.invalid")

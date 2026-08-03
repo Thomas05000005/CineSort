@@ -160,8 +160,13 @@ def send_email_report(
     # prevue — une branche permissive sur un chemin qui transporte un secret,
     # c'est exactement le defaut qu'on corrige. La sortie est a un clic :
     # activer STARTTLS, passer en 465, ou retirer les identifiants.
+    #
+    # Le log ne reprend NI l'hote NI le port : le message dit deja quoi
+    # corriger, la configuration est sous les yeux de l'utilisateur, et les
+    # logs CineSort partent en piece jointe des demandes de support. Rien de la
+    # configuration du compte mail n'a besoin d'y figurer.
     if user and password and not smtp_session_will_be_encrypted(port, use_tls):
-        logger.error("[email] %s (hote %s port %s)", CLEARTEXT_REFUSAL_MESSAGE, host, port)
+        logger.error("[email] %s", CLEARTEXT_REFUSAL_MESSAGE)
         return False
 
     subject = _build_subject(event, data)
@@ -193,7 +198,7 @@ def send_email_report(
                 # les deux plus tard (nouveau port implicite, refactor du
                 # calcul de `use_tls`, sous-classe de smtplib).
                 if not _socket_is_encrypted(smtp):
-                    logger.error("[email] %s (hote %s port %s)", CLEARTEXT_REFUSAL_MESSAGE, host, port)
+                    logger.error("[email] %s", CLEARTEXT_REFUSAL_MESSAGE)
                     raise SmtpCleartextRefused(CLEARTEXT_REFUSAL_MESSAGE)
                 smtp.login(user, password)
             smtp.sendmail(from_addr, [to_addr], msg.as_string())
