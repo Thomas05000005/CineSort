@@ -124,15 +124,12 @@ def load_model(
     try:
         import onnxruntime as ort  # type: ignore[import-not-found]  # noqa: PLC0415
     except ImportError as exc:
-        raise VisionModelUnavailableError(
-            "onnxruntime non installe (requis pour DINOv3 embeddings V4.2)"
-        ) from exc
+        raise VisionModelUnavailableError("onnxruntime non installe (requis pour DINOv3 embeddings V4.2)") from exc
 
     resolved = Path(model_path) if model_path else _default_model_path()
     if not resolved.is_file():
         raise VisionModelUnavailableError(
-            f"modele ONNX absent: {resolved} "
-            f"(cf docs/internal/notes/vision_models.md pour bundling)"
+            f"modele ONNX absent: {resolved} (cf docs/internal/notes/vision_models.md pour bundling)"
         )
 
     provs = list(providers) if providers else ["CPUExecutionProvider"]
@@ -147,9 +144,7 @@ def load_model(
             providers=provs,
         )
     except Exception as exc:  # noqa: BLE001 - encapsule toute erreur ONNX
-        raise VisionModelUnavailableError(
-            f"echec chargement session ONNX {resolved}: {exc}"
-        ) from exc
+        raise VisionModelUnavailableError(f"echec chargement session ONNX {resolved}: {exc}") from exc
 
     _session_cache = session
     _model_path_cache = resolved
@@ -188,7 +183,8 @@ def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
     if a.size == 0 or b.size == 0 or a.shape != b.shape:
         logger.debug(
             "cosine_similarity: shapes incompat a=%s b=%s",
-            a.shape, b.shape,
+            a.shape,
+            b.shape,
         )
         return 0.0
     na = float(np.linalg.norm(a))

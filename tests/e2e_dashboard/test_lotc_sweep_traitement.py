@@ -151,9 +151,7 @@ def _goto_step(page, step, timeout=20000):
     try:
         page.wait_for_function(wait_js, arg=_STEP_TITLES[step], timeout=timeout)
     except PWTimeoutError:
-        stuck_empty = page.evaluate(
-            "() => !!document.querySelector('.traitement-header-run--empty')"
-        )
+        stuck_empty = page.evaluate("() => !!document.querySelector('.traitement-header-run--empty')")
         if not stuck_empty:
             raise
         # Vue morte sur l'empty-state (race dedup+abort) : re-resolve force.
@@ -245,15 +243,15 @@ class TestLotCSweepTraitement:
         )
         if title == _STEP_TITLES["analyse"]:
             # Fenetre pre-tick : verifier le panneau Analyse (asserts rapides).
-            assert page.evaluate(
-                "() => !!document.querySelector('[data-traitement-action=\"start-scan\"]')"
-            ), "Bouton start-scan absent en etape Analyse (run DONE)"
-            assert page.evaluate(
-                "() => !!document.querySelector('[data-traitement-action=\"view-logs\"]')"
-            ), "Bouton view-logs absent en etape Analyse"
-            assert page.evaluate(
-                "() => !!document.querySelector('[data-scan-opt=\"perceptual\"]:not([disabled])')"
-            ), "Options de scan desactivees alors qu'aucun scan ne tourne"
+            assert page.evaluate("() => !!document.querySelector('[data-traitement-action=\"start-scan\"]')"), (
+                "Bouton start-scan absent en etape Analyse (run DONE)"
+            )
+            assert page.evaluate("() => !!document.querySelector('[data-traitement-action=\"view-logs\"]')"), (
+                "Bouton view-logs absent en etape Analyse"
+            )
+            assert page.evaluate("() => !!document.querySelector('[data-scan-opt=\"perceptual\"]:not([disabled])')"), (
+                "Options de scan desactivees alors qu'aucun scan ne tourne"
+            )
             _screenshot(page, "traitement_step1_analyse.png")
 
         # Auto-transition v1.5.2 : le run DONE doit basculer sur Verification.
@@ -270,20 +268,16 @@ class TestLotCSweepTraitement:
             _screenshot(page, "traitement_step1_analyse.png")
 
         # Asserts communs post-stabilisation (header + breadcrumb partages).
-        steps = page.evaluate(
-            "() => document.querySelectorAll('#view-processing [data-traitement-step]').length"
-        )
+        steps = page.evaluate("() => document.querySelectorAll('#view-processing [data-traitement-step]').length")
         assert steps == 5, f"Breadcrumb attendu avec 5 etapes, trouve {steps}"
-        assert page.evaluate(
-            "() => !!document.querySelector('#view-processing .traitement-runchip')"
-        ), "Header run actif absent (chip run ID)"
+        assert page.evaluate("() => !!document.querySelector('#view-processing .traitement-runchip')"), (
+            "Header run actif absent (chip run ID)"
+        )
 
         # Run DONE : les actions pause/resume/save/cancel du header ne doivent
         # pas etre rendues (reservees a RUNNING/PAUSED).
         for action in ("pause", "resume", "save", "cancel"):
-            present = page.evaluate(
-                f"() => !!document.querySelector('[data-traitement-action=\"{action}\"]')"
-            )
+            present = page.evaluate(f"() => !!document.querySelector('[data-traitement-action=\"{action}\"]')")
             assert not present, f"Action header '{action}' rendue alors que le run est DONE"
 
         _assert_clean(watch, "etape analyse + auto-transition")
@@ -367,9 +361,9 @@ class TestLotCSweepTraitement:
         # Action sure 'Re-verifier' (reload-plan) : la table reste rendue.
         page.click('[data-traitement-action="reload-plan"]')
         page.wait_for_timeout(1000)
-        assert page.evaluate(
-            "() => !!document.querySelector('.traitement-verif-table')"
-        ), "Table verification absente apres reload-plan"
+        assert page.evaluate("() => !!document.querySelector('.traitement-verif-table')"), (
+            "Table verification absente apres reload-plan"
+        )
 
         # Action sure 'go-validation' : transition visible vers l'etape 3.
         page.click('[data-traitement-action="go-validation"]')
@@ -403,9 +397,9 @@ class TestLotCSweepTraitement:
             timeout=15000,
         )
         # La fiche ne doit pas etre en etat d'erreur.
-        assert not page.evaluate(
-            "() => !!document.querySelector('#filmDetailOverlay .film-detail--error')"
-        ), "Fiche film en etat d'erreur sur row-001 (get_film_full)"
+        assert not page.evaluate("() => !!document.querySelector('#filmDetailOverlay .film-detail--error')"), (
+            "Fiche film en etat d'erreur sur row-001 (get_film_full)"
+        )
 
         # Les 4 onglets se cliquent et remplissent le panneau.
         for tab in ("analysis", "history", "rename", "overview"):
@@ -529,9 +523,7 @@ class TestLotCSweepTraitement:
         high_rows = page.evaluate(
             "() => document.querySelectorAll('.traitement-validation-table tbody tr[data-row-id]').length"
         )
-        assert 0 < high_rows < total_rows, (
-            f"Filtre 'high' sans effet visible : {high_rows}/{total_rows}"
-        )
+        assert 0 < high_rows < total_rows, f"Filtre 'high' sans effet visible : {high_rows}/{total_rows}"
         page.click('[data-traitement-validation-filter="all"]')
         page.wait_for_timeout(400)
 
@@ -560,9 +552,7 @@ class TestLotCSweepTraitement:
             page.wait_for_timeout(400)
 
         # Enregistrer les decisions : toast de confirmation.
-        toast = _click_and_wait_toast(
-            page, '[data-traitement-action="save-validation"]', "save-validation"
-        )
+        toast = _click_and_wait_toast(page, '[data-traitement-action="save-validation"]', "save-validation")
         assert "sauvegard" in toast.lower() or "enregistr" in toast.lower(), (
             f"Toast save-validation inattendu : {toast}"
         )
@@ -610,9 +600,7 @@ class TestLotCSweepTraitement:
                 timeout=8000,
             )
         except Exception:
-            stuck_empty = page.evaluate(
-                "() => !!document.querySelector('.traitement-header-run--empty')"
-            )
+            stuck_empty = page.evaluate("() => !!document.querySelector('.traitement-header-run--empty')")
             if stuck_empty:
                 _screenshot(page, "traitement_go_doublons_ecran_mort.png")
                 pytest.xfail(
@@ -696,9 +684,7 @@ class TestLotCSweepTraitement:
         _screenshot(page, "traitement_step5_apply.png")
 
         # Mode dry-run coche par defaut (garde-fou).
-        assert page.is_checked('[data-apply-opt="dry_run"]'), (
-            "dry_run devrait etre coche par defaut en etape Apply"
-        )
+        assert page.is_checked('[data-apply-opt="dry_run"]'), "dry_run devrait etre coche par defaut en etape Apply"
 
         # Mode atomique : le cocher ouvre une modale d'explication -> ANNULER.
         # Apres annulation la checkbox doit rester decochee.
@@ -723,9 +709,9 @@ class TestLotCSweepTraitement:
             f"Titre modale apply inattendu : {modal_title}"
         )
         # Countdown 3s : le bouton confirmer est desactive a l'ouverture.
-        assert page.evaluate(
-            "() => document.querySelector('#dashDangerModal [data-danger-confirm]').disabled"
-        ), "Bouton confirmer actif immediatement (countdown 3s attendu)"
+        assert page.evaluate("() => document.querySelector('#dashDangerModal [data-danger-confirm]').disabled"), (
+            "Bouton confirmer actif immediatement (countdown 3s attendu)"
+        )
         _cancel_danger_modal(page)
 
         # AUCUN run/apply ne doit etre parti (ni dry-run ni reel).
@@ -741,9 +727,7 @@ class TestLotCSweepTraitement:
         # la carte annulation et son bouton ne doivent pas etre rendus. Si un
         # jour le dataset embarque un pending_undo : ouvrir la preview puis
         # FERMER sans executer.
-        undo_btn = page.evaluate(
-            "() => !!document.querySelector('[data-traitement-action=\"undo-preview\"]')"
-        )
+        undo_btn = page.evaluate("() => !!document.querySelector('[data-traitement-action=\"undo-preview\"]')")
         if undo_btn:
             page.click('[data-traitement-action="undo-preview"]')
             page.wait_for_selector("#dashModal", timeout=8000)
@@ -751,14 +735,13 @@ class TestLotCSweepTraitement:
             page.click('#dashModal [data-modal-action="0"]')
             page.wait_for_selector("#dashModal", state="detached", timeout=5000)
             assert not any(
-                "run/undo_last_apply\"" in u or u.endswith("run/undo_last_apply")
-                for u in watch["api_posts"]
+                'run/undo_last_apply"' in u or u.endswith("run/undo_last_apply") for u in watch["api_posts"]
             ), "undo_last_apply execute alors que la preview devait etre fermee"
         else:
             # Coherent avec le dataset : pas d'apply -> pas de carte undo.
-            assert not page.evaluate(
-                "() => !!document.querySelector('[data-traitement-undo-card]')"
-            ), "Carte undo rendue sans pending_undo backend"
+            assert not page.evaluate("() => !!document.querySelector('[data-traitement-undo-card]')"), (
+                "Carte undo rendue sans pending_undo backend"
+            )
         _assert_clean(watch, "etape apply")
 
     # --- Aller-retour navigation x3 ------------------------------------------
@@ -793,7 +776,9 @@ class TestLotCSweepTraitement:
                     overlays: document.querySelectorAll('#filmDetailOverlay, #dashDangerModal, #dashModal').length,
                 })"""
             )
-            assert counts["breadcrumbs"] == 1, f"Aller-retour {i + 1} : {counts['breadcrumbs']} breadcrumbs (empilement)"
+            assert counts["breadcrumbs"] == 1, (
+                f"Aller-retour {i + 1} : {counts['breadcrumbs']} breadcrumbs (empilement)"
+            )
             assert counts["panels"] == 1, f"Aller-retour {i + 1} : {counts['panels']} panels (empilement)"
             assert counts["activeViews"] == 1, f"Aller-retour {i + 1} : {counts['activeViews']} vues actives"
             assert counts["overlays"] == 0, f"Aller-retour {i + 1} : overlay residuel"

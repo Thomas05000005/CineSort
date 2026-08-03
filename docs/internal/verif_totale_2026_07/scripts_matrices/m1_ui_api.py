@@ -57,6 +57,7 @@ FACADE_CLASS = {
     "runtime": "RuntimeFacade",
 }
 
+
 # ---------------------------------------------------------------------------
 # 1. Introspection des facades
 # ---------------------------------------------------------------------------
@@ -76,8 +77,7 @@ def introspect_facades():
             try:
                 sig = inspect.signature(attr)
             except (TypeError, ValueError):
-                methods[name] = {"required": [], "optional": [], "has_kwargs": True,
-                                 "signature": "<introuvable>"}
+                methods[name] = {"required": [], "optional": [], "has_kwargs": True, "signature": "<introuvable>"}
                 continue
             required, optional, has_kwargs = [], [], False
             for pname, p in sig.parameters.items():
@@ -346,9 +346,7 @@ def check_payload(spec, kind, keys, flags):
     if kind in ("expression", "absent"):
         # params construit dynamiquement ({} par defaut cote wrapper si absent)
         if kind == "absent" and spec["required"]:
-            details.append(
-                "payload absent mais params requis: " + ", ".join(spec["required"])
-            )
+            details.append("payload absent mais params requis: " + ", ".join(spec["required"]))
             return False, details
         return True, (["payload non analysable (expression)"] if kind == "expression" else [])
     known = set(spec["required"]) | set(spec["optional"])
@@ -358,9 +356,7 @@ def check_payload(spec, kind, keys, flags):
         details.append("params requis manquants: " + ", ".join(missing))
     unexpected = [k for k in keys if k not in known]
     if unexpected and not spec["has_kwargs"]:
-        details.append(
-            "cles inconnues de la signature (TypeError => 400): " + ", ".join(unexpected)
-        )
+        details.append("cles inconnues de la signature (TypeError => 400): " + ", ".join(unexpected))
     if partial:
         details.append("payload partiellement analyse (" + ",".join(flags) + ")")
     ok = not ((missing and not partial) or (unexpected and not spec["has_kwargs"]))
@@ -370,8 +366,7 @@ def check_payload(spec, kind, keys, flags):
 def verdict_forward(site, facades):
     results = []
     if not site["endpoints"]:
-        results.append({**site, "endpoint": None, "verdict": "NON_RESOLU",
-                        "detail": site["resolution"]})
+        results.append({**site, "endpoint": None, "verdict": "NON_RESOLU", "detail": site["resolution"]})
         return results
     for ep in site["endpoints"]:
         row = {**site, "endpoint": ep}
@@ -389,9 +384,8 @@ def verdict_forward(site, facades):
         elif fac is None:
             elsewhere = find_method_elsewhere(facades, meth)
             row["verdict"] = "ENDPOINT_INEXISTANT"
-            row["detail"] = (
-                "appel legacy sans facade => 410 Gone (Pass 1 desactivee par defaut)"
-                + (f" ; methode presente sur: {', '.join(elsewhere)}" if elsewhere else "")
+            row["detail"] = "appel legacy sans facade => 410 Gone (Pass 1 desactivee par defaut)" + (
+                f" ; methode presente sur: {', '.join(elsewhere)}" if elsewhere else ""
             )
         elif fac not in facades:
             elsewhere = find_method_elsewhere(facades, meth)
@@ -403,17 +397,13 @@ def verdict_forward(site, facades):
             elsewhere = find_method_elsewhere(facades, meth)
             if elsewhere:
                 row["verdict"] = "MAUVAISE_FACADE"
-                row["detail"] = (
-                    f"'{meth}' absent de la facade '{fac}' mais present sur: "
-                    + ", ".join(elsewhere)
-                )
+                row["detail"] = f"'{meth}' absent de la facade '{fac}' mais present sur: " + ", ".join(elsewhere)
             else:
                 row["verdict"] = "ENDPOINT_INEXISTANT"
                 row["detail"] = f"'{meth}' absent des 6 facades => 404"
         else:
             spec = facades[fac][meth]
-            ok, details = check_payload(spec, site["payload_kind"],
-                                        site["payload_keys"], site["payload_flags"])
+            ok, details = check_payload(spec, site["payload_kind"], site["payload_keys"], site["payload_flags"])
             row["verdict"] = "OK" if ok else "PAYLOAD_DESACCORDE"
             row["detail"] = "; ".join(details) if details else f"signature {spec['signature']}"
         results.append(row)
@@ -440,15 +430,17 @@ def reverse_matrix(facades, corpus, forward_rows):
                 verdict = "ORPHELINE_INCERTAINE"
             else:
                 verdict = "ORPHELINE"
-            rows.append({
-                "facade": fac,
-                "method": meth,
-                "endpoint": ep,
-                "verdict": verdict,
-                "literal_refs": literal,
-                "bare_name_refs": bare,
-                "signature": spec["signature"],
-            })
+            rows.append(
+                {
+                    "facade": fac,
+                    "method": meth,
+                    "endpoint": ep,
+                    "verdict": verdict,
+                    "literal_refs": literal,
+                    "bare_name_refs": bare,
+                    "signature": spec["signature"],
+                }
+            )
     return rows
 
 
@@ -486,28 +478,22 @@ def main():
                 "exclusion": "_EXCLUDED_METHODS filtre Pass 1 ET Pass 2 (L215+L232)",
             },
         },
-        "facades": {
-            f: {m: {k: v for k, v in spec.items()} for m, spec in ms.items()}
-            for f, ms in facades.items()
-        },
+        "facades": {f: {m: {k: v for k, v in spec.items()} for m, spec in ms.items()} for f, ms in facades.items()},
         "forward": sorted(forward, key=lambda r: (r["file"], r["line"])),
         "reverse": reverse,
         "stats": {"forward": fstats, "reverse": rstats},
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
-                        encoding="utf-8")
+    OUT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"JS scannes: {len(corpus)} fichiers, {len(sites)} sites apiPost, "
-          f"{len(forward)} lignes forward")
+    print(f"JS scannes: {len(corpus)} fichiers, {len(sites)} sites apiPost, {len(forward)} lignes forward")
     print(f"Facades: {n_methods} methodes")
     print("STATS forward:", json.dumps(fstats, ensure_ascii=False, sort_keys=True))
     print("STATS reverse:", json.dumps(rstats, ensure_ascii=False, sort_keys=True))
     print("--- findings non-OK (forward) ---")
     for r in payload["forward"]:
         if r["verdict"] not in ("OK",):
-            print(f"{r['verdict']} | {r.get('endpoint') or r['arg_raw']} | "
-                  f"{r['file']}:{r['line']} | {r['detail']}")
+            print(f"{r['verdict']} | {r.get('endpoint') or r['arg_raw']} | {r['file']}:{r['line']} | {r['detail']}")
     print("--- orphelines (reverse) ---")
     for r in reverse:
         if r["verdict"].startswith("ORPHELINE"):

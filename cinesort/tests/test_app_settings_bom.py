@@ -126,9 +126,9 @@ class AppSettingsBomTests(unittest.TestCase):
             "app.py ne doit plus lire le token clair brut de settings.json (SEC-2)",
         )
         # Le BOM reste tolere, mais au bon endroit : read_settings (utf-8-sig).
-        settings_support_src = (
-            REPO_ROOT / "cinesort" / "ui" / "api" / "settings_support.py"
-        ).read_text(encoding="utf-8")
+        settings_support_src = (REPO_ROOT / "cinesort" / "ui" / "api" / "settings_support.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(
             'encoding="utf-8-sig"',
             settings_support_src,

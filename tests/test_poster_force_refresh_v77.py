@@ -6,7 +6,9 @@ refresh ne changeait rien (toast "N recuperees" trompeur). Desormais :
 - le proxy honore force -> supprime le cache disque (id,size) avant re-fetch ;
 - la biblio pose row._posterBust apres refresh.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 
@@ -22,7 +24,7 @@ class PosterForceRefreshTests(unittest.TestCase):
     def test_proxy_honors_force(self):
         py = (_ROOT / "cinesort/infra/integrations/poster_proxy.py").read_text(encoding="utf-8")
         self.assertIn('query.get("force")', py)
-        self.assertIn(".glob(f\"{tmdb_id}.*\")", py)
+        self.assertIn('.glob(f"{tmdb_id}.*")', py)
 
     def test_biblio_sets_bust(self):
         js = (_ROOT / "web/dashboard/views/bibliotheque.js").read_text(encoding="utf-8")

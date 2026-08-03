@@ -62,8 +62,7 @@ class UndoSlotGuardTests(unittest.TestCase):
         rows = plan.get("rows", [])
         self.assertTrue(rows, plan)
         decisions = {
-            r["row_id"]: {"ok": True, "title": r.get("proposed_title"), "year": r.get("proposed_year")}
-            for r in rows
+            r["row_id"]: {"ok": True, "title": r.get("proposed_title"), "year": r.get("proposed_year")} for r in rows
         }
         applied = api._apply_impl(run_id, decisions, False, False)
         self.assertTrue(applied.get("ok"), applied)

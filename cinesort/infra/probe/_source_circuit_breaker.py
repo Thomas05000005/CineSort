@@ -151,8 +151,12 @@ class SourceCircuitBreaker:
         failure_threshold: Optional[int] = None,
         recovery_timeout: Optional[float] = None,
     ) -> None:
-        threshold = failure_threshold if failure_threshold is not None else _env_int("CINESORT_PROBE_BREAKER_THRESHOLD", 5)
-        recovery = recovery_timeout if recovery_timeout is not None else _env_float("CINESORT_PROBE_BREAKER_RECOVERY_S", 300.0)
+        threshold = (
+            failure_threshold if failure_threshold is not None else _env_int("CINESORT_PROBE_BREAKER_THRESHOLD", 5)
+        )
+        recovery = (
+            recovery_timeout if recovery_timeout is not None else _env_float("CINESORT_PROBE_BREAKER_RECOVERY_S", 300.0)
+        )
         if threshold < 1:
             raise ValueError(f"failure_threshold doit etre >= 1 (recu {threshold})")
         if recovery < 0:

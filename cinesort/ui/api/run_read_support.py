@@ -21,11 +21,20 @@ _AUTO_INTEGRITY_WARNINGS = {"integrity_header_invalid", "integrity_probe_failed"
 # auto-approuvable). Sans ça, un film en conflit pouvait être compté à la fois
 # "auto-approuvable" ET "conflit" -> 843 + 157 > total (partition impossible).
 # Source UNIQUE partagée avec dashboard_support._build_dashboard_section.
-_CONFLICT_FLAGS = frozenset({
-    "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
-    "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
-    "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
-})
+_CONFLICT_FLAGS = frozenset(
+    {
+        "year_conflict_folder_file",
+        "nfo_year_mismatch",
+        "nfo_title_mismatch",
+        "nfo_file_mismatch",
+        "runtime_mismatch",
+        "runtime_mismatch_likely_wrong_film",
+        "omdb_disagree",
+        "title_ambiguity_detected",
+        "not_a_movie",
+        "year_missing",
+    }
+)
 
 
 # Ensemble BLOQUANT complet (critique ∪ intégrité ∪ conflit).
@@ -42,12 +51,7 @@ def is_auto_approvable_flags(
     "Tous problèmes" (liste, flags ignorés-soustraits) dès qu'une alerte bloquante est ignorée."""
     has_title = bool(proposed_title and str(proposed_title).strip())
     has_year = bool(proposed_year and int(proposed_year or 0) >= 1900)
-    return (
-        int(confidence or 0) >= int(threshold)
-        and not (set(flags or ()) & _AUTO_BLOCKING)
-        and has_title
-        and has_year
-    )
+    return int(confidence or 0) >= int(threshold) and not (set(flags or ()) & _AUTO_BLOCKING) and has_title and has_year
 
 
 def is_auto_approvable(row: Any, threshold: int) -> bool:
@@ -99,7 +103,7 @@ def reconcile_subtitle_flags(flags: Any, present_langs: Set[str]) -> List[str]:
     for flag in flags or []:
         text = str(flag)
         if text.startswith("subtitle_missing_"):
-            raw = text[len("subtitle_missing_"):].strip().lower()
+            raw = text[len("subtitle_missing_") :].strip().lower()
             lang = _normalize_iso639(raw) or raw
             if lang and lang in present_langs:
                 continue  # faux positif : la langue EST présente -> drop

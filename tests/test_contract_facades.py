@@ -54,89 +54,93 @@ DASHBOARD_DIR = REPO_ROOT / "web" / "dashboard"
 # set_active_profile cote quality : nom nu present dans le JS mais jamais
 # "quality/<methode>"). Format "facade.methode" (facade = stem du fichier
 # facades/<facade>_facade.py = prefixe d'endpoint REST).
-KNOWN_ORPHAN_METHODS = frozenset({
-    # Phase 5 (purge verif totale) : ces 8 methodes n'etaient consommees QUE par
-    # les 6 vues mortes supprimees (status/logs/jellyfin/plex/radarr.js) — la
-    # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
-    # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
-    "integrations.get_jellyfin_sync_report",
-    "integrations.get_plex_sync_report",
-    "integrations.request_radarr_upgrade",
-    "library.get_library_podiums",
-    "library.get_library_timeline",
-    "run.export_run_nfo",
-    "run.export_run_report",
-    "runtime.get_log_paths",
-    "integrations.refresh_jellyfin_library_now",
-    "integrations.refresh_plex_library_now",
-    "integrations.test_email_report",
-    "library.clear_field_lock",
-    "library.get_film_history",
-    "library.get_scoring_rollup",
-    "library.list_field_locks",
-    "library.set_field_lock",
-    "quality.analyze_perceptual_batch",
-    "quality.analyze_quality_batch",
-    "quality.apply_quality_preset",
-    "quality.compare_perceptual",
-    "quality.export_quality_profile",
-    "quality.export_shareable_profile",
-    "quality.get_calibration_report",
-    "quality.get_custom_rules_catalog",
-    "quality.get_custom_rules_templates",
-    "quality.get_profiles",
-    "quality.get_quality_presets",
-    "quality.get_quality_profile",
-    "quality.get_quality_report",
-    "quality.import_quality_profile",
-    "quality.import_shareable_profile",
-    "quality.reset_quality_profile",
-    "quality.save_custom_quality_preset",
-    "quality.save_profile",
-    "quality.save_quality_profile",
-    "quality.set_active_profile",
-    "quality.simulate_quality_preset",
-    "quality.validate_custom_rules",
-    "run.check_duplicates_fusion",
-    "run.cleanup_old_runs",
-    "run.export_apply_audit",
-    "run.get_cleanup_residual_preview",
-    "run.import_watchlist",
-    "run.list_apply_history",
-    "run.list_pending_runs",
-    "run.purge_quarantine_bucket",
-    "run.undo_by_row_preview",
-    "run.undo_selected_rows",
-    "runtime.check_for_updates",
-    "runtime.get_event_ts",
-    "runtime.get_probe",
-    "runtime.get_tools_status",
-    "runtime.purge_probe_cache",
-    "runtime.reset_incremental_cache",
-    "runtime.run_nas_benchmark",
-    "runtime.set_probe_tool_paths",
-    "settings.get_naming_presets",
-    "settings.get_user_data_size",
-    "settings.preview_naming_template",
-    "settings.reset_all_user_data",
-    "settings.set_locale",
-})
+KNOWN_ORPHAN_METHODS = frozenset(
+    {
+        # Phase 5 (purge verif totale) : ces 8 methodes n'etaient consommees QUE par
+        # les 6 vues mortes supprimees (status/logs/jellyfin/plex/radarr.js) — la
+        # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
+        # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
+        "integrations.get_jellyfin_sync_report",
+        "integrations.get_plex_sync_report",
+        "integrations.request_radarr_upgrade",
+        "library.get_library_podiums",
+        "library.get_library_timeline",
+        "run.export_run_nfo",
+        "run.export_run_report",
+        "runtime.get_log_paths",
+        "integrations.refresh_jellyfin_library_now",
+        "integrations.refresh_plex_library_now",
+        "integrations.test_email_report",
+        "library.clear_field_lock",
+        "library.get_film_history",
+        "library.get_scoring_rollup",
+        "library.list_field_locks",
+        "library.set_field_lock",
+        "quality.analyze_perceptual_batch",
+        "quality.analyze_quality_batch",
+        "quality.apply_quality_preset",
+        "quality.compare_perceptual",
+        "quality.export_quality_profile",
+        "quality.export_shareable_profile",
+        "quality.get_calibration_report",
+        "quality.get_custom_rules_catalog",
+        "quality.get_custom_rules_templates",
+        "quality.get_profiles",
+        "quality.get_quality_presets",
+        "quality.get_quality_profile",
+        "quality.get_quality_report",
+        "quality.import_quality_profile",
+        "quality.import_shareable_profile",
+        "quality.reset_quality_profile",
+        "quality.save_custom_quality_preset",
+        "quality.save_profile",
+        "quality.save_quality_profile",
+        "quality.set_active_profile",
+        "quality.simulate_quality_preset",
+        "quality.validate_custom_rules",
+        "run.check_duplicates_fusion",
+        "run.cleanup_old_runs",
+        "run.export_apply_audit",
+        "run.get_cleanup_residual_preview",
+        "run.import_watchlist",
+        "run.list_apply_history",
+        "run.list_pending_runs",
+        "run.purge_quarantine_bucket",
+        "run.undo_by_row_preview",
+        "run.undo_selected_rows",
+        "runtime.check_for_updates",
+        "runtime.get_event_ts",
+        "runtime.get_probe",
+        "runtime.get_tools_status",
+        "runtime.purge_probe_cache",
+        "runtime.reset_incremental_cache",
+        "runtime.run_nas_benchmark",
+        "runtime.set_probe_tool_paths",
+        "settings.get_naming_presets",
+        "settings.get_user_data_size",
+        "settings.preview_naming_template",
+        "settings.reset_all_user_data",
+        "settings.set_locale",
+    }
+)
 
 # M2 : methodes CineSortApi *_impl AVEC homonyme top-level dans un module
 # *_support*.py (2 implementations du meme nom -> confusion, drift possible).
-KNOWN_HOMONYM_IMPLS = frozenset({
-    "_get_diagnostic_impl",
-    "_get_film_full_impl",
-    "_get_history_stats_impl",
-    "_get_library_filtered_impl",
-    "_get_plan_impl",
-    "_get_probe_impl",
-    "_get_status_impl",
-    "_list_apply_history_impl",
-    "_mark_alert_ignored_impl",
-    "_mark_for_deletion_impl",
-    "_start_plan_impl",
-})
+KNOWN_HOMONYM_IMPLS = frozenset(
+    {
+        "_get_diagnostic_impl",
+        "_get_film_full_impl",
+        "_get_history_stats_impl",
+        "_get_library_filtered_impl",
+        "_get_plan_impl",
+        "_get_probe_impl",
+        "_get_status_impl",
+        "_list_apply_history_impl",
+        "_mark_alert_ignored_impl",
+        "_mark_for_deletion_impl",
+        "_start_plan_impl",
+    }
+)
 
 # M2 : methode publique exposee sur >= 2 classes facade (owners tries).
 KNOWN_MULTI_FACADE = {
@@ -153,6 +157,7 @@ KNOWN_UNINSTANTIATED_FACADES = frozenset({"SimilarFilmsFacade"})
 # Analyse statique (calculee UNE fois par session pytest)
 # ---------------------------------------------------------------------------
 
+
 def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
 
@@ -168,8 +173,7 @@ def _extract_excluded_methods() -> frozenset[str]:
         target, value = None, None
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             target, value = node.target.id, node.value
-        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)):
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target, value = node.targets[0].id, node.value
         if target == "_EXCLUDED_METHODS" and value is not None:
             return frozenset(ast.literal_eval(value))
@@ -241,8 +245,7 @@ def _facade_public_methods() -> dict[str, dict[str, int]]:
             if isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
                 meths = out.setdefault(short, {})
                 for m in node.body:
-                    if (isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
-                            and not m.name.startswith("_")):
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and not m.name.startswith("_"):
                         meths[m.name] = m.lineno
     return out
 
@@ -255,13 +258,11 @@ def _all_facade_classes() -> dict[str, dict[str, object]]:
             continue
         tree = _parse(f)
         for node in tree.body:
-            if (isinstance(node, ast.ClassDef) and node.name.endswith("Facade")
-                    and not node.name.startswith("_")):
+            if isinstance(node, ast.ClassDef) and node.name.endswith("Facade") and not node.name.startswith("_"):
                 meths = {
                     m.name: m.lineno
                     for m in node.body
-                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and not m.name.startswith("_")
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and not m.name.startswith("_")
                 }
                 rel = str(f.relative_to(REPO_ROOT)).replace("\\", "/")
                 out[node.name] = {"file": rel, "methods": meths}
@@ -275,8 +276,7 @@ def _god_impl_methods() -> dict[str, int]:
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "CineSortApi":
             for m in node.body:
-                if (isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and m.name.endswith("_impl")):
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name.endswith("_impl"):
                     out[m.name] = m.lineno
     return out
 
@@ -338,8 +338,7 @@ class _Analysis:
         js_files = sorted(DASHBOARD_DIR.rglob("*.js"))
         self.js_file_count = len(js_files)
         self.js_corpus = "\n".join(
-            _strip_js_comments(p.read_text(encoding="utf-8", errors="replace"))
-            for p in js_files
+            _strip_js_comments(p.read_text(encoding="utf-8", errors="replace")) for p in js_files
         )
 
         # (1) orphelines : methode publique de facade sans litteral
@@ -353,9 +352,7 @@ class _Analysis:
                     self.orphans.add(f"{fac}.{meth}")
 
         # (2) homonymes _X_impl god ET support
-        self.homonyms: set[str] = {
-            n for n in self.god_impls if n in self.support_funcs
-        }
+        self.homonyms: set[str] = {n for n in self.god_impls if n in self.support_funcs}
 
         # (3) multi-facade : methode publique sur >= 2 classes facade
         owners: dict[str, set[str]] = {}
@@ -382,21 +379,24 @@ class ContractFacadesTests(unittest.TestCase):
 
     def test_sanity_corpus_et_facades_scannes(self) -> None:
         self.assertGreaterEqual(
-            self.a.js_file_count, 10,
+            self.a.js_file_count,
+            10,
             msg=f"web/dashboard: seulement {self.a.js_file_count} fichiers .js "
-                "scannes — arborescence deplacee ? Adapter DASHBOARD_DIR.",
+            "scannes — arborescence deplacee ? Adapter DASHBOARD_DIR.",
         )
         self.assertGreaterEqual(
-            len(self.a.facade_methods), 6,
+            len(self.a.facade_methods),
+            6,
             msg=f"facades/ : {sorted(self.a.facade_methods)} — les 6 facades "
-                "attendues (run/settings/quality/integrations/library/runtime) "
-                "ne sont plus toutes trouvees. Adapter FACADES_DIR.",
+            "attendues (run/settings/quality/integrations/library/runtime) "
+            "ne sont plus toutes trouvees. Adapter FACADES_DIR.",
         )
         total = sum(len(m) for m in self.a.facade_methods.values())
         self.assertGreaterEqual(
-            total, 100,
+            total,
+            100,
             msg=f"Seulement {total} methodes publiques de facade trouvees "
-                "(172 attendues en 2026-07) — l'extraction AST a casse.",
+            "(172 attendues en 2026-07) — l'extraction AST a casse.",
         )
 
     # -- (1) reverse M1 : orphelines --
@@ -447,8 +447,7 @@ class ContractFacadesTests(unittest.TestCase):
     def test_homonym_impls_pas_de_nouvelle_paire(self) -> None:
         new = self.a.homonyms - KNOWN_HOMONYM_IMPLS
         lines = [
-            f"  - {n} : CineSortApi (cinesort_api.py:{self.a.god_impls[n]}) ET "
-            f"{', '.join(self.a.support_funcs[n])}"
+            f"  - {n} : CineSortApi (cinesort_api.py:{self.a.god_impls[n]}) ET {', '.join(self.a.support_funcs[n])}"
             for n in sorted(new)
         ]
         self.assertFalse(
@@ -481,10 +480,7 @@ class ContractFacadesTests(unittest.TestCase):
 
     def test_multi_facade_pas_de_nouvelle_exposition(self) -> None:
         computed = self.a.multi_facade
-        new = {
-            m: owners for m, owners in computed.items()
-            if KNOWN_MULTI_FACADE.get(m) != owners
-        }
+        new = {m: owners for m, owners in computed.items() if KNOWN_MULTI_FACADE.get(m) != owners}
         lines = [f"  - {m} exposee sur : {', '.join(owners)}" for m, owners in sorted(new.items())]
         self.assertFalse(
             new,
@@ -502,10 +498,7 @@ class ContractFacadesTests(unittest.TestCase):
         )
 
     def test_multi_facade_pas_dentree_perimee(self) -> None:
-        stale = {
-            m: owners for m, owners in KNOWN_MULTI_FACADE.items()
-            if self.a.multi_facade.get(m) != owners
-        }
+        stale = {m: owners for m, owners in KNOWN_MULTI_FACADE.items() if self.a.multi_facade.get(m) != owners}
         self.assertFalse(
             stale,
             msg=(
@@ -521,9 +514,7 @@ class ContractFacadesTests(unittest.TestCase):
 
     def test_facades_non_instanciees_pas_de_nouvelle(self) -> None:
         new = self.a.uninstantiated - KNOWN_UNINSTANTIATED_FACADES
-        lines = [
-            f"  - {c} ({self.a.facade_classes[c]['file']})" for c in sorted(new)
-        ]
+        lines = [f"  - {c} ({self.a.facade_classes[c]['file']})" for c in sorted(new)]
         self.assertFalse(
             new,
             msg=(
@@ -539,10 +530,7 @@ class ContractFacadesTests(unittest.TestCase):
 
     def test_facades_non_instanciees_pas_dentree_perimee(self) -> None:
         computed = self.a.uninstantiated
-        stale = {
-            c for c in KNOWN_UNINSTANTIATED_FACADES
-            if c not in computed
-        }
+        stale = {c for c in KNOWN_UNINSTANTIATED_FACADES if c not in computed}
         self.assertFalse(
             stale,
             msg=(
