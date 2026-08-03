@@ -375,7 +375,7 @@ class OmdbClient:
         # bien HTTPError vu par le breaker (cf _is_server_down dans
         # _circuit_breaker.py:51-67 — 5xx et 429 ouvrent le circuit, 4xx hors
         # 429 ne le ferment pas).
-        # Issue #824 : la borne de taille est appliquee A LA LECTURE du flux
+        # Issue #798 : la borne de taille est appliquee A LA LECTURE du flux
         # (get_bounded), pas apres que requests ait deja alloue tout le corps.
         # ResponseTooLargeError derive de ValueError : le breaker ne la compte
         # pas comme un echec serveur, et le `except` ci-dessous l'attrape
@@ -498,7 +498,7 @@ class OmdbClient:
         try:
             response = self._breaker.call(_do_get)
         except ResponseTooLargeError:
-            # Issue #824 : le corps est desormais refuse PENDANT la lecture, donc
+            # Issue #798 : le corps est desormais refuse PENDANT la lecture, donc
             # avant que `response` n'existe. On rend le meme verdict que l'ancien
             # garde-fou post-materialisation (`invalid_resp`) ; les compteurs de
             # quota ne sont pas disponibles puisque la reponse a ete abandonnee.
