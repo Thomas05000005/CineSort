@@ -8,11 +8,14 @@ dans `app/job_runner.py` et `ui/api/runtime_support.py`, et valait
 soit une resolution d'exactement 1 milliseconde SANS aucune garde d'unicite :
 deux appels dans la meme milliseconde renvoyaient le MEME identifiant (mesure :
 1997 collisions sur 2000 appels en rafale). Or `run_id` est la cle primaire de
-`runs`, une composante de cle de six autres tables (quality_reports,
-perceptual_reports, duplicate_decisions, film_marked_for_deletion,
-film_tmdb_overrides, film_decisions_v2), le nom du dossier de run
-`runs/tri_films_<run_id>` et la cle du brouillon de validation en localStorage :
-son unicite est une garantie d'ISOLATION METIER, pas un detail de journalisation.
+`runs`, une composante de PRIMARY KEY de TROIS autres tables (quality_reports,
+perceptual_reports, duplicate_decisions — mesure : `PRAGMA table_info`, verrouille
+par `RunsSchemaDocumentationTests`), une colonne de rattachement de huit autres
+(film_marked_for_deletion, film_tmdb_overrides, film_decisions_v2, apply_batches,
+errors, anomalies, film_field_locks, user_quality_feedback), le nom du dossier de
+run `runs/tri_films_<run_id>` et la cle du brouillon de validation en
+localStorage : son unicite est une garantie d'ISOLATION METIER, pas un detail de
+journalisation.
 
 Format canonique : ``<YYYYMMDD>_<HHMMSS>_<mmm>_<ccc>``
 
@@ -44,7 +47,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 RUN_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}(?:_\d{3})?$")
 
@@ -54,6 +57,11 @@ RUN_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}(?:_\d{3})?$")
 # pour que l'unicite soit une GARANTIE et non une probabilite.
 _COUNTER_WIDTH = 3
 _COUNTER_MODULO = 10**_COUNTER_WIDTH
+
+
+def _now_ms() -> int:
+    """Horloge par defaut : epoch en millisecondes."""
+    return time.time_ns() // 1_000_000
 
 
 class _MonotonicSlots:
@@ -71,16 +79,24 @@ class _MonotonicSlots:
     milliseconde VIRTUELLE plutot que d'attendre : la monotonie (donc
     l'unicite et l'ordre lexicographique) est preservee, au prix d'un
     horodatage en avance d'au plus 1 ms par tranche de 1000 identifiants.
+
+    `clock` est INJECTABLE, et ce n'est pas de la complaisance de conception :
+    une rafale reelle ne peut ni faire reculer l'horloge du systeme ni garantir
+    1001 appels dans la meme milliseconde. Sans injection, ces deux gardes ne
+    sont couvertes par aucun test — mesure : les neutraliser toutes les deux
+    laissait la batterie entierement verte alors que chacune produit de VRAIS
+    doublons (cf `MonotonicSlotsClockTests`).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], int] = _now_ms) -> None:
+        self._clock = clock
         self._lock = threading.Lock()
         self._epoch_ms = -1
         self._counter = -1
 
     def next_slot(self) -> Tuple[int, int]:
         with self._lock:
-            now_ms = time.time_ns() // 1_000_000
+            now_ms = self._clock()
             if now_ms > self._epoch_ms:
                 self._epoch_ms = now_ms
                 self._counter = 0
@@ -110,6 +126,16 @@ def generate_run_id() -> str:
     atteint par deux chemins differents) restent couvertes en defense en
     profondeur par la PRIMARY KEY de `runs` et par la reservation atomique du
     dossier de run (`infra/state.py:create_run_dir(exclusive=True)`).
+
+    Une reserve, mesuree et assumee : `_MonotonicSlots` rend des `epoch_ms`
+    strictement croissants, mais `_format_run_id` les projette en heure LOCALE.
+    Au retour a l'heure d'hiver, deux `epoch_ms` distants d'une heure rendent
+    donc la MEME chaine (mesure en Europe/Paris :
+    `_format_run_id(1792889940500, 0) == _format_run_id(1792893540500, 0) ==
+    '20261025_025900_500_000'`). C'est pre-existant a l'identique (l'ancienne
+    formule utilisait deja `strftime` local), non corrige ici pour ne pas
+    changer la lisibilite des identifiants, et couvert par les memes deux
+    gardes de defense en profondeur que le cas inter-processus.
     """
     epoch_ms, counter = _SLOTS.next_slot()
     return _format_run_id(epoch_ms, counter)

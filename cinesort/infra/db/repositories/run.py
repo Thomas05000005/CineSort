@@ -55,9 +55,18 @@ class RunIdConflictError(sqlite3.IntegrityError):
     Pourquoi ne pas non plus absorber l'erreur (`INSERT OR IGNORE` / `OR
     REPLACE`) : ce serait transformer un echec de journalisation en succes
     silencieux. `OR IGNORE` rendrait un run sans ligne `runs`, `OR REPLACE`
-    ECRASERAIT le run precedent et, via les six FK `ON DELETE CASCADE` qui
-    pointent sur `runs(run_id)`, detruirait ses erreurs, ses rapports qualite
-    et ses anomalies.
+    ECRASERAIT le run precedent et, via les trois FK `ON DELETE CASCADE` qui
+    pointent sur `runs(run_id)` — `errors`, `quality_reports` et `anomalies`,
+    posees par `migrations/021_fk_cascade.sql` — detruirait ses erreurs, ses
+    rapports qualite et ses anomalies.
+
+    Ce chiffre est MESURE, pas estime : `PRAGMA foreign_key_list` sur une base
+    reellement initialisee, verrouille par `RunsSchemaDocumentationTests`. Il
+    disait « six » — le compte des tables PORTANT une colonne `run_id`, qui
+    n'est pas la meme chose : `film_marked_for_deletion`, `film_tmdb_overrides`
+    et `film_decisions_v2` n'ont AUCUNE FK cascade. Un chiffre faux sur
+    l'argument qui porte l'arbitrage sera cite plus tard comme s'il avait ete
+    verifie.
 
     Herite de `sqlite3.IntegrityError` : les appelants existants qui
     l'attrapent (start_job, demo_support via `sqlite3.Error`) restent valides.
