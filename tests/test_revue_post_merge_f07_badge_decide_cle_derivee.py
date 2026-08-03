@@ -50,9 +50,10 @@ RUN_ID = "r_f07_badge"
 class _StubApplyRepo:
     def __init__(self, decisions: Iterable[Dict[str, Any]]) -> None:
         self._decisions = [dict(d) for d in decisions]
+        self.seen_run_ids: List[str] = []
 
     def list_duplicate_decisions(self, *, run_id: str) -> List[Dict[str, Any]]:
-        assert run_id == RUN_ID
+        self.seen_run_ids.append(str(run_id))
         # Contrat du vrai repo (repositories/apply.py) : ORDER BY decided_ts DESC.
         return [dict(d) for d in sorted(self._decisions, key=lambda d: d["decided_ts"], reverse=True)]
 
@@ -83,10 +84,11 @@ def _decision(group_key: str, winner: str, losers: Iterable[str], decided_ts: fl
     }
 
 
-def _annotate(groups: List[Dict[str, Any]], decisions: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    data: Dict[str, Any] = {"groups": groups}
-    _annotate_groups_with_decisions(data, RUN_ID, _StubStore(decisions))
-    return data
+def _annotate(groups: List[Dict[str, Any]], decisions: Iterable[Dict[str, Any]]) -> _StubStore:
+    """Annote `groups` EN PLACE et rend le store, pour inspecter l'appel au repo."""
+    store = _StubStore(decisions)
+    _annotate_groups_with_decisions({"groups": groups}, RUN_ID, store)
+    return store
 
 
 # ── Le defaut : la cle derive, le badge disparait ────────────────────
@@ -98,8 +100,9 @@ class BadgeSurvitALaDeriveDeCleTests(unittest.TestCase):
         groups = [_group("Le Grand Voyage", 2006, ["r1", "r2"])]
         decisions = [_decision("le grand voyage|2005", winner="r1", losers=["r2"], decided_ts=1000.0)]
 
-        _annotate(groups, decisions)
+        store = _annotate(groups, decisions)
 
+        self.assertEqual(store.apply.seen_run_ids, [RUN_ID], "Les decisions sont relues pour CE run.")
         grp = groups[0]
         self.assertTrue(grp.get("winner_decided"), "Decision persistee -> badge « Decide » attendu malgre la derive.")
         self.assertEqual(grp.get("winner_row_id"), "r1")
