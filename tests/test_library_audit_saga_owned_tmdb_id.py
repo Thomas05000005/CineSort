@@ -34,7 +34,7 @@ _DIE_HARD_COLLECTION_ID = 1570
 
 
 def _candidate(
-    title: str, year: int, tmdb_id: int | None, *, score: float = 0.9, source: str = "tmdb"
+    title: str, year: int | None, tmdb_id: int | None, *, score: float = 0.9, source: str = "tmdb"
 ) -> core.Candidate:
     return core.Candidate(title=title, year=year, source=source, tmdb_id=tmdb_id, score=score)
 
@@ -138,7 +138,7 @@ def test_missing_year_is_not_a_wildcard() -> None:
     """Une row non resolue (`_build_unresolved_row`) a `proposed_year = 0` et des
     candidats sans annee : matcher sur le seul titre reviendrait a revendiquer la
     possession d'un film que rien n'a identifie."""
-    row = _payload([_plan_row("r1", "Die Hard", 0, [_candidate("Die Hard", None, 562)])])[0]  # type: ignore[arg-type]
+    row = _payload([_plan_row("r1", "Die Hard", 0, [_candidate("Die Hard", None, 562)])])[0]
     assert _plan_row_tmdb_id(row) is None
 
 
