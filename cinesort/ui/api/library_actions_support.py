@@ -8,24 +8,30 @@ Endpoints :
     export_films(row_ids, format, run_id)       — CSV / JSON / NDJSON
 
 Persistance :
-- Les marqueurs de suppression sont stockes dans un fichier
-  `deletion_marks.json` dans le run_dir (cote du `validation.json`).
-  Format : {"row_ids": ["abc", "def"], "marked_ts": {"abc": 1234567.0}}.
+- Les marqueurs de suppression sont stockes dans la table DB
+  `film_marked_for_deletion` (store film_modal) — STORE UNIQUE depuis l'audit
+  2026-07-13 (HIGH-18). L'ancien fichier `deletion_marks.json` (purement
+  additif, aucun chemin d'annulation) n'est plus ecrit : les marques deja sur
+  disque sont migrees a la lecture (migrate_legacy_deletion_marks) puis le
+  fichier est supprime.
 - Les exports sont ecrits dans `%LOCALAPPDATA%/CineSort/exports/`.
 - Les rescans sont lances via JobRunner (job background).
 """
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
 import logging
 import os
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from cinesort.app.merge_metadata import merge_metadata
+from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
@@ -35,19 +41,42 @@ from cinesort.ui.api.settings_support import normalize_user_path
 logger = logging.getLogger(__name__)
 
 
+# Revue adversaire 2026-07-13 (defaut 3) : `sqlite3.Error` N'HERITE PAS d'OSError.
+# Les helpers de marquage ci-dessous sont des filets "best-effort, sans perte" —
+# une sqlite3.OperationalError("database is locked") ne doit donc pas les
+# traverser et faire planter l'apply / la vue Bibliotheque / unmark. Meme tuple
+# que library_support._get_store (RuntimeError = rollback migration a l'init).
+_DB_ERRORS = (
+    OSError,
+    AttributeError,
+    KeyError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    sqlite3.Error,
+)
+
+
 # ---------------------------------------------------------------------------
 # Helpers persistance "deletion_marks.json"
 # ---------------------------------------------------------------------------
 
 
 def _deletion_marks_path(api: Any, run_id: str) -> Optional[Path]:
-    """Resout le chemin du fichier deletion_marks.json pour ce run."""
+    """Resout le chemin du fichier deletion_marks.json (legacy) pour ce run.
+
+    Revue adversaire 2026-07-13 (defaut 6) : `ensure_exists=False` — ce helper
+    n'est plus appele que par des chemins de LECTURE/drain (vue Bibliotheque,
+    apply, unmark). Avec ensure_exists=True, le simple affichage de la
+    Bibliotheque RECREAIT `runs/tri_films_<id>/` pour un run purge du disque
+    (dossiers fantomes a chaque rendu).
+    """
     try:
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
         return run_paths.run_dir / "deletion_marks.json"
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
+    except _DB_ERRORS as exc:
         logger.warning("_deletion_marks_path failed run_id=%s: %s", run_id, exc)
         return None
 
@@ -67,40 +96,274 @@ def _read_deletion_marks(path: Path) -> Dict[str, Any]:
         return {"row_ids": [], "marked_ts": {}}
 
 
-def _write_deletion_marks(path: Path, data: Dict[str, Any]) -> None:
-    state.atomic_write_json(path, data)
+def _film_modal_repo(api: Any) -> Any:
+    """Repo DB `film_modal` (table film_marked_for_deletion), ou None si indispo."""
+    try:
+        settings = api.settings.get_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
+        store, _runner = api._get_or_create_infra(state_dir)
+    except _DB_ERRORS as exc:
+        logger.warning("_film_modal_repo: infra indisponible: %s", exc)
+        return None
+    return getattr(store, "film_modal", None)
 
 
-def list_deletion_marks_row_ids(api: Any, run_id: str) -> List[str]:
-    """AUDIT 2026-06-14 (R7-4) : row_ids marques pour suppression via le mecanisme
-    bulk (deletion_marks.json). Consomme par l'apply (apply_support) pour router
-    ces films vers _review/_user_marked_for_deletion/. [] si rien/erreur."""
+# SQL identique a FilmModalRepository.mark_for_deletion (meme UPSERT idempotent).
+# Duplique ici uniquement pour pouvoir marquer N films en UNE transaction : le
+# repo n'expose pas (encore) de variante bulk, et l'appel unitaire ouvre une
+# connexion + _ensure_tables PAR FILM (revue adversaire 2026-07-13, defaut 2 :
+# 9,6 s pour 500 films sur un endpoint synchrone -> UI gelee).
+_MARK_FOR_DELETION_SQL = """
+INSERT INTO film_marked_for_deletion(run_id, row_id, marked_at, source_path)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id, row_id) DO UPDATE SET
+    marked_at=excluded.marked_at,
+    source_path=excluded.source_path
+"""
+
+
+def _mark_many(
+    repo: Any,
+    run_id: str,
+    row_ids: List[str],
+    source_paths: Dict[str, str],
+) -> List[str]:
+    """Marque N rows dans la table film_marked_for_deletion (une transaction).
+
+    Returns:
+        Les row_ids EN ECHEC ([] si tout est passe). Ne leve jamais.
+    """
+    rids = [str(r) for r in row_ids]
+    if not rids:
+        return []
+
+    ensure = getattr(repo, "_ensure_tables", None)
+    managed = getattr(repo, "_managed_conn", None)
+    if callable(ensure) and callable(managed):
+        ts = time.time()
+        params = [(str(run_id), rid, ts, str(source_paths.get(rid, "") or "")) for rid in rids]
+        try:
+            ensure()
+            with managed() as conn:
+                conn.executemany(_MARK_FOR_DELETION_SQL, params)
+            return []
+        except _DB_ERRORS as exc:
+            logger.warning(
+                "mark_for_deletion batch echoue run_id=%s (%d row(s)): %s — fallback unitaire",
+                run_id,
+                len(rids),
+                exc,
+            )
+
+    # Fallback : repo sans helpers de connexion (stubs de test) ou batch en echec.
+    failed: List[str] = []
+    for rid_s in rids:
+        try:
+            repo.mark_for_deletion(
+                run_id=str(run_id),
+                row_id=rid_s,
+                source_path=str(source_paths.get(rid_s, "") or ""),
+            )
+        except _DB_ERRORS as exc:
+            logger.warning("mark_for_deletion echoue row_id=%s run_id=%s: %s", rid_s, run_id, exc)
+            failed.append(rid_s)
+    return failed
+
+
+def _plan_source_paths(api: Any, run_id: str) -> Optional[Dict[str, str]]:
+    """Map row_id -> source_path (fallback folder) pour ce run.
+
+    None si le plan est illisible (on ne veut pas invalider un marquage pour
+    autant : cf _mark_rows_for_deletion).
+    """
+    try:
+        plan = api.run.get_plan(run_id)
+    except _DB_ERRORS as exc:
+        logger.warning("_plan_source_paths: get_plan echoue run_id=%s: %s", run_id, exc)
+        return None
+    if not isinstance(plan, dict) or not plan.get("ok"):
+        return None
+    rows = plan.get("rows")
+    if not isinstance(rows, list):
+        return None
+    out: Dict[str, str] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rid_s = str(r.get("row_id") or "").strip()
+        if rid_s:
+            out[rid_s] = str(r.get("source_path") or r.get("folder") or "")
+    return out
+
+
+def migrate_legacy_deletion_marks(api: Any, run_id: str) -> List[str]:
+    """AUDIT 2026-07-13 (HIGH-18) : migration a la lecture de deletion_marks.json.
+
+    Historiquement le marquage bulk ecrivait dans `deletion_marks.json` (store
+    purement ADDITIF, sans aucun chemin de retrait) tandis que le modal Film
+    ecrivait dans la table DB `film_marked_for_deletion` — seule celle-ci sait
+    annuler (unmark_for_deletion) et alimente le flag UI is_marked_for_deletion.
+    L'apply lisait l'UNION : un marquage bulk etait donc IRREVOCABLE et INVISIBLE.
+
+    On unifie sur le store DB. Cette fonction reverse les marques legacy encore
+    presentes sur disque dans la DB, puis supprime le fichier (une seule fois).
+
+    Best-effort et sans perte : si la DB est indisponible ou l'insertion echoue,
+    le fichier est CONSERVE et ses row_ids restent retournes (l'apply continue
+    de les honorer, comportement d'avant le fix).
+
+    Returns:
+        Les row_ids concernes (migres lors de cet appel, ou restes en attente).
+    """
     path = _deletion_marks_path(api, run_id)
     if path is None:
         return []
-    return [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
+    try:
+        if not path.exists():
+            return []
+    except (OSError, AttributeError, TypeError, ValueError):
+        return []
+
+    row_ids = [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
+    if not row_ids:
+        # Fichier vide/corrompu : plus rien a honorer, on le retire.
+        with contextlib.suppress(OSError, TypeError, ValueError):
+            path.unlink(missing_ok=True)
+        return []
+
+    repo = _film_modal_repo(api)
+    if repo is None:
+        # Store DB indisponible : on ne perd rien, le JSON reste la source.
+        return row_ids
+
+    source_paths = _plan_source_paths(api, run_id) or {}
+    failed = _mark_many(repo, run_id, row_ids, source_paths)
+    if failed:
+        logger.warning(
+            "migrate_legacy_deletion_marks: insertion DB echouee run_id=%s (%d/%d) — JSON conserve",
+            run_id,
+            len(failed),
+            len(row_ids),
+        )
+        return row_ids
+
+    with contextlib.suppress(OSError, TypeError, ValueError):
+        path.unlink(missing_ok=True)
+    logger.info(
+        "deletion_marks.json migre vers film_marked_for_deletion run_id=%s (%d marque(s))",
+        run_id,
+        len(row_ids),
+    )
+    return row_ids
 
 
-def _persist_marks(api: Any, run_id: str, new_row_ids: List[str]) -> int:
-    """Persiste les marqueurs. Retourne le nombre de rows nouvellement marques."""
+def remove_legacy_deletion_mark(api: Any, run_id: str, row_id: str) -> bool:
+    """Retire un row_id de `deletion_marks.json` (legacy). Filet pour unmark.
+
+    Revue adversaire R3 2026-07-13 (defaut 4) : `migrate_legacy_deletion_marks`
+    CONSERVE volontairement le JSON quand le drain vers la DB echoue (DB
+    verrouillee/indisponible) — et l'apply honore alors ses row_ids
+    (apply_support.py:1584, union DB + legacy). Or `unmark_for_deletion` jetait
+    le retour du drain : le DELETE en DB ne trouvait rien (la marque n'y avait
+    jamais ete inseree), l'endpoint repondait quand meme ok:True, l'UI affichait
+    "demarque"... et le film repartait au bucket au prochain apply.
+
+    On retire donc explicitement le row_id du store legacy. Ne leve jamais.
+
+    Returns:
+        True si le row_id n'est PLUS marque cote legacy (retire, ou deja absent,
+        ou fichier inexistant — cas nominal ou le drain a reussi).
+        False si le retrait a echoue : le film est TOUJOURS marque, l'appelant ne
+        doit PAS pretendre que le demarquage a reussi.
+    """
     path = _deletion_marks_path(api, run_id)
     if path is None:
-        raise RuntimeError("Impossible de resoudre le chemin de persistance.")
-    current = _read_deletion_marks(path)
-    existing = set(current["row_ids"])
-    marked_ts: Dict[str, float] = current["marked_ts"]
-    now = time.time()
-    added = 0
-    for rid in new_row_ids:
-        rid_s = str(rid).strip()
-        if not rid_s:
+        # Chemin non resolvable : on ne peut ni lire ni prouver l'absence de marque.
+        return False
+    try:
+        if not path.exists():
+            return True  # drain nominal : le JSON a deja ete supprime.
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.warning("remove_legacy_deletion_mark: acces impossible run_id=%s: %s", run_id, exc)
+        return False
+
+    data = _read_deletion_marks(path)
+    rid_s = str(row_id)
+    row_ids = [str(r) for r in (data.get("row_ids") or [])]
+    if rid_s not in row_ids:
+        return True
+
+    remaining = [r for r in row_ids if r != rid_s]
+    marked_ts = {str(k): v for k, v in (data.get("marked_ts") or {}).items() if str(k) != rid_s}
+    try:
+        if remaining:
+            path.write_text(
+                json.dumps({"row_ids": remaining, "marked_ts": marked_ts}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        else:
+            path.unlink(missing_ok=True)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning(
+            "remove_legacy_deletion_mark: ecriture echouee run_id=%s row_id=%s: %s",
+            run_id,
+            rid_s,
+            exc,
+        )
+        return False
+    logger.info("deletion_marks.json : marque legacy retiree run_id=%s row_id=%s", run_id, rid_s)
+    return True
+
+
+def _mark_rows_for_deletion(api: Any, run_id: str, row_ids: List[str]) -> Dict[str, Any]:
+    """Marque des rows dans le SEUL store de verite (table film_marked_for_deletion).
+
+    AUDIT 2026-07-13 (HIGH-18) : le bulk ecrivait dans deletion_marks.json, que
+    ni `unmark_for_deletion` ni le flag `is_marked_for_deletion` ne consultent ->
+    marquage de masse irrevocable. On passe par le meme store que le modal, donc
+    annulable film par film.
+
+    Revue adversaire 2026-07-13 (defaut 2) : 2 appels repo PAR FILM (chacun sa
+    connexion + _ensure_tables) = 9,6 s pour 500 films sur un endpoint
+    SYNCHRONE. On lit l'etat existant en UNE requete puis on insere en UNE
+    transaction (cf _mark_many).
+
+    Returns:
+        {"count": int (rows nouvellement marquees), "failed": [row_id, ...]}
+    """
+    migrate_legacy_deletion_marks(api, run_id)
+
+    repo = _film_modal_repo(api)
+    if repo is None:
+        raise RuntimeError("Store SQLite indisponible.")
+
+    source_paths = _plan_source_paths(api, run_id)
+    todo: List[str] = []
+    failed: List[str] = []
+    seen: set = set()
+    for rid_s in row_ids:
+        # Le plan fait foi quand il est lisible : ne jamais marquer (operation
+        # destructive) un row_id qui n'existe pas dans le run.
+        if source_paths is not None and rid_s not in source_paths:
+            failed.append(rid_s)
             continue
-        if rid_s not in existing:
-            existing.add(rid_s)
-            added += 1
-        marked_ts[rid_s] = now
-    _write_deletion_marks(path, {"row_ids": sorted(existing), "marked_ts": marked_ts})
-    return added
+        if rid_s in seen:
+            continue
+        seen.add(rid_s)
+        todo.append(rid_s)
+    if not todo:
+        return {"count": 0, "failed": failed}
+
+    try:
+        already = {str(m.get("row_id") or "") for m in (repo.list_marked_for_deletion(run_id=str(run_id)) or [])}
+    except _DB_ERRORS as exc:
+        logger.warning("list_marked_for_deletion echoue run_id=%s: %s", run_id, exc)
+        already = set()
+
+    batch_failed = set(_mark_many(repo, run_id, todo, source_paths or {}))
+    count = sum(1 for rid_s in todo if rid_s not in already and rid_s not in batch_failed)
+    failed.extend(rid_s for rid_s in todo if rid_s in batch_failed)
+    return {"count": count, "failed": failed}
 
 
 # ---------------------------------------------------------------------------
@@ -132,10 +395,17 @@ def mark_single_for_deletion(
     if not resolved:
         return _err_response("Aucun run actif.", category="resource", level="info", log_module=__name__)
     try:
-        _persist_marks(api, resolved, [rid])
-        return {"ok": True, "row_id": rid, "run_id": resolved}
+        res = _mark_rows_for_deletion(api, resolved, [rid])
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
+    if res["failed"]:
+        return _err_response(
+            f"Film introuvable ou non marquable (row_id={rid}).",
+            category="resource",
+            level="info",
+            log_module=__name__,
+        )
+    return {"ok": True, "row_id": rid, "run_id": resolved}
 
 
 def mark_for_deletion_bulk(
@@ -175,11 +445,11 @@ def mark_for_deletion_bulk(
             failed.append(str(raw))
 
     try:
-        count = _persist_marks(api, resolved, valid)
+        res = _mark_rows_for_deletion(api, resolved, valid)
         return {
             "ok": True,
-            "count": count,
-            "failed": failed,
+            "count": res["count"],
+            "failed": failed + res["failed"],
             "run_id": resolved,
             "total_requested": len(row_ids),
         }
@@ -281,6 +551,95 @@ def _list_locked_field_names(api: Any, film_id: str) -> List[str]:
     return [str(lk.get("field_name") or "") for lk in locks if lk.get("field_name")]
 
 
+def _scan_subtitle_expected_languages(settings: Dict[str, Any]) -> Optional[List[str]]:
+    """Langues de sous-titres attendues, DERIVEES COMME AU SCAN.
+
+    Meme regle que run_flow_support (job_fn) : None = detection desactivee
+    (replan laisse alors les champs subtitle_* a leur valeur par defaut), sinon
+    la liste normalisee (eventuellement vide).
+    """
+    if not _to_bool(settings.get("subtitle_detection_enabled"), True):
+        return None
+    raw_langs = settings.get("subtitle_expected_languages")
+    if isinstance(raw_langs, list):
+        return [str(lang).strip().lower() for lang in raw_langs if str(lang).strip()]
+    if isinstance(raw_langs, str) and raw_langs.strip():
+        return [lang.strip().lower() for lang in raw_langs.split(",") if lang.strip()]
+    return []
+
+
+# Champs poses par le SCAN a l'echelle du run, que `replan_single_row` (qui ne
+# voit qu'un fichier video isole) ne recalcule JAMAIS.
+#   - source_root : annote par plan_support_dedup.plan_multi_roots (l.864), pas
+#     par _plan_item. Une row replanifiee repartait donc avec source_root=None.
+_SCAN_ONLY_FIELDS = ("source_root",)
+
+# Kinds que `replan_single_row` sait reellement reproduire SANS PERTE (elle appelle
+# `_plan_item`, et renormalise en "single" tout kind hors de cet ensemble — cf.
+# plan_support_replan.py:875). Liste BLANCHE volontaire : tout autre kind
+# ("extra" = bonus d'un dossier partage, "tv_episode", ou un kind futur) doit
+# etre REFUSE au replan, jamais renormalise (cf. _rematch_tmdb_and_update_plan).
+_REPLANNABLE_KINDS = frozenset({"single", "collection"})
+
+# Idem pour les warning_flags poses APRES `_plan_item`, a une echelle que le
+# replan (1 fichier video, hors contexte) ne peut pas reconstruire :
+#   - root_level_source     : plan_support_core.py:739 (badge UI "Depuis la racine"),
+#                             pose selon la position du dossier dans le scan.
+#   - bonus_video           : plan_support_core.py:777, pose selon les AUTRES videos
+#                             du dossier (detection "collection + bonus").
+#   - duplicate_cross_root  : plan_support_dedup.py:783, pose selon les autres ROOTS.
+# Un rescan les EFFACAIT (badges UI perdus, doublon cross-root redevenu invisible).
+_SCAN_ONLY_WARNING_FLAGS = ("root_level_source", "bonus_video", "duplicate_cross_root")
+
+# Fragment de notes ajoute par _detect_cross_root_duplicates (plan_support_dedup.py:786) :
+# `row.notes += " | Aussi dans: <root1>, <root2>"`. Non reconstructible par le replan.
+_CROSS_ROOT_NOTE_PREFIX = "Aussi dans:"
+
+
+def _carry_over_scan_only_fields(target: Dict[str, Any], new_row_json: Dict[str, Any]) -> None:
+    """Reporte sur la row replanifiee les champs que le replan ne recalcule pas.
+
+    Revue adversaire 2026-07-13 (defaut 1, REGRESSION DESTRUCTIVE multi-root) :
+    l'apply groupe les rows par racine avec
+    `rk = getattr(row, "source_root", None) or str(cfg.root)`
+    (apply_support.py:1602) et cfg.root ne contient que roots[0]. Avec le resync
+    memoire (HIGH-17), un `source_root: null` ecrit par le rescan n'est plus
+    seulement cosmetique dans plan.jsonl : il est recharge en memoire, donc un
+    film du ROOT2 rescanne serait applique sous ROOT1 — DEPLACE DANS LA MAUVAISE
+    RACINE. On restaure donc ces champs depuis la row d'origine.
+
+    Revue adversaire R3 2026-07-13 (defaut 2, EFFACEMENT DE DONNEES) : idem pour
+    les warning_flags/notes poses par le scan APRES `_plan_item`
+    (root_level_source, bonus_video, duplicate_cross_root + note "Aussi dans:").
+    Le replan ne voit qu'un fichier isole : il ne peut ni les recalculer, ni
+    savoir qu'ils existaient -> un simple rescan les supprimait.
+    """
+    for field_name in _SCAN_ONLY_FIELDS:
+        if not new_row_json.get(field_name) and target.get(field_name):
+            new_row_json[field_name] = target[field_name]
+
+    old_flags = [str(f) for f in (target.get("warning_flags") or [])]
+    raw_new_flags = new_row_json.get("warning_flags")
+    new_flags = [str(f) for f in raw_new_flags] if isinstance(raw_new_flags, list) else []
+    carried = [f for f in _SCAN_ONLY_WARNING_FLAGS if f in old_flags and f not in new_flags]
+    if carried:
+        new_row_json["warning_flags"] = new_flags + carried
+    elif isinstance(raw_new_flags, list):
+        new_row_json["warning_flags"] = new_flags
+
+    # La note "| Aussi dans: <root>" accompagne duplicate_cross_root : sans elle,
+    # le badge doublon ne dit plus OU se trouve l'autre copie.
+    if "duplicate_cross_root" not in carried:
+        return
+    new_notes = str(new_row_json.get("notes") or "").strip()
+    for segment in str(target.get("notes") or "").split("|"):
+        segment = segment.strip()
+        if segment.startswith(_CROSS_ROOT_NOTE_PREFIX) and segment not in new_notes:
+            new_notes = f"{new_notes} | {segment}" if new_notes else segment
+    if new_notes:
+        new_row_json["notes"] = new_notes
+
+
 def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
     """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl.
 
@@ -331,6 +690,35 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
         logger.debug("_rematch_tmdb: video introuvable %s", video_path)
         return None
 
+    # Revue adversaire 2026-07-13 (defaut 1) : replan_single_row ne sait produire
+    # que des rows FILM (_plan_item) — le pipeline TV (_plan_tv_episode) n'est pas
+    # atteignable ici. Rejouer le match sur un episode ecraserait kind +
+    # tv_series_name / tv_season / tv_episode / tv_tmdb_series_id : l'apply
+    # classerait ensuite l'episode comme un FILM. Tant que le resync memoire
+    # (HIGH-17) n'existait pas, la row corrompue restait confinee a plan.jsonl ;
+    # elle est desormais rechargee en memoire -> on refuse de replanifier.
+    #
+    # Revue adversaire R3 2026-07-13 (defaut 1, DESTRUCTIF — CRIT-1 rouvert par
+    # une autre porte) : la liste NOIRE (tv_episode seul) laissait passer
+    # kind="extra" (video bonus d'un dossier PARTAGE, plan_support_core.py:773).
+    # Une row "extra" retombait dans le `else` en kind="single"
+    # (replan_single_row:875 renormalise en "single" tout kind hors
+    # {single, collection}), plan.jsonl etait reecrit ET recharge en memoire par
+    # le resync — or apply_core traite kind="single" comme "dossier dedie"
+    # (apply_core.py:1282) : marquer ce bonus pour suppression emportait de
+    # nouveau TOUT le dossier (le film principal avec). On passe donc en liste
+    # BLANCHE : seuls les kinds que replan_single_row sait reellement produire
+    # sans perte sont replanifiables ; tout kind inconnu/futur est refuse par
+    # defaut au lieu d'etre silencieusement renormalise en "single".
+    row_kind = str(target.get("kind") or "single")
+    if row_kind not in _REPLANNABLE_KINDS:
+        logger.info(
+            "_rematch_tmdb: row kind=%r (row_id=%s) non replanifiable — re-match TMDb ignore.",
+            row_kind,
+            row_id,
+        )
+        return None
+
     cfg = _build_cfg_for_row(api, settings, root=folder_path)
     if cfg is None:
         return None
@@ -338,7 +726,9 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
 
     from cinesort.app.plan_support import plan_row_to_jsonable, replan_single_row  # noqa: PLC0415
 
-    kind = "collection" if str(target.get("kind") or "") == "collection" else "single"
+    # row_kind est deja garanti dans _REPLANNABLE_KINDS par la garde ci-dessus :
+    # plus aucune renormalisation silencieuse vers "single" n'a lieu ici.
+    kind = row_kind
 
     # AUDIT 2026-06-11 (R3e gap[3] + R4-P4) : passer la VRAIE racine du scan a
     # replan (cfg a root=folder_path, donc sans racine explicite folder_name
@@ -349,12 +739,22 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
     # P4 v2 : la row porte source_root (le root EXACT du scan, core.py:424) —
     # candidat autoritaire teste en premier, avant les roots reconstruits de la DB.
-    scan_root = _resolve_scan_root_for_replan(
-        api, run_id, folder_path, priority_candidates=[target.get("source_root")]
-    )
+    scan_root = _resolve_scan_root_for_replan(api, run_id, folder_path, priority_candidates=[target.get("source_root")])
 
     new_row = replan_single_row(
-        cfg, folder_path, video_path, tmdb=tmdb, kind=kind, library_root=scan_root
+        cfg,
+        folder_path,
+        video_path,
+        tmdb=tmdb,
+        kind=kind,
+        library_root=scan_root,
+        # Revue adversaire 2026-07-13 (defaut 1) : sans cet argument,
+        # _apply_subtitle_detection sort immediatement (garde `is None`) et la
+        # nouvelle row repart avec subtitle_count=0 / languages=[] /
+        # missing_langs=[]. Le snapshot memoire etant desormais resynchronise, un
+        # rescan EFFACAIT donc les infos sous-titres du film dans l'UI. Memes
+        # regles de derivation que le scan (run_flow_support.py:424).
+        subtitle_expected_languages=_scan_subtitle_expected_languages(settings),
     )
     if new_row is None:
         return None
@@ -370,12 +770,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     try:
         old_film_id = compute_film_id(target)
         new_film_id = compute_film_id(new_row_json)
-        if (
-            old_film_id
-            and new_film_id
-            and old_film_id != new_film_id
-            and is_path_film_id(old_film_id)
-        ):
+        if old_film_id and new_film_id and old_film_id != new_film_id and is_path_film_id(old_film_id):
             repo = _get_field_locks_repo(api)
             if repo is not None:
                 try:
@@ -403,6 +798,8 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("field_locks integration failed (best-effort): %s", exc)
 
+    _carry_over_scan_only_fields(target, new_row_json)
+
     all_rows[target_idx] = new_row_json
     tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
     with open(tmp_path, "w", encoding="utf-8") as fp:
@@ -410,9 +807,16 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
             fp.write(json.dumps(r, ensure_ascii=False) + "\n")
     tmp_path.replace(plan_jsonl)
 
-    if tmdb is not None:
-        import contextlib  # noqa: PLC0415
+    # AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : plan.jsonl vient de changer, mais le
+    # snapshot memoire RunState.rows (prefere par get_plan ET par l'apply) date
+    # toujours de la fin du scan -> sans cette resynchronisation, l'UI reaffiche
+    # l'ancien match et l'apply renomme le dossier avec l'ANCIEN titre/annee/
+    # edition (le re-scan parait sans effet jusqu'au redemarrage de l'app).
+    from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
 
+    resync_run_state_rows(api, run_id)
+
+    if tmdb is not None:
         with contextlib.suppress(AttributeError, OSError):
             tmdb.flush()
 
@@ -788,8 +1192,14 @@ def export_films(
         file_path = exports_dir / fname
 
         if fmt_norm == "csv":
-            with open(file_path, "w", encoding="utf-8", newline="") as fp:
-                writer = csv.writer(fp)
+            # AUDIT 2026-07-13 (M15) : aligner l'export Biblio sur la convention
+            # Excel-FR DEJA appliquee par l'autre export CSV du produit
+            # (dashboard_support.write_run_report_file / report_to_csv_text) :
+            # BOM UTF-8 (`utf-8-sig`) + separateur ";". Sans BOM Excel FR casse
+            # les accents ; avec le "," par defaut il ouvre tout en une colonne.
+            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
+            with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
+                writer = csv.writer(fp, delimiter=";")
                 writer.writerow(
                     [
                         "row_id",

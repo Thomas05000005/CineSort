@@ -113,7 +113,7 @@ class LowercaseExtensionsPipelineGuardTests(unittest.TestCase):
         plan_jsonl = run_dir / "plan.jsonl"
         self.assertTrue(plan_jsonl.exists(), f"plan.jsonl manquant: {plan_jsonl}")
         decisions: Dict[str, Dict[str, Any]] = {}
-        with open(plan_jsonl, "r", encoding="utf-8") as f:
+        with open(plan_jsonl, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -150,7 +150,8 @@ class LowercaseExtensionsPipelineGuardTests(unittest.TestCase):
         dst = str(op.get("dst_path") or "")
         ext = os.path.splitext(dst)[1]
         self.assertEqual(
-            ext, ".mkv",
+            ext,
+            ".mkv",
             f"REGRESSION ITER7 ON : lowercase_extensions=True DOIT donner "
             f"une extension cible minuscule. Vu dst={dst!r}, ext={ext!r}.",
         )
@@ -162,7 +163,8 @@ class LowercaseExtensionsPipelineGuardTests(unittest.TestCase):
         dst = str(op.get("dst_path") or "")
         ext = os.path.splitext(dst)[1]
         self.assertEqual(
-            ext, ".MKV",
+            ext,
+            ".MKV",
             f"REGRESSION ITER7 OFF : lowercase_extensions=False DOIT preserver "
             f"la casse FS source (.MKV). Vu dst={dst!r}, ext={ext!r}. "
             "Cause probable : _execute_apply (apply_support.py L1340-1367) "
@@ -183,7 +185,8 @@ class LowercaseExtensionsPipelineGuardTests(unittest.TestCase):
         ext_off = os.path.splitext(dst_off)[1]
 
         self.assertNotEqual(
-            ext_on, ext_off,
+            ext_on,
+            ext_off,
             f"REGRESSION ITER7 GATE : ON et OFF produisent la meme extension "
             f"cible ({ext_on!r}). Le toggle UI 'Extensions en minuscule' "
             f"est silencieusement ignore dans le pipeline reel.",

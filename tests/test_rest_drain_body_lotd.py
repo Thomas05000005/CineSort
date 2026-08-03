@@ -42,9 +42,7 @@ class _FakeConnection:
 def _make_handler(content_length, body: bytes = b"", *, consumed=False):
     """Handler sans socket : uniquement les attributs lus par le drain."""
     handler = _CineSortHandler.__new__(_CineSortHandler)
-    handler.headers = (
-        {} if content_length is None else {"Content-Length": str(content_length)}
-    )
+    handler.headers = {} if content_length is None else {"Content-Length": str(content_length)}
     handler.rfile = io.BytesIO(body)
     handler.connection = _FakeConnection()
     if consumed is not None:
@@ -212,8 +210,10 @@ class DrainBodyRealSocketSEC1Tests(unittest.TestCase):
         worker = threading.Thread(target=_run, daemon=True)
         try:
             # Constantes reduites pour un test rapide (budget 1s, timeout par-recv 0.5s).
-            with mock.patch.object(rest_server, "_DRAIN_BODY_TIMEOUT_S", 0.5), \
-                 mock.patch.object(rest_server, "_DRAIN_BODY_MAX_WALL_S", 1.0):
+            with (
+                mock.patch.object(rest_server, "_DRAIN_BODY_TIMEOUT_S", 0.5),
+                mock.patch.object(rest_server, "_DRAIN_BODY_MAX_WALL_S", 1.0),
+            ):
                 drip.start()
                 worker.start()
                 worker.join(timeout=5.0)

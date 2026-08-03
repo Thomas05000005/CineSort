@@ -25,12 +25,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             user_version = int(cur.fetchone()[0])
             self.assertEqual(user_version, 5, "user_version doit valoir 5 apres apply")
 
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             # Migration 005 cree apply_batches + apply_operations
             self.assertIn("apply_batches", tables)
             self.assertIn("apply_operations", tables)
@@ -70,9 +65,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             self.assertEqual(user_version, 31)
 
             # Migration 012 cree schema_migrations -> 12..31 enregistrees
-            rows = conn.execute(
-                "SELECT version FROM schema_migrations ORDER BY version"
-            ).fetchall()
+            rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
             versions = [int(r[0]) for r in rows]
             # Au moins 12..31 doivent y etre (les < 12 sont retroactives, INSERT OR IGNORE)
             self.assertIn(31, versions)
@@ -81,12 +74,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             self.assertIn(12, versions)
 
             # Les 3 nouvelles tables Vague P doivent etre presentes.
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("apply_batch_modes", tables, "VP-A apply_batch_modes")
             self.assertIn("film_field_locks", tables, "VP-C film_field_locks")
             self.assertIn("film_decisions_v2", tables, "VP-D film_decisions_v2")
@@ -103,9 +91,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         try:
             # ALTER TABLE EXTEND (ce que fera la migration 029 P-04 sur apply_operations)
             # Pour ce test on simule une simple colonne ajoutee.
-            conn.execute(
-                "ALTER TABLE apply_operations ADD COLUMN committed_at TIMESTAMP"
-            )
+            conn.execute("ALTER TABLE apply_operations ADD COLUMN committed_at TIMESTAMP")
             conn.execute("PRAGMA user_version = 29")
             conn.commit()
 
@@ -134,9 +120,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             self.assertEqual(int(cur.fetchone()[0]), 28)
 
             # Table absente avant 029
-            tables_before = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn("apply_batch_modes", tables_before)
 
             # Appliquer la migration 029 reelle
@@ -158,9 +142,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             conn.execute("PRAGMA user_version = 29")
             conn.commit()
 
-            tables_after = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("apply_batch_modes", tables_after)
 
             cur = conn.execute("PRAGMA user_version")
@@ -184,9 +166,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 29)
 
-            tables_before = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn("film_field_locks", tables_before)
             # AC-4 : film_tmdb_overrides coexiste (zero regression)
             self.assertIn("film_tmdb_overrides", tables_before)
@@ -210,9 +190,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             conn.execute("PRAGMA user_version = 30")
             conn.commit()
 
-            tables_after = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("film_field_locks", tables_after)
             # film_tmdb_overrides toujours la (coexistence)
             self.assertIn("film_tmdb_overrides", tables_after)
@@ -224,7 +202,8 @@ class ExistingDbFixtureTests(unittest.TestCase):
 
             # AC-3 : idx_film_id present (dedie a migrate_locks)
             indexes = {
-                r[0] for r in conn.execute(
+                r[0]
+                for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_field_locks'"
                 )
             }
@@ -249,9 +228,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 30, "Fixture doit etre v30")
 
-            tables_before = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn("film_decisions_v2", tables_before)
             # AC-1 (VP-C) : film_field_locks deja la (chainage 030 -> 031 OK)
             self.assertIn("film_field_locks", tables_before)
@@ -284,7 +261,8 @@ class ExistingDbFixtureTests(unittest.TestCase):
             create_count = cleaned.count("CREATE TABLE") + cleaned.count("CREATE INDEX")
             if_not_exists_count = cleaned.count("IF NOT EXISTS")
             self.assertEqual(
-                create_count, if_not_exists_count,
+                create_count,
+                if_not_exists_count,
                 "Tous les CREATE doivent etre IF NOT EXISTS (idempotence)",
             )
 
@@ -293,9 +271,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
             conn.execute("PRAGMA user_version = 31")
             conn.commit()
 
-            tables_after = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("film_decisions_v2", tables_after)
             # Coexistence VP-A + VP-C + VP-D : toutes les tables presentes.
             self.assertIn("film_field_locks", tables_after)
@@ -307,7 +283,8 @@ class ExistingDbFixtureTests(unittest.TestCase):
 
             # Verifier les 2 index (idx_film_decision, idx_run_decision)
             indexes = {
-                r[0] for r in conn.execute(
+                r[0]
+                for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_decisions_v2'"
                 )
             }
@@ -347,7 +324,6 @@ class ExistingDbFixtureTests(unittest.TestCase):
 
     def test_migrations_dir_override(self):
         """On peut passer un dossier de migrations custom (tests isoles)."""
-        from cinesort.infra.db.migration_manager import MigrationManager
 
         # Dossier de migrations standard valide via repo
         from tests._helpers import _project_migrations_dir

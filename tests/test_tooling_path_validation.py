@@ -138,8 +138,10 @@ class ResolveToolPathTests(unittest.TestCase):
 
     def test_warning_logged_on_obsolete_path(self) -> None:
         """Une WARNING doit etre loggee quand on fallback PATH."""
-        with mock.patch("cinesort.infra.probe.tooling.Path") as mock_path_cls, \
-             mock.patch("cinesort.infra.probe.tooling.logger") as mock_logger:
+        with (
+            mock.patch("cinesort.infra.probe.tooling.Path") as mock_path_cls,
+            mock.patch("cinesort.infra.probe.tooling.logger") as mock_logger,
+        ):
             instance = mock.MagicMock()
             instance.is_file.return_value = False
             mock_path_cls.return_value = instance
