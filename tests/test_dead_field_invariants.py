@@ -131,8 +131,15 @@ class _FakeRepo:
 
 
 class _FakeFilmModalRepo:
+    def __init__(self):
+        self.marks: List[Dict[str, Any]] = []
+
     def get_tmdb_override(self, run_id=None, row_id=None):
         return None
+
+    def mark_for_deletion(self, *, run_id, row_id, source_path=""):
+        self.marks.append({"run_id": run_id, "row_id": row_id, "source_path": source_path})
+        return {"ok": True, "marked_at": 1234.5}
 
 
 class _FakeStore:
@@ -340,19 +347,29 @@ class PlanRowKeyContractTests(unittest.TestCase):
 # clef fantome NOUVELLE fait echouer, une clef fantome CORRIGEE fait echouer
 # aussi (il faut alors resserrer la constante — c'est voulu).
 #
-# Dette figee au 2026-08-03, hors perimetre de ce correctif :
-#   library_actions_support._plan_source_paths:195 lit `r.get("source_path")`
-#   — meme clef fantome que celle corrigee ici. Le `or r.get("folder")` qui
-#   suit masque l'absence, donc la fonction n'est pas morte : elle rend
-#   TOUJOURS le dossier, jamais le chemin du fichier video. Ce que ca degrade :
-#   la valeur alimente `source_path=` des marques de suppression (L239, L340).
-#   Pour un kind "collection"/"extra" le dossier est PARTAGE entre plusieurs
-#   films, donc la marque designe un conteneur au lieu du media. Le correctif
-#   est d'appeler `library_support.plan_row_media_path(r)` — le helper partage
-#   introduit par ce meme PR — mais library_actions_support.py est hors du
-#   perimetre de fichiers autorise ici.
+# Inventaire etabli par balayage AST de TOUS les consommateurs de plan brut du
+# depot (`api.run.get_plan` : film_support, history_support,
+# library_actions_support, library_audit_support, library_support,
+# quality_audit_support, quality_support, run_flow_support, tmdb_support), en
+# distinguant les rows BRUTES des rows DEJA construites par
+# `_build_library_rows` — seules les premieres sont concernees. Resultat : DEUX
+# lectures fantomes de `source_path` sur PlanRow, et deux seulement.
+#
+#   1. library_support._mark_for_deletion_impl — CORRIGEE par ce PR (le site
+#      est dans le perimetre de fichiers), d'ou l'entree a `set()` ci-dessous :
+#      elle n'est pas decorative, c'est elle qui rend le test rouge si la clef
+#      fantome revient.
+#   2. library_actions_support._plan_source_paths:195 — dette FIGEE, hors
+#      perimetre de fichiers. Le `or r.get("folder")` qui suit masque
+#      l'absence, donc la fonction n'est pas morte : elle rend TOUJOURS le
+#      dossier, jamais le chemin du fichier video. Ce que ca degrade : la
+#      valeur alimente `source_path=` des marques de suppression (L239, L340).
+#      Pour un kind "collection"/"extra" le dossier est PARTAGE entre
+#      plusieurs films, donc la marque designe un conteneur au lieu du media.
+#      Le correctif est le meme qu'en 1 : `library_support.plan_row_media_path(r)`.
 _KNOWN_PHANTOM_PLAN_ROW_KEYS = {
     "library_actions_support._plan_source_paths": {"source_path"},
+    "library_support._mark_for_deletion_impl": set(),
 }
 
 
@@ -379,6 +396,46 @@ class PlanRowConsumerRatchetTests(unittest.TestCase):
             "library_support.plan_row_media_path(). Si une clef a ete CORRIGEE : "
             "retirer l'entree de _KNOWN_PHANTOM_PLAN_ROW_KEYS.",
         )
+
+    def test_mark_for_deletion_reads_no_phantom_key(self):
+        """3e site de la famille, dans le fichier corrige par ce PR.
+
+        ROUGE avant le correctif : `_mark_for_deletion_impl` lisait
+        `row.get("source_path")` sur la PlanRow BRUTE rendue par
+        `_find_plan_row`. L'entree du ratchet vaut `set()` — zero clef
+        fantome toleree ici, contrairement au voisin hors perimetre.
+        """
+        phantom = self._phantom_keys_read_by(library_support._mark_for_deletion_impl, "RUN1", "ROW1")
+        self.assertEqual(
+            phantom,
+            _KNOWN_PHANTOM_PLAN_ROW_KEYS["library_support._mark_for_deletion_impl"],
+            "clef fantome lue par _mark_for_deletion_impl : corriger via "
+            "library_support.plan_row_media_path(), pas en elargissant le ratchet.",
+        )
+
+    def test_mark_for_deletion_persists_the_media_path_not_the_shared_folder(self):
+        """Preuve du symptome : la marque doit designer le MEDIA, pas le conteneur.
+
+        Pour un kind "collection"/"extra" le dossier est partage entre
+        plusieurs films ; enregistrer le dossier faisait pointer toutes les
+        marques du meme dossier sur la meme valeur.
+        """
+        folder = r"C:\Films\Trilogie Le Parrain"
+        video = "Le.Parrain.1972.mkv"
+        api = _FakeApi([_make_plan_row(folder, video)], "state")
+        res = library_support._mark_for_deletion_impl(api, "RUN1", "ROW1")
+
+        expected = os.path.join(folder, video)
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res["source_path"], expected)
+        self.assertEqual([m["source_path"] for m in api.store.film_modal.marks], [expected])
+
+    def test_mark_for_deletion_falls_back_to_the_folder_when_video_is_unknown(self):
+        """PlanRow sans `video` : on garde le dossier, pas de chaine vide."""
+        folder = r"C:\Films\Dune (2021)"
+        api = _FakeApi([_make_plan_row(folder, "")], "state")
+        res = library_support._mark_for_deletion_impl(api, "RUN1", "ROW1")
+        self.assertEqual(res["source_path"], folder)
 
     def test_plan_source_paths_currently_returns_the_folder_not_the_video(self):
         """Preuve du symptome, pas seulement de la lecture fantome.

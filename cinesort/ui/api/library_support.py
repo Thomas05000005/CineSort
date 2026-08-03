@@ -1861,7 +1861,20 @@ def _mark_for_deletion_impl(api: Any, run_id: Optional[str], row_id: str) -> Dic
             f"Film introuvable (row_id={row_id}).", category="resource", level="info", log_module=__name__
         )
 
-    source_path = str(row.get("source_path") or row.get("folder") or "")
+    # AUDIT 2026-08-03 (#447 / #730) : 3e site de la meme famille, dans ce
+    # fichier meme. `row` sort de `_find_plan_row`, donc c'est un
+    # `asdict(PlanRow)` BRUT : `source_path` n'y est pas, la lecture valait
+    # None en permanence et le `or row.get("folder")` la rendait invisible.
+    # La marque enregistrait donc TOUJOURS le dossier, jamais le fichier —
+    # et pour un kind "collection"/"extra" ce dossier est PARTAGE entre
+    # plusieurs films : la ligne `film_marked_for_deletion.source_path`
+    # designait un conteneur au lieu du media. Non destructif (l'apply
+    # bucketise par `marked_for_deletion_row_ids`, cf apply_core:1546 et 1609), mais
+    # faux dans la reponse d'API et dans `list_marked_for_deletion`.
+    # `plan_row_media_path` couvre deja le repli sur le dossier seul quand
+    # `video` est vide, et rend "" quand les deux manquent : un second terme
+    # `or row.get("folder")` serait une branche morte.
+    source_path = plan_row_media_path(row)
 
     store = _get_store(api)
     if store is None:
