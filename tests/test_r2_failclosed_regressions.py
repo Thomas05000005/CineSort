@@ -214,8 +214,7 @@ class D2AbandonIsVisibleTests(_Base):
         result = core.ApplyResult()
         result.errors = 1
         result.error_messages.append(
-            "MARKED_FOR_DELETION R_COLLIDE: row_id duplique dans le plan, "
-            "deplacement abandonne (fail-closed)"
+            "MARKED_FOR_DELETION R_COLLIDE: row_id duplique dans le plan, deplacement abandonne (fail-closed)"
         )
         summary_txt = Path(self._tmp) / "summary.txt"
         run_paths = types.SimpleNamespace(

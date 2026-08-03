@@ -168,9 +168,7 @@ class InstanceLockTests(unittest.TestCase):
         # sequentiels une fois la race ecartee.
         # Plus rigoureux : verifier qu'apres tous les join, le fichier de lock est
         # libre et acquisible (pas de inode orphelin tenu).
-        successes = sum(
-            1 for p in result_paths if p.is_file() and p.read_text(encoding="ascii").strip() == "1"
-        )
+        successes = sum(1 for p in result_paths if p.is_file() and p.read_text(encoding="ascii").strip() == "1")
         # Tous les enfants devraient avoir acquis sequentiellement (chacun release
         # apres 0.2s, le suivant attrape). Ce qui compte c'est l'absence de crash
         # et que le parent puisse re-acquerir apres.
@@ -203,9 +201,7 @@ class InstanceLockTests(unittest.TestCase):
             "release() ne doit pas unlink() le fichier : cree une TOCTOU race",
         )
         # Le contenu doit etre vide (PID efface sous le lock)
-        self.assertEqual(
-            lock_file.stat().st_size, 0, "PID doit etre efface (ftruncate sous le lock)"
-        )
+        self.assertEqual(lock_file.stat().st_size, 0, "PID doit etre efface (ftruncate sous le lock)")
 
     def test_lock_released_after_holder_exits(self) -> None:
         """Apres que le 1er process libere, le 2eme doit pouvoir acquerir."""

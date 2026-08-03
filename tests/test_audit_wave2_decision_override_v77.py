@@ -113,7 +113,7 @@ class HistoryDecisionFromValidationTests(unittest.TestCase):
             {"row_id": "b", "proposed_title": "Film B", "proposed_year": 2020},
         ]
         quality_reports = [
-            {"row_id": "a", "tier": "gold", "score": 90},   # bonne qualite MAIS rejete
+            {"row_id": "a", "tier": "gold", "score": 90},  # bonne qualite MAIS rejete
             {"row_id": "b", "tier": "reject", "score": 20},  # mauvaise qualite MAIS accepte
         ]
         decisions = {
@@ -178,9 +178,7 @@ class EnrichPlanOverridesTests(unittest.TestCase):
     def test_override_overlaid_in_enriched_payload(self) -> None:
         from cinesort.ui.api.history_support import _enrich_plan_payload
 
-        overrides = {
-            "a": {"tmdb_id": 999, "new_confidence": 92, "proposed_title": "The Thing", "proposed_year": 2011}
-        }
+        overrides = {"a": {"tmdb_id": 999, "new_confidence": 92, "proposed_title": "The Thing", "proposed_year": 2011}}
         api = _FakeApiEnrich(_FakeStoreOverride(overrides))
         payload = [
             {"row_id": "a", "proposed_title": "The Thing", "proposed_year": 1982, "confidence": 65, "warning_flags": []}
@@ -249,9 +247,15 @@ class ValidateApplyOverrideTests(unittest.TestCase):
         rows = [SimpleNamespace(row_id="a", proposed_title="The Thing", proposed_year=1982)]
         run_paths = SimpleNamespace(validation_json=self._tmp / "validation.json")
         cfg = SimpleNamespace(root="D:/Films")
-        ctx = (cfg, run_paths, rows, lambda *_: None, _FakeStoreValidate(
-            {"a": {"tmdb_id": 999, "new_confidence": 90, "proposed_title": "The Thing", "proposed_year": 2011}}
-        ))
+        ctx = (
+            cfg,
+            run_paths,
+            rows,
+            lambda *_: None,
+            _FakeStoreValidate(
+                {"a": {"tmdb_id": 999, "new_confidence": 90, "proposed_title": "The Thing", "proposed_year": 2011}}
+            ),
+        )
         api = _FakeApiValidate(ctx)
         # La decision UI seedee depuis le plan PERIME (annee 1982).
         incoming = {"a": {"ok": True, "title": "The Thing", "year": 1982}}

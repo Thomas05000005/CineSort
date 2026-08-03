@@ -41,6 +41,18 @@ class IsSafeExternalUrlTests(unittest.TestCase):
         ok, _ = is_safe_external_url("http://169.254.1.1/")
         self.assertFalse(ok)
 
+    def test_ipv4_mapped_metadata_blocked(self) -> None:
+        # #733 : ::ffff:169.254.169.254 (IPv4-mapped IPv6) doit etre bloque comme metadata.
+        ok, reason = is_safe_external_url("http://[::ffff:169.254.169.254]/latest/meta-data/")
+        self.assertFalse(ok)
+        self.assertIn("link-local", reason.lower())
+
+    def test_ipv6_link_local_blocked(self) -> None:
+        # fe80::/10 : parite avec le link-local IPv4 169.254.0.0/16.
+        ok, reason = is_safe_external_url("http://[fe80::1]:8096/")
+        self.assertFalse(ok)
+        self.assertIn("link-local", reason.lower())
+
     def test_file_scheme_blocked(self) -> None:
         ok, reason = is_safe_external_url("file:///etc/passwd")
         self.assertFalse(ok)

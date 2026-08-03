@@ -96,8 +96,7 @@ def save_secret(name: str, value: str) -> str:
     """
     if not _ng.dpapi_ng_available():
         raise SecretStorageError(
-            "DPAPI-NG indisponible sur cette machine. "
-            "CineSort exige Windows 10+. Reinstalle ou contacte le support."
+            "DPAPI-NG indisponible sur cette machine. CineSort exige Windows 10+. Reinstalle ou contacte le support."
         )
     try:
         blob = _ng.protect_dpapi_ng(str(value or "").encode("utf-8"))
@@ -136,9 +135,7 @@ def load_secret(name: str, stored_blob_b64: str) -> LoadResult:
     # Route 1 : blob deja en DPAPI-NG.
     if _ng.is_dpapi_ng_blob(blob):
         if not _ng.dpapi_ng_available():
-            raise SecretStorageError(
-                "DPAPI-NG indisponible pour relire un secret deja migre."
-            )
+            raise SecretStorageError("DPAPI-NG indisponible pour relire un secret deja migre.")
         try:
             plaintext = _ng.unprotect_dpapi_ng(blob)
         except _ng.DpapiNgOperationError as exc:
@@ -175,9 +172,7 @@ def load_secret(name: str, stored_blob_b64: str) -> LoadResult:
                 "Secret '%s' migre DPAPI legacy -> DPAPI-NG (silent re-encrypt).",
                 name,
             )
-            return LoadResult(
-                value=value, was_legacy=True, re_encrypted_blob=new_blob_b64
-            )
+            return LoadResult(value=value, was_legacy=True, re_encrypted_blob=new_blob_b64)
         except SecretStorageError as exc:
             # On a la valeur en clair, on accepte de la rendre meme si
             # la re-encryption echoue : le caller pourra reessayer plus
@@ -236,9 +231,7 @@ def migrate_legacy_blobs_to_ng(
                 try:
                     on_migrated(name, result.re_encrypted_blob)
                 except Exception:  # pragma: no cover - callback user-defined
-                    logger.exception(
-                        "Callback on_migrated a leve pour '%s'", name
-                    )
+                    logger.exception("Callback on_migrated a leve pour '%s'", name)
     return updated
 
 

@@ -35,9 +35,16 @@ class MarkedForDeletionApplyTests(unittest.TestCase):
 
     def _single_row(self, row_id: str, folder: Path, title: str, year: int) -> core.PlanRow:
         return core.PlanRow(
-            row_id=row_id, kind="single", folder=str(folder), video="movie.mkv",
-            proposed_title=title, proposed_year=year, proposed_source="name",
-            confidence=70, confidence_label="med", candidates=[],
+            row_id=row_id,
+            kind="single",
+            folder=str(folder),
+            video="movie.mkv",
+            proposed_title=title,
+            proposed_year=year,
+            proposed_source="name",
+            confidence=70,
+            confidence_label="med",
+            candidates=[],
         )
 
     def test_marked_film_moved_to_bucket_and_excluded(self) -> None:
@@ -74,11 +81,18 @@ class MarkedForDeletionApplyTests(unittest.TestCase):
         decisions = {"K|1": {"ok": True, "title": "Movie", "year": 2020}}
         result = apply_core.apply_rows(
             core.Config(root=self.root, enable_collection_folder=True).normalized(),
-            [row], decisions, dry_run=False, quarantine_unapproved=False,
-            log=self._log, run_review_root=self.run_review_root,
+            [row],
+            decisions,
+            dry_run=False,
+            quarantine_unapproved=False,
+            log=self._log,
+            run_review_root=self.run_review_root,
         )
         self.assertEqual(result.marked_for_deletion_moved_count, 0)
-        self.assertFalse((self.run_review_root / "_user_marked_for_deletion").exists() and any((self.run_review_root / "_user_marked_for_deletion").iterdir()))
+        self.assertFalse(
+            (self.run_review_root / "_user_marked_for_deletion").exists()
+            and any((self.run_review_root / "_user_marked_for_deletion").iterdir())
+        )
 
 
 if __name__ == "__main__":

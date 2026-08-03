@@ -1443,14 +1443,40 @@ function _formatPreviewEntry(entry) {
   return `<div class="apply-preview-entry">${src || dst || "&mdash;"}</div>`;
 }
 
+// F23 (revue post-merge 2026-07-18) : hash DJB2-xor 32 bits, stable et sans
+// dépendance. Sert uniquement à compacter la signature de décisions.
+function _hash32(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 // AUDIT 2026-06-13 (R5-P2) : signature légère des décisions pour invalider
 // l'aperçu backend quand l'utilisateur approuve/rejette des films.
+//
+// F23 : `size` est CONSTANT (toutes les rows sont pré-seedées par
+// _initDecisionsState) et `approved` ne bouge pas sur une édition d'année ni
+// sur un swap approuvé/rejeté 1-pour-1. L'aperçu backend restait donc affiché
+// tel quel — non étiqueté « estimation » — alors que l'apply réel poste
+// _buildDecisions() frais, dont `year` prime pour le dossier cible côté
+// backend. La signature dérive maintenant du CONTENU réellement posté.
 function _applyDecisionsSignature() {
   let approved = 0;
-  for (const st of _decisionsState.values()) {
-    if (st && st.ok) approved += 1;
+  const parts = [];
+  for (const [rowId, st] of _decisionsState.entries()) {
+    const ok = !!(st && st.ok);
+    if (ok) approved += 1;
+    // Normalisation IDENTIQUE à _buildDecisions (sinon 2019 et "2019"
+    // produiraient deux signatures pour un payload identique).
+    const yearNorm = (st && st.year != null) ? (Number(st.year) || "") : "";
+    parts.push(`${rowId}:${ok ? 1 : 0}:${yearNorm}`);
   }
-  return `${_runInfo?.runId || ""}|${_decisionsState.size}|${approved}`;
+  // L'ordre d'insertion de la Map n'est pas stable (delete+set dans les
+  // bulk-actions) : on trie pour que seule la VALEUR des décisions compte.
+  parts.sort();
+  // `size|approved` reste en clair : une collision de hash 32 bits ne peut pas
+  // à elle seule ramener le bug.
+  return `${_runInfo?.runId || ""}|${_decisionsState.size}|${approved}|${_hash32(parts.join(","))}`;
 }
 
 // Charge le VRAI plan d'apply (build_apply_preview) une fois par signature de
@@ -1466,6 +1492,15 @@ async function _ensureApplyPreview() {
   if (_applyPreviewLoading || _applyPreviewSig === sig) return;
   _applyPreviewLoading = true;
   _applyPreviewSig = sig;
+  // F23 (revue adversaire R1) : invalider AUSSI le plan deja en memoire.
+  // `_renderApplyStep` appelle _ensureApplyPreview() SANS l'attendre puis lit
+  // `_applyPreview` dans la foulee : tant que le refetch n'avait pas repondu,
+  // l'ancien plan restait affiche comme VRAI plan backend (totals non nul ->
+  // previewIsEstimate=false), non etiquete « (estimation) », alors que l'apply
+  // reel poste des decisions fraiches (dec['year'] prime cote backend).
+  // A null, l'etape retombe sur l'estimation client EXPLICITEMENT etiquetee
+  // pendant l'aller-retour (comportement documente plus bas).
+  _applyPreview = null;
   try {
     const res = await apiPost(
       "run/build_apply_preview",
@@ -1666,14 +1701,21 @@ function _renderStepPanel(stepId) {
     `;
   }
   if (!_runInfo) {
-    const step = STEPS.find((s) => s.id === stepId) || STEPS[0];
+    const stepIndex = Math.max(0, STEPS.findIndex((s) => s.id === stepId));
+    const step = STEPS[stepIndex];
+    // Le titre de panneau doit garder le MEME format que les cinq panneaux
+    // reels (« Étape 1 — Analyse ») : cet etat vide n'affichait que le libelle
+    // nu (« Analyse »), donc l'intitule changeait selon qu'un run existait ou
+    // non. C'est le seul chemin rendu quand aucun run n'est actif — le cas par
+    // defaut d'une installation neuve, et celui du runner CI.
+    const stepTitle = `Étape ${stepIndex + 1} — ${step.label}`;
     // Fix audit 2026-06-08 UX high : 1 seul CTA "Lancer un scan" (le header
     // empty-state n'en rend plus). Bouton avec data-traitement-action="start-scan"
     // pour rester dans la vue Traitement plutot que de rediriger vers
     // une vue tierce (#/processing) inexistante ou redondante.
     return `
       <section class="traitement-panel" aria-labelledby="traitement-panel-title">
-        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(step.label)}</h2>
+        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(stepTitle)}</h2>
         <p class="traitement-placeholder">
           Aucun run actif détecté. Lance un scan pour démarrer le workflow.
         </p>

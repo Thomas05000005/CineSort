@@ -151,9 +151,7 @@ class _Chain:
         # LIMITE windows_safe est documentee dans le module docstring).
         f1 = self.root / "Amélie, la belle (2001)"
         create_file(f1 / "Amélie, la belle (2001).mkv")
-        (f1 / "Amélie, la belle (2001).srt").write_text(
-            "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8"
-        )
+        (f1 / "Amélie, la belle (2001).srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8")
         # .nfo source avec guillemets dans <title> : prouve que meme via nfo la
         # sanitisation windows_safe s'applique (proposed_source == "nfo").
         (f1 / "Amélie, la belle (2001).nfo").write_text(

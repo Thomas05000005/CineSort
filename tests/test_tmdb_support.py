@@ -104,8 +104,8 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_success_returns_posters_dict(self, mock_client_cls):
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = (
-            lambda mid, size, force_refresh=False: f"https://img/{mid}_{size}.jpg"
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
+            f"https://img/{mid}_{size}.jpg"
         )
         mock_client_cls.return_value = client
 

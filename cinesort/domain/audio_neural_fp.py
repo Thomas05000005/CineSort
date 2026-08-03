@@ -112,8 +112,7 @@ def panns_inference_wrapper(
     """
     if not AUDIO_NEURAL_ENABLED:
         logger.debug(
-            "audio_neural disabled (feature flag OFF), skipping panns inference "
-            "for %s",
+            "audio_neural disabled (feature flag OFF), skipping panns inference for %s",
             audio_path,
         )
         return None
@@ -178,9 +177,7 @@ def fusion_score(
         # le calcul retombe sur l'ancienne fusion chromaprint+video.
         total_active = weight_chromaprint + weight_video
         if total_active <= 0:
-            logger.debug(
-                "fusion_score: poids actifs nuls (audio_neural OFF), retour 0.0"
-            )
+            logger.debug("fusion_score: poids actifs nuls (audio_neural OFF), retour 0.0")
             return 0.0
         w_cp = weight_chromaprint / total_active
         w_vd = weight_video / total_active
