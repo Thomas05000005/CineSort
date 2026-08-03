@@ -39,7 +39,7 @@ const _FALLBACK_FR = Object.freeze({
   "sidebar.nav.quality": "Qualité",
   "sidebar.nav.history": "Historique",
   "sidebar.nav.qij": "QIJ",
-  "sidebar.nav.settings": "Parametres",
+  "sidebar.nav.settings": "Paramètres",
   "sidebar.nav.help": "Aide",
   "sidebar.aria_label": "Navigation CineSort",
   "sidebar.about": "A propos",

@@ -48,7 +48,8 @@ def _log_video_parity(mi_video: Dict[str, Any], ff_video: Dict[str, Any]) -> Non
     if mi_codec and ff_codec and mi_codec != ff_codec:
         _logger.info(
             "probe_parity: codec divergent mediainfo=%s ffprobe=%s (flag pour audit)",
-            mi_codec, ff_codec,
+            mi_codec,
+            ff_codec,
         )
     # Bitrate : tolerance relative (kbps/bps mix possible mais _to_bitrate_int normalise)
     mi_br = mi_video.get("bitrate")
@@ -61,7 +62,8 @@ def _log_video_parity(mi_video: Dict[str, Any], ff_video: Dict[str, Any]) -> Non
             if base > 0 and abs(mi_v - ff_v) / base > _BITRATE_PARITY_TOLERANCE:
                 _logger.info(
                     "probe_parity: bitrate video divergent mediainfo=%s ffprobe=%s (>5%%, flag pour audit)",
-                    int(mi_v), int(ff_v),
+                    int(mi_v),
+                    int(ff_v),
                 )
         except (TypeError, ValueError):
             pass
@@ -158,8 +160,17 @@ def _merge_probes(
     # Tous les enrichissements §5/§6 v7.5.0 + Vague K NFO complet sont
     # passes en clair depuis ff_video. Ne pas ecraser les keys deja merged.
     _already_merged = {
-        "codec", "width", "height", "fps", "bit_depth", "pixel_format", "bitrate",
-        "hdr_dolby_vision", "hdr10", "hdr10_plus", "_hdr_text_present",
+        "codec",
+        "width",
+        "height",
+        "fps",
+        "bit_depth",
+        "pixel_format",
+        "bitrate",
+        "hdr_dolby_vision",
+        "hdr10",
+        "hdr10_plus",
+        "_hdr_text_present",
     }
     for k, v in ff_video.items():
         if k in _already_merged:

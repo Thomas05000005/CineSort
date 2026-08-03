@@ -1846,10 +1846,7 @@ class CineSortApi:
         return {
             "ok": True,
             "entries_deleted": deleted,
-            "message": (
-                f"Cache probe purge : {deleted} entrees supprimees. "
-                "Relance un scan pour re-probe les films."
-            ),
+            "message": (f"Cache probe purge : {deleted} entrees supprimees. Relance un scan pour re-probe les films."),
         }
 
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
@@ -2281,7 +2278,7 @@ class CineSortApi:
     def _get_auto_approved_summary_impl(
         self,
         run_id: str,
-        threshold: int = 85,
+        threshold: Optional[int] = None,
         enabled: bool = False,
         quarantine_corrupted: bool = False,
     ) -> Dict[str, Any]:
@@ -2713,9 +2710,7 @@ class CineSortApi:
         root = _normalize_user_path(settings.get("root"), Path(DEFAULT_ROOT))
         return self._build_cfg_from_settings(settings, root)
 
-    def _purge_quarantine_bucket_impl(
-        self, ttl_days: int = 30, dry_run: bool = False
-    ) -> Dict[str, Any]:
+    def _purge_quarantine_bucket_impl(self, ttl_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
         """Purge le bucket FS `_review` des fichiers > TTL jours (defaut 30).
 
         Appele :

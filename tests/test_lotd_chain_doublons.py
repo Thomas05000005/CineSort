@@ -95,9 +95,7 @@ def _mk_movie(folder: Path, name: str, size: int, pattern: bytes) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     video = folder / f"{name}.mkv"
     video.write_bytes(pattern * (size // len(pattern) + 1))
-    (folder / f"{name}.fr.srt").write_text(
-        "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8"
-    )
+    (folder / f"{name}.fr.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nBonjour\n", encoding="utf-8")
     return video
 
 
@@ -116,9 +114,7 @@ class LotDChainDoublonsTests(unittest.TestCase):
         # ignore_cleanup_errors : sous Windows, la SQLite du state_dir peut rester
         # ouverte par l'API a l'instant du cleanup (WinError 32) — tolere, le
         # dossier temp est purge par l'OS.
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="cinesort_lotd_dup_", ignore_cleanup_errors=True
-        )
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_dup_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
         base = Path(self._tmpdir.name)
         self.root_a = base / "rootA"
@@ -191,10 +187,7 @@ class LotDChainDoublonsTests(unittest.TestCase):
         self.assertNotEqual(winner_row["source_root"], loser_row["source_root"])
 
         # --- 2. Decisions approuvees, persistees et relues ----------------------
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         sv = api.run.save_validation(run_id, decisions)
         self.assertTrue(sv.get("ok"), sv)
         lv = api.run.load_validation(run_id)
@@ -217,9 +210,7 @@ class LotDChainDoublonsTests(unittest.TestCase):
         self.assertEqual(str(group.get("scope") or ""), "cross_root", group)
 
         # Le quasi-doublon n'apparait dans AUCUN groupe.
-        all_grouped_ids = {
-            str(r.get("row_id") or "") for g in groups for r in (g.get("rows") or [])
-        }
+        all_grouped_ids = {str(r.get("row_id") or "") for g in groups for r in (g.get("rows") or [])}
         self.assertNotIn(quasi_row["row_id"], all_grouped_ids, groups)
 
         # --- 4. Decision "Garder A" persistee + relue (R8-057) -------------------
@@ -250,7 +241,8 @@ class LotDChainDoublonsTests(unittest.TestCase):
         result = real["result"]
         self.assertEqual(int(result.get("errors") or 0), 0, result)
         self.assertEqual(
-            int(result.get("duplicates_user_decided_moved_count") or 0), 1,
+            int(result.get("duplicates_user_decided_moved_count") or 0),
+            1,
             f"compteur dedie R8-018 attendu==1: {result}",
         )
         # R8-018 : le loser ne doit PAS etre compte en 'duplicates identiques'.
@@ -268,14 +260,10 @@ class LotDChainDoublonsTests(unittest.TestCase):
             self.root_b / "_review" / "_duplicates_user_decided",
             self.root_a / "_review" / "_duplicates_user_decided",
         ]
-        moved_videos = [
-            p
-            for bucket in bucket_candidates
-            if bucket.is_dir()
-            for p in bucket.rglob(f"{_LOSER_DIR}.mkv")
-        ]
+        moved_videos = [p for bucket in bucket_candidates if bucket.is_dir() for p in bucket.rglob(f"{_LOSER_DIR}.mkv")]
         self.assertEqual(
-            len(moved_videos), 1,
+            len(moved_videos),
+            1,
             f"video du loser attendue UNE fois dans un bucket _duplicates_user_decided, "
             f"trouvee: {moved_videos} (buckets scannes: {bucket_candidates})",
         )
@@ -308,9 +296,7 @@ class LotDDupBucketViewerGuardTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="cinesort_lotd_viewer_", ignore_cleanup_errors=True
-        )
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_viewer_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
         base = Path(self._tmpdir.name)
         self.root = base / "root"
@@ -362,12 +348,9 @@ class LotDDupBucketViewerGuardTests(unittest.TestCase):
 
         rows = (api.run.get_plan(run_id) or {}).get("rows") or []
         self.assertEqual(len(rows), 2, rows)
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         winner_row = next(r for r in rows if _WINNER_DIR in str(r.get("folder") or ""))
-        loser_row = next(r for r in rows if _LOSER_DIR in str(r.get("folder") or ""))
+        next(r for r in rows if _LOSER_DIR in str(r.get("folder") or ""))
 
         dup = api.run.check_duplicates(run_id, decisions)
         self.assertTrue(dup.get("ok"), dup)
@@ -412,9 +395,7 @@ class LotDDupTitleYearIdentityGuardTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="cinesort_lotd_titleyear_", ignore_cleanup_errors=True
-        )
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_titleyear_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
         base = Path(self._tmpdir.name)
         self.root_a = base / "rootA"
@@ -456,10 +437,7 @@ class LotDDupTitleYearIdentityGuardTests(unittest.TestCase):
         self.assertEqual(years, {_DUP_YEAR}, rows)
         titles = {str(r.get("proposed_title") or "") for r in rows}
 
-        decisions = {
-            r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": r["proposed_title"], "year": r["proposed_year"]} for r in rows}
         dup = api.run.check_duplicates(run_id, decisions)
         self.assertTrue(dup.get("ok"), dup)
         if int(dup.get("total_groups") or 0) == 0 and len(titles) > 1:

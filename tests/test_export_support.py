@@ -94,6 +94,7 @@ class TestHtmlReport(unittest.TestCase):
         """GATE AUDIT 2026-06-10 : l'export HTML doit utiliser les couleurs tier
         INVARIANTES (memoire user / CLAUDE.md #2), pas les anciennes fausses."""
         from cinesort.app.export_support import _TIER_COLORS
+
         self.assertEqual(_TIER_COLORS["platinum"].upper(), "#E5E4E2")
         self.assertEqual(_TIER_COLORS["gold"].upper(), "#FFD700")
         self.assertEqual(_TIER_COLORS["silver"].upper(), "#C0C0C0")

@@ -90,6 +90,13 @@ function _gradedCountdownSeconds(count) {
   return Math.max(0, Math.min(3, Math.round(linear)));
 }
 
+// M14 (audit ultra 2026-07-13) : collation FRANCAISE partagee, meme instance
+// d'Intl.Collator que la Bibliotheque (À classé avec A, Ç avec C, ellipse/
+// ponctuation initiale ignorée, "Chapitre 2" avant "Chapitre 10"). Reutilisee
+// par l'etape Verification (_renderVerificationStep) ET le tri de l'etape
+// Validation (_sortValidationRows) pour une collation coherente entre ecrans.
+const _FR_COLLATOR = new Intl.Collator("fr", { sensitivity: "base", numeric: true, ignorePunctuation: true });
+
 let _currentStep = "analyse";
 let _runInfo = null;
 let _runStatus = null; // { status, idx, total, eta_s, speed, logs }
@@ -774,15 +781,41 @@ function _renderVerificationStep() {
   const _readFlags = (r) => Array.isArray(r.warning_flags)
     ? r.warning_flags
     : String(r.warning_flags || "").split(",").filter(Boolean);
-  const flagged = rows.filter((r) => _readFlags(r).length > 0);
-  const filtered = flagged.filter((r) => {
-    if (_verifFilter === "all") return true;
+  // Liste = SEULEMENT les cas nécessitant une revue humaine = NON auto-approuvables
+  // (confiance < seuil OU flag bloquant : conflit / NFO / intégrité). Les auto-approuvables
+  // (pré-approuvés par le backend) et les faux subtitle_missing_fr (FR embarqué) ne
+  // polluent plus l'écran. `auto_approvable` vient du backend
+  // (history_support._enrich_plan_payload) -> source unique cohérente avec les compteurs.
+  // Fallback défensif : si l'enrichissement est absent (bool non fourni), on retombe sur
+  // "a des alertes" pour ne pas masquer de lignes.
+  const flagged = rows.filter((r) =>
+    (typeof r.auto_approvable === "boolean") ? !r.auto_approvable : _readFlags(r).length > 0
+  );
+  // "Tous problèmes" = la liste de REVUE (non auto-approuvables). Les puces de CATÉGORIE
+  // (Subs FR / Doublons / NFO) sont des LENTILLES sur TOUTE la bibliothèque : un film bien
+  // identifié à qui il ne manque qu'un sous-titre FR est auto-approuvable (donc hors revue)
+  // mais doit rester visible/compté via sa puce dédiée — sinon "Subs FR manquants" tombe à ~0.
+  const _matchCat = (r, cat) => {
     const flags = _readFlags(r);
-    if (_verifFilter === "subs") return flags.some((f) => String(f).startsWith("subtitle"));
-    if (_verifFilter === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
-    if (_verifFilter === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
-    return true;
-  });
+    if (cat === "subs") return flags.some((f) => String(f).startsWith("subtitle_missing_fr"));
+    if (cat === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
+    if (cat === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
+    return false;
+  };
+  const filtered = (_verifFilter === "all")
+    ? flagged.slice()
+    : rows.filter((r) => _matchCat(r, _verifFilter));
+  // Tri alphabétique FRANÇAIS (À avec A, Ç avec C, ponctuation/ellipse initiale ignorée,
+  // "Chapitre 2" avant "Chapitre 10"). La table n'était triée par rien -> elle héritait de
+  // l'ordre du scan (comparaison par point de code : "À…"/"Ç…"/"…" classés après Z).
+  filtered.sort((a, b) => _FR_COLLATOR.compare(
+    String(a.display_title || a.proposed_title || ""),
+    String(b.display_title || b.proposed_title || "")
+  ));
+  // Compteurs de puces : chaque catégorie compte sur TOUTE la biblio (lentille), pas seulement la revue.
+  const _nSubs = rows.filter((r) => _matchCat(r, "subs")).length;
+  const _nDups = rows.filter((r) => _matchCat(r, "dups")).length;
+  const _nNfo = rows.filter((r) => _matchCat(r, "nfo")).length;
 
   // Fix VAL-2 (2026-05-30) : suppression du slice(0,50) qui tronquait
   // silencieusement la liste. Si > 500 lignes, un info banner est affiche
@@ -791,9 +824,10 @@ function _renderVerificationStep() {
     const flags = _readFlags(r);
     return `
       <tr data-row-id="${escapeHtml(r.row_id || "")}">
-        <td class="traitement-verif-title">${escapeHtml(r.proposed_title || "—")}</td>
+        <td class="traitement-verif-title">${escapeHtml(r.display_title || r.proposed_title || "—")}</td>
         <td class="traitement-verif-year">${escapeHtml(String(r.proposed_year || ""))}</td>
         <td class="traitement-verif-alerts">
+          ${flags.length === 0 ? `<span class="traitement-verif-alert">confiance faible</span>` : ""}
           ${flags.slice(0, 3).map((f) => `<span class="traitement-verif-alert">${escapeHtml(f)}</span>`).join(" ")}
           ${flags.length > 3 ? `<span class="traitement-verif-alert-more">+${flags.length - 3}</span>` : ""}
         </td>
@@ -801,7 +835,7 @@ function _renderVerificationStep() {
         <td class="traitement-verif-actions">
           <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="rescan" data-row-id="${escapeHtml(r.row_id || "")}">↻ Re-scanner</button>
           <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="rename" data-row-id="${escapeHtml(r.row_id || "")}">✎ Renommer</button>
-          <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-traitement-verif-action="ignore" data-row-id="${escapeHtml(r.row_id || "")}">Ignorer</button>
+          <button type="button" class="v5-btn v5-btn--sm v5-btn--secondary" data-traitement-verif-action="ignore" data-row-id="${escapeHtml(r.row_id || "")}">Ignorer</button>
         </td>
       </tr>
     `;
@@ -815,13 +849,15 @@ function _renderVerificationStep() {
 
       <div class="traitement-verif-filters" role="tablist" aria-label="Filtres vérification">
         <button type="button" class="traitement-verif-filter ${_verifFilter === "all" ? "is-active" : ""}" data-traitement-verif-filter="all">Tous problèmes (${flagged.length})</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "subs" ? "is-active" : ""}" data-traitement-verif-filter="subs">Subs FR manquants</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "dups" ? "is-active" : ""}" data-traitement-verif-filter="dups">Doublons cross-root</button>
-        <button type="button" class="traitement-verif-filter ${_verifFilter === "nfo" ? "is-active" : ""}" data-traitement-verif-filter="nfo">NFO incohérent</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "subs" ? "is-active" : ""}" data-traitement-verif-filter="subs">Subs FR manquants (${_nSubs})</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "dups" ? "is-active" : ""}" data-traitement-verif-filter="dups">Doublons cross-root (${_nDups})</button>
+        <button type="button" class="traitement-verif-filter ${_verifFilter === "nfo" ? "is-active" : ""}" data-traitement-verif-filter="nfo">NFO incohérent (${_nNfo})</button>
       </div>
 
-      ${flagged.length === 0 ? `
-        <p class="traitement-placeholder">✅ Tous les fichiers passent les contrôles. Continuez vers Validation.</p>
+      ${filtered.length === 0 ? `
+        <p class="traitement-placeholder">${_verifFilter === "all"
+          ? "✅ Tous les fichiers passent les contrôles. Continuez vers Validation."
+          : "Aucun film dans cette catégorie."}</p>
       ` : `
         <table class="traitement-verif-table" role="grid">
           <thead>
@@ -872,9 +908,15 @@ function _sortValidationRows(rows, sort) {
     let va;
     let vb;
     if (key === "titre" || key === "proposed_title") {
-      va = String(a.proposed_title || "").toLocaleLowerCase();
-      vb = String(b.proposed_title || "").toLocaleLowerCase();
-      return va.localeCompare(vb) * dirMult;
+      // M14 : collation FRANCAISE (meme Intl.Collator que la Bibliotheque et
+      // l'etape Verification) au lieu de toLocaleLowerCase()+localeCompare() SANS
+      // options — l'ancien tri ignorait numeric ("Film 10" avant "Film 2") et
+      // ignorePunctuation ("…Titre"/"À…" mal classes). Cle de tri alignee sur la
+      // cle AFFICHEE (display_title || proposed_title) et non proposed_title seul,
+      // sinon l'ordre divergeait visiblement du libelle rendu dans la colonne.
+      va = String(a.display_title || a.proposed_title || "");
+      vb = String(b.display_title || b.proposed_title || "");
+      return _FR_COLLATOR.compare(va, vb) * dirMult;
     }
     if (key === "annee" || key === "proposed_year") {
       va = Number(a.proposed_year) || 0;
@@ -965,7 +1007,9 @@ function _renderValidationStep() {
       defaultChecked = !!stState.ok;
     } else if (r.decision === "OK" || r.decision === "APPROVED") defaultChecked = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") defaultChecked = false;
-    else defaultChecked = conf >= _thr.high;
+    // H14 : defaut = verdict backend auto_approvable (source unique _defaultDecisionOk),
+    // pas la confiance brute >= high (qui pre-cochait des rows a flag bloquant).
+    else defaultChecked = _defaultDecisionOk(r);
     const yearForRender = stState && stState.year != null
       ? String(stState.year)
       : String(r.proposed_year || "");
@@ -982,7 +1026,7 @@ function _renderValidationStep() {
           <input type="checkbox" data-traitement-validation-check data-row-id="${escapeHtml(rowId)}" ${defaultChecked ? "checked" : ""}>
         </td>
         <td class="traitement-validation-confidence ${confCls}">${escapeHtml(confLabel)} (${conf})</td>
-        <td class="traitement-validation-title">${escapeHtml(r.proposed_title || "—")}</td>
+        <td class="traitement-validation-title">${escapeHtml(r.display_title || r.proposed_title || "—")}</td>
         <td class="traitement-validation-year">
           <input type="number" min="1900" max="2099" value="${escapeHtml(yearForRender)}" class="traitement-validation-year-input" data-row-id="${escapeHtml(rowId)}">
         </td>
@@ -1399,14 +1443,40 @@ function _formatPreviewEntry(entry) {
   return `<div class="apply-preview-entry">${src || dst || "&mdash;"}</div>`;
 }
 
+// F23 (revue post-merge 2026-07-18) : hash DJB2-xor 32 bits, stable et sans
+// dépendance. Sert uniquement à compacter la signature de décisions.
+function _hash32(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 // AUDIT 2026-06-13 (R5-P2) : signature légère des décisions pour invalider
 // l'aperçu backend quand l'utilisateur approuve/rejette des films.
+//
+// F23 : `size` est CONSTANT (toutes les rows sont pré-seedées par
+// _initDecisionsState) et `approved` ne bouge pas sur une édition d'année ni
+// sur un swap approuvé/rejeté 1-pour-1. L'aperçu backend restait donc affiché
+// tel quel — non étiqueté « estimation » — alors que l'apply réel poste
+// _buildDecisions() frais, dont `year` prime pour le dossier cible côté
+// backend. La signature dérive maintenant du CONTENU réellement posté.
 function _applyDecisionsSignature() {
   let approved = 0;
-  for (const st of _decisionsState.values()) {
-    if (st && st.ok) approved += 1;
+  const parts = [];
+  for (const [rowId, st] of _decisionsState.entries()) {
+    const ok = !!(st && st.ok);
+    if (ok) approved += 1;
+    // Normalisation IDENTIQUE à _buildDecisions (sinon 2019 et "2019"
+    // produiraient deux signatures pour un payload identique).
+    const yearNorm = (st && st.year != null) ? (Number(st.year) || "") : "";
+    parts.push(`${rowId}:${ok ? 1 : 0}:${yearNorm}`);
   }
-  return `${_runInfo?.runId || ""}|${_decisionsState.size}|${approved}`;
+  // L'ordre d'insertion de la Map n'est pas stable (delete+set dans les
+  // bulk-actions) : on trie pour que seule la VALEUR des décisions compte.
+  parts.sort();
+  // `size|approved` reste en clair : une collision de hash 32 bits ne peut pas
+  // à elle seule ramener le bug.
+  return `${_runInfo?.runId || ""}|${_decisionsState.size}|${approved}|${_hash32(parts.join(","))}`;
 }
 
 // Charge le VRAI plan d'apply (build_apply_preview) une fois par signature de
@@ -1422,6 +1492,15 @@ async function _ensureApplyPreview() {
   if (_applyPreviewLoading || _applyPreviewSig === sig) return;
   _applyPreviewLoading = true;
   _applyPreviewSig = sig;
+  // F23 (revue adversaire R1) : invalider AUSSI le plan deja en memoire.
+  // `_renderApplyStep` appelle _ensureApplyPreview() SANS l'attendre puis lit
+  // `_applyPreview` dans la foulee : tant que le refetch n'avait pas repondu,
+  // l'ancien plan restait affiche comme VRAI plan backend (totals non nul ->
+  // previewIsEstimate=false), non etiquete « (estimation) », alors que l'apply
+  // reel poste des decisions fraiches (dec['year'] prime cote backend).
+  // A null, l'etape retombe sur l'estimation client EXPLICITEMENT etiquetee
+  // pendant l'aller-retour (comportement documente plus bas).
+  _applyPreview = null;
   try {
     const res = await apiPost(
       "run/build_apply_preview",
@@ -1460,9 +1539,16 @@ function _applyPreviewOps(limit) {
 
 function _renderApplyStep() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
-  // VN-C.1 (batch 2) : seuil "auto-approve" = CONF_HIGH (85) via thresholds unifies.
-  const _autoThr = getConfidenceThresholdsSync().high;
-  const approved = rows.filter((r) => r.decision === "ok" || r.decision === "approved" || Number(r.confidence || 0) >= _autoThr);
+  // H14 + revue R2 : le compteur DOIT lire _decisionsState (la SOURCE DE VERITE
+  // des decisions, cf. _applyDecisionsToRows L1889), pas la chaine r.decision.
+  // L'ancien `r.decision === "approved"` (minuscule) ne matchait jamais un
+  // bulk-approve qui pose r.decision="APPROVED" (majuscule) -> sous-comptage des
+  // rows approuvees en masse mais non auto-approvables. On compte l'etat REEL
+  // (st.ok), avec repli sur le defaut backend pour une row pas encore seedee.
+  const approved = rows.filter((r) => {
+    const st = _decisionsState.get(String(r.row_id || ""));
+    return st ? st.ok : _defaultDecisionOk(r);
+  });
 
   // AUDIT 2026-06-13 (R5-P2) : déclenche le chargement du vrai plan backend.
   _ensureApplyPreview();
@@ -1615,14 +1701,21 @@ function _renderStepPanel(stepId) {
     `;
   }
   if (!_runInfo) {
-    const step = STEPS.find((s) => s.id === stepId) || STEPS[0];
+    const stepIndex = Math.max(0, STEPS.findIndex((s) => s.id === stepId));
+    const step = STEPS[stepIndex];
+    // Le titre de panneau doit garder le MEME format que les cinq panneaux
+    // reels (« Étape 1 — Analyse ») : cet etat vide n'affichait que le libelle
+    // nu (« Analyse »), donc l'intitule changeait selon qu'un run existait ou
+    // non. C'est le seul chemin rendu quand aucun run n'est actif — le cas par
+    // defaut d'une installation neuve, et celui du runner CI.
+    const stepTitle = `Étape ${stepIndex + 1} — ${step.label}`;
     // Fix audit 2026-06-08 UX high : 1 seul CTA "Lancer un scan" (le header
     // empty-state n'en rend plus). Bouton avec data-traitement-action="start-scan"
     // pour rester dans la vue Traitement plutot que de rediriger vers
     // une vue tierce (#/processing) inexistante ou redondante.
     return `
       <section class="traitement-panel" aria-labelledby="traitement-panel-title">
-        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(step.label)}</h2>
+        <h2 id="traitement-panel-title" class="traitement-panel-title">${escapeHtml(stepTitle)}</h2>
         <p class="traitement-placeholder">
           Aucun run actif détecté. Lance un scan pour démarrer le workflow.
         </p>
@@ -1808,6 +1901,20 @@ async function _loadPlan() {
   _initDecisionsState();
 }
 
+// H14 (audit ultra 2026-07-13) : defaut d'approbation d'une row = verdict
+// BACKEND `auto_approvable` (confiance >= seuil ET aucun flag bloquant
+// _AUTO_BLOCKING : history_support._enrich_plan_payload / run_read_support).
+// Un film confiance 92 + nfo_year_mismatch a auto_approvable=false et NE DOIT
+// PAS etre pre-coche. Fallback sur confiance >= high uniquement si
+// l'enrichissement backend est absent (bool non fourni), coherent avec le
+// filtre "a examiner" (meme vue, ligne ~785). Source UNIQUE partagee par les 4
+// sites (seed / rendu checkbox / compteur Application / dirty-check), sinon
+// _hasUnsavedValidationDecisions produirait un faux "decisions non enregistrees".
+function _defaultDecisionOk(r) {
+  if (typeof r.auto_approvable === "boolean") return r.auto_approvable;
+  return Number(r.confidence || 0) >= getConfidenceThresholdsSync().high;
+}
+
 // VN-C.2 : seed/refresh du state JS depuis _validationPlan. On ne touche jamais
 // au DOM ici (pas de querySelectorAll). On ne supprime pas non plus d'entree
 // existante en cas de re-load partiel — la suppression franche se fait au
@@ -1815,7 +1922,6 @@ async function _loadPlan() {
 function _initDecisionsState() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   if (rows.length === 0) return;
-  const thrHigh = getConfidenceThresholdsSync().high;
   const validIds = new Set();
   for (const r of rows) {
     const rowId = String(r.row_id || "");
@@ -1825,7 +1931,7 @@ function _initDecisionsState() {
     let ok;
     if (r.decision === "OK" || r.decision === "APPROVED") ok = true;
     else if (r.decision === "REJECT" || r.decision === "REJECTED") ok = false;
-    else ok = Number(r.confidence || 0) >= thrHigh;
+    else ok = _defaultDecisionOk(r);
     const year = Number(r.proposed_year) || null;
     _decisionsState.set(rowId, { ok, year, decided_at: Date.now() });
   }
@@ -2633,7 +2739,6 @@ function _hasUnsavedValidationDecisions() {
   const rows = (_validationPlan && _validationPlan.rows) || [];
   if (rows.length === 0) return false;
   if (_decisionsState.size === 0) return false;
-  const thrHigh = getConfidenceThresholdsSync().high;
   for (const row of rows) {
     const rowId = String(row.row_id || "");
     const st = _decisionsState.get(rowId);
@@ -2641,7 +2746,9 @@ function _hasUnsavedValidationDecisions() {
     let defaultOk;
     if (row.decision === "OK" || row.decision === "APPROVED") defaultOk = true;
     else if (row.decision === "REJECT" || row.decision === "REJECTED") defaultOk = false;
-    else defaultOk = Number(row.confidence || 0) >= thrHigh;
+    // H14 : meme defaut que le seed (_defaultDecisionOk), sinon une row jamais
+    // touchee par l'user apparaitrait faussement "non enregistree".
+    else defaultOk = _defaultDecisionOk(row);
     if (!!st.ok !== defaultOk) return true;
     const originalYear = Number(row.proposed_year) || null;
     const currentYear = st.year != null ? Number(st.year) || null : null;

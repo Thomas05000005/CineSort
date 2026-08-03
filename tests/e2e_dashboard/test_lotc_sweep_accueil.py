@@ -73,19 +73,19 @@ _KNOWN_CONSOLE_NOISE: list[str] = [
 _EXCLUDED_ACTIONS = {
     # accueil
     "start-scan-direct": "POST run/start_plan -> lance un VRAI run sur le serveur mock "
-                         "partage (scope session) : mutation d'etat, pas une action sure.",
+    "partage (scope session) : mutation d'etat, pas une action sure.",
     # aide
     "open-logs": "POST runtime/open_logs_folder -> ouvre un Explorer REEL sur la machine hote.",
     "report-bug": "window.open vers github.com (reseau externe, onglet popup) : hors sandbox test.",
     "drawer-expand": "navigue vers #/aide/doc/<id>, route NON enregistree dans le router "
-                     "(commentaire aide.js L549-551) -> rebond routeur, pas de reaction stable.",
+    "(commentaire aide.js L549-551) -> rebond routeur, pas de reaction stable.",
 }
 
 # Actions sures de #/accueil : action -> prefixe de hash attendu apres clic.
 # (Toutes sont des navigateTo() purs, cf. views/accueil.js _bindEvents L1188-1238.)
 _ACCUEIL_SAFE_NAV_ACTIONS = {
-    "start-scan": "#/traitement",          # empty state uniquement (aucun run)
-    "resume-validation": "#/traitement",   # uniquement si run AWAITING_VALIDATION
+    "start-scan": "#/traitement",  # empty state uniquement (aucun run)
+    "resume-validation": "#/traitement",  # uniquement si run AWAITING_VALIDATION
     "view-run-detail": "#/historique",
     "open-traitement": "#/traitement",
     "view-history": "#/historique",
@@ -237,9 +237,7 @@ class TestLotCSweepAccueil:
         # Skeletons remplaces par du contenu (pas de squelette permanent).
         assert page.evaluate("() => document.querySelectorAll('#view-status .v5-skeleton').length") == 0
         # aria-busy relache partout dans la vue active.
-        assert page.evaluate(
-            "() => document.querySelectorAll('#view-status [aria-busy=\"true\"]').length"
-        ) == 0
+        assert page.evaluate("() => document.querySelectorAll('#view-status [aria-busy=\"true\"]').length") == 0
 
         # Widgets / sections de la spec 05 (cf. accueil.js _renderAccueil L909-921).
         # Sante et Suggestions ont des variantes --empty selon les donnees : on
@@ -285,9 +283,7 @@ class TestLotCSweepAccueil:
                 absent.append(action)
                 continue
             btn.click()
-            page.wait_for_function(
-                f"() => window.location.hash.startsWith('{expected_prefix}')", timeout=5000
-            )
+            page.wait_for_function(f"() => window.location.hash.startsWith('{expected_prefix}')", timeout=5000)
             # Laisser la vue cible s'initialiser (ses erreurs comptent aussi).
             page.wait_for_timeout(400)
             clicked.append(action)
@@ -299,9 +295,7 @@ class TestLotCSweepAccueil:
             btn.click()
             page.wait_for_selector("[data-accueil-scan-drawer]", timeout=3000)
             page.click("[data-accueil-scan-drawer-cancel]")
-            page.wait_for_function(
-                "() => !document.querySelector('[data-accueil-scan-drawer]')", timeout=3000
-            )
+            page.wait_for_function("() => !document.querySelector('[data-accueil-scan-drawer]')", timeout=3000)
             clicked.append("open-scan-options")
         else:
             absent.append("open-scan-options")
@@ -309,12 +303,8 @@ class TestLotCSweepAccueil:
         # Garde anti-test-vide : les donnees mock (2 runs termines, 15 films)
         # garantissent au minimum view-run-detail, view-history, view-qualite
         # et le CTA scan idle.
-        assert len(clicked) >= 3, (
-            f"Sweep vide : seulement {clicked} cliquees (absentes : {absent})"
-        )
-        assert watcher.errors == [], (
-            f"Erreurs console pendant les actions accueil {clicked} : {watcher.errors}"
-        )
+        assert len(clicked) >= 3, f"Sweep vide : seulement {clicked} cliquees (absentes : {absent})"
+        assert watcher.errors == [], f"Erreurs console pendant les actions accueil {clicked} : {watcher.errors}"
 
     def test_03_accueil_open_insight(self, swept_page):
         """Clic sur une suggestion (open-insight) -> doit atteindre sa route cible.
@@ -324,9 +314,7 @@ class TestLotCSweepAccueil:
         """
         page, watcher = swept_page
         _wait_accueil_stable(page)
-        insight = page.query_selector(
-            '#view-status [data-accueil-action="open-insight"][data-target-route]'
-        )
+        insight = page.query_selector('#view-status [data-accueil-action="open-insight"][data-target-route]')
         if not insight:
             pytest.skip("Aucune suggestion open-insight avec data-target-route (etat des donnees)")
 
@@ -355,9 +343,7 @@ class TestLotCSweepAccueil:
         _wait_aide_stable(page)
 
         assert page.evaluate("() => document.querySelectorAll('#view-help .v5-skeleton').length") == 0
-        assert page.evaluate(
-            "() => document.querySelectorAll('#view-help [aria-busy=\"true\"]').length"
-        ) == 0
+        assert page.evaluate("() => document.querySelectorAll('#view-help [aria-busy=\"true\"]').length") == 0
 
         for selector, label in [
             ("#view-help [data-aide-search]", "barre de recherche documentation"),
@@ -386,9 +372,7 @@ class TestLotCSweepAccueil:
             "() => (document.querySelector('#view-help [data-aide-status]')?.textContent || '').trim() !== ''",
             timeout=4000,
         )
-        status = page.evaluate(
-            "() => document.querySelector('#view-help [data-aide-status]').textContent.trim()"
-        )
+        status = page.evaluate("() => document.querySelector('#view-help [data-aide-status]').textContent.trim()")
         assert "copi" in status.lower(), f"copy-diagnostic : statut inattendu {status!r}"
 
         # copy-recent-logs -> message de statut visible dans [data-aide-logs-status].
@@ -440,17 +424,13 @@ class TestLotCSweepAccueil:
         except PWTimeoutError:
             # Nettoyage (Escape marche : handler document) puis xfail documente.
             page.keyboard.press("Escape")
-            page.wait_for_function(
-                "() => !document.querySelector('.aide-doc-drawer-overlay')", timeout=3000
-            )
+            page.wait_for_function("() => !document.querySelector('.aide-doc-drawer-overlay')", timeout=3000)
             pytest.xfail(
                 "[BUG-DRAWER-ZINDEX] bouton Fermer du drawer documentation recouvert par "
                 "la topbar (icone theme intercepte les pointer events) : fermeture souris "
                 "impossible, seul Escape/backdrop fonctionne."
             )
-        page.wait_for_function(
-            "() => !document.querySelector('.aide-doc-drawer-overlay')", timeout=3000
-        )
+        page.wait_for_function("() => !document.querySelector('.aide-doc-drawer-overlay')", timeout=3000)
 
     # ------------------------------------------------------------------ About
 
@@ -467,8 +447,7 @@ class TestLotCSweepAccueil:
         page.wait_for_timeout(700)
         final_hash = page.evaluate("() => window.location.hash")
         assert final_hash != "#/about", (
-            "ATTENTION : #/about semble routee desormais — mettre a jour ce sweep "
-            "pour la traiter comme une vraie vue."
+            "ATTENTION : #/about semble routee desormais — mettre a jour ce sweep pour la traiter comme une vraie vue."
         )
         assert final_hash == "#/accueil", (
             f"Rebond route inconnue inattendu : {final_hash!r} (attendu #/accueil en mode loopback)"
@@ -478,9 +457,7 @@ class TestLotCSweepAccueil:
         page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         page.click("[data-v5-about-btn]")
         page.wait_for_selector("#dashModal", timeout=4000)
-        title = page.evaluate(
-            "() => (document.querySelector('#dashModal #dashModalTitle')?.textContent || '').trim()"
-        )
+        title = page.evaluate("() => (document.querySelector('#dashModal #dashModalTitle')?.textContent || '').trim()")
         assert "propos" in title.lower(), f"Titre modale About inattendu : {title!r}"
         # Laisser le fetch runtime/get_app_version aboutir avant la capture.
         page.wait_for_timeout(1200)

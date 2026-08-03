@@ -134,16 +134,12 @@ def _goto_qualite(page) -> None:
         _set_hash(page, "/qualite")
         try:
             # Vue stable = skeleton --loading remplace par le rendu final (ou l'erreur).
-            page.wait_for_selector(
-                ".qualite-view:not(.qualite-view--loading)", timeout=10000
-            )
+            page.wait_for_selector(".qualite-view:not(.qualite-view--loading)", timeout=10000)
             page.wait_for_timeout(300)
             return
         except PWTimeoutError:
             continue
-    raise AssertionError(
-        "Vue #/qualite bloquee sur son skeleton apres 3 tentatives (cf. bug LOTC-F1)"
-    )
+    raise AssertionError("Vue #/qualite bloquee sur son skeleton apres 3 tentatives (cf. bug LOTC-F1)")
 
 
 def _goto_doublons(page, timeout: int = 45000) -> None:
@@ -165,17 +161,11 @@ def _goto_doublons(page, timeout: int = 45000) -> None:
         except PWTimeoutError:
             continue
         error_el = page.query_selector(".doublons-error")
-        if (
-            attempt < 2
-            and error_el is not None
-            and "Aucun run actif" in (error_el.inner_text() or "")
-        ):
+        if attempt < 2 and error_el is not None and "Aucun run actif" in (error_el.inner_text() or ""):
             # Symptome LOTC-F1 : le mock a toujours un run -> re-naviguer.
             continue
         return
-    raise AssertionError(
-        "Vue #/doublons indisponible apres 3 tentatives (cf. bug LOTC-F1)"
-    )
+    raise AssertionError("Vue #/doublons indisponible apres 3 tentatives (cf. bug LOTC-F1)")
 
 
 def _screenshot(page, name: str) -> None:
@@ -188,9 +178,7 @@ def _count(page, selector: str) -> int:
 
 
 def _active_view_id(page) -> str:
-    return page.evaluate(
-        "() => { const el = document.querySelector('.main .view.active'); return el ? el.id : ''; }"
-    )
+    return page.evaluate("() => { const el = document.querySelector('.main .view.active'); return el ? el.id : ''; }")
 
 
 # ---------------------------------------------------------------------------
@@ -255,15 +243,11 @@ class TestQualiteSweep:
         dashboard_page.click('[data-qualite-action="filters"]')
         dashboard_page.wait_for_selector(".qualite-drawer", timeout=5000)
         dashboard_page.click("[data-qualite-drawer-close]")
-        dashboard_page.wait_for_selector(
-            ".qualite-drawer-overlay", state="detached", timeout=5000
-        )
+        dashboard_page.wait_for_selector(".qualite-drawer-overlay", state="detached", timeout=5000)
 
         # --- Switch periode Evolution (sure) : 7j devient actif apres re-render.
         dashboard_page.click('[data-qualite-period="7"]')
-        dashboard_page.wait_for_selector(
-            '.qualite-period-btn--active[data-qualite-period="7"]', timeout=10000
-        )
+        dashboard_page.wait_for_selector('.qualite-period-btn--active[data-qualite-period="7"]', timeout=10000)
 
         # --- Action "recompute" (avec confirmation) :
         # cliquer -> la modale dangerConfirmModal DOIT apparaitre -> ANNULER.
@@ -279,24 +263,18 @@ class TestQualiteSweep:
         # (cf. [LOTC-F2]) — la branche s'activera quand le mock sera corrige.
         if _count(dashboard_page, ".qualite-tier-row") > 0:
             dashboard_page.click(".qualite-tier-row")
-            dashboard_page.wait_for_function(
-                "() => window.location.hash.includes('/bibliotheque')", timeout=5000
-            )
+            dashboard_page.wait_for_function("() => window.location.hash.includes('/bibliotheque')", timeout=5000)
             _goto_qualite(dashboard_page)
 
         # --- Clic sur une decennie (sure) : navigation vers #/bibliotheque.
         assert _count(dashboard_page, ".qualite-decade-row") > 0, "Aucune barre decennie"
         dashboard_page.click(".qualite-decade-row")
-        dashboard_page.wait_for_function(
-            "() => window.location.hash.includes('/bibliotheque')", timeout=5000
-        )
+        dashboard_page.wait_for_function("() => window.location.hash.includes('/bibliotheque')", timeout=5000)
         _goto_qualite(dashboard_page)
 
         # --- Action "configure-subs" (sure) : navigation vers #/parametres.
         dashboard_page.click('[data-qualite-action="configure-subs"]')
-        dashboard_page.wait_for_function(
-            "() => window.location.hash.includes('/parametres')", timeout=5000
-        )
+        dashboard_page.wait_for_function("() => window.location.hash.includes('/parametres')", timeout=5000)
         _goto_qualite(dashboard_page)
 
         unexpected = _unexpected(errors)
@@ -366,9 +344,7 @@ class TestDoublonsSweep:
             title = dashboard_page.inner_text(".danger-modal-title")
             assert "Auto-décider" in title, f"Titre confirmation inattendu: {title!r}"
             dashboard_page.click("[data-danger-cancel]")
-            dashboard_page.wait_for_selector(
-                ".danger-modal-overlay", state="detached", timeout=5000
-            )
+            dashboard_page.wait_for_selector(".danger-modal-overlay", state="detached", timeout=5000)
             # Annule -> AUCUNE decision ne doit avoir ete posee.
             assert _count(dashboard_page, ".duplicate-decision-badge--decided") == 0, (
                 "Une decision a ete posee malgre l'annulation de l'auto-decide"
@@ -376,9 +352,7 @@ class TestDoublonsSweep:
 
         # --- Decision "Garder A" (sure et REVERSIBLE) : badge "Décidé : Garder A".
         dashboard_page.click('[data-doublons-card-action="keep"][data-side="a"]')
-        dashboard_page.wait_for_selector(
-            '.duplicate-decision-badge--decided:has-text("Garder A")', timeout=45000
-        )
+        dashboard_page.wait_for_selector('.duplicate-decision-badge--decided:has-text("Garder A")', timeout=45000)
         # _decideFromCard resynchronise ensuite via un re-scan force (R6-C) :
         # attendre la fin du cycle avant le clic suivant (DOM re-cree).
         dashboard_page.wait_for_timeout(1500)
@@ -386,9 +360,7 @@ class TestDoublonsSweep:
 
         # --- Reversibilite : "Garder B" re-appelle mark_duplicate_winner.
         dashboard_page.click('[data-doublons-card-action="keep"][data-side="b"]')
-        dashboard_page.wait_for_selector(
-            '.duplicate-decision-badge--decided:has-text("Garder B")', timeout=45000
-        )
+        dashboard_page.wait_for_selector('.duplicate-decision-badge--decided:has-text("Garder B")', timeout=45000)
         dashboard_page.wait_for_timeout(1500)
         dashboard_page.wait_for_selector(".doublons-list", timeout=45000)
 
@@ -397,9 +369,7 @@ class TestDoublonsSweep:
         # (la modale go-apply ne se montre que s'il reste des groupes pendants).
         dashboard_page.wait_for_selector(".doublons-apply-cta--ready", timeout=15000)
         dashboard_page.click('[data-doublons-action="go-apply"]')
-        dashboard_page.wait_for_function(
-            "() => window.location.hash.includes('/traitement')", timeout=5000
-        )
+        dashboard_page.wait_for_function("() => window.location.hash.includes('/traitement')", timeout=5000)
         # Retour sur la vue Doublons (cache R6-C -> restitution instantanee).
         _goto_doublons(dashboard_page)
 
@@ -419,27 +389,17 @@ class TestDoublonsSweep:
         # dataset mock les fichiers video n'existent pas -> etat erreur/vide
         # PROPRE attendu, pas de crash).
         dashboard_page.click('[data-duplicate-tab="frames"]')
-        dashboard_page.wait_for_selector(
-            '.duplicate-modal-tab.is-active[data-duplicate-tab="frames"]', timeout=5000
-        )
-        dashboard_page.wait_for_selector(
-            '.duplicate-modal-tab-content[data-tab="frames"]', timeout=20000
-        )
+        dashboard_page.wait_for_selector('.duplicate-modal-tab.is-active[data-duplicate-tab="frames"]', timeout=5000)
+        dashboard_page.wait_for_selector('.duplicate-modal-tab-content[data-tab="frames"]', timeout=20000)
 
         # Onglet Audio : idem.
         dashboard_page.click('[data-duplicate-tab="audio"]')
-        dashboard_page.wait_for_selector(
-            '.duplicate-modal-tab.is-active[data-duplicate-tab="audio"]', timeout=5000
-        )
-        dashboard_page.wait_for_selector(
-            '.duplicate-modal-tab-content[data-tab="audio"]', timeout=20000
-        )
+        dashboard_page.wait_for_selector('.duplicate-modal-tab.is-active[data-duplicate-tab="audio"]', timeout=5000)
+        dashboard_page.wait_for_selector('.duplicate-modal-tab-content[data-tab="audio"]', timeout=20000)
 
         # Fermer SANS decider (les boutons Garder du footer ne sont pas cliques ici).
         dashboard_page.click("[data-duplicate-close]")
-        dashboard_page.wait_for_selector(
-            ".duplicate-modal-overlay", state="detached", timeout=5000
-        )
+        dashboard_page.wait_for_selector(".duplicate-modal-overlay", state="detached", timeout=5000)
 
         # --- Action "perceptual" (sure) : sur la route /doublons, l'analyse
         # perceptuelle s'ouvre en mode A (inspecteur droit elargi), PAS en
@@ -449,17 +409,13 @@ class TestDoublonsSweep:
         dashboard_page.click('[data-doublons-card-action="perceptual"]')
         dashboard_page.wait_for_selector("[data-perceptual-close]", timeout=10000)
         dashboard_page.click("[data-perceptual-close]")
-        dashboard_page.wait_for_selector(
-            "[data-perceptual-close]", state="detached", timeout=5000
-        )
+        dashboard_page.wait_for_selector("[data-perceptual-close]", state="detached", timeout=5000)
 
         # --- Action "detail" (sure) : fiche film en overlay mode C, Esc ferme.
         dashboard_page.click('[data-doublons-card-action="detail"]')
         dashboard_page.wait_for_selector(".film-detail-modal-overlay", timeout=10000)
         dashboard_page.keyboard.press("Escape")
-        dashboard_page.wait_for_selector(
-            ".film-detail-modal-overlay", state="detached", timeout=5000
-        )
+        dashboard_page.wait_for_selector(".film-detail-modal-overlay", state="detached", timeout=5000)
 
         # --- Inspecteur droit : action "compare" (sure) depuis le right panel.
         insp_btn = dashboard_page.query_selector('[data-doublons-inspector-action="compare"]')
@@ -467,9 +423,7 @@ class TestDoublonsSweep:
             insp_btn.click()
             dashboard_page.wait_for_selector(".duplicate-modal-overlay", timeout=10000)
             dashboard_page.click("[data-duplicate-close]")
-            dashboard_page.wait_for_selector(
-                ".duplicate-modal-overlay", state="detached", timeout=5000
-            )
+            dashboard_page.wait_for_selector(".duplicate-modal-overlay", state="detached", timeout=5000)
 
         unexpected = _unexpected(errors)
         assert not unexpected, f"Erreurs console/pageerror overlays #/doublons: {unexpected}"
@@ -493,17 +447,13 @@ class TestNavigationAllerRetour:
 
         for i in range(3):
             _goto_qualite(dashboard_page)
-            assert _count(dashboard_page, ".qualite-view") == 1, (
-                f"Empilement vue Qualite au tour {i + 1}"
-            )
+            assert _count(dashboard_page, ".qualite-view") == 1, f"Empilement vue Qualite au tour {i + 1}"
             assert _active_view_id(dashboard_page) == "view-qij", (
                 f"Container actif inattendu apres #/qualite au tour {i + 1}"
             )
 
             _goto_doublons(dashboard_page)
-            assert _count(dashboard_page, ".doublons-view") == 1, (
-                f"Empilement vue Doublons au tour {i + 1}"
-            )
+            assert _count(dashboard_page, ".doublons-view") == 1, f"Empilement vue Doublons au tour {i + 1}"
             assert _active_view_id(dashboard_page) == "view-library", (
                 f"Container actif inattendu apres #/doublons au tour {i + 1}"
             )

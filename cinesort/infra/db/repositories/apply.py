@@ -46,38 +46,46 @@ class ApplyBatchStateError(RuntimeError):
 # ROLLED_BACK/FAILED/UNDONE_* -> DONE) est rejetee pour eviter la
 # regression de reversibilite decrite par H14.
 _ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
-    "PENDING": frozenset({
-        "PENDING",
-        "DONE",
-        "FAILED",
-        "ROLLED_BACK",
-        "ROLLED_BACK_BY_ATOMIC",
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-        "ABORTED",
-        "ABORTED_HASH_MISMATCH",
-    }),
+    "PENDING": frozenset(
+        {
+            "PENDING",
+            "DONE",
+            "FAILED",
+            "ROLLED_BACK",
+            "ROLLED_BACK_BY_ATOMIC",
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+            "ABORTED",
+            "ABORTED_HASH_MISMATCH",
+        }
+    ),
     # Premier undo full ou selectif depuis un batch acheve.
-    "DONE": frozenset({
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-    }),
+    "DONE": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
     # Reprise d'un undo selectif partiel : on autorise a re-affiner le
     # statut tant qu'on reste dans la famille UNDONE_*. Tout retour vers
     # DONE/PENDING reste interdit (regression H14).
-    "UNDONE_PARTIAL": frozenset({
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-    }),
+    "UNDONE_PARTIAL": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
     # R8-015 (F2-c) : un apply qui a echoue est clos FAILED, PUIS rollback_forward
     # restaure le FS. Si le revert reussit completement, le statut du batch doit
     # refleter cet etat reel -> ROLLED_BACK_BY_ATOMIC (sinon il reste fige a FAILED,
     # impossible de savoir depuis apply_batches.status si le FS est restaure). On
     # n'autorise QUE cette transition depuis FAILED (pas de retour vers DONE/PENDING
     # = pas de reintroduction dans get_last_reversible_apply_batch).
-    "FAILED": frozenset({
-        "ROLLED_BACK_BY_ATOMIC",
-    }),
+    "FAILED": frozenset(
+        {
+            "ROLLED_BACK_BY_ATOMIC",
+        }
+    ),
 }
 
 
@@ -200,10 +208,7 @@ class ApplyRepository(_BaseRepository):
             # Construire la liste des statuts source autorises pour atteindre
             # `target_status`. Si la cible n'apparait dans AUCUN frozenset
             # autorise, on bloque immediatement.
-            allowed_sources = [
-                src for src, targets in _ALLOWED_BATCH_TRANSITIONS.items()
-                if target_status in targets
-            ]
+            allowed_sources = [src for src, targets in _ALLOWED_BATCH_TRANSITIONS.items() if target_status in targets]
             if not allowed_sources:
                 # Avant de lever, on lit l'etat reel pour message clair.
                 cur = conn.execute(
@@ -211,7 +216,7 @@ class ApplyRepository(_BaseRepository):
                     (str(batch_id),),
                 )
                 row = cur.fetchone()
-                current = (row["status"] if row else None)
+                current = row["status"] if row else None
                 raise ApplyBatchStateError(
                     f"close_apply_batch: transition invalide vers '{target_status}' "
                     f"(batch_id={batch_id}, etat courant={current!r})"
@@ -235,7 +240,7 @@ class ApplyRepository(_BaseRepository):
                     (str(batch_id),),
                 )
                 row2 = cur2.fetchone()
-                current = (row2["status"] if row2 else None)
+                current = row2["status"] if row2 else None
                 raise ApplyBatchStateError(
                     f"close_apply_batch: transition refusee vers '{target_status}' "
                     f"(batch_id={batch_id}, etat courant={current!r}, "
@@ -271,6 +276,40 @@ class ApplyRepository(_BaseRepository):
             "summary": summary,
             "app_version": str(row["app_version"] or ""),
         }
+
+    def get_applied_counts_for_runs(self, run_ids: List[str]) -> Dict[str, int]:
+        """{run_id: applied_count} depuis le DERNIER batch reel (non dry-run) DONE de chaque run.
+
+        AUDIT 2026-07-13 (HIGH-7) : source de verite du nombre de films appliques =
+        apply_batches.summary_json.applied_count (ecrit par apply_support). Les
+        surfaces LECTURE (dashboard runs_history, inspecteur Historique) lisaient
+        runs.stats_json.applied_count, une cle JAMAIS ecrite apres un apply ->
+        "Appliques 0" partout malgre un apply reussi. Helper BULK (miroir de
+        run.get_error_counts_for_runs) pour eviter un N+1 sur la liste des runs.
+        """
+        ids = [str(x) for x in (run_ids or []) if str(x).strip()]
+        if not ids:
+            return {}
+        self._ensure_apply_journal_tables()
+        placeholders = ",".join("?" for _ in ids)
+        out: Dict[str, int] = {}
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                f"""
+                SELECT run_id, summary_json, started_ts
+                FROM apply_batches
+                WHERE run_id IN ({placeholders}) AND dry_run=0 AND status='DONE'
+                ORDER BY started_ts DESC
+                """,
+                tuple(ids),
+            )
+            for row in cur.fetchall():
+                rid = str(row["run_id"])
+                if rid in out:
+                    continue  # ORDER BY started_ts DESC -> 1er vu = dernier batch DONE
+                summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
+                out[rid] = int(summary.get("applied_count") or 0)
+        return out
 
     def list_apply_operations(self, *, batch_id: str) -> List[Dict[str, Any]]:
         """Retourne les operations apply du batch dans l'ordre d'execution (op_index croissant)."""
@@ -628,7 +667,12 @@ class ApplyRepository(_BaseRepository):
         """
         self._ensure_apply_atomic_tables()
         ts = str(rolled_back_at) if rolled_back_at is not None else None
-        if ts is None and str(status) in ("IN_PROGRESS", "ROLLED_BACK_BY_ATOMIC", "ROLLBACK_FAILED", "ROLLBACK_PARTIAL"):
+        if ts is None and str(status) in (
+            "IN_PROGRESS",
+            "ROLLED_BACK_BY_ATOMIC",
+            "ROLLBACK_FAILED",
+            "ROLLBACK_PARTIAL",
+        ):
             # auto-fill timestamp ISO-like pour audit
             ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._managed_conn() as conn:

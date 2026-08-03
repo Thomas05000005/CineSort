@@ -13,7 +13,6 @@ tous les codepoints du bearer. Le contrat teste ici :
     codepoints NON-ASCII du bearer (cas BOM U+FEFF historique).
 """
 
-import logging
 import unittest
 
 from cinesort.infra.rest_server import _log_auth_mismatch_debug
