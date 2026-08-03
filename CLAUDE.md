@@ -77,10 +77,11 @@ infra/    I/O (SQLiteStore + 10 repositories, clients TMDb/Plex/Jellyfin/Radarr,
           serveur REST)
 ```
 
-Contrats (identifiants exacts, utiles pour lire un echec CI) :
-`domain_pure` — domain n'importe ni app, ni infra, ni ui.
-`infra_bounded` — infra n'importe ni app, ni ui.
-`app_bounded` — app n'importe pas ui.
+Contrats, libelles **exacts** tels qu'ils apparaissent dans un echec CI (ce sont
+des phrases, pas des identifiants — cherchez-les tels quels dans `.importlinter`) :
+`Domain ne doit importer ni app, ni infra, ni ui`
+`Infra ne doit importer ni app, ni ui`
+`App ne doit pas importer ui`
 
 **Front** : `web/dashboard/` uniquement (ESM vanilla, aucun framework). Il n'y a
 plus de `web/views/` ni `web/components/` de premier niveau — ne pas chercher de
@@ -120,9 +121,15 @@ en suite complete, qui passe en isolation, est presque toujours cela.
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
-build style revert deps sec rel`. Un autre type fait echouer un check
-**obligatoire**. `sec` = correctif de securite (CWE identifie), `rel` = fiabilite
-(ecriture atomique, fsync, course entre ecrivains).
+build style revert deps sec rel`. `sec` = correctif de securite (CWE identifie),
+`rel` = fiabilite (ecriture atomique, fsync, course entre ecrivains).
+Un autre type fait rougir le check `PR title linter`, qui **ne bloque PAS** la
+fusion : les 7 checks requis par la protection de branche sont `Lint, Tests,
+Build` / `Analyze python` / `Analyze javascript-typescript` / `Scan secrets` /
+`bandit scan` / `pip-audit` / `mypy check`, et le linter de titre n'en fait pas
+partie (verifie 2026-08-03 ; quatre PR en `i18n(...)`, `ui-sec(...)` et
+`chore+docs(...)` ont deja fusionne). Respecter la convention reste utile : elle
+alimente le classement de Release Drafter.
 
 **Erreurs d'API** : passer par `cinesort/ui/api/_responses.py:err()`, jamais un
 `return {"ok": False}` nu.
