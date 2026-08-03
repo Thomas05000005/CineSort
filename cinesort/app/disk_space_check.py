@@ -68,11 +68,19 @@ def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     """Somme estimee des octets a deplacer par les rows approuves.
 
     `approved_keys` : ensemble des row_id qui seront effectivement appliques.
+
+    On ne somme QUE les rows explicitement approuvees. Une row au `row_id`
+    vide ne peut par construction jamais figurer dans `approved_keys` (les
+    cles viennent des decisions), donc elle est exclue — l'ancien garde
+    `if rid and rid not in approved_keys` la laissait passer et gonflait
+    l'estimation, jusqu'a un faux "espace disque insuffisant" qui BLOQUE
+    l'apply (#698). Cf la regle de revue "sentinelle falsy" dans
+    cinesort/domain/conversions.py.
     """
     total = 0
     for row in rows or []:
         rid = str(getattr(row, "row_id", "") or "")
-        if rid and rid not in approved_keys:
+        if rid not in approved_keys:
             continue
         total += _row_estimated_size(row)
     return total

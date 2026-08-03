@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, Optional
 
+from cinesort.domain.conversions import to_int
+
 # SCORE-02 (Vague M, M-06) : centralisation des helpers tiers dans
 # tiers_helpers. On reexporte tier_ordinal pour ne pas casser les imports
 # existants (cinesort.domain.calibration.tier_ordinal).
@@ -138,14 +140,19 @@ def suggest_weight_adjustment(
     if focus_count == 0:
         return None
 
-    try:
-        w_video = int(current_weights.get("video", 60) or 60)
-        w_audio = int(current_weights.get("audio", 30) or 30)
-        w_extras = int(current_weights.get("extras", 10) or 10)
-    except (TypeError, ValueError):
-        return None
-
-    weights = {"video": w_video, "audio": w_audio, "extras": w_extras}
+    # `to_int` (et non `... or 60`) : validate_quality_profile
+    # (quality_score.py:423) autorise explicitement un poids a 0 — un profil
+    # qui desactive volontairement une categorie ne doit pas la voir
+    # ressuscitee au defaut, sinon `total_before` et le prorata de
+    # reequilibrage sont calcules sur un profil qui n'existe pas (#639).
+    # Cf la regle de revue "sentinelle falsy" dans cinesort/domain/conversions.py.
+    # to_int ne leve pas : le try/except (TypeError, ValueError) d'origine
+    # etait devenu mort.
+    weights = {
+        "video": to_int(current_weights.get("video"), 60),
+        "audio": to_int(current_weights.get("audio"), 30),
+        "extras": to_int(current_weights.get("extras"), 10),
+    }
     total_before = sum(weights.values())
 
     delta = 5 if direction == "underscore" else -5
