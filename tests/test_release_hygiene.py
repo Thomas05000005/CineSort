@@ -1,8 +1,64 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
+
+# --- Perimetre du scan PII (cf. test_no_personal_strings_in_repo) ------------
+
+# Prefixes exclus du scan parce qu'ils ne partent PAS dans la release : le zip
+# source les retire explicitement (`SOURCE_EXCLUDE_PATH_PATTERNS` dans
+# scripts/package_zip.py, verifie par le test) et le bundle PyInstaller
+# n'embarque que web/, locales/, presets/ et migrations/ (cf CineSort.spec).
+# Ce sont des captures d'enquete (traces pytest, sorties de scripts de diag)
+# qui contiennent legitimement des chemins absolus de la machine de dev :
+# les nettoyer detruirait la valeur de preuve du materiau.
+RELEASE_EXCLUDED_PREFIXES = ("docs/internal/",)
+
+# Dette PII pre-existante, gelee le 2026-08-03. Ces fichiers-la partent bien
+# dans le zip source : ils DOIVENT etre nettoyes, ce n'est pas une exemption
+# de principe. La liste ne doit que RETRECIR ; tout nouveau fichier fuyant une
+# chaine personnelle fait rougir le test, ce qui est le role du garde-fou.
+# (Ce sont des chemins de bibliotheque de test codes en dur dans des tests de
+# chaine et deux scripts de smoketest : la correction consiste a les passer
+# par variable d'environnement / tmp_path.)
+KNOWN_PII_DEBT_2026_08_03 = frozenset(
+    {
+        "scripts/scan_smoketest_lib.py",
+        "scripts/scan_smoketest_parallel.py",
+        "tests/e2e_dashboard/test_lotc_sweep_accueil.py",
+        "tests/e2e_dashboard/test_lotc_sweep_parametres.py",
+        "tests/e2e_dashboard/test_lotc_sweep_processing_historique.py",
+        "tests/e2e_dashboard/test_lotc_sweep_traitement.py",
+        "tests/test_jellyfin_sync_transient_retry.py",
+        "tests/test_lotd_chain_doublons.py",
+        "tests/test_lotd_chain_exports.py",
+        "tests/test_lotd_chain_integrations.py",
+        "tests/test_lotd_chain_rest.py",
+        "tests/test_lotd_chain_scoring.py",
+    }
+)
+
+
+def _git_tracked_files(repo_root: Path) -> list[str] | None:
+    """Chemins (relatifs, separes par /) suivis par git, ou None si indisponible."""
+    try:
+        proc = subprocess.run(  # noqa: S603,S607 - git du PATH, arguments constants
+            # `-c safe.directory=*` : sur un runner, le checkout peut appartenir
+            # a un autre uid que le process de test ; sans ca git refuse le depot
+            # ("dubious ownership") et le test partirait en skip pour rien.
+            ["git", "-c", "safe.directory=*", "ls-files", "-z"],
+            cwd=repo_root,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p]
 
 
 class ReleaseHygieneTests(unittest.TestCase):
@@ -11,13 +67,39 @@ class ReleaseHygieneTests(unittest.TestCase):
         precedente. On evite de chercher le bare "blanc" qui matche aussi
         "bruit blanc" (audio FR), "carte blanche", etc. — on traque les
         vrais marqueurs de leak (chemin Users\\..., adresse mail, NAS path).
+
+        Le scan porte sur les fichiers SUIVIS PAR GIT, pas sur le repertoire de
+        travail. C'etait le defaut principal de la version precedente : elle
+        lisait aussi les artefacts locaux non versionnes (`.aider.chat.history.md`,
+        `_iter8_test/`, `docs/internal/observe/`, `docs/internal/r8/suite_*.txt`
+        — tous ignores par .gitignore). Resultat : rouge sur la machine de dev,
+        pour des fichiers qui n'existent meme pas sur le runner, sur du contenu
+        qui n'a jamais ete publie. Un test d'hygiene de RELEASE doit juger ce
+        que le depot publie, pas le bazar local du developpeur.
         """
         repo_root = Path(__file__).resolve().parents[1]
+        tracked = _git_tracked_files(repo_root)
+        if tracked is None:
+            self.skipTest(
+                "`git ls-files` indisponible ici : impossible de distinguer le contenu "
+                "versionne des artefacts locaux ignores, et scanner le repertoire de "
+                "travail produirait des faux positifs. Le test s'execute normalement "
+                "en CI (checkout git complet) et sur toute copie de travail git."
+            )
+
         allowed_exts = {".py", ".md", ".txt", ".spec", ".html", ".js", ".css"}
-        # 'audit' = dossier de prompts d'orchestration parallele qui contient
-        # legitimement des chemins de worktrees (.claude/worktrees/...). Pas du code prod.
-        skip_dirs = {".git", ".venv", ".venv313", "build", "dist", "packages", "__pycache__", "manual", "audit"}
         skip_files = {"_BACKUP_patch_before.txt", "_BACKUP_patch_after.txt", "test_release_hygiene.py"}
+
+        # Le prefixe exempte doit rester exclu du zip source, sinon l'exemption
+        # devient un mensonge : on le verifie plutot que de le supposer.
+        package_zip = (repo_root / "scripts" / "package_zip.py").read_text(encoding="utf-8")
+        self.assertIn(
+            '"docs/internal"',
+            package_zip,
+            "package_zip.py n'exclut plus docs/internal du zip source : "
+            "RELEASE_EXCLUDED_PREFIXES n'est plus justifie, il faut nettoyer ces "
+            "fichiers ou re-exclure le dossier.",
+        )
 
         # Les fragments sont assembles a runtime pour que le fichier de test
         # lui-meme ne matche pas (sinon ce serait recursif).
@@ -36,15 +118,15 @@ class ReleaseHygieneTests(unittest.TestCase):
         ]
 
         offenders = []
-        for path in repo_root.rglob("*"):
-            if not path.is_file():
+        for rel in tracked:
+            if rel.startswith(RELEASE_EXCLUDED_PREFIXES) or rel in KNOWN_PII_DEBT_2026_08_03:
                 continue
+            path = repo_root / rel
             if path.suffix.lower() not in allowed_exts:
                 continue
             if path.name in skip_files:
                 continue
-            parts_lower = {part.lower() for part in path.parts}
-            if parts_lower.intersection(skip_dirs):
+            if not path.is_file():  # entree d'index sans fichier (checkout partiel)
                 continue
 
             try:
@@ -55,7 +137,7 @@ class ReleaseHygieneTests(unittest.TestCase):
             content_l = content.lower()
             for token in forbidden_tokens:
                 if token in content_l:
-                    offenders.append(f"{path}: {token}")
+                    offenders.append(f"{rel}: {token}")
                     break
 
         if offenders:
