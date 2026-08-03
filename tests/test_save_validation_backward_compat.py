@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, ".")
 
@@ -167,7 +167,7 @@ class SaveValidationBackwardCompatTests(unittest.TestCase):
 
         api = _make_api(rs)
         decisions = {
-            "row-1": {"ok": True},   # -> accepted
+            "row-1": {"ok": True},  # -> accepted
             "row-2": {"ok": False},  # -> rejected
         }
         res = self._call_save(api, "run-1", decisions)
@@ -187,9 +187,7 @@ class SaveValidationBackwardCompatTests(unittest.TestCase):
 
         rs = _make_run_state(self.tmp_root)
         rs.store.decisions = MagicMock()
-        rs.store.decisions.set_decision = MagicMock(
-            side_effect=sqlite3.OperationalError("disk I/O error")
-        )
+        rs.store.decisions.set_decision = MagicMock(side_effect=sqlite3.OperationalError("disk I/O error"))
 
         api = _make_api(rs)
         decisions = {"row-1": {"ok": True}}

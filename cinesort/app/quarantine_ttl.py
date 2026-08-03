@@ -558,9 +558,7 @@ def purge_review_bucket(
     # 1) Sous-dossiers cible (TTL_SUBDIRS)
     for sub in TTL_SUBDIRS:
         target = root / sub
-        sub_stats = _purge_dir_recursive(
-            target, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
-        )
+        sub_stats = _purge_dir_recursive(target, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of)
         payload["by_subdir"][sub] = sub_stats
         payload["deleted"] += sub_stats["deleted"]
         payload["bytes_freed"] += sub_stats["bytes_freed"]
@@ -575,9 +573,7 @@ def purge_review_bucket(
     try:
         for child in root.iterdir():
             if child.is_dir() and child.name not in excluded:
-                sub_stats = _purge_dir_recursive(
-                    child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of
-                )
+                sub_stats = _purge_dir_recursive(child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of)
                 top_stats["deleted"] += sub_stats["deleted"]
                 top_stats["bytes_freed"] += sub_stats["bytes_freed"]
                 top_stats["errors"] += sub_stats["errors"]

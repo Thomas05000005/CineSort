@@ -5,6 +5,7 @@ caracteristiques sont sous probe.detected.* (resolution/video_codec/bitrate_kbps
 audio_tracks_count/duration_s). Le front lisait probe.video/audio/subtitles ->
 specs vides, "Pistes audio: 0". Le nb de sous-titres vient de la PlanRow.
 """
+
 from __future__ import annotations
 
 import unittest

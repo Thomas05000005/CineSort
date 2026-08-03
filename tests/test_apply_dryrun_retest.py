@@ -149,9 +149,7 @@ class ApplyDryRunRestRetestTests(unittest.TestCase):
         }
 
         # Persistance validation via REST
-        status, saved = self._post(
-            "/api/run/save_validation", {"run_id": run_id, "decisions": decisions}
-        )
+        status, saved = self._post("/api/run/save_validation", {"run_id": run_id, "decisions": decisions})
         self.assertEqual(status, 200, saved)
         self.assertTrue(saved.get("ok"), saved)
 
@@ -169,16 +167,12 @@ class ApplyDryRunRestRetestTests(unittest.TestCase):
         self.assertTrue(applied.get("ok"), applied)
 
         # FS inchange : source intacte, dst absente
-        expected_dir = self.root / core.windows_safe(
-            f"{row['proposed_title']} ({row['proposed_year']})"
-        )
+        expected_dir = self.root / core.windows_safe(f"{row['proposed_title']} ({row['proposed_year']})")
         self.assertTrue(source_dir.exists(), "source dir doit rester")
         self.assertTrue(source_video.exists(), "source video doit rester")
         # Comme nom propose != source, dst ne doit pas etre cree en dry-run.
         if expected_dir != source_dir:
-            self.assertFalse(
-                expected_dir.exists(), f"dst {expected_dir} ne doit pas etre cree en dry-run"
-            )
+            self.assertFalse(expected_dir.exists(), f"dst {expected_dir} ne doit pas etre cree en dry-run")
 
     # --- Test 2 : case-only -> aucun rename emis en preview (NOOP) ---
 
@@ -215,9 +209,7 @@ class ApplyDryRunRestRetestTests(unittest.TestCase):
         self.assertTrue(preview.get("ok"), preview)
 
         # Verification croisee : un dry-run apply via REST ne touche rien
-        status, saved = self._post(
-            "/api/run/save_validation", {"run_id": run_id, "decisions": decisions}
-        )
+        status, saved = self._post("/api/run/save_validation", {"run_id": run_id, "decisions": decisions})
         self.assertEqual(status, 200, saved)
         self.assertTrue(saved.get("ok"), saved)
 
@@ -258,9 +250,7 @@ class ApplyDryRunRestRetestTests(unittest.TestCase):
             }
         }
 
-        status, saved = self._post(
-            "/api/run/save_validation", {"run_id": run_id, "decisions": decisions}
-        )
+        status, saved = self._post("/api/run/save_validation", {"run_id": run_id, "decisions": decisions})
         self.assertEqual(status, 200, saved)
         self.assertTrue(saved.get("ok"), saved)
 

@@ -71,8 +71,7 @@ class TestSequenceBackoff(unittest.TestCase):
                 sleep_fn=sleeper,
             )
         self.assertEqual(len(attempts), 4, "3 retries -> 4 tentatives au total")
-        self.assertEqual(sleeper.delays, [1.0, 2.0, 4.0],
-                         "Sequence backoff 1s, 2s, 4s")
+        self.assertEqual(sleeper.delays, [1.0, 2.0, 4.0], "Sequence backoff 1s, 2s, 4s")
 
     def test_max_delay_plafonne_a_8s(self) -> None:
         """Avec base=1 et 5 retries, 2^5=32 mais cape a 8s (plafond)."""
@@ -95,8 +94,7 @@ class TestSequenceBackoff(unittest.TestCase):
         self.assertEqual(sleeper.delays[1], 2.0)
         self.assertEqual(sleeper.delays[2], 4.0)
         self.assertEqual(sleeper.delays[3], 8.0)
-        self.assertEqual(sleeper.delays[4], 8.0,
-                         "Plafond 8s ne doit JAMAIS etre depasse")
+        self.assertEqual(sleeper.delays[4], 8.0, "Plafond 8s ne doit JAMAIS etre depasse")
 
 
 class TestBorneMaxRetries(unittest.TestCase):
@@ -115,6 +113,7 @@ class TestBorneMaxRetries(unittest.TestCase):
         sleeper = _SleepRecorder()
         os.environ["CINESORT_PROBE_RETRY_MAX"] = "999"
         try:
+
             def fn() -> str:
                 raise _timeout_exc()
 
@@ -151,8 +150,7 @@ class TestSucces(unittest.TestCase):
 
         result = retry_with_backoff(fn, sleep_fn=sleeper)
         self.assertEqual(result, "ok")
-        self.assertEqual(sleeper.delays, [],
-                         "Aucun sleep en cas de succes immediat")
+        self.assertEqual(sleeper.delays, [], "Aucun sleep en cas de succes immediat")
 
     def test_succes_apres_2_echecs(self) -> None:
         sleeper = _SleepRecorder()

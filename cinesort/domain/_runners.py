@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, Callable, ContextManager, Iterator, Optional
 
 logger = logging.getLogger(__name__)
@@ -114,14 +114,10 @@ def tracked_popen(*args: Any, **kwargs: Any) -> Iterator[subprocess.Popen]:
             yield proc
         finally:
             if proc.poll() is None:
-                try:
+                with suppress(OSError):
                     proc.kill()
-                except OSError:
-                    pass
-                try:
+                with suppress(subprocess.TimeoutExpired, OSError):
                     proc.wait(timeout=1.0)
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
         return
     with _popen_runner(*args, **kwargs) as proc:
         yield proc

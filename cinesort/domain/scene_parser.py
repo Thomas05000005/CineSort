@@ -197,10 +197,17 @@ _TRAILING_LANG_TOKENS_RE = re.compile(
 # canaux et le ".1/.0" (un vrai tag audio "5.1" devient "5 1" apres le replace
 # point->espace), et on retire "ma"/"hra" (trop agressifs ; "DTS-HD MA" est
 # deja gere par _NOISE_RE). `[257][\s.][01]` couvre 5.1/7.1/2.1/5.0/7.0/2.0.
-# Les canaux (5.1/7.1/2.0) et "atmos" sont insensibles a la casse ; "MA"/"HRA"
-# (DTS-HD Master Audio / High Resolution Audio) sont matches UNIQUEMENT en
-# majuscules via le flag scope (?-i:...) -> on strippe le tag audio "MA" mais
-# PAS le mot de titre title-case "Ma" ("Ma Vie de Courgette").
+# Les canaux (5.1/7.1/2.0) et "atmos" sont insensibles a la casse.
+# F33 (2026-07-18) : l'alternative `(?-i:MA|HRA)` a ete RETIREE. Le garde
+# title-case ne protegeait que "Ma Vie de Courgette" ; toute release ALL-CAPS
+# (courante) etait MUTILEE : "MA.2019.1080p.BluRay.x264-GRP" -> "2019" (query
+# TMDb purement numerique = film introuvable), "MA.LOUTE.2016..." -> "LOUTE
+# 2016", "MA.VIE.DE.COURGETTE.2016..." -> "VIE DE COURGETTE 2016". Le residu
+# "MA"/"HRA" est desormais strippe UNIQUEMENT avec son contexte DTS-HD, via
+# _DTS_HD_MASTER_RE ci-dessous. Compromis assume : un "MA" audio sans prefixe
+# DTS (ex. "TrueHD.MA.7.1") reste dans le titre — bruit ADDITIF d'un token que
+# la similarite TMDb absorbe, la ou l'ancien comportement detruisait le titre.
+# Une heuristique qui peut mutiler un titre s'abandonne, elle ne s'itere pas.
 # R8-040 (F4) : préfixe DD/DDP optionnel COLLÉ au nombre de canaux. Après
 # `name.replace('.',' ')`, "DD5.1" devient "DD5 1" : le `\b` devant `[257]`
 # échoue (le 5 est précédé d'une lettre, pas de frontière de mot) -> "DD5 1"/
@@ -208,7 +215,32 @@ _TRAILING_LANG_TOKENS_RE = re.compile(
 # absorbe le préfixe sans toucher le strip release-group (R1/R4) ; le séparateur
 # OBLIGATOIRE `[\s.]` entre canal et `.1` reste (anti "21 Jump Street"/"50"/"71").
 _AUDIO_RESIDUE_RE = re.compile(
-    r"\b(?:(?:ddp?)?[257][\s.][01]|atmos|(?-i:MA|HRA))\b",
+    r"\b(?:(?:ddp?)?[257][\s.][01]|atmos)\b",
+    re.IGNORECASE,
+)
+
+# F33 : residu "MA"/"HRA" strippe UNIQUEMENT avec son contexte DTS-HD (Master
+# Audio / High Resolution Audio). Couvre les 3 graphies du corpus reel :
+# "DTS-HD.MA", "DTS-HDMA", "DTS HD-MA". DOIT etre applique AVANT _NOISE_RE :
+# ce dernier mange "dts"/"dts-hd" et detruirait le contexte.
+_DTS_HD_MASTER_RE = re.compile(r"\bdts[\s._-]*hd[\s._-]*(?:ma|hra)\b", re.IGNORECASE)
+
+# F33 : 2e contexte legitime de "MA" = la plateforme source Movies Anywhere,
+# qui precede le tag WEB/WEB-DL/WEBRip ("...1080p.MA.WEB-DL.DDP5.1...").
+# Verrouille par tests/test_lotd_titles_nfo_tmdbid_v77.py:80 (Avatar 2).
+#
+# ANCRAGE OBLIGATOIRE SUR LA RESOLUTION (revue adversaire R1). Le lookahead sur
+# "web" seul ne suffit PAS a distinguer le tag source d'un titre : il mutilait
+# "MA.WEB.2019...", qui rendait "WEB 2019" au lieu de "MA 2019" — exactement la
+# classe de defaut que F33 devait supprimer, reintroduite par une autre porte.
+# Dans le corpus reel le tag source suit TOUJOURS la resolution
+# ("2160p.MA.WEB-DL"), jamais le debut du nom. En exigeant cette resolution, un
+# "MA" en tete de titre ne peut plus matcher : la regle devient non ambigue au
+# lieu d'etre une heuristique qui peut mutiler un titre.
+# La resolution est capturee puis restituee (groupe 1) pour ne pas l'effacer.
+# Meme contrainte d'ordre que ci-dessus : AVANT _NOISE_RE, qui mange "web-dl".
+_WEB_SOURCE_MA_RE = re.compile(
+    r"(\b\d{3,4}p)[\s._-]+(?-i:MA)(?=[\s._-]+web(?:[\s._-]?(?:dl|rip))?\b)",
     re.IGNORECASE,
 )
 
@@ -417,6 +449,12 @@ def parse_scene_title(filename: str) -> str:
     # 3. Strip noise tags AVANT release group : NOISE_RE retire les tags
     # adjacents au groupe (codec, audio), ce qui isole "-XXXX" en fin de chaine
     # avec un espace avant — matchable par _RELEASE_GROUP_RE.
+    # F33 : "DTS-HD MA"/"DTS-HD HRA" et le tag source "MA WEB-DL" se strippent
+    # AVANT _NOISE_RE, qui mangerait le "dts"/"web-dl" porteur du contexte et
+    # laisserait un "MA" orphelin.
+    name = _DTS_HD_MASTER_RE.sub(" ", name)
+    # Groupe 1 = la resolution d'ancrage, restituee telle quelle (seul "MA" part).
+    name = _WEB_SOURCE_MA_RE.sub(r"\1 ", name)
     name = _NOISE_RE.sub(" ", name)
 
     # 4. Strip audio residue

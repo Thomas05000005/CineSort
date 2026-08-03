@@ -17,7 +17,6 @@ Voir docs/internal/VO_B_ANALYSIS.md pour la cartographie complete.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -208,9 +207,7 @@ def parallel_extract_local_candidates(
     from concurrent.futures import ThreadPoolExecutor
 
     results: List[Optional[LocalCandidate]] = [None] * n
-    executor = ThreadPoolExecutor(
-        max_workers=workers, thread_name_prefix="scan-local"
-    )
+    executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scan-local")
     futures = []
     try:
         for folder in folders:
@@ -233,9 +230,7 @@ def parallel_extract_local_candidates(
             try:
                 results[idx] = fut.result()
             except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-                logger.warning(
-                    "extract_local_candidate failed for %s: %s", folders[idx], exc
-                )
+                logger.warning("extract_local_candidate failed for %s: %s", folders[idx], exc)
                 placeholder = _empty_placeholder(folders[idx])
                 placeholder.errors.append(f"extract_local_candidate: {exc}")
                 results[idx] = placeholder

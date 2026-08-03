@@ -140,9 +140,7 @@ def _channels_label(channels: int) -> str:
     `—`, mode `bucketize=True` qui aligne 3/4/5 -> "2.0", 7 -> "5.1", 9+ -> "7.1",
     et `mono_label="1.0"` pour l'historique badge).
     """
-    return _format_audio_channels(
-        channels, invalid="—", mono_label="1.0", bucketize=True
-    )
+    return _format_audio_channels(channels, invalid="—", mono_label="1.0", bucketize=True)
 
 
 def _find_duplicate_tracks(tracks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
