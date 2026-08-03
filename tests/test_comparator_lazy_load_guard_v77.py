@@ -16,10 +16,7 @@ import re
 import unittest
 from pathlib import Path
 
-_MODAL = (
-    Path(__file__).resolve().parent.parent
-    / "web" / "dashboard" / "components" / "duplicate-comparator-modal.js"
-)
+_MODAL = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "components" / "duplicate-comparator-modal.js"
 
 
 class ComparatorLazyLoadGuardTests(unittest.TestCase):
@@ -36,8 +33,9 @@ class ComparatorLazyLoadGuardTests(unittest.TestCase):
         idx_loaded_true = body.find(f"{loaded_var}[pairKey] = true")
         self.assertGreaterEqual(idx_await, 0, "appel apiPost attendu")
         self.assertGreaterEqual(idx_loaded_true, 0, "le flag loaded doit etre pose")
-        self.assertLess(idx_await, idx_loaded_true,
-                        "Le flag loaded ne doit etre pose qu'APRES l'appel reussi (pas avant le await).")
+        self.assertLess(
+            idx_await, idx_loaded_true, "Le flag loaded ne doit etre pose qu'APRES l'appel reussi (pas avant le await)."
+        )
         self.assertIn(loading_var, body, "Une garde anti-concurrence (loading) doit exister.")
 
     def test_frames_loaded_only_after_success(self) -> None:

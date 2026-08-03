@@ -20,7 +20,6 @@ from unittest import mock
 
 import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
-import cinesort.domain.scan_helpers as core_scan_helpers
 from cinesort.app._local_candidate import (
     LocalCandidate,
     extract_local_candidate,
@@ -88,9 +87,7 @@ class ExtractLocalCandidateTests(unittest.TestCase):
             with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
                 result = extract_local_candidate(folder, cfg)
             # Le bucket local DOIT avoir capture le rejet, pas un global externe.
-            self.assertGreaterEqual(
-                int(result.ignores_par_raison.get("ignore_extension", 0)), 1
-            )
+            self.assertGreaterEqual(int(result.ignores_par_raison.get("ignore_extension", 0)), 1)
 
     def test_handles_missing_folder_gracefully(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vob_extract_missing_") as tmp:
@@ -113,9 +110,7 @@ class ParallelExtractOrderTests(unittest.TestCase):
             folders = sorted(root.iterdir(), key=lambda p: p.name)
             cfg = _make_cfg(root, max_workers=4)
             with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
-                results = parallel_extract_local_candidates(
-                    folders, cfg, max_workers=4
-                )
+                results = parallel_extract_local_candidates(folders, cfg, max_workers=4)
             self.assertEqual(len(results), 20)
             # Verifie l'ordre 1..N strict via le nom de dossier.
             for idx, cand in enumerate(results):
@@ -130,9 +125,7 @@ class ParallelExtractOrderTests(unittest.TestCase):
             folders = sorted(root.iterdir(), key=lambda p: p.name)
             cfg = _make_cfg(root, max_workers=1)
             with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
-                results = parallel_extract_local_candidates(
-                    folders, cfg, max_workers=1
-                )
+                results = parallel_extract_local_candidates(folders, cfg, max_workers=1)
             self.assertEqual(len(results), 5)
             for idx, cand in enumerate(results):
                 self.assertEqual(cand.folder.name, f"Movie {idx:03d}")
@@ -149,9 +142,7 @@ class ParallelExtractOrderTests(unittest.TestCase):
             cfg = _make_cfg(root, max_workers=2)
 
             # Cancel immediat -> tous placeholders en mode sequentiel.
-            results = parallel_extract_local_candidates(
-                folders, cfg, max_workers=1, should_cancel=lambda: True
-            )
+            results = parallel_extract_local_candidates(folders, cfg, max_workers=1, should_cancel=lambda: True)
             self.assertEqual(len(results), 10)
             for cand in results:
                 self.assertEqual(cand.videos, [])
@@ -198,9 +189,7 @@ class PlanLibraryBackwardCompatTests(unittest.TestCase):
                 cfg,
                 tmdb=None,
                 log=lambda *_a: None,
-                progress=lambda idx, total, current: progress_calls.append(
-                    (idx, total, current)
-                ),
+                progress=lambda idx, total, current: progress_calls.append((idx, total, current)),
             )
         return rows, stats, progress_calls
 
@@ -228,9 +217,7 @@ class PlanLibraryBackwardCompatTests(unittest.TestCase):
 
             # Memes rows (ordre et contenu).
             self.assertEqual(len(rows_seq), len(rows_par))
-            self.assertEqual(
-                [r.folder for r in rows_seq], [r.folder for r in rows_par]
-            )
+            self.assertEqual([r.folder for r in rows_seq], [r.folder for r in rows_par])
             # Memes stats agreges.
             self.assertEqual(
                 int(stats_seq.folders_scanned or 0),

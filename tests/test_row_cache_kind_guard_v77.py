@@ -83,9 +83,7 @@ class RowCacheKindGuardTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _lookup(self, cached_kind: str, requested_kind: str):
-        idx = _FakeScanIndex(
-            cached_kind, size=self._size, mtime_ns=self._mtime_ns, row_json=self._row_json
-        )
+        idx = _FakeScanIndex(cached_kind, size=self._size, mtime_ns=self._mtime_ns, row_json=self._row_json)
         return _try_lookup_row_cache(
             self.cfg,
             self.folder,

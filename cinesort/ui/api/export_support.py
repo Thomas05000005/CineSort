@@ -35,6 +35,10 @@ _SECRET_KEYS = frozenset(
         "smtp_password",
         "ntfy_topic_secret",
         "rest_api_token",
+        # [SEC-2] l'enveloppe chiffree ne doit pas non plus rider dans un export
+        # (blob DPAPI machine-bound : inutile ailleurs, mais on n'exporte pas de
+        # materiel secret meme chiffre).
+        "rest_api_token_secret",
         "omdb_api_key",
         "osdb_api_key",
     }

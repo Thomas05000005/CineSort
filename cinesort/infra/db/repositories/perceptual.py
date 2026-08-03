@@ -2,8 +2,8 @@
 
 Migration #85 phase B4 (2026-05-16) : meme pattern que B1/B2/B3 :
 - Code metier vit DANS PerceptualRepository
-- _PerceptualMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _PerceptualMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.perceptual (heritage MRO supprime en B8)
 
 Methodes exposees :
     upsert_perceptual_report, get_perceptual_report, list_perceptual_reports,
