@@ -98,7 +98,15 @@ def _folder_fs_facts(folder: str, cache: Dict[str, Dict[str, Tuple[float, int]]]
         with os.scandir(folder) as entries:
             for entry in entries:
                 try:
-                    st = entry.stat(follow_symlinks=False)
+                    # `follow_symlinks=True` (defaut) VOLONTAIRE : on veut la
+                    # taille et la date du FILM, pas celles du lien. Avec
+                    # follow_symlinks=False une bibliotheque montee en liens
+                    # symboliques afficherait « 60 octets » partout. Sous
+                    # Windows l'info vient du cache de scandir pour tout ce
+                    # qui n'est pas un point d'analyse, donc aucun syscall
+                    # supplementaire dans le cas courant ; un lien casse
+                    # leve OSError et l'entree est simplement ignoree.
+                    st = entry.stat()
                 except OSError:
                     continue
                 facts[entry.name] = (float(st.st_mtime), int(st.st_size))
