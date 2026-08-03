@@ -1,0 +1,29 @@
+bootstrap_schema: statement 27 ignore (idempotence): duplicate column name: row_id
+bootstrap_schema: statement 38 ignore (idempotence): duplicate column name: src_sha1
+bootstrap_schema: statement 39 ignore (idempotence): duplicate column name: src_size
+bootstrap_schema: statement 45 ignore (idempotence): duplicate column name: audio_fingerprint
+bootstrap_schema: statement 47 ignore (idempotence): duplicate column name: spectral_cutoff_hz
+bootstrap_schema: statement 48 ignore (idempotence): duplicate column name: lossy_verdict
+bootstrap_schema: statement 50 ignore (idempotence): duplicate column name: ssim_self_ref
+bootstrap_schema: statement 51 ignore (idempotence): duplicate column name: upscale_verdict
+bootstrap_schema: statement 53 ignore (idempotence): duplicate column name: global_score_v2
+bootstrap_schema: statement 54 ignore (idempotence): duplicate column name: global_tier_v2
+bootstrap_schema: statement 55 ignore (idempotence): duplicate column name: global_score_v2_json
+bootstrap_schema: statement 105 ignore (idempotence): duplicate column name: paused_at
+=== S-019 (paused_at preserve au self-heal bootstrap) ===
+  paused_at AVANT self-heal : 1234567.89
+  paused_at APRES self-heal : 1234567.89 (AVANT le fix = None/perte ; attendu 1234567.89)
+
+=== S-022 (incremental_row_cache filet self-heal) ===
+  dans REQUIRED_SCHEMA_TABLES + SCHEMA_GROUPS : True
+  droppee puis RECREEE par le self-heal       : True (before=None, after=True)
+
+=== S-020 (schema_migrations backfille apres bootstrap) ===
+  rows schema_migrations apres self-heal : 31 (attendu > 0)
+
+=== S-021 (IntegrityError idempotent, allowlist etroite) ===
+  UNIQUE/PK -> idempotent (skip)     : True/True (attendu True/True)
+  NOT NULL/CHECK -> NON idempotent   : True/True (attendu re-leve)
+
+VERDICT : CORRIGE (self-heal coherent : paused_at preserve, cache au filet, backfill, taxonomie)
+RESUME: {"S019_paused_at_preserve_au_selfheal": true, "S022_incremental_row_cache_dans_registre": true, "S022_recreee_par_selfheal": true, "S020_schema_migrations_backfille": true, "S021_integrityerror_idempotent_narrow": true}

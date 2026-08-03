@@ -1,0 +1,21 @@
+=== D1 (R8 seam #3 film-detail) — DIFFERENTIEL STRUCTUREL ===
+Décision produit Thomas : SUPPRIMER la vue standalone, garder UNIQUEMENT le composant.
+
+AVANT : route /film/:id -> initFilmDetail (views/film-detail.js) = jumeau buggé
+        R8-053 (probe.* top-level vs detected.*), R8-054 (candidate.confidence_label/.overview),
+        R8-055 (candidate.director) -> sections Vidéo/Audio/Sous-titres/durée/réalisateur VIDES.
+
+APRÈS :
+  - views/film-detail.js SUPPRIMÉ (git rm) :
+  - route /film/:id -> renderFilmDetail({mode:'B', rowId, container}) (composant complet) :
+      281:    renderFilmDetail({ mode: "B", rowId: opts && opts.params ? opts.params.id : undefined, container: el }),
+  - flux d'id IDENTIQUE : route id -> rowId -> library/get_film_full(row_id) (vue ET composant utilisaient déjà cet endpoint)
+  - 0 référence résiduelle à initFilmDetail / views/film-detail.js (hors commentaire)
+  - 0 lien mort : les 3 appelants (home-widgets:134, qualite:827, historique:674/1129) naviguent vers /film/:id, route conservée
+  - node --check app.js + bootstrap-bisect.js : OK
+  - composant complet (recon) : director :155, confidence :165, overview :256, candidate.score :324, probe.detected.* :435-456
+
+FORK-DESIGN UX SIGNALÉ : la route /film/:id est CONSERVÉE (repointée vers le composant mode B) plutôt que
+supprimée, car (1) le composant a un mode B explicitement conçu pour /film/:id, (2) 3 appelants y naviguent,
+(3) flux d'id identique. Supprimer la route + recâbler les 3 appelants en mode C (drawer overlay, comme
+bibliotheque/doublons) = changement d'UX page->drawer -> à arbitrer par Thomas.

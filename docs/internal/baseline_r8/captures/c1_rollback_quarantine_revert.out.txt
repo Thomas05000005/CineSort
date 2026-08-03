@@ -1,0 +1,20 @@
+rollback_forward: dst manquant op_id=3 dst=C:\Users\blanc\AppData\Local\Temp\cs_rbq_ruxi1qz5\_review\_conflicts\Film.2019.1080p.mkv — skipped
+{
+  "T1_quarantine_file_revert": {
+    "status": "DONE",
+    "reason": "",
+    "src_existe_apres": true,
+    "dst_existe_apres": false,
+    "VERDICT": "FIX OK (revert reel dst->src)"
+  },
+  "T2_delete_non_revertable_CONTROLE": {
+    "status": "SKIPPED",
+    "reason": "op_type=DELETE non revert-able",
+    "VERDICT": "switch DISCRIMINE (falsifiable)"
+  },
+  "T3_dst_missing_CONTROLE": {
+    "status": "SKIPPED",
+    "reason": "dst_missing",
+    "VERDICT": "garde dst_missing OK"
+  }
+}

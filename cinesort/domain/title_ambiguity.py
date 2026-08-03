@@ -29,7 +29,6 @@ import unicodedata
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # Articles à strip avant comparaison (matching cross-langue plus robuste).
 # Note : les apostrophes sont converties en espaces lors de la normalisation,
 # donc "l'" devient "l " avant le strip d'article. Même remarque pour "d ".

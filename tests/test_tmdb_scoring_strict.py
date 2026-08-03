@@ -157,10 +157,15 @@ class NfoImdbLookupRejectsPollutedNfoTests(unittest.TestCase):
     """
 
     def test_plan_support_has_post_imdb_lookup_verification(self) -> None:
-        """Le code source de plan_support.py doit verifier la similarite apres IMDb lookup."""
+        """Le code source de plan_support_dedup.py doit verifier la similarite apres IMDb lookup.
+
+        VP-E refactor : le pipeline NFO/IMDb lookup vit desormais dans
+        `plan_support_dedup.py` (decoupe haute LOC). La facade `plan_support.py`
+        re-exporte le symbole mais le code source est dans le sous-module.
+        """
         from pathlib import Path
 
-        src = Path("cinesort/app/plan_support.py").read_text(encoding="utf-8")
+        src = Path("cinesort/app/plan_support_dedup.py").read_text(encoding="utf-8")
         # Les patterns du fix doivent etre presents
         self.assertIn("find_by_imdb_id", src)
         # Verification de similarite apres lookup
@@ -175,10 +180,15 @@ class CollectionBoostRequiresTextualProofTests(unittest.TestCase):
     """
 
     def test_plan_support_has_collection_token_check(self) -> None:
-        """Le code source verifie que la collection partage au moins un mot avec le folder."""
+        """Le code source verifie que la collection partage au moins un mot avec le folder.
+
+        VP-E refactor : `_resolve_tmdb_collection` vit desormais dans
+        `plan_support_replan.py` (decoupe haute LOC). La facade `plan_support.py`
+        re-exporte le symbole mais le code source est dans le sous-module.
+        """
         from pathlib import Path
 
-        src = Path("cinesort/app/plan_support.py").read_text(encoding="utf-8")
+        src = Path("cinesort/app/plan_support_replan.py").read_text(encoding="utf-8")
         self.assertIn("pas de mot commun avec", src)
         self.assertIn("Collection", src)
 
@@ -189,8 +199,9 @@ class ConfidenceHonestyTests(unittest.TestCase):
     """
 
     def test_low_similarity_caps_confidence_below_med(self) -> None:
-        from cinesort.domain.core import Candidate, compute_confidence, Config
         from pathlib import Path
+
+        from cinesort.domain.core import Candidate, Config, compute_confidence
 
         cand_low = Candidate(
             title="Pirates des Caraibes",
@@ -206,8 +217,9 @@ class ConfidenceHonestyTests(unittest.TestCase):
         self.assertEqual(label, "low")
 
     def test_moderate_similarity_capped_below_med(self) -> None:
-        from cinesort.domain.core import Candidate, compute_confidence, Config
         from pathlib import Path
+
+        from cinesort.domain.core import Candidate, Config, compute_confidence
 
         cand_mid = Candidate(
             title="X-Men The Mutant Watch",

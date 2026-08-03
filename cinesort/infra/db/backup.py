@@ -71,10 +71,29 @@ def backup_db(src_path: Path, dst_path: Path) -> Path:
     if not src.is_file():
         raise FileNotFoundError(f"Source DB introuvable pour backup: {src}")
 
-    # On ouvre une connexion sur la source ET sur la destination, puis on
-    # demande au moteur SQLite de faire le backup (snapshot online).
-    with closing(sqlite3.connect(str(src))) as src_conn, closing(sqlite3.connect(str(dst))) as dst_conn:
-        src_conn.backup(dst_conn)
+    # AUDIT F29 (revue R1) : `sqlite3.connect(dst)` CREE le fichier destination
+    # (0 octet) AVANT que `src_conn.backup()` ne leve sur une source corrompue.
+    # Le .bak vide restait alors dans backups/ ; or un fichier de 0 octet est un
+    # SQLite parfaitement valide dont `PRAGMA integrity_check` repond "ok" — il
+    # devenait donc le candidat n°1 de l'auto-restore au boot suivant et
+    # remplacait la bibliotheque par une base VIDE. On nettoie le fichier que
+    # NOUS venons de creer (jamais un fichier prealable, jamais un fichier non
+    # vide : on ne detruit pas un backup existant).
+    existed_before = dst.exists()
+    try:
+        # On ouvre une connexion sur la source ET sur la destination, puis on
+        # demande au moteur SQLite de faire le backup (snapshot online).
+        with closing(sqlite3.connect(str(src))) as src_conn, closing(sqlite3.connect(str(dst))) as dst_conn:
+            src_conn.backup(dst_conn)
+    except BaseException:
+        if not existed_before:
+            try:
+                if dst.is_file() and dst.stat().st_size == 0:
+                    dst.unlink()
+                    _logger.warning("backup_db: destination vide supprimee apres echec: %s", dst.name)
+            except OSError as cleanup_exc:
+                _logger.warning("backup_db: nettoyage de %s impossible: %s", dst, cleanup_exc)
+        raise
     _logger.info("backup_db: %s -> %s (%.1f KB)", src.name, dst, dst.stat().st_size / 1024)
     return dst
 

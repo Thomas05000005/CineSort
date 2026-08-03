@@ -1,0 +1,18 @@
+=== R8 F4 PERCEPTUEL — INSTRUMENTATION RÉELLE (PLAN A, ffmpeg 8.1.1 Gyan) ===
+
+########## AVANT (code cassé) — 3 fixtures VISIBLEMENT différentes ##########
+(capturé avant fix ; toutes identiques = mesure du vide)
+  clean.mp4      frames=0 loud_il=None crest=None block=0.0->s95 blur=0.0->s95
+  m_clean.mp4    frames=0 loud_il=None crest=None block=0.0->s95 blur=0.0->s95
+  m_crushed.mp4  frames=0 loud_il=None crest=None block=0.0->s95 blur=0.0->s95
+
+########## APRÈS (R8-034/035/036) — 4 fixtures ##########
+  clean.mp4      frames=48 loud_il=-21.76 crest=1.456663 block=12.3292->s75 blur=4.527->s10
+  m_clean.mp4    frames=48 loud_il=-21.76 crest=1.456663 block=1.0822->s95 blur=6.2379->s10
+  m_crushed.mp4  frames=48 loud_il=-22.36 crest=2.226861 block=2.8479->s95 blur=11.8925->s10
+  degraded.mp4   frames=48 loud_il=-47.85 crest=1.550495 block=2.2521->s95 blur=15.983->s10
+
+VERDICT : AVANT = 3 fixtures distinctes -> mesures IDENTIQUES (frames=0, loud=None, crest=None, block/blur=0 -> scores 95/95) = MESURE DU VIDE.
+          APRÈS = frames=48 ; loudnorm/crest/dynrange RÉELS et DISCRIMINANTS (degraded loud_il=-47.85 vs clean -21.76) ;
+          block_mean discrimine (12.33 vs 1.08) + block SCORE discrimine (75 vs 95) ; blur_mean MONOTONE (4.53->15.98).
+          RÉSIDU : le SCORE blur sature à 10 (seuils BLUR_* 0.01-0.10 != échelle blurdetect réelle 4-16) -> R8-096 (residu decouvert pendant l instrumentation R8-036).

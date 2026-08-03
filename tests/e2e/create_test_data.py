@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-
 # ---------------------------------------------------------------------------
 # 15 films deterministes
 # ---------------------------------------------------------------------------
@@ -135,14 +134,21 @@ def build_plan_rows() -> List[Dict[str, Any]]:
 
 
 def _tier_from_score(score: int) -> str:
-    """Tier technique depuis le score."""
-    if score >= 85:
-        return "Premium"
-    if score >= 68:
-        return "Bon"
-    if score >= 54:
-        return "Moyen"
-    return "Faible"
+    """Tier technique depuis le score (labels canoniques post-migration-011).
+
+    LOTC-T1 : les labels legacy (Premium/Bon/Moyen/Faible) n'existent plus dans
+    une base migree -> la vue #/qualite les ignorait ("0 films classes").
+    Seuils = defaults v1.5.7 (cf cinesort/domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS).
+    """
+    if score >= 70:
+        return "Platinum"
+    if score >= 66:
+        return "Gold"
+    if score >= 55:
+        return "Silver"
+    if score >= 40:
+        return "Bronze"
+    return "Reject"
 
 
 def populate_database(
